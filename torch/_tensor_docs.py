@@ -2483,7 +2483,7 @@ add_docstr_all(
     r"""
 index_put(indices, values, accumulate=False) -> Tensor
 
-Out-place version of :meth:`~Tensor.index_put_`.
+Out-of-place version of :meth:`~Tensor.index_put_`.
 """,
 )
 
@@ -2723,7 +2723,7 @@ add_docstr_all(
     "is_pinned",
     r"""
 Returns true if this tensor resides in pinned memory.
-By default, the device pinned memory on will be the current :ref:`accelerator<accelerators>`.
+By default, the device on which pinned memory is allocated will be the current :ref:`accelerator<accelerators>`.
 """,
 )
 
@@ -3031,7 +3031,7 @@ add_docstr_all(
     r"""
 log_normal_(mean=1, std=2, *, generator=None)
 
-Fills :attr:`self` tensor with numbers samples from the log-normal distribution
+Fills :attr:`self` tensor with numbers sampled from the log-normal distribution
 parameterized by the given mean :math:`\mu` and standard deviation
 :math:`\sigma`. Note that :attr:`mean` and :attr:`std` are the mean and
 standard deviation of the underlying normal distribution, and not of the
@@ -3620,7 +3620,7 @@ add_docstr_all(
     r"""
 normal_(mean=0, std=1, *, generator=None) -> Tensor
 
-Fills :attr:`self` tensor with elements samples from the normal distribution
+Fills :attr:`self` tensor with elements sampled from the normal distribution
 parameterized by :attr:`mean` and :attr:`std`.
 """,
 )
@@ -6451,7 +6451,7 @@ add_docstr_all(
 pin_memory() -> Tensor
 
 Copies the tensor to pinned memory, if it's not already pinned.
-By default, the device pinned memory on will be the current :ref:`accelerator<accelerators>`.
+By default, the device on which pinned memory is allocated will be the current :ref:`accelerator<accelerators>`.
 """,
 )
 

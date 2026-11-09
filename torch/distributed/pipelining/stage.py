@@ -1322,7 +1322,7 @@ class _PipelineStageBase(ABC):
                         bwd_kwargs["stage_output"] = (bwd_kwargs["stage_output"],)
 
                     # perform the partial backwards for the inputs with a custom backward function
-                    # when the "stage_ouput" is a loss, then it is a tensor, otherwise it is a tuple of tensors
+                    # when the "stage_output" is a loss, then it is a tensor, otherwise it is a tuple of tensors
                     grads_input, param_groups = self.backward_maybe_with_nosync(
                         "input", bwd_kwargs, last_backward=last_backward
                     )

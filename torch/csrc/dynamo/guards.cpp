@@ -3557,18 +3557,18 @@ class GuardAccessor {
  *     int y = 2;
  *
  * At compile time
- * >> guard_mananger = GuardManager()
- * >> guard_mananger.x.add_lambda_guard(
+ * >> guard_manager = GuardManager()
+ * >> guard_manager.x.add_lambda_guard(
  *        lambda x: isinstance(x, Pair),
  *        lambda x: f"expected Pair, found {type(x)}"
  *    )
- * >> guard_mananger.x.add_lambda_guard(lambda x: x == 1, lambda x: f"found
+ * >> guard_manager.x.add_lambda_guard(lambda x: x == 1, lambda x: f"found
  * {x}, expected 1")
- * >> guard_mananger.y.add_lambda_guard(lambda x: x == 2, lambda x: f"found
+ * >> guard_manager.y.add_lambda_guard(lambda x: x == 2, lambda x: f"found
  * {x}, expected 2")
  *
  * At runtime
- * >> guard_mananger.check(Pair())
+ * >> guard_manager.check(Pair())
  *
  * At compile time we build the tree structure. When we do `guard_manager.x`,
  * it creates an AttrGuardAccessorNode, initializes a child guard manager with

@@ -2312,7 +2312,7 @@ def construct_cat_args(
     new_cat_args_meta = []  # type: ignore[var-annotated]
     for input in inputs:
         if input.target != operator.getitem:
-            # update the last arg based on getitem_indices and parents_seens
+            # update the last arg based on getitem_indices and parents_seen
             if len(parents_seen) > 0:
                 run_update_func(  # type: ignore[arg-type, union-attr]
                     graph,

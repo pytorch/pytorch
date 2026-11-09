@@ -772,7 +772,7 @@ static void check_shape_forward(const at::Tensor& input,
     }
 
     for (const auto i : c10::irange(2, k)) {
-      // T could be int64_t or SymInt, Specialized numeric_limts<SymInt> in c10/core/SymInt.h
+      // T could be int64_t or SymInt, Specialized numeric_limits<SymInt> in c10/core/SymInt.h
       TORCH_CHECK(padding[i-2] <= (std::numeric_limits<T>::max() - padding[i-2]),
                   "Given padding=", padding[i-2], " at dimension ", i-2, " , expected padding to be at most ",
                   (std::numeric_limits<T>::max() / 2));

@@ -839,7 +839,7 @@ class TestTryMerge(TestCase):
 
     def test_gql_complexity(self, *args: Any) -> None:
         "Fetch comments and conclusions for PR with 60 commits"
-        # Previous version of GrapQL query used to cause HTTP/502 error
+        # Previous version of GraphQL query used to cause HTTP/502 error
         # see https://gist.github.com/malfet/9b93bc7eeddeaf1d84546efc4f0c577f
         pr = GitHubPR("pytorch", "pytorch", 68111)
         self.assertGreater(len(pr.get_comments()), 20)

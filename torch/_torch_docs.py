@@ -960,7 +960,7 @@ Example::
    :noindex:
 
 For each row of :attr:`input` in the given dimension :attr:`dim`,
-returns `True` if any element in the row evaluate to `True` and `False` otherwise.
+returns `True` if any element in the row evaluates to `True` and `False` otherwise.
 
 {keepdim_details}
 
@@ -4987,7 +4987,7 @@ Keyword args:
 
     dim (``int``, ``list of int``, optional): the dimension or dimensions to approximate the gradient over.  By default
         the partial  gradient in every dimension is computed. Note that when :attr:`dim` is  specified the elements of
-        the :attr:`spacing` argument must correspond with the specified dims."
+        the :attr:`spacing` argument must correspond with the specified dims.
 
     edge_order (``int``, optional): 1 or 2, for `first-order
         <https://www.ams.org/journals/mcom/1988-51-184/S0025-5718-1988-0935077-0/S0025-5718-1988-0935077-0.pdf>`_ or
@@ -7345,7 +7345,7 @@ By default, :attr:`dim` is the last dimension of the :attr:`input` tensor.
 If :attr:`keepdim` is ``True``, the output tensors are of the same size
 as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
-the outputs tensor having 1 fewer dimension than :attr:`input`.
+the output tensors having 1 fewer dimension than :attr:`input`.
 
 .. note::
     The median is not unique for :attr:`input` tensors with an even number
@@ -8612,7 +8612,7 @@ non-zero elements in the :attr:`input` tensor.
 
 Returns a tuple of 1-D tensors, one for each dimension in :attr:`input`,
 each containing the indices (in that dimension) of all non-zero elements of
-:attr:`input` .
+:attr:`input`.
 
 If :attr:`input` has :math:`n` dimensions, then the resulting tuple contains :math:`n`
 tensors of size :math:`z`, where :math:`z` is the total number of
@@ -10592,9 +10592,9 @@ Args:
         coordinates of each element or block in values. (B+1)-dimensional
         tensor with the same length as values.
 
-    values (array_list): Initial values for the tensor. Can be a list,
-        tuple, NumPy ``ndarray``, scalar, and other types.  that
-        represents a (1+K)-dimensional (for CSR and CSC layouts) or
+    values (array_like): Initial values for the tensor. Can be a list,
+        tuple, NumPy ``ndarray``, scalar, and other types that
+        represent a (1+K)-dimensional (for CSR and CSC layouts) or
         (1+2+K)-dimensional tensor (for BSR and BSC layouts) where
         ``K`` is the number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
@@ -10660,9 +10660,9 @@ Args:
     col_indices (array_like): Column coordinates of each element in
         values. (B+1)-dimensional tensor with the same length
         as values.
-    values (array_list): Initial values for the tensor. Can be a list,
+    values (array_like): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types that
-        represents a (1+K)-dimensional tensor where ``K`` is the number
+        represent a (1+K)-dimensional tensor where ``K`` is the number
         of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows, ncols, *densesize)``. If
@@ -10723,9 +10723,9 @@ Args:
     row_indices (array_like): Row coordinates of each element in
         values. (B+1)-dimensional tensor with the same length as
         values.
-    values (array_list): Initial values for the tensor. Can be a list,
+    values (array_like): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types that
-        represents a (1+K)-dimensional tensor where ``K`` is the number
+        represent a (1+K)-dimensional tensor where ``K`` is the number
         of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows, ncols, *densesize)``. If
@@ -10766,7 +10766,7 @@ add_docstr(
     r"""sparse_bsr_tensor(crow_indices, col_indices, values, size=None, """
     r"""*, dtype=None, device=None, pin_memory=False, requires_grad=False, check_invariants=None) -> Tensor
 
-Constructs a :ref:`sparse tensor in BSR (Block Compressed Sparse Row))
+Constructs a :ref:`sparse tensor in BSR (Block Compressed Sparse Row)
 <sparse-bsr-docs>` with specified 2-dimensional blocks at the given
 :attr:`crow_indices` and :attr:`col_indices`. Sparse matrix
 multiplication operations in BSR format are typically faster than that
@@ -10786,9 +10786,9 @@ Args:
     col_indices (array_like): Column block coordinates of each block
         in values. (B+1)-dimensional tensor with the same length as
         values.
-    values (array_list): Initial values for the tensor. Can be a list,
+    values (array_like): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types that
-        represents a (1 + 2 + K)-dimensional tensor where ``K`` is the
+        represent a (1 + 2 + K)-dimensional tensor where ``K`` is the
         number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows * blocksize[0], ncols *
@@ -10835,7 +10835,7 @@ add_docstr(
     r"""*, dtype=None, device=None, pin_memory=False, requires_grad=False, check_invariants=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in BSC (Block Compressed Sparse
-Column)) <sparse-bsc-docs>` with specified 2-dimensional blocks at the
+Column) <sparse-bsc-docs>` with specified 2-dimensional blocks at the
 given :attr:`ccol_indices` and :attr:`row_indices`. Sparse matrix
 multiplication operations in BSC format are typically faster than that
 for sparse tensors in COO format. Make sure you have a look at :ref:`the
@@ -10854,13 +10854,13 @@ Args:
     row_indices (array_like): Row block coordinates of each block in
         values. (B+1)-dimensional tensor with the same length
         as values.
-    values (array_list): Initial blocks for the tensor. Can be a list,
+    values (array_like): Initial blocks for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, and other types that
-        represents a (1 + 2 + K)-dimensional tensor where ``K`` is the
+        represent a (1 + 2 + K)-dimensional tensor where ``K`` is the
         number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows * blocksize[0], ncols *
-        blocksize[1], *densesize)`` If not provided, the size will be
+        blocksize[1], *densesize)``. If not provided, the size will be
         inferred as the minimum size big enough to hold all non-zero
         blocks.
 
@@ -10935,15 +10935,15 @@ Keyword args:
     {pin_memory}
     {requires_grad}
     {check_invariants}
-    is_coalesced (bool, optional): When``True``, the caller is
+    is_coalesced (bool, optional): When ``True``, the caller is
         responsible for providing tensor indices that correspond to a
         coalesced tensor.  If the :attr:`check_invariants` flag is
         False, no error will be raised if the prerequisites are not
         met and this will lead to silently incorrect results. To force
         coalescing please use :meth:`coalesce` on the resulting
         Tensor.
-        Default: None: except for trivial cases (e.g. nnz < 2) the
-        resulting Tensor has is_coalesced set to ``False```.
+        Default: None, except for trivial cases (e.g. nnz < 2) the
+        resulting Tensor has is_coalesced set to ``False``.
 
 Example::
 
@@ -12080,7 +12080,7 @@ The argument :attr:`diagonal` controls which diagonal to consider. If
 :attr:`diagonal` = 0, all elements on and below the main diagonal are
 retained. A positive value includes just as many diagonals above the main
 diagonal, and similarly a negative value excludes just as many diagonals below
-the main diagonal. The main diagonal are the set of indices
+the main diagonal. The main diagonal is the set of indices
 :math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]` where
 :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 """
@@ -12142,7 +12142,7 @@ The argument :attr:`offset` controls which diagonal to consider. If
 :attr:`offset` = 0, all elements on and below the main diagonal are
 retained. A positive value includes just as many diagonals above the main
 diagonal, and similarly a negative value excludes just as many diagonals below
-the main diagonal. The main diagonal are the set of indices
+the main diagonal. The main diagonal is the set of indices
 :math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
 where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
@@ -12197,7 +12197,7 @@ The argument :attr:`diagonal` controls which diagonal to consider. If
 :attr:`diagonal` = 0, all elements on and above the main diagonal are
 retained. A positive value excludes just as many diagonals above the main
 diagonal, and similarly a negative value includes just as many diagonals below
-the main diagonal. The main diagonal are the set of indices
+the main diagonal. The main diagonal is the set of indices
 :math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]` where
 :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 """
@@ -12267,7 +12267,7 @@ The argument :attr:`offset` controls which diagonal to consider. If
 :attr:`offset` = 0, all elements on and above the main diagonal are
 retained. A positive value excludes just as many diagonals above the main
 diagonal, and similarly a negative value includes just as many diagonals below
-the main diagonal. The main diagonal are the set of indices
+the main diagonal. The main diagonal is the set of indices
 :math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
 where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
@@ -13546,7 +13546,7 @@ Arguments:
     x (Tensor): If specified, defines spacing between values as specified above.
 
 Keyword arguments:
-    dx (float): constant spacing between values. If neither :attr:`x` or :attr:`dx`
+    dx (float): constant spacing between values. If neither :attr:`x` nor :attr:`dx`
         are specified then this defaults to 1. Effectively multiplies the result by its value.
     dim (int): The dimension along which to compute the trapezoidal rule.
         The last (inner-most) dimension by default.
@@ -13633,7 +13633,7 @@ Arguments:
     x (Tensor): If specified, defines spacing between values as specified above.
 
 Keyword arguments:
-    dx (float): constant spacing between values. If neither :attr:`x` or :attr:`dx`
+    dx (float): constant spacing between values. If neither :attr:`x` nor :attr:`dx`
         are specified then this defaults to 1. Effectively multiplies the result by its value.
     dim (int): The dimension along which to compute the trapezoidal rule.
         The last (inner-most) dimension by default.
@@ -14437,7 +14437,7 @@ Sets the state of the generator to the specified state in a manner that is safe 
 This method is crucial for ensuring that the generator's state can be captured in the CUDA graph.
 
 Arguments:
-    state (torch.Generator): A Generator point to the new state for the generator, typically obtained from `graphsafe_get_state`.
+    state (torch.Generator): A Generator pointing to the new state for the generator, typically obtained from `graphsafe_get_state`.
 
 Example:
     >>> g_cuda = torch.Generator(device='cuda')
@@ -14456,7 +14456,7 @@ Retrieves the current state of the generator in a manner that is safe for graph 
 This method is crucial for ensuring that the generator's state can be captured in the CUDA graph.
 
 Returns:
-    torch.Generator: A Generator point to the current state of the generator
+    torch.Generator: A Generator pointing to the current state of the generator
 
 Example:
     >>> g_cuda = torch.Generator(device='cuda')

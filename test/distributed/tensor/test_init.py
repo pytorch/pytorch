@@ -413,7 +413,7 @@ DTensorConstructorTestWithLocalTensor = create_local_tensor_test_class(
     DTensorConstructorTest,
     base_class=LocalDTensorContinuousTestBase,
     skipped_tests=[
-        # Non-contigous sub-meshes are not supported
+        # Non-contiguous sub-meshes are not supported
         "test_zeros_submesh",
     ],
 )
