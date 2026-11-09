@@ -900,6 +900,10 @@ class StaticMethodVariable(VariableTracker):
 
 
 class GenericMethodVariable(VariableTracker):
+    """CPython bound method whose payload need not be a Python function."""
+
+    _cpython_type = types.MethodType
+
     def __init__(
         self,
         im_func: VariableTracker,
@@ -918,7 +922,7 @@ class GenericMethodVariable(VariableTracker):
         "__func__": Member(lambda s, _: s.im_func, readonly_setter),
     }
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         from .object_protocol import generic_hash_impl
 
         self_hash, self_fake = generic_hash_impl(tx, self.im_self)
@@ -1106,21 +1110,26 @@ class ClassMethodVariable(UserDefinedObjectVariable):
     def as_python_constant(self) -> classmethod:  # type: ignore[type-arg]
         if not self.is_synthetic:
             return self.value
-        return self._materialize(self.descriptor.as_python_constant())
+        return self._materialize()
 
     def _materialize(
         self,
-        descriptor: Any,
         convert: Callable[[VariableTracker], Any] | None = None,
     ) -> classmethod:  # type: ignore[type-arg]
-        # NestedUserFunctionVariable.get_function() does not preserve every
-        # observable function attribute, so it is not a safe __func__ here.
+        # Even a closure-free function is a fresh object at runtime. A
+        # compile-time copy could escape through __func__ or a constant result,
+        # and get_function() does not replay pending function mutations.
         if isinstance(self.descriptor, variables.NestedUserFunctionVariable):
             raise AsPythonConstantNotImplementedError(self)
         if self.is_materializing:
             raise AsPythonConstantNotImplementedError(self)
         self.is_materializing = True
         try:
+            descriptor = (
+                self.descriptor.as_python_constant()
+                if convert is None
+                else convert(self.descriptor)
+            )
             result = self.materialized_value
             if result is None:
                 result = classmethod(descriptor)

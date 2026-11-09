@@ -1686,7 +1686,7 @@ class VariableBuilder:
                 )(v)
 
             install_guard(
-                self.get_source().make_guard(GuardBuilder.ID_MATCH),
+                self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
                 keywords_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
                 args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
             )

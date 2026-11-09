@@ -9,6 +9,7 @@ import sys
 import traceback
 import types
 import unittest
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 from unittest import mock
 
@@ -987,11 +988,20 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         class C:
             bm = classmethod(functools.partial(impl, value=2))
 
+        class D(C):
+            pass
+
+        other_payload = functools.partial(impl, value=2)
+
         def fn():
             class_method = C.bm
+            direct = classmethod(other_payload).__get__(None, C)
             return (
-                class_method in {C.bm},
+                C.bm in {C.bm},
                 class_method == C.bm,
+                class_method != D.bm,
+                class_method != direct,
+                direct in {classmethod(other_payload).__get__(None, C)},
                 class_method.__self__ is C,
                 class_method(),
             )
@@ -1152,6 +1162,40 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             cm = classmethod(f)
             return identity(cm) is cm
 
+        def escaping_alias():
+            cm = classmethod(f)
+            return identity(cm), cm
+
+        for fullgraph in (True, False):
+            torch._dynamo.reset()
+            first, second = torch.compile(
+                escaping_alias, backend="eager", fullgraph=fullgraph
+            )()
+            self.assertIs(first, second)
+
+        def mutate_after_conversion():
+            cm = classmethod(f)
+            alias = identity(cm)
+            cm.y = 1
+            return alias.y
+
+        @torch.compiler.assume_constant_result
+        def pack(value):
+            return (value,)
+
+        def container_alias():
+            cm = classmethod(f)
+            return pack(cm), cm
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "assume_constant_result argument conversion failed",
+        ):
+            torch.compile(container_alias, backend="eager", fullgraph=True)()
+        torch._dynamo.reset()
+        packed, cm = torch.compile(container_alias, backend="eager")()
+        self.assertIs(packed[0], cm)
+
         def impl(cls):
             return cls
 
@@ -1184,6 +1228,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         for fn in (
             repeated_conversion,
             conversion_and_tracker,
+            mutate_after_conversion,
             dictionary_alias,
             dictionary_list_alias,
             mutation_between_conversions,
@@ -1195,6 +1240,82 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
                 )
                 torch._dynamo.reset()
                 self.assertEqual(torch.compile(fn, backend="eager")(), expected)
+
+    def test_assume_constant_result_classmethod_opaque_result(self):
+        @dataclass
+        class Box:
+            payload: object
+
+        @torch.compiler.assume_constant_result
+        def wrap(value, kind):
+            if kind == "namespace":
+                return types.SimpleNamespace(payload=value)
+            if kind == "dataclass":
+                return Box(value)
+            return {"nested": [Box(types.SimpleNamespace(payload=value))]}
+
+        def fn(kind):
+            cm = classmethod(int)
+            return wrap(cm, kind), cm
+
+        for kind in ("namespace", "dataclass", "nested"):
+            with self.subTest(kind=kind):
+                for compiled in (False, True):
+                    torch._dynamo.reset()
+                    run = torch.compile(fn, backend="eager") if compiled else fn
+                    wrapper, cm = run(kind)
+                    payload = (
+                        wrapper["nested"][0].payload.payload
+                        if kind == "nested"
+                        else wrapper.payload
+                    )
+                    self.assertIs(payload, cm)
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported,
+                    "assume_constant_result argument conversion failed",
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=True)(kind)
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires static protocol lookup")
+    def test_synthetic_partial_protocol(self):
+        @runtime_checkable
+        class HasFunc(Protocol):
+            func: object
+
+        def fn():
+            payload = functools.partial(int, "5")
+            return isinstance(payload, HasFunc), payload()
+
+        self.assertEqual(fn(), (True, 5))
+        for fullgraph in (True, False):
+            torch._dynamo.reset()
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=fullgraph)(), fn()
+            )
+
+    def test_assume_constant_result_partial_mutable_argument(self):
+        def size(values):
+            return len(values)
+
+        @torch.compiler.assume_constant_result
+        def read(payload, values):
+            return payload(), payload.args[0] is values
+
+        def fn():
+            values = [1]
+            payload = functools.partial(size, values)
+            before = read(payload, values)
+            values.append(2)
+            after = read(payload, values)
+            return before, after
+
+        self.assertEqual(fn(), ((1, True), (2, True)))
+        for fullgraph in (True, False):
+            torch._dynamo.reset()
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=fullgraph)(), fn()
+            )
 
     def test_assume_constant_result_mutated_partial_keywords(self):
         def impl(cls, value=0):
@@ -1409,8 +1530,12 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
                 result = torch.compile(fn, backend="eager", fullgraph=True)()
                 self.assertEqual(result, expected)
 
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "assume_constant_result argument conversion failed",
+        ):
             torch.compile(nested, backend="eager", fullgraph=True)()
+        torch._dynamo.reset()
         self.assertEqual(torch.compile(nested, backend="eager")(), nested())
 
         tensor = torch.ones(1)
@@ -1425,12 +1550,105 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(
             torch.compile(nonconstant, backend="eager", fullgraph=True)()
         )
+        torch._dynamo.reset()
         self.assertTrue(torch.compile(nonconstant, backend="eager")())
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(self_referential, backend="eager", fullgraph=True)()
         self.assertEqual(
             torch.compile(self_referential, backend="eager")(), self_referential()
         )
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires static protocol lookup")
+    def test_classmethod_nested_function_protocol(self):
+        @runtime_checkable
+        class HasFunction(Protocol):
+            __func__: object
+
+        def fn():
+            def inner():
+                return 1
+
+            return isinstance(classmethod(inner), HasFunction)
+
+        self.assertTrue(fn())
+        for fullgraph in (True, False):
+            torch._dynamo.reset()
+            self.assertTrue(torch.compile(fn, backend="eager", fullgraph=fullgraph)())
+
+    def test_classmethod_nested_function_constant_conversion(self):
+        @torch.compiler.assume_constant_result
+        def read(cm):
+            return cm.__func__()
+
+        def immutable():
+            value = 3
+
+            def inner():
+                return value
+
+            return read(classmethod(inner))
+
+        def mutable():
+            values = [1]
+
+            def inner():
+                return len(values)
+
+            values.append(2)
+            return read(classmethod(inner))
+
+        @torch.compiler.assume_constant_result
+        def metadata(cm, fn):
+            wrapped = cm.__func__
+            return (
+                wrapped is fn,
+                wrapped.__name__,
+                wrapped.__qualname__,
+                wrapped.__defaults__,
+                wrapped.__annotations__,
+                wrapped.extra,
+            )
+
+        def mutated():
+            def inner(x=1):
+                return x
+
+            inner.__dict__["extra"] = 2
+            inner.__name__ = "changed"
+            inner.__qualname__ = "changed.qualname"
+            inner.__defaults__ = (3,)
+            inner.__annotations__ = {"x": int}
+            return metadata(classmethod(inner), inner)
+
+        def cyclic():
+            def inner():
+                return inner.__name__
+
+            return read(classmethod(inner))
+
+        for fn in (immutable, mutable, mutated, cyclic):
+            with self.subTest(fn=fn.__name__):
+                expected = fn()
+                torch._dynamo.reset()
+                with self.assertRaises(torch._dynamo.exc.Unsupported):
+                    torch.compile(fn, backend="eager", fullgraph=True)()
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn, backend="eager")(), expected)
+
+    def test_classmethod_nested_function_reconstruct_alias(self):
+        def fn():
+            def inner():
+                return 1
+
+            cm = classmethod(inner)
+            return cm, inner, cm.__func__ is inner
+
+        for fullgraph in (True, False):
+            torch._dynamo.reset()
+            cm, inner, same = torch.compile(fn, backend="eager", fullgraph=fullgraph)()
+            self.assertTrue(same)
+            self.assertIs(cm.__func__, inner)
+            self.assertEqual(inner(), 1)
 
     def test_classmethod_descriptor_delegation_by_python_version(self):
         class C:
@@ -1507,6 +1725,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         )()
         self.assertIs(fullgraph_method.__self__, expected_method.__self__)
         self.assertEqual(fullgraph_method(), expected_method())
+        torch._dynamo.reset()
         result_method = torch.compile(return_method, backend="eager")()
         self.assertIs(result_method.__self__, expected_method.__self__)
         self.assertEqual(result_method(), expected_method())

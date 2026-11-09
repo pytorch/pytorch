@@ -2236,12 +2236,30 @@ def invoke_and_store_as_constant(
             return converted_objects[x]
         if x.is_tensor():
             converted = cast("TensorVariable", x).get_real_value()
+        elif isinstance(x, FunctoolsPartialVariable):
+            if x.value is not None:
+                modified = False
+
+                def check_mutation(item: VariableTracker) -> None:
+                    nonlocal modified
+                    modified |= tx.output.side_effects.is_modified(item)
+
+                VariableTracker.visit(check_mutation, x)
+                if modified:
+                    conversion_failed(x)
+                converted = x.get_real_python_backed_value()
+            else:
+                converted = functools.partial(
+                    convert(x.func),
+                    *[convert(arg) for arg in x.args],
+                    **{key: convert(value) for key, value in x.keywords.items()},
+                )
         elif isinstance(x, UserDefinedObjectVariable):
             if x.source is not None:
                 install_guard(x.make_guard(GuardBuilder.ID_MATCH))
             if isinstance(x, variables.ClassMethodVariable) and x.is_synthetic:
                 try:
-                    converted = x._materialize(convert(x.descriptor), convert)
+                    converted = x._materialize(convert)
                 except AsPythonConstantNotImplementedError:
                     conversion_failed(x)
             else:
@@ -2257,6 +2275,38 @@ def invoke_and_store_as_constant(
     args = [convert(x) for x in args]
     kwargs = {k: convert(v) for k, v in kwargs.items()}
     res = fn(*args, **kwargs)
+    materialized: dict[int, VariableTracker] = {}
+    for tracker, value in converted_objects.items():
+        if (
+            isinstance(tracker, variables.ClassMethodVariable) and tracker.is_synthetic
+        ) or (isinstance(tracker, FunctoolsPartialVariable) and tracker.value is None):
+            materialized[id(value)] = tracker
+    if id(res) in materialized:
+        # Reconstruct the original object and replay its later mutations.
+        return materialized[id(res)]
+    if materialized:
+        # Only inspect exact builtin containers. An opaque result could retain
+        # a trace-time copy through attributes, slots, or a closure.
+        pending = [res]
+        seen = set()
+        container_types = (tuple, list, set, frozenset)
+        scalar_types = (type(None), bool, int, float, complex, str, bytes)
+        while pending:
+            item = pending.pop()
+            item_id = id(item)
+            if item_id in materialized:
+                conversion_failed(materialized[item_id])
+            if item_id in seen:
+                continue
+            seen.add(item_id)
+            item_type = type(item)
+            if item_type is dict:
+                pending.extend(item.keys())
+                pending.extend(item.values())
+            elif any(item_type is kind for kind in container_types):
+                pending.extend(item)
+            elif not any(item_type is kind for kind in scalar_types):
+                conversion_failed(next(iter(materialized.values())))
     if isinstance(res, torch.Tensor):
         # ConstantSource reconstructs with LOAD_GLOBAL. Unlike the non-tensor
         # branch of register_attr_or_module, the tensor branch does not install
@@ -4008,7 +4058,6 @@ class FunctoolsPartialVariable(VariableTracker):
     _cpython_type = functools.partial
 
     _nonvar_fields = {
-        "materialized_value",
         "original_cache_hash",
         "value",
         *VariableTracker._nonvar_fields,
@@ -4034,7 +4083,6 @@ class FunctoolsPartialVariable(VariableTracker):
         # Store cache_hash from the original partial for SAC context_fn caching
         self.original_cache_hash = original_cache_hash
         self.value = value
-        self.materialized_value: functools.partial[Any] | None = None
 
     def python_type(self) -> type:
         return functools.partial
@@ -4102,15 +4150,18 @@ class FunctoolsPartialVariable(VariableTracker):
             raise_observed_exception(AttributeError, tx, args=[name])
 
     def as_python_constant(self) -> Any:
-        if self.value is not None:
-            return self.value
-        if self.materialized_value is None:
-            self.materialized_value = functools.partial(
-                self.func.as_python_constant(),
-                *[arg.as_python_constant() for arg in self.args],
-                **{k: v.as_python_constant() for k, v in self.keywords.items()},
-            )
-        return self.materialized_value
+        return functools.partial(
+            self.func.as_python_constant(),
+            *[arg.as_python_constant() for arg in self.args],
+            **{k: v.as_python_constant() for k, v in self.keywords.items()},
+        )
+
+    def get_real_python_backed_value(self) -> object:
+        if self.value is None:
+            return NO_SUCH_SUBOBJ
+        if self.source is not None:
+            install_guard(self.make_guard(GuardBuilder.ID_MATCH))
+        return self.value
 
     def guard_as_python_constant(self) -> Any:
         """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""

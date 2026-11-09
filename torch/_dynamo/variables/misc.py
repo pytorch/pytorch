@@ -457,8 +457,8 @@ class SuperVariable(VariableTracker):
         ):
             fn_vt, cls_variable = self._resolve_classmethod(tx, inner_fn, source)
             if isinstance(fn_vt, BaseUserFunctionVariable):
-                return variables.UserMethodVariable(
-                    fn_vt, cls_variable
+                return SuperClassMethodVariable(
+                    fn_vt, cls_variable, self, name
                 ).call_function(tx, args, kwargs)
             return fn_vt.call_function(tx, [cls_variable, *args], kwargs)
         elif isinstance(inner_fn, types.FunctionType):
