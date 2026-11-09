@@ -605,7 +605,11 @@ class TestKernelConfigs(TestCase):
         if not is_big_gpu():
             self.skipTest("Triton GEMM templates need a big GPU")
         a, b = (torch.randn(64, 64, device=GPU_TYPE) for _ in range(2))
-        cfg = {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
+        cfg = {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "benchmark_template_fusion": False,
+        }
         result, code = _code_for(lambda a, b: (a @ b).relu(), a, b, **cfg)
         (template,) = {k for k in _kernels(code) if k.startswith("triton_tem_")}
         ns = _load_from_file(code)
