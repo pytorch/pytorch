@@ -18,8 +18,8 @@ c10::MaybeOwned<Tensor> inline resolve_conj_if_indicated(const Tensor& tensor, b
   }
 }
 
-// The stride of a size-1 dim is arbitrary, even in a contiguous tensor, so use
-// the smallest leading dimension BLAS accepts instead.
+// BLAS leading dimension for a matrix whose stride(dim) is its ld. A size-1 dim's
+// stride is arbitrary and never addresses memory, so pass the smallest valid ld.
 int64_t inline blas_leading_dim(const Tensor& tensor, int64_t dim) {
   return tensor.size(dim) == 1 ? std::max<int64_t>(1, tensor.size(1 - dim))
                                : tensor.stride(dim);
