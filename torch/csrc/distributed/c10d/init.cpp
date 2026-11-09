@@ -4550,7 +4550,8 @@ Attributes:
             operation instead of when the group is bound to a device, so a
             group that never communicates allocates no NCCL resources. Such a
             group can't be split from until its first operation. Default is
-            False.
+            False. A single-rank group created without options or a
+            ``device_id`` uses ``lazy_init=True``.
 
 Example::
     >>> import torch.distributed as dist
@@ -4791,8 +4792,9 @@ Returns:
               R"(
             This process group's ``ncclComm_t``, as an opaque handle.
 
-            The process group holds a single communicator, created in its
-            constructor, so the value does not depend on the current device.
+            The process group holds a single communicator, so the value does
+            not depend on the current device. It is 0 until a ``lazy_init``
+            group's first operation creates the communicator.
 
             .. warning ::
                 The communicator is owned by the process group. Do not modify

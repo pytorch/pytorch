@@ -819,17 +819,39 @@ def _create_nccl_process_group(
     return backend_class
 
 
+def _has_uninitialized_lazy_nccl2(pg: ProcessGroup) -> bool:
+    """Whether ``pg`` is an nccl2 group whose lazy communicator does not exist yet.
+
+    Such a group cannot be split from until its first operation.
+    """
+    device = pg.bound_device_id
+    if device is None or device.type != "cuda" or not is_nccl_available():
+        return False
+    try:
+        backend = pg._get_backend(device)
+    except RuntimeError:
+        return False
+    while is_gloo_available() and isinstance(backend, _ProcessGroupWrapper):
+        backend = backend.wrapped_pg
+    # nccl2 reports supports_splitting=False only for an uncreated lazy communicator.
+    return (
+        isinstance(backend, (ProcessGroupNCCL2, ProcessGroupNCCLLazy))
+        and not backend.supports_splitting
+    )
+
+
 def _nccl2_options(
     opts: _DistributedBackendOptions, backend_options: object | None
 ) -> "ProcessGroupNCCL.Options":
     if backend_options is None:
         pg_options = ProcessGroupNCCL.Options()
         # Like the legacy backend, create the communicator on first use unless
-        # the caller bound a device, but only for single-rank groups: creating a
-        # multi-rank communicator on first use could hang on a point-to-point op.
+        # the caller requested a device, but only for single-rank groups: creating
+        # a multi-rank communicator on first use could hang on a point-to-point op.
         # Single-rank groups are often placeholders that never communicate (e.g.
         # vLLM's TP/PP/DP groups at world size 1), and each eager communicator
-        # pins hundreds of MiB of device memory. See #199957.
+        # pins hundreds of MiB of device memory. See #199957. Explicit options are
+        # used as given. This must run before _nccl2_device binds a fallback device.
         process_group = opts.process_group
         pg_options.lazy_init = (
             opts.group_size == 1
@@ -846,7 +868,7 @@ def _nccl2_options(
 
 
 def _nccl2_device(
-    opts: _DistributedBackendOptions, lazy_init: bool
+    opts: _DistributedBackendOptions,
 ) -> torch.device | None:
     if opts.enable_reconfigure:
         return None
@@ -854,6 +876,15 @@ def _nccl2_device(
     process_group = opts.process_group
     device = process_group.bound_device_id if process_group is not None else None
     if device is not None:
+        return device
+
+    # new_group does not pass on the device of a default group whose communicator
+    # is still lazy (see _has_uninitialized_lazy_nccl2), so use it here.
+    default_pg = _world.default_pg
+    if default_pg is not None and _has_uninitialized_lazy_nccl2(default_pg):
+        device = default_pg.bound_device_id
+        if process_group is not None:
+            process_group.bound_device_id = device
         return device
 
     device_count = torch.cuda.device_count()
@@ -871,9 +902,7 @@ def _nccl2_device(
         device_index = global_rank % device_count
 
     device = torch.device("cuda", device_index)
-    # A bound device marks a group as eagerly initialized, which makes new_group
-    # split from it and DeviceMesh use split_group, so a lazy group stays unbound.
-    if process_group is not None and not lazy_init:
+    if process_group is not None:
         process_group.bound_device_id = device
 
     return device
@@ -903,7 +932,7 @@ def _create_nccl2_process_group(
         opts.group_rank,
         opts.group_size,
         pg_options,
-        _nccl2_device(opts, pg_options.lazy_init),
+        _nccl2_device(opts),
     )
     return backend
 
@@ -932,7 +961,7 @@ def _create_nccl_lazy_process_group(
         opts.group_rank,
         opts.group_size,
         pg_options,
-        _nccl2_device(opts, pg_options.lazy_init),
+        _nccl2_device(opts),
     )
     return backend
 
@@ -7407,7 +7436,11 @@ def _new_group_with_tag(
 
     default_pg = _get_default_group()
     if device_id is None:
-        device_id = default_pg.bound_device_id
+        # Passing on the device would make the new group eager. A default group whose
+        # communicator is still lazy should not force that; _nccl2_device still gives
+        # the new group the default group's device.
+        if not _has_uninitialized_lazy_nccl2(default_pg):
+            device_id = default_pg.bound_device_id
     elif default_pg.bound_device_id is not None:
         if device_id != default_pg.bound_device_id:
             raise AssertionError(

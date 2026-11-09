@@ -452,7 +452,7 @@ class BackendEntryPointTest(TestCase):
             unittest.mock.patch.object(torch.cuda, "current_device", return_value=0),
         ):
             os.environ.pop("LOCAL_RANK", None)
-            self.assertEqual(c10d._nccl2_device(opts, False), torch.device("cuda:3"))
+            self.assertEqual(c10d._nccl2_device(opts), torch.device("cuda:3"))
 
     def test_nccl_legacy_backend_registration(self):
         c10d._register_builtin_nccl_legacy_backend()
