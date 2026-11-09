@@ -15,11 +15,12 @@ runs.
 """
 
 import dataclasses
+import functools
 import inspect
 import sys
 import weakref
 from collections.abc import Callable, Collection, Mapping
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, Literal, Never, TYPE_CHECKING
 
 import sympy
 
@@ -27,15 +28,20 @@ from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
 from torch._higher_order_ops.user_kernel_hop import (
+    constant_key,
     ConstantRules,
     functional_hop_dense,
     functional_hop_fake,
     functionalize_functional_hop,
     functionalize_mutation_hop,
     KernelSideTable,
+    map_constant,
     register_user_kernel_hop,
     register_user_kernel_hop_dispatch,
+    specialize_symbolic,
+    store_non_graphable_args,
     trace_user_kernel_wrapper,
+    UserKernelHOPifier,
     UserKernelHOPInfo,
     UserKernelWrapperHOP,
 )
@@ -59,43 +65,62 @@ def cutedsl_kernel_name(fn: Callable[..., Any]) -> str:
     return getattr(inspect.unwrap(fn), "__name__", "cutedsl_kernel")
 
 
+def normalize_mutates_args(fn: Callable[..., Any], mutates_args: object) -> MutatesArgs:
+    """The write set of host function ``fn``: "unknown", or the parameter names, read
+    once (a generator works) into a tuple without repeats, of parameters the kernel
+    can write: not the stream, nor a Constexpr or cutlass Numeric one. Raises a
+    TypeError for anything but "unknown" or an iterable of str (exactly str: not the
+    numpy strings of an array of names), and a ValueError for a name the kernel
+    cannot write, naming ``fn``; an empty write set does not parse the signature.
+    CuteDSLHOPifier.bind_call checks that a call passes each written parameter a
+    tensor or None, or leaves it to a default of None."""
+    if isinstance(mutates_args, str) and mutates_args == "unknown":
+        return "unknown"
+    name = cutedsl_kernel_name(fn)
+    error = TypeError(
+        f'CuTeDSL kernel {name}: mutates_args must be "unknown" or an iterable of '
+        "parameter names, each exactly a str (not a numpy string or another str "
+        f"subclass), got {mutates_args!r}"
+    )
+    if isinstance(mutates_args, str):
+        raise error
+    try:
+        # Materialize once: a generator would be empty on a second pass.
+        names = tuple(mutates_args)  # type: ignore[call-overload]
+    except TypeError:
+        raise error from None
+    if not all(type(n) is str for n in names):
+        raise error
+    names = tuple(dict.fromkeys(names))
+    if not names:
+        return names
+    info = get_host_fn_info(fn)
+    scalars = {info.stream_param, *info.constexpr_params, *info.numeric_params}
+    writable = tuple(p for p in info.params if p not in scalars)
+    for n in names:
+        if n not in writable:
+            raise ValueError(
+                f"CuTeDSL kernel {name}: mutates_args names {n!r}, but the parameters "
+                "it can write (all but the stream, Constexpr and cutlass Numeric "
+                f"ones) are {writable}"
+            )
+    return names
+
+
 @dataclasses.dataclass(frozen=True)
 class CuteDSLKernel:
     """Side-table entry for a CuTeDSL host function: plays the part a JITFunction
     plays for Triton. The write set is part of the record, so one host function
     wrapped with two different lists gets two entries. ``mutates_args`` may be any
-    iterable of parameter names (stored as a tuple without repeats), or "unknown"."""
+    iterable of parameter names (stored as a tuple without repeats), or "unknown",
+    as normalize_mutates_args validates it."""
 
     fn: Callable[..., Any]
     mutates_args: MutatesArgs
 
     def __post_init__(self) -> None:
-        if self.mutates_args == "unknown":
-            return
-        error = TypeError(
-            f'CuTeDSL kernel {self.name}: mutates_args must be "unknown" or an '
-            f"iterable of parameter names, got {self.mutates_args!r}"
-        )
-        if isinstance(self.mutates_args, str):
-            raise error
-        try:
-            names = tuple(dict.fromkeys(self.mutates_args))
-        except TypeError:
-            raise error from None
-        if not all(isinstance(name, str) for name in names):
-            raise error
-        object.__setattr__(self, "mutates_args", names)
-        if not names:
-            return
-        info = get_host_fn_info(self.fn)
-        writable = tuple(p for p in info.params if p != info.stream_param)
-        for name in names:
-            if name not in writable:
-                raise ValueError(
-                    f"CuTeDSL kernel {self.name}: mutates_args names {name!r}, but "
-                    f"its parameters other than the stream {info.stream_param!r} "
-                    f"are {writable}"
-                )
+        mutates_args = normalize_mutates_args(self.fn, self.mutates_args)
+        object.__setattr__(self, "mutates_args", mutates_args)
 
     @property
     def name(self) -> str:
@@ -108,6 +133,17 @@ def _is_cutlass_type(cls: type) -> bool:
     return module == "cutlass" or module.startswith("cutlass.")
 
 
+# What to pass instead of a DSL runtime object (see is_dsl_runtime_object).
+_DSL_RUNTIME_OBJECT_FIX = (
+    "pass torch.Tensor and Python values; PT2 converts tensors and supplies the stream"
+)
+
+# class -> whether its instances are kernel objects (see keyed_by_content).
+_kernel_object_classes: "weakref.WeakKeyDictionary[type, bool]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
 class _CuteDSLConstantRules(ConstantRules):
     def is_dsl_value(self, value: object) -> bool:
         return _is_cutlass_type(type(value))
@@ -116,6 +152,20 @@ class _CuteDSLConstantRules(ConstantRules):
         # A cutlass Numeric, such as cutlass.Float32(2.0), is keyed by its value.
         inner = getattr(value, "value", None) if self.is_dsl_value(value) else None
         return inner if isinstance(inner, (bool, int, float)) else None
+
+    def keyed_by_content(self, value: object) -> bool:
+        # A kernel object: its class's __call__ is a @cute.jit host function.
+        cls = type(value)
+        answer = _kernel_object_classes.get(cls)
+        if answer is None:
+            from torch._library.cutedsl import is_cutedsl_jit_function
+
+            answer = is_cutedsl_jit_function(cls.__call__)
+            _kernel_object_classes[cls] = answer
+        return answer
+
+    def refusal(self, cls: type) -> str | None:
+        return _DSL_RUNTIME_OBJECT_FIX if is_dsl_runtime_object(cls) else None
 
 
 CUTEDSL_CONSTANT_RULES = _CuteDSLConstantRules()
@@ -139,6 +189,20 @@ def get_kernel(kernel_idx: int) -> CuteDSLKernel:
 # Host function introspection
 
 
+def _tensor_default_error(name: str, param: str) -> ValueError:
+    return ValueError(
+        f"CuTeDSL kernel {name}: parameter {param!r} defaults to a tensor; pass the "
+        "tensor"
+    )
+
+
+def _scalar_param_error(name: str, param: str) -> TypeError:
+    return TypeError(
+        f"CuTeDSL kernel {name}: parameter {param!r} takes a scalar (it is Constexpr "
+        "or annotated with a cutlass Numeric type), not a tensor"
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class CuteDSLHostFnInfo:
     """What PT2 needs from a host function's signature.
@@ -151,7 +215,8 @@ class CuteDSLHostFnInfo:
 
     ``defaults`` are the parameters' defaults as written: like a passed value, a
     default that is a runtime scalar goes through python_scalar at launch, and any
-    other default reaches the DSL unchanged.
+    other default reaches the DSL unchanged. ``name`` is the host function's
+    cutedsl_kernel_name, which error messages give.
     """
 
     params: tuple[str, ...]
@@ -159,6 +224,13 @@ class CuteDSLHostFnInfo:
     constexpr_params: frozenset[str]
     numeric_params: Mapping[str, type]
     defaults: Mapping[str, Any]
+    name: str = "cutedsl_kernel"
+
+    @functools.cached_property
+    def stream_index(self) -> int:
+        """The position of the stream parameter, which no positional argument of a
+        call reaches (see CuteDSLHOPifier.bind_call)."""
+        return self.params.index(self.stream_param)
 
     def is_runtime_scalar(self, name: str, value: object) -> bool:
         """Whether ``value``, for parameter ``name``, is a runtime scalar: any value
@@ -217,17 +289,10 @@ class CuteDSLHostFnInfo:
             else:
                 value = self.defaults[param]
                 if isinstance(value, Tensor):
-                    raise ValueError(
-                        f"CuTeDSL kernel {name}: parameter {param!r} defaults to a "
-                        "tensor; pass the tensor"
-                    )
+                    raise _tensor_default_error(name, param)
             if isinstance(value, Tensor):
                 if param in self.constexpr_params or param in self.numeric_params:
-                    raise TypeError(
-                        f"CuTeDSL kernel {name}: parameter {param!r} takes a scalar "
-                        "(it is Constexpr or annotated with a cutlass Numeric type), "
-                        "not a tensor"
-                    )
+                    raise _scalar_param_error(name, param)
                 runtime_args[param] = value
             elif self.is_runtime_scalar(param, value):
                 runtime_args[param] = value
@@ -277,6 +342,17 @@ def python_scalar(value: Any, annotation: type | None = None) -> Any:
         if isinstance(value, Numeric):
             return value.value
     return value
+
+
+def is_dsl_runtime_object(cls: type) -> bool:
+    """Objects PT2 has to make itself: cute tensors and pointers (it converts torch
+    tensors) and CUDA streams (it passes the current stream). Other DSL values, such
+    as cutlass dtype classes, enums and Numeric values, are ordinary constants."""
+    module = getattr(cls, "__module__", "") or ""
+    name = getattr(cls, "__name__", "")
+    return module.startswith("cutlass.cute.runtime") or (
+        module.startswith("cuda.") and name in ("CUstream", "CUdeviceptr")
+    )
 
 
 _host_fn_infos: "weakref.WeakKeyDictionary[Callable[..., Any], CuteDSLHostFnInfo]" = (
@@ -343,6 +419,7 @@ def get_host_fn_info(fn: Callable[..., Any]) -> CuteDSLHostFnInfo:
         constexpr_params=frozenset(constexpr),
         numeric_params=numeric,
         defaults=defaults,
+        name=name,
     )
     _host_fn_infos[fn] = info
     return info
@@ -719,6 +796,298 @@ def cutedsl_kernel_wrapper_functional_functionalize(
 register_user_kernel_hop_dispatch(
     cutedsl_kernel_wrapper_mutation, cutedsl_kernel_wrapper_functional
 )
+
+
+###############################################################################
+# The "CuteDSLHOPifier": a class that transforms a call to a CuTeDSL host function
+# into a call to the cutedsl_kernel_wrapper_mutation HOP.
+
+
+class CuteDSLHOPifier(UserKernelHOPifier):
+    """Orchestrator for converting a call to a CuTeDSL host function into a call to
+    the cutedsl_kernel_wrapper_mutation HOP: the counterpart of TritonHOPifier.
+
+    For make_fx and non-strict export, wrap_cutedsl returns a
+    TraceableCuteDSLKernelWrapper, whose calls TracingCuteDSLHOPifier turns into a
+    call to the HOP (which can then be traced).
+
+    A CuTeDSL launch has no grid, autotuner or heuristics, so what is left is binding
+    the call to the host function's signature: the stream parameter is supplied at
+    launch and must not be passed; Constexpr arguments are baked into the compiled
+    kernel, so symbolic values for them are specialized; tensors and scalars are
+    kernel arguments (see CuteDSLHostFnInfo).
+
+    Every mistake of the user's that it finds (a write set, host function or call
+    that PT2 cannot take) goes through raise_user_error (see UserKernelHOPifier) as
+    a TypeError or ValueError naming the kernel and any parameter involved: the one
+    CuteDSLKernel or the eager launch raises for the same mistake, where they check
+    it. What wrap_cutedsl cannot wrap (a function that is not ``@cute.jit``, a bound
+    ``@cute.jit`` method, a kernel object) it refuses itself, with a TypeError it
+    raises before any HOPifier is involved.
+    """
+
+    def is_tensor(self, val: Any) -> bool:
+        raise NotImplementedError("abstract method")
+
+    def python_type(self, val: Any) -> type:
+        raise NotImplementedError("abstract method")
+
+    def leaves(self, val: Any) -> list[Any]:
+        """The values inside a container argument (the value itself otherwise):
+        containers are what the side table keys by content (see constant_contents).
+        Refuses a tensor or a DSL runtime object in it (only top-level tensors become
+        graph arguments; one inside a container would be baked in as a trace-time
+        constant) and a cycle, with the TypeError or ValueError of the side table's
+        walk, which says where it sits; bind_args re-raises it naming the kernel and
+        the parameter."""
+        raise NotImplementedError("abstract method")
+
+    def specialize_nested(self, variable: Any, val: Any) -> Any:
+        """val with every symbolic value in it (or itself) specialized."""
+        raise NotImplementedError("abstract method")
+
+    def call_HOP(  # type: ignore[no-untyped-def]
+        self,
+        variable,
+        combined_args: dict[str, Any],
+        tx,
+    ) -> Any:
+        raise NotImplementedError("abstract method")
+
+    def host_fn_info(self, kernel: Callable[..., Any]) -> CuteDSLHostFnInfo:
+        try:
+            return get_host_fn_info(kernel)
+        except ValueError as e:
+            self.raise_user_error(e)
+
+    def init_variable(
+        self,
+        variable: Any,
+        kernel: Callable[..., Any],
+        mutates_args: object,
+    ) -> None:
+        """Record the host function and its write set on ``variable`` and add them
+        to the side table."""
+        variable.kernel = kernel
+        try:
+            normalized = normalize_mutates_args(kernel, mutates_args)
+        except (TypeError, ValueError) as e:
+            self.raise_user_error(e)
+        self.host_fn_info(kernel)  # refuses a host function PT2 cannot launch
+        variable.mutates_args = normalized
+        variable.kernel_idx = cutedsl_kernel_side_table.add_kernel(
+            CuteDSLKernel(kernel, normalized)
+        )
+
+    def bind_call(
+        self,
+        variable: Any,
+        args: tuple[Any, ...] | list[Any],
+        kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Bind a call to the host function's parameters, minus the stream, and
+        refuse what PT2 cannot launch without looking inside an argument: a call
+        that does not bind, a tensor for a scalar parameter, a DSL runtime object,
+        a parameter left to a tensor default, and a written parameter given or left
+        to anything but a tensor or None. The eager fast path launches the result,
+        and the launch walks each constant (see bind_args)."""
+        info = self.host_fn_info(variable.kernel)
+        name = info.name
+        if len(args) > info.stream_index:
+            msg = (
+                f"CuTeDSL kernel {name}: takes {info.stream_index} positional "
+                f"arguments (the parameters before its stream parameter "
+                f"{info.stream_param!r}, which the launch supplies) but got {len(args)}"
+            )
+            by_keyword = info.params[info.stream_index + 1 : len(args) + 1]
+            if by_keyword:
+                msg += f"; pass {', '.join(map(repr, by_keyword))} by keyword"
+            self.raise_user_error(TypeError(msg))
+        combined_args = dict(zip(info.params, args))
+        for key, val in kwargs.items():
+            if key in combined_args:
+                self.raise_user_error(
+                    TypeError(
+                        f"CuTeDSL kernel {name}: got multiple values for argument "
+                        f"{key!r}"
+                    )
+                )
+            combined_args[key] = val
+
+        try:
+            info.check_call(name, combined_args)
+        except TypeError as e:
+            self.raise_user_error(e)
+
+        # PT2 can only functionalize a tensor that the call passes: a written
+        # parameter takes a tensor, or None for an optional tensor that the call
+        # leaves out, and no parameter is left to a tensor default.
+        written = () if variable.mutates_args == "unknown" else variable.mutates_args
+        for key, default in info.defaults.items():
+            if key in combined_args:
+                continue
+            if isinstance(default, Tensor):
+                self.raise_user_error(_tensor_default_error(name, key))
+            if key in written and default is not None:
+                self.raise_user_error(
+                    ValueError(
+                        f"CuTeDSL kernel {name}: mutates_args names parameter {key!r}, "
+                        "which takes a tensor or None, but the call leaves it to its "
+                        f"default, of type {type(default).__name__}"
+                    )
+                )
+        for key, val in combined_args.items():
+            if self.is_tensor(val):
+                if key in info.constexpr_params or key in info.numeric_params:
+                    self.raise_user_error(_scalar_param_error(name, key))
+                continue
+            val_type = self.python_type(val)
+            if is_dsl_runtime_object(val_type):
+                self.raise_user_error(
+                    TypeError(
+                        f"CuTeDSL kernel {name}: parameter {key!r} got a "
+                        f"{val_type.__name__}: {_DSL_RUNTIME_OBJECT_FIX}"
+                    )
+                )
+            if key in written and val_type is not type(None):
+                self.raise_user_error(
+                    TypeError(
+                        f"CuTeDSL kernel {name}: mutates_args names parameter {key!r}, "
+                        f"which takes a tensor or None, not {val_type.__name__}"
+                    )
+                )
+        return combined_args
+
+    def bind_args(
+        self,
+        variable: Any,
+        args: tuple[Any, ...] | list[Any],
+        kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """bind_call, then each argument that is not a tensor walked as the side
+        table walks a constant (leaves), which refuses what the side table refuses in
+        it, and the symbolic values in it specialized where the DSL bakes them into
+        the compiled kernel."""
+        combined_args = self.bind_call(variable, args, kwargs)
+        info = self.host_fn_info(variable.kernel)
+        for key, val in combined_args.items():
+            if self.is_tensor(val):
+                continue
+            try:
+                leaves = self.leaves(val)
+            except (TypeError, ValueError) as e:
+                msg = f"CuTeDSL kernel {info.name}: parameter {key!r}: {e}"
+                self.raise_user_error(type(e)(msg))
+            is_container = not (len(leaves) == 1 and leaves[0] is val)
+            if key in info.constexpr_params or is_container:
+                # The DSL bakes a Constexpr argument into the compiled kernel, and a
+                # container can only be a side-table constant, so symbolic values in
+                # either are specialized (see [Note: Specialize tl.constexpr args in
+                # user-defined triton kernels]).
+                combined_args[key] = self.specialize_nested(variable, val)
+        return combined_args
+
+    def call_cutedsl_kernel(
+        self,
+        variable: Any,
+        args: tuple[Any, ...] | list[Any],
+        kwargs: dict[str, Any],
+        tx: Any,
+    ) -> Any:
+        return self.call_HOP(variable, self.bind_args(variable, args, kwargs), tx)
+
+
+###############################################################################
+# Helpers for the wrap_cutedsl API, which makes a CuTeDSL host function traceable
+# into a graph via make_fx or non-strict export
+
+
+class TracingCuteDSLHOPifier(CuteDSLHOPifier):
+    def raise_user_error(self, exc: TypeError | ValueError) -> Never:
+        # from None: where exc is an error caught, or one that translates it,
+        # chaining would print its message twice.
+        raise exc from None
+
+    def is_tensor(self, val: Any) -> bool:
+        return isinstance(val, Tensor)
+
+    def python_type(self, val: Any) -> type:
+        return type(val)
+
+    def leaves(self, val: Any) -> list[Any]:
+        leaves: list[Any] = []
+
+        def collect(leaf: Any) -> Any:
+            if not isinstance(leaf, (SymInt, SymFloat, SymBool)):
+                # Also an unhashable value, as the side table would refuse it.
+                constant_key(leaf, CUTEDSL_CONSTANT_RULES)
+            leaves.append(leaf)
+            return leaf
+
+        map_constant(val, CUTEDSL_CONSTANT_RULES, collect)
+        return leaves
+
+    def specialize_nested(self, variable: Any, val: Any) -> Any:
+        # bind_args has walked val with leaves, which refuses a cycle.
+        return map_constant(val, CUTEDSL_CONSTANT_RULES, specialize_symbolic)
+
+    def call_HOP(
+        self,
+        variable: "TraceableCuteDSLKernelWrapper",
+        combined_args: dict[str, Any],
+        tx: None,
+    ) -> None:
+        if tx is not None:
+            raise AssertionError("tx must be None for TracingCuteDSLHOPifier")
+        info = get_host_fn_info(variable.kernel)
+        # Runtime scalars as the Python values the launch passes, which are
+        # graphable: a numpy scalar is not, and would be a side-table constant.
+        hop_args = {
+            key: python_scalar(val, info.numeric_params.get(key))
+            if info.is_runtime_scalar(key, val)
+            else val
+            for key, val in combined_args.items()
+        }
+        graphable_args, constant_args_idx = store_non_graphable_args(
+            cutedsl_kernel_side_table, hop_args
+        )
+        return cutedsl_kernel_wrapper_mutation(
+            kernel_idx=variable.kernel_idx,
+            constant_args_idx=constant_args_idx,
+            kwargs=graphable_args,
+        )
+
+
+tracing_cutedsl_hopifier_singleton = TracingCuteDSLHOPifier()
+
+
+class TraceableCuteDSLKernelWrapper:
+    """What wrap_cutedsl returns: calling it launches the host function eagerly, or
+    records a cutedsl_kernel_wrapper_mutation node under make_fx / non-strict export."""
+
+    kernel: Callable[..., Any]
+    mutates_args: MutatesArgs
+    kernel_idx: int
+
+    def __init__(self, kernel: Callable[..., Any], mutates_args: object) -> None:
+        tracing_cutedsl_hopifier_singleton.init_variable(self, kernel, mutates_args)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        from torch._library.triton import is_wrap_triton_enabled
+
+        if is_wrap_triton_enabled():
+            return tracing_cutedsl_hopifier_singleton.call_cutedsl_kernel(
+                self, args, kwargs, None
+            )
+        # Eager fast path (e.g. inside a triton_op's eager backend): launch directly,
+        # skipping the HOP dispatch. Nothing is symbolic, and the launch walks each
+        # constant once, to key it, refusing what bind_args' walk refuses.
+        from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
+
+        launch_cutedsl_kernel(
+            self.kernel,
+            tracing_cutedsl_hopifier_singleton.bind_call(self, args, kwargs),
+        )
 
 
 register_user_kernel_hop(
