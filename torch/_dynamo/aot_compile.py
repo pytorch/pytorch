@@ -56,15 +56,11 @@ _EXTERNAL_DATA_HINT = (
 # default instead, in the one lookup a live scope needs.
 _UNBOUND = object()
 
-# What a raise can cost the tree it came out of, as the no-match report's caveat
-# states it. Phrased for one tree or several, since the report's caveat names
-# every tree it rests on. Hedged, because only a throw skips the reset on
-# check_nopybind_template's exits: a tree that returns with an error set (the
-# SystemError _unwrapped_raise reads through) reset on its way out, and neither
-# the last-resort veto nor this clause tells the two apart.
-_STALE_AFTER_THROW = (
-    "a C++ throw out of a tree can leave that tree's relational guard state "
-    "stale, so its next check can reject a call it fits or accept one it does not"
+# Native relational guards reset on every exit, including C++ exceptions.
+# A guard can still run user code that changes the state checked by a retry.
+_STATE_CHANGED_AFTER_RAISE = (
+    "guard checks can execute user code that changes the guarded state, "
+    "so a later rejection need not describe the original call"
 )
 
 
@@ -662,16 +658,12 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
     # G['D']['a'] certifies that one item, while the name a load can substitute
     # is D, whose every other key the graph would then read live and unchecked.
     # get_global_source_name would walk such a source up to D.
-    # guard_on_key_order is deliberately not unioned in, even though a
-    # dict-order check roots a global: guard_filter_fn never prunes that set, so
-    # a name only it contributes is precisely a name no surviving guard checks
-    # the value of. On the default aot_compile filter, which drops every global
-    # guard, an iterated global dict is exactly that shape.
-    # Narrower than the serialized global_scope for the same reason: the
-    # serializer also fills that from a ShapeEnvSource guard's shape_env_sources
-    # and from DUPLICATE_INPUT's source_b -- names whose value no guard checks,
-    # and which DUPLICATE_INPUT records before its optimizer-source early return,
-    # so an optimizer-rooted pair records one with no guard installed at all.
+    # Order roots alone add no names: they select dictionary manager types but
+    # do not certify every value. A root with its own kept GlobalSource guard
+    # is still included below. Serialized
+    # global_scope also carries roots reached through aliases, shape_env_sources
+    # and DUPLICATE_INPUT's source_b, which need not have their own value guard.
+    # DUPLICATE_INPUT can even record a root before its optimizer-source early return.
     from .source import GlobalSource
 
     return {
@@ -682,10 +674,11 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
 
 
 def _recorded_guard_globals(guards_state: "GuardsState") -> set[str]:
-    """Every global name the kept guards read at check time."""
-    # Wider than their originating_sources: the serialized global_scope is the
-    # serializer's own record of the names the kept guards resolve, so it also
-    # carries a DUPLICATE_INPUT's source_b and a cpp-form SHAPE_ENV guard's
+    """Global names required to rebuild or check the retained guard tree."""
+    # Wider than their originating_sources: global_scope also carries retained
+    # order roots used to select manager types during rebuilding, even if no
+    # runtime guard reads the root directly. It also carries a DUPLICATE_INPUT's
+    # source_b and a cpp-form SHAPE_ENV guard's
     # shape_env_sources. A SHAPE_ENV guard installed as a Python lambda reads
     # its G['NAME'] operands from the same scope, and none of them reaches
     # global_scope -- shape_env_sources is filled from the cpp code parts alone
@@ -1847,28 +1840,11 @@ class AOTCompiledModel:
     an opted-out input when the last resort serves one, is served over: the
     graph runs, and the raise is logged on the ``torch._dynamo.aot_compile``
     logger with the advice to fix or drop the input that raised. The raise says
-    nothing about the result that did answer, and refusing would repair
-    nothing: a tree that raises rejects nothing, and a C++ throw out of it
-    leaves its relational guard state stale -- wherever the tree guards more
-    than one tensor against aliasing, a ``NO_TENSOR_ALIASING`` set still
-    holding the throwing evaluation's tensors, and under
-    ``enable_cpp_symbolic_shape_guards`` (off by default) a
-    ``SYMBOLIC_SHAPE_GUARD`` keeping its ``_args_seen`` count across the throw
-    -- so its NEXT check can reject a call it fits, and with that config on
-    accept one it does not, with no raise on record to veto. The advice names
-    both directions either way: a tree that threw is untrustworthy in both. An
-    opted-out input's warning names only the accept: ``check()`` ignores the
-    flag, so a stale accept is served in index order, displacing a later result
-    that fits -- so the warning names a later match only when a later result
-    exists. From the last index the warning states the remedy alone: what the
-    accept displaces there depends on the results ahead of it -- an earlier
-    opted-out result the last resort would have served, or the no-match report
-    an enabled input's raise leaves in its place -- and nothing at all where
-    the last resort would have served this result anyway. A stale rejection
-    forfeits only the calls the last resort does not then hand it (those an
-    opted-out result ahead of it takes, or an enabled input's raise withholds);
-    and its raise leaves its graph reachable only through its own later accept
-    or the last resort, which any enabled input's raise withholds.
+    nothing about the result that did answer. Native relational state resets
+    even when a check throws. Guard checks can still run user code that changes
+    guarded state, so retries do not replace the advice to fix or drop a failing
+    artifact. An opted-out artifact is served only by a successful check or the
+    last resort described above.
 
     The warning is logged once per ``(input index, exception type name,
     opt-out state)`` per model, starting over when a serve that warns finds
@@ -2002,20 +1978,11 @@ class AOTCompiledModel:
             if (i, kind, enabled) in warned:
                 continue
             if enabled:
-                advice = (
-                    f"Fix or drop input [{i}]: its next check can reject a call "
-                    "it fits or accept one it does not."
-                )
+                advice = f"Fix or drop input [{i}]: its guard check raised."
             else:
-                # The displaced later match is positional: from the last
-                # index there is none, and what a stale accept displaces there
-                # depends on the results ahead of it -- an earlier opted-out
-                # result's serve, or the no-match report -- so the line drops
-                # the clause and states the remedy alone.
-                later = " ahead of a later match" if i + 1 < len(results) else ""
                 advice = (
-                    f"Input [{i}] opted out of guard checks, but its next check "
-                    f"can accept a call it does not fit{later}; fix or drop it."
+                    f"Input [{i}] opted out of guard checks; "
+                    "fix or drop its failing guard artifact."
                 )
             log.warning(
                 "AOT compiled input [%d]'s guard check raised %s: %s; "
@@ -2156,19 +2123,9 @@ class AOTCompiledModel:
                 raised.clear()
                 unanswered.clear()
                 return result._serve(self.model, *args, **kwargs)
-        # A result that opted out via disable_guard_check() accepts anything, but
-        # only after both passes failed to find a real match and no tree whose
-        # guards someone did ask about raised -- even if a later pass answered: an
-        # answer after a throw can stand on relational guard state the throw left
-        # stale (a C++ throw skips the reset the normal exits run), not on this
-        # call. A NO_TENSOR_ALIASING set still holding the throwing evaluation's
-        # tensors rejects the re-check; under enable_cpp_symbolic_shape_guards
-        # (off by default) SYMBOLIC_SHAPE_GUARD's _args_seen count completes the
-        # evaluation over stale slots, which can answer true for this call's
-        # remaining args, an accept the second pass serves like any other.
-        # Neither can be told from a real answer or cleared from Python. A raise
-        # from the opted-out result itself withholds nothing: nobody wanted its
-        # answer.
+        # An opt-out applies only after both passes found no real match and no
+        # enabled check raised. Native state resets after throws, but user code
+        # can still change guarded state before a retry answers.
         # The flags are read once, for the veto, the last resort and the report
         # alike: disable_guard_check() is a plain store any thread can make.
         enabled = [result._guard_check_enabled for result in results]
@@ -2375,7 +2332,7 @@ class AOTCompiledModel:
                 advice += (
                     f" Fix the raise{plural} out of {'; '.join(untrusted)} first: "
                     "every rejection this advice rests on followed a raise from "
-                    f"its own tree, and {_STALE_AFTER_THROW}."
+                    f"its own tree, and {_STATE_CHANGED_AFTER_RAISE}."
                 )
             lines.append(advice)
         if len(raised) > 1 and not withheld and not coverable:

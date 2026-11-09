@@ -145,6 +145,7 @@ class SubgraphTracingInfo:
     side_effect_stack: traceback.StackSummary | None = None
     # All sources accessed via VariableBuilder during the subgraph trace.
     traced_sources: OrderedSet[Any] = field(default_factory=OrderedSet)
+    has_builtin_method_keys: bool = False
 
 
 # This function is a syntax sugar for creating a dummy new subtracer so that
@@ -2026,6 +2027,7 @@ def speculate_subgraph_with_auto_output_flattening(
             tracing_info = SubgraphTracingInfo(
                 side_effect_stack=subtracer.side_effect_stack,
                 traced_sources=subtracer.traced_sources,
+                has_builtin_method_keys=subtracer.has_builtin_method_keys,
             )
 
             return (

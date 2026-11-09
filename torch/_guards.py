@@ -316,6 +316,102 @@ class Guard:
         else:
             return self.create_fn
 
+    def with_source(
+        self,
+        source: Source,
+        /,
+        *,
+        create_fn: Callable[[GuardBuilderBase, Guard], None] | None = None,
+    ) -> Guard:
+        """Copy a guard for rebuilding, without derived export metadata or cached hash."""
+        return dataclasses.replace(
+            self,
+            originating_source=source,
+            create_fn=self.create_fn if create_fn is None else create_fn,
+            guard_types=None,
+            code_list=None,
+            obj_weakref=None,
+            guarded_class_weakref=None,
+            _hash=None,
+        )
+
+    def remap_sources(self, remap_source: Callable[[Source], Source], /) -> Guard:
+        """Remap explicit source dependencies; return self when nothing changes."""
+
+        def remap(value: Any) -> Any:
+            if isinstance(value, Source):
+                return remap_source(value)
+            if type(value) is tuple:
+                items = tuple(remap(item) for item in value)
+                return value if all(a is b for a, b in zip(value, items)) else items
+            return value
+
+        source = remap(self.originating_source)
+        create_fn = self.create_fn
+        if isinstance(create_fn, functools.partial):
+            args = tuple(remap(arg) for arg in create_fn.args)
+            keywords = {key: remap(value) for key, value in create_fn.keywords.items()}
+            if any(a is not b for a, b in zip(args, create_fn.args)) or any(
+                value is not create_fn.keywords[key] for key, value in keywords.items()
+            ):
+                create_fn = functools.partial(create_fn.func, *args, **keywords)
+        if source is self.originating_source and create_fn is self.create_fn:
+            return self
+        return self.with_source(source, create_fn=create_fn)
+
+    def source_dependencies(self) -> OrderedSet[Source]:
+        """Explicit sources, including ancestors and source-valued partial payloads."""
+        sources: OrderedSet[Source] = OrderedSet()
+
+        def collect(value: Any) -> None:
+            if isinstance(value, Source):
+                if value in sources:
+                    return
+                sources.add(value)
+                if dataclasses.is_dataclass(value):
+                    for field in dataclasses.fields(value):
+                        collect(getattr(value, field.name))
+            elif type(value) is tuple:
+                for item in value:
+                    collect(item)
+
+        collect(self.originating_source)
+        if isinstance(self.create_fn, functools.partial):
+            collect(self.create_fn.args)
+            collect(tuple(self.create_fn.keywords.values()))
+        return sources
+
+    def is_equivalent_to(self, other: Guard, /) -> bool:
+        """Prove equivalence for known payload types; keep unfamiliar payloads distinct."""
+
+        def same_payload(a: Any, b: Any) -> bool:
+            if a is b:
+                return True
+            if type(a) is not type(b):
+                return False
+            if isinstance(a, Source) or type(a) in (str, int, bool, bytes, type(None)):
+                return a == b
+            if type(a) is tuple:
+                return len(a) == len(b) and all(
+                    same_payload(x, y) for x, y in zip(a, b)
+                )
+            if type(a) is dict:
+                return a.keys() == b.keys() and all(same_payload(a[k], b[k]) for k in a)
+            return False
+
+        if (
+            self.originating_source != other.originating_source
+            or self._force_dict_keys_match != other._force_dict_keys_match
+            or self.inner_create_fn() is not other.inner_create_fn()
+        ):
+            return False
+        return same_payload(
+            getattr(self.create_fn, "args", ()), getattr(other.create_fn, "args", ())
+        ) and same_payload(
+            getattr(self.create_fn, "keywords", {}),
+            getattr(other.create_fn, "keywords", {}),
+        )
+
     @property
     def name(self) -> str:
         return self.originating_source.name
@@ -836,6 +932,9 @@ class InvokeSubgraphReuseCondition:
     # handler is a pre-resolved GuardCheckSpec from GUARD_VALUE_DISPATCH.
     guards: list[tuple[Source, GuardCheckSpec, object, Guard]]
 
+    # Structural dependencies are shared across candidate checks, not runtime values.
+    guard_dependencies: list[OrderedSet[Source]]
+
     # TreeSpec from pytree.tree_flatten of the (args, kwargs) structure.
     # On cache hit, we verify the new call has the same treespec.
     treespec: pytree.TreeSpec | None = None
@@ -844,6 +943,9 @@ class InvokeSubgraphReuseCondition:
     # On cache hit, we check if any modified VT's source is a base of one
     # of these to detect mutations on captured variables.
     traced_sources: OrderedSet[Source] = dataclasses.field(default_factory=OrderedSet)
+
+    # Order annotations required by guard source chains and additional dependencies.
+    guard_on_key_order: set[Source] = dataclasses.field(default_factory=set)
 
 
 class InvokeSubgraphCache(HopSubgraphCache):
@@ -1052,12 +1154,15 @@ class CompileContext:
     def try_get() -> CompileContext | None:
         return getattr(_TLS, "compile_context", None)
 
-    def __init__(self, compile_id: CompileId | None) -> None:
+    def __init__(
+        self, compile_id: CompileId | None, *, is_aot_capture: bool = False
+    ) -> None:
         if compile_id is not None and not isinstance(compile_id, CompileId):
             raise AssertionError(
                 f"compile_id must be None or CompileId, got {type(compile_id)}"
             )
         self.compile_id: CompileId | None = compile_id
+        self.is_aot_capture = is_aot_capture
         self.attempt = 0
         # Verbose ShapeEnv guards produced.
         self.shape_env_guards: list[str] = []

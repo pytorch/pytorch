@@ -17,7 +17,22 @@ class GlobalStateGuard:
 class LeafGuard:
     def verbose_code_parts(self) -> list[str]: ...
 
-class RelationalGuard: ...
+class ORDERED_DICT_ORDER_MATCH(LeafGuard):
+    def __init__(
+        self,
+        root: RootGuardManager,
+        order: Sequence[int],
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
+    def __call__(self, value: Any) -> bool: ...
+
+def ordered_dict_keys(value: Any) -> list[Any] | None: ...
+
+class RelationalGuard(LeafGuard):
+    def get_group_id(self) -> int: ...
+
+class NN_MODULE_HOOK_MEMBERSHIP(RelationalGuard): ...
 
 class GuardDebugInfo:
     verbose_code_parts: list[str]
@@ -412,6 +427,12 @@ class GuardManager:
     ) -> None: ...
     def mark_tag_safe(self) -> None: ...
     def mark_tag_safe_root(self) -> None: ...
+    def add_ordered_dict_order_guard(
+        self,
+        order: Sequence[int],
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
 
 class RootGuardManager(GuardManager):
     def get_epilogue_lambda_guards(self) -> list[LeafGuard]: ...
@@ -464,6 +485,19 @@ class FuncKwDefaultsGuardAccessor(GuardAccessor): ...
 class GetAttrGuardAccessor(GuardAccessor):
     def get_attr_name(self) -> str: ...
 
+def install_object_alias_pattern_guard(
+    guard_managers: Sequence[GuardManager],
+    aliases: Sequence[int],
+    verbose_code_parts: list[str],
+    user_stack: traceback.StackSummary | None,
+) -> None: ...
+def install_nn_module_hook_membership_guard(
+    hooks: GuardManager,
+    flags: GuardManager,
+    expected: Sequence[bool],
+    verbose_code_parts: list[str],
+    user_stack: traceback.StackSummary | None,
+) -> None: ...
 def install_object_aliasing_guard(
     x: GuardManager,
     y: GuardManager,

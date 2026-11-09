@@ -189,6 +189,7 @@ from .variables.functions import (
     BaseUserFunctionVariable,
     CO_VARARGS,
     CO_VARKEYWORDS,
+    FunctoolsPartialVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -4524,6 +4525,48 @@ class InstructionTranslatorBase(
             )
         if not obj.is_mutable():
             raise AssertionError("expected obj.is_mutable() to be true")
+        if inst.opname == "DICT_MERGE":
+            v = v.realize()
+            if isinstance(v, ConstDictVariable):
+                # Match CALL_FUNCTION_EX's callable/NULL stack layout.
+                offset = 3 if sys.version_info >= (3, 13) else 2
+                fn = self.stack[-inst.arg - offset].realize()
+                positional = self.stack[-inst.arg - 1].realize()
+                nargs = 0
+                while isinstance(fn, FunctoolsPartialVariable):
+                    nargs += len(fn.args)
+                    fn = fn.func.realize()
+                observes_order = True
+                if isinstance(fn, BaseUserFunctionVariable) and istype(
+                    positional, (ListVariable, TupleVariable)
+                ):
+                    try:
+                        code = fn.get_code()
+                        observes_order = bool(code.co_flags & CO_VARKEYWORDS)
+                        if not observes_order:
+                            nargs += len(positional.items)
+                            nargs += isinstance(fn, UserMethodVariable)
+                            nargs = min(nargs, code.co_argcount)
+                            names = code.co_varnames[
+                                max(code.co_posonlyargcount, nargs) : code.co_argcount
+                                + code.co_kwonlyargcount
+                            ]
+                            # Binding errors expose the order of unexpected keywords.
+                            for key in v.items:
+                                if not key.vt.is_python_constant():
+                                    observes_order = True
+                                    break
+                                name = key.vt.as_python_constant()
+                                if type(name) is not str or name not in names:
+                                    observes_order = True
+                                    break
+                    except NotImplementedError:
+                        pass
+                if observes_order:
+                    v.install_dict_order_guard(self)
+                else:
+                    v.install_dict_keys_match_guard()
+                v = ConstDictVariable(v.items, mutation_type=ValueMutationNew())
         obj.call_method(self, "update", [v], {})  # type: ignore[arg-type]
 
     DICT_UPDATE = DICT_MERGE
