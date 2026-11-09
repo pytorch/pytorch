@@ -10,6 +10,7 @@ views, dynamic shapes, CUDA graphs).
 import collections
 import contextlib
 import copy
+import ctypes
 import dataclasses
 import enum
 import functools
@@ -21,6 +22,7 @@ import logging
 import os
 import re
 import runpy
+import subprocess
 import sys
 import tempfile
 import types
@@ -8060,6 +8062,624 @@ class CuteDSLInductorTests(TestCase):
         self.assertEqual(bypasses, [f"Bypassing FX Graph Cache because {reason}"] * 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+
+# The header export_to_c (nvidia-cutlass-dsl 4.8.0) writes for a host function with
+# the parameters of _abi_specs, exported under the prefix cutedsl_fixture.
+_EXPORTED_HEADER = r"""
+#pragma once
+
+#include <cuda_runtime.h>
+#include <cuda_fp16.h>
+#include <stdio.h>
+#include <stdint.h>
+
+
+// Macro to check for cuda errors.
+#ifndef CUTE_DSL_CUDA_ERROR_CHECK
+#define CUTE_DSL_CUDA_ERROR_CHECK(err) { \
+    if ((err) != cudaSuccess) { \
+        printf("Got Cuda Error %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err)); \
+    } \
+}
+
+#endif
+
+typedef struct {
+    cudaLibrary_t module;
+} cutedsl_fixture_Kernel_Module_t;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+void _mlir_cutedsl_fixture_cuda_init(void **);
+void _mlir_cutedsl_fixture_cuda_load_to_device(void **);
+static inline void cutedsl_fixture_Kernel_Module_Load(cutedsl_fixture_Kernel_Module_t *module) {
+    cudaLibrary_t *libraryPtr = &(module->module);
+    cudaError_t ret = cudaSuccess;
+    struct {
+        cudaLibrary_t **libraryPtr;
+        cudaError_t *ret;
+    } initArgs = {&libraryPtr, &ret};
+    _mlir_cutedsl_fixture_cuda_init((void **)(&initArgs));
+    CUTE_DSL_CUDA_ERROR_CHECK(ret);
+    int32_t device_id = 0;
+    struct {
+        cudaLibrary_t **library;
+        int32_t *device_id;
+        cudaError_t *ret;
+    } loadArgs = {&libraryPtr, &device_id, &ret};
+    int32_t device_count;
+    CUTE_DSL_CUDA_ERROR_CHECK(cudaGetDeviceCount(&device_count));
+    for (int32_t i = 0; i < device_count; i++) {
+        device_id = i;
+        _mlir_cutedsl_fixture_cuda_load_to_device((void **)(&loadArgs));
+        CUTE_DSL_CUDA_ERROR_CHECK(ret);
+    }
+}
+
+static inline void cutedsl_fixture_Kernel_Module_Unload(cutedsl_fixture_Kernel_Module_t *module) {
+    CUTE_DSL_CUDA_ERROR_CHECK(cudaLibraryUnload(module->module));
+}
+
+#ifdef __cplusplus
+}
+#endif
+
+typedef struct {
+    void *data;
+    int32_t dynamic_shapes[2];
+    int64_t dynamic_strides[1];
+} cutedsl_fixture_Tensor_mX_t;
+
+
+typedef struct {
+    void *data;
+} cutedsl_fixture_Tensor_mOut_t;
+
+#ifdef __cplusplus
+extern "C"
+#endif
+void _mlir_cutedsl_fixture__mlir_ciface_cutlass_abi_kernel_FakeTensorFloat32div1div11i64div1_FakeTensorFloat328441______________3_FakeStream(void **args, int32_t num_args);
+
+static inline int32_t cute_dsl_cutedsl_fixture_wrapper(cutedsl_fixture_Kernel_Module_t *module, cutedsl_fixture_Tensor_mX_t *mX, cutedsl_fixture_Tensor_mOut_t *mOut, int8_t i8, int16_t i16, int32_t i32, int64_t i64, uint8_t u8, uint16_t u16, uint32_t u32, uint64_t u64, uint8_t flag, float f32, float tf32, double f64, __half_raw f16, cudaStream_t stream) {
+    int32_t ret = 0;
+    void *args[17] = {
+        mX, mOut, &i8, &i16, &i32, &i64, &u8, &u16, &u32, &u64, &flag, &f32, &tf32, &f64, &f16, &stream,
+        &ret
+    };
+    _mlir_cutedsl_fixture__mlir_ciface_cutlass_abi_kernel_FakeTensorFloat32div1div11i64div1_FakeTensorFloat328441______________3_FakeStream(args, 17);
+    return ret;
+}
+"""
+
+
+def _numeric(name):
+    """Stands in for the cutlass Numeric type ``name``: scalar_ctype reads only the
+    name and the module."""
+    return type(name, (), {"__module__": "cutlass"})
+
+
+def _abi_specs(numeric=_numeric):
+    """The specs of the host function _EXPORTED_HEADER was exported for."""
+    from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+        ConstantParamSpec,
+        ScalarParamSpec,
+        StreamParamSpec,
+        TensorParamSpec,
+    )
+
+    scalars = {
+        "i8": "Int8",
+        "i16": "Int16",
+        "i32": "Int32",
+        "i64": "Int64",
+        "u8": "Uint8",
+        "u16": "Uint16",
+        "u32": "Uint32",
+        "u64": "Uint64",
+        "flag": "Boolean",
+        "f32": "Float32",
+        "tf32": "TFloat32",
+        "f64": "Float64",
+        "f16": "Float16",
+    }
+    return [
+        TensorParamSpec("mX", torch.float32, (None, None), (1, None), 16),
+        TensorParamSpec("mOut", torch.float32, (8, 4), (4, 1), 4),
+        *(ScalarParamSpec(name, numeric(t), 1) for name, t in scalars.items()),
+        ConstantParamSpec("alpha", 3),
+        StreamParamSpec("stream"),
+    ]
+
+
+class CuteDSLExportTests(TestCase):
+    """The C++ side of an export_to_c export (parse the header, emit the
+    declarations, the launch and the launcher), on a header export_to_c wrote and
+    code the C++ compiler builds: no GPU or cutlass needed."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def _exported(self, header=_EXPORTED_HEADER):
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+            CuteDSLExportedKernel,
+            parse_exported_header,
+        )
+
+        abi = parse_exported_header(header, "cutedsl_fixture")
+        return CuteDSLExportedKernel(
+            "cutedsl_fixture", "cutedsl_fixture.h", "cutedsl_fixture.o", header, abi
+        )
+
+    def _compile(self, out_dir, name, source, *flags):
+        """Builds ``source`` into ``out_dir/name`` (an ELF object with ``-c``, a
+        shared library with ``-shared``)."""
+        from torch._inductor.cpp_builder import _compiler_command, get_cpp_compiler
+        from torch._inductor.exc import InvalidCxxCompiler
+
+        if sys.platform != "linux":
+            self.skipTest("ELF objects")
+        out = os.path.join(out_dir, name)
+        with open(f"{out}.cpp", "w") as f:
+            f.write(source)
+        try:
+            compiler = get_cpp_compiler()
+        except InvalidCxxCompiler as e:
+            self.skipTest(str(e))
+        subprocess.run(
+            _compiler_command(compiler, "-fPIC", *flags, f"{out}.cpp", "-o", out),
+            check=True,
+            capture_output=True,
+        )
+        return out
+
+    def test_parse_exported_header(self):
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import ExportedTensorStruct
+
+        abi = self._exported().abi
+        p = "cutedsl_fixture"
+        self.assertEqual(
+            (abi.module_ctype, abi.unload_fn, abi.wrapper_fn),
+            (
+                f"{p}_Kernel_Module_t",
+                f"{p}_Kernel_Module_Unload",
+                f"cute_dsl_{p}_wrapper",
+            ),
+        )
+        self.assertEqual(abi.wrapper_return_ctype, "int32_t")
+        self.assertEqual(
+            abi.tensor_structs,
+            (
+                ExportedTensorStruct(
+                    f"{p}_Tensor_mX_t", "mX", "int32_t", 2, "int64_t", 1
+                ),
+                ExportedTensorStruct(f"{p}_Tensor_mOut_t", "mOut", None, 0, None, 0),
+            ),
+        )
+        self.assertEqual(
+            abi.params,
+            (
+                (f"{p}_Tensor_mX_t*", "mX"),
+                (f"{p}_Tensor_mOut_t*", "mOut"),
+                ("int8_t", "i8"),
+                ("int16_t", "i16"),
+                ("int32_t", "i32"),
+                ("int64_t", "i64"),
+                ("uint8_t", "u8"),
+                ("uint16_t", "u16"),
+                ("uint32_t", "u32"),
+                ("uint64_t", "u64"),
+                ("uint8_t", "flag"),
+                ("float", "f32"),
+                ("float", "tf32"),
+                ("double", "f64"),
+                ("__half_raw", "f16"),
+                ("cudaStream_t", "stream"),
+            ),
+        )
+
+    def test_parse_exported_header_errors(self):
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import CuteDSLExportError
+
+        p = "cutedsl_fixture"
+        module_arg = f"{p}_Kernel_Module_t *module, "
+        load_error = r"no module load function of the known form"
+        for old, new, msg in [
+            ("cudaLibrary_t module;", "void *module;", "no module struct"),
+            (f"{p}_Kernel_Module_Load(", f"{p}_Load(", load_error),
+            # emit_cpp_declarations runs the steps of Module_Load itself, so a header
+            # whose Module_Load runs them in another way is refused.
+            ("device_id = i;", "device_id = 0;", load_error),
+            (f"_mlir_{p}_cuda_init((void **)", f"_mlir_{p}_init((void **)", load_error),
+            (f"{p}_Kernel_Module_Unload(", f"{p}_Unload(", "no module unload function"),
+            (
+                "void *data;\n    int32_t dynamic_shapes",
+                "int32_t dynamic_shapes",
+                f"{p}_Tensor_mX_t: first field is not 'void \\*data'",
+            ),
+            (
+                "int64_t dynamic_strides[1];",
+                "int64_t dynamic_strides[1];\n    float scale;",
+                f"{p}_Tensor_mX_t: unexpected field 'float scale'",
+            ),
+            (
+                "int64_t dynamic_strides[1];",
+                "int32_t dynamic_shapes[1];",
+                r"unexpected field 'int32_t dynamic_shapes\[1\]'",
+            ),
+            (
+                f"cute_dsl_{p}_wrapper(",
+                "cute_dsl_other_wrapper(",
+                "no wrapper function",
+            ),
+            ("int8_t i8,", "int8_t i8[2],", r"cannot parse parameter 'int8_t i8\[2\]'"),
+            (module_arg, "", f"first parameter is not a {p}_Kernel_Module_t pointer"),
+        ]:
+            self.assertEqual(_EXPORTED_HEADER.count(old), 1, old)
+            header = _EXPORTED_HEADER.replace(old, new)
+            with self.subTest(msg), self.assertRaisesRegex(CuteDSLExportError, msg):
+                self._exported(header)
+
+    def test_scalar_ctype_needs_a_cutlass_class(self):
+        # A class from a module named like cutlass, but not cutlass or one of its
+        # submodules, is no cutlass Numeric, whatever its name.
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+            CuteDSLExportError,
+            scalar_ctype,
+        )
+
+        for module in ("cutlass", "cutlass.base_dsl.typing"):
+            int32 = type("Int32", (), {"__module__": module})
+            self.assertEqual(scalar_ctype(int32), "int32_t")
+        for module in ("cutlass_configs", "cutlassx.typing"):
+            int32 = type("Int32", (), {"__module__": module})
+            with (
+                self.subTest(module),
+                self.assertRaisesRegex(CuteDSLExportError, "is not supported"),
+            ):
+                scalar_ctype(int32)
+
+    def test_launcher(self):
+        # The C++ launcher: the module, then parameters named by position (never
+        # after the host function's, which could collide), alignment and range
+        # checks, the struct fills, each scalar type's conversion and the status
+        # check.
+        from torch._inductor.codegen.cpp_wrapper_gpu import CuteDSLCallWrapper
+        from torch._inductor.utils import IndentedBuffer
+
+        exported = dataclasses.replace(self._exported(), specs=tuple(_abi_specs()))
+        wrapper = types.SimpleNamespace(prefix=IndentedBuffer())
+        CuteDSLCallWrapper("call_k", exported, {"mX": 16}).generate(wrapper)
+        self.assertExpectedInline(
+            wrapper.prefix.getvalue(),
+            """\
+static inline void call_k(cutedsl_fixture_Kernel_Module_t* cutedsl_module, void* p0, int64_t p0_size0, int64_t p0_size1, int64_t p0_stride0, void* p1, int64_t p2, int64_t p3, int64_t p4, int64_t p5, int64_t p6, int64_t p7, int64_t p8, uint64_t p9, int64_t p10, double p11, double p12, double p13, double p14, cudaStream_t cutedsl_stream)
+{
+  // CuTeDSL user kernel cutedsl_fixture
+  void* cutedsl_arg0_data = p0;  // mX
+  AOTI_RUNTIME_CHECK(reinterpret_cast<std::uintptr_t>(cutedsl_arg0_data) % 16 == 0, "CuTeDSL kernel cutedsl_fixture: argument mX is not 16-byte aligned");
+  const int64_t cutedsl_arg0_size0 = static_cast<int64_t>(p0_size0);
+  AOTI_RUNTIME_CHECK(cutedsl_arg0_size0 >= 0 && cutedsl_arg0_size0 <= 2147483647LL, "CuTeDSL kernel cutedsl_fixture: dynamic size 0 of argument mX does not fit in int32");
+  const int64_t cutedsl_arg0_size1 = static_cast<int64_t>(p0_size1);
+  AOTI_RUNTIME_CHECK(cutedsl_arg0_size1 >= 0 && cutedsl_arg0_size1 <= 2147483647LL, "CuTeDSL kernel cutedsl_fixture: dynamic size 1 of argument mX does not fit in int32");
+  cutedsl_fixture_Tensor_mX_t cutedsl_arg0{cutedsl_arg0_data, {static_cast<int32_t>(cutedsl_arg0_size0), static_cast<int32_t>(cutedsl_arg0_size1)}, {static_cast<int64_t>(p0_stride0)}};
+  void* cutedsl_arg1_data = p1;  // mOut
+  cutedsl_fixture_Tensor_mOut_t cutedsl_arg1{cutedsl_arg1_data};
+  const int64_t cutedsl_arg2_value = static_cast<int64_t>(p2);  // i8
+  AOTI_RUNTIME_CHECK(cutedsl_arg2_value >= -128LL && cutedsl_arg2_value <= 127LL, "CuTeDSL kernel cutedsl_fixture: scalar i8 does not fit in int8_t");
+  const int8_t cutedsl_arg2 = static_cast<int8_t>(cutedsl_arg2_value);
+  const int64_t cutedsl_arg3_value = static_cast<int64_t>(p3);  // i16
+  AOTI_RUNTIME_CHECK(cutedsl_arg3_value >= -32768LL && cutedsl_arg3_value <= 32767LL, "CuTeDSL kernel cutedsl_fixture: scalar i16 does not fit in int16_t");
+  const int16_t cutedsl_arg3 = static_cast<int16_t>(cutedsl_arg3_value);
+  const int64_t cutedsl_arg4_value = static_cast<int64_t>(p4);  // i32
+  AOTI_RUNTIME_CHECK(cutedsl_arg4_value >= -2147483648LL && cutedsl_arg4_value <= 2147483647LL, "CuTeDSL kernel cutedsl_fixture: scalar i32 does not fit in int32_t");
+  const int32_t cutedsl_arg4 = static_cast<int32_t>(cutedsl_arg4_value);
+  const int64_t cutedsl_arg5_value = static_cast<int64_t>(p5);  // i64
+  const int64_t cutedsl_arg5 = static_cast<int64_t>(cutedsl_arg5_value);
+  const int64_t cutedsl_arg6_value = static_cast<int64_t>(p6);  // u8
+  AOTI_RUNTIME_CHECK(cutedsl_arg6_value >= 0LL && cutedsl_arg6_value <= 255LL, "CuTeDSL kernel cutedsl_fixture: scalar u8 does not fit in uint8_t");
+  const uint8_t cutedsl_arg6 = static_cast<uint8_t>(cutedsl_arg6_value);
+  const int64_t cutedsl_arg7_value = static_cast<int64_t>(p7);  // u16
+  AOTI_RUNTIME_CHECK(cutedsl_arg7_value >= 0LL && cutedsl_arg7_value <= 65535LL, "CuTeDSL kernel cutedsl_fixture: scalar u16 does not fit in uint16_t");
+  const uint16_t cutedsl_arg7 = static_cast<uint16_t>(cutedsl_arg7_value);
+  const int64_t cutedsl_arg8_value = static_cast<int64_t>(p8);  // u32
+  AOTI_RUNTIME_CHECK(cutedsl_arg8_value >= 0LL && cutedsl_arg8_value <= 4294967295LL, "CuTeDSL kernel cutedsl_fixture: scalar u32 does not fit in uint32_t");
+  const uint32_t cutedsl_arg8 = static_cast<uint32_t>(cutedsl_arg8_value);
+  const uint64_t cutedsl_arg9 = static_cast<uint64_t>(p9);  // u64
+  const uint8_t cutedsl_arg10 = static_cast<uint8_t>((p10) != 0);  // flag
+  const float cutedsl_arg11 = static_cast<float>(p11);  // f32
+  const float cutedsl_arg12 = static_cast<float>(p12);  // tf32
+  const double cutedsl_arg13 = static_cast<double>(p13);  // f64
+  const __half_raw cutedsl_arg14 = __double2half(static_cast<double>(p14));  // f16
+  const int32_t cutedsl_status = cute_dsl_cutedsl_fixture_wrapper(cutedsl_module, &cutedsl_arg0, &cutedsl_arg1, cutedsl_arg2, cutedsl_arg3, cutedsl_arg4, cutedsl_arg5, cutedsl_arg6, cutedsl_arg7, cutedsl_arg8, cutedsl_arg9, cutedsl_arg10, cutedsl_arg11, cutedsl_arg12, cutedsl_arg13, cutedsl_arg14, static_cast<cudaStream_t>(cutedsl_stream));
+  if (cutedsl_status != 0) {
+    (void)cudaGetLastError();
+  }
+  AOTI_RUNTIME_CHECK(cutedsl_status == 0, std::string("CuTeDSL kernel cutedsl_fixture: launch failed: ") + cudaGetErrorName(static_cast<cudaError_t>(cutedsl_status)) + ": " + cudaGetErrorString(static_cast<cudaError_t>(cutedsl_status)));
+}
+""",
+        )
+
+    def test_module_ref_and_launch_failures(self):
+        # A reference to the kernel's library loads it at its first use, and onto
+        # each device at the first use for that device: a GPU the cubin cannot run
+        # on fails only the launches there, and a reference never used loads
+        # nothing. References share one load; the last one unloads it. Once a
+        # reference has the library loaded onto a device, it gets it there without
+        # the lock, and another reference still takes a hold of its own. A failed
+        # step throws, clearing the CUDA runtime's last error, which PyTorch could
+        # report later otherwise, and the next use tries again. Built against
+        # stand-ins for the CUDA runtime and for the export's object, which log what
+        # they are asked to do (devices by index, libraries numbered as loaded).
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+            CPP_CUDA_ERROR_CHECK,
+            CPP_HEADERS,
+            emit_cpp_declarations,
+            emit_cpp_launch,
+            ScalarParamSpec,
+        )
+
+        exported = dataclasses.replace(self._exported(), specs=tuple(_abi_specs()))
+        scalars = [s.name for s in exported.specs if isinstance(s, ScalarParamSpec)]
+        tensors = {"mX": ("nullptr", ["1", "1"], ["1"]), "mOut": ("nullptr", [], [])}
+        launch = emit_cpp_launch(
+            exported,
+            module_expr="cutedsl_fixture_module(0)",
+            tensor_args=tensors,
+            scalar_args=dict.fromkeys(scalars, "0"),
+            stream_expr="nullptr",
+            check_align={},
+        )
+        kernel_fn = re.search(r"void (_mlir_\w+_ciface_\w+)\(", _EXPORTED_HEADER)[1]
+        cuda_runtime_h = """
+            typedef int cudaError_t;
+            typedef struct CUlib_st* cudaLibrary_t;
+            typedef struct CUstream_st* cudaStream_t;
+            enum { cudaSuccess = 0 };
+            static cudaError_t cudaGetDeviceCount(int* count);
+            static cudaError_t cudaLibraryUnload(cudaLibrary_t library);
+            static cudaError_t cudaGetLastError();
+            static const char* cudaGetErrorName(cudaError_t error);
+            static const char* cudaGetErrorString(cudaError_t error);
+        """
+        cuda_fp16_h = """
+            typedef struct { unsigned short x; } __half_raw;
+            static __half_raw __double2half(double) { return {}; }
+        """
+        stand_ins = r"""
+            static std::string events;
+            static int libraries = 0, fail_init = 0, fail_device = -1;
+            static int fail_unload = 0, launch_status = 0;
+            static void note(const std::string& event) {
+              events += (events.empty() || events.back() == '\n' ? "" : " ") + event;
+            }
+            static cudaError_t cudaGetDeviceCount(int* count) {
+              *count = 2;
+              return cudaSuccess;
+            }
+            static cudaError_t cudaLibraryUnload(cudaLibrary_t library) {
+              const intptr_t id = reinterpret_cast<intptr_t>(library);
+              note("unload" + std::to_string(id) + (fail_unload ? "!" : ""));
+              return fail_unload;
+            }
+            static cudaError_t cudaGetLastError() {
+              note("clear");
+              return cudaSuccess;
+            }
+            static const char* cudaGetErrorName(cudaError_t) { return "cudaErrorX"; }
+            static const char* cudaGetErrorString(cudaError_t) { return "failed"; }
+            // fail_init: 1 fails before loading the library, 2 after.
+            extern "C" void _mlir_cutedsl_fixture_cuda_init(void** args) {
+              if (fail_init == 1) {
+                note("init!");
+                *static_cast<cudaError_t*>(args[1]) = 1;
+                return;
+              }
+              ++libraries;
+              note("init" + std::to_string(libraries) + (fail_init ? "!" : ""));
+              **static_cast<cudaLibrary_t**>(args[0]) =
+                  reinterpret_cast<cudaLibrary_t>(static_cast<intptr_t>(libraries));
+              *static_cast<cudaError_t*>(args[1]) = fail_init ? 1 : cudaSuccess;
+            }
+            extern "C" void _mlir_cutedsl_fixture_cuda_load_to_device(void** args) {
+              const int device = *static_cast<int32_t*>(args[1]);
+              const bool fail = device == fail_device;
+              note("load" + std::to_string(device) + (fail ? "!" : ""));
+              *static_cast<cudaError_t*>(args[2]) = fail;
+            }
+            extern "C" void KERNEL_FN(void** args, int32_t num_args) {
+              note(launch_status ? "launch!" : "launch");
+              *static_cast<int32_t*>(args[num_args - 1]) = launch_status;
+            }
+            static void caught(void (*step)()) {
+              try {
+                step();
+              } catch (const std::exception& e) {
+                note(std::string("[") + e.what() + "]");
+              }
+            }
+            static void attempt(void (*step)()) {
+              std::ostringstream printed;
+              std::streambuf* saved = std::cerr.rdbuf(printed.rdbuf());
+              caught(step);
+              std::cerr.rdbuf(saved);
+              const std::string text = printed.str();
+              if (!text.empty()) {
+                note("{" + text.substr(0, text.size() - 1) + "}");
+              }
+              events += '\n';
+            }
+            // Whether ref.get(device) returns while another thread holds the lock.
+            static bool gets_unlocked(cutedsl_fixture_module_ref& ref, int device) {
+              std::unique_lock<std::mutex> hold(cutedsl_fixture_module_mutex);
+              auto got = std::async(std::launch::async, [&] { ref.get(device); });
+              const bool done =
+                  got.wait_for(std::chrono::seconds(10)) == std::future_status::ready;
+              hold.unlock();
+              got.get();
+              return done;
+            }
+            static cutedsl_fixture_module_ref* held;
+            extern "C" const char* run() {
+              attempt([] {
+                cutedsl_fixture_module_ref ref;
+                note("unused");
+              });
+              attempt([] { cutedsl_fixture_module_ref().get(1); });
+              attempt([] {
+                cutedsl_fixture_module_ref a, b;
+                a.get(0);
+                b.get(0);
+                b.get(1);
+                a.get(1);
+              });
+              fail_device = 1;
+              attempt([] {
+                cutedsl_fixture_module_ref a;
+                held = &a;
+                a.get(0);
+                caught([] { held->get(1); });
+                fail_device = -1;
+                a.get(1);
+              });
+              for (fail_init = 1; fail_init <= 2; ++fail_init) {
+                attempt([] { cutedsl_fixture_module_ref().get(0); });
+              }
+              fail_init = 0;
+              fail_unload = 1;
+              attempt([] { cutedsl_fixture_module_ref().get(0); });
+              fail_unload = 0;
+              attempt([] {
+                cutedsl_fixture_module_ref b;
+                {
+                  cutedsl_fixture_module_ref a;
+                  a.get(0);
+                  note(gets_unlocked(a, 0) ? "unlocked" : "locked");
+                  b.get(0);
+                }
+                note("dropped");
+              });
+              fail_device = 1;
+              attempt([] { cutedsl_fixture_module(1); });
+              fail_device = -1;
+              attempt([] {
+                cutedsl_fixture_module(1);
+                cutedsl_fixture_module(1);
+                cutedsl_fixture_module(0);
+              });
+              attempt(launch);
+              launch_status = 1;
+              attempt(launch);
+              return events.c_str();
+            }
+        """
+        source = "\n".join(
+            [
+                "#include <chrono>",
+                "#include <future>",
+                "#include <sstream>",
+                "#include <stdexcept>",
+                *(f"#include <{header}>" for header in CPP_HEADERS),
+                "#define AOTI_RUNTIME_CHECK(cond, msg) \\",
+                "  if (!(cond)) throw std::runtime_error(msg)",
+                CPP_CUDA_ERROR_CHECK,
+                *emit_cpp_declarations(exported, aot=False),
+                "static void launch()",
+                *launch,
+                stand_ins.replace("KERNEL_FN", kernel_fn),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as d:
+            for name, text in (
+                ("cuda_runtime.h", cuda_runtime_h),
+                ("cuda_fp16.h", cuda_fp16_h),
+            ):
+                with open(os.path.join(d, name), "w") as f:
+                    f.write(text)
+            so = self._compile(d, "ref.so", source, "-shared", "-pthread", f"-I{d}")
+            lib = ctypes.CDLL(so)
+        lib.run.restype = ctypes.c_char_p
+        self.assertExpectedInline(
+            lib.run().decode(),
+            """\
+unused
+init1 load1 unload1
+init2 load0 load1 unload2
+init3 load0 load1! clear [CuTeDSL kernel module: cudaErrorX: failed] load1 unload3
+init! clear [CuTeDSL kernel module: cudaErrorX: failed]
+init4! unload4 clear [CuTeDSL kernel module: cudaErrorX: failed]
+init5 load0 unload5! clear {Failed to unload CuTeDSL kernel module cutedsl_fixture: CuTeDSL kernel module: cudaErrorX: failed}
+init6 load0 unlocked dropped unload6
+init7 load1! clear [CuTeDSL kernel module: cudaErrorX: failed]
+load1 load0
+launch
+launch! clear [CuTeDSL kernel cutedsl_fixture: launch failed: cudaErrorX: failed]
+""",
+        )
+
+    def test_emit_cpp_launch_errors(self):
+        from torch._inductor.codegen.cutedsl.user_kernel_aot import (
+            CuteDSLExportError,
+            emit_cpp_launch,
+            ScalarParamSpec,
+        )
+
+        exported = dataclasses.replace(self._exported(), specs=tuple(_abi_specs()))
+        tensors = {"mX": ("x", ["s0", "s1"], ["t0"]), "mOut": ("out", [], [])}
+        scalars = {
+            s.name: s.name for s in exported.specs if isinstance(s, ScalarParamSpec)
+        }
+
+        def launch(exported=exported, **kwargs):
+            args = {
+                "module_expr": "m",
+                "tensor_args": tensors,
+                "scalar_args": scalars,
+                "stream_expr": "s",
+                "check_align": {},
+            }
+            return emit_cpp_launch(exported, **{**args, **kwargs})
+
+        launch()
+        params = [
+            ("char" if name == "i8" else ctype, name)
+            for ctype, name in exported.abi.params
+        ]
+        char_abi = dataclasses.replace(exported.abi, params=tuple(params))
+        for kwargs, error, msg in [
+            (
+                {"tensor_args": {"mX": tensors["mX"]}},
+                ValueError,
+                r"tensor_args \['mX'\] != tensors \['mOut', 'mX'\]",
+            ),
+            (
+                {"scalar_args": {**scalars, "stream": "s"}},
+                ValueError,
+                r"scalar_args \[.*'stream'.*\] != scalars",
+            ),
+            (
+                {"check_align": {"i32": 16}},
+                ValueError,
+                r"check_align names \['i32'\] are not tensors",
+            ),
+            (
+                {"check_align": {"mX": 12}},
+                ValueError,
+                r"check_align\[mX\]=12 is not a power of two",
+            ),
+            (
+                {"tensor_args": {**tensors, "mX": ("x", ["s0"], ["t0"])}},
+                ValueError,
+                "mX needs 2 dynamic sizes and 1 dynamic strides, got 1 and 1",
+            ),
+            (
+                {"exported": dataclasses.replace(exported, abi=char_abi)},
+                CuteDSLExportError,
+                "unsupported scalar C type char for i8",
+            ),
+        ]:
+            with self.subTest(msg), self.assertRaisesRegex(error, msg):
+                launch(**kwargs)
 
 
 instantiate_parametrized_tests(CuteDSLHOPTests)
