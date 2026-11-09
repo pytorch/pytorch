@@ -1,6 +1,8 @@
 # Owner(s): ["module: unknown"]
 
 
+import threading
+
 import torch
 from torch.testing._internal.autocast_test_lists import (
     AutocastCPUTestLists,
@@ -359,6 +361,109 @@ class TestTorchAutocast(TestCase):
         msg = r"autocast\(\)\(func\) requires a callable, but got Tensor"
         with self.assertRaisesRegex(TypeError, msg):
             torch.autocast(device_type="cpu")(x)
+
+    def _assert_cpu_autocast_state(self, enabled, dtype, cache_enabled):
+        self.assertEqual(torch.is_autocast_enabled("cpu"), enabled)
+        self.assertEqual(torch.get_autocast_dtype("cpu"), dtype)
+        self.assertEqual(torch.is_autocast_cache_enabled(), cache_enabled)
+
+    def test_autocast_decorator_recursive_restores_state(self):
+        # Nested calls reuse the decorator; each must restore the outer state.
+        # Regression for https://github.com/pytorch/pytorch/issues/202706
+        outer_enabled = torch.is_autocast_enabled("cpu")
+        outer_dtype = torch.get_autocast_dtype("cpu")
+        outer_cache = torch.is_autocast_cache_enabled()
+
+        @torch.autocast("cpu", dtype=torch.bfloat16, cache_enabled=False)
+        def f(n):
+            self.assertTrue(torch.is_autocast_enabled("cpu"))
+            self.assertEqual(torch.get_autocast_dtype("cpu"), torch.bfloat16)
+            self.assertFalse(torch.is_autocast_cache_enabled())
+            if n > 0:
+                f(n - 1)
+            self.assertTrue(torch.is_autocast_enabled("cpu"))
+            self.assertEqual(torch.get_autocast_dtype("cpu"), torch.bfloat16)
+            self.assertFalse(torch.is_autocast_cache_enabled())
+
+        self._assert_cpu_autocast_state(outer_enabled, outer_dtype, outer_cache)
+        f(2)
+        self._assert_cpu_autocast_state(outer_enabled, outer_dtype, outer_cache)
+
+        with torch.autocast(
+            "cpu", dtype=torch.float16, enabled=True, cache_enabled=True
+        ):
+            self._assert_cpu_autocast_state(True, torch.float16, True)
+            f(1)
+            self._assert_cpu_autocast_state(True, torch.float16, True)
+
+        self._assert_cpu_autocast_state(outer_enabled, outer_dtype, outer_cache)
+
+    def test_autocast_decorator_exception_restores_state(self):
+        outer_enabled = torch.is_autocast_enabled("cpu")
+        outer_dtype = torch.get_autocast_dtype("cpu")
+        outer_cache = torch.is_autocast_cache_enabled()
+
+        @torch.autocast("cpu", dtype=torch.bfloat16, cache_enabled=False)
+        def boom(fail_inner):
+            self.assertTrue(torch.is_autocast_enabled("cpu"))
+            if fail_inner:
+                boom(False)
+            raise RuntimeError("boom")
+
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            boom(False)
+        self._assert_cpu_autocast_state(outer_enabled, outer_dtype, outer_cache)
+
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            boom(True)
+        self._assert_cpu_autocast_state(outer_enabled, outer_dtype, outer_cache)
+
+        with torch.autocast("cpu", dtype=torch.float16, cache_enabled=True):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                boom(True)
+            self._assert_cpu_autocast_state(True, torch.float16, True)
+
+        self._assert_cpu_autocast_state(outer_enabled, outer_dtype, outer_cache)
+
+    def test_autocast_decorator_overlapping_threads_restores_state(self):
+        # Same decorated function entered from two threads with different prior
+        # autocast states; each thread must restore its own entry state.
+        barrier = threading.Barrier(2)
+        errors = []
+
+        @torch.autocast("cpu", dtype=torch.bfloat16, cache_enabled=False)
+        def decorated():
+            barrier.wait()
+            self.assertTrue(torch.is_autocast_enabled("cpu"))
+            self.assertEqual(torch.get_autocast_dtype("cpu"), torch.bfloat16)
+            self.assertFalse(torch.is_autocast_cache_enabled())
+            barrier.wait()
+
+        def worker(prior_enabled, prior_dtype, prior_cache):
+            try:
+                with torch.autocast(
+                    "cpu",
+                    dtype=prior_dtype,
+                    enabled=prior_enabled,
+                    cache_enabled=prior_cache,
+                ):
+                    self._assert_cpu_autocast_state(
+                        prior_enabled, prior_dtype, prior_cache
+                    )
+                    decorated()
+                    self._assert_cpu_autocast_state(
+                        prior_enabled, prior_dtype, prior_cache
+                    )
+            except Exception as e:
+                errors.append(e)
+
+        t1 = threading.Thread(target=worker, args=(True, torch.float16, True))
+        t2 = threading.Thread(target=worker, args=(False, torch.bfloat16, True))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        self.assertEqual(errors, [])
 
 
 class TestTorchAutocastDevice(TestCase):
