@@ -283,7 +283,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         return {k.vt.as_python_constant(): v for k, v in self.items.items()}
 
     def python_type(self) -> type:
-        return cast(type, self._cpython_type)
+        return dict
 
     def _hashable_key(self, key: VariableTracker) -> HashableTracker:
         hashed = HashableTracker(key)
@@ -1091,6 +1091,9 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     # OrderedDict exposes no tp_getset / tp_members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
 
+    def python_type(self) -> type:
+        return collections.OrderedDict
+
     def move_to_end(
         self: "OrderedDictVariable",
         tx: "InstructionTranslatorBase",
@@ -1369,12 +1372,31 @@ class NNModuleHooksDictVariable(ConstDictVariable):
     def is_python_constant(self) -> bool:
         return not self.items
 
+    def python_type(self) -> type:
+        # Ordinary empty-hook dispatch need not specialize the exact mapping type.
+        if self.source:
+            install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
+        return super().python_type()
+
     def install_dict_keys_match_guard(self) -> None:
         if self.source and not is_constant_source(self.source):
             install_guard(self.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
+    def _hashable_key(self, key: VariableTracker) -> HashableTracker:
+        self.materialize_keys()
+        return super()._hashable_key(key)
+
+    def _store_item(self, key: HashableTracker, value: VariableTracker) -> None:
+        self.materialize_keys()
+        super()._store_item(key, value)
+
+    def _update_items(self, items: dict[HashableTracker, VariableTracker]) -> None:
+        self.materialize_keys()
+        super()._update_items(items)
+
     def materialize_keys(self) -> dict[HashableTracker, VariableTracker]:
-        # Detached containers reuse stored hashes and may never compare their keys.
+        # Key lookups, mutations and detached copies can observe IDs without
+        # comparing every stored key. Ordinary hook iteration keeps them lazy.
         for key in self.items:
             key.vt.realize()
         return self.items

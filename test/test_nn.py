@@ -11938,11 +11938,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(-log_probs.sum(0)[[0, 2], 0], loss[[0, 2]])
 
     # Merge into OpInfo?
-    @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
-                          https://github.com/pytorch/pytorch/issues/34870""")
-    # TODO: Find out if this failure is just because we can't run MPS with
-    # double or if there's a real problem with the backward pass
-    @expectedFailureMPS  # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch
     def test_ctc_loss(self, device):
         batch_size = 64
         num_labels = 101
@@ -11985,13 +11980,24 @@ class TestNNDeviceType(NNTestCase):
                     for i in idxes:
                         target_lengths[i] = 0
 
-            def ctc_after_softmax(x):
+            def ctc_after_softmax(x, tile_factors=tile_factors, targets=targets):
                 x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
                           .view(input_length, batch_size, num_labels))
                 log_probs = torch.log_softmax(x_full, 2)
                 return torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
-            gradcheck(ctc_after_softmax, [x])
+            if torch.device(device).type == 'mps':
+                # MPS has no float64, and finite-difference gradcheck in float32 is
+                # too noisy (it fails on CPU float32 too). Compare the analytical
+                # gradient against the CPU float64 one on the same inputs instead.
+                grad_device, = torch.autograd.grad(ctc_after_softmax(x), x)
+                x_ref = x.detach().cpu().double().requires_grad_()
+                loss_ref = ctc_after_softmax(x_ref, tile_factors.cpu().double(), targets.cpu())
+                grad_ref, = torch.autograd.grad(loss_ref, x_ref)
+                self.assertEqual(grad_device.cpu().double(), grad_ref, atol=1e-4, rtol=0)
+            else:
+                # CUDA backward accumulates with atomicAdd, so repeated runs differ in the last bits (gh-34870)
+                gradcheck(ctc_after_softmax, [x], nondet_tol=GRADCHECK_NONDET_TOL)
 
     def test_ctc_loss_error(self, device):
         log_probs = torch.rand(0, 0, 4, device=device)
@@ -15766,7 +15772,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(x.grad, torch.full_like(x, -0.5 * scale))
         self.assertEqual(y.grad, torch.full_like(y, 0.5 * scale))
 
-    @skipMPS
     @onlyAccelerator
     def test_CTCLoss_lengthchecks(self, device):
         for target_lengths in [[30, 25, 20], [-1, -1, -1]]:
@@ -15776,9 +15781,12 @@ class TestNNDeviceType(NNTestCase):
                 with self.assertRaises(RuntimeError):
                     torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
-    @skipMPS
     @onlyAccelerator
-    def test_CTCLoss_long_targets(self, device):
+    @dtypes(torch.double)
+    @dtypesIfMPS(torch.float)
+    @toleranceOverride({torch.double: tol(atol=1e-4, rtol=0), torch.float: tol(atol=1e-2, rtol=1e-6)})
+    def test_CTCLoss_long_targets(self, device, dtype):
+        # 2 * target_length + 1 > 1024 exercises the cross-block recursion in the MPS kernel (gh-203356)
         input_length = 4000
         vocab_size = 3
         batch_size = 4
@@ -15795,13 +15803,12 @@ class TestNNDeviceType(NNTestCase):
         grad_cpu, = torch.autograd.grad(res_cpu, log_probs, grad_out)
 
         with torch.backends.cudnn.flags(enabled=False):
-            res_device = torch.nn.functional.ctc_loss(log_probs.to(device), targets.to(device), input_lengths, target_lengths,
+            res_device = torch.nn.functional.ctc_loss(log_probs.to(dtype).to(device), targets.to(device), input_lengths, target_lengths,
                                                       reduction='sum', zero_infinity=True)
-            grad_device, = torch.autograd.grad(res_device, log_probs, grad_out.to(device))
-        self.assertEqual(res_cpu, res_device, atol=1e-4, rtol=0)
-        self.assertEqual(grad_cpu, grad_device, atol=1e-4, rtol=0)
+            grad_device, = torch.autograd.grad(res_device, log_probs, grad_out.to(device, dtype))
+        self.assertEqual(res_cpu, res_device, exact_dtype=False)
+        self.assertEqual(grad_cpu, grad_device)
 
-    @skipMPS
     @onlyAccelerator
     def test_CTCLoss_critical_target_len(self, device):
         # cudnn has an unexpected problem with target length 256, see issue #53505
@@ -15818,7 +15825,6 @@ class TestNNDeviceType(NNTestCase):
         res_cpu = torch.nn.functional.ctc_loss(inp.cpu(), target, input_lengths, target_lengths, reduction='none')
         self.assertEqual(res_cpu, res_gpu, atol=1e-3, rtol=0)
 
-    @skipMPS
     def test_CTCLoss_zero_lengths(self, device):
         N = 3
         S = 2
@@ -15839,7 +15845,6 @@ class TestNNDeviceType(NNTestCase):
         res.sum().backward()
         self.assertTrue((inp.grad == 0).all().item())
 
-    @skipMPS
     @onlyAccelerator
     def test_CTCLoss_zero_infinity(self, device):
         target_lengths = [60, 25, 20]
