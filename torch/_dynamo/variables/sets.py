@@ -406,8 +406,7 @@ class BaseSetVariable(VariableTracker):
                 return None
             if isinstance(value, variables.BaseListVariable):
                 pending.extend(value.items)
-        # Materializing receiver.count can copy its receiver, changing method-key
-        # equality. Only literal operands are safe.
+        # Only literal operands can materialize without copying a method receiver.
         if (
             not any(key.has_builtin_method for key in self.items)
             and check_constant_args([self, *args], kwargs)
