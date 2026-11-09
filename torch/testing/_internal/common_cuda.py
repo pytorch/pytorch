@@ -150,6 +150,9 @@ IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is no
                   ((torch.cuda.get_device_capability() == (11, 0) and int(torch.version.cuda[:2]) >= 13) or
                    (torch.cuda.get_device_capability() == (10, 1) and int(torch.version.cuda[:2]) < 13)))
 IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device_capability() in [(7, 2), (8, 7)] or IS_THOR))
+# A MIG slice reports its profile in the device name, e.g. "NVIDIA A100-SXM4-40GB MIG 1g.5gb".
+IS_MIG = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is not None and
+                 "MIG" in torch.cuda.get_device_name().split())
 # These exact-match SM predicates identify specific NVIDIA architectures and must
 # be False on ROCm, where torch.cuda.get_device_capability() returns the gfx-arch
 # version and collides with NVIDIA capability tuples (e.g. gfx90a reads as (9, 0)).
