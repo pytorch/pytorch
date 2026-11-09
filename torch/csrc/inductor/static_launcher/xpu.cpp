@@ -22,11 +22,13 @@
 #include <ATen/Context.h>
 #include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/util/env.h>
 #include <c10/xpu/XPUStream.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/static_launcher/common.h>
 #include <torch/csrc/inductor/static_launcher/xpu.h>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 #include <level_zero/ze_api.h>
@@ -60,13 +62,14 @@ typedef void* syclDevicePtr_t;
 
 /**
  * A loaded kernel and the launch properties that are fixed once it is loaded:
- * the threads per warp used with num_warps to size the work-group, and its
- * argument count.
+ * the threads per warp used with num_warps to size the work-group, its
+ * argument count, and whether it is submitted without a sycl::event.
  */
 struct LoadedKernel {
   sycl::kernel kernel;
   uint32_t threadsPerWarp = 0;
   uint32_t numArgs = 0;
+  bool eventlessSubmit = false;
 };
 
 syclDevicePtr_t callDataPtrMethod(PyObject* obj) {
@@ -376,6 +379,33 @@ inline LoadedKernel _createKernel(
   return LoadedKernel{std::move(fun), threadsPerWarp, props.numKernelArgs};
 }
 
+// Whether to submit kernels on `device` without a sycl::event, decided as in
+// Intel triton's launcher (_use_eventless_submit in backend/driver.py): only
+// with a driver of 1.6.35096+9 or newer, as older ones harvest the device-side
+// assert and printf buffers only when the host waits on the kernel's event, and
+// only on the Level Zero v2 adapter, as on v1 it is no faster and makes PTI
+// lose kernel times or hang.
+bool useEventlessSubmit(const sycl::device& device) {
+#if __SYCL_COMPILER_VERSION >= 20260204
+  // Off only if explicitly set to 0, as an escape hatch for debugging.
+  if (c10::utils::check_env("TORCHINDUCTOR_XPU_EVENTLESS_SUBMIT") == false) {
+    return false;
+  }
+  // A driver version that does not parse counts as too old.
+  const auto ver = device.get_info<sycl::info::device::driver_version>();
+  std::array<unsigned, 4> v{}; // major, minor, patch, build
+  // NOLINTNEXTLINE(bugprone-unchecked-string-to-number-conversion)
+  int n = std::sscanf(ver.c_str(), "%u.%u.%u+%u", &v[0], &v[1], &v[2], &v[3]);
+  const bool newDriver = n >= 3 && v >= std::array<unsigned, 4>{1, 6, 35096, 9};
+  const auto platform =
+      device.get_platform().get_info<sycl::info::platform::name>();
+
+  return newDriver && platform.ends_with(" V2");
+#else
+  return false;
+#endif
+}
+
 std::unique_ptr<LoadedKernel> loadKernel(
     const char* filePath,
     const char* funcName,
@@ -389,8 +419,13 @@ std::unique_ptr<LoadedKernel> loadKernel(
   auto mod = _createModule(
       reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), device_idx);
 
-  return std::make_unique<LoadedKernel>(
+  auto kernel = std::make_unique<LoadedKernel>(
       _createKernel(std::move(mod), funcName, nSpills));
+  // Decided once: all XPU devices share one Level Zero platform and driver.
+  static const bool eventlessSubmit = useEventlessSubmit(
+      c10::xpu::get_raw_device(static_cast<c10::DeviceIndex>(device_idx)));
+  kernel->eventlessSubmit = eventlessSubmit;
+  return kernel;
 }
 
 template <typename T>
@@ -473,6 +508,12 @@ void submitKernel(
       cgh.parallel_for(parallelWorkSize, loadedKernel->kernel);
     }
   };
+#if __SYCL_COMPILER_VERSION >= 20260204
+  if (loadedKernel->eventlessSubmit) {
+    sycl::ext::oneapi::experimental::submit(*queuePtr, cgf);
+    return;
+  }
+#endif
   queuePtr->submit(cgf);
 }
 
