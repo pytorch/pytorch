@@ -189,7 +189,7 @@ inline int cublasLtMatmulScaleMode(
 #else
         TORCH_CHECK_NOT_IMPLEMENTED(
             false,
-            "packed MNxK4 scaling requires cuBLASLt >= 13.8.1 (bundled with CUDA 13.4)");
+            "packed MNxK4 scaling requires a build with cuBLASLt >= 13.8.1 headers");
 #endif
       }
       if (swizzle_type == at::blas::SwizzleType::SWIZZLE_32_8) {
@@ -243,7 +243,7 @@ inline int cublasLtMatmulScaleMode(
 #else
         TORCH_CHECK_NOT_IMPLEMENTED(
             false,
-            "packed MNxK4 scaling requires cuBLASLt >= 13.8.1 (bundled with CUDA 13.4)");
+            "packed MNxK4 scaling requires a build with cuBLASLt >= 13.8.1 headers");
 #endif
       }
       TORCH_CHECK(scale_dtype == kFloat);

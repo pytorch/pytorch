@@ -7502,8 +7502,7 @@ def scaled_grouped_mm(
     or one value per group in a contiguous 1D tensor. Each input may use either scale layout.
     Both inputs must be ``float8_e4m3fn`` or ``float8_e5m2``, with at least one ``float8_e4m3fn`` input.
     At most 1024 groups are supported.
-    TensorWise scaling requires CUDA 13.4 or later on SM9.x-SM11.x; swizzle metadata is ignored
-    except ``SWIZZLE_MN_K4``, which is rejected.
+    TensorWise scaling requires CUDA 13.4 or later on SM9.x-SM11.x; swizzle metadata is ignored.
     It supports bfloat16, float16, and float32 outputs.
 
     Hopper block scaling requires CUDA 13.4 or later on SM9.x and supports recipe pairs

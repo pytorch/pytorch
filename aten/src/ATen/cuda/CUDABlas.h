@@ -196,18 +196,27 @@ void scaled_gemm(
     float alpha_multiplier = 1.0f,
     const Tensor* device_beta = nullptr);
 
+enum class CublasGroupedScaleLayout : uint8_t {
+  Scalar,
+  PerBatchScalar,
+  Vec16UE4M3,
+  Vec128F32,
+  Block128x128F32,
+  Vec32MnK4UE8M0,
+  Vec128MnK4UE8M0,
+};
+
+inline bool cublaslt_grouped_gemm_arch_supported() {
+  const auto major = at::cuda::getCurrentDeviceProperties()->major;
+  return major >= 9 && major <= 11;
+}
+
 struct GroupedGemmScaleOptions {
   const void* A_scale_ptr = nullptr;
   const void* B_scale_ptr = nullptr;
   bool use_fast_accum = false;
-  at::blas::ScalingType A_scaling_type = at::blas::ScalingType::TensorWise;
-  at::blas::ScalingType B_scaling_type = at::blas::ScalingType::TensorWise;
-  at::blas::SwizzleType A_swizzle_type = at::blas::SwizzleType::NO_SWIZZLE;
-  at::blas::SwizzleType B_swizzle_type = at::blas::SwizzleType::NO_SWIZZLE;
-  ScalarType A_scale_dtype = ScalarType::Float;
-  ScalarType B_scale_dtype = ScalarType::Float;
-  bool A_per_batch = false;
-  bool B_per_batch = false;
+  CublasGroupedScaleLayout A_layout = CublasGroupedScaleLayout::Scalar;
+  CublasGroupedScaleLayout B_layout = CublasGroupedScaleLayout::Scalar;
 };
 
 void grouped_gemm(
