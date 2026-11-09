@@ -898,15 +898,23 @@ def user_kernel_hop_infos() -> list[UserKernelHOPInfo]:
 
 
 class UserKernelHOPifier:
-    """Base of each DSL's HOPifier (e.g. TritonHOPifier), which turns a call to a user
-    kernel into a call to the DSL's mutation HOP.
+    """Base of each DSL's HOPifier (TritonHOPifier, CuteDSLHOPifier), which turns a
+    call to a user kernel into a call to the DSL's mutation HOP.
 
-    Each DSL has one subclass per capture environment: Dynamo, which works on
-    VariableTrackers and reports unsupported features as graph breaks, and tracing
-    (make_fx, non-strict export), which works on real or fake values.
+    Each DSL has one subclass per capture environment it supports: Dynamo, which
+    works on VariableTrackers and reports unsupported features as graph breaks, and
+    tracing (make_fx, non-strict export), which works on real or fake values.
     """
 
     def raise_unsupported(self, msg: str) -> Never:
+        """Refuse what eager may run but this capture environment cannot take.
+        Triton's HOPifiers refuse their users' mistakes with it too."""
+        raise NotImplementedError("abstract method")
+
+    def raise_user_error(self, exc: TypeError | ValueError) -> Never:
+        """Refuse a call with ``exc``, a mistake that eager refuses too: a TypeError
+        or ValueError naming the kernel. A tracing HOPifier raises it; a Dynamo
+        HOPifier is expected to report it as a graph break."""
         raise NotImplementedError("abstract method")
 
     def get_value(self, val: Any) -> Any:

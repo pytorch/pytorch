@@ -2,8 +2,8 @@
 """Tests for user-defined CuTeDSL kernels (``@cute.jit`` host functions) in PT2.
 
 Mirrors test/inductor/test_triton_kernels.py (the reference suite for user-defined
-Triton kernels): the HOPs used directly (side table, eager launch, fake mode, make_fx,
-functionalization).
+Triton kernels): direct HOP use, the eager launch and wrap_cutedsl tracing (make_fx,
+non-strict export).
 """
 
 import contextlib
@@ -14,6 +14,8 @@ import gc
 import inspect
 import logging
 import re
+import sys
+import types
 import unittest
 import weakref
 from unittest import mock
@@ -28,9 +30,12 @@ from torch._higher_order_ops.cutedsl_kernel_wrap import (
     cutedsl_kernel_wrapper_mutation,
     CuteDSLKernel,
     get_cutedsl_mutated_tensors,
+    TraceableCuteDSLKernelWrapper,
 )
 from torch._inductor.test_case import TestCase
+from torch._library.cutedsl import wrap_cutedsl
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -326,6 +331,73 @@ if HAS_CUTEDSL:
 
 
 DEVICE = "cuda"
+
+if HAS_CUTEDSL:
+    # Two different host functions with the same __name__ and __qualname__: the
+    # compile caches must key on the function object, not its name.
+    @cute.kernel
+    def _sub_k(gX: cute.Tensor, gY: cute.Tensor, gOut: cute.Tensor, n: cutlass.Int32):
+        tidx, _, _ = cute.arch.thread_idx()
+        bidx, _, _ = cute.arch.block_idx()
+        i = bidx * 128 + tidx
+        if i < n:
+            gOut[i] = gX[i] - gY[i]
+
+    @cute.jit
+    def binary_kernel(
+        mX: cute.Tensor,
+        mY: cute.Tensor,
+        mOut: cute.Tensor,
+        n: cutlass.Int32,
+        stream: cuda.CUstream,
+    ):
+        _add_k(mX, mY, mOut, n).launch(
+            grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+        )
+
+    same_name_add_kernel = binary_kernel
+
+    @cute.jit
+    def binary_kernel(
+        mX: cute.Tensor,
+        mY: cute.Tensor,
+        mOut: cute.Tensor,
+        n: cutlass.Int32,
+        stream: cuda.CUstream,
+    ):
+        _sub_k(mX, mY, mOut, n).launch(
+            grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+        )
+
+    same_name_sub_kernel = binary_kernel
+    del binary_kernel
+
+
+def _wrap(kernel, mutates_args):
+    """wrap_cutedsl(kernel, mutates_args=mutates_args) for the wrappers that most tests
+    share as module globals. They are built at import, so if wrap_cutedsl raises, the
+    result raises its error when called instead: only the tests that use a wrapper
+    fail, not every test of this file."""
+    try:
+        return wrap_cutedsl(kernel, mutates_args=mutates_args)
+    except Exception as e:
+        error = e
+
+        def failed(*args, **kwargs):
+            raise error
+
+        return failed
+
+
+if HAS_CUTEDSL:
+    add_w = _wrap(add_kernel, ["mOut"])
+    scale_inplace_w = _wrap(scale_inplace_kernel, ["mX"])
+    add_one_2d_w = _wrap(add_one_2d_kernel, ["mOut"])
+    mul_const_w = _wrap(mul_const_kernel, ["mOut"])
+    add_sub_w = _wrap(add_sub_kernel, ["mSum", "mDiff"])
+    add_scalar_w = _wrap(add_scalar_kernel, ["mOut"])
+    same_name_add_w = _wrap(same_name_add_kernel, ["mOut"])
+    same_name_sub_w = _wrap(same_name_sub_kernel, ["mOut"])
 
 
 def _rand(*shape, dtype=torch.float32, requires_grad=False):
@@ -1137,9 +1209,9 @@ class CuteDSLHOPTests(TestCase):
         # would never be cloned and written back, so a write would be lost) or names
         # one the kernel cannot write (the stream, a Constexpr or a cutlass Numeric
         # parameter) with a ValueError, and anything but "unknown" or an iterable of
-        # str with a TypeError (normalize_mutates_args): None, a bare string, a
-        # non-str name, an array of names (numpy strings), and an object equal to
-        # everything, compared with "unknown" only if it is a str.
+        # str with a TypeError, as wrap_cutedsl does (normalize_mutates_args): None,
+        # a bare string, a non-str name, an array of names (numpy strings), and an
+        # object equal to everything, compared with "unknown" only if it is a str.
         # An empty write set does not parse the signature.
         msg = (
             r"^CuTeDSL kernel {}: mutates_args names '{}', but the parameters it can "
@@ -1803,7 +1875,886 @@ def forward(self, x_1, y_1):
         self.assertEqual(cutedsl_kernel_side_table.get_kernel(idx), record)
 
 
+def _is_tensor_node(v):
+    return isinstance(v, torch.fx.Node) and isinstance(v.meta.get("val"), torch.Tensor)
+
+
+def _scalar_args(node):
+    """The non-tensor kernel args of a CuTeDSL HOP node, wherever the capture put
+    them: scalars inside the node's ``kwargs`` dict (FX nodes when symbolic) plus the
+    side-table constant args."""
+    args = {k: v for k, v in node.kwargs["kwargs"].items() if not _is_tensor_node(v)}
+    args.update(
+        cutedsl_kernel_side_table.get_constant_args(node.kwargs["constant_args_idx"])
+    )
+    return args
+
+
+@requires_cutedsl
+class CuteDSLWrapTests(TestCase):
+    """wrap_cutedsl: eager launches, make_fx / non-strict export capture, errors."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    def test_wrap_cutedsl_mutates_args_iterator(self):
+        # A one-shot iterable is read once, not consumed by its validation: the
+        # wrapper and its side-table record, whose write set functionalization reads,
+        # both get the names.
+        for names in ((n for n in ["mOut"]), iter(["mOut"]), map(str, ["mOut"])):
+            w = wrap_cutedsl(add_kernel, mutates_args=names)
+            self.assertEqual(w.mutates_args, ("mOut",))
+            record = cutedsl_kernel_side_table.get_kernel(w.kernel_idx)
+            self.assertEqual(record.mutates_args, ("mOut",))
+
+    def test_wrap_cutedsl_returns_traceable_wrapper(self):
+        w = wrap_cutedsl(add_kernel, mutates_args=["mOut"])
+        self.assertIsInstance(w, TraceableCuteDSLKernelWrapper)
+        x, y = _rand(1000), _rand(1000)
+        out = torch.zeros_like(x)
+        self.assertIsNone(w(x, y, out, 1000))
+        self.assertEqual(out, x + y)
+
+    def test_wrap_cutedsl_builds_one_side_table_record(self):
+        # Error messages name the host function without building a CuteDSLKernel
+        # record: wrap_cutedsl builds the one it adds to the side table, and calls of
+        # the wrapper build none.
+        def f(x, y, out):
+            w(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        out = torch.zeros_like(x)
+        with mock.patch(
+            "torch._higher_order_ops.cutedsl_kernel_wrap.CuteDSLKernel",
+            wraps=CuteDSLKernel,
+        ) as record_spy:
+            w = wrap_cutedsl(add_kernel, mutates_args=["mOut"])
+            f(x, y, out)
+            make_fx(f)(x, y, torch.empty_like(x))
+            with self.assertRaisesRegex(TypeError, "kernel add_kernel: missing"):
+                w(x, y, out)
+        self.assertEqual(record_spy.call_count, 1)
+        self.assertEqual(out, x + y)
+
+    def test_wrap_cutedsl_eager_kwargs_and_partial_write(self):
+        x, y = _rand(1000), _rand(1000)
+        out = torch.full_like(x, 7.0)
+        add_w(mX=x, mY=y, mOut=out, n=500)
+        self.assertEqual(out[:500], x[:500] + y[:500])
+        self.assertEqual(out[500:], torch.full_like(x[500:], 7.0))
+
+    def test_wrap_cutedsl_eager_inplace(self):
+        x = _rand(1000)
+        ref = 2 * x
+        scale_inplace_w(x, x.numel())
+        self.assertEqual(x, ref)
+
+    @parametrize(
+        "layout", ["contiguous", "transposed", "row_slice", "gap_out", "t_out"]
+    )
+    def test_wrap_cutedsl_eager_2d_layouts(self, layout):
+        # The kernel indexes through each tensor's own layout: strides and storage
+        # offsets of views must reach it unchanged.
+        x = _rand(4, 8)
+        out = torch.zeros(4, 8, device=DEVICE)
+        if layout == "transposed":
+            x = _rand(8, 4).t()
+        elif layout == "row_slice":
+            x = _rand(6, 8)[2:]
+        elif layout == "gap_out":
+            big = torch.zeros(4, 16, device=DEVICE)
+            out = big[:, ::2]
+        elif layout == "t_out":
+            out = torch.zeros(8, 4, device=DEVICE).t()
+        add_one_2d_w(x, out)
+        self.assertEqual(out, x + 1)
+        if layout == "gap_out":
+            self.assertEqual(big[:, 1::2], torch.zeros(4, 8, device=DEVICE))
+
+    def test_wrap_cutedsl_eager_unaligned_view(self):
+        # data_ptr is 4 bytes past a 16-byte boundary: from_dlpack(assumed_align=16)
+        # rejects it, so the launch must use the alignment the pointer really has.
+        base = _rand(4, 9)
+        x = base[:, 1:]
+        self.assertNotEqual(x.data_ptr() % 16, 0)
+        out = torch.zeros(4, 8, device=DEVICE)
+        add_one_2d_w(x, out)
+        self.assertEqual(out, x + 1)
+        y = _rand(1001)[1:]
+        out1 = torch.zeros(1000, device=DEVICE)[0:]
+        add_w(y, y, out1, 1000)
+        self.assertEqual(out1, 2 * y)
+
+    def test_wrap_cutedsl_eager_compile_cache_keys_on_layout(self):
+        # Layouts are static in the compiled kernel and a compiled function called
+        # with another shape silently computes garbage, so the eager cache must key
+        # on shape and stride (and dtype).
+        for shape, transpose in (((4, 8), False), ((16, 32), False), ((4, 8), True)):
+            x = _rand(*shape[::-1]).t() if transpose else _rand(*shape)
+            out = torch.zeros(*shape, device=DEVICE)
+            add_one_2d_w(x, out)
+            self.assertEqual(out, x + 1)
+        for dtype in (torch.float32, torch.float16, torch.bfloat16):
+            x, y = _rand(300, dtype=dtype), _rand(300, dtype=dtype)
+            out = torch.zeros_like(x)
+            add_w(x, y, out, 300)
+            self.assertEqual(out, x + y)
+
+    def test_wrap_cutedsl_eager_constexpr(self):
+        x = _rand(1000)
+        for alpha in (3, 2.5, 3):
+            out = torch.zeros_like(x)
+            mul_const_w(x, out, 1000, alpha)
+            self.assertEqual(out, x * alpha)
+
+    def test_wrap_cutedsl_eager_unannotated_scalar(self):
+        x = _rand(1000)
+        for k in (5, 7):
+            out = torch.zeros_like(x)
+            add_scalar_w(x, out, 1000, k)
+            self.assertEqual(out, x + k)
+
+    def test_wrap_cutedsl_eager_two_outputs_and_default(self):
+        x, y = _rand(1000), _rand(1000)
+        s, d = torch.zeros_like(x), torch.zeros_like(x)
+        add_sub_w(x, y, s, d, 1000)  # scale defaults to 1.0
+        self.assertEqual((s, d), (x + y, x - y))
+        add_sub_w(x, y, s, d, 1000, scale=0.5)
+        self.assertEqual((s, d), ((x + y) * 0.5, (x - y) * 0.5))
+
+    def test_wrap_cutedsl_eager_same_name_kernels(self):
+        # Two host functions with the same __name__/__qualname__ must not share a
+        # compiled kernel.
+        x, y = _rand(1000), _rand(1000)
+        o1, o2 = torch.zeros_like(x), torch.zeros_like(x)
+        same_name_add_w(x, y, o1, 1000)
+        same_name_sub_w(x, y, o2, 1000)
+        self.assertEqual(o1, x + y)
+        self.assertEqual(o2, x - y)
+
+    def test_wrap_cutedsl_eager_requires_grad_inputs(self):
+        # from_dlpack refuses tensors that require grad ("use tensor.detach()").
+        x, y = _rand(1000, requires_grad=True), _rand(1000, requires_grad=True)
+        out = torch.zeros(1000, device=DEVICE)
+        add_w(x, y, out, 1000)
+        self.assertEqual(out, (x + y).detach())
+
+    def test_wrap_cutedsl_eager_launches_on_current_stream(self):
+        # Capturing a CUDA graph only works if the launch goes to the capturing
+        # (current) stream; a launch on any other stream breaks the capture.
+        from torch._library.triton import set_wrap_triton_enabled
+        from torch.testing._internal.common_utils import get_cycles_per_ms
+
+        x, y = _rand(1000), _rand(1000)
+        out = torch.zeros_like(x)
+        add_w(x, y, out, 1000)  # compile + load outside of the capture
+        torch.cuda.synchronize()
+        out.zero_()
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            add_w(x, y, out, 1000)
+        torch.cuda.synchronize()
+        self.assertEqual(out, torch.zeros_like(x))
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(out, x + y)
+        # On a side stream, through the HOP or not, the launch is queued behind a
+        # sleep there, so the stream current outside reads the output before the
+        # kernel has run.
+        side = torch.cuda.Stream()
+        for enabled in (True, False):
+            out.zero_()
+            side.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(side), set_wrap_triton_enabled(enabled):
+                torch.cuda._sleep(int(200 * get_cycles_per_ms()))
+                add_w(x, y, out, 1000)
+            before = out.clone()
+            torch.cuda.current_stream().wait_stream(side)
+            self.assertEqual(before, torch.zeros_like(x))
+            self.assertEqual(out, x + y)
+
+    def test_wrap_after_plain_cute_compile(self):
+        # The DSL deletes _dsl_cls from the user function at its first compile
+        # (only the functools.wraps wrapper keeps a copy), so wrapping a host
+        # function that was already compiled must still be accepted.
+        x, y = _rand(1000), _rand(1000)
+        out = torch.zeros_like(x)
+        _reference_launch(add_kernel, x, y, out, 1000)
+        self.assertEqual(out, x + y)
+        w = wrap_cutedsl(add_kernel, mutates_args=["mOut"])
+        out2 = torch.zeros_like(x)
+        w(x, y, out2, 1000)
+        self.assertEqual(out2, x + y)
+
+    def test_wrap_cutedsl_eager_matches_plain_cutedsl(self):
+        # The wrapper's eager launch is exactly the plain CuTeDSL launch.
+        x = _rand(64, 300)
+        ref, out = torch.zeros_like(x), torch.zeros_like(x)
+        _reference_launch(add_one_2d_kernel, x, ref)
+        add_one_2d_w(x, out)
+        self.assertEqual(out, ref)
+
+    def test_wrap_cutedsl_error_stream_passed(self):
+        # A call that passes the stream does not bind: a TypeError (by keyword, the
+        # launch's own, from CuteDSLHostFnInfo.check_call), through the HOP or not,
+        # and under make_fx with fake tensors, where the launch does not run.
+        from torch._library.triton import set_wrap_triton_enabled
+
+        x = _rand(16)
+        out = torch.zeros_like(x)
+        w = add_w
+        keyword = (
+            "^CuTeDSL kernel add_kernel: got a value for its stream parameter "
+            "'stream', which the launch supplies$"
+        )
+        positional = (
+            r"^CuTeDSL kernel add_kernel: takes 4 positional arguments \(the "
+            r"parameters before its stream parameter 'stream', which the launch "
+            r"supplies\) but got 5$"
+        )
+        cases = (
+            ("keyword", lambda x, out: w(x, x, out, 16, stream=_stream()), keyword),
+            ("positional", lambda x, out: w(x, x, out, 16, _stream()), positional),
+        )
+        for case, call, error in cases:
+            with self.subTest(case=case):
+                for enabled in (True, False):
+                    with set_wrap_triton_enabled(enabled):
+                        with self.assertRaisesRegex(TypeError, error):
+                            call(x, out)
+                with self.assertRaisesRegex(TypeError, error):
+                    make_fx(call, tracing_mode="fake")(x, out)
+        self.assertEqual(out, torch.zeros_like(x))
+
+    def test_wrap_cutedsl_error_positional_argument_past_the_stream(self):
+        # Callers of a wrapper never pass the stream, so a positional argument at or
+        # past its position is refused, naming the parameter to pass by keyword,
+        # rather than bound to the parameter after the stream: here a scale, a
+        # CUstream (which would be refused as a value for scale) and a raw stream
+        # handle (which would launch with scale set to it).
+        from torch._library.triton import set_wrap_triton_enabled
+
+        x, y = _rand(1000), _rand(1000)
+        s, d = torch.zeros_like(x), torch.zeros_like(x)
+        error = (
+            r"^CuTeDSL kernel add_sub_kernel: takes 5 positional arguments \(the "
+            r"parameters before its stream parameter 'stream', which the launch "
+            r"supplies\) but got 6; pass 'scale' by keyword$"
+        )
+
+        def f(x, value):
+            add_sub_w(x, x, torch.empty_like(x), torch.empty_like(x), 1000, value)
+
+        handle = torch.cuda.current_stream().cuda_stream
+        for value in (0.5, _stream(), handle):
+            with self.subTest(value=type(value).__name__):
+                with self.assertRaisesRegex(TypeError, error):
+                    add_sub_w(x, y, s, d, 1000, value)
+                with set_wrap_triton_enabled(False):
+                    with self.assertRaisesRegex(TypeError, error):
+                        add_sub_w(x, y, s, d, 1000, value)
+                with self.assertRaisesRegex(TypeError, error):
+                    make_fx(functools.partial(f, value=value))(x)
+        self.assertEqual((s, d), (torch.zeros_like(x), torch.zeros_like(x)))
+        add_sub_w(x, y, s, d, 1000, scale=0.5)
+        self.assertEqual((s, d), ((x + y) * 0.5, (x - y) * 0.5))
+
+    def test_wrap_cutedsl_error_stream_params(self):
+        # Exactly one cuda.CUstream parameter is required: wrap_cutedsl refuses any
+        # other host function itself, whatever mutates_args, with the error of the
+        # side-table record.
+        one_stream = (
+            r"expected exactly one parameter annotated cuda\.CUstream \(PT2 launches "
+            r"the kernel on the current CUDA stream\), found "
+        )
+        for fn, found in (
+            (no_stream_kernel, r"\[\]"),
+            (two_stream_kernel, r"\['stream', 'stream2'\]"),
+        ):
+            error = f"^CuTeDSL kernel {fn.__name__}: {one_stream}{found}$"
+            with self.subTest(fn=fn.__name__):
+                for mutates_args in (["mOut"], "unknown"):
+                    with self.assertRaisesRegex(ValueError, error):
+                        wrap_cutedsl(fn, mutates_args=mutates_args)
+                with self.assertRaisesRegex(ValueError, error):
+                    CuteDSLKernel(fn, ["mOut"])
+
+    def test_wrap_cutedsl_error_bad_mutates_args(self):
+        # Refused by wrap_cutedsl itself, not at the first call of the wrapper, with
+        # the side-table record's errors (normalize_mutates_args): a ValueError for a
+        # name of a parameter the kernel cannot write, a TypeError for anything but
+        # "unknown" or an iterable of str, such as an array of names (numpy strings)
+        # or an object equal to everything, which is not taken for "unknown".
+        class EqualToAll:
+            def __eq__(self, other):
+                return True
+
+        def names(bad, params="'mX', 'mY', 'mOut'"):
+            return (
+                f"mutates_args names {bad!r}, but the parameters it can write (all but "
+                f"the stream, Constexpr and cutlass Numeric ones) are ({params})"
+            )
+
+        def iterable(bad):
+            return (
+                'mutates_args must be "unknown" or an iterable of parameter names, '
+                "each exactly a str (not a numpy string or another str subclass), got "
+                f"{bad!r}"
+            )
+
+        cases = [
+            (add_kernel, ["not_a_param"], ValueError, names("not_a_param")),
+            (add_kernel, ["n"], ValueError, names("n")),  # a cutlass Numeric parameter
+            (add_kernel, ["stream"], ValueError, names("stream")),
+            (mul_const_kernel, ["alpha"], ValueError, names("alpha", "'mX', 'mOut'")),
+        ]
+        for bad in ("mOut", None, [1], np.array(["mX", "mOut"]), EqualToAll()):
+            cases.append((add_kernel, bad, TypeError, iterable(bad)))
+        for fn, bad, error_type, message in cases:
+            error = f"^{re.escape(f'CuTeDSL kernel {fn.__name__}: {message}')}$"
+            with self.subTest(mutates_args=repr(bad)):
+                with self.assertRaisesRegex(error_type, error):
+                    wrap_cutedsl(fn, mutates_args=bad)
+                with self.assertRaisesRegex(error_type, error):
+                    CuteDSLKernel(fn, bad)
+
+    def test_wrap_cutedsl_error_scalar_for_a_written_parameter(self):
+        # An unannotated parameter may take a tensor, so mutates_args can name it,
+        # but a call that gives it a scalar is refused with a TypeError, and one that
+        # leaves it to a default other than None with a ValueError, eagerly, on the
+        # fast path and under make_fx (with fake tensors: the call's own checks
+        # refuse it, not the launch). None stands for an optional tensor that the
+        # call leaves out.
+        from torch._library.triton import set_wrap_triton_enabled
+
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        # The DSL re-runs this def in the module's globals, so defaults name no locals.
+        @cute.jit
+        def add_default_k_kernel(
+            mX: cute.Tensor,
+            mOut: cute.Tensor,
+            n: cutlass.Int32,
+            stream: cuda.CUstream,
+            k=5,
+        ):
+            _add_scalar_k(mX, mOut, n, k).launch(
+                grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+            )
+
+        x = _rand(1000)
+        out = torch.zeros_like(x)
+
+        def assert_refused(w, error_type, error, *args):
+            with self.assertRaisesRegex(error_type, error):
+                w(x, out, 1000, *args)
+            with set_wrap_triton_enabled(False):
+                with self.assertRaisesRegex(error_type, error):
+                    w(x, out, 1000, *args)
+            with self.assertRaisesRegex(error_type, error):
+                make_fx(
+                    lambda x: w(x, torch.empty_like(x), x.numel(), *args),
+                    tracing_mode="fake",
+                )(x)
+
+        names = (
+            "^CuTeDSL kernel {}: mutates_args names parameter 'k', which takes a "
+            "tensor or None, "
+        )
+        w = wrap_cutedsl(add_scalar_kernel, mutates_args=["mOut", "k"])
+        assert_refused(w, TypeError, names.format("add_scalar_kernel") + "not int$", 5)
+        w = wrap_cutedsl(add_default_k_kernel, mutates_args=["mOut", "k"])
+        left_to = "but the call leaves it to its default, of type int$"
+        assert_refused(w, ValueError, names.format("add_default_k_kernel") + left_to)
+        self.assertEqual(out, torch.zeros_like(x))
+        wrap_cutedsl(add_default_k_kernel, mutates_args=["mOut"])(x, out, 1000)
+        self.assertEqual(out, x + 5)
+
+        w = wrap_cutedsl(mul_cfg_kernel, mutates_args=["mOut", "unused"])
+        cfg = Cfg(3.0)
+        for kwargs in ({"unused": None}, {}):
+            out.zero_()
+            w(x, out, 1000, cfg, **kwargs)
+            self.assertEqual(out, 3 * x)
+        error = (
+            "^CuTeDSL kernel mul_cfg_kernel: mutates_args names parameter 'unused', "
+            "which takes a tensor or None, not float$"
+        )
+        with self.assertRaisesRegex(TypeError, error):
+            w(x, out, 1000, cfg, unused=0.5)
+
+    def test_wrap_cutedsl_error_tensor_default(self):
+        # A parameter left to a tensor default would be launched with a tensor PT2
+        # never saw, so it could not functionalize a write to it: the call is
+        # refused, written parameter or not ("unknown" counts every tensor argument
+        # as written), with the launch's ValueError, eagerly, on the fast path and
+        # under make_fx with fake tensors, where the launch does not run. A call that
+        # passes the tensor launches.
+        from torch._library.triton import set_wrap_triton_enabled
+
+        # The DSL re-runs this def in the module's globals, so defaults name no locals.
+        @cute.jit
+        def add_aux_kernel(
+            mX: cute.Tensor,
+            mOut: cute.Tensor,
+            n: cutlass.Int32,
+            stream: cuda.CUstream,
+            mAux=torch.zeros(4, device=DEVICE),
+        ):
+            _add_scalar_k(mX, mOut, n, 1).launch(
+                grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+            )
+
+        x = _rand(1000)
+        error = (
+            "^CuTeDSL kernel add_aux_kernel: parameter 'mAux' defaults to a tensor; "
+            "pass the tensor$"
+        )
+        for mutates_args in (["mOut", "mAux"], ["mOut"], "unknown"):
+            w = wrap_cutedsl(add_aux_kernel, mutates_args=mutates_args)
+            out = torch.zeros_like(x)
+            with self.subTest(mutates_args=mutates_args):
+                with self.assertRaisesRegex(ValueError, error):
+                    w(x, out, 1000)
+                with set_wrap_triton_enabled(False):
+                    with self.assertRaisesRegex(ValueError, error):
+                        w(x, out, 1000)
+                with self.assertRaisesRegex(ValueError, error):
+                    make_fx(
+                        lambda x: w(x, torch.empty_like(x), x.numel()),
+                        tracing_mode="fake",
+                    )(x)
+                self.assertEqual(out, torch.zeros_like(x))
+                w(x, out, 1000, mAux=torch.zeros(4, device=DEVICE))
+                self.assertEqual(out, x + 1)
+
+    def test_wrap_cutedsl_error_not_cute_jit(self):
+        # Only @cute.jit host functions are wrapped: not a plain function, a
+        # @cute.kernel device function, or a functools.wraps wrapper of a host
+        # function (a decorator, or torch.compiler.disable), although that copies the
+        # host function's _dsl_cls. Telling one needs CuTeDSL's class, imported from
+        # where the vendored quack code imports it: a cutlass that moved it raises
+        # its ImportError instead of refusing every host function, and without
+        # cutlass imported no function is one.
+        from torch._library.cutedsl import is_cutedsl_jit_function
+
+        def plain(mX, mY, mOut, n, stream: cuda.CUstream):
+            pass
+
+        @functools.wraps(add_kernel)
+        def logged(*args, **kwargs):
+            return add_kernel(*args, **kwargs)
+
+        error = (
+            "^CuTeDSL kernel {}: wrap_cutedsl only works on host functions decorated "
+            r"with @cute\.jit$"
+        )
+        # A wrapper's name is that of the host function it wraps.
+        for fn, name in ((plain, "plain"), (_add_k, "_add_k"), (logged, "add_kernel")):
+            with self.subTest(fn=fn.__qualname__):
+                with self.assertRaisesRegex(TypeError, error.format(name)):
+                    wrap_cutedsl(fn, mutates_args=["mOut"])
+        self.assertTrue(is_cutedsl_jit_function(add_kernel))
+        for fn in (logged, torch.compiler.disable(add_kernel)):
+            self.assertIn("_dsl_cls", vars(fn))
+            self.assertFalse(is_cutedsl_jit_function(fn))
+        moved = {
+            name: types.ModuleType(name)
+            for name in ("cutlass.cutlass_dsl", "cutlass.cutlass_dsl.cutlass")
+        }
+        with mock.patch.dict(sys.modules, moved):
+            with self.assertRaisesRegex(ImportError, "cannot import name 'CuTeDSL'"):
+                wrap_cutedsl(add_kernel, mutates_args=["mOut"])
+        with mock.patch.dict(sys.modules, {"cutlass": None}):
+            self.assertFalse(is_cutedsl_jit_function(add_kernel))
+
+    def test_wrap_cutedsl_error_unwrapped_host_fn(self):
+        # inspect.unwrap(host_fn) is the user's undecorated function. Whether it
+        # still carries _dsl_cls depends on whether it was compiled before (the DSL
+        # deletes it then); either way it is not a @cute.jit function.
+        _reference_launch(
+            add_kernel, _rand(8), _rand(8), torch.zeros(8, device=DEVICE), 8
+        )
+        error = (
+            "^CuTeDSL kernel add_kernel: wrap_cutedsl only works on host functions "
+            r"decorated with @cute\.jit$"
+        )
+        with self.assertRaisesRegex(TypeError, error):
+            wrap_cutedsl(inspect.unwrap(add_kernel), mutates_args=["mOut"])
+
+    def test_wrap_cutedsl_error_dsl_runtime_object_arg(self):
+        # PT2 makes the DSL's runtime objects itself: a cute tensor, a pointer
+        # (cuda.CUdeviceptr) or a stream given as an argument is refused, through the
+        # HOP or not, as one inside a constant is.
+        from torch._library.triton import set_wrap_triton_enabled
+
+        x, y = _rand(16), _rand(16)
+        out = torch.zeros_like(x)
+        error = (
+            r"^CuTeDSL kernel {}: parameter '{}' got a {}: pass torch\.Tensor and "
+            r"Python values; PT2 converts tensors and supplies the stream$"
+        )
+        cute_x, pointer = from_dlpack(x, assumed_align=16), cuda.CUdeviceptr(0)
+        cases = (
+            (add_w, (cute_x, y, out, 16), "mX", "_Tensor"),
+            (add_scalar_w, (x, out, 16, pointer), "k", "CUdeviceptr"),
+            (add_w, (x, y, out, _stream()), "n", "CUstream"),
+        )
+        for w, args, param, held in cases:
+            message = error.format(w.kernel.__name__, param, held)
+            with self.subTest(arg=held):
+                for enabled in (True, False):
+                    with set_wrap_triton_enabled(enabled):
+                        with self.assertRaisesRegex(TypeError, message):
+                            w(*args)
+                # Under make_fx with fake tensors, where the launch does not run.
+                with self.assertRaisesRegex(TypeError, message):
+                    make_fx(lambda x: w(*args), tracing_mode="fake")(x)
+        self.assertEqual(out, torch.zeros_like(x))
+
+    def test_wrap_cutedsl_error_bad_call(self):
+        # A call that does not bind, or that gives a tensor to a cutlass Numeric or a
+        # Constexpr parameter, is refused with the launch's TypeError
+        # (CuteDSLHostFnInfo.check_call and split_args), printed once rather than
+        # chained to the check's, through the HOP or not, and under make_fx with fake
+        # tensors, where the launch does not run.
+        import traceback
+
+        from torch._library.triton import set_wrap_triton_enabled
+
+        x = _rand(16)
+        out = torch.zeros_like(x)
+        w, m = add_w, mul_const_w
+        missing = r"add_kernel: missing arguments \['n'\]$"
+        unexpected = (
+            r"add_kernel: got an unexpected argument 'not_a_param'; its parameters are "
+            r"\('mX', 'mY', 'mOut', 'n', 'stream'\)$"
+        )
+        multiple = "add_kernel: got multiple values for argument 'n'$"
+        scalar = (
+            r"{}: parameter '{}' takes a scalar \(it is Constexpr or annotated with a "
+            r"cutlass Numeric type\), not a tensor$"
+        )
+        numeric = scalar.format("add_kernel", "n")
+        constexpr = scalar.format("mul_const_kernel", "alpha")
+        cases = (
+            ("missing", lambda x, out: w(x, x, out), missing),
+            ("unexpected", lambda x, out: w(x, x, out, 16, not_a_param=1), unexpected),
+            ("multiple", lambda x, out: w(x, x, out, 16, n=16), multiple),
+            ("tensor for n", lambda x, out: w(x, x, out, x), numeric),
+            ("tensor for alpha", lambda x, out: m(x, out, 16, x), constexpr),
+        )
+        for case, call, error in cases:
+            message = "^CuTeDSL kernel " + error
+            with self.subTest(case=case):
+                for enabled in (True, False):
+                    with set_wrap_triton_enabled(enabled):
+                        with self.assertRaisesRegex(TypeError, message) as caught:
+                            call(x, out)
+                    printed = "".join(traceback.format_exception(caught.exception))
+                    self.assertNotIn("During handling", printed)
+                with self.assertRaisesRegex(TypeError, message):
+                    make_fx(call, tracing_mode="fake")(x, out)
+        self.assertEqual(out, torch.zeros_like(x))
+
+    def test_wrap_cutedsl_user_errors_go_through_raise_user_error(self):
+        # Each refusal of a write set, host function or call goes through
+        # raise_user_error, which UserKernelHOPifier declares for every capture
+        # environment and the tracing HOPifier implements by raising the exception it
+        # is given: from wrap_cutedsl (normalize_mutates_args, get_host_fn_info),
+        # and from binding a call (check_call and bind_call's own checks), also on the
+        # fast path.
+        from torch._higher_order_ops.cutedsl_kernel_wrap import TracingCuteDSLHOPifier
+        from torch._library.triton import set_wrap_triton_enabled
+
+        def on_fast_path(call):
+            with set_wrap_triton_enabled(False):
+                call()
+
+        x, y = _rand(16), _rand(16)
+        out = torch.zeros_like(x)
+        missing = r"^CuTeDSL kernel add_kernel: missing arguments \['n'\]$"
+        cases = {
+            "mutates_args None": (
+                lambda: wrap_cutedsl(add_kernel, mutates_args=None),
+                TypeError,
+                '^CuTeDSL kernel add_kernel: mutates_args must be "unknown" or an ',
+            ),
+            "mutates_args ['n']": (
+                lambda: wrap_cutedsl(add_kernel, mutates_args=["n"]),
+                ValueError,
+                "^CuTeDSL kernel add_kernel: mutates_args names 'n', but ",
+            ),
+            "no stream": (
+                lambda: wrap_cutedsl(no_stream_kernel, mutates_args="unknown"),
+                ValueError,
+                "^CuTeDSL kernel no_stream_kernel: expected exactly one parameter ",
+            ),
+            "missing argument": (lambda: add_w(x, y, out), TypeError, missing),
+            "missing argument, fast path": (
+                lambda: on_fast_path(lambda: add_w(x, y, out)),
+                TypeError,
+                missing,
+            ),
+            "past the stream": (
+                lambda: add_w(x, y, out, 16, _stream()),
+                TypeError,
+                "^CuTeDSL kernel add_kernel: takes 4 positional arguments ",
+            ),
+        }
+        real = TracingCuteDSLHOPifier.raise_user_error
+        spy = mock.patch.object(
+            TracingCuteDSLHOPifier, "raise_user_error", autospec=True, side_effect=real
+        )
+        with spy as raise_user_error:
+            for case, (call, error_type, error) in cases.items():
+                with self.subTest(case=case):
+                    raise_user_error.reset_mock()
+                    with self.assertRaisesRegex(error_type, error) as caught:
+                        call()
+                    raise_user_error.assert_called_once()
+                    self.assertIs(raise_user_error.call_args.args[1], caught.exception)
+        self.assertEqual(out, torch.zeros_like(x))
+
+    @parametrize("tracing_mode", ["fake", "symbolic"])
+    def test_wrap_cutedsl_make_fx(self, tracing_mode):
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out
+
+        gm = make_fx(f, tracing_mode=tracing_mode)(_rand(1000), _rand(1000))
+        (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+        self.assertEqual(node.name, "cutedsl_kernel_wrapper_mutation_proxy")
+        record = cutedsl_kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+        self.assertIs(record.fn, add_kernel)
+        self.assertEqual(tuple(record.mutates_args), ("mOut",))
+        hop_kwargs = node.kwargs["kwargs"]
+        self.assertEqual(
+            [k for k, v in hop_kwargs.items() if _is_tensor_node(v)],
+            ["mX", "mY", "mOut"],
+        )
+        self.assertEqual(hop_kwargs["mX"].op, "placeholder")
+        scalars = _scalar_args(node)
+        self.assertNotIn("stream", scalars)
+        self.assertNotIn("stream", hop_kwargs)
+        if tracing_mode == "symbolic":
+            # A runtime (cutlass.Int32-annotated) scalar stays symbolic.
+            self.assertIsInstance(hop_kwargs["n"], torch.fx.Node)
+        else:
+            self.assertEqual(scalars["n"], 1000)
+            self.assertExpectedInline(
+                _normalize_indices(gm.code.strip()),
+                """\
+def forward(self, x_1, y_1):
+    empty_like = torch.ops.aten.empty_like.default(x_1, pin_memory = False)
+    cutedsl_kernel_wrapper_mutation_proxy = torch.ops.higher_order.cutedsl_kernel_wrapper_mutation(kernel_idx = K, constant_args_idx = C, kwargs = {'mX': x_1, 'mY': y_1, 'mOut': empty_like, 'n': 1000});  x_1 = y_1 = cutedsl_kernel_wrapper_mutation_proxy = None
+    return empty_like""",
+            )
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(gm(x, y), x + y)
+        if tracing_mode == "symbolic":
+            x, y = _rand(77), _rand(77)
+            self.assertEqual(gm(x, y), x + y)
+
+    def test_wrap_cutedsl_make_fx_unannotated_scalar_stays_symbolic(self):
+        # The DSL converts a Python int for an unannotated parameter to a runtime
+        # Int32, so a symbolic value stays a kernel argument (no specialization).
+        def f(x):
+            out = torch.empty_like(x)
+            add_scalar_w(x, out, x.numel(), x.shape[0] // 100)
+            return out
+
+        x = _rand(1000)
+        gm = make_fx(f, tracing_mode="symbolic")(x)
+        (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+        self.assertIsInstance(_scalar_args(node)["k"], torch.fx.Node)
+        self.assertEqual(gm(x), x + 10)
+        x2 = _rand(2000)
+        self.assertEqual(gm(x2), x2 + 20)
+
+    def test_wrap_cutedsl_make_fx_defaults_resolved_at_launch(self):
+        # As for Triton, a parameter the call leaves out is not captured: its
+        # default applies when the kernel is launched.
+        def f(x, y, scale=None):
+            s, d = torch.empty_like(x), torch.empty_like(x)
+            if scale is None:
+                add_sub_w(x, y, s, d, x.numel())
+            else:
+                add_sub_w(x, y, s, d, x.numel(), scale=scale)
+            return s, d
+
+        x, y = _rand(1000), _rand(1000)
+        for scale, expect in ((None, 1.0), (0.5, 0.5)):
+            gm = make_fx(functools.partial(f, scale=scale))(x, y)
+            (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+            if scale is None:
+                self.assertNotIn("scale", _scalar_args(node))
+            else:
+                self.assertEqual(_scalar_args(node)["scale"], scale)
+            s, d = gm(x, y)
+            self.assertEqual((s, d), ((x + y) * expect, (x - y) * expect))
+
+    def test_wrap_cutedsl_make_fx_runtime_scalars_as_python_values(self):
+        # A runtime scalar is captured as the Python value the launch passes
+        # (python_scalar): a numpy scalar, which is not graphable, as its .item(), an
+        # IntEnum member as an int, and an int for a cutlass float parameter as a
+        # float. The node holds what the launch compiles for, and a numpy scalar is
+        # an argument of the node, not a side-table constant.
+        add_c_w = wrap_cutedsl(add_c_kernel, mutates_args=["mOut"])
+        calls = (
+            (add_scalar_w, "k", np.int64(5), 5),
+            (add_scalar_w, "k", Factor.TWO, 2),
+            (add_c_w, "c", np.float16(0.5), 0.5),
+            (add_c_w, "c", 3, 3.0),
+        )
+
+        def f(x):
+            outs = [torch.empty_like(x) for _ in calls]
+            for out, (w, param, value, _) in zip(outs, calls):
+                w(x, out, x.numel(), **{param: value})
+            return outs
+
+        x = _rand(1000)
+        gm = make_fx(f)(x)
+        nodes = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+        for node, (_, param, _, expected) in zip(nodes, calls, strict=True):
+            captured = node.kwargs["kwargs"][param]
+            self.assertEqual((captured, type(captured)), (expected, type(expected)))
+            idx = node.kwargs["constant_args_idx"]
+            self.assertEqual(cutedsl_kernel_side_table.get_constant_args(idx), {})
+        self.assertEqual(gm(x), [x + expected for *_, expected in calls])
+
+    @parametrize("dynamic", [False, True])
+    def test_wrap_cutedsl_non_strict_export(self, dynamic):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                add_w(x, y, out, x.numel())
+                return out
+
+        x, y = _rand(1000), _rand(1000)
+        dynamic_shapes = None
+        if dynamic:
+            dim = torch.export.Dim("n", min=2, max=8192)
+            dynamic_shapes = {"x": {0: dim}, "y": {0: dim}}
+        ep = torch.export.export(
+            M(), (x, y), dynamic_shapes=dynamic_shapes, strict=False
+        )
+        self.assertIn(
+            "torch.ops.higher_order.cutedsl_kernel_wrapper_", ep.graph_module.code
+        )
+        decomposed = ep.run_decompositions()
+        FileCheck().check_count(
+            "torch.ops.higher_order.cutedsl_kernel_wrapper_functional", 1, exactly=True
+        ).run(decomposed.graph_module.code)
+        self.assertEqual(ep.module()(x, y), x + y)
+        self.assertEqual(decomposed.module()(x, y), x + y)
+        if dynamic:
+            x2, y2 = _rand(77), _rand(77)
+            self.assertEqual(ep.module()(x2, y2), x2 + y2)
+            self.assertEqual(decomposed.module()(x2, y2), x2 + y2)
+
+    def test_wrap_cutedsl_non_strict_export_input_mutation(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                scale_inplace_w(x, x.numel())
+                return x + 1
+
+        x = _rand(1000)
+        ep = torch.export.export(M(), (x.clone(),), strict=False)
+        x_in = x.clone()
+        self.assertEqual(ep.module()(x_in), 2 * x + 1)
+        self.assertEqual(x_in, 2 * x)
+
+    def test_wrap_cutedsl_non_strict_export_unknown_mutates_args(self):
+        # "unknown" reaches the side table as is and makes every tensor argument
+        # written: each is cloned, and every user input becomes a mutated input.
+        w = wrap_cutedsl(add_kernel, mutates_args="unknown")
+        self.assertEqual(w.mutates_args, "unknown")
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                w(x, y, out, x.numel())
+                return out
+
+        x, y = _rand(1000), _rand(1000)
+        ep = torch.export.export(M(), (x, y), strict=False).run_decompositions()
+        (node,) = _hop_nodes(ep.graph_module, cutedsl_kernel_wrapper_functional)
+        record = cutedsl_kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+        self.assertEqual(record, CuteDSLKernel(add_kernel, "unknown"))
+        self.assertEqual(sorted(node.kwargs["tensors_to_clone"]), ["mOut", "mX", "mY"])
+        sig = ep.graph_signature
+        mutated = sorted(sig.user_inputs_to_mutate.values())
+        self.assertEqual(mutated, sorted(sig.user_inputs))
+        x_in, y_in = x.clone(), y.clone()
+        self.assertEqual(ep.module()(x_in, y_in), x + y)
+        self.assertEqual((x_in, y_in), (x, y))
+
+    def test_wrap_cutedsl_non_strict_export_views_and_constants(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                out = torch.empty(x.shape[1], x.shape[0], device=x.device)
+                add_one_2d_w(x.t(), out)  # non-contiguous input view
+                flat = out.reshape(-1)
+                o2 = torch.empty_like(flat)
+                mul_const_w(flat, o2, flat.numel(), 3)
+                o3 = torch.empty_like(o2)
+                add_scalar_w(o2, o3, o2.numel(), 5)
+                return o3
+
+        x = _rand(8, 4)
+        expected = (x.t() + 1).reshape(-1) * 3 + 5
+        ep = torch.export.export(M(), (x,), strict=False)
+        self.assertEqual(ep.module()(x), expected)
+        self.assertEqual(ep.run_decompositions().module()(x), expected)
+
+    def test_wrap_cutedsl_compiles_under_compile_lock(self):
+        # CuTeDSL's preprocessor and library init are not thread-safe: every
+        # in-process cute.compile holds CUTEDSL_COMPILE_LOCK.
+        held = []
+
+        def record_lock(*args, **kwargs):
+            held.append(_compile_lock().locked())
+            return mock.DEFAULT  # the spy then calls the real cute.compile
+
+        x, y = _rand(1000), _rand(1000)
+        out = torch.zeros_like(x)
+        with _counting_compiles() as compile_spy:
+            compile_spy.side_effect = record_lock
+            add_w(x, y, out, 1000)
+        self.assertEqual(out, x + y)
+        self.assertEqual(held, [True])
+
+    def test_wrap_cutedsl_export_not_serializable(self):
+        import io
+
+        from torch._export.serde.serialize import SerializeError
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                add_w(x, y, out, x.numel())
+                return out
+
+        x, y = _rand(1000), _rand(1000)
+        ep = torch.export.export(M(), (x, y), strict=False)
+        # The node indexes a process-local side table: no serialized form.
+        with self.assertRaises(SerializeError) as cm:
+            torch.export.save(ep, io.BytesIO())
+        # serialize_graph wraps any error of a node in a SerializeError of its own.
+        error = cm.exception
+        while error.__cause__ is not None:
+            error = error.__cause__
+        self.assertIsInstance(error, SerializeError)
+        self.assertRegex(str(error), r"nodes \(cutedsl user kernels\) is not supported")
+
+
 instantiate_parametrized_tests(CuteDSLHOPTests)
+instantiate_parametrized_tests(CuteDSLWrapTests)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
