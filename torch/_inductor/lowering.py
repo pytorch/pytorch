@@ -3858,6 +3858,7 @@ make_fallback(aten.adaptive_max_pool3d, override_decomp=True)
 make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
 make_fallback(aten._scaled_addmm.default, warn=False)
 make_fallback(aten._scaled_addmm_.default, warn=False)
+make_fallback(aten._to_dtype_rounded.default, warn=False)
 
 
 # 1) Easy

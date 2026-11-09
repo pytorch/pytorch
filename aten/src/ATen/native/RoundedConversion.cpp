@@ -85,8 +85,6 @@ Tensor& _to_dtype_rounded_out(
   auto iter = TensorIteratorConfig()
                   .set_check_mem_overlap(true)
                   .check_all_same_dtype(false)
-                  .declare_static_dtype(dtype)
-                  .declare_static_device(self.device())
                   .add_output(out)
                   .add_const_input(self)
                   .build();
