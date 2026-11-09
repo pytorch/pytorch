@@ -264,6 +264,9 @@ cublasGroupedArgs::cublasGroupedArgs(
   const int64_t element_size = mat1.element_size();
   const int64_t out_element_size = c.element_size();
 
+  TORCH_CHECK_VALUE(
+      batchCount_ > 0 && batchCount_ <= kMaxCublasGroupedBatchCount,
+      "batchCount must be in [1, ", kMaxCublasGroupedBatchCount, "], got ", batchCount_);
   batchCount = batchCount_;
   use_int64 = needs_int64;
 

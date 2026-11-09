@@ -1,20 +1,14 @@
 #pragma once
 
 #include <ATen/ceil_div.h>
+#include <ATen/cuda/CUDABlas.h>
 #include <c10/macros/Macros.h>
 
 #include <cstdint>
 
 namespace at::native {
 
-enum class CublasGroupedScaleLayout : uint8_t {
-  Scalar,
-  PerBatchScalar,
-  Vec128F32,
-  Block128x128F32,
-  Vec32MnK4UE8M0,
-  Vec128MnK4UE8M0,
-};
+using at::cuda::blas::CublasGroupedScaleLayout;
 
 C10_HOST_DEVICE inline bool cublas_grouped_scale_uses_pointer_array(
     CublasGroupedScaleLayout layout) {
@@ -25,6 +19,14 @@ C10_HOST_DEVICE inline bool cublas_grouped_scale_is_blockwise(
     CublasGroupedScaleLayout layout) {
   return layout != CublasGroupedScaleLayout::Scalar &&
       layout != CublasGroupedScaleLayout::PerBatchScalar;
+}
+
+C10_HOST_DEVICE inline bool cublas_grouped_scale_uses_flat_storage(
+    CublasGroupedScaleLayout layout) {
+  return layout == CublasGroupedScaleLayout::Vec128F32 ||
+      layout == CublasGroupedScaleLayout::Block128x128F32 ||
+      layout == CublasGroupedScaleLayout::Vec32MnK4UE8M0 ||
+      layout == CublasGroupedScaleLayout::Vec128MnK4UE8M0;
 }
 
 C10_HOST_DEVICE inline bool cublas_grouped_scale_requires_outer_multiple_of_4(
