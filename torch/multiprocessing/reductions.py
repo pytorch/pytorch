@@ -345,7 +345,7 @@ def reduce_tensor(tensor):
     storage = tensor._typed_storage()
 
     device_type = storage._untyped_storage.device.type
-    if device_type in ("cuda", "xpu", torch._C._get_privateuse1_backend_name()):
+    if storage._untyped_storage.device.is_accelerator:
         (
             device,
             handle,
@@ -598,7 +598,7 @@ def reduce_storage(storage):
     from . import get_sharing_strategy
 
     device_type = storage.device.type
-    if device_type in ("cuda", "xpu", torch._C._get_privateuse1_backend_name()):
+    if storage.device.is_accelerator:
         raise RuntimeError(
             f"Cannot pickle {device_type} storage; try pickling a {device_type} tensor instead"
         )

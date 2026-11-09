@@ -106,6 +106,7 @@ class _NestedSequence(Protocol[T_co]):
 class device:
     type: str  # THPDevice_type
     index: _int  # THPDevice_index
+    is_accelerator: _bool  # THPDevice_isAccelerator
 
     def __get__(self, instance, owner=None) -> device: ...
 
