@@ -6,6 +6,7 @@ Triton kernels): direct HOP use, the eager launch and wrap_cutedsl tracing (make
 non-strict export).
 """
 
+import collections
 import contextlib
 import dataclasses
 import enum
@@ -329,6 +330,65 @@ if HAS_CUTEDSL:
             grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
         )
 
+    # A kernel object whose @cute.jit __call__ is its host code, as in the CUTLASS
+    # examples, and a host function that takes one as a Constexpr and calls it:
+    # out = x * alpha.
+    class MulKernel:
+        def __init__(self, alpha):
+            self.alpha = alpha
+
+        @cute.jit
+        def __call__(
+            self,
+            mX: cute.Tensor,
+            mOut: cute.Tensor,
+            n: cutlass.Int32,
+            stream: cuda.CUstream,
+        ):
+            _mul_const_k(mX, mOut, n, self.alpha).launch(
+                grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+            )
+
+    # A kernel object whose __call__ sets attributes on it, as CUTLASS kernel objects
+    # do (self.a_dtype = mA.element_type, self.tiled_mma = ...): out = x * alpha.
+    class CachingMulKernel(MulKernel):
+        @cute.jit
+        def __call__(
+            self,
+            mX: cute.Tensor,
+            mOut: cute.Tensor,
+            n: cutlass.Int32,
+            stream: cuda.CUstream,
+        ):
+            self.dtype = mX.element_type
+            self.layout = cute.make_layout((128,))
+            _mul_const_k(mX, mOut, n, self.alpha).launch(
+                grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+            )
+
+    @cute.jit
+    def call_mul_kernel(
+        kernel: cutlass.Constexpr,
+        mX: cute.Tensor,
+        mOut: cute.Tensor,
+        n: cutlass.Int32,
+        stream: cuda.CUstream,
+    ):
+        kernel(mX, mOut, n, stream)
+
+    # A Constexpr container read on the host: out = x * scales[0].
+    @cute.jit
+    def scale_by_first_kernel(
+        mX: cute.Tensor,
+        mOut: cute.Tensor,
+        n: cutlass.Int32,
+        scales: cutlass.Constexpr,
+        stream: cuda.CUstream,
+    ):
+        _mul_const_k(mX, mOut, n, int(scales[0])).launch(
+            grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+        )
+
 
 DEVICE = "cuda"
 
@@ -634,9 +694,10 @@ class CuteDSLHOPTests(TestCase):
             launch_cutedsl_kernel(mul_cfg_kernel, args)
 
     def test_map_constant_walks_what_the_side_table_keys(self):
-        # map_constant walks the containers constant_key keys by content and copies
-        # only those whose contents fn changed. It refuses what constant_key refuses
-        # as or in a constant, with the same errors, saying where: a tensor (also of a
+        # map_constant, on which the wrapper's leaves and specialize_nested are
+        # built, walks the containers constant_key keys by content and copies only
+        # those whose contents fn changed. It refuses what constant_key refuses as or
+        # in a constant, with the same errors, saying where: a tensor (also of a
         # subclass that does not hash), a DSL runtime object and a cycle. Both walks
         # refuse a tensor before they ask constant_contents whether it is a
         # container; test/test_hop_infra.py asks it directly.
@@ -691,6 +752,59 @@ class CuteDSLHOPTests(TestCase):
         msg = r"^a constant kernel argument of type list refers to itself through "
         with self.assertRaisesRegex(ValueError, msg + r"\[1\]$"):
             map_constant(items, rules, collect)
+
+    def test_kernel_object_keyed_by_content_only_under_cutedsl_rules(self):
+        # Keying a callable object by its attributes is up to the DSL
+        # (ConstantRules.keyed_by_content): under the default rules a kernel object
+        # is keyed and stored as itself, like any other callable, while CuTeDSL's
+        # rules key it by its attributes and store a copy.
+        from torch._higher_order_ops.user_kernel_hop import (
+            _snapshot,
+            constant_key,
+            ConstantRules,
+            KernelSideTable,
+        )
+
+        kernels = [MulKernel(3.0), MulKernel(3.0)]
+        for rules, by_content in (
+            (ConstantRules(), False),
+            (CUTEDSL_CONSTANT_RULES, True),
+        ):
+            with self.subTest(rules=type(rules).__name__):
+                keys = [constant_key(k, rules) for k in kernels]
+                self.assertEqual(keys[0] == keys[1], by_content)
+                snapshot = _snapshot(kernels[0], rules)
+                self.assertEqual(snapshot is kernels[0], not by_content)
+                table = KernelSideTable(constant_rules=rules)
+                idx = [table.add_constant_args({"kernel": k}) for k in kernels]
+                self.assertEqual(idx[0] == idx[1], by_content)
+
+    def test_kernel_object_check_is_cached_per_class(self):
+        # Whether a callable object is a kernel object, which keyed_by_content asks
+        # for each one a walk meets, depends only on its class, whose __call__ is
+        # inspected once.
+        from torch._higher_order_ops.user_kernel_hop import constant_key
+        from torch._library import cutedsl as library_cutedsl
+
+        class Kernel(MulKernel):
+            pass
+
+        class Functor:
+            def __call__(self):
+                pass
+
+        rules = CUTEDSL_CONSTANT_RULES
+        check = mock.patch.object(
+            library_cutedsl,
+            "is_cutedsl_jit_function",
+            wraps=library_cutedsl.is_cutedsl_jit_function,
+        )
+        with check as is_cutedsl_jit_function:
+            answers = [rules.keyed_by_content(k) for k in (Kernel(1.0), Functor())]
+            for _ in range(2):
+                constant_key([Kernel(2.0), Functor()], rules)
+        self.assertEqual(answers, [True, False])
+        self.assertEqual(is_cutedsl_jit_function.call_count, 2)
 
     def test_constants_holding_tensors_are_refused(self):
         # The eager launch refuses a constant that holds a tensor, as constant_key
@@ -1906,6 +2020,322 @@ class CuteDSLWrapTests(TestCase):
             record = cutedsl_kernel_side_table.get_kernel(w.kernel_idx)
             self.assertEqual(record.mutates_args, ("mOut",))
 
+    def test_wrap_cutedsl_make_fx_nested_symint_specialized(self):
+        # A SymInt inside a Constexpr container is specialized like a bare one, so the
+        # side table only holds concrete values. Containers are the ones the side
+        # table walks (see constant_contents), subclasses of tuple (such as
+        # torch.Size, and a namedtuple, rebuilt with _make), list and dict included.
+        # One that cannot be rebuilt with the new items raises its own error.
+        class Scales(list):
+            pass
+
+        class ScaleMap(dict):
+            pass
+
+        class Pair(tuple):
+            __slots__ = ()
+
+            def __new__(cls, a, b):
+                return super().__new__(cls, (a, b))
+
+        Tile = collections.namedtuple("Tile", ["m", "n"])
+        w = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
+
+        def f(x, make_scales):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), make_scales(x.shape[0] // 250))
+            return out
+
+        x = _rand(1000)
+        cases = (
+            (lambda s: (s,), (4,)),
+            (lambda s: torch.Size([s]), torch.Size([4])),
+            (lambda s: Tile(s, 1), Tile(4, 1)),
+            (lambda s: Scales([s]), Scales([4])),
+            (lambda s: ScaleMap({0: s}), ScaleMap({0: 4})),
+        )
+        for make_scales, expected in cases:
+            fn = functools.partial(f, make_scales=make_scales)
+            with self.subTest(container=type(expected).__name__):
+                gm = make_fx(fn, tracing_mode="symbolic")(x)
+                (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+                scales = _scalar_args(node)["scales"]
+                self.assertIs(type(scales), type(expected))
+                self.assertEqual(scales, expected)
+                self.assertIs(type(scales[0]), int)
+                self.assertEqual(gm(x), 4 * x)
+        fn = functools.partial(f, make_scales=lambda s: Pair(s, 1))
+        with self.assertRaisesRegex(TypeError, r"__new__\(\) missing 1 required"):
+            make_fx(fn, tracing_mode="symbolic")(x)
+
+    def test_wrap_cutedsl_counter_constant(self):
+        # A Counter is a dict subclass, which the side table's snapshot and the
+        # launch's copy for the compile rebuild with its items assigned: rebuilt with
+        # update(), it would count its (key, value) pairs, and scales[0] would be 0.
+        # Through the HOP, on the fast path, with the compile cache emptied so that
+        # its launch compiles its own copy, and under make_fx.
+        from torch._library.triton import set_wrap_triton_enabled
+
+        w = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
+
+        def f(x):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), collections.Counter({0: 3}))
+            return out
+
+        x = _rand(1000)
+        self.assertEqual(f(x), 3 * x)
+        with set_wrap_triton_enabled(False), _counting_compiles() as compile_spy:
+            self.assertEqual(f(x), 3 * x)
+        self.assertEqual(compile_spy.call_count, 1)
+        gm = make_fx(f)(x)
+        (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+        scales = _scalar_args(node)["scales"]
+        self.assertIs(type(scales), collections.Counter)
+        self.assertEqual(list(scales.items()), [(0, 3)])
+        self.assertEqual(gm(x), 3 * x)
+
+    def test_wrap_cutedsl_make_fx_symint_in_object_specialized(self):
+        # The side table keys a dataclass instance or plain object by its contents
+        # (see _object_state), so a SymInt inside one, given to a Constexpr or an
+        # unannotated parameter, is specialized with a guard as inside a tuple, in a
+        # copy of the object: in a field of a frozen dataclass too, and in an
+        # attribute that is not a field (set in __post_init__).
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        @dataclasses.dataclass(frozen=True)
+        class FrozenCfg:
+            alpha: int
+
+        @dataclasses.dataclass
+        class DerivedCfg:
+            n: int
+
+            def __post_init__(self):
+                self.alpha = self.n // 2
+
+        mul_default_cfg_w = wrap_cutedsl(mul_default_cfg_kernel, mutates_args=["mOut"])
+        mul_cfg_w = wrap_cutedsl(mul_cfg_kernel, mutates_args=["mOut"])
+        cfgs = []
+
+        def f(x):
+            n = x.shape[0]
+            cfgs[:] = [MulCfg(n // 250), Cfg(n // 500), FrozenCfg(n // 125)]
+            cfgs.append(DerivedCfg(n // 100))
+            outs = [torch.empty_like(x) for _ in cfgs]
+            mul_default_cfg_w(x, outs[0], x.numel(), cfg=cfgs[0])
+            mul_cfg_w(x, outs[1], x.numel(), cfgs[1])
+            mul_default_cfg_w(x, outs[2], x.numel(), cfg=cfgs[2])
+            mul_cfg_w(x, outs[3], x.numel(), cfgs[3])
+            return outs
+
+        x = _rand(1000)
+        gm = make_fx(f, tracing_mode="symbolic")(x)
+        nodes = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+        captured = [_scalar_args(node)["cfg"] for node in nodes]
+        classes = [MulCfg, Cfg, FrozenCfg, DerivedCfg]
+        self.assertEqual([type(cfg) for cfg in captured], classes)
+        self.assertEqual([cfg.alpha for cfg in captured], [4, 2, 8, 5])
+        self.assertEqual([type(cfg.alpha) for cfg in captured], [int] * 4)
+        self.assertEqual((captured[3].n, type(captured[3].n)), (10, int))
+        self.assertEqual([type(cfg.alpha) for cfg in cfgs], [torch.SymInt] * 4)
+        size = gm.graph.find_nodes(op="placeholder")[0].meta["val"].shape[0]
+        guards = [str(guard.expr) for guard in gm.shape_env.guards]
+        for divisor, value in ((250, 4), (500, 2), (125, 8), (100, 10)):
+            self.assertIn(f"Eq(({size}//{divisor}), {value})", guards)
+        self.assertEqual(gm(x), [4 * x, 2 * x, 8 * x, 5 * x])
+
+    def test_wrap_cutedsl_error_tensor_in_container(self):
+        # Only top-level tensors become graph arguments; one inside a container would
+        # be a trace-time constant. Containers are the ones the side table walks (see
+        # constant_contents): subclasses of list too, and dicts, keys included. The
+        # error is the side table's, naming the kernel, the parameter and where the
+        # tensor sits, under make_fx and eagerly, and the launch's own, the same, on
+        # the fast path.
+        from torch._library.triton import set_wrap_triton_enabled
+
+        class Scales(list):
+            pass
+
+        w = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
+
+        def f(x, make_scales):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), make_scales(x))
+            return out
+
+        x = _rand(1000)
+        error = (
+            r"^CuTeDSL kernel scale_by_first_kernel: parameter 'scales': a constant "
+            r"kernel argument holds a tensor at {}: pass each tensor as its own "
+            r"argument$"
+        )
+        cases = {
+            "tuple": (lambda x: (x,), r"\[0\]"),
+            "list subclass": (lambda x: Scales([x]), r"\[0\]"),
+            "dict key": (lambda x: {x: 1}, r"\.keys\(\)\[0\]"),
+        }
+        for case, (make_scales, where) in cases.items():
+            fn = functools.partial(f, make_scales=make_scales)
+            with self.subTest(case=case):
+                with self.assertRaisesRegex(TypeError, error.format(where)):
+                    make_fx(fn, tracing_mode="fake")(x)
+                with self.assertRaisesRegex(TypeError, error.format(where)):
+                    fn(x)
+                with set_wrap_triton_enabled(False):
+                    with self.assertRaisesRegex(TypeError, error.format(where)):
+                        fn(x)
+
+    def test_wrap_cutedsl_error_tensor_in_object(self):
+        # A dataclass instance or plain object is a container too: a tensor inside
+        # one, in a field or in an attribute that is not a field, would be baked into
+        # a make_fx graph as a fake tensor constant, and a cute tensor or stream
+        # inside one would reach the DSL. A tensor whose class does not hash is
+        # refused as a tensor too. Each is refused with the side table's error,
+        # saying where it sits, under make_fx, eagerly and on the fast path.
+        from torch._library.triton import set_wrap_triton_enabled
+
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        class UnhashableTensor(torch.Tensor):
+            __hash__ = None
+
+        mul_default_cfg_w = wrap_cutedsl(mul_default_cfg_kernel, mutates_args=["mOut"])
+
+        def f(x, make_cfg):
+            out = torch.empty_like(x)
+            mul_default_cfg_w(x, out, x.numel(), cfg=make_cfg(x))
+            return out
+
+        def with_extra(x):
+            cfg = MulCfg(2.0)
+            cfg.extra = x
+            return cfg
+
+        x = _rand(1000)
+        unhashable_x = x.as_subclass(UnhashableTensor)
+        cute_x, stream = from_dlpack(x, assumed_align=16), _stream()
+        tensor_fix = "pass each tensor as its own argument"
+        dsl_fix = (
+            "pass torch.Tensor and Python values; PT2 converts tensors and supplies "
+            "the stream"
+        )
+        cases = (
+            (MulCfg, "tensor", r"\.alpha", tensor_fix),
+            (lambda x: Cfg([x]), "tensor", r"\.alpha\[0\]", tensor_fix),
+            (lambda x: MulCfg(unhashable_x), "tensor", r"\.alpha", tensor_fix),
+            (with_extra, "tensor", r"\.extra", tensor_fix),
+            (lambda x: MulCfg(cute_x), "_Tensor", r"\.alpha", dsl_fix),
+            (lambda x: Cfg(stream), "CUstream", r"\.alpha", dsl_fix),
+        )
+        for i, (make_cfg, held, where, fix) in enumerate(cases):
+            error = (
+                r"^CuTeDSL kernel mul_default_cfg_kernel: parameter 'cfg': a constant "
+                rf"kernel argument holds a {held} at {where}: {re.escape(fix)}$"
+            )
+            fn = functools.partial(f, make_cfg=make_cfg)
+            with self.subTest(case=i):
+                with self.assertRaisesRegex(TypeError, error):
+                    make_fx(fn, tracing_mode="fake")(x)
+                with self.assertRaisesRegex(TypeError, error):
+                    fn(x)
+                with set_wrap_triton_enabled(False):
+                    with self.assertRaisesRegex(TypeError, error):
+                        fn(x)
+
+    def test_wrap_cutedsl_error_cyclic_constant(self):
+        # A constant that refers to itself (a config object with a back-pointer, one
+        # that is a key of a dict it holds, one holding a logging.Logger, whose
+        # manager's loggerDict holds the logger, or a list holding itself) is refused
+        # instead of walked until a RecursionError: under make_fx, before a SymInt in
+        # it is specialized in a copy, and eagerly, also on the fast path, with the
+        # side table's ValueError naming the kernel, the parameter and the cycle. The
+        # logger is one of its own manager's: the cycle the walk meets first in a
+        # logger of the process depends on the process's loggers and handlers.
+        import traceback
+
+        from torch._library.triton import set_wrap_triton_enabled
+
+        log = logging.Manager(logging.RootLogger(logging.WARNING)).getLogger("cfg")
+
+        class Parent:
+            def __init__(self, child):
+                self.child = child
+
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+                self.parent = Parent(self)
+
+        class KeyCfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+                self.lookup = {self: 1}
+
+        class LoggingCfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+                self.log = log
+
+        def self_list(alpha):
+            cfg = [alpha]
+            cfg.append(cfg)
+            return cfg
+
+        mul_cfg_w = wrap_cutedsl(mul_cfg_kernel, mutates_args=["mOut"])
+
+        def f(x, make_cfg):
+            out = torch.empty_like(x)
+            mul_cfg_w(x, out, x.numel(), make_cfg(x.shape[0] // 500))
+            return out
+
+        x = _rand(1000)
+        cases = (
+            (Cfg, r"Cfg refers to itself through \.parent\.child"),
+            (KeyCfg, r"KeyCfg refers to itself through \.lookup\.keys\(\)\[0\]"),
+            (
+                LoggingCfg,
+                r"Logger refers to itself through \.manager\.loggerDict\['cfg'\]",
+            ),
+            (self_list, r"list refers to itself through \[1\]"),
+        )
+        for make_cfg, cycle in cases:
+            fn = functools.partial(f, make_cfg=make_cfg)
+            error = (
+                "^CuTeDSL kernel mul_cfg_kernel: parameter 'cfg': a constant kernel "
+                f"argument of type {cycle}$"
+            )
+            with self.subTest(cfg=make_cfg.__name__):
+                with self.assertRaisesRegex(ValueError, error):
+                    make_fx(fn, tracing_mode="symbolic")(x)
+                with self.assertRaisesRegex(ValueError, error) as caught:
+                    fn(x)
+                # Not chained to the walk's ValueError, which says the same.
+                printed = "".join(traceback.format_exception(caught.exception))
+                self.assertNotIn("During handling", printed)
+                with set_wrap_triton_enabled(False):
+                    with self.assertRaisesRegex(ValueError, error):
+                        fn(x)
+
+    def test_wrap_cutedsl_cutlass_values_as_constants(self):
+        # cutlass Numeric values (like dtype classes and enums) are ordinary
+        # constants; only DSL tensors and streams are refused.
+        x = _rand(1000)
+        out = torch.empty_like(x)
+        mul_const_w(x, out, 1000, cutlass.Float32(2.0))
+        self.assertEqual(out, 2 * x)
+
+        def f(x):
+            out = torch.empty_like(x)
+            mul_const_w(x, out, x.numel(), cutlass.Float32(3.0))
+            return out
+
+        self.assertEqual(make_fx(f)(x)(x), 3 * x)
+
     def test_wrap_cutedsl_returns_traceable_wrapper(self):
         w = wrap_cutedsl(add_kernel, mutates_args=["mOut"])
         self.assertIsInstance(w, TraceableCuteDSLKernelWrapper)
@@ -2093,6 +2523,53 @@ class CuteDSLWrapTests(TestCase):
         _reference_launch(add_one_2d_kernel, x, ref)
         add_one_2d_w(x, out)
         self.assertEqual(out, ref)
+
+    def test_wrap_cutedsl_eager_fast_path_skips_hop(self):
+        # With wrap_triton disabled, as in a triton_op's eager backend, the wrapper
+        # launches directly instead of dispatching the HOP, and still checks the call.
+        # It neither walks nor specializes an argument itself: the launch walks each
+        # constant once, to key it, and refuses a tensor in one as the HOP path does.
+        # The kernel name comes from the parsed signature (CuteDSLHostFnInfo.name),
+        # not from unwrapping the host function again.
+        from torch._higher_order_ops import cutedsl_kernel_wrap, user_kernel_hop
+        from torch._library.triton import set_wrap_triton_enabled
+
+        hop_calls = []
+        hop_type = type(cutedsl_kernel_wrapper_mutation)
+        hop_call = hop_type.__call__
+
+        def spy_hop_call(hop, *args, **kwargs):
+            hop_calls.append(kwargs["kernel_idx"])
+            return hop_call(hop, *args, **kwargs)
+
+        def spy(module, name):
+            return mock.patch.object(module, name, wraps=getattr(module, name))
+
+        scale_by_first_w = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
+        x, y = _rand(1000), _rand(1000)
+        out, out2, out3 = (torch.zeros_like(x) for _ in range(3))
+        with mock.patch.object(hop_type, "__call__", spy_hop_call):
+            add_w(x, y, out, 1000)
+            self.assertEqual(hop_calls, [add_w.kernel_idx])  # the spy sees the HOP
+            with set_wrap_triton_enabled(False):
+                add_w(x, y, out2, 1000)
+                walk = spy(cutedsl_kernel_wrap, "map_constant")
+                key = spy(user_kernel_hop, "constant_key")
+                name = spy(cutedsl_kernel_wrap, "cutedsl_kernel_name")
+                with walk as map_constant, key as constant_key, name as kernel_name:
+                    scale_by_first_w(x, out3, 1000, (2,))
+                self.assertEqual(map_constant.call_count, 0)
+                self.assertEqual(constant_key.call_count, 1)
+                self.assertEqual(kernel_name.call_count, 0)
+                with self.assertRaisesRegex(TypeError, "its stream parameter"):
+                    add_w(x, y, out2, 1000, stream=_stream())
+                error = r"'scales': a constant kernel argument holds a tensor at \[0\]"
+                with self.assertRaisesRegex(TypeError, error):
+                    scale_by_first_w(x, out2, 1000, (x,))
+        self.assertEqual(hop_calls, [add_w.kernel_idx])
+        self.assertEqual(out, x + y)
+        self.assertEqual(out2, x + y)
+        self.assertEqual(out3, 2 * x)
 
     def test_wrap_cutedsl_error_stream_passed(self):
         # A call that passes the stream does not bind: a TypeError (by keyword, the
@@ -2370,6 +2847,169 @@ class CuteDSLWrapTests(TestCase):
         with mock.patch.dict(sys.modules, {"cutlass": None}):
             self.assertFalse(is_cutedsl_jit_function(add_kernel))
 
+    def test_wrap_cutedsl_error_bound_method(self):
+        # A bound @cute.jit method, or a kernel object standing for its bound
+        # __call__ as in cute.compile, is refused with an error that names the method
+        # and a workaround, which works: a host function that takes the object as a
+        # Constexpr and calls it. An object whose __call__ is not @cute.jit is not
+        # a kernel object.
+        kernel = MulKernel(3.0)
+        error = (
+            r"^CuTeDSL kernel __call__: wrap_cutedsl does not support bound methods or "
+            r"kernel objects \(got MulKernel\.__call__\): instead, wrap a @cute\.jit "
+            r"function that takes the object as a cutlass\.Constexpr parameter and "
+            r"calls the method on it, and pass the object to that wrapper, which keys "
+            r"a kernel object by its attributes: equal objects share one compile, and "
+            r"one mutated between calls is compiled again$"
+        )
+        for host_fn in (kernel.__call__, kernel):
+            with self.subTest(host_fn=type(host_fn).__name__):
+                with self.assertRaisesRegex(TypeError, error):
+                    wrap_cutedsl(host_fn, mutates_args=["mOut"])
+        error = (
+            r"^CuTeDSL kernel cutedsl_kernel: wrap_cutedsl only works on host "
+            r"functions decorated with @cute\.jit$"
+        )
+        with self.assertRaisesRegex(TypeError, error):
+            wrap_cutedsl(add_w, mutates_args=["mOut"])
+
+        w = wrap_cutedsl(call_mul_kernel, mutates_args=["mOut"])
+
+        def f(x):
+            out = torch.empty_like(x)
+            w(kernel, x, out, x.numel())
+            return out
+
+        x = _rand(1000)
+        self.assertEqual(f(x), 3 * x)
+        self.assertEqual(make_fx(f)(x)(x), 3 * x)
+
+    def test_wrap_cutedsl_kernel_object_keyed_by_attributes(self):
+        # A kernel object given to a host function that calls it is keyed by its
+        # attributes (see _object_state), in the eager compile cache and the side
+        # table alike: equal objects, such as one built for each call, share one
+        # compile and one side-table entry, which holds a snapshot, and an object
+        # mutated between calls is compiled again. Any other callable object is keyed
+        # by its identity.
+        from torch._library.triton import set_wrap_triton_enabled
+
+        w = wrap_cutedsl(call_mul_kernel, mutates_args=["mOut"])
+
+        def f(x, kernel):
+            out = torch.empty_like(x)
+            w(kernel, x, out, x.numel())
+            return out
+
+        x = _rand(1000)
+        with _counting_compiles() as compile_spy:
+            self.assertEqual(f(x, MulKernel(3.0)), 3 * x)
+            self.assertEqual(f(x, MulKernel(3.0)), 3 * x)
+            with set_wrap_triton_enabled(False):
+                self.assertEqual(f(x, MulKernel(3.0)), 3 * x)
+            self.assertEqual(compile_spy.call_count, 1)
+            kernel = MulKernel(3.0)
+            f(x, kernel)
+            kernel.alpha = 0.5
+            self.assertEqual(f(x, kernel), 0.5 * x)
+            self.assertEqual(compile_spy.call_count, 2)
+
+        kernels = [MulKernel(4.0), MulKernel(4.0)]
+        gms = [make_fx(functools.partial(f, kernel=k))(x) for k in kernels]
+        nodes = [_hop_nodes(gm, cutedsl_kernel_wrapper_mutation)[0] for gm in gms]
+        idx = nodes[0].kwargs["constant_args_idx"]
+        self.assertEqual(nodes[1].kwargs["constant_args_idx"], idx)
+        stored = cutedsl_kernel_side_table.get_constant_args(idx)["kernel"]
+        self.assertIs(type(stored), MulKernel)
+        self.assertFalse(any(stored is k for k in kernels))
+        kernels[0].alpha = 1.0
+        self.assertEqual(stored.alpha, 4.0)
+        self.assertEqual([gm(x) for gm in gms], [4 * x, 4 * x])
+
+        class Functor:
+            def __call__(self):
+                pass
+
+        table = cutedsl_kernel_side_table
+        self.assertNotEqual(
+            table.add_constant_args({"c": Functor()}),
+            table.add_constant_args({"c": Functor()}),
+        )
+
+    def test_wrap_cutedsl_kernel_object_that_sets_attributes(self):
+        # The compile runs a kernel object's __call__, which may set attributes on it
+        # (here a cute layout, which does not hash): launch_cutedsl_kernel compiles
+        # with a copy, so neither the caller's object nor the side table's snapshot
+        # changes, and both keep matching the key of the kernel compiled for them.
+        from torch._library.triton import set_wrap_triton_enabled
+
+        w = wrap_cutedsl(call_mul_kernel, mutates_args=["mOut"])
+
+        def f(x, kernel):
+            out = torch.empty_like(x)
+            w(kernel, x, out, x.numel())
+            return out
+
+        x = _rand(1000)
+        kernel, fast_kernel = CachingMulKernel(3.0), CachingMulKernel(2.0)
+        with _counting_compiles() as compile_spy:
+            for k in (kernel, kernel, CachingMulKernel(3.0)):
+                self.assertEqual(f(x, k), 3 * x)
+            gm = make_fx(functools.partial(f, kernel=CachingMulKernel(3.0)))(x)
+            self.assertEqual(gm(x), 3 * x)
+            self.assertEqual(gm(x), 3 * x)
+            with set_wrap_triton_enabled(False):
+                self.assertEqual(f(x, fast_kernel), 2 * x)
+                self.assertEqual(f(x, fast_kernel), 2 * x)
+        self.assertEqual(compile_spy.call_count, 2)
+        self.assertEqual(vars(fast_kernel), {"alpha": 2.0})
+
+    def test_wrap_cutedsl_error_in_kernel_object(self):
+        # A kernel object is a container like a plain object (see _object_state): one
+        # holding a tensor, a reference cycle (a logging.Logger of its own manager,
+        # whose loggerDict holds it) or an unhashable value (a set or a numpy array,
+        # which a kernel object keyed by identity could hold) is refused, under
+        # make_fx, eagerly and on the fast path, with the side table's error naming
+        # the kernel and the parameter.
+        from torch._library.triton import set_wrap_triton_enabled
+
+        w = wrap_cutedsl(call_mul_kernel, mutates_args=["mOut"])
+
+        def f(x, extra):
+            kernel = MulKernel(3.0)
+            kernel.extra = extra
+            out = torch.empty_like(x)
+            w(kernel, x, out, x.numel())
+            return out
+
+        x = _rand(1000)
+        log = logging.Manager(logging.RootLogger(logging.WARNING)).getLogger("cfg")
+        unhashable = (
+            "is unhashable: pass a hashable value, or a list, tuple, dict, dataclass "
+            "or plain object of them"
+        )
+        tensor = r"holds a tensor at \.extra: pass each tensor as its own argument$"
+        cycle = r"refers to itself through \.manager\.loggerDict\['cfg'\]$"
+        cases = (
+            (x, TypeError, tensor),
+            (log, ValueError, f"of type Logger {cycle}"),
+            ({1, 2}, TypeError, f"of type set {unhashable}$"),
+            (np.arange(3), TypeError, f"of type ndarray {unhashable}$"),
+        )
+        prefix = (
+            "^CuTeDSL kernel call_mul_kernel: parameter 'kernel': a constant kernel "
+            "argument "
+        )
+        for extra, error_type, error in cases:
+            fn = functools.partial(f, extra=extra)
+            with self.subTest(extra=type(extra).__name__):
+                with self.assertRaisesRegex(error_type, prefix + error):
+                    make_fx(fn, tracing_mode="fake")(x)
+                with self.assertRaisesRegex(error_type, prefix + error):
+                    fn(x)
+                with set_wrap_triton_enabled(False):
+                    with self.assertRaisesRegex(error_type, prefix + error):
+                        fn(x)
+
     def test_wrap_cutedsl_error_unwrapped_host_fn(self):
         # inspect.unwrap(host_fn) is the user's undecorated function. Whether it
         # still carries _dsl_cls depends on whether it was compiled before (the DSL
@@ -2387,7 +3027,8 @@ class CuteDSLWrapTests(TestCase):
     def test_wrap_cutedsl_error_dsl_runtime_object_arg(self):
         # PT2 makes the DSL's runtime objects itself: a cute tensor, a pointer
         # (cuda.CUdeviceptr) or a stream given as an argument is refused, through the
-        # HOP or not, as one inside a constant is.
+        # HOP or not, as one inside a constant is
+        # (test_wrap_cutedsl_error_tensor_in_object).
         from torch._library.triton import set_wrap_triton_enabled
 
         x, y = _rand(16), _rand(16)
@@ -2464,15 +3105,21 @@ class CuteDSLWrapTests(TestCase):
         # raise_user_error, which UserKernelHOPifier declares for every capture
         # environment and the tracing HOPifier implements by raising the exception it
         # is given: from wrap_cutedsl (normalize_mutates_args, get_host_fn_info),
-        # and from binding a call (check_call and bind_call's own checks), also on the
-        # fast path.
+        # from binding a call (check_call and bind_call's own checks), also on the
+        # fast path, and from the walk of a constant (bind_args).
         from torch._higher_order_ops.cutedsl_kernel_wrap import TracingCuteDSLHOPifier
         from torch._library.triton import set_wrap_triton_enabled
+
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+                self.me = self
 
         def on_fast_path(call):
             with set_wrap_triton_enabled(False):
                 call()
 
+        mul_cfg_w = wrap_cutedsl(mul_cfg_kernel, mutates_args=["mOut"])
         x, y = _rand(16), _rand(16)
         out = torch.zeros_like(x)
         missing = r"^CuTeDSL kernel add_kernel: missing arguments \['n'\]$"
@@ -2502,6 +3149,12 @@ class CuteDSLWrapTests(TestCase):
                 lambda: add_w(x, y, out, 16, _stream()),
                 TypeError,
                 "^CuTeDSL kernel add_kernel: takes 4 positional arguments ",
+            ),
+            "cyclic constant": (
+                lambda: mul_cfg_w(x, out, 16, Cfg(2.0)),
+                ValueError,
+                r"^CuTeDSL kernel mul_cfg_kernel: parameter 'cfg': a constant kernel "
+                r"argument of type Cfg refers to itself through \.me$",
             ),
         }
         real = TracingCuteDSLHOPifier.raise_user_error
@@ -2558,6 +3211,23 @@ def forward(self, x_1, y_1):
         if tracing_mode == "symbolic":
             x, y = _rand(77), _rand(77)
             self.assertEqual(gm(x, y), x + y)
+
+    def test_wrap_cutedsl_make_fx_constexpr_specialized(self):
+        # A Constexpr param is baked into the compiled kernel: a symbolic value is
+        # specialized to a Python int, while the runtime scalar n stays symbolic.
+        def f(x):
+            out = torch.empty_like(x)
+            mul_const_w(x, out, x.numel(), x.shape[0] // 250)
+            return out
+
+        x = _rand(1000)
+        gm = make_fx(f, tracing_mode="symbolic")(x)
+        (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+        alpha = _scalar_args(node)["alpha"]
+        self.assertIs(type(alpha), int)
+        self.assertEqual(alpha, 4)
+        self.assertIsInstance(node.kwargs["kwargs"]["n"], torch.fx.Node)
+        self.assertEqual(gm(x), 4 * x)
 
     def test_wrap_cutedsl_make_fx_unannotated_scalar_stays_symbolic(self):
         # The DSL converts a Python int for an unannotated parameter to a runtime

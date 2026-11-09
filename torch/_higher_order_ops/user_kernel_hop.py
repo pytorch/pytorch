@@ -21,7 +21,7 @@ from typing import Any, Generic, Literal, NamedTuple, Never, TYPE_CHECKING, Type
 
 import torch.fx as fx
 import torch.utils._pytree as pytree
-from torch import Tensor
+from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import _dispatch_keys, DispatchKey
 from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger, TRIGGER_DSLS
 from torch._higher_order_ops.utils import redirect_to_mode
@@ -35,7 +35,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.fx.experimental.symbolic_shapes import guard_or_false
+from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_scalar
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -121,6 +121,11 @@ class ConstantRules:
         or None for any other value."""
         return None
 
+    def keyed_by_content(self, value: object) -> bool:
+        """Whether ``value``, a callable object, is keyed and copied by its attributes
+        as a plain object is (other callables are keyed as themselves)."""
+        return False
+
     def refusal(self, cls: type) -> str | None:
         """What to pass instead of a value of type ``cls``, one of the DSL's objects
         that PT2 makes for each launch itself (a DSL tensor or stream, say), which a
@@ -133,21 +138,28 @@ def _object_state(value: object, rules: ConstantRules) -> dict[str, object] | No
     fields of a dataclass instance followed by the other entries of its __dict__
     (attributes set ad hoc or in __post_init__), or the __dict__ of a plain object
     (one with no __slots__ attributes that is not callable or a module, of a class
-    that does not hash by value), such as a mutable config object. None for any other
-    value, the DSL's own values and tensors (of a subclass that does not hash too)
-    included, and for an object, a dataclass instance too, whose class has a built-in
-    base keeping state outside __dict__ (see _has_builtin_state).
+    that does not hash by value), such as a mutable config object, or of a callable
+    object the DSL keys by content (ConstantRules.keyed_by_content), such as a
+    CuTeDSL kernel object, one that would be a plain object but for its class's
+    @cute.jit __call__ (a host function takes one as a Constexpr and calls it). Equal
+    objects then share one side-table entry and one compile, kernel objects built
+    for each call included, and an object mutated between launches is compiled
+    again. None for any other value, the DSL's own values and tensors (of a subclass
+    that does not hash too) included, and for an object, a dataclass instance too,
+    whose class has a built-in base keeping state outside __dict__ (see
+    _has_builtin_state).
 
     Limitation: an object with state in __slots__ attributes that are not dataclass
-    fields or in a built-in base (see _has_builtin_state), or a callable object other
-    than a dataclass instance (a functor), is keyed as itself, by identity unless its
-    class defines equality and hashing (a dataclass's compares its fields alone), and
-    refused if it is unhashable (as a dataclass with eq=True that is not frozen is):
-    mutating it between launches reuses the kernel compiled for its old contents, and a
-    new object with the same contents is compiled again. Such an object also stays in
-    memory, with anything it holds, a tensor included (constant_key does not look inside
-    it): a side-table entry holds it for the life of the process (see KernelSideTable),
-    and so does the eager compile cache (see torch/_native/cutedsl/user_kernel.py)."""
+    fields or in a built-in base (see _has_builtin_state), or a callable object that is
+    not a dataclass instance and that the DSL does not key by content (a functor), is
+    keyed as itself, by identity unless its class defines equality and hashing (a
+    dataclass's compares its fields alone), and refused if it is unhashable (as a
+    dataclass with eq=True that is not frozen is): mutating it between launches reuses
+    the kernel compiled for its old contents, and a new object with the same contents is
+    compiled again. Such an object also stays in memory, with anything it holds, a
+    tensor included (constant_key does not look inside it): a side-table entry holds it
+    for the life of the process (see KernelSideTable), and so does the eager compile
+    cache (see torch/_native/cutedsl/user_kernel.py)."""
     cls = type(value)
     if (
         rules.is_dsl_value(value)
@@ -167,8 +179,8 @@ def _object_state(value: object, rules: ConstantRules) -> dict[str, object] | No
     if (
         (cls.__hash__ is None or cls.__hash__ is object.__hash__)
         and hasattr(value, "__dict__")
-        and not callable(value)
         and not isinstance(value, types.ModuleType)
+        and (not callable(value) or rules.keyed_by_content(value))
     ):
         return vars(value)
     return None
@@ -919,3 +931,10 @@ class UserKernelHOPifier:
 
     def get_value(self, val: Any) -> Any:
         raise NotImplementedError("abstract method")
+
+
+def specialize_symbolic(arg: Any) -> Any:
+    # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
+    if isinstance(arg, (SymInt, SymBool, SymFloat)):
+        return guard_scalar(arg)
+    return arg

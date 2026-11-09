@@ -28,14 +28,17 @@ from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
 from torch._higher_order_ops.user_kernel_hop import (
+    constant_key,
     ConstantRules,
     functional_hop_dense,
     functional_hop_fake,
     functionalize_functional_hop,
     functionalize_mutation_hop,
     KernelSideTable,
+    map_constant,
     register_user_kernel_hop,
     register_user_kernel_hop_dispatch,
+    specialize_symbolic,
     store_non_graphable_args,
     trace_user_kernel_wrapper,
     UserKernelHOPifier,
@@ -135,6 +138,11 @@ _DSL_RUNTIME_OBJECT_FIX = (
     "pass torch.Tensor and Python values; PT2 converts tensors and supplies the stream"
 )
 
+# class -> whether its instances are kernel objects (see keyed_by_content).
+_kernel_object_classes: "weakref.WeakKeyDictionary[type, bool]" = (
+    weakref.WeakKeyDictionary()
+)
+
 
 class _CuteDSLConstantRules(ConstantRules):
     def is_dsl_value(self, value: object) -> bool:
@@ -144,6 +152,17 @@ class _CuteDSLConstantRules(ConstantRules):
         # A cutlass Numeric, such as cutlass.Float32(2.0), is keyed by its value.
         inner = getattr(value, "value", None) if self.is_dsl_value(value) else None
         return inner if isinstance(inner, (bool, int, float)) else None
+
+    def keyed_by_content(self, value: object) -> bool:
+        # A kernel object: its class's __call__ is a @cute.jit host function.
+        cls = type(value)
+        answer = _kernel_object_classes.get(cls)
+        if answer is None:
+            from torch._library.cutedsl import is_cutedsl_jit_function
+
+            answer = is_cutedsl_jit_function(cls.__call__)
+            _kernel_object_classes[cls] = answer
+        return answer
 
     def refusal(self, cls: type) -> str | None:
         return _DSL_RUNTIME_OBJECT_FIX if is_dsl_runtime_object(cls) else None
@@ -795,24 +814,36 @@ class CuteDSLHOPifier(UserKernelHOPifier):
     A CuTeDSL launch has no grid, autotuner or heuristics, so what is left is binding
     the call to the host function's signature: the stream parameter is supplied at
     launch and must not be passed; Constexpr arguments are baked into the compiled
-    kernel; tensors and scalars are kernel arguments (see CuteDSLHostFnInfo).
+    kernel, so symbolic values for them are specialized; tensors and scalars are
+    kernel arguments (see CuteDSLHostFnInfo).
 
-    Every mistake of the user's that init_variable and bind_call find (a write set,
-    host function or call that PT2 cannot take) goes through raise_user_error (see
-    UserKernelHOPifier) as a TypeError or ValueError naming the kernel and any
-    parameter involved: the one CuteDSLKernel or the eager launch raises for the same
-    mistake, where they check it. A constant that the side table refuses (one holding
-    a tensor, a DSL runtime object or itself, or an unhashable one) is refused when
-    call_HOP stores it, with the side table's own error. What wrap_cutedsl cannot
-    wrap (a function that is not ``@cute.jit``, a bound ``@cute.jit`` method, a
-    kernel object) it refuses itself, with a TypeError it raises before any HOPifier
-    is involved.
+    Every mistake of the user's that it finds (a write set, host function or call
+    that PT2 cannot take) goes through raise_user_error (see UserKernelHOPifier) as
+    a TypeError or ValueError naming the kernel and any parameter involved: the one
+    CuteDSLKernel or the eager launch raises for the same mistake, where they check
+    it. What wrap_cutedsl cannot wrap (a function that is not ``@cute.jit``, a bound
+    ``@cute.jit`` method, a kernel object) it refuses itself, with a TypeError it
+    raises before any HOPifier is involved.
     """
 
     def is_tensor(self, val: Any) -> bool:
         raise NotImplementedError("abstract method")
 
     def python_type(self, val: Any) -> type:
+        raise NotImplementedError("abstract method")
+
+    def leaves(self, val: Any) -> list[Any]:
+        """The values inside a container argument (the value itself otherwise):
+        containers are what the side table keys by content (see constant_contents).
+        Refuses a tensor or a DSL runtime object in it (only top-level tensors become
+        graph arguments; one inside a container would be baked in as a trace-time
+        constant) and a cycle, with the TypeError or ValueError of the side table's
+        walk, which says where it sits; bind_args re-raises it naming the kernel and
+        the parameter."""
+        raise NotImplementedError("abstract method")
+
+    def specialize_nested(self, variable: Any, val: Any) -> Any:
+        """val with every symbolic value in it (or itself) specialized."""
         raise NotImplementedError("abstract method")
 
     def call_HOP(  # type: ignore[no-untyped-def]
@@ -859,7 +890,7 @@ class CuteDSLHOPifier(UserKernelHOPifier):
         that does not bind, a tensor for a scalar parameter, a DSL runtime object,
         a parameter left to a tensor default, and a written parameter given or left
         to anything but a tensor or None. The eager fast path launches the result,
-        and the launch walks each constant."""
+        and the launch walks each constant (see bind_args)."""
         info = self.host_fn_info(variable.kernel)
         name = info.name
         if len(args) > info.stream_index:
@@ -927,6 +958,35 @@ class CuteDSLHOPifier(UserKernelHOPifier):
                 )
         return combined_args
 
+    def bind_args(
+        self,
+        variable: Any,
+        args: tuple[Any, ...] | list[Any],
+        kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """bind_call, then each argument that is not a tensor walked as the side
+        table walks a constant (leaves), which refuses what the side table refuses in
+        it, and the symbolic values in it specialized where the DSL bakes them into
+        the compiled kernel."""
+        combined_args = self.bind_call(variable, args, kwargs)
+        info = self.host_fn_info(variable.kernel)
+        for key, val in combined_args.items():
+            if self.is_tensor(val):
+                continue
+            try:
+                leaves = self.leaves(val)
+            except (TypeError, ValueError) as e:
+                msg = f"CuTeDSL kernel {info.name}: parameter {key!r}: {e}"
+                self.raise_user_error(type(e)(msg))
+            is_container = not (len(leaves) == 1 and leaves[0] is val)
+            if key in info.constexpr_params or is_container:
+                # The DSL bakes a Constexpr argument into the compiled kernel, and a
+                # container can only be a side-table constant, so symbolic values in
+                # either are specialized (see [Note: Specialize tl.constexpr args in
+                # user-defined triton kernels]).
+                combined_args[key] = self.specialize_nested(variable, val)
+        return combined_args
+
     def call_cutedsl_kernel(
         self,
         variable: Any,
@@ -934,7 +994,7 @@ class CuteDSLHOPifier(UserKernelHOPifier):
         kwargs: dict[str, Any],
         tx: Any,
     ) -> Any:
-        return self.call_HOP(variable, self.bind_call(variable, args, kwargs), tx)
+        return self.call_HOP(variable, self.bind_args(variable, args, kwargs), tx)
 
 
 ###############################################################################
@@ -944,13 +1004,32 @@ class CuteDSLHOPifier(UserKernelHOPifier):
 
 class TracingCuteDSLHOPifier(CuteDSLHOPifier):
     def raise_user_error(self, exc: TypeError | ValueError) -> Never:
-        raise exc
+        # from None: where exc is an error caught, or one that translates it,
+        # chaining would print its message twice.
+        raise exc from None
 
     def is_tensor(self, val: Any) -> bool:
         return isinstance(val, Tensor)
 
     def python_type(self, val: Any) -> type:
         return type(val)
+
+    def leaves(self, val: Any) -> list[Any]:
+        leaves: list[Any] = []
+
+        def collect(leaf: Any) -> Any:
+            if not isinstance(leaf, (SymInt, SymFloat, SymBool)):
+                # Also an unhashable value, as the side table would refuse it.
+                constant_key(leaf, CUTEDSL_CONSTANT_RULES)
+            leaves.append(leaf)
+            return leaf
+
+        map_constant(val, CUTEDSL_CONSTANT_RULES, collect)
+        return leaves
+
+    def specialize_nested(self, variable: Any, val: Any) -> Any:
+        # bind_args has walked val with leaves, which refuses a cycle.
+        return map_constant(val, CUTEDSL_CONSTANT_RULES, specialize_symbolic)
 
     def call_HOP(
         self,
@@ -1001,7 +1080,8 @@ class TraceableCuteDSLKernelWrapper:
                 self, args, kwargs, None
             )
         # Eager fast path (e.g. inside a triton_op's eager backend): launch directly,
-        # skipping the HOP dispatch; the launch walks each constant once, to key it.
+        # skipping the HOP dispatch. Nothing is symbolic, and the launch walks each
+        # constant once, to key it, refusing what bind_args' walk refuses.
         from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
         launch_cutedsl_kernel(

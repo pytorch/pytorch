@@ -73,7 +73,14 @@ def wrap_cutedsl(
     the side table that holds them for make_fx and export: a list, tuple, dict,
     dataclass instance or plain object by its type and contents, which must not hold
     a tensor or a DSL tensor, pointer or stream, and must be hashable values or such
-    containers.
+    containers. A bound ``@cute.jit`` method or a kernel object (one whose class's
+    ``__call__`` is ``@cute.jit``) cannot be wrapped: wrap a ``@cute.jit`` function
+    that takes the object as a ``cutlass.Constexpr`` parameter and calls the method
+    on it, and pass the object to that wrapper. A kernel object is keyed by its
+    attributes like a plain object: equal objects, such as one built for each call,
+    share one compile, one mutated between calls is compiled again, and one with an
+    unhashable attribute (a set, a numpy array, or a cute layout that a direct
+    ``cute.compile`` of it stored on it) is refused.
 
     Examples:
 
@@ -115,6 +122,20 @@ def wrap_cutedsl(
         TraceableCuteDSLKernelWrapper,
     )
 
+    # A kernel object stands for its bound __call__, as in cute.compile.
+    bound = host_fn
+    if callable(host_fn) and not inspect.ismethod(host_fn):
+        bound = host_fn.__call__
+    if inspect.ismethod(bound) and is_cutedsl_jit_function(bound.__func__):
+        raise TypeError(
+            f"CuTeDSL kernel {cutedsl_kernel_name(bound)}: wrap_cutedsl does not "
+            f"support bound methods or kernel objects (got {bound.__qualname__}): "
+            "instead, wrap a @cute.jit function that takes the object as a "
+            "cutlass.Constexpr parameter and calls the method on it, and pass the "
+            "object to that wrapper, which keys a kernel object by its attributes: "
+            "equal objects share one compile, and one mutated between calls is "
+            "compiled again"
+        )
     if not is_cutedsl_jit_function(host_fn):
         raise TypeError(
             f"CuTeDSL kernel {cutedsl_kernel_name(host_fn)}: wrap_cutedsl only works "
