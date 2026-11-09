@@ -5239,7 +5239,7 @@ Here are the ways to call ``to``:
     ``"to_nearest_even"`` round up.
 
     The results are the same on CPU and CUDA, except that NaN may be encoded
-    differently (e.g. without its sign). On CUDA, NaN can also differ between
+    differently (e.g. without its sign). NaN can also differ between
     ``round="to_nearest_even"`` and a conversion without :attr:`round`.
 
     A device change, if any, is a separate transfer, and the result is never
@@ -5268,8 +5268,11 @@ Example::
     tensor([[-0.5044,  0.0005],
             [ 0.3310, -0.0584]], dtype=torch.float64, device='cuda:0')
 
-    >>> torch.tensor([0.1, 0.75, -0.75]).to(torch.bfloat16, round="toward_positive")
-    tensor([ 0.1001,  0.7500, -0.7500], dtype=torch.bfloat16)
+    >>> x = torch.tensor([0.1, -0.1])
+    >>> x.to(torch.bfloat16)
+    tensor([ 0.1001, -0.1001], dtype=torch.bfloat16)
+    >>> x.to(torch.bfloat16, round="toward_zero")
+    tensor([ 0.0996, -0.0996], dtype=torch.bfloat16)
 """.format(**common_args),
 )
 

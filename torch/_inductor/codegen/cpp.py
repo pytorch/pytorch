@@ -647,7 +647,7 @@ def arith_promoted(op, a, b):
 
 
 class CppOverrides(OpOverrides):
-    """Map element-wise ops to scalar C++ expressions for the CPU backend."""
+    """Map element-wise ops to scalar C++ expressions (CppVecOverrides is the vectorized version)"""
 
     @staticmethod
     def add(a, b):
@@ -809,11 +809,15 @@ class CppOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def sqrt(x):
+        if config.cpp.sqrt_without_errno:
+            return f"sqrt_without_errno({x})"
         return f"std::sqrt({x})"
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def rsqrt(x):
+        if config.cpp.sqrt_without_errno:
+            return f"1 / sqrt_without_errno({x})"
         return f"1 / std::sqrt({x})"
 
     @staticmethod
@@ -2037,6 +2041,9 @@ class CppVecOverrides(CppOverrides):
                 if (scalar_func.__name__ == "to_dtype_bitcast")
                 else octype
             )
+            if scalar_func.__name__ == "to_dtype_rounded":
+                octype = DTYPE_TO_CPP[args[1]]
+                n_vec = kernel._get_num_vectors(args[1])
             with code.indent():
                 for argidx, arg in enumerate(args):
                     if isinstance(arg, CppCSEVariable):
@@ -3487,6 +3494,8 @@ class CppVecKernel(CppKernel):
                 vec_dtype = torch.float if is_bool else dtype
                 vec = f"at::vec::Vectorized<{DTYPE_TO_CPP[vec_dtype]}>"
                 vec_reduce_all_func = f"at::vec::vec_reduce_all<{DTYPE_TO_CPP[vec_dtype]}, {self._get_num_vectors(vec_dtype)}>"
+                if config.cpp.simd_horizontal_reduction:
+                    vec_reduce_all_func = f"simd_vec_reduce_all<{DTYPE_TO_CPP[vec_dtype]}, {self._get_num_vectors(vec_dtype)}>"
                 result_vec = f"{acc_vec}"
                 if use_acc_helper:
                     if reduction_type != "sum":
@@ -4163,10 +4172,6 @@ class TilingSelect:
         if not all_dtypes:
             raise AssertionError("expected all_dtypes")
         if any(dtype not in VECTORIZABLE_DTYPES for dtype in all_dtypes):
-            return [], [], KernelOpStats()
-        # The scalarized fallback of CppVecKernel assumes the same number of
-        # elements per vector for inputs and outputs, which narrowing breaks.
-        if any(body.has_op("to_dtype_rounded") for body in loop_bodies):
             return [], [], KernelOpStats()
         dtype = torch.float
         _lowp_fp_dtype = get_loop_body_lowp_fp(loop_bodies[0])[0]

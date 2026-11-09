@@ -218,7 +218,11 @@ class TestRoundedConversionInductor(_RoundedConversionTestMixin, TestCase):
         x = torch.randn(1024, device=device)
         m = torch.rand(1024, device=device) > 0.5
         actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), x, m)
-        self.assertNotIn(FALLBACK, "\n".join(code))
+        code = "\n".join(code)
+        self.assertNotIn(FALLBACK, code)
+        if torch.device(device).type == "cpu" and valid_vec_isa_list():
+            # Only the conversion is scalarized in the vectorized loop.
+            self.assertIn("at::vec::Vectorized", code)
         for a, e in zip(actual, fn(x, m)):
             self.assertSameValues(a, e)
 
