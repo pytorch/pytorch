@@ -359,8 +359,12 @@ class MooncakeTransport(Transport):
                 if status != 0:
                     settled.append((batch_id, future, registration, status))
             with self._poll_cv:
-                for batch_id, *_ in settled:
-                    del self._batches[batch_id]
+                for batch_id, future, *_ in settled:
+                    # A batch id is a BatchDesc address that Mooncake freed in
+                    # the status check, so a concurrent submit may reuse it.
+                    entry = self._batches.get(batch_id)
+                    if entry is not None and entry[0] is future:
+                        del self._batches[batch_id]
             for _, future, registration, status in settled:
                 if status == 1:
                     future.set_result(None)
