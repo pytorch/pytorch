@@ -13106,7 +13106,7 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_block_diag),
     UnaryUfuncInfo('bitwise_count',
                    ref=reference_bitwise_count,
-                   dtypes=integral_types_and(torch.bool),
+                   dtypes=integral_types_and(torch.bool, torch.uint16, torch.uint32, torch.uint64),
                    supports_autograd=False),
     UnaryUfuncInfo('bitwise_not',
                    ref=np.bitwise_not,

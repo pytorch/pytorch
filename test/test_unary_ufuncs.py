@@ -18,7 +18,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCPU,
     ops,
     precisionOverride,
 )
@@ -497,14 +496,16 @@ class TestUnaryUfuncs(TestCase):
         with self.assertRaisesRegex(RuntimeError, "uint8"):
             torch.bitwise_count(x, out=torch.empty_like(x, dtype=torch.int32))
 
-    @onlyCPU
     @dtypes(*barebones_unsigned_types())
     def test_bitwise_count_barebones_unsigned(self, device, dtype):
         info = torch.iinfo(dtype)
         vals = [0, 1, info.max, info.max - 1, info.max // 3]
-        x = torch.from_numpy(np.array(vals, dtype=torch_to_numpy_dtype_dict[dtype]))
-        expected = torch.tensor([int(v).bit_count() for v in vals], dtype=torch.uint8)
+        x = torch.tensor(vals, dtype=dtype, device=device)
+        expected = torch.tensor(
+            [v.bit_count() for v in vals], dtype=torch.uint8, device=device
+        )
         self.assertEqual(torch.bitwise_count(x), expected, exact_dtype=True)
+        self.assertEqual(x.bitwise_count(), expected, exact_dtype=True)
 
     @dtypes(torch.float32, torch.float16)
     def test_bitwise_count_rejects_floating(self, device, dtype):

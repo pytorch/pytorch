@@ -690,6 +690,8 @@ REGISTER_UNARY_OP(bitwise_not, bool, bool);
 
 // Population count of |x| as uchar, matching np.bitwise_count. Negative values
 // are negated in the unsigned domain so the minimum signed value is safe.
+// Metal copy of calc_bitwise_count in ATen/native/Math.h (used by the CPU and
+// CUDA kernels); keep the two in sync.
 struct bitwise_count_functor {
   template <typename T>
   inline enable_if_t<

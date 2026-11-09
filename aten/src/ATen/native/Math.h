@@ -7,6 +7,7 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
+#include <bit>
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
@@ -1253,6 +1254,29 @@ calc_gcd(T a, T b) {
     b = c;
   }
   return b;
+}
+
+// Number of set bits in |a|, matching np.bitwise_count (uint8 result). The
+// magnitude is negated in the unsigned domain so the minimum signed value
+// does not overflow. Shared by the CPU and CUDA bitwise_count kernels; the
+// MPS kernel (mps/kernels/UnaryKernel.metal) has its own copy of this logic.
+template <typename T>
+C10_HOST_DEVICE inline std::enable_if_t<
+    std::is_integral_v<T> && !std::is_same_v<T, bool>,
+    uint8_t>
+calc_bitwise_count(T a) {
+  using unsigned_t = std::make_unsigned_t<T>;
+  auto u = static_cast<unsigned_t>(a);
+  if constexpr (std::is_signed_v<T>) {
+    if (a < 0) {
+      u = static_cast<unsigned_t>(~u + static_cast<unsigned_t>(1));
+    }
+  }
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+  return static_cast<uint8_t>(__popcll(static_cast<unsigned long long>(u)));
+#else
+  return static_cast<uint8_t>(std::popcount(static_cast<uint64_t>(u)));
+#endif
 }
 
 template <typename T>

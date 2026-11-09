@@ -1691,7 +1691,7 @@ bitwise_count(input, *, out=None) -> Tensor
 Computes the number of 1-bits in the absolute value of each element of
 :attr:`input` (its population count), following ``numpy.bitwise_count``.
 The input tensor must be of integral or Boolean type; the result is always
-of dtype :attr:`torch.uint8`.
+of dtype ``torch.uint8``.
 
 Args:
     {input}

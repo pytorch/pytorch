@@ -3921,7 +3921,6 @@ make_fallback(aten.nonzero_static.default)
 # Data-dependent output size; route to ATen eager kernel (CPU/CUDA/XPU all have
 # native implementations)
 make_fallback(aten.bincount.default, warn=False)
-make_fallback(aten.bitwise_count.default, warn=False)
 make_fallback(aten._unique2.default, warn=False)
 make_fallback(aten.unique_dim.default, warn=False)
 make_fallback(aten.unique_consecutive.default, warn=False)
@@ -3929,6 +3928,9 @@ make_fallback(aten.unique_dim_consecutive.default, warn=False)
 
 # Misc
 make_fallback(aten.gcd.default, warn=False)
+# Pointwise with a static output shape. Inductor has no popcount op yet, so
+# this runs the eager kernel and does not fuse with neighbouring pointwise ops.
+make_fallback(aten.bitwise_count.default, warn=False)
 make_fallback(aten.split_with_sizes_copy.out, override_decomp=True)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
