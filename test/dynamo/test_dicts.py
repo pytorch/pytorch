@@ -25,6 +25,7 @@ import torch.utils.checkpoint
 from torch._dynamo.exc import UncapturedHigherOrderOpError, Unsupported
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
+from torch._dynamo.variables.lazy import LazyVariableTracker
 from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -70,6 +71,72 @@ class FakeMapping:
 
 class DictTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_dict_repr_custom_new_input_falls_back(self):
+        class Mapping(dict):
+            def __new__(cls, *args, **kwargs):
+                return super().__new__(cls)
+
+        def fn(x, mapping):
+            return x + 1, dict.__repr__(mapping)
+
+        mapping, x = Mapping(a=1), torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
+
+    def test_dict_repr_uses_ordered_dict_storage(self):
+        def fn(x, mapping):
+            return x + 1, dict.__repr__(mapping)
+
+        mapping = OrderedDict(a=1, b=2)
+        mapping.move_to_end("a")
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+            mapping.move_to_end(next(iter(mapping)))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_ordered_dict_repr_guards_linked_order(self):
+        def fn(x, mapping):
+            return x + 1, repr(mapping)
+
+        mapping = OrderedDict(a=1, b=2)
+        mapping.move_to_end("a")
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+            mapping.move_to_end(next(iter(mapping)))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_instance_dict_repr_uses_proxy(self):
+        class Box:
+            def __init__(self):
+                self.a = "first"
+                self.b = "second"
+
+        def fn(x, obj):
+            return x + 1, repr(obj.__dict__)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        obj, x = Box(), torch.ones(1)
+        for value in ("second", "third"):
+            obj.b = value
+            self.assertEqual(compiled(x, obj), fn(x, obj))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_realize_all_preserves_ordered_dict_storage(self):
+        mapping = OrderedDict(a=object(), b=object())
+        mapping.move_to_end("a")
+        actual = LazyVariableTracker.realize_all(mapping)
+        self.assertIs(type(actual), OrderedDict)
+        self.assertEqual(list(actual), ["b", "a"])
+        self.assertEqual(list(dict.keys(actual)), ["a", "b"])
+        for key, value in dict.items(mapping):
+            self.assertIs(actual[key], value)
 
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
     @parametrize(
@@ -160,18 +227,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 2)
 
     @parametrize("mapping_type", [dict, OrderedDict])
-    @parametrize("name", ["keys", "values", "items"])
-    def test_dictionary_view_repr(self, mapping_type, name):
-        def fn(x, mapping):
-            view = getattr(mapping, name)()
-            return x + 1, repr(view), type(view)
-
-        mapping = mapping_type(a=1, b=2)
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.ones(1)
-        self.assertEqual(compiled(x, mapping), fn(x, mapping))
-
-    @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize("name", ["__eq__", "__ne__"])
     def test_dictionary_comparison_descriptor_order(self, mapping_type, name):
         left, right = OrderedDict(a=1, b=2), OrderedDict(a=1, b=2)
@@ -190,21 +245,26 @@ class DictTests(torch._dynamo.test_case.TestCase):
             right.move_to_end(next(iter(right)))
         self.assertEqual(counter.frame_count, 2 if mapping_type is OrderedDict else 1)
 
-    @parametrize("name", ["__repr__", "__iter__"])
-    def test_dict_storage_order_descriptors(self, name):
-        def fn(x, mapping):
-            result = getattr(dict, name)(mapping)
-            return x + 1, tuple(result) if name == "__iter__" else result, type(result)
+    @parametrize("custom_new", [False, True])
+    def test_dict_storage_order_descriptors(self, custom_new):
+        class Mapping(OrderedDict):
+            def __new__(cls, *args, **kwargs):
+                return super().__new__(cls)
 
-        mapping = OrderedDict(a=1, b=2)
+        def fn(x, mapping):
+            result = dict.__iter__(mapping)
+            return x + 1, tuple(result), type(result)
+
+        mapping = (Mapping if custom_new else OrderedDict)(a=1, b=2)
         mapping.move_to_end("a")
         counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        compiled = torch.compile(fn, backend=counter, fullgraph=not custom_new)
         x = torch.ones(1)
         for _ in range(2):
             self.assertEqual(compiled(x, mapping), fn(x, mapping))
             mapping.move_to_end(next(iter(mapping)))
-        self.assertEqual(counter.frame_count, 1)
+        if not custom_new:
+            self.assertEqual(counter.frame_count, 1)
 
     @parametrize("graph_break", [False, True])
     def test_ordered_dict_reconstruction_preserves_storage_order(self, graph_break):
@@ -227,19 +287,16 @@ class DictTests(torch._dynamo.test_case.TestCase):
         actual["c"] = x
         self.assertIn("c", view)
 
-    def test_ordered_dict_partial_update_preserves_order(self):
+    def test_ordered_dict_input_move_preserves_writeback_order(self):
         def fn(x, mapping):
-            mapping["a"] = x + 2
+            mapping["c"], mapping["d"] = 1, 2
+            mapping.move_to_end("c")
             return x + 1
 
-        mapping = OrderedDict(a=0, b=0)
-        mapping.move_to_end("a")
-        x = torch.ones(1)
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(x, mapping), x + 1)
-        self.assertEqual(mapping["a"], x + 2)
-        self.assertEqual(tuple(mapping), ("b", "a"))
-        self.assertEqual(tuple(dict.keys(mapping)), ("a", "b"))
+        actual, expected, x = OrderedDict(a=0), OrderedDict(a=0), torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, actual), fn(x, expected))
+        self.assertEqual(tuple(actual), tuple(expected))
+        self.assertEqual(tuple(dict.items(actual)), tuple(dict.items(expected)))
 
     def test_keys_view_unsupported_owner(self):
         class Mapping(dict):
@@ -276,7 +333,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(calls, ["value"])
 
-    @parametrize("key", [(1, 2), frozenset({1, 2})])
+    @parametrize("key", ["a", (1, 2), frozenset({1, 2})])
     def test_ordered_dict_literal_key_update_keeps_order_dynamic(self, key):
         def fn(x, mapping):
             mapping[key] = x + 1
@@ -288,7 +345,11 @@ class DictTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.ones(1)
         for _ in range(2):
+            order = tuple(mapping)
             self.assertEqual(compiled(x, mapping), x + 1)
+            self.assertEqual(mapping[key], x + 1)
+            self.assertEqual(tuple(mapping), order)
+            self.assertEqual(tuple(dict.keys(mapping)), (key, "other"))
             self.assertIs(next(k for k in mapping if k == key), stored)
             mapping.move_to_end(key)
         self.assertEqual(counter.frame_count, 1)
@@ -323,7 +384,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
             keys = ("extra_a", "extra_b") if kind == "invalid" else ("a", "b")
             kwargs = dict(zip(keys, (1, 2)))
             reversed_kwargs = dict(reversed(kwargs.items()))
-            self.assertNotEqual(compiled(x, **kwargs), compiled(x, **reversed_kwargs))
+            for kw in (kwargs, reversed_kwargs):
+                error_key = compiled(x, **kw)[1].split("'")[1]
+                self.assertEqual(error_key, fn(x, **kw)[1].split("'")[1])
         else:
             self.assertEqual(compiled(x, a=1, b=2), fn(x, a=1, b=2))
             self.assertEqual(compiled(x, b=2, a=1), fn(x, b=2, a=1))
@@ -345,8 +408,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
             try:
                 return target(**mapping)
-            except TypeError:
-                return x - 1
+            except TypeError as exc:
+                return x - 1, str(exc)
 
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
@@ -363,6 +426,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 if mapping_type is defaultdict
                 else actual_type(pairs)
             )
+            if not valid:
+                self.assertEqual(fn(x, mapping)[1], "keywords must be strings")
             self.assertEqual(compiled(x, mapping), fn(x, mapping))
         # Subclass keys retain positional guards; exact builtin keys bind by name.
         self.assertEqual(counter.frame_count, 2 if subclass and valid else 1)
@@ -519,14 +584,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 )
             if method == "__reversed__":
                 return x + 1, list(view)
-            return (
-                x + 1,
-                list(view),
-                list(type(view).__reversed__(view)),
-                type(view),
-                isinstance(view, keys_type),
-                repr(view),
-            )
+            contents = list(view), list(type(view).__reversed__(view))
+            return x + 1, contents, type(view), isinstance(view, keys_type), repr(view)
 
         mapping = mapping_type(a=1, b=2)
         if reordered:
