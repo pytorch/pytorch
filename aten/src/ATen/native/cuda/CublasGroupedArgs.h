@@ -12,6 +12,8 @@
 namespace at::native {
 
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
+constexpr int kMaxCublasGroupedBatchCount = 1024;
+
 struct cublasGroupedArgs {
   cublasGroupedArgs(
       const Tensor& mat1,
