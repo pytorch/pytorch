@@ -345,7 +345,20 @@ def reduce_tensor(tensor):
     storage = tensor._typed_storage()
 
     device_type = storage._untyped_storage.device.type
-    if device_type in ("cuda", "xpu", torch._C._get_privateuse1_backend_name()):
+    if device_type == "meta":
+        return (
+            rebuild_meta_tensor,
+            (
+                type(tensor),
+                tensor.size(),
+                tensor.stride(),
+                tensor.storage_offset(),
+                tensor.dtype,
+                tensor.untyped_storage().size(),
+                tensor.requires_grad,
+            ),
+        )
+    elif device_type != "cpu":
         (
             device,
             handle,
@@ -378,19 +391,6 @@ def reduce_tensor(tensor):
                 ref_counter_offset,
                 event_handle,
                 event_sync_required,
-            ),
-        )
-    elif device_type == "meta":
-        return (
-            rebuild_meta_tensor,
-            (
-                type(tensor),
-                tensor.size(),
-                tensor.stride(),
-                tensor.storage_offset(),
-                tensor.dtype,
-                tensor.untyped_storage().size(),
-                tensor.requires_grad,
             ),
         )
 
@@ -598,13 +598,13 @@ def reduce_storage(storage):
     from . import get_sharing_strategy
 
     device_type = storage.device.type
-    if device_type in ("cuda", "xpu", torch._C._get_privateuse1_backend_name()):
-        raise RuntimeError(
-            f"Cannot pickle {device_type} storage; try pickling a {device_type} tensor instead"
-        )
-    elif device_type == "meta":
+    if device_type == "meta":
         raise RuntimeError(
             "Cannot pickle meta storage; try pickling a meta tensor instead"
+        )
+    elif device_type != "cpu":
+        raise RuntimeError(
+            f"Cannot pickle {device_type} storage; try pickling a {device_type} tensor instead"
         )
     elif get_sharing_strategy() == "file_system":
         metadata = storage._share_filename_cpu_()
