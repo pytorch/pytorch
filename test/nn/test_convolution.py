@@ -1371,7 +1371,7 @@ class TestConvolutionNNDevice(NNTestCase):
             output.mean().backward()
 
     @dtypesIfCUDA(torch.float, torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else [])
-    @dtypesIfXPU(torch.float, torch.half)
+    @dtypesIfXPU(torch.float, torch.half, torch.bfloat16)
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
@@ -1412,7 +1412,7 @@ class TestConvolutionNNDevice(NNTestCase):
     # Covering special case when group > 1, input-channel / group < 16
     # and output-channel is multiple of 16
     @dtypesIfCUDA(torch.float, torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else [])
-    @dtypesIfXPU(torch.float, torch.half)
+    @dtypesIfXPU(torch.float, torch.half, torch.bfloat16)
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
