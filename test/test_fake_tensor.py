@@ -6177,9 +6177,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         msg = "CppFakeTensorMode is not supported here yet"
         with self.assertRaisesRegex(NotImplementedError, msg):
             require_python_fake_mode(detect_fake_mode([fake]))
-        py_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        self.assertIs(require_python_fake_mode(py_mode), py_mode)
-        self.assertIsNone(require_python_fake_mode(None))
 
         # Python modes are found as before, including under a user mode, and
         # not inside unset_fake_temporarily()
@@ -6466,6 +6463,25 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(inherited, [keys])
         check(detached, (2, 3))
         self.assertIsNone(maybe_get_fake_dispatch_keys(detached))
+        # Python's FakeTensorMode is out of the FAKE mode slot while it
+        # dispatches, so the op's kernel sees no fake mode, as here
+        seen = []
+
+        def probe_meta(t):
+            seen.append(torch._guards.active_fake_mode())
+            return t.new_empty(t.shape)
+
+        with torch.library._scoped_library("_test_fake_fallback_probe", "DEF") as lib:
+            lib.define("probe(Tensor x) -> Tensor")
+            lib.impl("probe", probe_meta, "Meta")
+            probe = torch.ops._test_fake_fallback_probe.probe
+            with mode:
+                check(probe(x), (2, 3))
+                self.assertIs(torch._guards.active_fake_mode(), mode)
+            check(probe(x), (2, 3))
+            with torch._subclasses.fake_tensor.FakeTensorMode() as python_mode:
+                probe(python_mode.from_tensor(real))
+        self.assertEqual(seen, [None, None, None])
 
         meta = torch.eye(2).to_sparse().to("meta")
         sparse = torch._C._from_meta_and_device(meta, real.device, mode)
@@ -6532,6 +6548,18 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertFalse(static._has_symbolic_sizes_strides)
         with self.assertRaisesRegex(NotImplementedError, msg), symbolic_mode:
             static.expand(symbolic.shape[0], 3)
+
+    def test_require_python_fake_mode(self):
+        from torch._guards import require_python_fake_mode
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        # Callers that need a Python FakeTensorMode reject a C++ one
+        msg = "CppFakeTensorMode is not supported here yet"
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            require_python_fake_mode(CppFakeTensorMode())
+        py_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        self.assertIs(require_python_fake_mode(py_mode), py_mode)
+        self.assertIsNone(require_python_fake_mode(None))
 
     # Dynamo keeps references that stop the mode being collected
     @xfailIfTorchDynamo

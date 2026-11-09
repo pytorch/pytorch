@@ -93,6 +93,34 @@ void for_each_tensor(
       cause);
 }
 
+// Uninstalls this thread's C++ FakeTensorMode, if any, for its lifetime
+class UnsetFakeTensorModeGuard {
+ public:
+  UnsetFakeTensorModeGuard()
+      : mode_(c10::impl::FakeTensorModeTLS::get_state()),
+        fake_included_(
+            c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Fake)) {
+    if (mode_ != nullptr) {
+      c10::impl::FakeTensorModeTLS::reset_state();
+    }
+  }
+  ~UnsetFakeTensorModeGuard() {
+    if (mode_ != nullptr) {
+      c10::impl::FakeTensorModeTLS::create_state(std::move(mode_));
+      c10::impl::tls_set_dispatch_key_included(
+          c10::DispatchKey::Fake, fake_included_);
+    }
+  }
+  UnsetFakeTensorModeGuard(const UnsetFakeTensorModeGuard&) = delete;
+  UnsetFakeTensorModeGuard& operator=(const UnsetFakeTensorModeGuard&) = delete;
+  UnsetFakeTensorModeGuard(UnsetFakeTensorModeGuard&&) = delete;
+  UnsetFakeTensorModeGuard& operator=(UnsetFakeTensorModeGuard&&) = delete;
+
+ private:
+  std::shared_ptr<c10::FakeTensorMode> mode_;
+  bool fake_included_;
+};
+
 // Whether ivalue is or holds a symbolic number
 bool is_symbolic(const c10::IValue& ivalue) {
   if (ivalue.isSymInt() || ivalue.isSymFloat() || ivalue.isSymBool()) {
@@ -196,6 +224,10 @@ void fakeFallback(
   if (mode == nullptr) {
     unsupported(op, "fake tensors without a mode");
   }
+  // Python's FakeTensorMode is out of the FAKE dispatch mode slot while its
+  // __torch_dispatch__ runs, so the code the op runs (a Python Meta kernel
+  // calling active_fake_mode(), say) sees no fake mode; so here
+  UnsetFakeTensorModeGuard unset_mode;
 
   for (const auto idx : c10::irange(num_arguments)) {
     const auto& ivalue = (*stack)[arguments_begin + idx];
