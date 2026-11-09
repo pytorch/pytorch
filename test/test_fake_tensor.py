@@ -5454,5 +5454,38 @@ class TestFakeTensorViewCopy(TestCase):
                     _ = yf.view(-1)
 
 
+class TestCppFakeTensorModeBindings(TestCase):
+    class Wrapper:
+        pass
+
+    def _make_mode(self, shape_env=None):
+        wrapper = self.Wrapper()
+        mode = torch._C._CppFakeTensorMode(FakeTensorConverter(), shape_env, wrapper)
+        wrapper._cpp_mode = mode
+        return mode, wrapper
+
+    def test_create(self):
+        mode, wrapper = self._make_mode()
+        self.assertIs(wrapper._cpp_mode, mode)
+        self.assertTrue(mode.allow_meta)
+        mode.allow_meta = False
+        self.assertFalse(mode.allow_meta)
+        with torch._functorch.config.patch(fake_tensor_allow_meta=False):
+            mode, wrapper = self._make_mode(ShapeEnv())
+        self.assertFalse(mode.allow_meta)
+        with self.assertRaisesRegex(RuntimeError, "Expected a FakeTensorConverter"):
+            torch._C._CppFakeTensorMode(None, None, self.Wrapper())
+        with self.assertRaisesRegex(RuntimeError, "Expected the CppFakeTensorMode"):
+            torch._C._CppFakeTensorMode(FakeTensorConverter(), None, None)
+
+    def test_wrapper_weakref(self):
+        mode, wrapper = self._make_mode()
+        ref = weakref.ref(wrapper)
+        del wrapper
+        gc.collect()
+        self.assertIsNone(ref())
+        self.assertTrue(mode.allow_meta)
+
+
 if __name__ == "__main__":
     run_tests()
