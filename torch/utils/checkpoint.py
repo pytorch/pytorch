@@ -10,7 +10,7 @@ import warnings
 import weakref
 from collections import defaultdict
 from typing import *  # noqa: F403
-from typing_extensions import Self
+from typing import Self
 import enum
 from weakref import ReferenceType
 
@@ -646,16 +646,6 @@ def _checkpoint_impl(
     respect_saved_tensors_hooks: bool | None = None,
 ):
     preserve = preserve_rng_state
-
-    if torch.compiler._is_non_strict_tracing():
-        from torch._functorch import config as functorch_config
-
-        if functorch_config.deterministic_recompute:
-            raise NotImplementedError(
-                "deterministic_recompute does not support non-strict train-step "
-                "tracing: the recompute is traced as separate ops, so it can't be "
-                "shared with the forward. Disable the flag."
-            )
 
     if use_reentrant is None:
         warnings.warn(
