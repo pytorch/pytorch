@@ -6768,13 +6768,11 @@ def exponential(self, rate=1, generator=None):
 
     uniform_val = torch.rand_like(self)
 
-    # copying numerics of transformation::exponential see comment:
-    # curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
-    # we need log to be not 0, and not underflow when converted to half
-    # fast __logf approximation can underflow, so set log to -epsilon/2 for 1 or close to 1 args
+    # -log1p(-u) takes small results from u near 0, where rand_like is dense; -log(u) would take them from u near 1
+    # and lose the small tail (see standard_exponential in aten/src/ATen/native/cuda/DistributionTemplates.h).
+    # rand_like can return 0, and the exponential distribution excludes 0.
     epsilon = torch.finfo(uniform_val.dtype).eps / 2
-    condition = uniform_val >= 1.0 - epsilon
-    log_uniform = torch.where(condition, -epsilon, torch.log(uniform_val))
+    log_uniform = torch.where(uniform_val == 0, -epsilon, torch.log1p(-uniform_val))
 
     return -1 / rate * log_uniform
 
@@ -6788,7 +6786,6 @@ def exponential(self, rate=1, generator=None):
 def geometric(self, p, generator=None):
     if generator is not None:
         raise AssertionError("generator is not supported in refs")
-    # TODO: fix inductor rand_like for integer, bool dtypes
     torch._check(
         not utils.is_complex_dtype(self.dtype)
         and not utils.is_boolean_dtype(self.dtype),
@@ -6798,7 +6795,9 @@ def geometric(self, p, generator=None):
         0 < p and p < 1,
         lambda: f"geometric_ expects p to be in (0, 1), but got p={p}",
     )
-    return torch.floor(torch.log1p(-torch.rand_like(self)) / math.log1p(-p)) + 1
+    rand_dtype = self.dtype if utils.is_float_dtype(self.dtype) else torch.float32
+    u = torch.rand_like(self, dtype=rand_dtype)
+    return torch.floor(torch.log1p(-u) / math.log1p(-p)) + 1
 
 
 @register_decomposition(aten.log_normal)
