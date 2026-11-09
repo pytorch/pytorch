@@ -725,8 +725,8 @@ static bool has_dense_order(const Tensor& t, IntArrayRef ref_strides) {
 // The fast path copies the i-th memory-order chunk of self (the elements for
 // one index of the dims before dim) to the i-th chunk of each output, one flat
 // byte range per split, ignoring layout inside the range. That is exact when
-// every tensor is dense with the same dim order and the dims from dim on form
-// self's innermost block, dim outermost. Empty outputs never matter.
+// every tensor is dense with the same dim order and splits start where the
+// kernel puts them, at multiples of slice_numel. Empty outputs never matter.
 static bool has_dense_matching_slices(
     const Tensor& self,
     TensorList out,
@@ -754,14 +754,9 @@ static bool has_dense_matching_slices(
   if (non_empty == 1) {
     return true;
   }
-  // Several non-empty splits imply size(dim) > 1, so stride(dim) is meaningful
-  for (int64_t d = 0; d < self.dim(); ++d) {
-    if (d != dim && self.size(d) != 1 &&
-        (d < dim) != (self.stride(d) > self.stride(dim))) {
-      return false;
-    }
-  }
-  return true;
+  // The kernel starts split j at cum_j * slice_numel; it actually starts at
+  // cum_j * stride(dim). Several non-empty splits imply size(dim) > 1.
+  return self.stride(dim) == c10::multiply_integers(self.sizes().slice(dim + 1));
 }
 
 void split_with_sizes_copy_out_cuda(
