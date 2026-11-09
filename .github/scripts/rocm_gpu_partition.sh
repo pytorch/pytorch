@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Informational only, never fails: print whether a process holds each visible GPU partition.
-# Reads the KFD sysfs process table (as amd-smi does), so it sees other pods; MATRIX_RUNNER's `.N` suffix sets the expected count.
+# Informational only, never fails: print whether each visible GPU partition is occupied.
+# occupied: `amd-smi process` lists a process on it, or its VRAM use is above the idle limit
+#   (an idle card still holds ~0.3 GiB, so the limit is 1 GiB). free: neither. unknown: no source readable.
+# MATRIX_RUNNER's `.N` suffix sets the expected device count.
 
 kfd="${KFD_DIR:-/sys/class/kfd/kfd}"
+idle_mib=1024
 shopt -s nullglob
 
 # A job pod's own devices are listed here; otherwise use every render node.
@@ -20,7 +23,13 @@ if [[ "${MATRIX_RUNNER:-}" =~ \.([0-9]+)$ ]]; then
 fi
 echo "${summary}"
 
+smi_list=""
+if command -v amd-smi >/dev/null; then
+  smi_list=$(timeout 30 amd-smi list 2>/dev/null)
+fi
+
 for name in "${devs[@]}"; do
+  # amd-smi numbers GPUs itself; match on the KFD id both tools report for this render node.
   gpu_id=""
   for props in "${kfd}"/topology/nodes/*/properties; do
     if grep -qx "drm_render_minor ${name#renderD}" "${props}" 2>/dev/null; then
@@ -28,33 +37,35 @@ for name in "${devs[@]}"; do
       break
     fi
   done
-  if [[ -z "${gpu_id}" || "${gpu_id}" == 0 ]]; then
-    echo "GPU partition ${name}: unknown (no KFD node for this render device)"
-    continue
+
+  holders=""
+  smi_ok=0
+  smi_note="amd-smi: unavailable"
+  idx=""
+  if [[ -n "${gpu_id}" && "${gpu_id}" != 0 ]]; then
+    idx=$(awk -v id="${gpu_id}" '/^GPU:/ {gpu = $2} $1 == "KFD_ID:" && $2 == id {print gpu; exit}' <<<"${smi_list}")
+  fi
+  if [[ -n "${idx}" ]] && out=$(timeout 30 amd-smi process --gpu "${idx}" 2>/dev/null) && [[ -n "${out}" ]]; then
+    smi_ok=1
+    smi_note="amd-smi: no processes"
+    holders=$(awk '$1 == "NAME:" {n = $2} $1 == "PID:" && $2 ~ /^[0-9]+$/ {printf "%sPID %s %s", sep, $2, n; sep = ", "}' <<<"${out}")
+    [[ -z "${holders}" ]] || smi_note="amd-smi: ${holders}"
   fi
 
-  procs=("${kfd}"/proc/[0-9]*)
-  holders=()
-  readable=0
-  for p in "${procs[@]}"; do
-    vram=$(cat "${p}/vram_${gpu_id}" 2>/dev/null) || continue
-    readable=1
-    [[ "${vram}" =~ ^[0-9]+$ && "${vram}" -gt 0 ]] || continue
-    holders+=("PID ${p##*/} $(cat "/proc/${p##*/}/comm" 2>/dev/null || echo '?')")
-  done
-
-  used="VRAM unknown"
+  vram_note="VRAM unknown"
+  mib=""
   if bytes=$(cat "/sys/class/drm/${name}/device/mem_info_vram_used" 2>/dev/null) && [[ "${bytes}" =~ ^[0-9]+$ ]]; then
-    used=$(awk -v b="${bytes}" 'BEGIN {printf "VRAM %.1f GiB used", b / 2^30}')
+    mib=$((bytes >> 20))
+    vram_note=$(awk -v m="${mib}" -v l="${idle_mib}" 'BEGIN {printf "VRAM %.1f GiB used %s %.1f GiB idle limit", m / 1024, (m > l ? ">" : "<="), l / 1024}')
   fi
 
-  if [[ ! -d "${kfd}/proc" || ( ${#procs[@]} -gt 0 && ${readable} -eq 0 ) ]]; then
-    echo "GPU partition ${name}: unknown (KFD does not expose per-process VRAM; ${used})"
-  elif [[ ${#holders[@]} -gt 0 ]]; then
-    list=$(printf '%s, ' "${holders[@]}")
-    echo "GPU partition ${name}: occupied (${list}${used})"
+  if [[ -n "${holders}" || ( -n "${mib}" && ${mib} -gt ${idle_mib} ) ]]; then
+    verdict=occupied
+  elif [[ -n "${mib}" || ${smi_ok} -eq 1 ]]; then
+    verdict=free
   else
-    echo "GPU partition ${name}: free (${used})"
+    verdict=unknown
   fi
+  echo "GPU partition ${name}: ${verdict} (${smi_note}; ${vram_note})"
 done
 exit 0
