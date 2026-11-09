@@ -9,13 +9,12 @@ Python polyfills for common builtins.
 from __future__ import annotations
 
 import importlib
-import struct as py_struct
 import sys as py_sys
 import types
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
-from operator import eq, ge, gt, le, length_hint, lt, ne
+from operator import eq, ge, gt, le, lt, ne
 from typing import Any, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import TypeIs
 
@@ -97,39 +96,6 @@ def index(
     # Callers pass the message their sequence type raises in CPython, which is
     # not uniform: list/deque repr the value, tuple ignores it.
     raise ValueError(not_found_msg.format(item))
-
-
-def sequence_fast_iter(iterable: Iterable[T], message: str) -> Iterator[T]:
-    # Mirrors the first iter() in CPython's PySequence_Fast.
-    # CPython replaces the TypeError instead of chaining to it, so raise
-    # outside the handler.
-    it: Iterator[T] | None = None
-    try:
-        it = iter(iterable)
-    except TypeError:
-        pass
-    if it is None:
-        raise TypeError(message)
-    return it
-
-
-# CPython rounds the preallocation up to an even number of pointers.
-_MAX_LIST_PREALLOCATION = (py_sys.maxsize // py_struct.calcsize("P")) & ~1
-
-
-def sequence_fast_list(it: Iterator[T]) -> list[T] | None:
-    # Dynamo's list() skips the length hint, and a for loop would call iter()
-    # again after we obtain the inner iterator.
-    inner = iter(it)
-    if length_hint(it, 8) > _MAX_LIST_PREALLOCATION:
-        # Let eager raise the allocation error before consuming the iterator.
-        return None
-    items: list[T] = []
-    while True:
-        try:
-            items.append(next(inner))
-        except StopIteration:
-            return items
 
 
 def repeat(item: T, count: int) -> Iterator[T]:

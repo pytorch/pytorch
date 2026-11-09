@@ -5244,7 +5244,9 @@ class GraphModule(torch.nn.Module):
 
     def test_operator_length_hint_type_error_subclass(self):
         # CPython's PyErr_ExceptionMatches catches TypeError subclasses when
-        # deciding whether to fall back to the default.
+        # deciding whether to fall back to the default, but Dynamo only tracks
+        # ObservedTypeError for TypeError itself. Subclasses therefore propagate
+        # instead of selecting the default; revisit if this shows up in practice.
         class MyTypeError(TypeError):
             pass
 
@@ -5260,7 +5262,7 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(operator.length_hint(HintRaisesSubclass(), 42), 42)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(torch.ones(2))[0], ("ok", 42))
+        self.assertEqual(opt_fn(torch.ones(2))[0], ("raise", "MyTypeError", "boom"))
 
     def test_operator_length_hint_bool(self):
         # _operator.length_hint is declared -> Py_ssize_t and ends in

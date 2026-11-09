@@ -15,7 +15,6 @@ variable tracking system.
 """
 
 import collections
-import inspect
 import operator
 import sys
 from typing import Any, Optional, TYPE_CHECKING
@@ -37,6 +36,7 @@ from ..bytecode_transformation import (
 from ..exc import (
     handle_observed_exception,
     ObservedException,
+    ObservedTypeError,
     ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
@@ -50,7 +50,6 @@ from ..utils import (
     guard_if_dyn,
     istype,
     iter_contains,
-    list_reverseiterator,
     no_keywords,
     no_positional,
     odict_values,
@@ -92,8 +91,6 @@ from .object_protocol import (
 
 
 if TYPE_CHECKING:
-    from typing import NoReturn
-
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
@@ -2179,12 +2176,6 @@ class ByteArrayVariable(VariableTracker):
         else "{!r} is not in bytearray"
     )
 
-    # Note [bytearray copy on write]
-    #
-    # Every mutator must build a new bytearray and assign it to self.data,
-    # never change it in place: a sourced object must not be mutated during
-    # tracing, and bytearray_join detects a separator mutated during iteration
-    # by checking whether self.data was replaced.
     _nonvar_fields = {
         "data",
         *VariableTracker._nonvar_fields,
@@ -2198,11 +2189,6 @@ class ByteArrayVariable(VariableTracker):
 
     def python_type(self) -> type[bytearray]:  # type: ignore[type-arg]
         return bytearray
-
-    @staticmethod
-    def create(data: bytearray) -> "ByteArrayVariable":
-        """Wrap a bytearray allocated by the traced operation as a new, writable value."""
-        return ByteArrayVariable(data, mutation_type=ValueMutationNew())
 
     def as_python_constant(self) -> bytearray:
         return bytearray(self.data)
@@ -2712,77 +2698,19 @@ class ByteArrayVariable(VariableTracker):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker | None:
-        # bytearray_join: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+    ) -> VariableTracker:
+        # stringlib_bytes_join: https://github.com/python/cpython/blob/v3.13.0/Objects/stringlib/join.h
         iterable = args[0].realize()
-        sep = self.data
         if istype(iterable, (ListVariable, TupleVariable)):
             items = iterable.items
         else:
-            # CPython exports the separator's buffer for the whole call, so
-            # resizing it raises BufferError. A changed self.data means the
-            # separator was mutated (see Note [bytearray copy on write]):
-            # leave that to eager, also when iteration raised.
-            def unimplemented_mutated_separator() -> "NoReturn":
-                unimplemented(
-                    gb_type="bytearray.join with a separator mutated during iteration",
-                    context=f"iterable: {iterable}",
-                    explanation="The iterable passed to bytearray.join mutated the "
-                    "separator. CPython holds a buffer export on the separator "
-                    "during the call, which Dynamo does not model.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-
             try:
-                iterator = tx.inline_user_function_return(
-                    VariableTracker.build(tx, polyfills.sequence_fast_iter),
-                    [iterable, ConstantVariable.create("can only join an iterable")],
-                    {},
-                )
-                # These iterators lack a modeled length hint. Decline before
-                # consuming any items so eager can run the whole join.
-                iterator_type = maybe_get_python_type(iterator)
-                if any(
-                    iterator_type is candidate
-                    for candidate in (
-                        list_reverseiterator,
-                        polyfills.builtins._SequenceIterator,
-                        polyfills.builtins._ReversedSequenceIterator,
-                        reversed,
-                    )
-                ):
-                    return None
-                # call_length_hint looks up the method on the class. Eager
-                # special-method lookup bypasses metaclass attributes and hooks.
-                metaclass = type(iterator_type)
-                if metaclass is not type and (
-                    inspect.getattr_static(metaclass, "__getattribute__")
-                    is not type.__getattribute__
-                    or inspect.getattr_static(
-                        metaclass, "__getattr__", NO_SUCH_SUBOBJ
-                    )
-                    is not NO_SUCH_SUBOBJ
-                    or inspect.getattr_static(
-                        metaclass, "__length_hint__", NO_SUCH_SUBOBJ
-                    )
-                    is not NO_SUCH_SUBOBJ
-                ):
-                    return None
-                materialized = tx.inline_user_function_return(
-                    VariableTracker.build(tx, polyfills.sequence_fast_list),
-                    [iterator],
-                    {},
-                )
-                if materialized.is_constant_none():
-                    return None
-                items = materialized.items
-            except ObservedException:
-                if self.data is sep:
-                    raise
+                iterable = generic_getiter(tx, iterable)
+            except ObservedTypeError:
                 handle_observed_exception(tx)
-                unimplemented_mutated_separator()
-            if self.data is not sep:
-                unimplemented_mutated_separator()
+                raise_type_error(tx, "can only join an iterable")
+            items = unpack_iterable(tx, iterable)
+
         parts = []
         for item in items:
             item = item.realize()
@@ -2794,19 +2722,16 @@ class ByteArrayVariable(VariableTracker):
                 parts.append(item.as_python_constant())
             else:
                 unimplemented(
-                    gb_type="bytearray.join with an unsupported item",
-                    context=f"item: {item}",
-                    explanation="Dynamo only traces bytearray.join when every item "
-                    "is a bytearray or a plain constant: bytes and bytearray items "
-                    "are joined, and other constants raise TypeError. Other items "
-                    "run in eager, which raises TypeError for items without the "
-                    "buffer protocol.",
+                    gb_type="bytearray.join() with unsupported item type",
+                    context=f"bytearray.join() item: {item}",
+                    explanation="Dynamo only supports joining bytes and bytearray "
+                    f"items, got {item.python_type_name()}.",
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
         try:
-            return ByteArrayVariable.create(self.data.join(parts))
-        except (MemoryError, OverflowError, TypeError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
+            return VariableTracker.build(tx, self.data.join(parts))
+        except TypeError as e:
+            raise_observed_exception(TypeError, tx, args=list(e.args))
 
     def _bytearray_case_method(
         self,
@@ -3473,20 +3398,6 @@ class ByteArrayIteratorVariable(IteratorVariable):
         value = ConstantVariable.create(data[self.index])
         self.index += 1
         return value
-
-    def length_hint(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # bytearrayiter_length_hint: bytes left, floored at 0.
-        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
-        if self.is_exhausted:
-            return ConstantVariable.create(0)
-        return ConstantVariable.create(max(len(self.parent.data) - self.index, 0))
-
-    tp_methods = {"__length_hint__": Method(length_hint)}
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
