@@ -142,10 +142,6 @@ def _get_path_without_sccache() -> str:
     return ":".join(path_envs)
 
 
-def _get_cutlass_dir() -> str:
-    return config.xpu.cutlass_dir if GPU_TYPE == "xpu" else config.cutlass.cutlass_dir
-
-
 def _check_if_instances_equal(op1, op2) -> bool:
     """
     Utility function to check if two instances of a class are equal.
@@ -329,6 +325,33 @@ class TestCutlassBackend(TestCase):
                 self.assertEqual(choices, [])
 
     @skipXPUIf(not Xe2_Or_Later, "")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @xfailIfSM120OrLater
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_profiling_configs_and_swizzles_limit_choices(self):
+        a = torch.randn(128, 128).to(GPU_TYPE).half()
+        b = torch.randn(128, 128).to(GPU_TYPE).half().t()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cutlass.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_swizzle_options": [1, 2],
+            }
+        ):
+            with mock.patch(
+                "torch._inductor.kernel.mm.autotune_select_algorithm",
+                wraps=select_no_algorithm,
+            ) as sa:
+                with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
+                    _ = torch.compile(torch.mm, dynamic=False)(a, b)
+                args, _ = sa.call_args
+                _, choices, _, __ = args
+
+                self.assertEqual(len(choices), 2 * 2)
+
+    @skipXPUIf(not Xe2_Or_Later, "")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_import_cutlass(self):
         self.assertTrue(try_import_cutlass())
@@ -381,7 +404,7 @@ class TestCutlassBackend(TestCase):
 
         M, N, K = 4096, 2048, 25728
 
-        cutlass_dir = _get_cutlass_dir()
+        cutlass_dir = config.cutlass.cutlass_dir
         self.assertTrue(
             try_import_cutlass(),
             lambda msg: f"{msg}\n"
