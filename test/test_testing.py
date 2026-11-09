@@ -29,7 +29,7 @@ from torch.testing._internal.common_utils import (
     IS_CI, IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_CUDA, TEST_WITH_CROSSREF, TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    getRocmVersion, TemporaryFileName, sanitize_pytest_xml,
+    getRocmVersion, TemporaryFileName, sanitize_pytest_xml, set_cwd,
 )
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
@@ -679,6 +679,34 @@ if __name__ == '__main__':
         env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
         _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
         self.assertNotIn('OK', stderr.decode('ascii'))
+
+    @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+    @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+    def test_inductor_run_cpu_env_var(self):
+        # PYTORCH_TEST_INDUCTOR_RUN_CPU=1 brings back inductor's RUN_CPU test classes
+        # when ONLY_FOR leaves CPU out (CI's nogpu_NO_AVX2 job), but not when EXCEPT_FOR
+        # excludes CPU. If this broke, those classes would silently disappear.
+        flag = "PYTORCH_TEST_INDUCTOR_RUN_CPU"
+        unset = ("CI", PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, flag)
+        base_env = {k: v for k, v in os.environ.items() if k not in unset}
+
+        def query(name, env):
+            code = f"from torch.testing._internal.inductor_utils import {name}; print(bool({name}))"
+            stdout, stderr = TestCase.run_process_no_exception(code, env={**base_env, **env})
+            lines = stdout.decode().strip().splitlines()
+            self.assertIn(lines[-1:], (["True"], ["False"]), msg=stderr.decode())
+            return lines[-1]
+
+        if query("HAS_CPU", {}) != "True":
+            self.skipTest("RUN_CPU also needs a working C++ compiler")
+        for env, expected in [
+            ({}, "True"),
+            ({PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY: "cuda"}, "False"),
+            ({PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY: "cuda", flag: "1"}, "True"),
+            ({PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY: "cpu", flag: "1"}, "False"),
+        ]:
+            with self.subTest(env=env):
+                self.assertEqual(query("RUN_CPU", env), expected)
 
 
 # Golden-file tests for the junit XML that CI uploads (tools/stats/upload_test_stats.py).
@@ -3503,6 +3531,24 @@ class TestHardwareClassifications(TestCase):
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
 instantiate_parametrized_tests(TestImports)
+
+
+@unittest.skipIf(IS_WINDOWS, "dynamo test failures are not looked up on Windows")
+class TestDynamoTestFailuresDir(TestCase):
+    def test_found_from_working_directory(self):
+        # pytest-xdist workers of an installed build have neither a local
+        # torch/../test nor a test file as __main__.
+        from torch.testing._internal import dynamo_test_failures
+
+        test_dir = os.path.dirname(os.path.realpath(__file__))
+        with set_cwd(test_dir), tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.object(
+            dynamo_test_failures, "__file__", os.path.join(tmp, "a", "b", "c", "x.py")
+        ), unittest.mock.patch.dict(
+            sys.modules, {"__main__": unittest.mock.Mock(spec=[])}
+        ):
+            found = dynamo_test_failures.find_test_dir()
+        self.assertIsNotNone(found)
+        self.assertEqual(os.path.realpath(found), test_dir)
 
 
 if __name__ == '__main__':
