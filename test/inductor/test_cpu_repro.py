@@ -1713,6 +1713,7 @@ class CPUReproTests(TestCase):
                     FileCheck().check(
                         "out_ptr0[static_cast<int64_t>(x0_tail + 66LL*x1)] = tmp_acc0_arr[x0_tail - static_cast<int64_t>(64LL)];"
                     ).run(code)
+
     def test_simd_horizontal_reduction(self):
         def fn(x):
             return x.sum(-1), x.amax(-1)
