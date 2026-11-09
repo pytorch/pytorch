@@ -652,13 +652,17 @@ def build_reuse_condition(
 
     hc_log.debug("Number of guards %s", len(guard_tuples))
 
+    guard_dependencies = [
+        guard.source_dependencies() for _, _, _, guard in guard_tuples
+    ]
     needed_sources = OrderedSet(traced_sources)
-    for _, _, _, guard in guard_tuples:
-        needed_sources.update(guard.source_dependencies())
+    for dependencies in guard_dependencies:
+        needed_sources.update(dependencies)
 
     return InvokeSubgraphReuseCondition(
         input_checks=input_checks,
         guards=guard_tuples,
+        guard_dependencies=guard_dependencies,
         treespec=fingerprint.treespec,
         traced_sources=traced_sources,
         guard_on_key_order=tx.output.guard_on_key_order.intersection(needed_sources),
@@ -681,9 +685,9 @@ def build_source_replacement(
 class SubgraphReuseMatch:
     """Invocation-local resolution caches shared with stamp-out after a successful check.
 
-    Guard checks record dependencies without copying Guard objects. Stamp-out builds
-    them only for the selected candidate. A hash-keyed match has no condition and
-    deliberately relies on the user's hash contract instead of replaying guards.
+    Guard checks record dependencies and copy guards only after the candidate passes.
+    A hash-keyed match has no condition and deliberately relies on the user's hash
+    contract instead of replaying guards.
     Dependencies of hash-keyed children are not replayed into an outer region;
     its reuse must therefore also satisfy that contract.
     """
@@ -751,33 +755,57 @@ def _treespecs_identical(a: pytree.TreeSpec, b: pytree.TreeSpec, /) -> bool:
 
 
 def static_capture_policy_matches(
-    tx: "InstructionTranslatorBase", source: Source, new_source: Source, value: Any, /
+    tx: "InstructionTranslatorBase",
+    match: SubgraphReuseMatch,
+    source: Source,
+    new_source: Source,
+    value: Any,
+    /,
 ) -> bool:
-    """A static dimension in the cached body cannot become symbolic during replay."""
-    from .builder import VariableBuilder
+    """Captured dimensions must retain the expressions the cached body lifts."""
+    from .builder import lookup_tracked_variable, VariableBuilder
 
     cached = tx.output.input_source_to_var.get(source)
     if not isinstance(cached, TensorVariable):
+        try:
+            # Graph attributes are tracked objects rather than lifted inputs.
+            cached = lookup_tracked_variable(tx, match.resolve(source))
+        except Exception:
+            cached = None
+    if not isinstance(cached, TensorVariable):
+        hc_log.debug("subgraph_reuse: no cached tensor for %s", source.name)
         return False
     example = cached.proxy.node.meta.get("example_value")
     if example is None:
+        hc_log.debug("subgraph_reuse: no cached tensor example for %s", source.name)
         return False
-    static_dims = [i for i, size in enumerate(example.shape) if type(size) is int]
-    if not static_dims:
-        return True
     current = tx.output.input_source_to_var.get(new_source)
     if not isinstance(current, TensorVariable):
         # Use the same source-specific policy and merged PGO state as stamp-out.
         current = VariableBuilder(tx, new_source)(value)
     if not isinstance(current, TensorVariable):
+        hc_log.debug("subgraph_reuse: no current tensor for %s", new_source.name)
         return False
     current_example = current.proxy.node.meta.get("example_value")
     if current_example is None:
+        hc_log.debug(
+            "subgraph_reuse: no current tensor example for %s", new_source.name
+        )
         return False
-    for dim in static_dims:
-        if type(current_example.shape[dim]) is not int:
+    for dim, (old_size, new_size) in enumerate(
+        zip(example.shape, current_example.shape)
+    ):
+        if type(old_size) is int:
+            matches = type(new_size) is int
+        else:
+            matches = (
+                isinstance(old_size, torch.SymInt)
+                and isinstance(new_size, torch.SymInt)
+                and sym_num_key(old_size) == sym_num_key(new_size)
+            )
+        if not matches:
             hc_log.debug(
-                "subgraph_reuse: reuse failed -- captured source %s dimension %d became symbolic",
+                "subgraph_reuse: captured source %s dimension %d has a different symbolic policy",
                 new_source.name,
                 dim,
             )
@@ -793,7 +821,7 @@ def is_reusable(
 ) -> bool:
     """Check if a cached subgraph can be reused for the current call.
 
-    Three-phase check:
+    Four-phase check:
     (1) Verify that intermediates (tensor metadata, symnode types, constant
         values) match the cached input_checks — these are lightweight
         structural comparisons that don't require source resolution.
@@ -801,7 +829,7 @@ def is_reusable(
         the subgraph read has been mutated since the original trace, the
         cached guards would evaluate against stale values.
     (3) Use the match's remapped sources to re-evaluate snapshotted guards.
-        Record them on this invocation's match for runtime replay on stamp-out.
+    (4) Compare captured tensor policies, then record the selected guards for replay.
     """
     # Structural check: treespec must match first.
     if condition.treespec is not None and (
@@ -920,9 +948,15 @@ def is_reusable(
     if not match.source_replacement:
         return True
 
-    for source, handler, expected, guard in condition.guards:
+    capture_checks: list[tuple[Source, Source, Any]] = []
+    guards_to_replay: list[Guard] = []
+    for (source, handler, expected, guard), dependencies in zip(
+        condition.guards, condition.guard_dependencies
+    ):
         new_source = match.remap_source(source)
-        if all(match.remap_source(dep) is dep for dep in guard.source_dependencies()):
+        if new_source is source and all(
+            match.remap_source(dep) is dep for dep in dependencies
+        ):
             continue
 
         try:
@@ -971,21 +1005,20 @@ def is_reusable(
             )
             return False
 
-        if (
-            guard.create_fn_name() == "TENSOR_MATCH"
-            and not static_capture_policy_matches(tx, source, new_source, value)
-        ):
+        guards_to_replay.append(guard)
+        if guard.create_fn_name() == "TENSOR_MATCH":
+            capture_checks.append((source, new_source, value))
+
+    for source, new_source, value in capture_checks:
+        if not static_capture_policy_matches(tx, match, source, new_source, value):
             return False
 
     # Guard objects are copied only for the winning match.
-    match.runtime_guards = [
-        guard.remap_sources(match.remap_source) for _, _, _, guard in condition.guards
-    ]
-    match.runtime_guards = [
-        new
-        for new, (_, _, _, old) in zip(match.runtime_guards, condition.guards)
-        if new is not old
-    ]
+    match.runtime_guards = []
+    for guard in guards_to_replay:
+        remapped_guard = guard.remap_sources(match.remap_source)
+        if remapped_guard is not guard:
+            match.runtime_guards.append(remapped_guard)
     return True
 
 
@@ -1194,17 +1227,22 @@ def stamp_out_subgraph(
     graph placeholders. Replay runtime guards and order annotations from the winning
     match before returning; its dependencies then participate in outer-region reuse.
     """
-    from torch._dynamo.variables.builder import VariableBuilder
+    from torch._dynamo.variables.builder import lookup_tracked_variable, VariableBuilder
     from torch._dynamo.variables.higher_order_ops import add_call_function, make_attr
 
     cached = match.entry
     flat_proxies = get_flat_proxies(fingerprint)
     for guard in match.runtime_guards:
         if guard.create_fn_name() == "TENSOR_MATCH":
-            # Build even shape-only captures, while deduplicating lifted inputs
-            # and tensor alias guards through VariableBuilder's existing cache.
             source = guard.originating_source
-            VariableBuilder(tx, source)(match.resolve(source))
+            value = match.resolve(source)
+            current = lookup_tracked_variable(tx, value)
+            if isinstance(current, TensorVariable) and current.source == source:
+                # This is VariableBuilder's tracked-tensor fast path; retain its footprint.
+                tx.output.current_tracer.traced_sources.add(source)
+            else:
+                # Other sources must still install tensor alias guards.
+                VariableBuilder(tx, source)(value)
         elif not any(
             guard.is_equivalent_to(existing)
             for existing in tx.output.guards.get_guards_for_source(
