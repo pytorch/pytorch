@@ -304,6 +304,9 @@ non_decreasing_unary_ops = [
     aten.trunc.default,
     aten.trunc_.default,
     aten.trunc.out,
+    # nan_to_num is excluded: it is not max/min-preserving because NaN maps
+    # to a finite value and custom posinf/neginf replacements can reverse
+    # the order, so preserving Partial(max/min) across it is unsound.
     # hardshrink: x if |x|>lambd else 0. Non-decreasing on entire domain.
     aten.hardshrink.default,
     # I1(x) is monotonically non-decreasing for all real x.

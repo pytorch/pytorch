@@ -1358,6 +1358,36 @@ class TestPointwiseRuleValidation(TestCase):
         if torch.distributed.is_initialized():
             torch.distributed.destroy_process_group()
 
+    def test_nan_to_num_partial_redistribution(self):
+        # nan_to_num is not max/min-preserving in the presence of NaN/Inf or
+        # custom replacement values, so it must not preserve Partial(max/min)
+        # placements: applying it before an outstanding distributed max/min
+        # reduction silently changes the result.
+        # https://github.com/pytorch/pytorch/issues/203922
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            cases = [
+                ("amax", float("nan"), 5.0, {}, Partial("max")),
+                ("amin", float("nan"), -5.0, {}, Partial("min")),
+                ("amax", float("inf"), 5.0, {"posinf": -1.0}, Partial("max")),
+                ("amin", -float("inf"), -5.0, {"neginf": 1.0}, Partial("min")),
+            ]
+            for reduction, a, b, kwargs, partial_placement in cases:
+                with self.subTest(reduction=reduction, kwargs=kwargs):
+                    full = torch.tensor([[a, -3.0], [b, 2.0]])
+                    shard = distribute_tensor(full, mesh, [Shard(0)])
+                    pending = getattr(shard, reduction)(dim=0)
+                    # the outstanding reduction still carries the Partial placement
+                    self.assertEqual(pending.placements, (partial_placement,))
+                    actual = torch.nan_to_num(pending, **kwargs)
+                    # the op must materialize the pending reduction to Replicate
+                    self.assertEqual(actual.placements, (Replicate(),))
+                    got = actual.full_tensor().reconcile()
+                    expected = torch.nan_to_num(
+                        getattr(full, reduction)(dim=0), **kwargs
+                    )
+                    self.assertEqual(got, expected)
+
     def _with_even_sizes(self, fn):
         """Run fn with opinfo sizes overridden to be evenly divisible by world_size."""
         import torch.testing._internal.common_methods_invocations as common_ops
@@ -1436,50 +1466,6 @@ class TestPointwiseRuleValidation(TestCase):
 DistElementwiseOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistElementwiseOpsTest, base_class=LocalDTensorOpTestBase
 )
-
-
-class TestNanToNumPartialReduction(TestCase):
-    """`nan_to_num` is not max/min-preserving in the presence of NaN/Inf or
-    custom replacement values, so it must not preserve ``Partial(max/min)``
-    placements: applying it before an outstanding distributed max/min
-    reduction silently changes the result.
-    https://github.com/pytorch/pytorch/issues/203922
-    """
-
-    world_size = 2
-
-    def setUp(self):
-        super().setUp()
-        if not torch.distributed.is_initialized():
-            torch.distributed.init_process_group(
-                "fake", rank=0, world_size=self.world_size
-            )
-
-    def tearDown(self):
-        super().tearDown()
-        if torch.distributed.is_initialized():
-            torch.distributed.destroy_process_group()
-
-    def test_nan_to_num_after_partial_reduction(self):
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            cases = [
-                ("amax", float("nan"), 5.0, {}),
-                ("amin", float("nan"), -5.0, {}),
-                ("amax", float("inf"), 5.0, {"posinf": -1.0}),
-                ("amin", -float("inf"), -5.0, {"neginf": 1.0}),
-            ]
-            for reduction, a, b, kwargs in cases:
-                with self.subTest(reduction=reduction, kwargs=kwargs):
-                    full = torch.tensor([[a, -3.0], [b, 2.0]])
-                    shard = distribute_tensor(full, mesh, [Shard(0)])
-                    pending = getattr(shard, reduction)(dim=0)
-                    actual = torch.nan_to_num(pending, **kwargs)
-                    got = actual.full_tensor()._local_tensors[0]
-                    expected = torch.nan_to_num(
-                        getattr(full, reduction)(dim=0), **kwargs
-                    )
-                    self.assertEqual(got, expected)
 
 
 if __name__ == "__main__":
