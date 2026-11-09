@@ -9,8 +9,9 @@ from torch._inductor.cpu_vec_isa import valid_vec_isa_list
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_triton_fp8_dtype_supported, run_and_get_code
 from torch.testing._internal.common_device_type import (
-    expectedFailureIfRocm,
     instantiate_device_type_tests,
+    skipCPUIf,
+    skipCUDAIfRocm,
 )
 from torch.testing._internal.common_utils import HardwareClassification, parametrize
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -151,8 +152,7 @@ class TestRoundedConversionInductor(_RoundedConversionTestMixin, TestCase):
                 code = self._check(device, torch.float32, torch.float8_e5m3fnu, mode)
                 self.assertIn(FALLBACK, code)
 
-    # Triton reduces float64 with PTX, so ROCm still rounds twice.
-    @expectedFailureIfRocm
+    @skipCUDAIfRocm(msg="Triton reduces float64 with PTX, so ROCm still rounds twice")
     @parametrize(
         "dst",
         [torch.float16, torch.bfloat16, torch.float8_e4m3fn, torch.float8_e5m2],
@@ -203,11 +203,16 @@ class TestRoundedConversionInductor(_RoundedConversionTestMixin, TestCase):
         self.assertTrue(actual.is_contiguous(memory_format=torch.channels_last))
         self.assertSameValues(actual, fn(x))
 
-    def test_low_precision_users(self, device):
-        # The rounded float16 or bfloat16 result feeds ops that mix it with
-        # other values (in C++, the low-precision legalization widens it).
+    @parametrize(
+        "dst",
+        [torch.float16, torch.bfloat16],
+        name_fn=lambda dst: str(dst).removeprefix("torch."),
+    )
+    def test_low_precision_users(self, device, dst):
+        # The rounded result feeds ops that mix it with other values (in C++,
+        # the low-precision legalization widens it).
         def fn(x, m):
-            r = x.to(torch.bfloat16, round="toward_zero")
+            r = x.to(dst, round="toward_zero")
             return torch.maximum(r + r, r), torch.where(m, r * r, r)
 
         x = torch.randn(1024, device=device)
@@ -216,6 +221,72 @@ class TestRoundedConversionInductor(_RoundedConversionTestMixin, TestCase):
         self.assertNotIn(FALLBACK, "\n".join(code))
         for a, e in zip(actual, fn(x, m)):
             self.assertSameValues(a, e)
+
+    def test_fusion(self, device):
+        # Before sm_89, Triton has no float8_e4m3fn.
+        if is_triton_fp8_dtype_supported(torch.float8_e4m3fn, device):
+            q_dtype = torch.float8_e4m3fn
+        else:
+            q_dtype = torch.float8_e5m2
+
+        def fn(x, y):
+            scale = x.abs().amax(dim=-1, keepdim=True) / 448
+            e8m0 = scale.to(torch.float8_e8m0fnu, round="toward_positive")
+            q = (x / e8m0.float()).to(q_dtype, round="toward_zero")
+            return q, e8m0, (y * 2).to(torch.bfloat16, round="toward_negative") + 1
+
+        x = torch.randn(64, 32, device=device)
+        y = torch.randn(1024, device=device)
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x, y)
+        for a, e in zip(actual, fn(x, y)):
+            self.assertSameValues(a, e)
+        self.assertNotIn("extern_kernels", code)
+        self.assertNotIn(FALLBACK, code)
+
+    @skipCPUIf(True, "tests a Triton helper")
+    def test_software_helper(self, device):
+        # Exercise the Triton software path for every format and mode, even
+        # where Inductor would emit a hardware instruction.
+        import triton
+        import triton.language as tl
+
+        from torch._inductor.codegen.triton import ROUNDING_FORMATS, ROUNDING_MODES
+        from torch._inductor.runtime import triton_helpers
+
+        @triton.jit
+        def kernel(
+            in_ptr, out_ptr, n, MODE: tl.constexpr, MANT_BITS: tl.constexpr,
+            BIAS: tl.constexpr, SIGNED: tl.constexpr, HAS_NEG_ZERO: tl.constexpr,
+            HAS_SUBNORMALS: tl.constexpr, SIGN_BIT: tl.constexpr,
+            MAX_FINITE: tl.constexpr, OVERFLOW: tl.constexpr, NAN: tl.constexpr,
+            BLOCK: tl.constexpr,
+        ):  # fmt: skip
+            offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+            mask = offsets < n
+            x = tl.load(in_ptr + offsets, mask=mask)
+            bits = triton_helpers.round_float32_to_bits(
+                x, MODE, MANT_BITS, BIAS, SIGNED, HAS_NEG_ZERO, HAS_SUBNORMALS,
+                SIGN_BIT, MAX_FINITE, OVERFLOW, NAN,
+            )  # fmt: skip
+            tl.store(out_ptr + offsets, bits, mask=mask)
+
+        x = torch.cat(
+            [
+                _inputs(torch.float32, 1 << 20),
+                torch.arange(0, 1 << 24, dtype=torch.int32).view(torch.float32),
+            ]
+        ).to(device)
+        for dst, fmt in ROUNDING_FORMATS.items():
+            for mode in MODES:
+                with self.subTest(dst=dst, mode=mode):
+                    out = torch.empty_like(x, dtype=torch.int32)
+                    kernel[(triton.cdiv(x.numel(), 1024),)](
+                        x, out, x.numel(), ROUNDING_MODES[mode], *fmt, BLOCK=1024
+                    )
+                    bits = torch.finfo(dst).bits
+                    int_dtype = torch.int16 if bits == 16 else torch.uint8
+                    actual = out.to(int_dtype).view(dst)
+                    self.assertSameValues(actual, x.cpu().to(dst, round=mode))
 
 
 @unittest.skipIf(not HAS_CUDA, "requires CUDA")
@@ -282,27 +353,6 @@ class TestRoundedConversionInductorCUDAOnly(_RoundedConversionTestMixin, TestCas
                 if dst == e8m0:
                     self.assertNotIn("satfinite", code)
 
-    def test_fusion(self):
-        # Before sm_89, Triton has no float8_e4m3fn.
-        if is_triton_fp8_dtype_supported(torch.float8_e4m3fn, "cuda"):
-            q_dtype = torch.float8_e4m3fn
-        else:
-            q_dtype = torch.float8_e5m2
-
-        def fn(x, y):
-            scale = x.abs().amax(dim=-1, keepdim=True) / 448
-            e8m0 = scale.to(torch.float8_e8m0fnu, round="toward_positive")
-            q = (x / e8m0.float()).to(q_dtype, round="toward_zero")
-            return q, e8m0, (y * 2).to(torch.bfloat16, round="toward_negative") + 1
-
-        x = torch.randn(64, 32, device="cuda")
-        y = torch.randn(1024, device="cuda")
-        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x, y)
-        for a, e in zip(actual, fn(x, y)):
-            self.assertSameValues(a, e)
-        self.assertNotIn("extern_kernels", code)
-        self.assertNotIn(FALLBACK, code)
-
     def test_scan_combine_fn(self):
         # Scans lift their combine function into a separate Triton function,
         # so the float64 conversion, routed through to_dtype_rounded, must not
@@ -324,50 +374,6 @@ class TestRoundedConversionInductorCUDAOnly(_RoundedConversionTestMixin, TestCas
         self.assertIn("_triton_helper_fn", code)
         self.assertIn("round_float64_to_odd_float32", code)
         self.assertEqual(actual, fn(x), atol=0, rtol=0)
-
-    def test_software_helper(self):
-        # Exercise the Triton software path for every format and mode, even
-        # where Inductor would emit a hardware instruction.
-        import triton
-        import triton.language as tl
-
-        from torch._inductor.codegen.triton import ROUNDING_FORMATS, ROUNDING_MODES
-        from torch._inductor.runtime import triton_helpers
-
-        @triton.jit
-        def kernel(
-            in_ptr, out_ptr, n, MODE: tl.constexpr, MANT_BITS: tl.constexpr,
-            BIAS: tl.constexpr, SIGNED: tl.constexpr, HAS_NEG_ZERO: tl.constexpr,
-            HAS_SUBNORMALS: tl.constexpr, SIGN_BIT: tl.constexpr,
-            MAX_FINITE: tl.constexpr, OVERFLOW: tl.constexpr, NAN: tl.constexpr,
-            BLOCK: tl.constexpr,
-        ):  # fmt: skip
-            offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
-            mask = offsets < n
-            x = tl.load(in_ptr + offsets, mask=mask)
-            bits = triton_helpers.round_float32_to_bits(
-                x, MODE, MANT_BITS, BIAS, SIGNED, HAS_NEG_ZERO, HAS_SUBNORMALS,
-                SIGN_BIT, MAX_FINITE, OVERFLOW, NAN,
-            )  # fmt: skip
-            tl.store(out_ptr + offsets, bits, mask=mask)
-
-        x = torch.cat(
-            [
-                _inputs(torch.float32, 1 << 20),
-                torch.arange(0, 1 << 24, dtype=torch.int32).view(torch.float32),
-            ]
-        ).cuda()
-        for dst, fmt in ROUNDING_FORMATS.items():
-            for mode in MODES:
-                with self.subTest(dst=dst, mode=mode):
-                    out = torch.empty_like(x, dtype=torch.int32)
-                    kernel[(triton.cdiv(x.numel(), 1024),)](
-                        x, out, x.numel(), ROUNDING_MODES[mode], *fmt, BLOCK=1024
-                    )
-                    bits = torch.finfo(dst).bits
-                    int_dtype = torch.int16 if bits == 16 else torch.uint8
-                    actual = out.to(int_dtype).view(dst)
-                    self.assertSameValues(actual, x.cpu().to(dst, round=mode))
 
 
 instantiate_device_type_tests(

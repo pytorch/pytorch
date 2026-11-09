@@ -32,12 +32,6 @@
 #include <cstring>
 #include <limits>
 #include <type_traits>
-#if __has_include(<version>)
-#include <version>
-#endif
-#ifdef __cpp_lib_bit_cast
-#include <bit>
-#endif
 #if defined(_MSC_VER) && !defined(__clang__)
 #include <intrin.h>
 #endif
@@ -95,12 +89,30 @@ constexpr T overflow_value() {
   }
 }
 
+// The encodings of T's limits, as scalars that device code can use (the
+// functions of numeric_limits are constexpr host functions).
+template <typename T>
+struct LimitBits {
+  static constexpr Bits<T> min = std::numeric_limits<T>::min().x;
+  static constexpr Bits<T> max = std::numeric_limits<T>::max().x;
+  static constexpr Bits<T> nan = std::numeric_limits<T>::quiet_NaN().x;
+  static constexpr Bits<T> overflow = overflow_value<T>().x;
+};
+template <>
+struct LimitBits<float> {
+  static constexpr uint32_t min = 0x00800000;
+  static constexpr uint32_t max = 0x7F7FFFFF;
+  static constexpr uint32_t nan = 0x7FC00000;
+  static constexpr uint32_t overflow = 0x7F800000;
+};
+
 // Rounds x to float, setting the last bit if inexact ("round to odd"). float
 // has at least two more mantissa bits than the narrower formats and covers
 // their ranges, so rounding the result to one of them again rounds x correctly.
 C10_HOST_DEVICE inline float round_to_odd_float(double x) {
 #if defined(__CUDA_ARCH__)
-  // Truncate, then set the last bit if inexact (false for NaN).
+  // Truncate, then set the last bit if inexact (false for NaN). Not used for
+  // HIP, where it is untested; the portable version below is correct there.
   const float t = __double2float_rz(x);
   return fp32_from_bits(
       fp32_to_bits(t) | ((static_cast<double>(t) != x) & (x == x)));
@@ -164,16 +176,11 @@ C10_HOST_DEVICE Dst convert_with_rounding(Src x, RoundingMode mode) {
   constexpr int kDstBias = (kDstHasSubnormals ? 1 : 0) - kDstExpMin;
   constexpr uint32_t kDstSignBit =
       DstL::is_signed ? uint32_t{1} << (sizeof(Dst) * 8 - 1) : 0;
-  // Values are constexpr (numeric_limits must not be called at run time in
-  // device code); their bits are copied at run time.
-  constexpr Dst kDstMaxValue = DstL::max();
-  constexpr Dst kDstNaNValue = DstL::quiet_NaN();
-  constexpr Dst kDstOverflowValue = detail::overflow_value<Dst>();
-  const uint32_t kDstMaxFinite = detail::bit_copy<Bits<Dst>>(kDstMaxValue);
-  const uint32_t kDstNaN = detail::bit_copy<Bits<Dst>>(kDstNaNValue);
-  const uint32_t kDstOverflow = detail::bit_copy<Bits<Dst>>(kDstOverflowValue);
+  constexpr uint32_t kDstMaxFinite = detail::LimitBits<Dst>::max;
+  constexpr uint32_t kDstNaN = detail::LimitBits<Dst>::nan;
+  constexpr uint32_t kDstOverflow = detail::LimitBits<Dst>::overflow;
   // The fnuz formats encode NaN as negative zero.
-  const bool kDstHasNegZero = DstL::is_signed && kDstNaN != kDstSignBit;
+  constexpr bool kDstHasNegZero = DstL::is_signed && kDstNaN != kDstSignBit;
 
   const auto from_bits = [](uint32_t bits) {
     return detail::bit_copy<Dst>(static_cast<Bits<Dst>>(bits));
@@ -213,12 +220,10 @@ C10_HOST_DEVICE Dst convert_with_rounding(Src x, RoundingMode mode) {
   bool dst_normal = unbiased_exponent >= kDstExpMin;
 
   if (!dst_normal && !kDstHasSubnormals) {
-#ifdef __cpp_lib_bit_cast
     static_assert(
-        kDstHasSubnormals || std::bit_cast<Bits<Dst>>(DstL::min()) == 0,
+        kDstHasSubnormals || detail::LimitBits<Dst>::min == 0,
         "a destination without subnormals must have no zero either, so that "
         "encoding 0 is its smallest normal value");
-#endif
     return from_bits(0);
   }
 

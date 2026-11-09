@@ -2303,6 +2303,35 @@ def _canonicalize_to_arguments(a: Tensor, to_kwargs: dict):
                 to_kwargs.pop(kw)
 
 
+def _check_to_dtype_rounded(a: TensorLikeType, dtype: torch.dtype, rounding: str):
+    """The checks of aten._to_dtype_rounded, in the same order as its kernel
+    (check_to_dtype_rounded in aten/src/ATen/native/RoundedConversion.cpp)."""
+    torch._check(
+        a.layout == torch.strided,
+        lambda: f"rounding is only supported for strided tensors, but got {a.layout}",
+    )
+    narrower = {
+        torch.float64: (torch.float32, torch.float16, torch.bfloat16),
+        torch.float32: (torch.float16, torch.bfloat16),
+        torch.float16: (torch.bfloat16,),
+        torch.bfloat16: (torch.float16,),
+    }
+    torch._check(
+        a.dtype in narrower
+        and (dtype in narrower[a.dtype] or str(dtype).startswith("torch.float8_")),
+        lambda: "rounding is only supported when converting a float64, float32, "
+        "float16 or bfloat16 tensor to a narrower floating-point dtype (one that "
+        "cannot represent all its values exactly), but got a conversion from "
+        f"{a.dtype} to {dtype}",
+    )
+    modes = ("to_nearest_even", "toward_zero", "toward_positive", "toward_negative")
+    torch._check_value(
+        rounding in modes,
+        lambda: "the rounding mode must be one of 'to_nearest_even', 'toward_zero', "
+        f"'toward_positive' or 'toward_negative', but got '{rounding}'",
+    )
+
+
 def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
     rounding = kwargs.pop("round", None)
     # handled dispatch via positional arguments
@@ -2330,8 +2359,9 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
                 "aten::_to_dtype_rounded.out", key
             )
 
-        # Like Tensor.to: convert on a device with a kernel, preferring an
-        # accelerator and, between two, the source.
+        # Like Tensor.to: fail before any transfer, and convert on a device
+        # with a kernel, preferring an accelerator and, between two, the source.
+        _check_to_dtype_rounded(a, dtype, rounding)
         device = kwargs.get("device")
         if device is None:
             return to(convert(a), **kwargs)

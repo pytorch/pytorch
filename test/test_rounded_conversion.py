@@ -172,6 +172,9 @@ def _boundary_inputs(src, dst):
         )
         mags = mags.sort().values
         top = torch.tensor([torch.finfo(dst).max, 2.0**128], dtype=torch.float64)
+        # Midpoints between the random values and the next float32 values.
+        next_mags = torch.nextafter(mags.float(), torch.tensor(math.inf)).double()
+        mags = torch.cat([mags, next_mags]).sort().values
     else:
         mags = _finite_magnitudes(dst)
         no_mantissa = dst is torch.float8_e8m0fnu
@@ -243,7 +246,7 @@ class TestRoundedConversion(TestCase):
             )
         )
         if bad.any():
-            i = bad.nonzero()[0].item()
+            i = bad.view(torch.uint8).argmax().item()
             self.fail(
                 f"{int(bad.sum())} mismatches, e.g. input {inputs[i].item()!r} -> "
                 f"{actual[i].item()!r}, expected {expected[i].item()!r}"
@@ -471,7 +474,8 @@ class TestRoundedConversion(TestCase):
             rtol=0,
         )
 
-        # The layout change happens in the conversion itself, not in a copy.
+        # The binding converts with a single op, rather than converting and
+        # then copying to the requested layout.
         class RecordOps(TorchDispatchMode):
             def __init__(self):
                 super().__init__()
@@ -590,6 +594,7 @@ class TestRoundedConversion(TestCase):
     @slowTest
     @serialTest()
     @largeTensorTest("6GB", device="cpu")
+    @largeTensorTest("2GB")
     def test_exhaustive_float32(self, device):
         # Every float32 input, comparing the accelerator (which uses hardware
         # instructions where available, and NVIDIA's emulations of some of
@@ -680,7 +685,7 @@ class TestRoundedConversionPython(TestCase):
         def fn():
             return module.to(torch.float16, round="toward_zero")
 
-        with self.assertRaisesRegex(Exception, "does not accept round argument"):
+        with self.assertRaisesRegex(RuntimeError, "does not accept round argument"):
             torch.compile(fn, backend="eager", fullgraph=True)()
 
 
