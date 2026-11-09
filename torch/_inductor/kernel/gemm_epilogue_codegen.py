@@ -3,11 +3,14 @@
 
 import ast
 import dataclasses
+import math
+import operator
 from collections.abc import Callable
 from typing import Any, cast
 
 import torch
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+    CuteDSLArg,
     CuteDSLCSEVariable,
     CuteDSLOpOverrides,
     tensorssa_reduction,
@@ -18,8 +21,10 @@ from torch._inductor.kernel.gemm_epilogue import (
     GemmReductionType,
 )
 from torch._inductor.ops_handler import ReductionType
-from torch._inductor.virtualized import V
+from torch._inductor.virtualized import OpsValue, V
 from torch.utils._sympy.value_ranges import ValueRanges
+
+from .gemm_epilogue_utils import normalize_shape
 
 
 @dataclasses.dataclass(frozen=True)
@@ -178,7 +183,7 @@ class GemmReductionCompileConfig:
                 0.0,
                 materialize(args.combine_fn),
                 None,
-                materialize(args.finalizer_fn),
+                materialize(args.finalizer_fn) or _identity_finalize,
             )
         else:
             if args.reduction_type is None or args.source_fn is None:
@@ -257,6 +262,133 @@ class GemmReductionCompileConfig:
         )
 
 
+def _cute_op_name(target: Any) -> str | None:
+    """Return the CuTeDSL operations-handler name for one FX target."""
+    if isinstance(target, torch._ops.OpOverload):
+        name = target.overloadpacket.__name__
+    elif isinstance(target, str):
+        name = target
+    else:
+        name = target.__name__ if callable(target) else None
+    if name is not None:
+        name = name.rsplit(".", 1)[-1]
+    return "truediv" if name == "div" else name
+
+
+def _cute_arg(value: Any, env: dict[torch.fx.Node, Any], context: str) -> Any:
+    """Translate FX references and constants into generated expressions."""
+    if isinstance(value, torch.fx.Node):
+        if value in env:
+            return env[value]
+        raise NotImplementedError(
+            f"unsupported {context} epilogue dependency: {value.format_node()}"
+        )
+    if isinstance(value, (bool, int)):
+        return value
+    if isinstance(value, float):
+        if math.isnan(value):
+            return 'float("nan")'
+        if math.isinf(value):
+            return 'float("inf")' if value > 0 else 'float("-inf")'
+        return value
+    if isinstance(value, CuteDSLCSEVariable):
+        return str(value)
+    if isinstance(value, (str, torch.dtype)) or value is None:
+        return value
+    if isinstance(value, (tuple, list)):
+        return type(value)(_cute_arg(item, env, context) for item in value)
+    raise NotImplementedError(f"unsupported {context} epilogue constant: {value!r}")
+
+
+def gemm_epilogue_source_expr(value: Any) -> str:
+    """Render a generated expression without quoting tuple components."""
+    if isinstance(value, (tuple, list)):
+        items = ", ".join(gemm_epilogue_source_expr(item) for item in value)
+        return f"({items}{',' if len(value) == 1 else ''})"
+    return str(value)
+
+
+def lower_full_scalar(node: torch.fx.Node) -> Any | None:
+    """Return the scalar value from an empty-shape ``aten.full`` node."""
+    if node.op != "call_function" or node.target is not torch.ops.aten.full.default:
+        return None
+    if normalize_shape(node.args[0]) != ():
+        return None
+    value = node.args[1]
+    return value if isinstance(value, (bool, int, float)) else None
+
+
+def _cute_call(
+    node: torch.fx.Node,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    *,
+    context: str,
+) -> Any:
+    """Lower one FX call through the active CuTeDSL operations handler."""
+    target = node.target
+    op_name = _cute_op_name(target)
+    if op_name is None:
+        raise NotImplementedError(f"unsupported {context} epilogue op: {target}")
+    if op_name == "inline_asm_elementwise":
+        kwargs = dict(kwargs)
+        kwargs["asm"] = kwargs.pop("asm_str")
+        input_values = []
+        for input_node in node.args[: len(args)]:
+            value = (
+                input_node.meta.get("val")
+                if isinstance(input_node, torch.fx.Node)
+                else None
+            )
+            if not isinstance(value, torch.Tensor):
+                raise NotImplementedError(
+                    f"{context} inline asm inputs require tensor metadata"
+                )
+            input_values.append(value)
+        kwargs["input_dtypes"] = tuple(value.dtype for value in input_values)
+        kwargs["scalar_sources"] = tuple(
+            all(isinstance(dim, int) and dim == 1 for dim in value.shape)
+            for value in input_values
+        )
+    try:
+        op = getattr(V.get_ops_handler(), op_name)
+    except AttributeError:
+        raise NotImplementedError(
+            f"unsupported {context} epilogue op: {target}"
+        ) from None
+    return op(*args, **kwargs)
+
+
+def lower_gemm_epilogue_fx_node(
+    kernel: "GemmEpilogueCuteDSLKernel",
+    env: dict[torch.fx.Node, Any],
+    node: torch.fx.Node,
+    *,
+    context: str,
+) -> Any:
+    """Lower one ordinary FX expression through the shared CuTeDSL frontend."""
+    if _cute_op_name(node.target) in ("view", "reshape", "squeeze"):
+        return _cute_arg(node.args[0], env, context)
+    if node.target is operator.getitem:
+        source = _cute_arg(node.args[0], env, context)
+        index = node.args[1]
+        if isinstance(source, (tuple, list)) and isinstance(index, int):
+            return source[index]
+    if (value := lower_full_scalar(node)) is not None:
+        return _cute_arg(value, env, context)
+    args = tuple(_cute_arg(arg, env, context) for arg in node.args)
+    kwargs = {key: _cute_arg(value, env, context) for key, value in node.kwargs.items()}
+    with V.set_current_node(node):
+        expression = _cute_call(node, args, kwargs, context=context)
+    if isinstance(expression, OpsValue):
+        expression = expression.value
+    if isinstance(expression, (tuple, list, CuteDSLCSEVariable)):
+        return expression
+    meta = node.meta.get("val")
+    dtype = meta.dtype if isinstance(meta, torch.Tensor) else torch.float32
+    return kernel.cse.generate(kernel.body, expression, dtype=dtype, shape=(1,))
+
+
 class GemmEpilogueCuteDSLBody:
     def __init__(self) -> None:
         self.lines: list[str] = []
@@ -308,12 +440,46 @@ class GemmEpilogueCuteDSLOpOverrides(CuteDSLOpOverrides):
     @staticmethod
     def add(a: Any, b: Any, *, alpha: Any = 1) -> Any:
         rhs = b if alpha == 1 else CuteDSLOpOverrides.mul(b, alpha)
+        rhs_expr = str(rhs)
+        try:
+            float(rhs_expr)
+        except ValueError:
+            pass
+        else:
+            if CuteDSLOpOverrides._is_tensor_like(a):
+                return CuteDSLOpOverrides._apply_unary_op(a, f"({{x}} + {rhs_expr})")
         return CuteDSLOpOverrides.add(a, rhs)
 
     @staticmethod
+    def mul(a: Any, b: Any) -> Any:
+        rhs_expr = str(b)
+        try:
+            float(rhs_expr)
+        except ValueError:
+            pass
+        else:
+            if CuteDSLOpOverrides._is_tensor_like(a):
+                return CuteDSLOpOverrides._apply_unary_op(a, f"({{x}} * {rhs_expr})")
+        return CuteDSLOpOverrides.mul(a, b)
+
+    @staticmethod
     def sub(a: Any, b: Any, *, alpha: Any = 1) -> Any:
-        rhs = b if alpha == 1 else CuteDSLOpOverrides.mul(b, alpha)
+        rhs = b if alpha == 1 else GemmEpilogueCuteDSLOpOverrides.mul(b, alpha)
         return CuteDSLOpOverrides.sub(a, rhs)
+
+    @staticmethod
+    def erf(x: Any) -> Any:
+        return CuteDSLOpOverrides._apply_unary_op(x, "erf({x})")
+
+    @staticmethod
+    def sigmoid(x: Any) -> Any:
+        return CuteDSLOpOverrides._apply_unary_op(x, "sigmoid({x})")
+
+    @staticmethod
+    def maximum(a: Any, b: Any) -> Any:
+        if CuteDSLOpOverrides._is_tensor_like(a) and str(b) in ("0", "0.0"):
+            return CuteDSLOpOverrides._apply_unary_op(a, "relu({x})")
+        return CuteDSLOpOverrides.maximum(a, b)
 
     @staticmethod
     def _to_copy(x: Any, *, dtype: torch.dtype, **kwargs: Any) -> Any:
@@ -326,7 +492,24 @@ class GemmEpilogueCuteDSLOpOverrides(CuteDSLOpOverrides):
             raise NotImplementedError(
                 f"unsupported GEMM epilogue _to_copy kwargs: {unsupported_kwargs}"
             )
-        return CuteDSLOpOverrides.to_dtype(x, dtype)
+        return GemmEpilogueCuteDSLOpOverrides.to_dtype(x, dtype)
+
+    @staticmethod
+    def to_dtype(
+        x: CuteDSLArg,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype | None = None,
+        use_compute_types: bool = True,
+    ) -> CuteDSLArg:
+        x_cse = CuteDSLOpOverrides._get_cse_var(x)
+        if x_cse is not None and x_cse.dtype == dtype:
+            return x_cse
+        return CuteDSLOpOverrides.to_dtype(
+            x,
+            dtype,
+            src_dtype=src_dtype,
+            use_compute_types=use_compute_types,
+        )
 
     @staticmethod
     def where(condition: Any, a: Any, b: Any) -> Any:
@@ -374,4 +557,4 @@ class GemmEpilogueCuteDSLOpOverrides(CuteDSLOpOverrides):
 
     @staticmethod
     def convert_element_type(x: Any, dtype: torch.dtype) -> Any:
-        return CuteDSLOpOverrides.to_dtype(x, dtype)
+        return GemmEpilogueCuteDSLOpOverrides.to_dtype(x, dtype)

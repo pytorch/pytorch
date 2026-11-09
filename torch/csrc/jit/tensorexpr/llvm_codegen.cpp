@@ -77,6 +77,7 @@ C10_DIAGNOSTIC_POP()
 #include <torch/csrc/jit/jit_log.h>
 
 #include <memory>
+#include <numeric>
 
 using namespace torch::jit::tensorexpr;
 
@@ -148,7 +149,7 @@ llvm::CmpInst::Predicate llvm_comparison_predicate(
                                      : llvm::ICmpInst::ICMP_ULE;
     default:
       // TODO: change to a proper error report
-      throw std::runtime_error("invalid operator type");
+      TORCH_CHECK(false, "invalid operator type");
   }
 }
 
@@ -169,7 +170,7 @@ llvm::CmpInst::Predicate llvm_fp_comparison_predicate(
       return llvm::FCmpInst::FCMP_OLE;
     default:
       // TODO: change to a proper error report
-      throw std::runtime_error("invalid operator type");
+      TORCH_CHECK(false, "invalid operator type");
   }
 }
 
@@ -289,12 +290,21 @@ class LLVMCodeGenImpl : public IRVisitor {
     Binary,
   };
 
-  using SimdCallee = std::tuple<llvm::FunctionType*, llvm::Value*, bool>;
+  // The callee, plus the number of lanes it consumes per call. A width of 1
+  // means no vector implementation was found and the scalar function has to be
+  // called once per lane.
+  using SimdCallee = std::tuple<llvm::FunctionType*, llvm::Value*, int>;
   SimdCallee getSimdFunction(
       const std::string& name,
       llvm::Type* type,
       Arity arity,
       int lanes);
+  llvm::Value* emitSimdCall(
+      llvm::FunctionType* callTy,
+      llvm::Value* callFn,
+      const std::vector<llvm::Value*>& params,
+      int lanes,
+      int simdLanes);
 
   llvm::Value* varToValue(VarPtr var);
   void replaceVarMapping(
@@ -441,9 +451,9 @@ void LLVMCodeGen::call_with_numel(void** args, int64_t /* numel */) {
 
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {
   auto& buf_args = buffer_args();
-  if (args.size() != buf_args.size()) {
-    throw malformed_input("wrong number of args in call");
-  }
+  TORCH_CHECK(
+      args.size() == buf_args.size(),
+      "MALFORMED INPUT: wrong number of args in call");
 
   constexpr unsigned nargs = 8;
   c10::SmallVector<void*, nargs> argv;
@@ -509,6 +519,12 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
       irb_(getContext()),
       kernel_func_name_(std::move(kernel_func_name)),
       bufsExtAlloc_(ExternalAllocBufFinder::find(stmt)) {
+#if LLVM_VERSION_MAJOR >= 24
+  // LLVM 24 uses IR-level contraction flags instead of AllowFPOpFusion.
+  llvm::FastMathFlags fast_math_flags;
+  fast_math_flags.setAllowContract(true);
+  irb_.setFastMathFlags(fast_math_flags);
+#endif
   if (!triple) {
     triple = LLVMTargetTriple();
   }
@@ -608,18 +624,15 @@ llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
 #undef TYPE_CASE
     case ScalarType::QInt8:
       return CharTy_;
-      break;
 
     case ScalarType::QUInt8:
       return ByteTy_;
-      break;
 
     case ScalarType::BFloat16:
       return ShortTy_;
-      break;
 
     default:
-      throw unsupported_dtype();
+      TORCH_CHECK(false, "UNSUPPORTED DTYPE");
   }
   return nullptr;
 }
@@ -758,9 +771,9 @@ void LLVMCodeGenImpl::emitKernel(
   GRAPH_DEBUG(
       "\nLLVM module before optimizations\n\n", asmStream.str().str(), "\n");
 
-  if (llvm::verifyFunction(*fn_, &llvm::outs())) {
-    throw std::runtime_error("Function verification failed");
-  }
+  TORCH_CHECK(
+      !llvm::verifyFunction(*fn_, &llvm::outs()),
+      "Function verification failed");
 
   optimize(*module_);
 
@@ -806,7 +819,10 @@ void LLVMCodeGenImpl::visit(const AddPtr& v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateAdd(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codegen: bad type in Add", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Add - ",
+        std::to_string(v));
   }
 }
 
@@ -824,7 +840,10 @@ void LLVMCodeGenImpl::visit(const SubPtr& v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateSub(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codegen: bad type in Sub", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Sub - ",
+        std::to_string(v));
   }
 }
 
@@ -842,7 +861,10 @@ void LLVMCodeGenImpl::visit(const MulPtr& v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateMul(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codegen: bad type in Mul", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Mul - ",
+        std::to_string(v));
   }
 }
 
@@ -860,7 +882,10 @@ void LLVMCodeGenImpl::visit(const DivPtr& v) {
   } else if (!lfp && !rfp) {
     value_ = irb_.CreateSDiv(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codegen: bad type in Div", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Div - ",
+        std::to_string(v));
   }
 }
 
@@ -875,7 +900,10 @@ void LLVMCodeGenImpl::visit(const AndPtr& v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateAnd(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codegen: bad type in And", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in And - ",
+        std::to_string(v));
   }
 }
 
@@ -890,7 +918,10 @@ void LLVMCodeGenImpl::visit(const OrPtr& v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateOr(lhs, rhs); // codespell:ignore
   } else {
-    throw malformed_input("llvm_codegen: bad type in Or", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Or - ",
+        std::to_string(v));
   }
 }
 
@@ -905,7 +936,10 @@ void LLVMCodeGenImpl::visit(const XorPtr& v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateXor(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codegen: bad type in Xor", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Xor - ",
+        std::to_string(v));
   }
 }
 
@@ -920,7 +954,10 @@ void LLVMCodeGenImpl::visit(const LshiftPtr& v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateShl(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codegen: bad type in Lshift", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Lshift - ",
+        std::to_string(v));
   }
 }
 
@@ -939,7 +976,10 @@ void LLVMCodeGenImpl::visit(const RshiftPtr& v) {
       value_ = irb_.CreateLShr(lhs, rhs);
     }
   } else {
-    throw malformed_input("llvm_codegen: bad type in Rshift", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Rshift - ",
+        std::to_string(v));
   }
 }
 
@@ -954,7 +994,10 @@ void LLVMCodeGenImpl::visit(const ModPtr& v) {
   if (!lfp && !rfp) {
     value_ = irb_.CreateSRem(lhs, rhs);
   } else {
-    throw malformed_input("llvm_codegen: bad type in Mod", v);
+    TORCH_CHECK(
+        false,
+        "MALFORMED INPUT: llvm_codegen: bad type in Mod - ",
+        std::to_string(v));
   }
 }
 
@@ -1025,7 +1068,7 @@ void LLVMCodeGenImpl::visit(const CompareSelectPtr& v) {
     } else if (c10::isFloatingType(type_used)) {
       cmp_ = irb_.CreateFCmp(llvm_fp_comparison_predicate(cmp_op_), lhs, rhs);
     } else {
-      throw std::runtime_error("invalid type for CompareSelect");
+      TORCH_CHECK(false, "invalid type for CompareSelect");
     }
 
     return irb_.CreateSelect(cmp_, retval1, retval2);
@@ -1047,7 +1090,7 @@ void LLVMCodeGenImpl::visit(const CompareSelectPtr& v) {
     } else if (c10::isFloatingType(cmp_type)) {
       cmp = irb_.CreateFCmp(llvm_fp_comparison_predicate(cmp_op), lhs, rhs);
     } else {
-      throw std::runtime_error("invalid type for CompareSelect");
+      TORCH_CHECK(false, "invalid type for CompareSelect");
     }
 
     auto lanes = v->lhs()->dtype().lanes();
@@ -1253,14 +1296,15 @@ void LLVMCodeGenImpl::visit(const CastPtr& v) {
         value_ = irb_.CreateFPToSI(value_, dstType);
       }
     } else {
-      throw unimplemented_lowering(v);
+      TORCH_CHECK(false, "UNIMPLEMENTED LOWERING: ", std::to_string(v));
     }
     return;
   }
 
-  if (!srcType->isIntOrIntVectorTy()) {
-    throw unimplemented_lowering(v);
-  }
+  TORCH_CHECK(
+      srcType->isIntOrIntVectorTy(),
+      "UNIMPLEMENTED LOWERING: ",
+      std::to_string(v));
   if (dstType->isFPOrFPVectorTy()) {
     if (srcUnsigned) {
       value_ = irb_.CreateUIToFP(value_, dstType);
@@ -1277,7 +1321,7 @@ void LLVMCodeGenImpl::visit(const CastPtr& v) {
     }
     value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
   } else {
-    throw unimplemented_lowering(v);
+    TORCH_CHECK(false, "UNIMPLEMENTED LOWERING: ", std::to_string(v));
   }
 }
 
@@ -1372,7 +1416,7 @@ void LLVMCodeGenImpl::visit(const RampPtr& v) {
       vecType = llvm::VectorType::get(ShortTy_, element_count);
       break;
     default:
-      throw std::runtime_error("invalid dtype in Ramp");
+      TORCH_CHECK(false, "invalid dtype in Ramp");
   }
 
   value_ = llvm::UndefValue::get(vecType);
@@ -1462,7 +1506,7 @@ void LLVMCodeGenImpl::visit(const LoadPtr& v) {
       loadType = llvm::VectorType::get(ShortTy_, element_count);
       break;
     default:
-      throw std::runtime_error("invalid dtype in Load");
+      TORCH_CHECK(false, "invalid dtype in Load");
   }
 
   // Handle the case where the load is contiguous and unmasked efficiently
@@ -1731,7 +1775,7 @@ void LLVMCodeGenImpl::visit(const ForPtr& v) {
   if (!varToVal_.count(v->var())) {
     varToVal_.emplace(v->var(), idx);
   } else {
-    throw std::runtime_error("var should not exist before");
+    TORCH_CHECK(false, "var should not exist before");
   }
 
   // Create the body and exit blocks.
@@ -1776,9 +1820,7 @@ void LLVMCodeGenImpl::visit(const BlockPtr& v) {
   auto it = scopeToVar_.find(v);
   if (it != scopeToVar_.end()) {
     for (VarPtr e : it->second) {
-      if (varToVal_.erase(e) != 1) {
-        throw std::runtime_error("erasing var that doesn't exist");
-      }
+      TORCH_CHECK(varToVal_.erase(e) == 1, "erasing var that doesn't exist");
     }
   }
 }
@@ -1990,24 +2032,37 @@ LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
     llvm::Type* basetype,
     Arity arity,
     int lanes) {
-  std::string name;
-  llvm::Type* type;
-  bool useSimd;
+  std::string name = basename;
+  llvm::Type* type = basetype;
+  int simdLanes = 1;
 
-  // Determine whether to use vectorized intrinsic.
+  // Sleef's vector entry points are only callable if the target actually has
+  // the ISA they were built for. Advanced SIMD is mandatory on aarch64, so
+  // there is nothing to test for; on x86 the widest ones need AVX.
+  auto const& targetTriple = jit_->getTargetMachine().getTargetTriple();
   auto const& featureString = jit_->getTargetMachine().getTargetFeatureString();
-  bool hasAVX = featureString.find("+avx") != llvm::StringRef::npos;
-  std::string typeSuffix = basetype == DoubleTy_ ? "d" : "";
-  std::string sleefName =
-      "Sleef_" + basename + typeSuffix + std::to_string(lanes);
-  if (wantSleef(basename) && hasAVX && jit_->hasSymbol(sleefName)) {
-    name = std::move(sleefName);
-    type = llvm::VectorType::get(basetype, ElementCount(lanes));
-    useSimd = true;
-  } else {
-    name = basename;
-    type = basetype;
-    useSimd = false;
+  bool hasSimd = targetTriple.isAArch64() ||
+      featureString.find("+avx") != llvm::StringRef::npos;
+
+  if (wantSleef(basename) && hasSimd) {
+    std::string typeSuffix = basetype == DoubleTy_ ? "d" : "";
+    // Prefer an entry point as wide as the vectorized loop body, but accept a
+    // narrower one and call it repeatedly. Advanced SIMD tops out at 4 floats
+    // or 2 doubles, so without this a body vectorized at 8 lanes would fall
+    // all the way back to one scalar libm call per element.
+    for (int width = lanes; width > 1; width /= 2) {
+      if (lanes % width != 0) {
+        continue;
+      }
+      std::string sleefName =
+          "Sleef_" + basename + typeSuffix + std::to_string(width);
+      if (jit_->hasSymbol(sleefName)) {
+        name = std::move(sleefName);
+        type = llvm::VectorType::get(basetype, ElementCount(width));
+        simdLanes = width;
+        break;
+      }
+    }
   }
 
   // Get function to call from name and type.
@@ -2022,13 +2077,66 @@ LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
   }
   FunctionCallee callee = module_->getOrInsertFunction(name, fntype, {});
   applyMathFunctionAttributes(llvm::cast<llvm::Function>(callee.getCallee()));
-  return SimdCallee{callee.getFunctionType(), callee.getCallee(), useSimd};
+  return SimdCallee{callee.getFunctionType(), callee.getCallee(), simdLanes};
+}
+
+// Applies `callFn`, which consumes `simdLanes` at a time, across a
+// `lanes`-wide vector by slicing the operands and concatenating the results.
+llvm::Value* LLVMCodeGenImpl::emitSimdCall(
+    llvm::FunctionType* callTy,
+    llvm::Value* callFn,
+    const std::vector<llvm::Value*>& params,
+    int lanes,
+    int simdLanes) {
+  auto constantMask = [&](const std::vector<int>& indices) {
+    std::vector<llvm::Constant*> mask;
+    mask.reserve(indices.size());
+    for (int i : indices) {
+      mask.push_back(
+          i < 0 ? llvm::UndefValue::get(IntTy_)
+                : llvm::ConstantInt::get(IntTy_, i));
+    }
+    return llvm::ConstantVector::get(mask);
+  };
+
+  llvm::Value* result = nullptr;
+  int resultLanes = 0;
+  for (int base = 0; base < lanes; base += simdLanes) {
+    std::vector<int> sliceIndices(simdLanes);
+    std::iota(sliceIndices.begin(), sliceIndices.end(), base);
+    std::vector<llvm::Value*> slice;
+    slice.reserve(params.size());
+    for (llvm::Value* p : params) {
+      slice.push_back(irb_.CreateShuffleVector(
+          p, llvm::UndefValue::get(p->getType()), constantMask(sliceIndices)));
+    }
+    llvm::Value* part = irb_.CreateCall(callTy, callFn, slice);
+
+    if (!result) {
+      result = part;
+      resultLanes = simdLanes;
+      continue;
+    }
+    // shufflevector needs both operands to have the same type, so pad this
+    // part out to the accumulated width before appending it.
+    std::vector<int> padIndices(resultLanes, -1);
+    std::iota(padIndices.begin(), padIndices.begin() + simdLanes, 0);
+    llvm::Value* padded = irb_.CreateShuffleVector(
+        part, llvm::UndefValue::get(part->getType()), constantMask(padIndices));
+
+    std::vector<int> concatIndices(resultLanes + simdLanes);
+    std::iota(concatIndices.begin(), concatIndices.end(), 0);
+    result =
+        irb_.CreateShuffleVector(result, padded, constantMask(concatIndices));
+    resultLanes += simdLanes;
+  }
+  return result;
 }
 
 void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
   llvm::FunctionType* call_ty = nullptr;
   llvm::Value* call_fn = nullptr;
-  bool call_simd_sleef = false;
+  int call_simd_lanes = 1;
 
   if (v->op_type() == kIsNan) {
     return emitIsNan(v);
@@ -2043,11 +2151,11 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
             toVec(llvm::ConstantFP::get(FloatTy_, 1.0), v->dtype().lanes());
         value_ = irb_.CreateFDiv(constant, value_);
         return;
-      } break;
+      }
 
 #define SIMD_UNARY_MATH_CASE(enum, name, type)                  \
   case enum: {                                                  \
-    std::tie(call_ty, call_fn, call_simd_sleef) =               \
+    std::tie(call_ty, call_fn, call_simd_lanes) =               \
         getSimdFunction(name, type, Unary, v->dtype().lanes()); \
   } break;
         SIMD_UNARY_MATH_CASE(kLog10, "log10f", FloatTy_)
@@ -2078,7 +2186,7 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
 
 #define SIMD_BINARY_MATH_CASE(enum, name, type)                  \
   case enum: {                                                   \
-    std::tie(call_ty, call_fn, call_simd_sleef) =                \
+    std::tie(call_ty, call_fn, call_simd_lanes) =                \
         getSimdFunction(name, type, Binary, v->dtype().lanes()); \
   } break;
         SIMD_BINARY_MATH_CASE(kAtan2, "atan2f", FloatTy_)
@@ -2097,15 +2205,15 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
       } break;
 
       default: {
-        throw unimplemented_lowering(v);
-      } break;
+        TORCH_CHECK(false, "UNIMPLEMENTED LOWERING: ", std::to_string(v));
+      }
     }
 
   } else if (v->dtype().scalar_type() == ScalarType::Double) {
     switch (v->op_type()) {
 #define SIMD_UNARY_MATH_CASE(enum, name, type)                  \
   case enum: {                                                  \
-    std::tie(call_ty, call_fn, call_simd_sleef) =               \
+    std::tie(call_ty, call_fn, call_simd_lanes) =               \
         getSimdFunction(name, type, Unary, v->dtype().lanes()); \
   } break;
       SIMD_UNARY_MATH_CASE(kLog10, "log10", DoubleTy_)
@@ -2143,11 +2251,11 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
         }
         value_ = irb_.CreateFDiv(constant, value_);
         return;
-      } break;
+      }
 
 #define SIMD_BINARY_MATH_CASE(enum, name, type)                  \
   case enum: {                                                   \
-    std::tie(call_ty, call_fn, call_simd_sleef) =                \
+    std::tie(call_ty, call_fn, call_simd_lanes) =                \
         getSimdFunction(name, type, Binary, v->dtype().lanes()); \
   } break;
         SIMD_BINARY_MATH_CASE(kAtan2, "atan2", DoubleTy_)
@@ -2166,8 +2274,8 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
       } break;
 
       default: {
-        throw unimplemented_lowering(v);
-      } break;
+        TORCH_CHECK(false, "UNIMPLEMENTED LOWERING: ", std::to_string(v));
+      }
     }
   } else if (v->dtype().is_integral() && v->op_type() == kAbs) {
     // abs is only intrinsic defined for integer inputs in pytorch eager
@@ -2197,12 +2305,13 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
     params.push_back(value_);
   }
 
-  if (v->dtype().lanes() == 1 || call_simd_sleef == true) {
+  int lanes = v->dtype().lanes();
+  if (lanes == call_simd_lanes) {
     value_ = irb_.CreateCall(call_ty, call_fn, params);
-  } else {
+  } else if (call_simd_lanes == 1) {
     llvm::Type* vecType = params[0]->getType();
     value_ = llvm::UndefValue::get(vecType);
-    for (int i = 0; i < v->dtype().lanes(); ++i) {
+    for (int i = 0; i < lanes; ++i) {
       std::vector<llvm::Value*> call_operands;
       for (auto p : params) {
         call_operands.push_back(irb_.CreateExtractElement(p, i));
@@ -2211,6 +2320,8 @@ void LLVMCodeGenImpl::visit(const IntrinsicsPtr& v) {
       llvm::Value* val = irb_.CreateCall(call_ty, call_fn, call_operands);
       value_ = irb_.CreateInsertElement(value_, val, i);
     }
+  } else {
+    value_ = emitSimdCall(call_ty, call_fn, params, lanes, call_simd_lanes);
   }
 }
 
@@ -2224,9 +2335,10 @@ void LLVMCodeGenImpl::handleBufReuse(BufPtr buf, BufPtr buf_to_reuse) {
 
 void LLVMCodeGenImpl::visit(const ExternalCallPtr& v) {
   auto& func_registry = getNNCFunctionRegistry();
-  if (!func_registry.count(v->func_name())) {
-    throw unimplemented_lowering(v);
-  }
+  TORCH_CHECK(
+      func_registry.count(v->func_name()),
+      "UNIMPLEMENTED LOWERING: ",
+      std::to_string(v));
 
   // Prepare a vector of bufs that we need to pass to the external function.
   // This vector is the output buf followed by the buf_args.
@@ -2378,9 +2490,10 @@ void LLVMCodeGenImpl::visit(const ExternalCallPtr& v) {
 
 void LLVMCodeGenImpl::visit(const ExternalCallWithAllocPtr& v) {
   auto& func_registry = getNNCFunctionRegistry();
-  if (!func_registry.count(v->func_name())) {
-    throw unimplemented_lowering(v);
-  }
+  TORCH_CHECK(
+      func_registry.count(v->func_name()),
+      "UNIMPLEMENTED LOWERING: ",
+      std::to_string(v));
 
   const auto& bufs_out = v->buf_out_args();
   const auto& bufs_in = v->buf_args();
@@ -2611,7 +2724,11 @@ void LLVMCodeGenImpl::visit(const AllocatePtr& v) {
     }
   }
 
-#if LLVM_VERSION_MAJOR > 17
+#if LLVM_VERSION_MAJOR >= 24
+  irb_.SetInsertPoint(irb_.GetInsertBlock());
+  llvm::Instruction* I = irb_.CreateMalloc(LongTy_, size, nullptr, nullptr, "");
+  varToVal_[v->buffer_var()] = I;
+#elif LLVM_VERSION_MAJOR > 17
   irb_.SetInsertPoint(irb_.GetInsertBlock());
   llvm::Instruction* I = irb_.CreateMalloc(
       LongTy_, dtypeToLLVM(v->dtype()), size, nullptr, nullptr, "");
@@ -2726,7 +2843,7 @@ void LLVMCodeGenImpl::visit(const LetPtr& v) {
     varToVal_.emplace(v->var(), value_);
     scopeToVar_[scope_].push_back(v->var());
   } else {
-    throw std::runtime_error("var should not exist before");
+    TORCH_CHECK(false, "var should not exist before");
   }
 }
 
@@ -2788,7 +2905,11 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   // Take a look at the PassBuilder constructor parameters for more
   // customization, e.g. specifying a TargetMachine or various debugging
   // options.
+#if LLVM_VERSION_MAJOR >= 24
+  llvm::PassBuilder PB(M.getContext(), &TM);
+#else
   llvm::PassBuilder PB(&TM);
+#endif
 
 #if LLVM_VERSION_MAJOR >= 18 && LLVM_VERSION_MAJOR < 19
   TM.registerPassBuilderCallbacks(PB, false);

@@ -82,22 +82,6 @@ class TestLazyModules(TestCase):
         self.assertTrue(module.has_uninitialized_params())
 
     @suppress_warnings
-    def test_lazy_module_jit_param(self):
-        module = LazyModule()
-        module.register_parameter("test_param", UninitializedParameter())
-        self.assertTrue(module.has_uninitialized_params())
-        with self.assertRaisesRegex(RuntimeError, "run a forward pass"):
-            torch.jit.script(module)
-
-    @suppress_warnings
-    def test_lazy_module_jit_buffer(self):
-        module = LazyModule()
-        module.test_buffer = UninitializedBuffer()
-        self.assertTrue(module.has_uninitialized_params())
-        with self.assertRaisesRegex(RuntimeError, "run a forward pass"):
-            torch.jit.script(module)
-
-    @suppress_warnings
     def test_lazy_share_memory_param(self):
         module = LazyModule()
         module.register_parameter("test_param", UninitializedParameter())
@@ -860,7 +844,7 @@ class TestLazyModulesDevice(NNTestCase):
         self.assertEqual(module.test_param.device.type, device.split(":")[0])
 
 
-instantiate_device_type_tests(TestLazyModulesDevice, globals())
+instantiate_device_type_tests(TestLazyModulesDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":

@@ -95,6 +95,10 @@ namespace {
     FunctionSchema inferred = inferred_.cloneWithRealTypes();
     std::optional<std::string> schema_difference = findSchemaDifferences(from_def, inferred);
     if (schema_difference.has_value()) {
+      const bool has_unsupported_symint_signature =
+          !kernel.isValidSymUnboxed() &&
+          !findSchemaDifferences(from_def_.cloneWithRealTypes(), inferred)
+               .has_value();
       TORCH_CHECK(false,
         "Inferred operator schema for a C++ kernel function doesn't match the expected function schema.\n"
         "  operator: ", toString(name), "\n",
@@ -102,7 +106,13 @@ namespace {
         "    ", from_def_debug, "\n",
         "  inferred schema: ", toString(inferred), "\n",
         "    ", inferred_debug, "\n",
-        "  reason: ", *schema_difference);
+        "  reason: ", *schema_difference,
+        has_unsupported_symint_signature
+            ? "\n  SymInt parameters must use the supported C++ signatures: "
+              "pass SymInt and std::optional<SymInt> by value, and "
+              "SymIntArrayRef and OptionalSymIntArrayRef directly (not as "
+              "const references)."
+            : "");
     }
   }
 } // anonymous namespace
@@ -142,9 +152,7 @@ void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug,
   // NB: don't register schema until after we've checked everything!
   dispatchKeyExtractor_.registerSchema(schema);
   schema_ = AnnotatedSchema(std::move(schema), std::move(debug));
-  #ifndef C10_MOBILE
-    tags_ = std::move(tags);
-  #endif
+  tags_ = std::move(tags);
 }
 
 void OperatorEntry::deregisterSchema() {
@@ -196,11 +204,7 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
   // Redirect catchAll registrations to CompositeImplicitAutograd.
   auto& k = dispatch_key.has_value() ? kernels_[*dispatch_key] : kernels_[DispatchKey::CompositeImplicitAutograd];
 
-#ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
-  if (k[0].kernel.isValid()) {
-#else
   if (!k.empty()) {
-#endif
     // Suppress the warning for Meta key as we are overriding C++ meta functions with python meta functions
     // for some ops
     // Also suppress the warning for MTIA, as MTIA achieves CPU fallback by overriding registration.
@@ -216,13 +220,7 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
     }
   }
 
-#ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
-  k[0].kernel = std::move(kernel);
-  k[0].inferred_function_schema = std::move(inferred_function_schema);
-  k[0].debug = std::move(debug);
-#else
   k.emplace_front(std::move(kernel), std::move(inferred_function_schema), std::move(debug));
-#endif
   AnnotatedKernelContainerIterator inserted = k.begin();
   // update the dispatch table, i.e. re-establish the invariant
   // that the dispatch table points to the newest kernel
@@ -244,11 +242,7 @@ void OperatorEntry::deregisterKernel_(
   auto found = kernels_.find(dk);
   TORCH_INTERNAL_ASSERT(found != kernels_.end(), "Tried to deregister a kernel for dispatch key ", toString(dispatch_key), " but there are no kernels registered for this dispatch key. The operator is ", toString(name_));
   auto& k = found->second;
-#ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
-  // We are about to remove the array from the map, no need to do anything.
-#else
   k.erase(kernel);
-#endif
   if (k.empty()) {
     // the invariant says we don't want empty lists but instead remove the list from the map
     kernels_.erase(found);
@@ -342,11 +336,7 @@ SafeKernelFunction OperatorEntry::getComputedKernelForDispatchKey(
 }
 
 const std::vector<at::Tag>& OperatorEntry::getTags() const {
-  #if defined C10_MOBILE
-    TORCH_CHECK(false, "tags are not saved for Mobile");
-  #else
-    return tags_;
-  #endif
+  return tags_;
 }
 
 std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTableEntryWithDebug(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const {

@@ -455,6 +455,9 @@ def set_logs(
             needs to be set. This can be done by providing the fully-qualified module
             name as the key, with the log level as the value. Default: ``None``
 
+        cudagraphs (:class:`bool`):
+            Whether to emit debug info from wrapping Inductor generated code with CUDA graphs. Default: ``False``
+
         cudagraph_static_inputs (:class:`bool`):
             Whether to emit debug info for cudagraph static input detection. Default: ``False``
 
@@ -475,6 +478,16 @@ def set_logs(
 
         hierarchical_compile (:class:`bool`):
             Whether to emit debug info for hierarchical compilation. Default: ``False``
+
+        compiled_autograd (:class:`bool`):
+            Whether to emit compiled autograd logs, including graphs. Default: ``False``
+
+        compiled_autograd_verbose (:class:`bool`):
+            Whether to emit verbose compiled autograd logs with C++ info, such as
+            autograd node to FX node mappings. Default: ``False``
+
+        compute_dependencies (:class:`bool`):
+            Whether to emit Inductor compute dependency information. Default: ``False``
 
         caching (:class:`bool`):
             Whether to emit detailed Inductor caching information. Default: ``False``
@@ -1338,6 +1351,13 @@ class LazyTraceHandler(logging.StreamHandler):
                 ranksuffix = ""
                 if dist.is_available() and dist.is_initialized():
                     ranksuffix = f"rank_{dist.get_rank()}_"
+                elif (
+                    "TORCHELASTIC_RUN_ID" in os.environ
+                    and (env_rank := os.environ.get("RANK", "")).isdecimal()
+                ):
+                    # The first trace often precedes init_process_group; torchelastic
+                    # exports the global rank before starting workers.
+                    ranksuffix = f"rank_{env_rank}_"
                 fd, path = tempfile.mkstemp(
                     suffix=".log",
                     prefix=LOG_PREFIX + ranksuffix,
