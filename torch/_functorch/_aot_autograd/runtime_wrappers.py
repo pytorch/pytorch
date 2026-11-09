@@ -42,6 +42,7 @@ from torch._guards import (
     CompileContext,
     detect_fake_mode,
     DuplicateInputs,
+    StorageIdentity,
     tracing,
     TracingContext,
 )
@@ -2086,6 +2087,18 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     ) -> Callable[..., Any]:
         if not self.needs_post_compile:
             return compiled_fn
+
+        # Both cold compiles and warm cache hits restore guards through this wrapper.
+        tracing_context = TracingContext.try_get()
+        if tracing_context and aot_config.aot_autograd_arg_pos_to_source:
+            for group in self.base_groups.values():
+                if len(group) < 2:
+                    continue
+                sources = [aot_config.aot_autograd_arg_pos_to_source[i] for i in group]
+                if all(source is not None for source in sources):
+                    tracing_context.guards_context.aotautograd_guards.append(
+                        StorageIdentity(sources)
+                    )
 
         from .codegen import PySourceBuilder
 

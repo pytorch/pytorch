@@ -18,7 +18,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._functorch._aot_autograd.schemas import PlainTensorMeta
-from torch._guards import StorageIdentity, StorageOverlap
+from torch._guards import StorageOverlap
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
@@ -387,9 +387,7 @@ def compute_overlapping_inputs(
             for i in compute_overlapping_tensors(aliased_fwd_inputs, symbolic=symbolic)
         }
 
-    # Keep the pairwise StorageOverlap guard on symbolic-shape paths. A merged
-    # storage group needs an identity guard for every sourced member, including
-    # static shapes and members that do not overlap any other member.
+    # Keep the pairwise StorageOverlap guard on symbolic-shape paths.
     if (
         tracing_context is not None
         # We check that we have more than 1 aliased tensor, which should be true at
@@ -409,15 +407,6 @@ def compute_overlapping_inputs(
         if symbolic:
             tracing_context.guards_context.aotautograd_guards.append(
                 StorageOverlap(overlapping_sources, non_overlapping_sources)
-            )
-        identity_sources = overlapping_sources + non_overlapping_sources
-        if len(actual_aliased_indices) > 1 and all(
-            source is not None for source in identity_sources
-        ):
-            # Warm cache hits do not rerun this analysis or restore this guard.
-            aot_config.cache_info = None
-            tracing_context.guards_context.aotautograd_guards.append(
-                StorageIdentity(identity_sources)
             )
 
     return actual_aliased_indices

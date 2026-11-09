@@ -5149,14 +5149,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                     self.assertIsNotNone(source.name)
         self.assertEqual(tracing_context.guards_context.aotautograd_guards, [])
 
-    def test_storage_identity_disables_aot_cache_save(self):
-        from torch._functorch._aot_autograd.input_output_analysis import (
-            compute_overlapping_inputs,
+    def test_synthetic_base_post_compile_restores_storage_identity(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            AOTSyntheticBaseWrapper,
         )
         from torch._guards import StorageIdentity
 
-        base = torch.arange(8, dtype=torch.float32)
-        inputs = [base[2:5], base[3:6], base[:2]]
         sources = {
             index: types.SimpleNamespace(name=f"s{index}") for index in range(3)
         }
@@ -5165,23 +5163,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             shape_env=None,
             guards_context=types.SimpleNamespace(aotautograd_guards=[]),
         )
+        cache_info = object()
         aot_config = types.SimpleNamespace(
-            aot_autograd_arg_pos_to_source=sources, cache_info=object()
+            aot_autograd_arg_pos_to_source=sources, cache_info=cache_info
         )
+        wrapper = AOTSyntheticBaseWrapper(trace_joint=False)
+        wrapper.base_groups = {0: [0, 1, 2]}
+        wrapper.base_group_names = {0: ["a", "b", "c"]}
 
         with mock.patch.object(
             torch._guards.TracingContext, "try_get", return_value=tracing_context
         ):
-            actual = compute_overlapping_inputs(aot_config, inputs, [0, 1, 2])
+            wrapper.post_compile(lambda *args: args, aot_config, runtime_metadata=None)
 
-        self.assertEqual(actual, {0, 1})
-        self.assertTrue(
-            any(
-                isinstance(guard, StorageIdentity)
-                for guard in tracing_context.guards_context.aotautograd_guards
-            )
-        )
-        self.assertIsNone(aot_config.cache_info)
+        guards = tracing_context.guards_context.aotautograd_guards
+        self.assertEqual(len(guards), 1)
+        self.assertIsInstance(guards[0], StorageIdentity)
+        self.assertEqual(guards[0].aliased_sources, list(sources.values()))
+        self.assertIs(aot_config.cache_info, cache_info)
 
     def test_stale_base_adds_no_base_guard_and_no_recompile(self):
         # A rebound tensor's _base is not a live view base, so dynamo must not
