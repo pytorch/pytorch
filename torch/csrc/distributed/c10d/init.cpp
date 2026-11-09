@@ -4550,8 +4550,9 @@ Attributes:
             operation instead of when the group is bound to a device, so a
             group that never communicates allocates no NCCL resources. Such a
             group can't be split from until its first operation. Default is
-            False. A single-rank group created without options or a
-            ``device_id`` uses ``lazy_init=True``.
+            False. Without options or a ``device_id``, a single-rank group
+            uses ``lazy_init=True`` unless ``new_group`` passes on the device
+            of a default group whose communicator already exists.
 
 Example::
     >>> import torch.distributed as dist

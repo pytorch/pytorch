@@ -808,17 +808,16 @@ class ProcessGroupNCCL2LazyDefaultGroupTest(_ProcessGroupNCCL2OptionsTest):
     @skip_if_lt_x_gpu(2)
     def test_device_mesh_before_first_op(self) -> None:
         # split_group would need the default group's communicator, which does not exist yet.
-        self.assertEqual(
-            dist.distributed_c10d._get_default_group().bound_device_id, self.device
-        )
+        default_group = dist.distributed_c10d._get_default_group()
+        self.assertEqual(default_group.bound_device_id, self.device)
+        self.assertEqual(default_group._get_backend(self.device).comm_ptr, 0)
         mesh = init_device_mesh(
             "cuda", (self.world_size, 1), mesh_dim_names=("dp", "tp")
         )
         tp = mesh.get_group("tp")
         self.assertEqual(tp._get_backend(self.device).comm_ptr, 0)
-        t = torch.ones(1, device=self.device)
-        dist.all_reduce(t, group=tp)
-        self.assertEqual(t, torch.ones_like(t))
+        dist.all_reduce(torch.ones(1, device=self.device), group=tp)
+        self.assertNotEqual(tp._get_backend(self.device).comm_ptr, 0)
         self._check_all_reduce()
 
     @requires_nccl()
@@ -2569,7 +2568,7 @@ class ProcessGroupNCCL2SingleRankLazyInitTest(TestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
     @parametrize("backend", ["nccl2", "nccl-lazy"])
-    def test_new_group_splits_after_first_op(self, backend: str) -> None:
+    def test_new_group_is_eager_after_first_op(self, backend: str) -> None:
         dist.init_process_group(backend, rank=0, world_size=1, store=dist.HashStore())
         try:
             dist.all_reduce(torch.ones(1, device="cuda"))
@@ -2616,7 +2615,6 @@ class ProcessGroupNCCL2SingleRankLazyInitTest(TestCase):
 _UNINITIALIZED_CUDA_SCRIPT = """\
 import torch
 import torch.distributed as dist
-from torch.distributed.device_mesh import init_device_mesh
 
 # Nothing above this point may touch torch.cuda: the caching allocator is
 # brought up lazily by the Python torch.cuda layer, and neither CUDAGuard nor

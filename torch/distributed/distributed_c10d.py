@@ -3059,7 +3059,9 @@ def _new_process_group_helper(
     # initialization time.  Due to lazy initialization of
     # communicators in some backends, we have to be careful and only
     # split when we *know* the default PG has already started communicator initialization.
-    # We know this if we have bound a device id to the default pg (eager initialized).
+    # We know this if we have bound a device id to the default pg (eager initialized),
+    # except for a lazy_init default pg, which _get_split_source rejects via
+    # supports_splitting until its communicator exists.
     # A lazy_init group is not created by splitting: splitting is eager and collective
     # over the parent.
     if (
