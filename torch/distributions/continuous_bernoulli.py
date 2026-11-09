@@ -124,7 +124,7 @@ class ContinuousBernoulli(ExponentialFamily):
             torch.le(cut_probs, 0.5), cut_probs, torch.zeros_like(cut_probs)
         )
         cut_probs_above_half = torch.where(
-            torch.ge(cut_probs, 0.5), cut_probs, torch.ones_like(cut_probs)
+            torch.ge(cut_probs, 0.5), cut_probs, 1
         )
         log_norm = torch.log(
             torch.abs(torch.log1p(-cut_probs) - torch.log(cut_probs))
@@ -206,7 +206,7 @@ class ContinuousBernoulli(ExponentialFamily):
         return torch.where(
             torch.le(value, 0.0),
             torch.zeros_like(value),
-            torch.where(torch.ge(value, 1.0), torch.ones_like(value), unbounded_cdfs),
+            torch.where(torch.ge(value, 1.0), 1, unbounded_cdfs),
         )
 
     def icdf(self, value):
