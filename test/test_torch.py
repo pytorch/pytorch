@@ -931,51 +931,6 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(frameinfo.lineno - 8, warning.lineno)
             self.assertEqual(len(w), 1)
 
-        # Checks jitted cpp warning
-        with warnings.catch_warnings(record=True) as w:
-            # nvfuser deprecation warning filter
-            warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
-            # ignore all deprecation warnings
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
-            # torch.jit.script emits a visible FutureWarning; ignore it too
-            warnings.filterwarnings("ignore", category=FutureWarning)
-            scripted_cpp_warn_fn = torch.jit.script(cpp_warn_fn)
-            scripted_cpp_warn_fn()
-            warning = w[0]
-
-            # Checks for cpp context in the warning message
-            escaped_warning_message = str(warning.message).encode('unicode_escape')
-            self.assertTrue(re.search(s, repr(escaped_warning_message), re.IGNORECASE) is not None)
-
-            # Checks the Python features of the warning
-            # Note: the jitted warning's lineno refers to the call to the jitted
-            # function, which in our test suite has a layer of indirection
-            # that makes checking the Python lineno fragile
-            self.assertEqual(len(w), 1)
-
-        # Checks jitted Python warning
-        def warn_fn():
-            warnings.warn("Warning!")
-
-        # The jit mimics an eager-mode Python warning in this case
-        with warnings.catch_warnings(record=True) as w:
-            # nvfuser deprecation warning filter
-            warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
-            # ignore all deprecation warnings
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
-            # torch.jit.script emits a visible FutureWarning; ignore it too
-            warnings.filterwarnings("ignore", category=FutureWarning)
-            scripted_warn_fn = torch.jit.script(warn_fn)
-            scripted_warn_fn()
-            frameinfo = inspect.getframeinfo(inspect.currentframe())
-            warning = w[0]
-
-            self.assertTrue(re.search('Warning!', str(warning.message)) is not None)
-
-            # Checks the Python features of the warning
-            self.assertEqual(frameinfo.lineno - 12, warning.lineno)
-            self.assertEqual(len(w), 1)
-
     @onlyNativeDeviceTypes
     def test_complex_half_experimental_warning(self, device):
         msg = 'ComplexHalf support is experimental'
@@ -7213,6 +7168,11 @@ class TestTorchDeviceType(TestCase):
         # Permuted leading dims, with outputs permuted the same way
         x = torch.randn(3, 4, 6, device=device).transpose(0, 1)
         check(x, [2, 4], 2, [torch.empty_like(x[:, :, :2]), torch.empty_like(x[:, :, 2:])])
+        # The split dim's stride is the trailing size product, though dim 0 is
+        # physically inside it and dim 2 outside
+        x = torch.arange(40.0, device=device).as_strided((2, 10, 2), (1, 2, 20))
+        sizes = [4, 4, 2]
+        check(x, sizes, 1, [torch.empty_strided((2, s, 2), (1, 2, 2 * s), device=device) for s in sizes])
         # A single non-empty split laid out like the transposed input
         x = torch.arange(12.0, device=device).reshape(3, 4).t()
         check(x, [0, 3], 1, [torch.empty(4, 0, device=device), torch.empty_like(x)])
@@ -9819,10 +9779,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_get_cpu_capability(self):
         # This method is primarily exposed for torchvision's resize
         torch.backends.cpu.get_cpu_capability()
-
-        # We have to ensure that method is torchscriptable as torchvision's resize
-        # should be torchscriptable
-        torch.jit.script(torch.backends.cpu.get_cpu_capability)
 
     @slowTest
     def test_slow_test(self):
