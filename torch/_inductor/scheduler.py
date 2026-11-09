@@ -7582,9 +7582,13 @@ class Scheduler:
         if not config.benchmark_fusion and not is_multi_template:
             return FusionResult.fuse(True)
 
-        if config.helion.enabled and any(
-            not node.is_template() and node.is_native_matmul()
-            for node in (node1, node2)
+        if (
+            config.helion.enabled
+            and config.helion.native_matmul
+            and any(
+                not node.is_template() and node.is_native_matmul()
+                for node in (node1, node2)
+            )
         ):
             # Fusion benchmarking compiles Triton kernels, so it cannot measure
             # a Helion matmul kernel; keep the fusion. With benchmark_fusion it
