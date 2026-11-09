@@ -2770,12 +2770,22 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
 
     def test_median_dim_expanded(self, device):
-        # The reduced dim has stride 0
-        t = torch.tensor([[1.0], [2.0], [3.0]], device=device).expand(3, 5)
+        # The reduced dim has stride 0; reading it densely would pick up the 100s
+        base = torch.tensor([1.0, 2.0, 3.0, 100.0, 100.0, 100.0, 100.0], device=device)
+        t = base[:3].unsqueeze(1).expand(3, 5)
         for op in (torch.median, torch.nanmedian):
             values, indices = op(t, dim=1)
             self.assertEqual(values, torch.tensor([1.0, 2.0, 3.0], device=device))
             self.assertTrue(((indices >= 0) & (indices < 5)).all())
+
+    def test_median_dim_size_one_out_aliases_input(self, device):
+        # values overlaps the input rows it has not been computed from yet
+        for op in (torch.median, torch.nanmedian):
+            b = torch.arange(10.0, device=device)
+            x = b.as_strided((4, 1), (2, 99))
+            indices = torch.empty(4, dtype=torch.long, device=device)
+            op(x, 1, out=(b[2::2], indices))
+            self.assertEqual(b[2::2], torch.tensor([0.0, 2.0, 4.0, 6.0], device=device))
 
     # CUDA median with dim returns the first occurrence of the median value
     @onlyCUDA
