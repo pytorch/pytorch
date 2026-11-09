@@ -17,6 +17,7 @@ import types
 from typing import Any, cast, TYPE_CHECKING, TypeAlias
 
 from torch._C._dynamo import get_type_tp_name
+from torch._guards import Source
 
 from .. import graph_break_hints, variables
 from ..bytecode_transformation import create_call_function
@@ -39,16 +40,13 @@ from .base import (
     Member,
     NO_SUCH_SUBOBJ,
     readonly_setter,
+    store_attr_mutation,
     type_qualified_name,
     unmodeled_setter,
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .functions import (
-    BaseUserFunctionVariable,
-    UserFunctionVariable,
-    UserMethodVariable,
-)
+from .functions import BaseUserFunctionVariable, UserMethodVariable
 from .object_protocol import python_constant_repr_impl
 from .user_defined import UserDefinedObjectVariable
 
@@ -56,7 +54,6 @@ from .user_defined import UserDefinedObjectVariable
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-    from torch._guards import Source
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +70,14 @@ DescriptorTypes: TypeAlias = (
     | types.MemberDescriptorType
     | types.GetSetDescriptorType
 )
+
+
+def _is_c_struct_member(descriptor: types.MemberDescriptorType) -> bool:
+    """A member of a C type: may be T_OBJECT (del, then reads give None) or a
+    numeric field (del raises). __slots__ members live on heap types and are
+    always T_OBJECT_EX."""
+    Py_TPFLAGS_HEAPTYPE = 1 << 9
+    return not descriptor.__objclass__.__flags__ & Py_TPFLAGS_HEAPTYPE
 
 
 def _check_descriptor_obj_type(
@@ -223,16 +228,18 @@ class WrapperDescriptorVariable(DescriptorVariable):
         tx: "InstructionTranslatorBase",
         obj: VariableTracker,
         owner: VariableTracker,
-    ) -> "MethodWrapperVariable":
+    ) -> "WrapperDescriptorVariable | MethodWrapperVariable":
         # Mirrors wrapperdescr_get which calls PyWrapper_New to produce
         # a bound method-wrapper.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L203-L213
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1489-L1505
+        if obj.is_constant_none():
+            return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
 
 
-class MethodWrapperVariable(VariableTracker):
+class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
     """Bound method-wrapper (wrapper_descriptor bound to an instance).
 
     Produced by WrapperDescriptorVariable.tp_descr_get_impl, mirroring
@@ -332,13 +339,13 @@ class MethodWrapperVariable(VariableTracker):
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         try:
             # CPython wrapper_hash:
             # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1347
             return hash(self.as_python_constant()), False
         except NotImplementedError:
-            return super().hash_impl(tx)
+            return super().tp_hash_impl(tx)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
@@ -439,18 +446,6 @@ class MethodDescriptorVariable(DescriptorVariable):
         # PyCFunction_NewEx creates a fresh object; see ClassMethodDescriptorVariable.
         return BoundBuiltinMethodVariable(self.descriptor, obj)
 
-    def tp_richcompare_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        other: VariableTracker,
-        op: str,
-    ) -> VariableTracker:
-        # PyMethodDescr_Type leaves tp_richcompare NULL and inherits
-        # object_richcompare from object.
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
 
 @functools.cache
 def _same_c_function(left: Any, right: Any) -> bool | None:
@@ -485,7 +480,7 @@ def _bind_builtin_method(descriptor: Any, obj: Any) -> Any:
     return descriptor.__get__(obj, type(obj))
 
 
-class BoundBuiltinMethodVariable(VariableTracker):
+class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
     """Bound builtin_function_or_method (PyCFunction_Type).
 
     Produced by MethodDescriptorVariable.tp_descr_get_impl (binding a
@@ -577,7 +572,7 @@ class BoundBuiltinMethodVariable(VariableTracker):
     def python_type(self) -> type:
         return types.BuiltinMethodType
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # meth_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/methodobject.c#L319
         # It hashes m_self by identity, so only a guarded runtime method has a
         # real hash; a method bound during tracing gets a compile-time-only one.
@@ -709,6 +704,13 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @staticmethod
+    def create(
+        descriptor: types.ClassMethodDescriptorType,
+        source: Source | None = None,
+    ) -> "ClassMethodDescriptorVariable":
+        return ClassMethodDescriptorVariable(descriptor, source=source)
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # method_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L50-L55
         return descr_repr(tx, self.descriptor, "method")
@@ -835,6 +837,10 @@ class StaticMethodVariable(VariableTracker):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @staticmethod
+    def create(fn: VariableTracker) -> "StaticMethodVariable":
+        return StaticMethodVariable(fn)
+
     @classmethod
     def from_descriptor(
         cls,
@@ -912,6 +918,10 @@ class ClassMethodVariable(VariableTracker):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @staticmethod
+    def create(fn: VariableTracker) -> "ClassMethodVariable":
+        return ClassMethodVariable(fn)
+
     @classmethod
     def from_descriptor(
         cls,
@@ -925,7 +935,7 @@ class ClassMethodVariable(VariableTracker):
         # as `owner.<name>`, so build the VT that can source it.
         # A classmethod may wrap any callable, so let the builder pick the VT;
         # tp_descr_get_impl rejects the ones it cannot bind.
-        return ClassAttrClassMethodVariable(
+        return ClassAttrClassMethodVariable(  # noqa: RVT001
             name,
             VariableTracker.build(tx, descriptor.__func__, func_source, realize=True),
             source=source,
@@ -1050,6 +1060,13 @@ class MemberDescriptorVariable(DescriptorVariable):
         super().__init__(**kwargs)
         self.descriptor = descriptor
 
+    @staticmethod
+    def create(
+        descriptor: types.MemberDescriptorType,
+        source: Source | None = None,
+    ) -> "MemberDescriptorVariable":
+        return MemberDescriptorVariable(descriptor, source=source)
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # member_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L57-L62
         return descr_repr(tx, self.descriptor, "member")
@@ -1073,6 +1090,8 @@ class MemberDescriptorVariable(DescriptorVariable):
         # Mirrors member_get which calls PyMember_GetOne to read the
         # C struct field.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
+        if obj.is_constant_none():
+            return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         from .object_protocol import _UnhandledDescriptorError
 
@@ -1120,11 +1139,18 @@ class MemberDescriptorVariable(DescriptorVariable):
             # what PyMember_SetOne raises.
             entry.setter(obj, tx, value)
             return ConstantVariable.create(None)
+        if value is None and _is_c_struct_member(self.descriptor):
+            unimplemented(
+                gb_type="Delete of an unmodeled C member",
+                context=f"del {obj}.{name}",
+                explanation=f"Dynamo does not model deleting the C struct member '{name}'.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         # No model for this member. STORE_ATTR itself applies the descriptor, so
         # replay via store_attr on the target (mirrors the __slots__ path in
         # UserDefinedObjectVariable).
         stored = variables.DeletedVariable() if value is None else value
-        tx.output.side_effects.store_attr(obj, name, stored)
+        store_attr_mutation(tx, obj, name, stored)
         return ConstantVariable.create(None)
 
 
@@ -1149,6 +1175,13 @@ class GetSetDescriptorVariable(DescriptorVariable):
     def __init__(self, descriptor: types.GetSetDescriptorType, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    @staticmethod
+    def create(
+        descriptor: types.GetSetDescriptorType,
+        source: Source | None = None,
+    ) -> "GetSetDescriptorVariable":
+        return GetSetDescriptorVariable(descriptor, source=source)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # getset_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/descrobject.c#L64-L69
@@ -1235,6 +1268,8 @@ class GetSetDescriptorVariable(DescriptorVariable):
         # concrete Python object (UDOV.value, or as_python_constant
         # for classes/constants). Fall back to tp_getattro_impl for
         # proxy-based VTs like TensorVariable.
+        if obj.is_constant_none():
+            return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         # Prefer the VT's declarative table when it models this attribute
         entry = obj.lookup_tp_getset_member(attr_name)
@@ -1342,12 +1377,12 @@ class PropertyVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker:
         from ..polyfills import property_isabstractmethod
+        from .builder import SourcelessBuilder
 
         # Trace truth testing so user-defined __bool__ methods and their
         # exceptions are handled within the traced program.
-        return UserFunctionVariable(property_isabstractmethod).call_function(
-            tx, [self], {}
-        )
+        fn = SourcelessBuilder.create_internal_user_function(property_isabstractmethod)
+        return fn.call_function(tx, [self], {})
 
     tp_getset = {
         "__name__": GetSet(_name_getter, getset_set("__name__")),
@@ -1364,6 +1399,12 @@ class PropertyVariable(VariableTracker):
     ) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    @staticmethod
+    def create(
+        descriptor: property, source: Source | None = None
+    ) -> "PropertyVariable":
+        return PropertyVariable(descriptor, source=source)
 
     def __repr__(self) -> str:
         fget_name = getattr(self.descriptor.fget, "__name__", "?")
@@ -1385,7 +1426,10 @@ class PropertyVariable(VariableTracker):
         fn = getattr(self.descriptor, attr)
 
         if fn is None:
-            display_name = getattr(self.descriptor, "__name__", None)
+            if sys.version_info >= (3, 13):
+                display_name = getattr(self.descriptor, "__name__", None)
+            else:
+                display_name = getattr(self.descriptor.fget, "__name__", None)
             kind = "setter" if value is not None else "deleter"
             # property_descr_set formats %R of the owner's *type*, whose
             # repr is its bare __qualname__ (no module prefix) -- unlike
@@ -1446,6 +1490,13 @@ class TupleGetterVariable(VariableTracker):
     ) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
+
+    @staticmethod
+    def create(
+        descriptor: "_collections._tuplegetter",
+        source: Source | None = None,
+    ) -> "TupleGetterVariable":
+        return TupleGetterVariable(descriptor, source=source)
 
     def __repr__(self) -> str:
         _, (idx, doc) = self.descriptor.__reduce__()

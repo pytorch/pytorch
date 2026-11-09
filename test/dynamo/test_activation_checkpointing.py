@@ -3,6 +3,7 @@ import contextlib
 import copy
 import functools
 import math
+import operator
 import re
 import unittest
 from importlib import import_module
@@ -39,6 +40,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
     skipIfHpu,
@@ -191,6 +193,11 @@ def _get_custom_policy(no_recompute_list=None, must_recompute_list=None):
             return CheckpointPolicy.PREFER_RECOMPUTE
 
     return _custom_policy
+
+
+save_mm_context_fn = functools.partial(
+    create_selective_checkpoint_contexts, [torch.ops.aten.mm.default]
+)
 
 
 class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
@@ -2298,12 +2305,8 @@ class GraphModule(torch.nn.Module):
 
         def cleanup():
             # Clean up pytree registrations to avoid leaking state to other tests.
-            # We manually remove from the registries since _deregister_pytree_node
-            # has issues with classes registered without serialized_type_name.
             for cls in [InputNode, OutputNode]:
-                pytree.SUPPORTED_NODES.pop(cls, None)
-                pytree.SUPPORTED_SERIALIZED_TYPES.pop(cls, None)
-                pytree.CONSTANT_NODES.discard(cls)
+                pytree._deregister_pytree_node(cls)
 
         try:
 
@@ -3752,6 +3755,371 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 instantiate_device_type_tests(
     ActivationCheckpointingViaTagsTests, globals(), except_for="cpu", allow_xpu=True
 )
+
+
+class DeterministicRecomputeHelperTests(torch._dynamo.test_case.TestCase):
+    """The helpers of torch._functorch._aot_autograd.deterministic_recompute, on
+    their own."""
+
+    def _partitioned(self, fn, *args):
+        """The forward and backward graphs the partitioner makes for fn, and the
+        values the forward saves for the backward."""
+        graphs = []
+
+        def partition(joint, inputs, *, num_fwd_outputs, **kwargs):
+            fw, bw = min_cut_rematerialization_partition(
+                joint, inputs, num_fwd_outputs=num_fwd_outputs, **kwargs
+            )
+            outs = fw.graph.find_nodes(op="output")[0].args[0][num_fwd_outputs:]
+            graphs.append((fw, bw, {n for n in outs if isinstance(n, torch.fx.Node)}))
+            return fw, bw
+
+        backend = aot_autograd(fw_compiler=nop, bw_compiler=nop, partition_fn=partition)
+        torch.compile(fn, backend=backend, fullgraph=True)(*args).sum().backward()
+        return graphs[0]
+
+    def test_recomputed_copies(self):
+        # Each region's recompute is found by name, op and inputs: whatever of
+        # it the backward needs (the first region's cos for the second mm's
+        # gradient), except what a policy saves (the second mm).
+        from torch._functorch._aot_autograd.deterministic_recompute import (
+            _recomputed_copies,
+        )
+
+        def gn(x, w):
+            return torch.sigmoid(x @ w).cos()
+
+        def fn(x, w):
+            y = checkpoint(gn, x, w, use_reentrant=False)
+            return checkpoint(
+                gn, y, w, use_reentrant=False, context_fn=save_mm_context_fn
+            )
+
+        x = torch.randn(4, 4, requires_grad=True)
+        w = torch.randn(4, 4, requires_grad=True)
+        copies, regions = _recomputed_copies(*self._partitioned(fn, x, w))
+        aten = torch.ops.aten
+        targets = [[n.target for n in nodes] for nodes in regions.values()]
+        first = [aten.mm.default, aten.sigmoid.default, aten.cos.default]
+        self.assertEqual(targets, [first, [aten.sigmoid.default]])
+        self.assertEqual(copies, {n for nodes in regions.values() for n in nodes})
+
+    def test_recomputed_copies_outside_regions(self):
+        # The partitioner also recomputes cheap ops outside any region (the
+        # views feeding the checkpoint): copies in no region.
+        from torch._functorch._aot_autograd.deterministic_recompute import (
+            _recomputed_copies,
+        )
+
+        def fn(x, w):
+            y = torch.relu(x).view(16).view(4, 4)
+            return checkpoint(lambda y: (y @ w).sin(), y, use_reentrant=False)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        w = torch.randn(4, 4, requires_grad=True)
+        copies, regions = _recomputed_copies(*self._partitioned(fn, x, w))
+        in_regions = {n for nodes in regions.values() for n in nodes}
+        outside = {n.name for n in copies - in_regions}
+        self.assertEqual(outside, {"view", "view_1"})
+
+    @parametrize("op", ["rand_like", "native_dropout"])
+    def test_recomputed_copies_logs_mismatch(self, op):
+        # On CPU the backward replays a random op from a saved RNG state with a
+        # different op, so neither it nor what is computed from it is a copy.
+        # The log says so once, where that starts, even when the random op has
+        # two readers.
+        from torch._functorch._aot_autograd import deterministic_recompute
+
+        def gn(x, w):
+            h = torch.sigmoid(x @ w)
+            if op == "rand_like":
+                return (h * torch.rand_like(x)).sin()
+            out, mask = torch.ops.aten.native_dropout(h, 0.5, True)
+            return out.sin() * mask
+
+        def fn(x, w):
+            return checkpoint(gn, x, w, use_reentrant=False)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        w = torch.randn(4, 4, requires_grad=True)
+        graphs = self._partitioned(fn, x, w)
+        with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
+            _, regions = deterministic_recompute._recomputed_copies(*graphs)
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn("the backward recomputes it differently", logs.output[0])
+        aten = torch.ops.aten
+        targets = [[n.target for n in nodes] for nodes in regions.values()]
+        self.assertEqual(targets, [[aten.mm.default, aten.sigmoid.default]])
+
+    def test_recomputed_copies_checks_op_and_args(self):
+        # A backward node with a forward node's name is its copy only if it is
+        # the same op on the same inputs (primals, saved values, graph
+        # attributes such as h's subgraph, or other copies). The log says once
+        # where that fails: at a, which the backward recomputes under another
+        # name, rather than at b and c, which read it.
+        from torch._functorch._aot_autograd import deterministic_recompute
+
+        def hop(sub, x):
+            return x
+
+        def graph(ops):
+            g = torch.fx.Graph()
+            env = {"x": g.placeholder("x"), "y": g.placeholder("y")}
+            env["sub"] = g.get_attr("sub")
+            for name, target, args in ops:
+                args = tuple(env[a] for a in args)
+                env[name] = g.create_node("call_function", target, args, name=name)
+            g.output(tuple(env[name] for name, _, _ in ops))
+            root = torch.nn.Module()
+            root.sub = torch.nn.Module()
+            return torch.fx.GraphModule(root, g)
+
+        sin, cos = torch.ops.aten.sin.default, torch.ops.aten.cos.default
+        common = [("b", cos, ("a",)), ("c", sin, ("a",)), ("h", hop, ("sub", "x"))]
+        fw = graph(
+            [("same", sin, ("x",)), ("target", sin, ("x",)), ("args", sin, ("x",))]
+            + [("a", sin, ("x",)), *common]
+        )
+        bw = graph(
+            [("same", sin, ("x",)), ("target", cos, ("x",)), ("args", sin, ("y",))]
+            + [
+                ("a_1", sin, ("x",)),
+                *(o if o[0] == "h" else (o[0], o[1], ("a_1",)) for o in common),
+            ]
+        )
+        with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
+            copies, _ = deterministic_recompute._recomputed_copies(fw, bw, set())
+        self.assertEqual({n.name for n in copies}, {"same", "h"})
+        logged = [re.search(r": (\w+) left", line).group(1) for line in logs.output]
+        self.assertEqual(logged, ["target", "args", "a"])
+
+    @unittest.skipIf(not TEST_CUDA, "graphsafe RNG functionalization is CUDA-only")
+    def test_recomputed_copies_graphsafe_rng(self):
+        # On CUDA the backward replays dropout with graphsafe_run_with_rng_state,
+        # under the forward draw's name but from its own RNG state: same name,
+        # different inputs, so not a copy.
+        from torch._functorch._aot_autograd.deterministic_recompute import (
+            _recomputed_copies,
+        )
+
+        def fn(x, w):
+            return checkpoint(
+                lambda x, w: F.dropout(x @ w, p=0.5).sin(), x, w, use_reentrant=False
+            )
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        w = torch.randn(4, 4, device="cuda", requires_grad=True)
+        copies, regions = _recomputed_copies(*self._partitioned(fn, x, w))
+        draw = torch._prims.rng_prims.graphsafe_run_with_rng_state
+        self.assertFalse([n for n in copies if n.target is draw])
+        targets = [[n.target for n in nodes] for nodes in regions.values()]
+        self.assertEqual(targets, [[torch.ops.aten.mm.default]])
+
+    def _outline(self, fn, args, names):
+        """Replace the nodes of fn's graph named ``names`` with a call of one
+        subgraph computing them, as the pass does in each graph, and check that
+        the graph still computes fn. Returns the graph, or the reason the call
+        can't be placed."""
+        from torch._functorch._aot_autograd.deterministic_recompute import (
+            _place,
+            _slice_module,
+            _splice_slice_call,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        gm = make_fx(fn, tracing_mode="fake")(*args)
+        index = {n: i for i, n in enumerate(gm.graph.nodes)}
+        nodes = [n for n in gm.graph.nodes if n.name in names]
+        inputs = [a for n in nodes for a in n.all_input_nodes if a not in nodes]
+        inputs = list(dict.fromkeys(inputs))
+        outputs = [n for n in nodes if any(u not in nodes for u in n.users)]
+        last_input = max(inputs, key=index.__getitem__)
+        point, moved, reason = _place(set(nodes), inputs, last_input, index)
+        if reason is not None:
+            return reason
+        _splice_slice_call(
+            gm,
+            _slice_module(gm, inputs, nodes, outputs),
+            "piece",
+            [n.meta["val"] for n in outputs],
+            operands=inputs,
+            replace={n.name: n for n in outputs},
+            slice_index={n.name: i for i, n in enumerate(outputs)},
+            erase_names=set(names),
+            insert_after=point,
+            move_below=moved,
+        )
+        gm.graph.lint()
+        gm.recompile()
+        self.assertEqual(gm(*args), fn(*args))
+        return gm
+
+    def _ops(self, gm):
+        return [n.target for n in gm.graph.nodes if n.op == "call_function"]
+
+    def test_outline_before_first_reader(self):
+        # The call goes right before the first node that reads one of the nodes
+        # it replaces, so it computes them no earlier than the first of them is
+        # needed.
+        from torch._higher_order_ops import invoke_subgraph
+
+        def fn(x, w):
+            y = w * 2
+            return x.sin().cos() + y
+
+        args = (torch.randn(4), torch.randn(4))
+        gm = self._outline(fn, args, {"sin", "cos"})
+        aten = torch.ops.aten
+        ops = [aten.mul.Tensor, invoke_subgraph, operator.getitem, aten.add.Tensor]
+        self.assertEqual(self._ops(gm), ops)
+
+    def test_outline_moves_readers(self):
+        # The call needs exp, which comes after mul reads sin, so the call goes
+        # after exp and mul moves below it.
+        from torch._higher_order_ops import invoke_subgraph
+
+        def fn(x, w):
+            a = x.sin()
+            return a * 3, a + w.exp()
+
+        args = (torch.randn(4), torch.randn(4))
+        gm = self._outline(fn, args, {"sin", "add"})
+        aten = torch.ops.aten
+        getitem = operator.getitem
+        ops = [aten.exp.default, invoke_subgraph, getitem, getitem, aten.mul.Tensor]
+        self.assertEqual(self._ops(gm), ops)
+
+    @parametrize("hops", [1, 2])
+    def test_outline_rejects_path_back(self, hops):
+        # exp (and neg) read sin and are read by add: no single call can replace
+        # sin and add.
+        def fn(x):
+            a = x.sin()
+            b = a.exp().neg() if hops == 2 else a.exp()
+            return a + b
+
+        reason = self._outline(fn, (torch.randn(4),), {"sin", "add"})
+        last = "neg" if hops == 2 else "exp"
+        self.assertEqual(reason, f"its input {last} depends on its own recompute")
+
+    def test_outline_moves_view_it_copies(self):
+        # A view the call copies in rather than returns (t) reads a replaced
+        # node (sin), so it moves below the call, while add, replaced, still
+        # reads it above the call until both are erased.
+        from torch._functorch._aot_autograd.deterministic_recompute import (
+            _place,
+            _slice_module,
+            _splice_slice_call,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x, w):
+            b = x.sin().t() + 1
+            return b * (x @ w)
+
+        args = (torch.randn(4, 4), torch.randn(4, 4))
+        gm = make_fx(fn, tracing_mode="fake")(*args)
+        n = {n.name: n for n in gm.graph.nodes}
+        nodes = [n["sin"], n["t"], n["add"], n["mul"]]
+        inputs = [n["x_1"], n["mm"]]
+        index = {node: i for i, node in enumerate(gm.graph.nodes)}
+        replaced = {n["sin"], n["add"], n["mul"]}
+        point, moved, reason = _place(replaced, inputs, n["mm"], index)
+        self.assertEqual((point, moved, reason), (n["mm"], [n["t"]], None))
+        _splice_slice_call(
+            gm,
+            _slice_module(gm, inputs, nodes, [n["mul"]]),
+            "piece",
+            [n["mul"].meta["val"]],
+            operands=inputs,
+            replace={"mul": n["mul"]},
+            slice_index={"mul": 0},
+            erase_names={"sin", "t", "add", "mul"},
+            insert_after=point,
+            move_below=moved,
+        )
+        gm.graph.lint()
+        gm.recompile()
+        self.assertEqual(gm(*args), fn(*args))
+
+    def test_outline_keeps_random_readers(self):
+        # Moving rand_like below the call could reorder it with another random
+        # op, which changes what each draws.
+        def fn(x, w):
+            a = x.sin()
+            return torch.rand_like(a) * a, a + w.exp()
+
+        reason = self._outline(fn, (torch.randn(4), torch.randn(4)), {"sin", "add"})
+        self.assertEqual(reason, "it would move the random op rand_like")
+
+    def test_rng_and_inplace_writes(self):
+        # Outlining can't re-run a random op (it would draw again), and has to
+        # keep an in-place write in order with the reads and writes of the
+        # storage it writes: a write into a view writes its base, and an op with
+        # side effects but no write in its schema (resize_storage_bytes_ frees
+        # its tensor's storage) writes all of its tensor inputs.
+        from torch._functorch._aot_autograd.deterministic_recompute import (
+            _is_rng,
+            _writes,
+        )
+        from torch._inductor.fx_utils import get_node_storage
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x, y, z):
+            x[0].add_(y[0].sin())
+            torch.ops.inductor.resize_storage_bytes_(z, 0)
+            _, r = torch._prims.rng_prims.run_and_save_rng_state(
+                torch.ops.aten.rand_like.default, y
+            )
+            return torch.rand_like(y) + r
+
+        args = [torch.randn(4, 4) for _ in range(3)]
+        gm = make_fx(fn, tracing_mode="fake")(*args)
+        nodes = {n.name: n for n in gm.graph.nodes}
+        rng = [n.name for n in gm.graph.nodes if _is_rng(n)]
+        self.assertEqual(rng, ["run_and_save_rng_state", "rand_like"])
+        writes = {n.name: _writes(n) for n in gm.graph.nodes if _writes(n)}
+        storage = {name: get_node_storage(nodes[name]) for name in ("x_1", "z_1")}
+        expected = {"add_": {storage["x_1"]}, "resize_storage_bytes_": {storage["z_1"]}}
+        self.assertEqual(writes, expected)
+
+    def test_unbound_symbols(self):
+        # Inductor binds a symbol in a subgraph from a SymInt input that is the
+        # symbol, and, under size_asserts, from an input size or stride that is:
+        # x.view(s0 * s1, s2) binds neither s0 nor s1, while x's sizes or the
+        # SymInts s0 and s1 do, and y[:, 0]'s stride binds y's second size.
+        # Without size_asserts only the SymInts bind, and nor do the sizes of
+        # z, of a static size 0.
+        from torch._functorch._aot_autograd.deterministic_recompute import (
+            _unbound_symbols,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x, w, y, z):
+            n0, n1 = x.shape[0], x.shape[1]
+            return (x.view(n0 * n1, -1) @ w).sin(), y[:, 0].cos(), z.sum(1).sin()
+
+        args = (torch.randn(4, 6, 8), torch.randn(8, 10), torch.randn(3, 5))
+        args += (torch.randn(7, 0),)
+        gm = make_fx(fn, tracing_mode="symbolic")(*args)
+        n = {n.name: n for n in gm.graph.nodes}
+        s0, s1, s2 = (d.node.expr for d in n["x_1"].meta["val"].shape)
+        s3 = n["w_1"].meta["val"].shape[1].node.expr
+        sizes = n["sym_size_int"], n["sym_size_int_1"]
+        x, w, view, body = n["x_1"], n["w_1"], n["view"], [n["mm"], n["sin"]]
+        with torch._inductor.config.patch(size_asserts=True):
+            self.assertEqual(_unbound_symbols([view, w], body), {s0, s1})
+            self.assertEqual(_unbound_symbols([x, view, w], body), set())
+            self.assertEqual(_unbound_symbols([view, w, *sizes], body), set())
+            self.assertEqual(_unbound_symbols([n["select"]], [n["cos"]]), set())
+            z, z_sum = n["z_1"], n["sum_1"]
+            s4 = z.meta["val"].shape[0].node.expr
+            self.assertEqual(_unbound_symbols([z], [z_sum, n["sin_1"]]), {s4})
+        with torch._inductor.config.patch(size_asserts=False):
+            self.assertEqual(_unbound_symbols([x, view, w, *sizes], body), {s2, s3})
+
+
+instantiate_parametrized_tests(DeterministicRecomputeHelperTests)
 
 
 class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCase):
