@@ -243,6 +243,12 @@ class TestOptimRenewed(TestCase):
                     s(optimizer)
                     for s in (schedulers_constructor if schedulers_constructor else [])
                 ]
+                # LBFGS maximizing a convex loss diverges to inf or nan depending on
+                # rounding, so give it a concave one to maximize.
+                lbfgs_maximize = (
+                    optim_cls.__name__ == "LBFGS"
+                    and optim_input.kwargs.get("maximize", False)
+                )
 
                 def closure():
                     optimizer.zero_grad()
@@ -252,6 +258,8 @@ class TestOptimRenewed(TestCase):
                         else weight.mv(input) + bias
                     )
                     loss = wo.pow(2).sum()
+                    if lbfgs_maximize:
+                        loss = -loss
                     loss.backward()
                     if optim_info.only_supports_sparse_grads:
                         # For this test, we naively convert the Tensor layout, which we know does
@@ -419,10 +427,16 @@ class TestOptimRenewed(TestCase):
                 self.assertRegex(str(e), ".*lr as a Tensor is not supported.*")
                 continue
 
+            lbfgs_maximize = optim_cls.__name__ == "LBFGS" and kwargs.get(
+                "maximize", False
+            )
+
             def closure(optim, w, b, i):
                 optim.zero_grad()
                 wo = w.mv(i) if optim_cls.__name__ == "Muon" else w.mv(i) + b
                 loss = wo.pow(2).sum()
+                if lbfgs_maximize:
+                    loss = -loss
                 loss.backward()
                 if optim_info.only_supports_sparse_grads:
                     # For this test, we naively convert the Tensor layout, which we know does
