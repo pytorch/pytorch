@@ -932,6 +932,9 @@ class InvokeSubgraphReuseCondition:
     # handler is a pre-resolved GuardCheckSpec from GUARD_VALUE_DISPATCH.
     guards: list[tuple[Source, GuardCheckSpec, object, Guard]]
 
+    # Structural dependencies are shared across candidate checks, not runtime values.
+    guard_dependencies: list[OrderedSet[Source]]
+
     # TreeSpec from pytree.tree_flatten of the (args, kwargs) structure.
     # On cache hit, we verify the new call has the same treespec.
     treespec: pytree.TreeSpec | None = None
@@ -1151,12 +1154,15 @@ class CompileContext:
     def try_get() -> CompileContext | None:
         return getattr(_TLS, "compile_context", None)
 
-    def __init__(self, compile_id: CompileId | None) -> None:
+    def __init__(
+        self, compile_id: CompileId | None, *, is_aot_capture: bool = False
+    ) -> None:
         if compile_id is not None and not isinstance(compile_id, CompileId):
             raise AssertionError(
                 f"compile_id must be None or CompileId, got {type(compile_id)}"
             )
         self.compile_id: CompileId | None = compile_id
+        self.is_aot_capture = is_aot_capture
         self.attempt = 0
         # Verbose ShapeEnv guards produced.
         self.shape_env_guards: list[str] = []
