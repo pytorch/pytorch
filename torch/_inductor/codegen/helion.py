@@ -626,6 +626,13 @@ class HelionKernel(SIMDKernel[CSEVariable]):
                 self.body.splice(self.compute)
             # Reduction results are stored after the loop.
             self.body.splice(self.stores)
+            # Values from the K loop are out of scope after it. A kernel can have
+            # one K loop per dot, e.g. ((a @ w).float(), (b @ w).float()) for a
+            # and b of shape [512, 16]. Without this, the second loop reuses
+            # tmp1 = in1[tile_r, tile_x] from the first one:
+            #   acc1 = torch.addmm(acc1, tmp2, tmp1)
+            #   CrossRootDeviceValue: Device value 'tmp1' cannot be carried between top-level loops.
+            self.cse.invalidate(OrderedSet(self.accumulators.values()))
         else:
             self.body.splice(self.compute)
             self.body.splice(self.stores)
