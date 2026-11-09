@@ -14,6 +14,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace at::native {
@@ -59,7 +60,7 @@ void arange_range_fill_mps(const Scalar& start, const Scalar& step, Tensor& resu
   if (result.is_contiguous() || result.dim() == 1) {
     const auto stride = result.is_contiguous() ? 1 : result.stride(0);
     const auto abs_stride = stride < 0 ? -stride : stride;
-    const auto use32 = std::max<int64_t>(steps, (steps - 1) * abs_stride) <= std::numeric_limits<int32_t>::max();
+    const auto use32 = std::in_range<int32_t>(std::max<int64_t>(steps, (steps - 1) * abs_stride));
     auto pso = lib.getPipelineStateForFunc("arange_" + tname + (use32 ? "_i32" : "_i64"));
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
@@ -224,7 +225,7 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
   if (result.is_contiguous() || result.dim() == 1) {
     const auto stride = result.is_contiguous() ? 1 : result.stride(0);
     const auto abs_stride = stride < 0 ? -stride : stride;
-    const auto use32 = std::max<int64_t>(steps, (steps - 1) * abs_stride) <= std::numeric_limits<int32_t>::max();
+    const auto use32 = std::in_range<int32_t>(std::max<int64_t>(steps, (steps - 1) * abs_stride));
     auto pso = lib.getPipelineStateForFunc(kernel_prefix + tname + (use32 ? "_i32" : "_i64"));
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
@@ -309,7 +310,7 @@ Tensor& logspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
   if (result.is_contiguous() || result.dim() == 1) {
     const auto stride = result.is_contiguous() ? 1 : result.stride(0);
     const auto abs_stride = stride < 0 ? -stride : stride;
-    const auto use32 = std::max<int64_t>(steps, (steps - 1) * abs_stride) <= std::numeric_limits<int32_t>::max();
+    const auto use32 = std::in_range<int32_t>(std::max<int64_t>(steps, (steps - 1) * abs_stride));
     auto pso = lib.getPipelineStateForFunc("logspace_" + tname + (use32 ? "_i32" : "_i64"));
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
