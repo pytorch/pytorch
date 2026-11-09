@@ -3,8 +3,9 @@
 
 Mirrors test/inductor/test_triton_kernels.py (the reference suite for user-defined
 Triton kernels): direct HOP use, the eager launch, wrap_cutedsl tracing (make_fx,
-non-strict export), Dynamo and Inductor (mutation without clones, reinplacing,
-views, dynamic shapes, CUDA graphs).
+non-strict export), Dynamo, Inductor (mutation without clones, reinplacing, views,
+dynamic shapes, CUDA graphs) and the C++ wrapper (AOTInductor, and torch.compile with
+cpp_wrapper).
 """
 
 import collections
@@ -23,12 +24,15 @@ import os
 import re
 import runpy
 import shlex
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import types
 import unittest
 import weakref
+import zipfile
 from unittest import mock
 
 import numpy as np
@@ -52,7 +56,7 @@ from torch._higher_order_ops.cutedsl_kernel_wrap import (
 )
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_code, run_and_get_cpp_code
 from torch._library.cutedsl import wrap_cutedsl
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -487,6 +491,41 @@ if HAS_CUTEDSL:
             grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
         )
 
+    @cute.jit
+    def select_bool_kernel(
+        mX: cute.Tensor,
+        mOut: cute.Tensor,
+        n: cutlass.Int32,
+        flag: cutlass.Boolean,
+        stream: cuda.CUstream,
+    ):
+        _select_k(mX, mOut, n, flag).launch(
+            grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+        )
+
+    # A runtime Float16 scalar: out = x + h.
+    @cute.kernel
+    def _add_half_k(
+        gX: cute.Tensor, gOut: cute.Tensor, n: cutlass.Int32, h: cutlass.Float16
+    ):
+        tidx, _, _ = cute.arch.thread_idx()
+        bidx, _, _ = cute.arch.block_idx()
+        i = bidx * 128 + tidx
+        if i < n:
+            gOut[i] = gX[i] + cutlass.Float32(h)
+
+    @cute.jit
+    def add_half_kernel(
+        mX: cute.Tensor,
+        mOut: cute.Tensor,
+        n: cutlass.Int32,
+        h: cutlass.Float16,
+        stream: cuda.CUstream,
+    ):
+        _add_half_k(mX, mOut, n, h).launch(
+            grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+        )
+
     # Host functions that differ only in a captured list: out = x * c[0] + c[1].
     def make_affine_kernel(c):
         @cute.kernel
@@ -511,6 +550,10 @@ if HAS_CUTEDSL:
     @cute.kernel
     def _copy_first_k(gX: cute.Tensor, gOut: cute.Tensor):
         gOut[0] = gX[0]
+
+    @cute.jit
+    def copy_first_kernel(mX: cute.Tensor, mOut: cute.Tensor, stream: cuda.CUstream):
+        _copy_first_k(mX, mOut).launch(grid=[1, 1, 1], block=[1, 1, 1], stream=stream)
 
     # Exported with _abi_specs under the prefix cutedsl_fixture, it gives
     # _EXPORTED_HEADER: a tensor with dynamic sizes and a dynamic stride, a static
@@ -537,6 +580,21 @@ if HAS_CUTEDSL:
         stream: cuda.CUstream,
     ):
         _copy_first_k(mX, mOut).launch(grid=[1, 1, 1], block=[1, 1, 1], stream=stream)
+
+    # Parameters named like the identifiers a C++ launcher named after the host
+    # function's parameters would declare (its stream, a tensor's dynamic size, the
+    # launch block's locals): out = x + k.
+    @cute.jit
+    def colliding_names_kernel(
+        stream: cute.Tensor,
+        cutedsl_arg0: cute.Tensor,
+        stream_size0: cutlass.Int32,
+        cutedsl_status: cutlass.Int32,
+        s: cuda.CUstream,
+    ):
+        _add_scalar_k(stream, cutedsl_arg0, stream_size0, cutedsl_status).launch(
+            grid=[(stream_size0 + 127) // 128, 1, 1], block=[128, 1, 1], stream=s
+        )
 
 
 DEVICE = "cuda"
@@ -610,6 +668,37 @@ if HAS_CUTEDSL:
     add_scalar_w = _wrap(add_scalar_kernel, ["mOut"])
     same_name_add_w = _wrap(same_name_add_kernel, ["mOut"])
     same_name_sub_w = _wrap(same_name_sub_kernel, ["mOut"])
+
+    # out = x + 1 through 64 KB of dynamic shared memory: more than the 48 KB a launch
+    # may ask for without the attribute that loading a compiled function's library
+    # onto a device (cuda_load_to_device) sets for that device.
+    _SMEM_FLOATS = 16384
+
+    @cute.kernel
+    def _add_one_smem_k(gX: cute.Tensor, gOut: cute.Tensor, n: cutlass.Int32):
+        tidx, _, _ = cute.arch.thread_idx()
+        bidx, _, _ = cute.arch.block_idx()
+        smem = cute.arch.get_dyn_smem(cutlass.Float32)
+        buf = cute.make_tensor(smem, cute.make_layout(_SMEM_FLOATS))
+        i = bidx * 128 + tidx
+        if i < n:
+            buf[_SMEM_FLOATS - 128 + tidx] = gX[i]
+        cute.arch.sync_threads()
+        if i < n:
+            gOut[i] = buf[_SMEM_FLOATS - 128 + tidx] + 1.0
+
+    @cute.jit
+    def add_one_smem_kernel(
+        mX: cute.Tensor, mOut: cute.Tensor, n: cutlass.Int32, stream: cuda.CUstream
+    ):
+        _add_one_smem_k(mX, mOut, n).launch(
+            grid=[(n + 127) // 128, 1, 1],
+            block=[128, 1, 1],
+            smem=_SMEM_FLOATS * 4,
+            stream=stream,
+        )
+
+    add_one_smem_w = wrap_cutedsl(add_one_smem_kernel, mutates_args=["mOut"])
 
 
 if HAS_CUTEDSL:
@@ -6865,9 +6954,9 @@ class CuteDSLInductorTests(TestCase):
         with self.assertRaisesRegex(
             RuntimeError,
             r"This compiled graph launches user CuTeDSL kernels "
-            r"\(cutedsl_add_kernel_\d+\) through objects bound in this process, so "
-            r"it cannot be serialized \(aot_compile, precompile\)\. Compile it in "
-            r"the process that runs it\.",
+            r"\(cutedsl_add_kernel_\d+\) through objects bound in this process or "
+            r"object files it links by path, so it cannot be serialized "
+            r"\(aot_compile, precompile\)\. Compile it in the process that runs it\.",
         ):
             torch.compile(f, fullgraph=True).aot_compile(((x, y), {}))
         mode = compile_fx.FxCompileMode.SUBPROCESS
@@ -6877,22 +6966,6 @@ class CuteDSLInductorTests(TestCase):
             mock.patch.object(_SubprocessFxCompile, "process_pool", side_effect=sent),
         ):
             self.assertEqual(torch.compile(f, fullgraph=True)(x, y), (x + y) * 2)
-
-    @inductor_config.patch(cpp_wrapper=True)
-    def test_cutedsl_kernel_cpp_wrapper_refused(self):
-        # The C++ wrappers have no launcher for the kernel yet: they refuse it.
-        def f(x, y):
-            out = torch.empty_like(x)
-            add_w(x, y, out, x.numel())
-            return out * 2
-
-        x, y = _rand(1000), _rand(1000)
-        with self.assertRaisesRegex(
-            Exception,
-            r"NotImplementedError: User-defined CuTeDSL kernels are not supported by "
-            r"the C\+\+ wrapper",
-        ):
-            torch.compile(f, fullgraph=True)(x, y)
 
     @inductor_config.patch(fx_wrapper=True)
     def test_cutedsl_kernel_fx_wrapper_refused(self):
@@ -8116,13 +8189,315 @@ class CuteDSLInductorTests(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
 
+# A 1-D clone whose real output starts 4 bytes into its allocation while its fake
+# output is a fresh tensor: Inductor assumes an alignment the output lacks.
+@torch.library.custom_op("cutedsl_test::misaligned_clone", mutates_args=())
+def misaligned_clone(x: torch.Tensor) -> torch.Tensor:
+    return torch.cat([x.new_empty(1), x])[1:]
+
+
+@misaligned_clone.register_fake
+def _misaligned_clone_fake(x):
+    return torch.empty_like(x)
+
+
+class Toy(torch.nn.Module):
+    def forward(self, x, y):
+        return toy(x, y)
+
+
+class _AddModule(torch.nn.Module):
+    def forward(self, x, y):
+        out = torch.empty_like(x)
+        add_w(x, y, out, x.numel())
+        return out
+
+
+class _AddOneSmemModule(torch.nn.Module):
+    def forward(self, x):
+        out = torch.empty_like(x)
+        add_one_smem_w(x, out, x.numel())
+        return out
+
+
+class _ScaleModule(torch.nn.Module):
+    def forward(self, x):
+        y = x.clone()
+        scale_inplace_w(y, y.numel())
+        return y
+
+
+def _module_state(so, prefix):
+    """The reference count and the library handle (None before it is loaded) of
+    CuTeDSL kernel ``prefix`` in model .so ``so``, which this process has loaded:
+    its <prefix>_module_refs and <prefix>_loaded_module (see emit_cpp_declarations),
+    read at the addresses of their local symbols."""
+    symbols = {}
+    nm = subprocess.run(
+        ["nm", "--defined-only", so], check=True, capture_output=True, text=True
+    )
+    for fields in map(str.split, nm.stdout.splitlines()):
+        if len(fields) == 3:
+            symbols[fields[2]] = int(fields[0], 16)
+    lib = ctypes.CDLL(so, mode=os.RTLD_NOLOAD | os.RTLD_LAZY)
+    entry = "AOTInductorModelContainerCreateWithDevice"
+    base = ctypes.cast(getattr(lib, entry), ctypes.c_void_p).value - symbols[entry]
+
+    def address(name):
+        (value,) = [v for n, v in symbols.items() if n.endswith(f"{len(name)}{name}E")]
+        return base + value
+
+    refs = ctypes.c_int64.from_address(address(f"{prefix}_module_refs")).value
+    handle = ctypes.c_void_p.from_address(address(f"{prefix}_loaded_module")).value
+    return refs, handle
+
+
 @requires_cuda_and_triton
 @requires_cutedsl
 class CuteDSLAOTITests(TestCase):
-    """The ahead-of-time compile of user CuTeDSL kernels for the C++ wrapper
-    (export_to_c), which needs a GPU and cutlass."""
+    """The C++ wrapper (AOTInductor, and torch.compile with cpp_wrapper): the kernel
+    is compiled ahead of time (export_to_c) and launched from the generated C++
+    through its cute_dsl_<prefix>_wrapper."""
 
     hw_classification = HardwareClassification.CUDA
+
+    def _package(self, model, args, dynamic_shapes=None, strict=False):
+        ep = torch.export.export(
+            model, args, dynamic_shapes=dynamic_shapes, strict=strict
+        )
+        return torch._inductor.aoti_compile_and_package(ep)
+
+    def _package_and_code(self, model, args, **kwargs):
+        # run_and_get_cpp_code starts with torch._dynamo.reset(), so the export has
+        # to happen inside it (see test_aoti_program_exported_before_reset).
+        return run_and_get_cpp_code(self._package, model, args, **kwargs)
+
+    def test_aoti_kernels_differing_in_closure_values(self):
+        # Two host functions from one factory get the same prefix (it cannot see a
+        # captured list); each still gets its own export.
+        ka = wrap_cutedsl(make_affine_kernel([2.0, 0.0]), mutates_args=["mOut"])
+        kb = wrap_cutedsl(make_affine_kernel([5.0, 1.0]), mutates_args=["mOut"])
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a, b = torch.empty_like(x), torch.empty_like(x)
+                ka(x, a, x.numel())
+                kb(x, b, x.numel())
+                return a, b
+
+        x = torch.arange(1000, device=DEVICE, dtype=torch.float32)
+        a, b = torch._inductor.aoti_load_package(self._package(M(), (x,)))(x)
+        self.assertEqual(a, 2 * x)
+        self.assertEqual(b, 5 * x + 1)
+
+    def test_aoti_exports_stored_by_content(self):
+        # With the in-process registry empty (as in a new process) the kernel is
+        # exported again, into the directory named by the bytes of its files: the
+        # same paths and no new files. The version script is stored there as well.
+        # A healthy entry is reused as it is; one that lost a file is repaired in
+        # place, removing nothing (another process may be using it).
+        from torch._inductor.codegen.cutedsl import user_kernel_aot
+        from torch._inductor.utils import fresh_cache
+
+        real_export_for_link = user_kernel_aot.export_for_link
+        exports, listings, inodes = [], [], []
+
+        def export_for_link(*args, **kwargs):
+            exports.append(real_export_for_link(*args, **kwargs))
+            return exports[-1]
+
+        x, y = _rand(1000), _rand(1000)
+        with (
+            fresh_cache(),
+            mock.patch.object(user_kernel_aot, "export_for_link", export_for_link),
+            mock.patch.object(
+                user_kernel_aot,
+                "export_cutedsl_kernel",
+                wraps=user_kernel_aot.export_cutedsl_kernel,
+            ) as export,
+            mock.patch.object(
+                user_kernel_aot, "shutil", wraps=user_kernel_aot.shutil
+            ) as shutil_mock,
+        ):
+            root = user_kernel_aot.cutedsl_cache_dir()
+            for _ in range(2):
+                user_kernel_aot._exports.clear()
+                self._package(_AddModule(), (x, y))
+                listings.append(sorted(os.listdir(root)))
+                inodes.append(os.stat(exports[-1].object_path).st_ino)
+            entry = os.path.dirname(exports[0].object_path)
+            files = sorted(os.listdir(entry))
+            os.remove(exports[0].object_path)
+            open(os.path.join(entry, "marker"), "w").close()
+            user_kernel_aot._exports.clear()
+            pkg = self._package(_AddModule(), (x, y))
+            self.assertEqual(sorted(os.listdir(entry)), [*files, "marker"])
+            self.assertEqual(torch._inductor.aoti_load_package(pkg)(x, y), x + y)
+        self.assertEqual(export.call_count, 3)
+        obj = exports[0].object_path
+        self.assertEqual([e.object_path for e in exports], [obj] * 3)
+        self.assertEqual(os.path.dirname(entry), root)
+        self.assertEqual(files, [f"{exports[0].prefix}.{ext}" for ext in "ho"])
+        self.assertEqual(listings[0], listings[1])
+        self.assertEqual(inodes[0], inodes[1])
+        self.assertEqual(len([f for f in listings[0] if f.endswith(".ver")]), 1)
+        removed = [c.args[0] for c in shutil_mock.rmtree.call_args_list]
+        self.assertNotIn(entry, removed)
+
+    def test_aoti_exports_stored_with_the_umask_mode(self):
+        # A cache directory can be shared between users (TORCHINDUCTOR_CACHE_DIR), so
+        # an export's entry, its files and the version script get the mode the umask
+        # gives, as Inductor's other cache files do.
+        from torch._inductor.codegen.cutedsl import user_kernel_aot
+
+        specs = _abi_specs(lambda name: getattr(cutlass, name))
+        for umask in (0o022, 0o007):
+            registry = weakref.WeakKeyDictionary()
+            with (
+                self.subTest(umask=oct(umask)),
+                tempfile.TemporaryDirectory() as root,
+                mock.patch.object(user_kernel_aot, "_exports", registry),
+            ):
+                old = os.umask(umask)
+                try:
+                    exported = user_kernel_aot.export_for_link(
+                        abi_kernel, specs, "sm_90a", linked={}, out_root=root
+                    )
+                    flags = user_kernel_aot.cutedsl_link_flags(root, [exported.prefix])
+                finally:
+                    os.umask(old)
+                entry = os.path.dirname(exported.object_path)
+                script = shlex.split(flags[1])[-1]
+                paths = (entry, exported.header_path, exported.object_path, script)
+                modes = [stat.S_IMODE(os.stat(path).st_mode) for path in paths]
+                self.assertEqual(os.path.dirname(entry), root)
+                self.assertEqual(modes, [0o777 & ~umask] + [0o666 & ~umask] * 3)
+
+    def test_aoti_call_sites_share_one_export(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a, b = torch.empty_like(x), torch.empty_like(x)
+                add_w(x, y, a, x.numel())
+                add_w(a, y, b, x.numel())
+                return b
+
+        x, y = _rand(1000), _rand(1000)
+        pkg, code = self._package_and_code(M(), (x, y))
+        self.assertEqual(code.count("#define CUTEDSL_DECLARED_"), 1)
+        self.assertEqual(torch._inductor.aoti_load_package(pkg)(x, y), x + 2 * y)
+
+    @unittest.skipUnless(shutil.which("nm"), "reads the model .so's symbols with nm")
+    def test_aoti_module_held_per_model_instance(self):
+        # Each model instance takes a reference to the kernel's CUDA library at its
+        # first launch (a member of AOTInductorModelKernels): the first reference
+        # loads it and the last unloads it, even when dlclose leaves the .so mapped.
+        # Read from the .so: nothing loaded before a launch, one load shared by two
+        # runners, released once the last of them is destroyed, and loaded again by
+        # a runner created after that, onto its device as well (the kernel's launch
+        # needs the attribute that loading onto the device sets).
+        from cuda.bindings import runtime as cudart
+
+        x = _rand(1000)
+        pkg, code = self._package_and_code(_AddOneSmemModule(), (x,))
+        p = re.search(r"\bcall_(cutedsl_add_one_smem_kernel\w*)\(", code).group(1)
+        FileCheck().check("class AOTInductorModelKernels").check(
+            f"{p}_module_ref {p}_ref;"
+        ).check_next("};").run(code)
+        call = f"call_{p}(kernels.{p}_ref.get(this->device_idx_), "
+        FileCheck().check(call).run(code)
+        self.assertNotIn(f"static {p}_module_ref", code)
+        runner = torch._C._aoti.AOTIModelContainerRunnerCuda
+        with tempfile.TemporaryDirectory() as d, zipfile.ZipFile(pkg) as z:
+            so = z.extract(next(n for n in z.namelist() if n.endswith(".so")), d)
+            first, second = (runner(so, 1, DEVICE) for _ in range(2))
+            self.assertEqual(_module_state(so, p), (0, None))
+            self.assertEqual(first.run([x]), [x + 1])
+            self.assertEqual(second.run([x]), [x + 1])
+            refs, handle = _module_state(so, p)
+            self.assertEqual(refs, 2)
+            self.assertEqual(
+                cudart.cudaLibraryGetKernelCount(handle),
+                (cudart.cudaError_t.cudaSuccess, 1),
+            )
+            del second
+            self.assertEqual(_module_state(so, p), (1, handle))
+            self.assertEqual(first.run([x]), [x + 1])
+            del first
+            self.assertEqual(_module_state(so, p), (0, None))
+            third = runner(so, 1, DEVICE)
+            self.assertEqual(third.run([x]), [x + 1])
+            self.assertEqual(_module_state(so, p)[0], 1)
+
+    @unittest.skipUnless(torch.cuda.device_count() >= 2, "requires two CUDA devices")
+    @unittest.skipUnless(shutil.which("nm"), "reads the model .so's symbols with nm")
+    def test_aoti_module_loaded_onto_the_model_device(self):
+        # With two visible GPUs, a model loads the kernel's library onto its own
+        # device at its first launch, not onto every visible GPU when it is
+        # constructed: a model on cuda:1 runs with nothing loaded before, and models
+        # of one .so on both devices share one load (which devices a reference loads
+        # onto: test_module_ref_and_launch_failures). The JIT cpp_wrapper loads it
+        # onto the device of each launch. The kernel's launch fails on a device the
+        # library is not loaded onto (it needs the attribute the load sets there).
+        if torch.cuda.get_device_capability(0) != torch.cuda.get_device_capability(1):
+            self.skipTest("requires two CUDA devices of one compute capability")
+        x = _rand(1000)
+        x1 = x.to("cuda:1")
+        pkg, code = self._package_and_code(_AddOneSmemModule(), (x,))
+        p = re.search(r"\bcall_(cutedsl_add_one_smem_kernel\w*)\(", code).group(1)
+        runner = torch._C._aoti.AOTIModelContainerRunnerCuda
+        with tempfile.TemporaryDirectory() as d, zipfile.ZipFile(pkg) as z:
+            so = z.extract(next(n for n in z.namelist() if n.endswith(".so")), d)
+            on1 = runner(so, 1, "cuda:1")
+            self.assertEqual(_module_state(so, p), (0, None))
+            self.assertEqual(on1.run([x1]), [x1 + 1])
+            refs, handle = _module_state(so, p)
+            self.assertEqual(refs, 1)
+            on0 = runner(so, 1, "cuda:0")
+            self.assertEqual(on0.run([x]), [x + 1])
+            self.assertEqual(_module_state(so, p), (2, handle))
+            del on1
+            self.assertEqual(on0.run([x]), [x + 1])
+            del on0
+            self.assertEqual(_module_state(so, p), (0, None))
+        torch._dynamo.reset()
+        with inductor_config.patch(cpp_wrapper=True):
+            compiled = torch.compile(_AddOneSmemModule(), fullgraph=True)
+            self.assertEqual(compiled(x1), x1 + 1)
+            self.assertEqual(compiled(x), x + 1)
+
+    def test_aoti_module_load_failure(self):
+        # A cubin this GPU cannot run (exported for another architecture) fails to
+        # load at the first launch, which raises the CUDA error, and so does a
+        # retry. An aten kernel launched afterwards does not report the error again
+        # (the model's CUDA calls go to PyTorch's libcudart in OSS builds).
+        other = "80" if torch.cuda.get_device_capability() >= (9, 0) else "90"
+        x, y = _rand(1000), _rand(1000)
+        msg = "CuTeDSL kernel module: cudaErrorNoKernelImageForDevice"
+        with inductor_config.patch({"cuda.arch": other}):
+            run = torch._inductor.aoti_load_package(self._package(_AddModule(), (x, y)))
+        for _ in range(2):
+            with self.assertRaisesRegex(RuntimeError, msg):
+                run(x, y)
+        self.assertEqual(x * 2, x + x)
+
+    def test_cutedsl_kernel_jit_cpp_wrapper_exports_for_the_device(self):
+        # The JIT module runs in this process, so it exports for the architecture
+        # of the kernel's device: config.cuda.arch, AOTInductor's target, does not
+        # change it (a cubin for another architecture would not load here).
+        from torch._inductor.codegen.cuda.compile_utils import (
+            _cuda_arch_with_compile_suffix,
+        )
+
+        major, minor = torch.cuda.get_device_capability()
+        other = "80" if (major, minor) >= (9, 0) else "90"
+        arch = _cuda_arch_with_compile_suffix(f"{major}{minor}")
+        x, y = _rand(1000), _rand(1000)
+        torch._dynamo.reset()
+        with inductor_config.patch({"cpp_wrapper": True, "cuda.arch": other}):
+            compiled = torch.compile(_AddModule(), fullgraph=True)
+            res, (code,) = run_and_get_code(compiled, x, y)
+        self.assertEqual(res, x + y)
+        FileCheck().check(f"call_cutedsl_add_kernel_sm{arch}_").run(code)
 
     def test_aoti_cross_arch_export_in_fresh_process(self):
         # An export for another architecture than the GPU's works as the first
@@ -8141,9 +8516,518 @@ class CuteDSLAOTITests(TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertTrue(os.path.exists(os.path.join(d, "p.o")))
 
+    def test_aoti_two_packages_same_prefix(self):
+        # Two packages of kernels that differ only in a captured list: both link it
+        # under one prefix. Its symbols and the DSL runtime's stay out of each .so's
+        # dynamic symbol table, so neither can bind to the other's, and both run in
+        # one process.
+        def module(c):
+            k = wrap_cutedsl(make_affine_kernel(c), mutates_args=["mOut"])
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    out = torch.empty_like(x)
+                    k(x, out, x.numel())
+                    return out
+
+            return M()
+
+        x = torch.arange(1000, device=DEVICE, dtype=torch.float32)
+        packages, prefixes = [], set()
+        for c in ([2.0, 0.0], [5.0, 1.0]):
+            pkg, code = self._package_and_code(module(c), (x,))
+            packages.append(pkg)
+            prefixes.update(re.findall(r"\bcall_(cutedsl_affine_kernel\w*)\(", code))
+        (prefix,) = prefixes
+        # The object's entry points, and runtime archive shims it calls.
+        private = (
+            f"_mlir_{prefix}_cuda_init",
+            "_cudaLibraryLoadData",
+            "_cudaLibraryGetKernel",
+            "_cudaLaunchKernelEx",
+        )
+        for pkg in packages:
+            with tempfile.TemporaryDirectory() as d, zipfile.ZipFile(pkg) as z:
+                so = z.extract(next(n for n in z.namelist() if n.endswith(".so")), d)
+                lib = ctypes.CDLL(so)
+            self.assertTrue(hasattr(lib, "AOTInductorModelContainerCreateWithDevice"))
+            for sym in private:
+                self.assertFalse(hasattr(lib, sym), sym)
+        run_a, run_b = (torch._inductor.aoti_load_package(p) for p in packages)
+        self.assertEqual(run_a(x), 2 * x)
+        self.assertEqual(run_b(x), 5 * x + 1)
+
+    def test_aoti_boolean_and_half_scalars(self):
+        # A Boolean takes the truthiness of its value (x.shape[0] % 3 can be 2), as
+        # in eager; a Float16 scalar compiles and is converted from double.
+        w = wrap_cutedsl(select_bool_kernel, mutates_args=["mOut"])
+        h = wrap_cutedsl(add_half_kernel, mutates_args=["mOut"])
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a, b = torch.empty_like(x), torch.empty_like(x)
+                w(x, a, x.numel(), x.shape[0] % 3)
+                h(x, b, x.numel(), 0.5)
+                return a, b
+
+        n = torch.export.Dim("n", min=2, max=4096)
+        pkg = self._package(M(), (_rand(1000),), dynamic_shapes={"x": {0: n}})
+        run = torch._inductor.aoti_load_package(pkg)
+        for size in (1000, 1001, 1002):  # size % 3 = 1, 2, 0
+            x = _rand(size)
+            a, b = run(x)
+            self.assertEqual(a, (3 if size % 3 else 5) * x)
+            self.assertEqual(b, x + 0.5)
+
+    def test_aoti_dynamic_size_beyond_int32(self):
+        # A dynamic size fills an int32 slot of the exported tensor struct: a larger
+        # one is refused at launch instead of being truncated.
+        w = wrap_cutedsl(copy_first_kernel, mutates_args=["mOut"])
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                out = torch.empty(1, device=x.device)
+                w(x, out)
+                return out
+
+        # Expanded inputs: n elements, one of storage.
+        def expanded(n):
+            return torch.full((1,), 3.0, device=DEVICE).expand(n)
+
+        dims = {"x": {0: torch.export.Dim("n", min=2)}}
+        pkg, code = self._package_and_code(M(), (expanded(1000),), dynamic_shapes=dims)
+        msg = "dynamic size 0 of argument mX does not fit in int32"
+        FileCheck().check(msg).run(code)
+        run = torch._inductor.aoti_load_package(pkg)
+        self.assertEqual(run(expanded(5000)), expanded(1))
+        with self.assertRaisesRegex(RuntimeError, msg):
+            run(expanded(2**31))
+
+    def test_aoti_toy_raw_call(self):
+        # The toy through strict export, where Dynamo captures the raw call, and
+        # AOTInductor.
+        x, y = _rand(2048), _rand(2048)
+        pkg, code = self._package_and_code(Toy(), (x, y), strict=True)
+        self.assertRegex(code, r"cute_dsl_\w+_wrapper\(")
+        runner = torch._inductor.aoti_load_package(pkg)
+        self.assertEqual(runner(x, y), (x + y).relu())
+        x2, y2 = _rand(2048), _rand(2048)
+        self.assertEqual(runner(x2, y2), (x2 + y2).relu())
+
+    def test_aoti_add(self):
+        x, y = _rand(1000), _rand(1000)
+        pkg, code = self._package_and_code(_AddModule(), (x, y))
+        self.assertRegex(code, r"cute_dsl_\w+_wrapper\(")
+        runner = torch._inductor.aoti_load_package(pkg)
+        self.assertEqual(runner(x, y), x + y)
+        x2, y2 = _rand(1000), _rand(1000)
+        self.assertEqual(runner(x2, y2), x2 + y2)
+
+    @parametrize("strict", [False, True])
+    def test_aoti_dynamic_shapes(self, strict):
+        dim = torch.export.Dim("n", min=2, max=8192)
+        pkg = self._package(
+            _AddModule(),
+            (_rand(1000), _rand(1000)),
+            dynamic_shapes={"x": {0: dim}, "y": {0: dim}},
+            strict=strict,
+        )
+        runner = torch._inductor.aoti_load_package(pkg)
+        for n in (1000, 77, 8192):
+            x, y = _rand(n), _rand(n)
+            self.assertEqual(runner(x, y), x + y)
+
+    def test_aoti_2d_view_dynamic(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                xt = x.t()  # strides (1, x.shape[1]): a non-contiguous view
+                out = torch.empty(xt.shape, device=x.device)
+                add_one_2d_w(xt, out)
+                return out
+
+        a, b = (
+            torch.export.Dim("a", min=2, max=512),
+            torch.export.Dim("b", min=2, max=512),
+        )
+        pkg = self._package(M(), (_rand(8, 4),), dynamic_shapes={"x": {0: a, 1: b}})
+        runner = torch._inductor.aoti_load_package(pkg)
+        for shape in ((8, 4), (33, 17), (4, 300)):
+            x = _rand(*shape)
+            self.assertEqual(runner(x), x.t() + 1)
+
+    def test_aoti_constexpr(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                o1, o2 = torch.empty_like(x), torch.empty_like(x)
+                mul_const_w(x, o1, x.numel(), 3)
+                mul_const_w(x, o2, x.numel(), 2.5)
+                return o1, o2
+
+        x = _rand(1000)
+        runner = torch._inductor.aoti_load_package(self._package(M(), (x,)))
+        o1, o2 = runner(x)
+        self.assertEqual((o1, o2), (3 * x, 2.5 * x))
+
+    def test_aoti_unannotated_scalar(self):
+        # export_to_c takes a scalar's C type from its annotation ("Unsupported
+        # argument ... with type None" in cutlass 4.4.2), so the C++ wrapper asks for
+        # one, for AOTInductor and the JIT cpp_wrapper alike.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                out = torch.empty_like(x)
+                add_scalar_w(x, out, x.numel(), 5)
+                return out
+
+        x = _rand(1000)
+        # The Python wrapper launches it fine ...
+        self.assertEqual(torch.compile(M(), fullgraph=True)(x), x + 5)
+        # ... the C++ wrapper cannot export it.
+        msg = r"C\+\+ wrapper \(AOTInductor or cpp_wrapper\) needs scalar parameter 'k'"
+        with self.assertRaisesRegex(Exception, msg):
+            self._package(M(), (x,))
+        torch._dynamo.reset()
+        with inductor_config.patch(cpp_wrapper=True):
+            with self.assertRaisesRegex(Exception, msg):
+                torch.compile(M(), fullgraph=True)(x)
+
+    @parametrize(
+        "option,value,message",
+        [
+            ("triton.autotune_at_compile_time", False, "dual wrapper mode"),
+            ("aot_inductor.package_cpp_only", True, "package_cpp_only"),
+            ("aot_inductor.emit_multi_arch_kernel", True, "emit_multi_arch_kernel"),
+            ("aot_inductor.cross_target_platform", "windows", "for Windows"),
+        ],
+        name_fn=lambda option, *_: option.split(".")[-1],
+    )
+    def test_aoti_refused_config(self, option, value, message):
+        # Configurations the exported objects cannot be linked in are refused
+        # before anything is exported.
+        from torch._inductor.codegen.cutedsl import user_kernel_aot
+
+        # Cross-compiling for Windows needs the constants out of the .so to get here.
+        patches = {option: value, "aot_inductor.package_constants_in_so": False}
+        x, y = _rand(1000), _rand(1000)
+        with (
+            inductor_config.patch(patches),
+            mock.patch.object(user_kernel_aot, "export_for_link") as export,
+            self.assertRaisesRegex(Exception, f"not supported with .*{message}"),
+        ):
+            self._package(_AddModule(), (x, y))
+        export.assert_not_called()
+
+    def test_aoti_misaligned_input_guard(self):
+        # Exported with aligned inputs, the kernel assumes 16-byte alignment and
+        # the launch checks it for every tensor.
+        base, base2 = _rand(1001), _rand(1001)
+        pkg, code = self._package_and_code(_AddModule(), (base[:1000], base2[:1000]))
+        for name in ("mX", "mY", "mOut"):
+            FileCheck().check(f"argument {name} is not 16-byte aligned").run(code)
+        runner = torch._inductor.aoti_load_package(pkg)
+        x, y = base[1:], base2[1:]
+        if inductor_config.is_fbcode():
+            # fbcode AOTI does not copy misaligned inputs, so the guard fires.
+            with self.assertRaisesRegex(RuntimeError, "mX is not 16-byte aligned"):
+                runner(x, y)
+        else:
+            self.assertEqual(runner(x, y), x + y)
+
+    def test_aoti_misaligned_fallback_output_guard(self):
+        # The real output of misaligned_clone is 4 bytes off while its fake output
+        # is aligned, so the kernel is compiled to assume 16-byte alignment and the
+        # guard fires, also outside fbcode (where misaligned inputs are copied).
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                add_w(misaligned_clone(x), y, out, x.numel())
+                return out
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(misaligned_clone(x).data_ptr() % 16, 4)
+        pkg, code = self._package_and_code(M(), (x, y))
+        FileCheck().check("argument mX is not 16-byte aligned").run(code)
+        runner = torch._inductor.aoti_load_package(pkg)
+        with self.assertRaisesRegex(RuntimeError, "mX is not 16-byte aligned"):
+            runner(x, y)
+
+    def test_aoti_two_outputs_and_default_scale(self):
+        # The C wrapper takes `float scale` after the stream: a defaulted runtime
+        # scalar must still be passed.
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                s1, d1 = torch.empty_like(x), torch.empty_like(x)
+                add_sub_w(x, y, s1, d1, x.numel())
+                s2, d2 = torch.empty_like(x), torch.empty_like(x)
+                add_sub_w(x, y, s2, d2, x.numel(), scale=0.25)
+                return s1, d1, s2, d2
+
+        x, y = _rand(1000), _rand(1000)
+        runner = torch._inductor.aoti_load_package(self._package(M(), (x, y)))
+        s1, d1, s2, d2 = runner(x, y)
+        self.assertEqual((s1, d1), (x + y, x - y))
+        self.assertEqual((s2, d2), ((x + y) * 0.25, (x - y) * 0.25))
+
+    def test_aoti_inplace_kernel_and_view(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = x * 1
+                scale_inplace_w(y, y.numel())
+                v = y[4:]
+                scale_inplace_w(v, v.numel())
+                return y
+
+        x = _rand(1000)
+        expected = 2 * x
+        expected[4:] *= 2
+        runner = torch._inductor.aoti_load_package(self._package(M(), (x,)))
+        self.assertEqual(runner(x), expected)
+
+    def test_aoti_same_name_kernels(self):
+        # Two host functions named binary_kernel: their exported symbols must not
+        # collide in the package. The C++ the two exports share (standard headers,
+        # and the CUTE_DSL_CUDA_ERROR_CHECK definition, which must precede the
+        # export_to_c headers) is emitted once; AOTI_RUNTIME_CHECK, which it uses,
+        # comes from the AOTI headers.
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                o1, o2 = torch.empty_like(x), torch.empty_like(x)
+                same_name_add_w(x, y, o1, x.numel())
+                same_name_sub_w(x, y, o2, x.numel())
+                return o1, o2
+
+        x, y = _rand(1000), _rand(1000)
+        pkg, code = self._package_and_code(M(), (x, y))
+        self.assertEqual(code.count("#define CUTEDSL_DECLARED_"), 2)
+        # Found by its body: each export_to_c header has an #ifndef-guarded default.
+        error_check = 'std::string("CuTeDSL kernel module: ")'
+        for text in (error_check, "#include <mutex>"):
+            self.assertEqual(code.count(text), 1, text)
+        FileCheck().check(error_check).check("#ifndef CUTE_DSL_CUDA_ERROR_CHECK").run(
+            code
+        )
+        self.assertNotIn("#ifndef AOTI_RUNTIME_CHECK", code)
+        runner = torch._inductor.aoti_load_package(pkg)
+        o1, o2 = runner(x, y)
+        self.assertEqual(o1, x + y)
+        self.assertEqual(o2, x - y)
+
+    def test_aoti_launcher_parameter_names(self):
+        # Parameters named like the launcher's own identifiers would be if it named
+        # its parameters after the host function's (a tensor "stream", a scalar
+        # "stream_size0" next to that tensor's dynamic size, "cutedsl_arg0" and
+        # "cutedsl_status"): the launcher names its parameters by position.
+        w = wrap_cutedsl(colliding_names_kernel, mutates_args=["cutedsl_arg0"])
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                out = torch.empty_like(x)
+                w(x, out, x.numel(), 5)
+                return out
+
+        n = torch.export.Dim("n", min=2, max=4096)
+        pkg = self._package(M(), (_rand(1000),), dynamic_shapes={"x": {0: n}})
+        run = torch._inductor.aoti_load_package(pkg)
+        for size in (1000, 77):
+            x = _rand(size)
+            self.assertEqual(run(x), x + 5)
+
+    def test_cutedsl_kernel_link_args_from_wrapper(self):
+        # The model .so and the JIT module link what the wrapper's cutedsl_link_args
+        # returns: the export's object, the DSL's runtime archive and the symbol
+        # flags, plus cudart for the JIT module.
+        from torch._inductor.codegen.cpp_wrapper_gpu import CppWrapperGpu
+        from torch._inductor.codegen.cutedsl import user_kernel_aot
+
+        link_args = []
+        real = CppWrapperGpu.cutedsl_link_args
+
+        def cutedsl_link_args(wrapper):
+            link_args.append(real(wrapper))
+            return link_args[-1]
+
+        x, y = _rand(1000), _rand(1000)
+        with mock.patch.object(CppWrapperGpu, "cutedsl_link_args", cutedsl_link_args):
+            run = torch._inductor.aoti_load_package(self._package(_AddModule(), (x, y)))
+            self.assertEqual(run(x, y), x + y)
+            torch._dynamo.reset()
+            with inductor_config.patch(cpp_wrapper=True):
+                self.assertEqual(
+                    torch.compile(_AddModule(), fullgraph=True)(x, y), x + y
+                )
+        aot, jit = link_args
+        obj, archive = shlex.split(" ".join(aot[:2]))
+        self.assertTrue(obj.endswith(".o"), aot)
+        self.assertEqual(archive, user_kernel_aot.cutedsl_runtime_archive())
+        self.assertIn(f"-Wl,--exclude-libs,{os.path.basename(archive)}", aot)
+        self.assertEqual(jit[:-1], aot)
+        self.assertIn("cudart", jit[-1])
+
+    def test_aoti_unaligned_view(self):
+        class M(torch.nn.Module):
+            def forward(self, base):
+                x = base[:, 1:]  # data_ptr 4 bytes past a 16-byte boundary
+                out = torch.empty(x.shape, device=x.device)
+                add_one_2d_w(x, out)
+                return out
+
+        base = _rand(4, 9)
+        pkg, code = self._package_and_code(M(), (base,))
+        # Compiled for the view's 4-byte alignment, mX needs no guard; mOut does.
+        FileCheck().check_not("argument mX is not").run(code)
+        FileCheck().check("argument mOut is not 16-byte aligned").run(code)
+        runner = torch._inductor.aoti_load_package(pkg)
+        self.assertEqual(runner(base), base[:, 1:] + 1)
+
+    @parametrize("strict", [False, True])
+    def test_aoti_program_exported_before_reset(self, strict):
+        # A program exported before torch._dynamo.reset() and another strict export
+        # must still compile its own kernel (the Triton side table is reset there).
+        x, y = _rand(1000), _rand(1000)
+        ep = torch.export.export(_AddModule(), (x, y), strict=strict)
+        torch._dynamo.reset()
+        torch.export.export(_ScaleModule(), (x,), strict=True)
+        runner = torch._inductor.aoti_load_package(
+            torch._inductor.aoti_compile_and_package(ep)
+        )
+        self.assertEqual(runner(x, y), x + y)
+
+    def test_cutedsl_kernel_jit_cpp_wrapper(self):
+        # torch.compile with the C++ wrapper links the exported objects into the JIT
+        # module the same way.
+        x, y = _rand(1000), _rand(1000)
+        with inductor_config.patch(cpp_wrapper=True):
+            res, (code,) = run_and_get_code(
+                torch.compile(_AddModule(), fullgraph=True), x, y
+            )
+        self.assertEqual(res, x + y)
+        FileCheck().check("call_cutedsl_add_kernel_").run(code)
+
+    def test_cutedsl_kernel_jit_cpp_wrapper_object_constant_modified(self):
+        # The export compiles the object's contents in; Dynamo guards them, so a
+        # change made between calls recompiles and exports again, as eager sees it.
+        class Cfg:
+            def __init__(self, alpha):
+                self.alpha = alpha
+
+        cfg = Cfg(3.0)
+        w = wrap_cutedsl(cfg_scale_kernel, mutates_args=["mOut"])
+
+        def f(x, cfg):
+            out = torch.empty_like(x)
+            w(x, out, x.numel(), cfg)
+            return out
+
+        x = _rand(1000)
+        cnt = CompileCounterWithBackend("inductor")
+        cf = torch.compile(f, backend=cnt, fullgraph=True)
+        with inductor_config.patch(cpp_wrapper=True):
+            res, (code,) = run_and_get_code(cf, x, cfg)
+            self.assertEqual(res, 3 * x)
+            self.assertEqual(cnt.frame_count, 1)
+            cfg.alpha = 5.0
+            self.assertEqual(cf(x, cfg), 5 * x)
+            self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(cf(x, cfg), 5 * x)
+            self.assertEqual(cnt.frame_count, 2)
+        FileCheck().check("call_cutedsl_cfg_scale_kernel_").run(code)
+
+    def test_cutedsl_kernel_jit_cpp_wrapper_link_args_stable(self):
+        # Exported again (registry cleared, as in a new process), the kernel links
+        # from the same paths, so the JIT module's link command, part of its cache
+        # key, is unchanged.
+        from torch._inductor.codegen.cutedsl import user_kernel_aot
+
+        x, y = _rand(1000), _rand(1000)
+        flags = []
+        for _ in range(2):
+            user_kernel_aot._exports.clear()
+            torch._dynamo.reset()
+            with inductor_config.patch(cpp_wrapper=True):
+                _, (code,) = run_and_get_code(
+                    torch.compile(_AddModule(), fullgraph=True), x, y
+                )
+            flags.append(re.search(r"extra_flags=(.*)", code).group(1))
+        self.assertEqual(flags[0], flags[1])
+        self.assertIn(user_kernel_aot.cutedsl_cache_dir(), flags[0])
+        self.assertIn(".ver", flags[0])
+
+    def test_cutedsl_kernel_runtime_archive_path_with_space(self):
+        # The DSL's runtime archive is in site-packages, whose path can hold a space
+        # (a venv under "My Projects"): the model .so and the JIT module link it.
+        from torch._inductor.codegen.cutedsl import user_kernel_aot
+
+        x, y = _rand(1000), _rand(1000)
+        archive = user_kernel_aot.cutedsl_runtime_archive()
+        with tempfile.TemporaryDirectory() as d:
+            spaced = os.path.join(d, "dsl lib", os.path.basename(archive))
+            os.mkdir(os.path.dirname(spaced))
+            os.symlink(archive, spaced)
+            with mock.patch.object(
+                user_kernel_aot, "cutedsl_runtime_archive", return_value=spaced
+            ):
+                run = torch._inductor.aoti_load_package(
+                    self._package(_AddModule(), (x, y))
+                )
+                self.assertEqual(run(x, y), x + y)
+                torch._dynamo.reset()
+                with inductor_config.patch(cpp_wrapper=True):
+                    self.assertEqual(
+                        torch.compile(_AddModule(), fullgraph=True)(x, y), x + y
+                    )
+
+    def test_cutedsl_kernel_jit_cpp_wrapper_precompiled_header_reused(self):
+        # The JIT module links the exports through extra_flags, which its precompiled
+        # header is built and keyed without, so a second, different set of exports
+        # reuses the header instead of precompiling (and storing) a new one.
+        from torch._inductor import codecache
+        from torch._inductor.codegen.cutedsl import user_kernel_aot
+
+        x, y = _rand(1000), _rand(1000)
+        with (
+            tempfile.TemporaryDirectory() as headers,
+            mock.patch.object(codecache, "_HEADER_DIR", headers),
+            mock.patch.object(
+                codecache, "_HEADER_LOCK_DIR", os.path.join(headers, "locks")
+            ),
+            mock.patch.object(
+                codecache,
+                "_precompile_header",
+                wraps=functools.cache(codecache._precompile_header.__wrapped__),
+            ) as precompile,
+            inductor_config.patch(cpp_wrapper=True, cpp_cache_precompile_headers=True),
+        ):
+            for module, args, expected in (
+                (_AddModule(), (x, y), x + y),
+                (_ScaleModule(), (x,), 2 * x),
+            ):
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(module, fullgraph=True)(*args), expected)
+            stored = [f for f in os.listdir(headers) if f.endswith(".h")]
+        first, second = precompile.call_args_list
+        self.assertEqual(first, second)
+        self.assertNotIn(user_kernel_aot.cutedsl_cache_dir(), str(first))
+        self.assertEqual(len(stored), 1)
+
+    def test_cutedsl_kernel_jit_cpp_wrapper_graph_not_serializable(self):
+        # The JIT module links the exports by their paths in the local cache
+        # directory, so serializing the compiled graph (aot_compile) fails loudly, as
+        # for the Python wrapper's launchers.
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out * 2
+
+        x, y = _rand(1000), _rand(1000)
+        # The export's prefix (cutedsl_<name>_<arch>_<hash>), not a launcher's name.
+        msg = r"\(cutedsl_add_kernel_sm\w+\).*cannot be serialized"
+        with inductor_config.patch(cpp_wrapper=True):
+            with self.assertRaisesRegex(Exception, msg):
+                torch.compile(f, fullgraph=True).aot_compile(((x, y), {}))
+
     def test_cutedsl_kernel_prefix_same_for_equal_constants(self):
-        # Equal constants give the same prefix in every process: objects are compared
-        # by content, sets in any order, and object addresses are ignored.
+        # Equal constants give the same prefix in every process, so a kernel exported
+        # again reuses its files: objects are compared by content, sets in any order,
+        # and object addresses are ignored.
         from torch._inductor.codegen.cutedsl.user_kernel_aot import (
             ConstantParamSpec,
             cutedsl_kernel_prefix,
@@ -8424,10 +9308,10 @@ def _abi_specs(numeric=_numeric):
 
 
 class CuteDSLExportTests(TestCase):
-    """The C++ side of an export_to_c export (parse and validate the header, check
-    the object's symbols, emit the declarations and the launch, link flags), on a
-    header export_to_c wrote and code the C++ compiler builds: no GPU or cutlass
-    needed."""
+    """What the C++ wrapper does with an export_to_c header and object (parse and
+    validate the header, check the object's symbols, emit the declarations and the
+    launch, link flags), on a header export_to_c wrote and code the C++ compiler
+    builds: no GPU or cutlass needed."""
 
     hw_classification = HardwareClassification.GENERIC
 
