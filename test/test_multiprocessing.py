@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     parametrize,
     run_tests,
+    set_warn_always_context,
     slowTest,
     subtest,
     TEST_WITH_ASAN,
@@ -88,8 +89,8 @@ def _test_cuda_ipc_collect_during_export():
     import torch.cuda._gpu_trace as gpu_trace
 
     test_case = TestCase()
-    # Match CUDA_IPC_REF_COUNTER_FILE_SIZE in torch/csrc/CudaIPCTypes.h.
-    # This must exceed CUDA_IPC_MAXIMUM_EVENTS_TO_USE to force stream synchronization.
+    # Match IPC_REF_COUNTER_FILE_SIZE in torch/csrc/IPCTypes.h.
+    # This must exceed IPC_MAXIMUM_EVENTS_TO_USE to force stream synchronization.
     counter_file_size = 10000
     tensors = [
         torch.empty(1, dtype=torch.uint8, device="cuda")
@@ -106,11 +107,11 @@ def _test_cuda_ipc_collect_during_export():
     try:
         # Exhaust the first counter file and the IPC event allowance.
         for i in range(counter_file_size):
-            handles.append(tensors[i].untyped_storage()._share_cuda_())
+            handles.append(tensors[i].untyped_storage()._share_device_())
         torch._C._activate_gpu_trace()
         gpu_trace.register_callback_for_stream_synchronization(collect)
         # Collect during stream synchronization for the first slot in a new file.
-        handles.append(tensors[-1].untyped_storage()._share_cuda_())
+        handles.append(tensors[-1].untyped_storage()._share_device_())
         test_case.assertEqual(collections, 1)
         test_case.assertEqual(handles[0][5], 0)
         test_case.assertEqual(handles[-2][5], counter_file_size - 1)
@@ -120,7 +121,7 @@ def _test_cuda_ipc_collect_during_export():
         test_case.assertNotEqual(handles[-1][4], handles[0][4])
     finally:
         for handle in handles:
-            torch.UntypedStorage._release_ipc_counter_cuda(handle[4], handle[5])
+            torch.UntypedStorage._release_ipc_counter_device(handle[4], handle[5])
         tensors.clear()
         torch.cuda.ipc_collect()
 
@@ -179,7 +180,7 @@ def send_tensor_with_untyped_storage(queue, event, expandable, peer):
             ref_counter_offset,
             event_handle,
             event_sync_required,
-        ) = storage._share_cuda_()
+        ) = storage._share_device_()
         specs.append(
             {
                 "tensor_cls": type(tensor),
@@ -908,6 +909,16 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
         self.assertEqual(p.exitcode, 0)
         del t_received
 
+    def test_cuda_ipc_deprecated_aliases(self):
+        storage = torch.ones(4, device="cuda").untyped_storage()
+        with set_warn_always_context(True):
+            with self.assertWarnsRegex(UserWarning, "_share_cuda_ is deprecated"):
+                handle = storage._share_cuda_()
+            with self.assertWarnsRegex(
+                UserWarning, "_release_ipc_counter_cuda is deprecated"
+            ):
+                torch.UntypedStorage._release_ipc_counter_cuda(handle[4], handle[5])
+
     def test_cuda_ipc_deadlock(self):
         ctx = mp.get_context("spawn")
         queue = ctx.Queue(1)
@@ -1043,13 +1054,13 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
                     self.assertEqual(handle_type, 2)  # FABRIC_HANDLE
                 struct.pack_into("=i", wrong_handle, 26, 0)  # UNSPECIFIED
                 with self.assertRaisesRegex(RuntimeError, "Unsupported.*IPC"):
-                    mp.reductions.rebuild_cuda_tensor(
+                    mp.reductions._rebuild_device_tensor(
                         **dict(specs[0], storage_handle=bytes(wrong_handle))
                     )
             for dev in range(2 if peer else 1):
                 start = 3 * dev
                 tensors.extend(
-                    mp.reductions.rebuild_cuda_tensor(**dict(s, storage_device=dev))
+                    mp.reductions._rebuild_device_tensor(**dict(s, storage_device=dev))
                     for s in specs[start : start + 3]
                 )
                 self.assertEqual([t.device.index for t in tensors[start:]], [dev] * 3)
