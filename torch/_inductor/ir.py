@@ -7766,15 +7766,30 @@ class ExternKernel(InputsKernel):
                 )
             )
         )
-        # This freezes an intermediate buffer owned by its producer. If the current
-        # node only protects its own output strides, that says nothing about this
-        # input, so let the producer's marking decide whether it can be padded.
-        padding_fx_node = V.get_current_node()
+        consumer = V.get_current_node()
+
+        def exclusively_used_by_consumer(node: torch.fx.Node) -> bool:
+            while node is not consumer:
+                if len(node.users) != 1:
+                    return False
+                node = next(iter(node.users))
+            return True
+
+        padding_fx_node = consumer
+        # An output-only restriction need not protect a private input buffer.
+        # Check stable origins too: no-op views can overwrite origin_node.
+        # Alias-returning consumers may expose the input even without a fork.
         if (
             x_unwrap_view_fx_node is not None
-            and hasattr(padding_fx_node, "meta")
-            and padding_fx_node.meta.get("dislike_padding_only_for_output", False)
-            and not x_unwrap_view_fx_node.meta.get("backs_user_visible_output", False)
+            and isinstance(consumer, torch.fx.Node)
+            and consumer.meta.get("dislike_padding_only_for_output", False)
+            and isinstance(consumer.target, torch._ops.OpOverload)
+            and not any(r.alias_info for r in consumer.target._schema.returns)
+            and buf.get_origins()
+            and all(
+                isinstance(node, torch.fx.Node) and exclusively_used_by_consumer(node)
+                for node in (x_unwrap_view_fx_node, *buf.get_origins())
+            )
         ):
             padding_fx_node = x_unwrap_view_fx_node
         with V.set_current_node(padding_fx_node):

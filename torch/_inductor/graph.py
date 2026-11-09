@@ -225,13 +225,9 @@ def _is_cpu_strided_tensor_pinned(t: torch.Tensor) -> bool:
 
 def extend_user_visible_output_strides(
     user_visible_outputs: dict[Node, tuple[int, ...]],
-    through_getitem: bool = False,
 ) -> dict[Node, object]:
     """
     Extend user_visible_output_strides to include view ops that lead to user-visible outputs.
-
-    With through_getitem=True, also walk from a tuple element to the node producing
-    the tuple, so the result covers the nodes whose buffers can be returned to the user.
     """
     result: dict[Node, object] = {**user_visible_outputs}
     queue = [*result.keys()]
@@ -239,10 +235,7 @@ def extend_user_visible_output_strides(
     while queue:
         current = queue.pop()
         if (
-            (
-                _is_view_op(current.target)
-                or (through_getitem and current.target is operator.getitem)
-            )
+            _is_view_op(current.target)
             and current.args
             and isinstance(current.args[0], torch.fx.Node)
         ):
@@ -271,10 +264,6 @@ def mark_nodes_dislike_padding(
     extended_user_visible_nodes = extend_user_visible_output_strides(
         user_visible_output_strides
     )
-    for node in extend_user_visible_output_strides(
-        user_visible_output_strides, through_getitem=True
-    ):
-        node.meta["backs_user_visible_output"] = True
     ops_dislike_padding = OrderedSet(
         [
             aten.convolution,
@@ -353,9 +342,6 @@ def mark_nodes_dislike_padding(
             # step (e.g. is_contiguous_storage_and_layout) already mutated
             # the input layout to padded strides.
             if op not in ops_like_padding:
-                # User-visible marking doesn't propagate, so a flag set by now means
-                # this node or its users want dense inputs. Otherwise the flag only
-                # protects this node's output and says nothing about its inputs.
                 if not cur.meta.get("dislike_padding", False):
                     cur.meta["dislike_padding_only_for_output"] = True
                 cur.meta["dislike_padding"] = True
