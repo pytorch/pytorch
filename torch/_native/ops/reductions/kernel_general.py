@@ -1,7 +1,9 @@
 # Reduction dispatcher and general-axis plan for the shared TileReduce kernel.
 # TensorIterator geometry handles every layout. Runtime values keep kernel count
 # O(op * dtype * pair-count); cache_sig compiles decode depths, outputs, index mode,
-# projection/partial mode, and fold clamps. Inputs must be on the current device.
+# projection/partial mode, and fold clamps. The uniform Welford tree also compiles
+# count // block and a tail flag, up to 127 kernels per configuration. Inputs must be on
+# the current device.
 
 import math
 from collections.abc import Sequence
@@ -77,6 +79,9 @@ class ReduceBlock:
         self.ragged_chunk = ragged_chunk  # clamp each output's reduced run
         self.from_partials = from_partials
         self.block = block
+        # TileReduce reads a zero count as the tree being off.
+        if uniform_tree and count == 0:
+            raise ValueError("the uniform Welford tree needs a nonempty reduction")
         # Plan one general-axis block per output; the shared body performs mixed-radix folding.
         self.tile = tile.TileReduce(
             trait,
@@ -365,6 +370,7 @@ def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
 # tree. reduce_ordered_col declines replays past tile.MAX_UNROLL leaves, so the route
 # stops at R = 8192.
 _ORDERED_COL_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
+# kernel_coltile._ORDERED_COL_CONFIGS entries for other architectures are not routed.
 _ORDERED_COL_CCS = ((10, 0),)
 _ORDERED_COL_MIN_R = 128
 _ORDERED_COL_MAX_R = 8192
@@ -380,7 +386,8 @@ def _ordered_col_route_ok(view: torch.Tensor, trait: Any) -> bool:
     """Whether the ordered column kernel beats the indexed tree at this view's shape and
     output count. Callers check _ORDERED_COL_CCS and _ORDERED_COL_DTYPES."""
     B, R, C = (1, *view.shape) if view.dim() == 2 else view.shape
-    # reduce_ordered_col also declines views narrower than a warp.
+    # Narrow tiles are unmeasured on views narrower than a warp; reduce_ordered_col
+    # declines them too.
     if C < WARP:
         return False
     min_outputs = _ORDERED_COL_MIN_OUTPUTS[min(trait.nfields, 3)]

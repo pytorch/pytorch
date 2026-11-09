@@ -359,9 +359,10 @@ class TestKernelGeneral(TestCase):
         )
         self.assertEqual(found, {"tile.py": 1, "kernel_coltile.py": 2})
 
-    # 4095 over 64 threads leaves leftover subtrees and a masked 63-lane remainder; count ==
-    # block is a single load. Stride and the view offset are runtime geometry, so they reuse
-    # kernels; shift offsets the input values.
+    # 4095 over 64 threads leaves leftover subtrees and a 63-value tail load with one masked
+    # lane; count == block is a single load, and 200 over 128 one whole load and a tail.
+    # Stride and the view offset are runtime geometry, so cache_sig omits them; shift scales
+    # and offsets the input values.
     @parametrize(
         "count,block,dtype,stride,offset,shift,var_mean",
         [
@@ -369,6 +370,7 @@ class TestKernelGeneral(TestCase):
             (4095, 64, torch.float32, 1, 0, False, False),
             (4096, 64, torch.float32, 1, 0, False, False),
             (128, 128, torch.float32, 1, 0, False, False),
+            (200, 128, torch.float32, 1, 0, False, False),
             (4095, 64, torch.float32, 2, 0, False, False),
             (4095, 64, torch.float32, 2, 1, False, False),
             (4095, 64, torch.float16, 1, 0, False, False),
@@ -400,6 +402,17 @@ class TestKernelGeneral(TestCase):
             block=block,
             uniform_tree=True,
         )
+        plain = kg.ReduceBlock(
+            trait,
+            count=count,
+            num_o=rows,
+            red_pairs=((count, 1),),
+            kept_pairs=((rows, count),),
+            nouts=len(outs),
+            block=block,
+            uniform_tree=True,
+        )
+        self.assertEqual(op.cache_sig, plain.cache_sig)
         key = ("test_uniform_welford_tree", type(trait).__name__, dtype) + op.cache_sig
         kg._launch(op, key, [kg._flat(x)], outs)
         with torch.backends.python_native.cutedsl.disabled():
@@ -410,9 +423,10 @@ class TestKernelGeneral(TestCase):
 
     def test_uniform_welford_tree_counts_share_kernels(self):
         # A tail kernel serves every count strictly between nloads * block and
-        # (nloads + 1) * block, so 300 and 383 (2 * 128 < count < 3 * 128) share one.
+        # (nloads + 1) * block, so 300 and 383 (2 * 128 < count < 3 * 128) share one;
+        # 256 = 2 * 128 loads as often but takes a tail-free kernel, as does 384 = 3 * 128.
         trait = T.WelfordOps(correction=1, acc=cutlass.Float32)
-        for count in (300, 383):
+        for count in (256, 300, 383, 384):
             x = torch.randn(17, count, device="cuda")
             out = torch.empty(17, device="cuda")
             op = kg.ReduceBlock(
@@ -424,6 +438,8 @@ class TestKernelGeneral(TestCase):
                 block=128,
                 uniform_tree=True,
             )
+            self.assertEqual(op.tile.uniform_tree_loads, count // 128)
+            self.assertEqual(op.tile.uniform_tree_tail, bool(count % 128))
             kg._launch(
                 op, ("uniform_share", "var") + op.cache_sig, [kg._flat(x)], [out]
             )
@@ -431,8 +447,36 @@ class TestKernelGeneral(TestCase):
                 want = torch.var(x.double(), dim=1).float()
             self.assertEqual(out, want, atol=1e-5, rtol=1e-5)
         self.assertEqual(
-            len([k for k in kg._COMPILE_CACHE if k[1] == "uniform_share"]), 1
+            len([k for k in kg._COMPILE_CACHE if k[1] == "uniform_share"]), 3
         )
+
+    def test_uniform_welford_tree_changes_bits(self):
+        """uniform_tree=True must take the tree: its bits differ from the online chain's,
+        and both stay within tolerance of fp64."""
+        torch.manual_seed(0)
+        rows, count = 17, 4096
+        x = torch.randn(rows, count, device="cuda")
+        trait = T.WelfordOps(correction=1, acc=cutlass.Float32)
+        outs = []
+        for uniform_tree in (True, False):
+            op = kg.ReduceBlock(
+                trait,
+                count=count,
+                num_o=rows,
+                red_pairs=((count, 1),),
+                kept_pairs=((rows, count),),
+                block=64,
+                uniform_tree=uniform_tree,
+            )
+            outs.append(torch.empty(rows, device="cuda"))
+            key = ("uniform_bits", "var") + op.cache_sig
+            kg._launch(op, key, [kg._flat(x)], outs[-1:])
+        with torch.backends.python_native.cutedsl.disabled():
+            want = torch.var(x.double(), dim=1).float()
+        for out in outs:
+            self.assertEqual(out, want, atol=1e-5, rtol=1e-5)
+        tree, online = outs
+        self.assertFalse(torch.equal(tree, online))
 
     def test_internal_invariants_raise(self):
         # Each invariant must raise explicitly because python -O strips asserts. Exercise every
@@ -500,12 +544,16 @@ class TestKernelGeneral(TestCase):
             kept_pairs=(),
             uniform_tree=True,
         )
+        self.assertEqual(kg.ReduceBlock(**tree).tile.uniform_tree_loads, 1024 // 128)
         msg = "the uniform Welford tree needs"
         long = 128 * tile.UNIFORM_TREE_MAX_LOADS + 1
+        long64 = 64 * tile.UNIFORM_TREE_MAX_LOADS + 1
         for bad in (
             dict(trait=trait),
+            dict(count=0, red_pairs=((0, 1),)),
             dict(count=64, red_pairs=((64, 1),)),
             dict(count=long, red_pairs=((long, 1),)),
+            dict(block=64, count=long64, red_pairs=((long64, 1),)),
             dict(red_pairs=((32, 1), (32, 64))),
             dict(from_partials=True),
             dict(gidx_from="chunk"),

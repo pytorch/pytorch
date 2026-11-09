@@ -521,7 +521,7 @@ def itree_combine_plan(
     itree: _ItreePlan,
     itemsize: int,
     device: torch.device | int | str | None = None,
-    nfields: int = 1,
+    nfields: int | None = None,
     nrows: int | None = None,
     *,
     trait: Any = None,
@@ -532,10 +532,14 @@ def itree_combine_plan(
     `itemsize` is the widest partial field's size, so each field's copy group stays within
     `combine_group_bytes` and each staged field's footprint is bounded by it. Uniform
     counts stage one field fewer per row, and their weights add one row shared by the
-    block. A given `trait` supplies nfields and may enable uniform counts.
+    block. A given `trait` supplies nfields (default 1) and may enable uniform counts.
     """
     if trait is not None:
+        if nfields is not None and nfields != trait.nfields:
+            raise ValueError(f"{nfields=} disagrees with trait.nfields={trait.nfields}")
         nfields = trait.nfields
+    elif nfields is None:
+        nfields = 1
     arch = _itree_arch(device) if arch is None else arch
     if arch.combine_unroll < 0:
         raise ValueError("combine_unroll must be nonnegative")

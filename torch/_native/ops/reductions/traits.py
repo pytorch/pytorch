@@ -215,9 +215,11 @@ class WelfordOps:
     def combine_uniform(self, a, b, index, count: cutlass.Constexpr, weight=None):
         """Fold partial `b` into `a` with `combine`'s arithmetic, deriving counts.
 
-        `index` is the number of partials already folded into `a`, and every partial holds
+        `index` is the number of partials already folded into `a` and must be at least 1:
+        unlike `combine`, nothing passes `b` through for an empty `a`. Every partial holds
         exactly `count` values, so `index * count` must be exact in the accumulator (fp32).
-        `a[2]` and `b[2]` are ignored. `weight`, if given, replaces `count / ((index + 1) * count)`.
+        `a[2]` and `b[2]` are ignored. `weight`, if given, replaces `count / ((index + 1) * count)`
+        and must be uniform_weight(index, count).
         """
         ma, m2a, _ = a
         mb, m2b, _ = b
@@ -228,6 +230,12 @@ class WelfordOps:
         mean = ma + delta * nb_over_n
         m2 = m2a + m2b + delta * delta * na * nb_over_n
         return (mean, m2, nn)
+
+    @cute.jit
+    def uniform_weight(self, index, count: cutlass.Constexpr):
+        """combine_uniform's nb / nn for partial `index`, with the same arithmetic."""
+        na, nb = self.acc(index) * self.acc(count), self.acc(count)
+        return nb / (na + nb)
 
     @cute.jit
     def combine_equal(self, a, b, count: cutlass.Constexpr):
