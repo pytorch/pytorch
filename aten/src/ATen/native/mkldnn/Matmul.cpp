@@ -653,11 +653,16 @@ void mkldnn_matmul_i8i8i32(
   // x:u8 or s8 * w:s8 -> y:s32
   // both inputs should be 2d
 #if defined(__aarch64__)
+  // oneDNN's int8 gemm API has no AArch64 kernel (it runs ref_gemm_s8x8s32), so
+  // the fast path here is the matmul primitive rather than the x86 gemm route.
   // On AArch64 the matmul primitive dispatches to jit:int8, which only accepts
   // a row-major src (other layouts fall back to a much slower kernel).
   // contiguous() is a no-op when mat1 is already row-major.
   _mkldnn_matmul_i8i8i32_with_primitive(mat1.contiguous(), mat2, result);
 #else
+  // x86 has optimized int8 kernels behind the gemm API. Operands it cannot read
+  // in place are copied, since the matmul primitive only has a reference kernel
+  // for them (orders of magnitude slower).
   const Tensor a = _blas_layout(mat1) ? mat1 : mat1.clone(at::MemoryFormat::Preserve);
   const Tensor b = _blas_layout(mat2) ? mat2 : mat2.clone(at::MemoryFormat::Preserve);
   if (a.scalar_type() == at::kByte) {
