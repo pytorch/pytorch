@@ -774,6 +774,8 @@ inductor_override_kwargs["xpu"] = {
         "grad_atol": 2e-3,
         "grad_rtol": 1e-3,
     },
+    # fp16 backward reduces over frames in a different order than eager.
+    ("stft", f16): {"grad_atol": 1e-2, "grad_rtol": 1e-3},
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
