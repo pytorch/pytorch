@@ -69,7 +69,9 @@ static py::object weakref_referent(const c10::SafePyObject& weakref) {
 // The C++ mode only weakly references its Python object; a strong reference
 // would form a cycle through the holder. So fake tensors can outlive the
 // object: once Python drops it, it is collected while the C++ mode lives on
-// through its fakes.
+// through its fakes. An entered object is also kept alive until it exits on
+// the entering thread, or that thread ends, by _cpp_fake_mode_tls.entered in
+// torch/utils/_python_dispatch.py.
 //
 // getCppFakeTensorModePyObj returns the object while it is alive. Otherwise it
 // builds a new CppFakeTensorMode around the same C++ mode with the classmethod
