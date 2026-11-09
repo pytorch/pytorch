@@ -17,6 +17,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -376,15 +377,14 @@ static MPSNDArray* permuteNDArray(MPSNDArray* inArray, const std::vector<int64_t
 static void check_mps_shape(MPSShape* shape) {
   for (NSNumber* elem in shape) {
     const auto val = [elem longValue];
-    TORCH_CHECK(val <= std::numeric_limits<int32_t>::max(),
-                "MPSGraph does not support tensor dims larger than INT_MAX");
+    TORCH_CHECK(std::in_range<int32_t>(val), "MPSGraph does not support tensor dims larger than INT_MAX");
   }
 }
 
 bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI, bool checkLinearOffset) {
   if ((!tensor.is_contiguous() || tensor.storage_offset()) && useMPSStridedAPI) {
     auto storage_numel = tensor.storage().nbytes() / tensor.element_size() - tensor.storage_offset();
-    if (storage_numel > std::numeric_limits<int32_t>::max()) {
+    if (!std::in_range<int32_t>(storage_numel)) {
       return true;
     }
   }
@@ -394,14 +394,14 @@ bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI, bool che
   int64_t max_linear_offset = 0;
   for (const auto dim : c10::irange(tensor.dim())) {
     const auto size = tensor.size(dim);
-    if (size > std::numeric_limits<int32_t>::max()) {
+    if (!std::in_range<int32_t>(size)) {
       return true;
     }
     if (check_offset) {
       max_linear_offset += tensor.stride(dim) * (size - 1);
     }
   }
-  if (check_offset && max_linear_offset > std::numeric_limits<int32_t>::max()) {
+  if (check_offset && !std::in_range<int32_t>(max_linear_offset)) {
     return true;
   }
   return false;
@@ -539,8 +539,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
     check_mps_shape(mpsShape);
 
     auto storage_numel = src.storage().nbytes() / src.element_size() - src.storage_offset();
-    TORCH_CHECK(storage_numel <= std::numeric_limits<int32_t>::max(),
-                "MPSGraph does not support tensor dims larger than INT_MAX");
+    TORCH_CHECK(std::in_range<int32_t>(storage_numel), "MPSGraph does not support tensor dims larger than INT_MAX");
     MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:dataType
                                                                                  shape:@[ @(storage_numel) ]];
     srcTensorDesc.preferPackedRows = YES;

@@ -1885,10 +1885,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         # For example, `dict.update(ordered, src)` must bypass `OrderedDict.update`.
         name = descriptor.__name__
-        if self._cpython_type is None:
-            if mro_lookup(self.python_type(), name) is descriptor:
-                return self.lookup_tp_method(name)
-            return None
         python_type = self._cpython_type
         for cls in type(self).__mro__:
             python_type = cls.__dict__.get("_cpython_type", python_type)

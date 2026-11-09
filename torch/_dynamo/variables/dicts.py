@@ -277,7 +277,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         return {k.vt.as_python_constant(): v for k, v in self.items.items()}
 
     def python_type(self) -> type:
-        return cast(type, self._cpython_type)
+        return dict
 
     def _hashable_key(self, key: VariableTracker) -> HashableTracker:
         hashed = HashableTracker(key)
@@ -1084,6 +1084,9 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
     # OrderedDict exposes no tp_getset / tp_members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
+
+    def python_type(self) -> type:
+        return collections.OrderedDict
 
     def move_to_end(
         self: "OrderedDictVariable",
