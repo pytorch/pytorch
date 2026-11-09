@@ -1025,9 +1025,11 @@ class TestTunableOpPretune(TestCase):
     def test_enabled_modes_bypass_the_fx_graph_cache(self, mode, dev, expect_bypass):
         # Both passes work while lowering -- tune records, reuse borrows and
         # validates -- so a cache hit does neither and a rerun writes an empty
-        # results file. AOTAutogradCache routes through the same validator.
-        # Only for graphs that would do that work: bypassing a CPU or
-        # GEMM-free graph recompiles it every time for nothing.
+        # results file. Only for graphs that would do that work: bypassing a
+        # CPU or GEMM-free graph recompiles it every time for nothing. The AOT
+        # level is a separate check with a different answer -- it skips the
+        # lookup rather than bypassing, see
+        # test_a_mode_misses_the_aot_cache_instead_of_bypassing.
         from torch._inductor.codecache import BypassFxGraphCache, FxGraphCache
 
         gm = self._gemm_gm(dev)
@@ -1261,6 +1263,59 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
             {frozenset(expected_dims)},
             f"recorded dims do not match the ladder: {sorted(shapes)}",
         )
+
+
+    @parametrize("mode", ("off", "tune", "reuse"))
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_a_mode_misses_the_aot_cache_instead_of_bypassing(self, mode):
+        # A mode has to stop an AOT *hit*, because a hit skips the lowering
+        # both passes do their work in. It must not stop the *save*: bypassing
+        # drops the cache key, and with no key no entry is built, so the
+        # compiled function never gets the serialize method that
+        # standalone_compile(aot=True) and regional inductor require.
+        #
+        # So the assertion is miss-not-bypass. The "off" row is the control: it
+        # must hit on the rerun, which proves the cache really works here and
+        # that the other rows' misses mean something.
+        from torch._dynamo.utils import counters
+
+        def fn(a, b):
+            return (a @ b).relu()
+
+        tunable = torch.cuda.tunable
+        self._tunableop_process_cleanup()
+        with tempfile.TemporaryDirectory(prefix="tunableop_aotcache_") as d:
+            tunable.enable(False)
+            tunable.set_filename(os.path.join(d, "results.csv"), False)
+            tunable.set_max_tuning_duration(1)
+            tunable.set_max_tuning_iterations(1)
+            a = torch.randn(64, 64, device="cuda", dtype=DTYPE)
+            b = torch.randn(64, 64, device="cuda", dtype=DTYPE)
+            with config.patch(
+                {"cuda.autotune_tunableop_mode": mode, "fx_graph_cache": True}
+            ):
+                for _ in range(2):
+                    counters.clear()
+                    torch._dynamo.reset()
+                    torch.compile(fn)(a, b)
+                    aot = counters["aot_autograd"]
+
+        self.assertEqual(
+            aot["autograd_cache_bypass"],
+            0,
+            f"a mode set must not bypass the AOT cache: {dict(aot)}",
+        )
+        if mode == "off":
+            self.assertEqual(
+                aot["autograd_cache_hit"], 1, f"control did not hit: {dict(aot)}"
+            )
+        else:
+            self.assertEqual(
+                aot["autograd_cache_hit"],
+                0,
+                f"a hit skips the lowering the pass works in: {dict(aot)}",
+            )
 
 
 if __name__ == "__main__":

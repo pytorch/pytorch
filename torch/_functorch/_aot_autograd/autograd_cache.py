@@ -388,21 +388,6 @@ def check_cacheable(gm: torch.fx.GraphModule) -> None:
     if torch._inductor.config.freezing:
         raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 
-    # Both TunableOp passes do their work while lowering, so an AOT hit skips
-    # all of it and the rerun records nothing. Unlike the Inductor-level
-    # bypass this cannot ask whether the graph holds a CUDA GEMM: the graph
-    # here is pre-decomposition, so its targets are torch-level and carry no
-    # aten overload packet. Mode set means no AOT caching, CPU-only and
-    # GEMM-free graphs included -- the cost of a tune or reuse pass, which is
-    # a deliberate offline run, not the steady state.
-    from torch._inductor import tunableop
-
-    if tunableop.is_enabled():
-        raise BypassAOTAutogradCache(
-            "TunableOp tune and reuse modes must lower every CUDA GEMM; unset "
-            "cuda.autotune_tunableop_mode (TORCHINDUCTOR_AUTOTUNE_TUNABLEOP_MODE)"
-        )
-
     if not (
         torch._inductor.config.fx_graph_cache or should_use_remote_fx_graph_cache()
     ):
@@ -1253,13 +1238,26 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             if config.strict_autograd_cache or torch._dynamo.config.strict_precompile:
                 raise e
 
+        # Both TunableOp passes do their work while lowering, so a hit skips all
+        # of it and the rerun records nothing. A miss, not a bypass: bypassing
+        # drops the key, and without a key nothing is saved and the compiled
+        # function never gets a serialize method, which breaks standalone_compile
+        # and precompile for every graph -- CPU-only and GEMM-free included,
+        # since unlike the Inductor-level check this one cannot ask whether the
+        # graph holds a CUDA GEMM (pre-decomposition, so its targets are
+        # torch-level and carry no aten overload packet). Skipping only the
+        # lookup keeps the pass honest and leaves the save path intact, so the
+        # artifact this run compiles is still there for the next one.
+        from torch._inductor import tunableop
+
         try:
             cache_key, debug_lines = autograd_cache_key(
                 mod, args, aot_config, compiler_config_extra, act_input_paths
             )
-            result = AOTAutogradCache._lookup(
-                cache_key, local, remote, args, cache_info, aot_config
-            )
+            if not tunableop.is_enabled():
+                result = AOTAutogradCache._lookup(
+                    cache_key, local, remote, args, cache_info, aot_config
+                )
         except Exception as e:
             record_bypass(e)
 
