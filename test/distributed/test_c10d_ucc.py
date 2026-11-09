@@ -372,8 +372,6 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):
-    hw_classification = HardwareClassification.ACCELERATOR
-
     def setUp(self):
         super().setUp()
         self._spawn_processes()
@@ -1090,7 +1088,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 class UccProcessGroupWithDispatchedCollectivesTests(
     test_c10d_common.ProcessGroupWithDispatchedCollectivesTests
 ):
-    hw_classification = HardwareClassification.ACCELERATOR
+    hw_classification = HardwareClassification.CUDA
 
     @skip_but_pass_in_sandcastle("Fails on M60")
     @requires_ucc()
