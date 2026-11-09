@@ -87,7 +87,7 @@ def _rocm_major_minor():
 ROCM_VERSION = LazyVal(_rocm_major_minor)
 
 # Cuspy needs both the cupti-python bindings and the build-generated
-# _cupti_stubs catalogs (emitted only on CUDA >= 13.3 builds where the field-id codegen
+# _cupti_stubs catalogs (emitted only on CUPTI >= 13.5 builds where the field-id codegen
 # ran); the module hard-imports the latter, so guard on both to skip (not error) where
 # the stubs were not generated.
 TEST_CUPTI = (
@@ -106,7 +106,11 @@ def _cupti_version():
         return 0
 
 
-TEST_CUPTI_V13_3 = LazyVal(lambda: TEST_CUPTI and _cupti_version() >= 130300)
+# Also gate on the build's CUDA: the cupti-python wheel pulls in its own (newer) libcupti,
+# so a CUDA 13.2 runner can still load a libcupti >= 13.5.
+TEST_CUPTI_V13_5 = LazyVal(
+    lambda: TEST_CUPTI and _get_torch_cuda_version() >= (13, 5) and _cupti_version() >= 130500
+)
 
 
 def _cuda_graph_tools_id_available():
@@ -146,6 +150,9 @@ IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is no
                   ((torch.cuda.get_device_capability() == (11, 0) and int(torch.version.cuda[:2]) >= 13) or
                    (torch.cuda.get_device_capability() == (10, 1) and int(torch.version.cuda[:2]) < 13)))
 IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device_capability() in [(7, 2), (8, 7)] or IS_THOR))
+# A MIG slice reports its profile in the device name, e.g. "NVIDIA A100-SXM4-40GB MIG 1g.5gb".
+IS_MIG = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is not None and
+                 "MIG" in torch.cuda.get_device_name().split())
 # These exact-match SM predicates identify specific NVIDIA architectures and must
 # be False on ROCm, where torch.cuda.get_device_capability() returns the gfx-arch
 # version and collides with NVIDIA capability tuples (e.g. gfx90a reads as (9, 0)).
@@ -203,6 +210,10 @@ _CDNA2_ARCHS = ["gfx90a"]
 _CDNA3_ARCHS = ["gfx942", "gfx950"]
 # GFX1250 (CDNA 5)
 _CDNA5_ARCHS = ["gfx1250"]
+# GFX11 (RDNA 3 and RDNA 3.5)
+_RDNA3_ARCHS = ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153"]
+# GFX12 (RDNA 4)
+_RDNA4_ARCHS = ["gfx1200", "gfx1201"]
 
 def CDNA5OrLater():
     return evaluate_gfx_arch_within(_CDNA5_ARCHS)
@@ -212,6 +223,9 @@ def CDNA3OrLater():
 
 def CDNA2OrLater():
     return evaluate_gfx_arch_within(_CDNA2_ARCHS + _CDNA3_ARCHS + _CDNA5_ARCHS)
+
+def RDNA3OrLater():
+    return evaluate_gfx_arch_within(_RDNA3_ARCHS + _RDNA4_ARCHS)
 
 # Archs that take the opportunistic_fastAtomicAdd path (packed 2x16 atomics + DPP
 # lane coalescing) in ScatterGatherKernel.cu. Keep in sync with that kernel's arch
