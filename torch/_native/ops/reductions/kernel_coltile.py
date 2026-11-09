@@ -72,7 +72,9 @@ _ORDERED_LANE_UNROLL = 4
 
 
 class OrderedColConfig(NamedTuple):
-    # Useful 32-column blocks (partials * columns / WARP), whatever tile_columns is.
+    # Minimum useful 32-column blocks (partials * columns / WARP), whatever tile_columns
+    # is. Views the selector skips (batched, or below min_blocks) take the default
+    # mapping, so a non-default entry compiles a second kernel for the same R.
     min_blocks: int
     worker_warps: int = _ORDERED_WORKER_WARPS
     tile_columns: int = WARP
@@ -299,15 +301,15 @@ class _OrderedColReduce:
         self.trait = trait
         self.plan = plan
         self.R = R
-        # C and the batch count are runtime, so each R compiles once. Each leaf costs an
-        # address multiply-add that a compile-time C folds into the load, but the clamp
-        # keeps addresses independent: against per-C kernels, B200 sum, argmax and
-        # var_mean (fp32/bf16) ran at 1.04x geomean (0.79-1.70x) for looped R 128-8192
-        # and 1.18x (0.69-1.68x) for split R 32768-131072, and a new C skips a 0.8 s
-        # (median) compile. Full tiles read rows in order, where per-C kernels fold the
-        # offsets into loads: there runtime C ran at 0.93x looped and 0.97x split
-        # (best tile mode each; short looped argmax 0.68-0.79x). Row views take a
-        # 64-bit stride once R * C needs one.
+        # C and the batch count are runtime, so each R compiles once per mapping (see
+        # OrderedColConfig.min_blocks). Each leaf costs an address multiply-add that a
+        # compile-time C folds into the load, but the clamp keeps addresses independent:
+        # against per-C kernels, B200 sum, argmax and var_mean (fp32/bf16) ran at 1.04x
+        # geomean (0.79-1.70x) for looped R 128-8192 and 1.18x (0.69-1.68x) for split R
+        # 32768-131072, and a new C skips a 0.8 s (median) compile. Full tiles read rows
+        # in order, where per-C kernels fold the offsets into loads: there runtime C ran
+        # at 0.93x looped and 0.97x split (best tile mode each; short looped argmax
+        # 0.68-0.79x). Row views take a 64-bit stride once R * C needs one.
         self.wide = R * C >= _INT32_LIMIT
         self.nouts = nouts
         # Split plans launch one block row per partition.
