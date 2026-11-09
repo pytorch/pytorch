@@ -63,6 +63,7 @@ class ExplorationSplit:
     frame: int
     out_of_frame: int
     out_of_frame_seconds: float
+    skipped_seconds: float
     replicates: int
     explored: list[ExploredTest]  # in TD's order
 
@@ -212,6 +213,7 @@ def plan_exploration(
         out_of_frame_seconds=math.fsum(
             cost for i, cost in enumerate(candidate_costs) if i not in in_frame_set
         ),
+        skipped_seconds=math.fsum(candidate_costs),
         replicates=replicates,
         explored=explored,
     )
@@ -309,6 +311,7 @@ def exploration_info(
         "frame": split.frame,
         "out_of_frame": split.out_of_frame,
         "out_of_frame_seconds": split.out_of_frame_seconds,
+        "skipped_seconds": split.skipped_seconds,
         "weight_scheme": WEIGHT_SCHEME,
         "replicates": split.replicates,
         "explored": explored_pieces,

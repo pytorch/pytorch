@@ -93,6 +93,10 @@ class TestPlanExploration(unittest.TestCase):
         out = [n for n in costs if n >= "test_011" and costs[n] > 110.0]
         self.assertEqual(split.out_of_frame, len(out))
         self.assertAlmostEqual(split.out_of_frame_seconds, sum(costs[n] for n in out))
+        self.assertAlmostEqual(
+            split.skipped_seconds,
+            sum(cost for name, cost in costs.items() if name >= "test_011"),
+        )
         self.assertEqual(split.frame + split.out_of_frame, 29)
         spent = sum(explored.cost for explored in split.explored)
         self.assertLessEqual(spent, split.budget_seconds)
@@ -286,6 +290,7 @@ class TestExplorationInfo(unittest.TestCase):
             frame=10,
             out_of_frame=2,
             out_of_frame_seconds=900.0,
+            skipped_seconds=1200.0,
             replicates=1000,
             explored=[
                 exploration.ExploredTest(test, math.nan, 7, 1.0, 40.0, 120, 0.12)
@@ -313,6 +318,7 @@ class TestExplorationInfo(unittest.TestCase):
                 "frame": 10,
                 "out_of_frame": 2,
                 "out_of_frame_seconds": 900.0,
+                "skipped_seconds": 1200.0,
                 "weight_scheme": exploration.WEIGHT_SCHEME,
                 "replicates": 1000,
                 "explored": [
