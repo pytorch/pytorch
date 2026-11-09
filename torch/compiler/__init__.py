@@ -23,7 +23,6 @@ from torch._precompile import PrecompileError as PrecompileError
 
 from . import config, precompile
 from ._cache import CacheInfo
-from ._export_python import export_python
 
 
 if TYPE_CHECKING:
@@ -49,7 +48,6 @@ __all__ = [
     "load_compiled_function",
     "precompile",
     "PrecompileError",
-    "export_python",
     "wrap_numpy",
     "is_compiling",
     "is_dynamo_compiling",
