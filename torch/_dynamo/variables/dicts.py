@@ -336,9 +336,14 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         with repr_guard(self) as recursive:
             if recursive:
                 return VariableTracker.build(tx, "{...}")
+            storage = (
+                self.items.items()
+                if isinstance(self.items, SideEffectsProxyDict)
+                else dict.items(self.items)
+            )
             items = [
-                f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
-                for key, value in dict.items(self.items)
+                f"{tracked_repr(tx, cast(HashableTracker, key).vt)}: {tracked_repr(tx, value)}"
+                for key, value in storage
             ]
         return VariableTracker.build(tx, "{" + ", ".join(items) + "}")
 
@@ -347,7 +352,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         return {k.vt.as_python_constant(): v for k, v in self.items.items()}
 
     def python_type(self) -> type:
-        return cast(type, self._cpython_type)
+        return dict
 
     def _hashable_key(self, key: VariableTracker) -> HashableTracker:
         hashed = HashableTracker(key)
@@ -744,15 +749,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from . import DictBuiltinVariable
-
-        temp_dict_vt = cast(
-            ConstDictVariable,
-            DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs),
-        )
-        tx.output.side_effects.mutation(self)
-        self._update_items(temp_dict_vt.items)
-        return ConstantVariable.create(None)
+        return self.dict_update_common(tx, args, kwargs, method_name="dict")
 
     # NB - Both key and value are LazyVariableTrackers in the beginning. So,
     # we have to insert guards when a dict method is accessed. For this to be
@@ -926,9 +923,19 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
+        return self.dict_update_common(tx, args, kwargs)
+
+    def dict_update_common(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+        *,
+        method_name: str = "update",
+    ) -> VariableTracker:
         # CPython's dict_update_common validates args, updates from the positional
         # source, then merges keywords only if that update succeeded.
-        check_positional(tx, "update", len(args), 0, 1)
+        check_positional(tx, method_name, len(args), 0, 1)
         self.install_dict_keys_match_guard()
         if args or kwargs:
             tx.output.side_effects.mutation(self)
@@ -1271,35 +1278,6 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         ):
             install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
 
-    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .iter import DictIterator
-
-        self.install_dict_order_guard(tx)
-        return DictIterator.create(self.items)
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        result = super().tp_richcompare_impl(tx, other, op)
-        if (
-            op not in ("__eq__", "__ne__")
-            or not isinstance(other, OrderedDictVariable)
-            or result.as_python_constant() == (op == "__ne__")
-        ):
-            return result
-        # OrderedDict compares key order only after dict equality succeeds.
-        # Keep this outside dict.__eq__, whose descriptor ignores linked order.
-        self.install_dict_order_guard(tx)
-        other.install_dict_order_guard(tx)
-        left = variables.TupleVariable([key.vt for key in self.items])
-        right = variables.TupleVariable([key.vt for key in other.items])
-        return generic_richcompare_bool(tx, left, right, op)
-
-    # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
-    # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
-    # OrderedDict exposes no tp_getset / tp_members.
-    # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
-
     def tp_init_impl(
         self: ConstDictVariable,
         tx: "InstructionTranslatorBase",
@@ -1315,7 +1293,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         return OrderedDictVariable.odict_update(self, tx, args, kwargs)
 
     def odict_update(
-        self: ConstDictVariable,
+        self: VariableTracker,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1330,7 +1308,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
             pyodict_checkexact(self)
             and fast_keywords
             and self.is_mutable()
-            and self._can_fast_merge(args[0] if args else ConstDictVariable({}))
+            and (not args or self._can_fast_merge(args[0]))
         ):
             if args and not isinstance(args[0], ConstDictVariable):
                 return cast(
@@ -1377,12 +1355,51 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         self.odict_update(tx, [other], {})
         return self
 
+    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .iter import DictIterator
+
+        self.install_dict_order_guard(tx)
+        return DictIterator.create(self.items)
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        result = super().tp_richcompare_impl(tx, other, op)
+        if (
+            op not in ("__eq__", "__ne__")
+            or not isinstance(other, OrderedDictVariable)
+            or result.as_python_constant() == (op == "__ne__")
+        ):
+            return result
+        # OrderedDict compares key order only after dict equality succeeds.
+        # Keep this outside dict.__eq__, whose descriptor ignores linked order.
+        self.install_dict_order_guard(tx)
+        other.install_dict_order_guard(tx)
+        left = variables.TupleVariable([key.vt for key in self.items])
+        right = variables.TupleVariable([key.vt for key in other.items])
+        return generic_richcompare_bool(tx, left, right, op)
+
+    # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
+    # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
+    # OrderedDict exposes no tp_getset / tp_members.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
+
+    def python_type(self) -> type:
+        return collections.OrderedDict
+
     def move_to_end(
         self: "OrderedDictVariable",
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if self.source:
+            unimplemented(
+                gb_type="Input OrderedDict linked-order mutation",
+                context="OrderedDict.move_to_end",
+                explanation="Dynamo does not yet replay linked order for input OrderedDicts.",
+                hints=[],
+            )
         self.install_dict_keys_match_guard()
         tx.output.side_effects.mutation(self)
         if args[0] not in self:
@@ -1554,7 +1571,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
             OrderedDictVariable.tp_init_impl(new, tx, [left], {})
         else:
             cls = VariableTracker.build(tx, type).call_function(tx, [owner], {})
-            new = cast(ConstDictVariable, cls.call_function(tx, [left], {}))
+            new = cls.call_function(tx, [left], {})
         OrderedDictVariable.odict_update(new, tx, [right], {})
         return new
 
@@ -1737,12 +1754,31 @@ class NNModuleHooksDictVariable(ConstDictVariable):
     def is_python_constant(self) -> bool:
         return not self.items
 
+    def python_type(self) -> type:
+        # Ordinary empty-hook dispatch need not specialize the exact mapping type.
+        if self.source:
+            install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
+        return super().python_type()
+
     def install_dict_keys_match_guard(self) -> None:
         if self.source and not is_constant_source(self.source):
             install_guard(self.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
+    def _hashable_key(self, key: VariableTracker) -> HashableTracker:
+        self.materialize_keys()
+        return super()._hashable_key(key)
+
+    def _store_item(self, key: HashableTracker, value: VariableTracker) -> None:
+        self.materialize_keys()
+        super()._store_item(key, value)
+
+    def _update_items(self, items: dict[HashableTracker, VariableTracker]) -> None:
+        self.materialize_keys()
+        super()._update_items(items)
+
     def materialize_keys(self) -> dict[HashableTracker, VariableTracker]:
-        # Detached containers reuse stored hashes and may never compare their keys.
+        # Key lookups, mutations and detached copies can observe IDs without
+        # comparing every stored key. Ordinary hook iteration keeps them lazy.
         for key in self.items:
             key.vt.realize()
         return self.items
