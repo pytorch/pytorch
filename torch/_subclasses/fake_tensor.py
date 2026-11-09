@@ -14,8 +14,8 @@ import typing
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar, Union
-from typing_extensions import Self, TypedDict, Unpack
+from typing import Any, cast, Literal, Self, TYPE_CHECKING, TypeGuard, TypeVar, Union
+from typing_extensions import TypedDict, Unpack
 from weakref import ReferenceType
 
 import torch
@@ -383,9 +383,7 @@ def maybe_get_item_memo(x: object) -> _ItemMemo | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.item_memo
     if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
-        fake_mode = maybe_get_fake_mode(x)
-        if fake_mode is not None:
-            return cast(Any, fake_mode).get_item_memo(x)
+        return torch._C._get_fake_item_memo(x)
     return None
 
 
@@ -393,9 +391,49 @@ def maybe_set_item_memo(x: object, memo: _ItemMemo) -> None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         x.item_memo = memo
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
-        fake_mode = maybe_get_fake_mode(x)
-        if fake_mode is not None:
-            cast(Any, fake_mode).set_item_memo(x, memo)
+        # Like SymNumberMemoDescriptor, a backed SymFloat survives an epoch
+        # change. The descriptor checks the hint on every read, but a SymNode's
+        # hint is computed when it is created, and the only later write
+        # (guarding_hint_or_throw) rejects SymFloats, so a SymFloat's hint
+        # cannot change after this and checking it once here is equivalent.
+        backed = isinstance(memo, SymFloat) and memo.node.hint is not None
+        torch._C._set_fake_item_memo(x, memo, keep_across_epochs=backed)
+
+
+# The SymInt memos of a fake (nonzero_memo, unique_memo,
+# unique_consecutive_memo). A Python FakeTensor keeps them in its
+# SymNumberMemoDescriptors. A C++ fake keeps them on the C++ tensor, outside
+# its __dict__ (which torch.save would pickle as tensor state), and like the
+# descriptor drops a memo once the tensor is mutated or fake_mode's epoch
+# changes; a shallow copy such as set_data drops it too.
+def _check_sym_memo_name(name: str) -> None:
+    # A Python FakeTensor raises on an unknown memo name through getattr, so do
+    # the same for a C++ fake instead of silently missing the memo. item_memo
+    # has its own helpers and nested_int_memo never invalidates.
+    desc = FakeTensor.__dict__.get(name)
+    if (
+        not isinstance(desc, SymNumberMemoDescriptor)
+        or desc._is_nested_int
+        or name == "item_memo"
+    ):
+        raise AttributeError(f"{name!r} is not a SymInt memo of FakeTensor")
+
+
+def maybe_get_sym_memo(x: object, name: str) -> SymInt | int | None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        return getattr(x, name)
+    if not (isinstance(x, Tensor) and torch._C._is_fake_tensor(x)):
+        return None
+    _check_sym_memo_name(name)
+    return torch._C._get_fake_sym_memo(x, name)
+
+
+def maybe_set_sym_memo(x: object, name: str, value: SymInt | int) -> None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        setattr(x, name, value)
+    elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        _check_sym_memo_name(name)
+        torch._C._set_fake_sym_memo(x, name, value)
 
 
 def maybe_get_fake_device(x: object) -> torch.device | None:
@@ -434,9 +472,11 @@ def maybe_clear_fake_constant(x: object) -> None:
 
 
 def maybe_get_fake_dispatch_keys(x: object) -> torch.DispatchKeySet | None:
-    # The real tensor's dispatch keys recorded on a fake.
+    # The real tensor's dispatch keys recorded on a Python or C++ fake.
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.dispatch_keys
+    if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        return torch._C._get_fake_dispatch_keys(x)
     return None
 
 
@@ -987,7 +1027,7 @@ class FakeTensorConverter:
         # NB: meta_converter set the memo
         return out
 
-    # If you specify the device, it MUST be a meta tensor.
+    # If you specify the device, it MUST be a meta tensor that is not fake.
     def from_meta_and_device(
         self,
         fake_mode: FakeTensorMode,
@@ -999,6 +1039,13 @@ class FakeTensorConverter:
         if t.device.type != "meta":
             raise AssertionError(
                 f"tensor's device must be `meta`, got {t.device.type} instead"
+            )
+        # A fake also reports meta on the meta device or inside a kernel
+        if is_fake_tensor(t):
+            raise AssertionError(
+                "expected a plain meta tensor that is not fake; use an existing "
+                "fake directly, or make a new meta tensor outside the fake mode, "
+                "e.g. under torch._subclasses.fake_tensor.unset_fake_temporarily()"
             )
         # This is a bit abusive (this is not the "real" tensor) but whatever,
         # the meta tensor should be fresh so there's no way to get it wrong
@@ -1052,7 +1099,9 @@ def in_kernel_invocation_manager(
     if meta_in_tls != prev_in_kernel:
         raise AssertionError(f"{meta_in_tls}, {prev_in_kernel}")
 
-    with torch._C._DisableTorchDispatch():
+    # _InKernelInvocation makes C++ fakes report meta here too, see Note
+    # [C++ in_kernel_invocation].
+    with torch._C._DisableTorchDispatch(), torch._C._InKernelInvocation():
         fake_mode.in_kernel_invocation = True
         # Unfortunately _set_meta_in_tls_dispatch_include(False) can leave
         # `Dense` turned on (because it's implied by `Meta`)

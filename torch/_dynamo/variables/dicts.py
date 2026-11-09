@@ -98,7 +98,7 @@ if TYPE_CHECKING:
 
 
 # [Adding a new supported class within the keys of ConstDictVariable]
-# - Implement hash_impl(self, tx) on the VariableTracker subclass (or rely on the
+# - Implement tp_hash_impl(self, tx) on the VariableTracker subclass (or rely on the
 #   base class default which uses get_real_python_backed_value())
 # - Implement tp_richcompare_impl() for key equality
 
@@ -145,7 +145,7 @@ def _is_set_or_dictview(obj: VariableTracker) -> bool:
     return issubclass(t, (set, frozenset, dict_keys, dict_items))
 
 
-class ConstDictVariable(VariableTracker):
+class ConstDictVariable(VariableTracker):  # noqa: RVT001
     # PyDict_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4825
     _cpython_type = dict
 
@@ -154,6 +154,12 @@ class ConstDictVariable(VariableTracker):
 
     _nonvar_fields = {
         "_checking_python_constant",
+        # Reachability has to match what codegen emits, and codegen only
+        # ever emits self.items (removals set should_reconstruct_all rather
+        # than being recorded here). This is a construction-time snapshot,
+        # read only for keys that are still in self.items, so traversing it
+        # would make removed elements look reachable.
+        "original_items",
         *VariableTracker._nonvar_fields,
     }
 
@@ -263,7 +269,7 @@ class ConstDictVariable(VariableTracker):
         return {k.vt.as_python_constant(): v for k, v in self.items.items()}
 
     def python_type(self) -> type:
-        return cast(type, self._cpython_type)
+        return dict
 
     def __contains__(self, vt: VariableTracker) -> bool:
         if not isinstance(vt, VariableTracker):
@@ -566,7 +572,7 @@ class ConstDictVariable(VariableTracker):
         key: VariableTracker,
     ) -> VariableTracker:
         # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
-        # Unhashable key check happens inside HashableTracker (hash_impl → TypeError).
+        # Unhashable key check happens inside HashableTracker (tp_hash_impl → TypeError).
         return self.getitem_const_raise_exception_if_absent(tx, key)
 
     def sq_contains_impl(
@@ -587,7 +593,7 @@ class ConstDictVariable(VariableTracker):
         if self.source and not is_constant_source(self.source):
             self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
-        return DictIterator(self.items)
+        return DictIterator.create(self.items)
 
     def tp_init_impl(
         self,
@@ -619,7 +625,7 @@ class ConstDictVariable(VariableTracker):
         self.install_dict_keys_match_guard()
         if self.source:
             tx.output.guard_on_key_order.add(self.source)
-        return DictItemsVariable(self)
+        return DictItemsVariable.create(self)
 
     def dict_keys(
         self,
@@ -630,7 +636,7 @@ class ConstDictVariable(VariableTracker):
         self.install_dict_keys_match_guard()
         if self.source:
             tx.output.guard_on_key_order.add(self.source)
-        return DictKeysVariable(self)
+        return DictKeysVariable.create(self)
 
     def dict_values(
         self,
@@ -641,7 +647,7 @@ class ConstDictVariable(VariableTracker):
         self.install_dict_keys_match_guard()
         if self.source:
             tx.output.guard_on_key_order.add(self.source)
-        return DictValuesVariable(self)
+        return DictValuesVariable.create(self)
 
     def _new_dict(
         self, items: dict[HashableTracker, VariableTracker]
@@ -987,7 +993,7 @@ class ConstDictVariable(VariableTracker):
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def tp_richcompare_impl(
@@ -1024,7 +1030,7 @@ class ConstDictVariable(VariableTracker):
         return super().tp_getattro_impl(tx, name)
 
 
-class OrderedDictVariable(ConstDictVariable):
+class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     _cpython_type = collections.OrderedDict
     # self.items is actually a collections.OrderedDict at runtime for this
     # class (see ConstDictVariable.__init__'s storage_cls), which is what
@@ -1035,6 +1041,9 @@ class OrderedDictVariable(ConstDictVariable):
     # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
     # OrderedDict exposes no tp_getset / tp_members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
+
+    def python_type(self) -> type:
+        return collections.OrderedDict
 
     def move_to_end(
         self: "OrderedDictVariable",
@@ -1182,7 +1191,7 @@ class OrderedDictVariable(ConstDictVariable):
         raise NotImplementedError
 
 
-class MappingProxyVariable(VariableTracker):
+class MappingProxyVariable(VariableTracker):  # noqa: RVT001
     # PyDictProxy_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c#L1995
     _cpython_type = types.MappingProxyType
 
@@ -1194,10 +1203,10 @@ class MappingProxyVariable(VariableTracker):
     def python_type(self) -> type:
         return types.MappingProxyType
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # mappingproxy.__hash__ delegates to the underlying dict, which
         # raises TypeError. Mirror that behavior.
-        return self.dv_dict.hash_impl(tx)
+        return self.dv_dict.tp_hash_impl(tx)
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
@@ -1343,6 +1352,10 @@ class DictViewVariable(VariableTracker):
             raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
 
+    @classmethod
+    def create(cls, dv_dict: ConstDictVariable) -> "DictViewVariable":
+        return cls(dv_dict)
+
     @property
     def view_items(self) -> Any:
         if self.kv is None:
@@ -1352,7 +1365,7 @@ class DictViewVariable(VariableTracker):
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     @property
@@ -1499,7 +1512,7 @@ class DictKeysVariable(DictViewVariable):
 
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
-        return DictKeysIterator(self.dv_dict.items)
+        return DictKeysIterator.create(self.dv_dict.items)
 
     def debug_repr(self) -> str:
         if not self.view_items:
@@ -1578,7 +1591,7 @@ class DictValuesVariable(DictViewVariable):
     # (https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L6630),
     # so it inherits object's tp_hash (PyObject_GenericHash) — hashable.
     #
-    # Override DictViewVariable.hash_impl to restore the base identity hash.
+    # Override DictViewVariable.tp_hash_impl to restore the base identity hash.
     kv = "values"
 
     # dict.values() do not implement tp_as_number
@@ -1594,8 +1607,8 @@ class DictValuesVariable(DictViewVariable):
     def is_hashable(self) -> bool:
         return True
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        return super(DictViewVariable, self).hash_impl(tx)
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        return super(DictViewVariable, self).tp_hash_impl(tx)
 
     @property
     def view_items_vt(self) -> list[VariableTracker]:
@@ -1609,15 +1622,7 @@ class DictValuesVariable(DictViewVariable):
 
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
-        return DictValuesIterator(self.dv_dict.items)
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        # dict_values has no tp_richcompare (inherits object's).
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
+        return DictValuesIterator.create(self.dv_dict.items)
 
     def debug_repr(self) -> str:
         if not self.view_items:
@@ -1706,7 +1711,7 @@ class DictItemsVariable(DictViewVariable):
 
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
-        return DictItemsIterator(self.dv_dict.items)
+        return DictItemsIterator.create(self.dv_dict.items)
 
 
 kV = HashableTracker | str

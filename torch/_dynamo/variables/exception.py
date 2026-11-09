@@ -173,13 +173,6 @@ class TracebackVariable(VariableTracker):
         "tb_lasti": Member(_get_tb_lasti, readonly_setter),
     }
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -230,6 +223,20 @@ class ExceptionVariable(VariableTracker):
         # Used to preserve the original exception location when re-raising.
         self.python_stack: traceback.StackSummary | None = None
 
+    @staticmethod
+    def create(  # noqa: RVT001
+        exc_type: type[BaseException],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> "ExceptionVariable":
+        if exc_type is StopIteration:
+            return StopIterationVariable(exc_type, args, kwargs)
+        elif exc_type is AttributeError:
+            return AttributeErrorVariable(exc_type, args, kwargs)
+        elif exc_type is NameError:
+            return NameErrorVariable(exc_type, args, kwargs)
+        return ExceptionVariable(exc_type, args, kwargs)
+
     def set_context(self, context: VariableTracker) -> None:
         self.__context__ = context
 
@@ -259,13 +266,6 @@ class ExceptionVariable(VariableTracker):
 
     def python_type(self) -> type:
         return self.exc_type
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def call_method(
         self,
