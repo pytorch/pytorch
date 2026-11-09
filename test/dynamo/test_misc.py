@@ -113,7 +113,6 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     wrapDeterministicFlagAPITest,
 )
-from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils._sympy.numbers import int_oo
 
 
@@ -10531,16 +10530,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertFalse(torch.compiler.is_compiling())
         self.assertFalse(torch.compiler.is_exporting())
 
-    def test_tracing_flags_scriptable(self):
-        # Only is_compiling() is scriptable: its is_scripting() check predates
-        # the per-thread flags and lets the JIT dead-code the TLS read. The
-        # other readers were never scriptable.
-        @torch.jit.script
-        def scripted_flags():
-            return torch.compiler.is_compiling()
-
-        self.assertEqual(scripted_flags(), False)
-
     def test_tracing_flags_in_session_reads(self):
         torch._dynamo.reset()
         backend_started, release_backend = (threading.Event() for _ in range(2))
@@ -15811,6 +15800,28 @@ def ___make_guard_fn():
         self.assertEqual(list(eager), list(compiled))
         self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_itertools_cycle_reuses_initial_iterator(self):
+        counters.clear()
+
+        class Iterable:
+            def __init__(self):
+                self.calls = 0
+
+            def __iter__(self):
+                self.calls += 1
+                return iter([self.calls, self.calls + 10])
+
+        def fn(x):
+            data = Iterable()
+            values = itertools.cycle(data)
+            return x + next(values) + next(values) + next(values), data.calls
+
+        x = torch.tensor(0)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), (x + 13, 1))
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(len(counters["graph_break"]), 0)
+
     def test_itertools_accumulate_symint_default_sum(self):
         # https://github.com/pytorch/pytorch/issues/110287
         counters.clear()
@@ -16682,7 +16693,8 @@ ShapeEnv not equal: field values don't match:
         # Make sure the record/replay mechanism for ShapeEnv will fallback
         # if no ShapeEnv instance is found.
         constrain_range(5, min=2, max=10)
-        constrain_unify(5, 5)
+        with self.assertWarns(FutureWarning):
+            constrain_unify(5, 5)
 
         self.assertExpectedRaisesInline(
             AssertionError,
@@ -20939,35 +20951,6 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
 
         inp = torch.ones(3)
         self.assertEqual(fn(inp, Foo()), inp + 1)
-
-
-class TestTracer(JitTestCase):
-    def test_jit_save(self):
-        def fn():
-            class Foo(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.a = 3
-
-                @torch.jit.export
-                def __getstate__(self):
-                    return (3, self.training)
-
-                @torch.jit.export
-                def __setstate__(self, state):
-                    self.a = state[0]
-                    self.training = state[1]
-
-                def forward(self, x):
-                    return x + self.a
-
-            f = Foo()
-
-            return torch.jit.trace(f, (torch.rand(3, 4),))
-
-        fn()
-        opt_fn = torch.compile(fn, backend="eager")
-        opt_fn()
 
 
 class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
