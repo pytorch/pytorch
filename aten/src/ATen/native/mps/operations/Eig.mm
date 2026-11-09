@@ -8,6 +8,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
 #include <c10/metal/common.h>
+#include <utility>
 
 #include <fmt/format.h>
 
@@ -45,7 +46,7 @@ static void encode_eig_kernel(MPSStream* stream,
                               int64_t threadgroup_memory,
                               const Args&... args) {
   auto encoder = stream->commandEncoder();
-  const bool use_32bit_index = n * n <= std::numeric_limits<int32_t>::max();
+  const bool use_32bit_index = std::in_range<int32_t>(n * n);
   auto pso = lib.getPipelineStateForFunc(fmt::format("{}_{}", name, use_32bit_index ? "int" : "long"));
   getMPSProfiler().beginProfileKernel(pso, name, {profiled}, stream);
   [encoder setComputePipelineState:pso];
