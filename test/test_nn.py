@@ -12229,26 +12229,20 @@ class TestNNDeviceType(NNTestCase):
     def test_grid_sample_pixel_non_finite(self, device):
         # a poisoned coordinate never reaches an integer cast: NaN, infinities
         # and absurd magnitudes sample as out-of-volume, forward and backward
-        for mode in ('bilinear', 'nearest', 'bicubic'):
-            for padding_mode in ('zeros', 'border', 'reflection'):
-                for bad in (float('nan'), float('inf'), -float('inf'), 1e30, -1e30, 1e10, -1e10):
-                    v = torch.randn(1, 1, 5, 6, device=device, requires_grad=True)
-                    g = torch.tensor([[[[bad, 1.0], [2.2, 1.4]]]], device=device,
-                                     requires_grad=True)
-                    out = F.grid_sample(v, g, mode=mode, padding_mode=padding_mode,
-                                        align_corners=False, pixel_coords=True)
-                    self.assertEqual(out.shape, (1, 1, 1, 2))
-                    self.assertTrue(bool(out[0, 0, 0, 1].isfinite()))
-                    gi, gg = torch.autograd.grad(out.sum(), (v, g), allow_unused=True)
-                    self.assertTrue(bool(gi.isfinite().all()))
-                    v3 = torch.randn(1, 1, 4, 5, 6, device=device, requires_grad=True)
-                    g3 = torch.tensor([[[[[bad, 1.0, 1.0], [2.2, 1.4, 1.1]]]]], device=device,
-                                      requires_grad=True)
-                    out = F.grid_sample(v3, g3, mode=mode, padding_mode=padding_mode,
-                                        align_corners=False, pixel_coords=True)
-                    self.assertTrue(bool(out[0, 0, 0, 0, 1].isfinite()))
-                    gi, gg = torch.autograd.grad(out.sum(), (v3, g3), allow_unused=True)
-                    self.assertTrue(bool(gi.isfinite().all()))
+        bads = (float('nan'), float('inf'), -float('inf'), 1e30, -1e30, 1e10, -1e10)
+        for mode, padding_mode, bad, dim in product(('bilinear', 'nearest', 'bicubic'),
+                                                    ('zeros', 'border', 'reflection'), bads, (2, 3)):
+            shape = (1, 1, 5, 6) if dim == 2 else (1, 1, 4, 5, 6)
+            coords = [[bad, 1.0], [2.2, 1.4]] if dim == 2 else [[bad, 1.0, 1.0], [2.2, 1.4, 1.1]]
+            v = torch.randn(*shape, device=device, requires_grad=True)
+            g = torch.tensor(coords, device=device).reshape(1, *([1] * (dim - 1)), 2, dim)
+            g.requires_grad_()
+            out = F.grid_sample(v, g, mode=mode, padding_mode=padding_mode,
+                                align_corners=False, pixel_coords=True)
+            self.assertEqual(out.shape, (1, 1) + (1,) * (dim - 1) + (2,))
+            self.assertTrue(bool(out.flatten()[1].isfinite()))
+            gi, gg = torch.autograd.grad(out.sum(), (v, g), allow_unused=True)
+            self.assertTrue(bool(gi.isfinite().all()))
 
         # an infinity in a half grid is mapped in the accumulate type, which holds the far value
         for dtype, bad, padding_mode in product((torch.half, torch.bfloat16), (float('inf'), -float('inf')),

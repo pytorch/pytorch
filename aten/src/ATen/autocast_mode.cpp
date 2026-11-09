@@ -177,44 +177,22 @@ static Tensor binary_cross_entropy_banned(const Tensor & /*unused*/, const Tenso
 
 // The pixel grid_sampler ops promote like grid_sampler, except that a double
 // grid stays double and the payload is not promoted to it.
-template <c10::DeviceType device_type>
-static Tensor grid_sampler_2d_pixel_autocast(
+template <c10::DeviceType device_type, auto Op>
+static Tensor grid_sampler_pixel_autocast(
     const Tensor& input, const Tensor& grid, int64_t interpolation_mode,
     int64_t padding_mode, bool align_corners, double cubic_coeff_a) {
   c10::impl::ExcludeDispatchKeyGuard no_autocast(
       get_autocast_dispatch_key_from_device_type(device_type));
   if (grid.scalar_type() == at::kDouble) {
-    return at::_grid_sampler_2d_pixel(
-        input, grid, interpolation_mode, padding_mode, align_corners,
-        cubic_coeff_a);
+    return Op(input, grid, interpolation_mode, padding_mode, align_corners,
+              cubic_coeff_a);
   }
   auto to_type = promote_type(
       get_lower_precision_fp_from_device_type(device_type), device_type, input,
       grid);
-  return at::_grid_sampler_2d_pixel(
-      cached_cast(to_type, input, device_type),
-      cached_cast(to_type, grid, device_type), interpolation_mode,
-      padding_mode, align_corners, cubic_coeff_a);
-}
-
-template <c10::DeviceType device_type>
-static Tensor grid_sampler_3d_pixel_autocast(
-    const Tensor& input, const Tensor& grid, int64_t interpolation_mode,
-    int64_t padding_mode, bool align_corners, double cubic_coeff_a) {
-  c10::impl::ExcludeDispatchKeyGuard no_autocast(
-      get_autocast_dispatch_key_from_device_type(device_type));
-  if (grid.scalar_type() == at::kDouble) {
-    return at::_grid_sampler_3d_pixel(
-        input, grid, interpolation_mode, padding_mode, align_corners,
-        cubic_coeff_a);
-  }
-  auto to_type = promote_type(
-      get_lower_precision_fp_from_device_type(device_type), device_type, input,
-      grid);
-  return at::_grid_sampler_3d_pixel(
-      cached_cast(to_type, input, device_type),
-      cached_cast(to_type, grid, device_type), interpolation_mode,
-      padding_mode, align_corners, cubic_coeff_a);
+  return Op(cached_cast(to_type, input, device_type),
+            cached_cast(to_type, grid, device_type), interpolation_mode,
+            padding_mode, align_corners, cubic_coeff_a);
 }
 
 namespace {
@@ -269,9 +247,9 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::binary_cross_entropy"),
          TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
   m.impl(TORCH_SELECTIVE_NAME("aten::_grid_sampler_2d_pixel"),
-         TORCH_FN((&grid_sampler_2d_pixel_autocast<c10::DeviceType::CUDA>)));
+         TORCH_FN((&grid_sampler_pixel_autocast<c10::DeviceType::CUDA, &at::_grid_sampler_2d_pixel>)));
   m.impl(TORCH_SELECTIVE_NAME("aten::_grid_sampler_3d_pixel"),
-         TORCH_FN((&grid_sampler_3d_pixel_autocast<c10::DeviceType::CUDA>)));
+         TORCH_FN((&grid_sampler_pixel_autocast<c10::DeviceType::CUDA, &at::_grid_sampler_3d_pixel>)));
 }
 
 TORCH_LIBRARY_IMPL(_, AutocastMPS, m) {
@@ -522,9 +500,9 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(index_copy, promote)
 
   m.impl(TORCH_SELECTIVE_NAME("aten::_grid_sampler_2d_pixel"),
-         TORCH_FN((&grid_sampler_2d_pixel_autocast<c10::DeviceType::CPU>)));
+         TORCH_FN((&grid_sampler_pixel_autocast<c10::DeviceType::CPU, &at::_grid_sampler_2d_pixel>)));
   m.impl(TORCH_SELECTIVE_NAME("aten::_grid_sampler_3d_pixel"),
-         TORCH_FN((&grid_sampler_3d_pixel_autocast<c10::DeviceType::CPU>)));
+         TORCH_FN((&grid_sampler_pixel_autocast<c10::DeviceType::CPU, &at::_grid_sampler_3d_pixel>)));
 }
 
 // MTIA
