@@ -3419,7 +3419,8 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
             model[0].set_all_gather_layout(rank_major, recurse=False)
         self.assertIs(groups[0]._all_gather_layout, native)
 
-        # FSDP adopts nothing from a rejected result, so another layout can follow
+        # FSDP adopts nothing from a rejected result, so after reset_iter_state()
+        # another layout can follow
         class ShortLayout(AllGatherLayout):
             def prepare_output(self, metadata):
                 return True
@@ -3438,10 +3439,11 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
         inp = torch.randn(2, 8)
         with self.assertRaisesRegex(ValueError, "contiguous 1-D tensor"):
             model(inp)
+        model.reset_iter_state()
         model.set_all_gather_layout(DefaultAllGatherLayout())
         model(inp).sum().backward()
 
-        # A rejected refill frees what it re-allocated: the shared buffer, or the
+        # A refill is rejected whether it refills the shared buffer or the
         # parameters' own outputs after a rank-major first unshard
         class RejectedRefill(_ParamContiguousLayout):
             def finalize_outputs(self, metadata):
@@ -3458,9 +3460,6 @@ class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
             model(inp)
             with self.assertRaisesRegex(ValueError, "did not refill"):
                 model(inp)
-            fsdp_params = model._get_fsdp_state()._fsdp_param_group.fsdp_params
-            outputs = [t for p in fsdp_params for t in p.all_gather_outputs]
-            self.assertEqual([t.untyped_storage().size() for t in outputs], [0, 0])
 
     def test_shared_buffer_extension(self):
         # Extension outputs share one FSDP-owned buffer, which an extension whose

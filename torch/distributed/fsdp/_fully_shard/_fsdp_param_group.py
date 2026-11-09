@@ -560,26 +560,12 @@ class FSDPParamGroup:
 
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
-                try:
-                    self._all_gather_buffers = foreach_all_gather_copy_out(
-                        self._all_gather_result,
-                        self.fsdp_params,
-                        self._all_gather_process_group,
-                        self._all_gather_buffers,
-                    )
-                except ValueError:
-                    # Drop the completed all-gather once its streams wait for the
-                    # rejected copy-out, so that a layout whose first unshard was
-                    # rejected can be replaced, and free what a refill re-allocated
-                    event = self.device_handle.Event()
-                    event.record()
-                    self.comm_ctx.wait_all_gather_streams_on_event(event)
-                    self._all_gather_result = None
-                    self._free_all_gather_buffers()
-                    for fsdp_param in self.fsdp_params:
-                        if not fsdp_param.keep_unsharded_storage:
-                            fsdp_param.free_all_gather_outputs()
-                    raise
+                self._all_gather_buffers = foreach_all_gather_copy_out(
+                    self._all_gather_result,
+                    self.fsdp_params,
+                    self._all_gather_process_group,
+                    self._all_gather_buffers,
+                )
 
         for fsdp_param in self.fsdp_params:
             fsdp_param.init_unsharded_param()
