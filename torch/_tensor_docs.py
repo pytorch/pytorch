@@ -2723,7 +2723,7 @@ add_docstr_all(
     "is_pinned",
     r"""
 Returns true if this tensor resides in pinned memory.
-By default, the device on which pinned memory is allocated will be the current :ref:`accelerator<accelerators>`.
+By default, the device pinned memory on will be the current :ref:`accelerator<accelerators>`.
 """,
 )
 
@@ -6451,7 +6451,7 @@ add_docstr_all(
 pin_memory() -> Tensor
 
 Copies the tensor to pinned memory, if it's not already pinned.
-By default, the device on which pinned memory is allocated will be the current :ref:`accelerator<accelerators>`.
+By default, the device pinned memory on will be the current :ref:`accelerator<accelerators>`.
 """,
 )
 

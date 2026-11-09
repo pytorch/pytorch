@@ -10942,7 +10942,7 @@ Keyword args:
         met and this will lead to silently incorrect results. To force
         coalescing please use :meth:`coalesce` on the resulting
         Tensor.
-        Default: None, except for trivial cases (e.g. nnz < 2) the
+        Default: None: except for trivial cases (e.g. nnz < 2) the
         resulting Tensor has is_coalesced set to ``False``.
 
 Example::
