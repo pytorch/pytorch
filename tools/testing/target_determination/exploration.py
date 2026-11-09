@@ -12,18 +12,25 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 import random
 import statistics
+import sys
+import traceback
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any, NamedTuple, TYPE_CHECKING
 
+from tools.testing.target_determination.heuristics.utils import get_pr_number
 from tools.testing.test_selections import get_duration
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Iterable, Sequence
 
-    from tools.testing.test_run import ShardedTest, TestRun
+    from tools.testing.target_determination.heuristics.interface import (
+        TestPrioritizations,
+    )
+    from tools.testing.test_run import TestRun
 
 
 EXPLORATION_SHARE = 0.05
@@ -31,10 +38,6 @@ OVERHEAD_SECONDS = 15.0
 MAX_FILE_SECONDS = 600.0
 REPLICATES = 1000
 WEIGHT_SCHEME = "score_half_uniform_half"
-
-FAILED = "failed"
-PASSED = "passed"
-NOT_RUN = "not_run"
 
 
 @dataclass(frozen=True)
@@ -94,15 +97,16 @@ def estimate_costs(
     """Estimated seconds per test: its recorded time, or the median of the
     known times when it has none, plus OVERHEAD_SECONDS. None when no test has
     a recorded time."""
-    durations = [
-        get_duration(test, test_file_times, test_class_times) for test in tests
-    ]
-    known = [max(0.0, duration) for duration in durations if duration is not None]
+    durations = []
+    for test in tests:
+        duration = get_duration(test, test_file_times, test_class_times)
+        durations.append(None if duration is None else max(0.0, duration))
+    known = [duration for duration in durations if duration is not None]
     if not known:
         return None
     median = statistics.median(known)
     return [
-        (median if duration is None else max(0.0, duration)) + OVERHEAD_SECONDS
+        (median if duration is None else duration) + OVERHEAD_SECONDS
         for duration in durations
     ]
 
@@ -233,79 +237,26 @@ def check_disjoint(
         raise ValueError("explored tests overlap TD's selected tests")
 
 
-class ExploredBatchRun:
-    """Runs the explored batch after TD's own batch and labels each piece
-    scheduled on this shard: failed, passed, or not_run when the batch never
-    started or may have stopped before reaching it."""
-
-    def __init__(self, pieces: Sequence[ShardedTest]) -> None:
-        self.pieces = pieces
-        self.keep_going = False
-        self.returned = False
-
-    def run_after(
-        self, top_failed: bool, keep_going: bool, run: Callable[[], None]
-    ) -> None:
-        if not self.pieces or (top_failed and not keep_going):
-            return
-        self.keep_going = keep_going
-        run()
-        self.returned = True
-
-    def outcomes(self, failed: Iterable[TestRun]) -> list[str]:
-        failed_names = {str(test) for test in failed}
-        # Without keep-going, a failing file terminates the parallel pool and
-        # the batch still returns, so the files it never reached look clean.
-        completed = self.returned and (self.keep_going or not failed_names)
-        return [
-            FAILED
-            if str(piece.test) in failed_names
-            else PASSED
-            if completed
-            else NOT_RUN
-            for piece in self.pieces
-        ]
-
-
 def _finite_or_none(value: float) -> float | None:
     return value if math.isfinite(value) else None
 
 
 def exploration_info(
     split: ExplorationSplit,
-    pieces: Sequence[ShardedTest],
-    outcomes: Sequence[str],
+    include: Sequence[TestRun],
     *,
     sha: str,
     pr_number: int | None,
     num_tests: int,
-    top_tests: int,
 ) -> dict[str, Any]:
-    """The td_exploration metric for the explored pieces on this shard."""
-    by_name = {str(explored.test): explored for explored in split.explored}
-    explored_pieces = []
-    for piece, outcome in zip(pieces, outcomes, strict=True):
-        explored = by_name[str(piece.test)]
-        explored_pieces.append(
-            {
-                "test": str(piece.test),
-                "test_file": piece.test.test_file,
-                "score": _finite_or_none(explored.score),
-                "weight": explored.weight,
-                "position": explored.position,
-                "cost": explored.cost,
-                "count": explored.count,
-                "propensity": explored.propensity,
-                "piece": [piece.shard, piece.num_shards],
-                "outcome": outcome,
-            }
-        )
+    """The td_exploration metric: one row per run_test.py invocation."""
+    top_files = {test.test_file for test in include}
     return {
         "sha": sha,
         "pr_number": pr_number,
         "call": split.call,
         "num_tests": num_tests,
-        "top_tests": top_tests,
+        "top_tests": len(include),
         "top_seconds": split.top_seconds,
         "budget_seconds": split.budget_seconds,
         "frame": split.frame,
@@ -314,5 +265,91 @@ def exploration_info(
         "skipped_seconds": split.skipped_seconds,
         "weight_scheme": WEIGHT_SCHEME,
         "replicates": split.replicates,
-        "explored": explored_pieces,
+        "explored": [
+            {
+                "test": str(explored.test),
+                "test_file": explored.test.test_file,
+                "score": _finite_or_none(explored.score),
+                "weight": explored.weight,
+                "position": explored.position,
+                "cost": explored.cost,
+                "count": explored.count,
+                "propensity": explored.propensity,
+                "top_part": explored.test.test_file in top_files,
+            }
+            for explored in split.explored
+        ],
     }
+
+
+class Exploration(NamedTuple):
+    enabled: bool
+    explored: list[TestRun]
+    skipped: list[TestRun]  # exclude without the explored tests
+    info: dict[str, Any] | None  # the td_exploration metric, built on shard 1 only
+
+
+def select_exploration(
+    prioritizations: TestPrioritizations,
+    include: list[TestRun],
+    exclude: list[TestRun],
+    test_file_times: dict[str, float],
+    test_class_times: dict[str, dict[str, float]],
+    *,
+    td_enabled: bool,
+    which_shard: int,
+) -> Exploration:
+    """The tests to explore on top of TD's `include`. Exploration is on when
+    TD is, SHA1 is set and EXPLORATION_SHARE > 0; any error is logged and
+    leaves TD's selection as it is."""
+    sha = os.environ.get("SHA1", "")
+    enabled = td_enabled and bool(sha) and EXPLORATION_SHARE > 0
+    nothing = Exploration(enabled, [], exclude, None)
+    if not enabled:
+        return nothing
+    try:
+        seed_prefix = ":".join(
+            [
+                sha,
+                os.environ.get("GITHUB_WORKFLOW", ""),
+                os.environ.get("BUILD_ENVIRONMENT", ""),
+                os.environ.get("TEST_CONFIG", ""),
+            ]
+        )
+        split = plan_exploration(
+            include,
+            rank_candidates(exclude, prioritizations.get_scored_tests()),
+            test_file_times,
+            test_class_times,
+            seed_prefix,
+            EXPLORATION_SHARE,
+        )
+        if split is None:
+            return nothing
+        explored = split.tests()
+        check_disjoint(explored, include, exclude)
+        names = {str(test) for test in explored}
+        skipped = [test for test in exclude if str(test) not in names]
+        info = None
+        if which_shard == 1:
+            info = exploration_info(
+                split,
+                include,
+                sha=sha,
+                pr_number=get_pr_number(),
+                num_tests=len(include) + len(exclude),
+            )
+        print(
+            f"TD exploration: budget {split.budget_seconds:.0f}s, "
+            f"frame {split.frame}, out of frame {split.out_of_frame}, "
+            f"explored {[str(test) for test in explored]}",
+            file=sys.stderr,
+        )
+        return Exploration(enabled, explored, skipped, info)
+    except Exception:
+        print(
+            f"TD exploration failed, running TD's selection only:\n"
+            f"{traceback.format_exc()}",
+            file=sys.stderr,
+        )
+        return nothing

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import contextlib
+import dataclasses
+import io
 import math
 import os
 import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -13,7 +17,7 @@ sys.path.append(str(REPO_ROOT))
 
 import tools.testing.target_determination.exploration as exploration
 import tools.testing.target_determination.heuristics.interface as interface
-from tools.testing.test_run import ShardedTest, TestRun
+from tools.testing.test_run import TestRun
 
 
 sys.path.remove(str(REPO_ROOT))
@@ -238,51 +242,101 @@ class TestPropensities(unittest.TestCase):
         self.assertAlmostEqual(counts[0] / split.replicates, 0.75, delta=0.05)
 
 
-class TestExploredBatchRun(unittest.TestCase):
-    pieces = [ShardedTest(TestRun("a"), 1, 1), ShardedTest(TestRun("b"), 1, 1)]
+ENV = {
+    "SHA1": "deadbeef",
+    "GITHUB_WORKFLOW": "pull",
+    "BUILD_ENVIRONMENT": "env",
+    "TEST_CONFIG": "default",
+    "PR_NUMBER": "123",
+}
 
-    def run_batch(
-        self, top_failed: bool, keep_going: bool, failed: list[TestRun], raises: bool
-    ) -> list[str]:
-        batch = exploration.ExploredBatchRun(self.pieces)
 
-        def run() -> None:
-            if raises:
-                raise RuntimeError("serial test failed")
+class TestSelectExploration(unittest.TestCase):
+    def select(
+        self, env: dict[str, str] = ENV, td_enabled: bool = True, which_shard: int = 1
+    ) -> tuple[list[TestRun], list[TestRun], exploration.Exploration]:
+        tp = make_tp([1 - i / 200 for i in range(200)])
+        include, exclude = tp.get_top_per_tests(25)
+        stderr = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            contextlib.redirect_stderr(stderr),
+        ):
+            selected = exploration.select_exploration(
+                tp,
+                include,
+                exclude,
+                uniform_times(200, 30.0),
+                {},
+                td_enabled=td_enabled,
+                which_shard=which_shard,
+            )
+        self.stderr = stderr.getvalue()
+        return include, exclude, selected
 
-        if raises:
-            with self.assertRaises(RuntimeError):
-                batch.run_after(top_failed, keep_going, run)
-        else:
-            batch.run_after(top_failed, keep_going, run)
-        return batch.outcomes(failed)
+    def test_artifact_lists_partition_td_order(self) -> None:
+        include, exclude, selected = self.select()
+        self.assertTrue(selected.enabled)
+        self.assertTrue(selected.explored)
+        names = {str(t) for t in selected.explored}
+        self.assertEqual(selected.skipped, [t for t in exclude if str(t) not in names])
+        exploration.check_disjoint(selected.explored, include, exclude)
+        artifact = [str(t) for t in include + selected.explored + selected.skipped]
+        self.assertEqual(sorted(artifact), sorted(str(t) for t in include + exclude))
+        self.assertEqual(len(set(artifact)), len(artifact))
 
-    def test_outcomes(self) -> None:
-        a = TestRun("a")
-        cases = [
-            # top_failed, keep_going, failed, raises -> outcomes
-            ((False, False, [], False), ["passed", "passed"]),
-            ((True, True, [a], False), ["failed", "passed"]),
-            ((False, False, [a], False), ["failed", "not_run"]),
-            ((False, False, [a], True), ["failed", "not_run"]),
-            ((True, False, [], False), ["not_run", "not_run"]),
-        ]
-        for args, expected in cases:
-            with self.subTest(args=args):
-                self.assertEqual(self.run_batch(*args), expected)
-
-    def test_skipped_batch_never_runs(self) -> None:
-        exploration.ExploredBatchRun(self.pieces).run_after(
-            True, False, lambda: self.fail("explored batch ran")
+    def test_metric_built_on_shard_one_only(self) -> None:
+        _, _, first = self.select()
+        _, _, second = self.select(which_shard=2)
+        self.assertEqual(first.explored, second.explored)
+        self.assertIsNone(second.info)
+        self.assertIsNotNone(first.info)
+        info = first.info or {}
+        self.assertEqual(info.get("sha"), "deadbeef")
+        self.assertEqual(info.get("pr_number"), 123)
+        self.assertEqual(
+            [e["test"] for e in info.get("explored", [])],
+            [str(t) for t in first.explored],
         )
-        exploration.ExploredBatchRun([]).run_after(
-            False, False, lambda: self.fail("explored batch ran")
+
+    def test_disabled_cases_leave_td_as_is(self) -> None:
+        no_sha = {k: v for k, v in ENV.items() if k != "SHA1"}
+        cases = [(no_sha, True), (ENV, False)]
+        for env, td_enabled in cases:
+            with self.subTest(env=env, td_enabled=td_enabled):
+                _, exclude, selected = self.select(env, td_enabled)
+                self.assertEqual(selected, (False, [], exclude, None))
+                self.assertIs(selected.skipped, exclude)
+                self.assertEqual(self.stderr, "")
+        with mock.patch.object(exploration, "EXPLORATION_SHARE", 0):
+            _, exclude, selected = self.select()
+        self.assertEqual(selected, (False, [], exclude, None))
+
+    def test_errors_fall_back_to_td(self) -> None:
+        tp = make_tp([1 - i / 200 for i in range(200)])
+        split = must_plan(tp, uniform_times(200, 30.0))
+        top = tp.get_top_per_tests(25)[0][0]
+        overlapping = dataclasses.replace(
+            split,
+            explored=[exploration.ExploredTest(top, 1.0, 0, 1.0, 1.0, 1, 0.001)],
         )
+        for patched, error in (
+            (mock.Mock(side_effect=RuntimeError("boom")), "RuntimeError: boom"),
+            (mock.Mock(return_value=overlapping), "not all in TD's excluded tests"),
+        ):
+            with (
+                self.subTest(error=error),
+                mock.patch.object(exploration, "plan_exploration", patched),
+            ):
+                _, exclude, selected = self.select()
+                self.assertEqual(selected, (True, [], exclude, None))
+                self.assertIs(selected.skipped, exclude)
+                self.assertIn("TD exploration failed", self.stderr)
+                self.assertIn(error, self.stderr)
 
 
 class TestExplorationInfo(unittest.TestCase):
     def test_info(self) -> None:
-        test = TestRun("test_x")
         split = exploration.ExplorationSplit(
             call="abc",
             top_seconds=1000.0,
@@ -293,17 +347,20 @@ class TestExplorationInfo(unittest.TestCase):
             skipped_seconds=1200.0,
             replicates=1000,
             explored=[
-                exploration.ExploredTest(test, math.nan, 7, 1.0, 40.0, 120, 0.12)
+                exploration.ExploredTest(
+                    TestRun("test_x"), math.nan, 7, 1.0, 40.0, 120, 0.12
+                ),
+                exploration.ExploredTest(
+                    TestRun("test_y", excluded=["TestA"]), 0.5, 9, 2.0, 30.0, 300, 0.3
+                ),
             ],
         )
         info = exploration.exploration_info(
             split,
-            [ShardedTest(test, 1, 1)],
-            ["passed"],
+            [TestRun("test_y::TestA"), TestRun("test_z")],
             sha="deadbeef",
             pr_number=123,
             num_tests=40,
-            top_tests=11,
         )
         self.assertEqual(
             info,
@@ -312,7 +369,7 @@ class TestExplorationInfo(unittest.TestCase):
                 "pr_number": 123,
                 "call": "abc",
                 "num_tests": 40,
-                "top_tests": 11,
+                "top_tests": 2,
                 "top_seconds": 1000.0,
                 "budget_seconds": 50.0,
                 "frame": 10,
@@ -331,9 +388,19 @@ class TestExplorationInfo(unittest.TestCase):
                         "cost": 40.0,
                         "count": 120,
                         "propensity": 0.12,
-                        "piece": [1, 1],
-                        "outcome": "passed",
-                    }
+                        "top_part": False,
+                    },
+                    {
+                        "test": "test_y, not (TestA)",
+                        "test_file": "test_y",
+                        "score": 0.5,
+                        "weight": 2.0,
+                        "position": 9,
+                        "cost": 30.0,
+                        "count": 300,
+                        "propensity": 0.3,
+                        "top_part": True,
+                    },
                 ],
             },
         )
