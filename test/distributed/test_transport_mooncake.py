@@ -3,8 +3,9 @@
 import asyncio
 import ctypes
 import os
+from dataclasses import replace
 from types import SimpleNamespace
-from unittest import skip, skipUnless
+from unittest import skipUnless
 from unittest.mock import patch
 
 from transport_test_utils import TransportTestMixin
@@ -34,47 +35,66 @@ class _Engine:
 
     Transfers copy bytes directly between the real process addresses of the
     registered tensors, so the shared conformance assertions observe real data
-    movement without RDMA hardware.
+    movement without RDMA hardware. Like Mooncake, a transfer resolves ``peer``
+    to that engine and fails unless the local range is registered here and the
+    remote range is registered on the peer.
     """
 
     _next_port = 20000
+    _by_port: dict[int, "_Engine"] = {}
 
     def __init__(self):
-        self._registered: set[int] = set()
+        self._regions: dict[int, int] = {}
         self._port = 0
         self._next_batch = 0
+        self._failed: set[int] = set()
         self.options = None
 
     def initialize(self, host, metadata_server, protocol, device_name):
         self.options = (metadata_server, protocol, device_name)
         type(self)._next_port += 1
         self._port = type(self)._next_port
+        self._by_port[self._port] = self
         return 0
 
     def get_rpc_port(self):
         return self._port
 
     def register_memory(self, address, length, location="*"):
-        if address in self._registered:
+        if address in self._regions:
             raise AssertionError("allocation registered twice")
-        self._registered.add(address)
+        self._regions[address] = length
         return 0
 
     def unregister_memory(self, address):
-        self._registered.discard(address)
+        self._regions.pop(address, None)
         return 0
 
+    def _covers(self, address, length):
+        return any(
+            start <= address and address + length <= start + size
+            for start, size in self._regions.items()
+        )
+
     def batch_transfer_async(self, peer, buffers, peer_buffers, lengths, opcode):
-        for buffer, peer_buffer, length in zip(buffers, peer_buffers, lengths):
+        self._next_batch += 1
+        target = self._by_port.get(int(peer.rpartition(":")[2]))
+        requests = list(zip(buffers, peer_buffers, lengths))
+        if target is None or not all(
+            self._covers(buffer, length) and target._covers(peer_buffer, length)
+            for buffer, peer_buffer, length in requests
+        ):
+            self._failed.add(self._next_batch)
+            return self._next_batch
+        for buffer, peer_buffer, length in requests:
             if opcode == _Opcode.Write:
                 ctypes.memmove(peer_buffer, buffer, length)
             else:
                 ctypes.memmove(buffer, peer_buffer, length)
-        self._next_batch += 1
         return self._next_batch
 
     def transfer_check_status(self, batch_id):
-        return 1
+        return -1 if batch_id in self._failed else 1
 
 
 def _backend():
@@ -98,10 +118,6 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         self.assertEqual(first.connect(second.bind()), 0)
         self.assertEqual(second.connect(first.bind()), 0)
         return first, second
-
-    @skip("Mooncake transport does not support slicing yet")
-    def test_transport_slice(self):
-        pass
 
     def test_initialize_uses_p2p_handshake(self):
         with patch.object(_mooncake, "_load_backend", return_value=_backend()):
@@ -165,6 +181,76 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         with self.assertRaises(ValueError):
             first.write(source.to_view(), stranger)
 
+    def test_connects_multiple_peers(self):
+        first, second = self.make_transport_pair()
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            peers = [new_transport("mooncake", host="127.0.0.1") for _ in range(2)]
+        third, fourth = peers
+        self.addCleanup(fourth.close)
+        self.addCleanup(third.close)
+        self.assertEqual(first.connect(third.bind()), 0)
+        self.assertEqual(first.connect(third.bind()), 0)
+        self.assertEqual(first._peers, {second._endpoint, third._endpoint})
+        source = first.register_memory(torch.arange(8, dtype=torch.uint8))
+        targets = [torch.zeros(8, dtype=torch.uint8) for _ in range(3)]
+        remotes = [
+            peer.register_memory(target).to_remote_buffer()
+            for peer, target in zip((second, third, fourth), targets)
+        ]
+        works = [first.write(source.to_view(), r, async_op=True) for r in remotes[:2]]
+        for work in works:
+            work.wait()
+        self.assertEqual(targets[0], torch.arange(8, dtype=torch.uint8))
+        self.assertEqual(targets[1], targets[0])
+        with self.assertRaisesRegex(ValueError, "connected peer"):
+            first.write(source.to_view(), remotes[2])
+        first.close()
+        self.assertFalse(first.connected())
+        self.assertEqual(first._peers, set())
+
+    def test_transfers_reach_the_descriptor_peer(self):
+        first, second = self.make_transport_pair()
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            third = new_transport("mooncake", host="127.0.0.1")
+        self.addCleanup(third.close)
+        first.connect(third.bind())
+        source = first.register_memory(torch.arange(8, dtype=torch.uint8))
+        targets = [torch.zeros(8, dtype=torch.uint8) for _ in range(2)]
+        memories = [p.register_memory(t) for p, t in zip((second, third), targets)]
+        remotes = [memory.to_remote_buffer() for memory in memories]
+        first.write(source.to_view(), remotes[1])
+        self.assertEqual(targets[1], torch.arange(8, dtype=torch.uint8))
+        self.assertEqual(targets[0].count_nonzero(), 0)
+        misrouted = replace(remotes[1], endpoint=remotes[0].endpoint)
+        targets[1].zero_()
+        with self.assertRaisesRegex(RuntimeError, "transfer failed"):
+            first.write(source.to_view(), misrouted)
+        self.assertEqual(targets[1].count_nonzero(), 0)
+        second.unregister_memory(memories[0])
+        with self.assertRaisesRegex(RuntimeError, "transfer failed"):
+            first.write(source.to_view(), remotes[0])
+        self.assertEqual(targets[0].count_nonzero(), 0)
+
+    def test_remote_slice_ranges(self):
+        _, second = self.make_transport_pair()
+        remote = second.register_memory(
+            torch.zeros(8, dtype=torch.uint8)
+        ).to_remote_buffer()
+        part = remote.slice(2, 4).slice(1, 2)
+        self.assertEqual((part.address, part.length), (remote.address + 3, 2))
+        self.assertEqual(part.endpoint, remote.endpoint)
+        self.assertEqual(remote.slice(remote.length).length, 0)
+
+    def test_slice_unregistered_view(self):
+        first, _ = self.make_transport_pair()
+        source = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        view = source.to_view()
+        first.unregister_memory(source)
+        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+            view.slice(1)
+        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+            view[1:]
+
     def test_unregister_then_use_fails(self):
         first, second = self.make_transport_pair()
         source = first.register_memory(torch.ones(8, dtype=torch.uint8))
@@ -193,26 +279,56 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         first.close()
         first.close()
 
-    def test_failed_transfer_pins_memory_and_poisons_transport(self):
+    def test_failed_transfer_fails_only_its_work(self):
         first, second = self.make_transport_pair()
-        failed = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            third = new_transport("mooncake", host="127.0.0.1")
+        self.addCleanup(third.close)
+        first.connect(third.bind())
+        source = first.register_memory(torch.arange(8, dtype=torch.uint8))
+        target = torch.zeros(8, dtype=torch.uint8)
+        dead = second.register_memory(torch.zeros(8, dtype=torch.uint8))
+        live = third.register_memory(target).to_remote_buffer()
+        with patch.object(_Engine, "transfer_check_status", return_value=-1):
+            with self.assertRaisesRegex(RuntimeError, "transfer failed"):
+                first.write(source.to_view(), dead.to_remote_buffer())
+        first.write(source.to_view(), live)
+        self.assertEqual(target, torch.arange(8, dtype=torch.uint8))
+        with patch.object(_Engine, "unregister_memory", return_value=0) as native:
+            first.unregister_memory(source)
+        native.assert_called_once_with(source._registration.address)
+
+    def test_timeout_status_pins_memory(self):
+        first, second = self.make_transport_pair()
+        timed_out = first.register_memory(torch.ones(8, dtype=torch.uint8))
         other = first.register_memory(torch.ones(8, dtype=torch.uint8))
         remote = second.register_memory(
             torch.zeros(8, dtype=torch.uint8)
         ).to_remote_buffer()
-        with patch.object(_Engine, "transfer_check_status", return_value=-1):
-            with self.assertRaisesRegex(RuntimeError, "may still be running"):
-                first.write(failed.to_view(), remote)
-        with self.assertRaisesRegex(RuntimeError, "unusable after a failed transfer"):
-            first.write(other.to_view(), remote)
+        with patch.object(_Engine, "transfer_check_status", return_value=-2) as check:
+            with self.assertRaisesRegex(RuntimeError, "stays pinned"):
+                first.write(timed_out.to_view(), remote)
+        check.assert_called_once()
+        with self.assertRaisesRegex(RuntimeError, "pinned after a timed-out"):
+            first.write(timed_out.to_view(), remote)
+        first.write(other.to_view(), remote)
         engine = first._engine
-        with patch.object(_Engine, "unregister_memory") as native_unregister:
-            first.unregister_memory(failed)
+        with patch.object(_Engine, "unregister_memory", return_value=0) as native:
+            first.unregister_memory(timed_out)
             first.close()
-        native_unregister.assert_called_once_with(other._registration.address)
+        native.assert_called_once_with(other._registration.address)
         self.assertEqual(
-            _mooncake._pinned_registrations, [(engine, failed._registration)]
+            _mooncake._pinned_registrations, [(engine, timed_out._registration)]
         )
+
+    def test_connect_rejects_malformed_peer_url(self):
+        first, _ = self.make_transport_pair()
+        peers = set(first._peers)
+        for url in (b"", b"host", b"host:", b":1234", b"host:port", b"\xff:1"):
+            with self.assertRaisesRegex(ValueError, r"bind\(\) endpoint"):
+                first.connect(url)
+        self.assertEqual(first._peers, peers)
+        self.assertEqual(first.connect(b"[::1]:1234"), 0)
 
     def test_close_async_after_handled_failure_does_not_reraise(self):
         first, second = self.make_transport_pair()
@@ -243,10 +359,6 @@ class TestMooncakeTransportIntegration(TransportTestMixin, TestCase):
     hw_classification = HardwareClassification.GENERIC
     protocol = os.environ.get("MOONCAKE_PROTOCOL", "rdma")
 
-    @skip("Mooncake transport does not support slicing yet")
-    def test_transport_slice(self):
-        pass
-
     def make_transport_pair(self):
         first = new_transport(
             "mooncake", "cpu", host="127.0.0.1", protocol=self.protocol
@@ -259,6 +371,31 @@ class TestMooncakeTransportIntegration(TransportTestMixin, TestCase):
         self.assertEqual(first.connect(second.bind()), 0)
         self.assertEqual(second.connect(first.bind()), 0)
         return first, second
+
+    def test_connects_multiple_peers(self):
+        first, second = self.make_transport_pair()
+        third = new_transport(
+            "mooncake", "cpu", host="127.0.0.1", protocol=self.protocol
+        )
+        self.addCleanup(third.close)
+        self.assertEqual(first.connect(third.bind()), 0)
+        source = torch.arange(64, dtype=torch.uint8)
+        view = first.register_memory(source).to_view()
+        targets = [torch.zeros(64, dtype=torch.uint8) for _ in range(2)]
+        remotes = [
+            peer.register_memory(target).to_remote_buffer()
+            for peer, target in zip((second, third), targets)
+        ]
+        works = [
+            first.write(view[:32], remotes[0][16:48], async_op=True),
+            first.write(view[32:], remotes[1][:32], async_op=True),
+        ]
+        for work in works:
+            work.wait()
+        self.assertEqual(targets[0][16:48], source[:32])
+        self.assertEqual(targets[1][:32], source[32:])
+        self.assertEqual(targets[0][:16].count_nonzero(), 0)
+        self.assertEqual(targets[1][32:].count_nonzero(), 0)
 
 
 if __name__ == "__main__":
