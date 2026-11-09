@@ -3751,7 +3751,7 @@ class TestPrecompileCaptureFiles(TestCase):
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
-    # exercises the CUDA lowering, not just CPU.
+    # exercises the accelerator lowering, not just CPU.
 
     def test_plain_function(self, device):
         def f(x, y):
@@ -4281,7 +4281,7 @@ class TestPrecompileNumerics(TestCase):
         self.assertEqual(f_c(x), x.t())
 
 
-instantiate_device_type_tests(TestPrecompileNumerics, globals())
+instantiate_device_type_tests(TestPrecompileNumerics, globals(), allow_xpu=True)
 
 
 _FRESH_PROCESS_LOADER = """
