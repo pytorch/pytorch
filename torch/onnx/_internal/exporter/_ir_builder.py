@@ -298,12 +298,38 @@ class GraphBuilder:
                 f"got {num_outputs}. Correct num_outputs or output_types."
             )
         inferred = []
+        attribute_dtype = None
+        if op_type == "Cast":
+            attribute_dtype = ir.DataType(attributes["to"])
+        elif op_type == "ConstantOfShape":
+            attribute_dtype = (
+                attributes["value"].dtype
+                if attributes.get("value") is not None
+                else ir.DataType.FLOAT
+            )
+        elif op_type == "Constant":
+            if attributes.get("value") is not None:
+                attribute_dtype = attributes["value"].dtype
+            else:
+                for suffix, dtype in (
+                    ("int", ir.DataType.INT64),
+                    ("float", ir.DataType.FLOAT),
+                    ("string", ir.DataType.STRING),
+                ):
+                    if (
+                        f"value_{suffix}" in attributes
+                        or f"value_{suffix}s" in attributes
+                    ):
+                        attribute_dtype = dtype
+                        break
         for index in range(num_outputs):
             param = signature.outputs[min(index, len(signature.outputs) - 1)]
             constraint = param.type_constraint
             type_ = bindings.get(constraint) if param.homogeneous else None
             if type_ is None and len(constraint.allowed_types) == 1:
                 type_ = next(iter(constraint.allowed_types))
+            if type_ is None and attribute_dtype is not None:
+                type_ = ir.TensorType(attribute_dtype)
             if output_types is not None:
                 explicit = output_types[index]
                 if explicit is not None:

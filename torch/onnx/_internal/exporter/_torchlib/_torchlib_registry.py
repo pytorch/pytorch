@@ -7,13 +7,11 @@ __all__ = ["onnx_impl", "get_torchlib_ops"]
 
 import logging
 from collections.abc import Callable, Sequence
-from typing import Any, TypeVar
+from typing import TypeVar
 from typing_extensions import ParamSpec
 
-import onnxscript
-
 import torch
-from torch.onnx._internal.exporter import _constants, _registration
+from torch.onnx._internal.exporter import _custom_translation, _registration
 
 
 # Use ParamSpec for better type preservation instead of bound Callable TypeVar
@@ -29,10 +27,8 @@ _registry: list[_registration.OnnxDecompMeta] = []
 def onnx_impl(
     target: _registration.TorchOp | tuple[_registration.TorchOp, ...],
     *,
-    trace_only: bool = False,
     complex: bool = False,
     opset_introduced: int = 18,
-    no_compile: bool = False,
     private: bool = False,
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Register an ONNX implementation of a torch op."""
@@ -47,20 +43,6 @@ def onnx_impl(
     def wrapper(
         func: Callable[_P, _R],
     ) -> Callable[_P, _R]:
-        processed_func: Any
-        if no_compile:
-            processed_func = func
-        else:
-            torchlib_opset = onnxscript.values.Opset(
-                domain=_constants.TORCHLIB_DOMAIN, version=1
-            )
-
-            if not trace_only:
-                # Compile the function
-                processed_func = onnxscript.script(opset=torchlib_opset)(func)
-            else:
-                processed_func = onnxscript.TracedOnnxFunction(torchlib_opset, func)
-
         if not private:
             # TODO(justinchuby): Simplify the logic and remove the private attribute
             # Skip registration if private
@@ -72,15 +54,18 @@ def onnx_impl(
             for t in targets:
                 _registry.append(
                     _registration.OnnxDecompMeta(
-                        onnx_function=processed_func,
+                        onnx_function=_custom_translation.NativeTranslation(
+                            t, func, complex, opset_introduced, None
+                        ),
                         fx_target=t,
                         signature=None,
+                        is_custom=False,
                         is_complex=complex,
                         opset_introduced=opset_introduced,
-                        skip_signature_inference=no_compile,
+                        skip_signature_inference=True,
                     )
                 )
-        return processed_func  # type: ignore[return-value]
+        return func
 
     return wrapper
 

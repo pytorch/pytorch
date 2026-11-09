@@ -102,9 +102,6 @@ _STEP_THREE_ERROR_MESSAGE = textwrap.dedent(
 )
 
 logger = logging.getLogger(__name__)
-# The current tracer that is being used to trace the operators,
-# used by torch/onnx/_internal/exporter/_torchlib/ops/hop.py
-current_tracer: _building.OpRecorder | None = None
 
 
 def torch_dtype_to_onnx_dtype(dtype: torch.dtype) -> ir.DataType:
@@ -717,8 +714,6 @@ def _call_legacy_translation(
                 return [legacy_arg(value) for value in arg]
             return arg
 
-        global current_tracer
-        current_tracer = tracer
         try:
             outputs = onnx_function(
                 *(legacy_arg(arg) for arg in onnx_args),
@@ -728,8 +723,6 @@ def _call_legacy_translation(
             raise _errors.GraphConstructionError(
                 f"Error when calling function '{onnx_function}' with args '{onnx_args}' and kwargs '{onnx_kwargs}'"
             ) from e
-        finally:
-            current_tracer = None
 
     # Add the defined functions to the model
     for identifier, onnxscript_function in tracer.functions.items():
@@ -1416,10 +1409,12 @@ def _exported_program_to_onnx_program(
         for metas in registry.functions.values()
         for meta in metas
     ):
+        import onnx.version_converter
+
         # ONNX Script's inliner requires identical function/model opsets.
         # Convert function bodies independently so lexical subgraph captures
         # remain in their original scopes until the normal inlining pass.
-        import onnx.version_converter
+        import onnxscript.version_converter
 
         target_opset = model.opset_imports.get("", _constants.TORCHLIB_OPSET)
         for identifier, function in tuple(model.functions.items()):
@@ -1427,9 +1422,17 @@ def _exported_program_to_onnx_program(
                 continue
             body = ir.Model(function.graph.clone(), ir_version=model.ir_version)
             try:
-                converted = onnx.version_converter.convert_version(
-                    ir.serde.serialize_model(body), target_opset
-                )
+                if function.attributes:
+                    # Legacy scripted functions can reference formal attributes,
+                    # which the IR-native converter does not support.
+                    converted = onnx.version_converter.convert_version(
+                        ir.serde.serialize_model(body), target_opset
+                    )
+                    graph = ir.serde.deserialize_model(converted).graph
+                else:
+                    # Keep lifted FakeTensors in IR instead of serializing their data.
+                    onnxscript.version_converter.convert_version(body, target_opset)
+                    graph = body.graph
             except RuntimeError as error:
                 raise _errors.GraphConstructionError(
                     f"Cannot align function {identifier!r} from ONNX opset "
@@ -1441,7 +1444,7 @@ def _exported_program_to_onnx_program(
                 function.domain,
                 function.name,
                 function.overload,
-                graph=ir.serde.deserialize_model(converted).graph,
+                graph=graph,
                 attributes=function.attributes.values(),
             )
             normalized.metadata_props.update(function.metadata_props)

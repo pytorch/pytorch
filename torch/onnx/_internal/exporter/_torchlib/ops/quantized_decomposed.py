@@ -2,16 +2,13 @@
 
 # mypy: disable-error-code="misc,arg-type,type-arg,valid-type,assignment,return-value"
 # pyrefly: ignore-errors
-# ruff: noqa: TC001
 
 from __future__ import annotations
-
-from onnxscript.onnx_opset import opset18 as op
 
 import torch
 import torch.ao.quantization.fx._decomposed  # registers the quantized_decomposed ops
 from torch.onnx._internal._lazy_import import onnx_ir as ir
-from torch.onnx._internal.exporter._torchlib._tensor_typing import TensorType
+from torch.onnx._internal.exporter._ir_builder import current_builder
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 
 
@@ -41,9 +38,13 @@ _FLOAT8_DTYPES = frozenset(
 
 
 def _clip(quantized, quant_min, quant_max):
-    return op.Clip(
-        quantized, op.CastLike(quant_min, quantized), op.CastLike(quant_max, quantized)
-    )
+    builder = current_builder()
+    return builder.call(
+        "Clip",
+        quantized,
+        builder.call("CastLike", quant_min, quantized)[0],
+        builder.call("CastLike", quant_max, quantized)[0],
+    )[0]
 
 
 @onnx_impl(
@@ -52,40 +53,54 @@ def _clip(quantized, quant_min, quant_max):
         quantized_decomposed.quantize_per_tensor.tensor,
         quantized_decomposed.quantize_per_tensor.tensor2,
     ),
-    trace_only=True,
 )
 def quantized_decomposed_quantize_per_tensor(
-    input: TensorType,
+    input: ir.Value,
     scale: float,
     zero_point: int,
     quant_min: int,
     quant_max: int,
     dtype: int,
-) -> TensorType:
+) -> ir.Value:
     """quantize_per_tensor(Tensor input, float scale, int zero_point, int quant_min, int quant_max, ScalarType dtype) -> Tensor"""
+    builder = current_builder()
 
     if dtype == ir.DataType.INT32:
         # Reference: clamp(round(input * (1 / scale)) + zero_point, quant_min, quant_max).to(int32).
         # The reciprocal divides in float64; float16/bfloat16 inputs compute in float32.
         if input.dtype in (ir.DataType.FLOAT16, ir.DataType.BFLOAT16):
-            input = op.Cast(input, to=ir.DataType.FLOAT)
+            input = builder.call("Cast", input, to=ir.DataType.FLOAT)[0]
         if isinstance(scale, float):
-            inv_scale = op.Constant(
-                value=ir.tensor(1.0 / scale, dtype=ir.DataType.DOUBLE)
-            )
+            inv_scale = builder.call(
+                "Constant", value=ir.tensor(1.0 / scale, dtype=ir.DataType.DOUBLE)
+            )[0]
         else:
-            inv_scale = op.Reciprocal(op.Cast(scale, to=ir.DataType.DOUBLE))
-        quantized = op.Add(
-            op.Round(op.Mul(input, op.CastLike(inv_scale, input))),
-            op.CastLike(zero_point, input),
-        )
+            inv_scale = builder.call(
+                "Reciprocal",
+                builder.call("Cast", scale, to=ir.DataType.DOUBLE)[0],
+            )[0]
+        quantized = builder.call(
+            "Add",
+            builder.call(
+                "Round",
+                builder.call(
+                    "Mul",
+                    input,
+                    builder.call("CastLike", inv_scale, input)[0],
+                )[0],
+            )[0],
+            builder.call("CastLike", zero_point, input)[0],
+        )[0]
         # Cast float-to-int is undefined out of range, so clamping is required
         # even at the full int32 range.
-        return op.Cast(_clip(quantized, quant_min, quant_max), to=dtype)
+        return builder.call("Cast", _clip(quantized, quant_min, quant_max), to=dtype)[0]
 
-    quantized = op.QuantizeLinear(
-        input, op.CastLike(scale, input), op.Cast(zero_point, to=dtype)
-    )
+    quantized = builder.call(
+        "QuantizeLinear",
+        input,
+        builder.call("CastLike", scale, input)[0],
+        builder.call("Cast", zero_point, to=dtype)[0],
+    )[0]
     if (
         dtype not in _FLOAT8_DTYPES
         and (quant_min, quant_max) != _FULL_QUANTIZATION_RANGE[dtype]
@@ -95,17 +110,18 @@ def quantized_decomposed_quantize_per_tensor(
     return quantized
 
 
-@onnx_impl(quantized_decomposed.quantize_per_channel.default, trace_only=True)
+@onnx_impl(quantized_decomposed.quantize_per_channel.default)
 def quantized_decomposed_quantize_per_channel(
-    input: TensorType,
-    scales: TensorType,
-    zero_points: TensorType,
+    input: ir.Value,
+    scales: ir.Value,
+    zero_points: ir.Value,
     axis: int,
     quant_min: int,
     quant_max: int,
     dtype: int,
-) -> TensorType:
+) -> ir.Value:
     """quantize_per_channel(Tensor input, Tensor scales, Tensor zero_points, int axis, int quant_min, int quant_max, ScalarType dtype) -> Tensor"""
+    builder = current_builder()
 
     if dtype == ir.DataType.INT32:
         shape = input.shape
@@ -130,28 +146,40 @@ def quantized_decomposed_quantize_per_channel(
             else ir.DataType.FLOAT
         )
         if scales.dtype in (ir.DataType.FLOAT, ir.DataType.DOUBLE):
-            reciprocal = op.Reciprocal(scales)
+            reciprocal = builder.call("Reciprocal", scales)[0]
         else:
-            reciprocal = op.Reciprocal(op.Cast(scales, to=ir.DataType.FLOAT))
+            reciprocal = builder.call(
+                "Reciprocal",
+                builder.call("Cast", scales, to=ir.DataType.FLOAT)[0],
+            )[0]
             if scales.dtype in (ir.DataType.FLOAT16, ir.DataType.BFLOAT16):
-                reciprocal = op.Cast(reciprocal, to=scales.dtype)
+                reciprocal = builder.call("Cast", reciprocal, to=scales.dtype)[0]
         if input.dtype != compute_dtype:
-            input = op.Cast(input, to=compute_dtype)
+            input = builder.call("Cast", input, to=compute_dtype)[0]
         # Broadcast the 1-D values along 'axis'.
         axes = [i for i in range(rank) if i != axis]
-        inv_scales = op.Unsqueeze(op.CastLike(reciprocal, input), axes=axes)
-        zero_points = op.Unsqueeze(op.CastLike(zero_points, input), axes=axes)
-        quantized = op.Add(op.Round(op.Mul(input, inv_scales)), zero_points)
+        inv_scales = builder.call(
+            "Unsqueeze", builder.call("CastLike", reciprocal, input)[0], axes
+        )[0]
+        zero_points = builder.call(
+            "Unsqueeze", builder.call("CastLike", zero_points, input)[0], axes
+        )[0]
+        quantized = builder.call(
+            "Add",
+            builder.call("Round", builder.call("Mul", input, inv_scales)[0])[0],
+            zero_points,
+        )[0]
         # Cast float-to-int is undefined out of range, so clamping is required
         # even at the full int32 range.
-        return op.Cast(_clip(quantized, quant_min, quant_max), to=dtype)
+        return builder.call("Cast", _clip(quantized, quant_min, quant_max), to=dtype)[0]
 
-    quantized = op.QuantizeLinear(
+    quantized = builder.call(
+        "QuantizeLinear",
         input,
-        op.CastLike(scales, input),
-        op.Cast(zero_points, to=dtype),
+        builder.call("CastLike", scales, input)[0],
+        builder.call("Cast", zero_points, to=dtype)[0],
         axis=axis,
-    )
+    )[0]
     if (
         dtype not in _FLOAT8_DTYPES
         and (quant_min, quant_max) != _FULL_QUANTIZATION_RANGE[dtype]

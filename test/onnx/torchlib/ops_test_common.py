@@ -27,7 +27,7 @@ import onnxscript.evaluator
 import pytest
 
 import torch
-from torch.onnx._internal.exporter import _building, _ir_passes, _tensors
+from torch.onnx._internal.exporter import _building, _ir_builder, _ir_passes, _tensors
 from torch.testing._internal.opinfo import core as opinfo_core
 
 
@@ -467,15 +467,26 @@ def graph_executor(
             opset_imports={"": opset_version, "pkg.torch.onnx": 1},
             name="main_graph",
         )
-        opset = onnxscript.values.Opset("", opset_version)
-        tracer = _building.OpRecorder(opset, {})
+        native = function.__module__.startswith(
+            "torch.onnx._internal.exporter._torchlib."
+        )
+        builder = _ir_builder.GraphBuilder(graph, opset=opset_version)
+        opset = None if native else onnxscript.values.Opset("", opset_version)
+        tracer = None if native else _building.OpRecorder(opset, {})
+
+        def tensor_input(**kwargs):
+            if native:
+                kwargs.pop("opset")
+                return ir.Value(**kwargs)
+            return _tensors.SymbolicTensor(**kwargs)
+
         ort_inputs = {}
         onnxscript_args: list[Any] = []
         onnxscript_kwargs = {}
         for i, arg in enumerate(args):
             if isinstance(arg, np.ndarray):
                 input_name = f"input_{i}"
-                input = _tensors.SymbolicTensor(
+                input = tensor_input(
                     opset=opset,
                     name=input_name,
                     shape=ir.Shape(arg.shape),
@@ -493,7 +504,7 @@ def graph_executor(
                     if isinstance(subarg, np.ndarray):
                         input_name = f"input_{i}_{j}"
                         tensor = torch.tensor(subarg)
-                        input = _tensors.SymbolicTensor(
+                        input = tensor_input(
                             opset=opset,
                             name=input_name,
                             shape=ir.Shape(tensor.shape),
@@ -511,7 +522,7 @@ def graph_executor(
                 onnxscript_args.append(arg)
         for key, value in kwargs.items():
             if isinstance(value, np.ndarray):
-                input = _tensors.SymbolicTensor(
+                input = tensor_input(
                     opset=opset,
                     name=key,
                     shape=ir.Shape(torch.tensor(value).shape),
@@ -525,7 +536,10 @@ def graph_executor(
             else:
                 onnxscript_kwargs[key] = value
 
-        with onnxscript.evaluator.default_as(tracer):
+        context = (
+            builder.activate() if native else onnxscript.evaluator.default_as(tracer)
+        )
+        with context:
             symbolic_outputs = function(*onnxscript_args, **onnxscript_kwargs)
         if not isinstance(symbolic_outputs, Sequence):
             symbolic_outputs = (symbolic_outputs,)
@@ -546,9 +560,11 @@ def graph_executor(
             symbolic_output.dtype = _TORCH_DTYPE_TO_ONNX_TYPE[output.dtype]
 
         graph.outputs.extend(symbolic_outputs)
-        graph.extend(tracer.nodes)
+        if tracer is not None:
+            graph.extend(tracer.nodes)
         onnx_model = ir.Model(graph, ir_version=10, producer_name="torch_test")
-        for identifier, onnxscript_function in tracer.functions.items():
+        functions = builder.functions if native else tracer.functions
+        for identifier, onnxscript_function in functions.items():
             if identifier in onnx_model.functions:
                 continue
             if isinstance(onnxscript_function, ir.Function):

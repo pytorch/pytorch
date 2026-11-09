@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch.onnx._internal._lazy_import import onnx_ir as ir
-from torch.onnx._internal.exporter import _core
+from torch.onnx._internal.exporter._ir_builder import current_builder
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 
 
@@ -25,43 +25,22 @@ def call_op(
 
     Arguments are always inputs, while keyword arguments are attributes.
     """
-    # This is a wrapper around the IR node creation that hooks into the _builder.OpRecorder
-    # tracer so that all nodes created are recorded the same way as if we were to use
-    # onnxscript ops directly.
-    from onnxscript.ir import convenience as ir_convenience
-
-    if _core.current_tracer is None:
-        raise AssertionError("current_tracer must be non-None")
-    tracer = _core.current_tracer
-
-    inputs = list(args)
-
-    # If final inputs are None, strip them from the node inputs
-    for input in reversed(inputs):
-        if input is not None:
-            break
-        inputs.pop()
-
-    # Construct and filter out None attributes
-    attributes = [
-        attr
-        for attr in ir_convenience.convert_attributes(kwargs)
-        if attr.value is not None  # type: ignore[union-attr]
-    ]
-    tracer.nodes.append(
-        node := ir.Node(
-            _domain,
-            op_type,
-            inputs=inputs,
-            attributes=attributes,
-            num_outputs=_num_outputs,
-            version=tracer.opset.version,
-        )
+    # Use the scoped builder so subgraph nodes and ordinary native calls share
+    # recording, optional-input trimming, and opset import handling.
+    builder = current_builder()
+    return builder.node(
+        op_type,
+        args,
+        domain=_domain,
+        version=builder.graph.opset_imports.get(_domain, 1)
+        if _domain
+        else builder.opset,
+        attributes=kwargs,
+        output_types=[None] * _num_outputs,
     )
-    return node.outputs
 
 
-@onnx_impl(torch.ops.higher_order.cond, no_compile=True)
+@onnx_impl(torch.ops.higher_order.cond)
 def higher_order_cond(
     cond: ir.Value,
     true_func: ir.Function,
@@ -95,7 +74,7 @@ def higher_order_cond(
     )
 
 
-@onnx_impl(torch.ops.higher_order.scan, no_compile=True)
+@onnx_impl(torch.ops.higher_order.scan)
 def higher_order_scan(
     body_func: ir.Function,
     scan_inits: Sequence[ir.Value],
@@ -158,7 +137,7 @@ def higher_order_scan(
     )
 
 
-@onnx_impl(torch.ops.higher_order.while_loop, no_compile=True)
+@onnx_impl(torch.ops.higher_order.while_loop)
 def higher_order_while_loop(
     cond_func: ir.Function,
     body_func: ir.Function,
@@ -293,10 +272,10 @@ def higher_order_while_loop(
         if isinstance(inp, ir.Value):
             carried_inputs_values.append(inp)
         elif isinstance(inp, int):
-            const = call_op("Constant", value=ir.tensor(inp))[0]
+            const = current_builder().constant(inp, dtype=ir.DataType.INT64)
             carried_inputs_values.append(const)
         elif isinstance(inp, float):
-            const = call_op("Constant", value=ir.tensor(inp))[0]
+            const = current_builder().constant(inp, dtype=ir.DataType.FLOAT)
             carried_inputs_values.append(const)
         else:
             raise NotImplementedError(
@@ -305,12 +284,11 @@ def higher_order_while_loop(
             )
 
     # Get initial condition by calling cond_func with initial inputs
-    initial_outputs = call_op(
-        cond_func.name,
+    initial_outputs = current_builder().call_function(
+        cond_func,
         *carried_inputs_values,
         *additional_inputs,
-        _num_outputs=len(cond_func.outputs),
-        _domain=cond_func.domain,
+        version=1,
     )
 
     if len(initial_outputs) != 1:
@@ -333,7 +311,7 @@ def higher_order_while_loop(
     return loop_outputs
 
 
-@onnx_impl(torch.ops.higher_order.invoke_subgraph, no_compile=True)
+@onnx_impl(torch.ops.higher_order.invoke_subgraph)
 def higher_order_invoke_subgraph(
     subgraph: ir.Function,
     identifier: str | None,
@@ -362,9 +340,8 @@ def higher_order_invoke_subgraph(
     )
 
     # Create the function call node
-    return call_op(
-        subgraph.name,
+    return current_builder().call_function(
+        subgraph,
         *operands,
-        _num_outputs=len(subgraph.outputs),
-        _domain=subgraph.domain,
+        version=1,
     )

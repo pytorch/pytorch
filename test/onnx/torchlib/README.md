@@ -28,6 +28,19 @@ in onnxruntime by running the inference sessions in a separate process.
 
 ## How to add a new operator test
 
+PyTorch-owned implementations are ordinary Python functions accepting `onnx_ir.Value`
+inputs. Use `current_builder().call("Operator", ...)` from
+`torch.onnx._internal.exporter._ir_builder` to construct nodes; unpack its tuple of
+outputs explicitly. Tensor casts, shape construction, and control flow are explicit.
+The builder converts Python constants according to the ONNX schema but does not
+promote tensor inputs. Operator annotations document inputs and outputs, not dispatch
+overloads: registration selects the ATen target, real/complex branch, and opset.
+
+The test harness activates a native builder and supplies plain IR inputs for these
+functions. The isolated ONNX Script evaluator path remains for external torch_lib
+implementations until they are migrated. Tests requiring newer operators also require
+an ONNX Runtime release supporting their opset.
+
 See _usage_ in [`ops_test_data.py`](./ops_test_data.py)
 
 ## How to add custom OpInfo tests

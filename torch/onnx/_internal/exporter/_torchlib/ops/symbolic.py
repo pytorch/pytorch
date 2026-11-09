@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from onnxscript.ir import convenience as ir_convenience
-
 import torch
 from torch.onnx._internal._lazy_import import onnx_ir as ir
-from torch.onnx._internal.exporter import _core
+from torch.onnx._internal.exporter._ir_builder import current_builder
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 from torch.onnx.ops import _symbolic_impl
 
@@ -30,49 +28,28 @@ def _call_symbolic_op(
 
     Arguments are always inputs, while keyword arguments are attributes.
     """
-    # This is a wrapper around the IR node creation that hooks into the _builder.OpRecorder
-    # tracer so that all nodes created are recorded the same way as if we were to use
-    # onnxscript ops directly.
-
-    if _core.current_tracer is None:
-        raise AssertionError("current_tracer must be non-None")
-    tracer = _core.current_tracer
-
-    inputs = list(args)
-
-    # If final inputs are None, strip them from the node inputs
-    for input in reversed(inputs):
-        if input is not None:
-            break
-        inputs.pop()
-
-    # Construct and filter out None attributes
-    attributes = [
-        attr
-        for attr in ir_convenience.convert_attributes(kwargs)  # type: ignore[arg-type]
-        if attr.value is not None  # type: ignore[union-attr]
-    ]
-    tracer.nodes.append(
-        node := ir.Node(
-            domain,
-            op_type,
-            inputs=inputs,
-            attributes=attributes,
-            num_outputs=len(dtypes),
-            version=version,
-            metadata_props=metadata_props,
-        )
-    )
     # Set the dtypes for the outputs. We set them here because the graph builder
     # Uses PyTorch types which are sometimes inaccurate when they are ONNX only
     # types like float4e2m1.
-    for value, dtype in zip(node.outputs, dtypes):
-        value.dtype = ir.DataType(dtype)
-        # The shape is set by the graph builder. We don't need to set it here.
-    return node.outputs
+    builder = current_builder()
+    outputs = builder.node(
+        op_type,
+        args,
+        attributes=kwargs,
+        domain=domain,
+        version=version
+        if version is not None
+        else builder.graph.opset_imports.get(domain, 1)
+        if domain
+        else builder.opset,
+        output_types=[ir.TensorType(ir.DataType(dtype)) for dtype in dtypes],
+    )
+    next(reversed(builder.graph)).metadata_props.update(metadata_props or {})
+    # The shape is set by the graph builder. We don't need to set it here.
+    return outputs
 
 
-@onnx_impl(torch.ops.onnx_symbolic._symbolic.default, no_compile=True)
+@onnx_impl(torch.ops.onnx_symbolic._symbolic.default)
 def onnx_symbolic_symbolic(
     inputs: Sequence[ir.Value | None],
     op_type: str,
@@ -111,7 +88,7 @@ def onnx_symbolic_symbolic(
     )[0]
 
 
-@onnx_impl(torch.ops.onnx_symbolic._symbolic_multi_out.default, no_compile=True)
+@onnx_impl(torch.ops.onnx_symbolic._symbolic_multi_out.default)
 def onnx_symbolic_symbolic_multi_out(
     inputs: Sequence[ir.Value | None],
     op_type: str,

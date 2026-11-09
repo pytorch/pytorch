@@ -151,8 +151,12 @@ def run_test_output_match(
     # than the aten operator upsample_nearest2d
     onnx_function = torchlib_op_info.op
     input_wrangler = torchlib_op_info.input_wrangler
+    native = onnx_function.__module__.startswith(
+        "torch.onnx._internal.exporter._torchlib."
+    )
     if (
-        not ops_test_common.dtype_op_schema_compatible(
+        not native
+        and not ops_test_common.dtype_op_schema_compatible(
             dtype, onnx_function.op_signature
         )
         and dtype not in COMPLEX_TYPES
