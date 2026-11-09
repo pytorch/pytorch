@@ -626,13 +626,6 @@ class HelionKernel(SIMDKernel[CSEVariable]):
                 self.body.splice(self.compute)
             # Reduction results are stored after the loop.
             self.body.splice(self.stores)
-            # Values from the K loop are out of scope after it. A kernel can have
-            # one K loop per dot, e.g. ((a @ w).float(), (b @ w).float()) for a
-            # and b of shape [512, 16]. Without this, the second loop reuses
-            # tmp1 = in1[tile_r, tile_x] from the first one:
-            #   acc1 = torch.addmm(acc1, tmp2, tmp1)
-            #   CrossRootDeviceValue: Device value 'tmp1' cannot be carried between top-level loops.
-            self.cse.invalidate(OrderedSet(self.accumulators.values()))
         else:
             self.body.splice(self.compute)
             self.body.splice(self.stores)
@@ -986,6 +979,35 @@ class HelionScheduling(TritonScheduling):
 
     can_fuse_vertical = can_fuse
     can_fuse_horizontal = can_fuse
+
+    def generate_node_schedule(
+        self, nodes, numel, rnumel, *, required_post_reduction_index=None
+    ):
+        # Dots first, so that they share one K loop. ((a @ w).float(),
+        # (b @ w).float()) fuses as [dot1, cast1, dot2, cast2]; in that order
+        # the K loop closes at cast1, which needs dot1's result, and dot2 opens
+        # a second K loop that loads w again:
+        #   for tile_r in hl.tile(16):
+        #       tmp0 = in0[tile_y, tile_r]
+        #       tmp1 = in1[tile_r, tile_x]
+        #       acc = torch.addmm(acc, tmp0, tmp1)
+        #   out0[tile_y, tile_x] = acc
+        #   acc1 = hl.zeros([tile_y, tile_x], dtype=torch.float32)
+        #   for tile_r in hl.tile(16):
+        #       tmp2 = in2[tile_y, tile_r]
+        #       tmp3 = in1[tile_r, tile_x]
+        #       acc1 = torch.addmm(acc1, tmp2, tmp3)
+        # No dot reads another node of its kernel (a fused read must use the
+        # index of the write, and a dot reads its operands at a K-dependent
+        # index), so moving the dots first keeps every producer before its use.
+        if required_post_reduction_index is None and any(map(is_helion_matmul, nodes)):
+            nodes = sorted(nodes, key=lambda node: not is_helion_matmul(node))
+        return super().generate_node_schedule(
+            nodes,
+            numel,
+            rnumel,
+            required_post_reduction_index=required_post_reduction_index,
+        )
 
     def create_kernel_choices(self, kernel_features, kernel_args, kernel_kwargs):
         if any(is_helion_matmul(node) for node in kernel_features.scheduler_nodes()):
