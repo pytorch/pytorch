@@ -160,6 +160,7 @@ def register_device_autocast_entry(fn: Any, device_type: str) -> None:
     cache_enabled=...)`` and omit ``device_type``, which is supplied from the
     registration instead. Example::
 
+        >>> # xdoctest: +SKIP("torch.npu is an out-of-tree backend")
         >>> import torch.utils
         >>> torch.utils.register_device_autocast_entry(torch.npu.amp.autocast, "npu")
 
