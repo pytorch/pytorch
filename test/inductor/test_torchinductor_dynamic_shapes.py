@@ -430,6 +430,25 @@ class TestInductorDynamic(DynamicShapesTestCase):
         # covering the fix.
         self.assertGreater(metrics.num_comprehensive_padding, 0)
 
+    @torch._dynamo.config.patch(error_on_recompile=True)
+    def test_bmm_symbolic_strides_no_recompile(self, device):
+        # The bmm decomposition used to upcast bf16 inputs before deciding not
+        # to decompose. The cast checks the layout of `a`, whose strides (h, k, 1)
+        # cannot be ordered without knowing k % 2, so it guarded on k's parity
+        # and the even k recompiled.
+        def fn(x, y):
+            k = x.shape[1]
+            h = k // 2
+            a = x.as_strided((2, x.shape[0], h), (h, k, 1))
+            b = y.as_strided((2, h, y.shape[1]), (h * y.shape[1], y.shape[1], 1))
+            return torch.bmm(a, b)
+
+        cfn = torch.compile(fn, dynamic=True, fullgraph=True)
+        for k in (1001, 1000):
+            x = torch.randn(8, k, device=device, dtype=torch.bfloat16)
+            y = torch.randn(k, 4, device=device, dtype=torch.bfloat16)
+            self.assertEqual(cfn(x, y), fn(x, y))
+
     def test_arange_dynamic(self, device):
         def fn(a):
             batch_size = a.numel()

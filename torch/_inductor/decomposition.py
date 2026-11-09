@@ -476,20 +476,13 @@ def _preserve_bf16x9_matmul(arg_index, arg_name):
     return decorator
 
 
-@register_decomposition([aten.bmm])
-@_preserve_bf16x9_matmul(0, "self")
-@pw_cast_for_opmath
-def bmm(
-    self: torch.Tensor,
-    batch2: torch.Tensor,
-    out_dtype: torch.dtype | None = None,
-) -> torch.Tensor:
+def _bmm_decomposition_kind(self: torch.Tensor, batch2: torch.Tensor) -> str | None:
     # Outer-product specialization: [B, M, 1] x [B, 1, N] -> [B, M, N].
     # This avoids introducing a reduction and maps directly to broadcasted mul.
     if statically_known_true(self.shape[2] == 1) and statically_known_true(
         batch2.shape[1] == 1
     ):
-        return (self * batch2).contiguous()
+        return "outer"
 
     # TODO: Re-enable for mps once our reductions are performant enough
     # (https://github.com/pytorch/pytorch/issues/150121)
@@ -497,17 +490,43 @@ def bmm(
         if statically_known_true(self.shape[1] == 1) or statically_known_true(
             batch2.shape[2] == 1
         ):
-            out = (self.unsqueeze(-1) * batch2.unsqueeze(1)).sum(dim=2)
-            return out
+            return "vector"
     if self.device.type == "cpu":
         if statically_known_true(self.size(1) == 1) and statically_known_true(
             batch2.size(-1) == 1
         ):
-            counters["inductor"]["decompose_bmm"] += 1
-            return torch.sum(
-                self.squeeze(1) * batch2.squeeze(-1), dim=1, keepdim=True
-            ).unsqueeze(1)
-    return NotImplemented
+            return "cpu_dot"
+    return None
+
+
+@register_decomposition([aten.bmm])
+@_preserve_bf16x9_matmul(0, "self")
+def bmm(
+    self: torch.Tensor,
+    batch2: torch.Tensor,
+    out_dtype: torch.dtype | None = None,
+) -> torch.Tensor:
+    # Decide before the opmath cast: casting inputs with symbolic strides runs
+    # dense-layout checks that guard on those strides, and the guards would
+    # remain even though the bmm is then not decomposed.
+    kind = _bmm_decomposition_kind(self, batch2)
+    if kind is None:
+        return NotImplemented
+    return _bmm_decomposed(self, batch2, kind)
+
+
+@pw_cast_for_opmath
+def _bmm_decomposed(
+    self: torch.Tensor, batch2: torch.Tensor, kind: str
+) -> torch.Tensor:
+    if kind == "outer":
+        return (self * batch2).contiguous()
+    if kind == "vector":
+        return (self.unsqueeze(-1) * batch2.unsqueeze(1)).sum(dim=2)
+    counters["inductor"]["decompose_bmm"] += 1
+    return torch.sum(
+        self.squeeze(1) * batch2.squeeze(-1), dim=1, keepdim=True
+    ).unsqueeze(1)
 
 
 @register_decomposition([aten.addmm])
