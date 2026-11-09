@@ -23,7 +23,9 @@ if(NOT __AOTRITON_INCLUDED)
       "manylinux_2_28"  # rocm7.2
       "manylinux_2_28"  # rocm7.14
       "manylinux_2_28"  # "rocm7.15" ROCM 10.0
-      "manylinux_2_28"  # "rocm7.16" ROCM 10.1/10.2
+      "manylinux_2_28"  # "rocm7.16" ROCM 10.1/Early 10.2
+      "manylinux_2_28"  # rocm7.17 ROCM 10.2
+      "manylinux_2_28"  # rocm7.18 ROCM 10.3
       )
   set(__AOTRITON_ROCM_LIST
       "rocm6.4"
@@ -33,6 +35,8 @@ if(NOT __AOTRITON_INCLUDED)
       "rocm7.14"
       "rocm7.15"
       "rocm7.16"
+      "rocm7.17"
+      "rocm7.18"
       )
   if(DEFINED ENV{PYTORCH_AOTRITON_COMMIT})
     set(__AOTRITON_CI_COMMIT "$ENV{PYTORCH_AOTRITON_COMMIT}")
@@ -47,6 +51,8 @@ if(NOT __AOTRITON_INCLUDED)
       "e5ee9522a7ae0aa43bb92752a8e87edaacde00c4bf357f0423f0ca406389de9e"  # rocm7.14
       "4faffe8dd7dcc59c0db16c0a9eb1d88d0cd423df10bc88264dca74ad93870c96"  # rocm7.15
       "dce419812204cc11ba4d470c736395efd20dbdd7f509ee89333c70d316131d6e"  # rocm7.16
+      "5fb6869c5cea979ec512d29949b7a513e9544d377082360f151ec07ca4a6e9af"  # rocm7.17
+      "5cfeec9dae4b37c8152c0ad75f8c54b94faa517fa6dc9818f348ebeac38a429c"  # rocm7.18
       )
   set(__AOTRITON_IMAGE_LIST
       "amd-gfx90a"
@@ -54,6 +60,7 @@ if(NOT __AOTRITON_INCLUDED)
       "amd-gfx950"
       "amd-gfx110x"
       "amd-gfx115x"
+      "amd-gfx117x"
       "amd-gfx120x"
       "amd-gfx1250"
      )
@@ -63,6 +70,7 @@ if(NOT __AOTRITON_INCLUDED)
      "5030077f0388bbbf4d68841a7465d91cfa7b652a3134a73e73f5639c45b6df93" # amd-gfx950
      "9b1bb0f3bfef08845d2b955a006890f287c46b537c07da497e5e084d90d7be35" # amd-gfx110x
      "352e9e5b99c230d7da854f86bac6d14930ab8a811275d39899eae030c6d161ab" # amd-gfx115x
+     "bd00d282c743a97d1e94b1593bd9aef81293a381cc0d0c0f4e7bb2382c52f283" # amd-gfx117x
      "4605621b2422e4a3b28b3357d70e60c55ca57de6179df0a9788ef0b487eda64b" # amd-gfx120x
      "230d10fc13aee49aaeb7227bed879bae41a082457fabecfc0a5c97f047875122" # amd-gfx1250
      )
