@@ -444,7 +444,8 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
     }
   };
 
-  // The host branch of round_to_odd_float in torch/headeronly/util/FloatRounding.h
+  // The host branch of round_to_odd_float in
+  // torch/headeronly/util/floating_point_utils.h
   // (portable, as hiprtc also compiles this).
   inline float round_to_odd_float(double x) {
     const float f = static_cast<float>(x);

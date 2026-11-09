@@ -342,7 +342,6 @@ dtensor_numeric_only_fails = {
 # These will error during sharding propagation and affect unbacked tests too.
 dtensor_fails_no_strategy = {
     xfail("_chunk_cat"),
-    xfail("_to_dtype_rounded"),
     xfail("_unsafe_masked_index"),
     xfail("_unsafe_masked_index_put_accumulate"),
     xfail("addbmm"),
