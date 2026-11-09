@@ -2729,6 +2729,38 @@
       "Hints": []
     }
   ],
+  "GB9356": [
+    {
+      "Gb_type": "CuTeDSL kernel unsupported feature",
+      "Context": "",
+      "Explanation": "Dynamo cannot capture this call of a CuTeDSL host function, which eager may run: {msg}",
+      "Hints": [
+        "Change the code as the explanation says.",
+        "To capture the launch as it is, make it in a custom operator (torch.library.custom_op), whose call Dynamo captures without tracing into it."
+      ]
+    }
+  ],
+  "GB6579": [
+    {
+      "Gb_type": "CuTeDSL kernel call error",
+      "Context": "",
+      "Explanation": "Eager refuses this call too: {exc}",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB3754": [
+    {
+      "Gb_type": "CuTeDSL kernel wrapper attribute",
+      "Context": "",
+      "Explanation": "CuTeDSL kernel {cutedsl_kernel_name(self.kernel)}: Dynamo takes a CuTeDSL kernel wrapper (what torch._library.cutedsl.wrap_cutedsl returns) for its host function and write set, so in the compiled region it reads only the wrapper's kernel and mutates_args, not {name}.",
+      "Hints": [
+        "Read the attribute outside the compiled region and pass its value in.",
+        "To launch the kernel, call the wrapper itself, which Dynamo captures."
+      ]
+    }
+  ],
   "GB0159": [
     {
       "Gb_type": "Unsupported ndarray.__version__ access",
