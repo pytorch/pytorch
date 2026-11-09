@@ -56,6 +56,15 @@ class TestInnerTreeCombineUnroll(TestCase):
         with self.assertRaisesRegex(ValueError, next(iter(updates))):
             rt.itree_combine_plan(None, 4, arch=policy)
 
+    def test_nfields_must_match_trait(self):
+        import cutlass
+
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
+
+        trait = T.VarMeanOps(correction=1, acc=cutlass.Float32)
+        with self.assertRaisesRegex(ValueError, "disagrees with trait.nfields"):
+            rt.itree_combine_plan(None, 4, nfields=2, trait=trait)
+
     @parametrize(
         "count,last,key,weights,staged",
         [
@@ -119,14 +128,29 @@ class TestInnerTreeCombineUnroll(TestCase):
         arch = rt._ITREE_ARCH[(10, 0)]._replace(combine_max=512)
         uniform = arch._replace(uniform_count=True, combine_weights=weights)
         kwargs = dict(nrows=32, trait=trait)
-        # 32 rows of 516 staged floats: three fields exceed it, two plus one row of 512 do not.
-        caps = SimpleNamespace(smem_per_block_optin=32 * 516 * 4 * 2 + 512 * 4)
-        with mock.patch.object(rt._hw, "caps", return_value=caps):
-            baseline = rt.itree_combine_plan(split, 4, arch=arch, **kwargs)
-            candidate = rt.itree_combine_plan(split, 4, arch=uniform, **kwargs)
-        self.assertEqual(baseline.combine_tile, 256)
-        self.assertEqual(candidate.combine_tile, 512)
-        self.assertEqual(candidate.combine_weights, weights)
+        # 32 rows of 516 staged floats: three fields exceed the budget and two fit it, and two
+        # plus one weight row of 512 fit it exactly but not a byte less.
+        fit = 32 * 516 * 4 * 2 + 512 * 4
+        for smem, weighted_tile in ((fit - 1, 256), (fit, 512)):
+            caps = SimpleNamespace(smem_per_block_optin=smem)
+            with mock.patch.object(rt._hw, "caps", return_value=caps):
+                baseline = rt.itree_combine_plan(split, 4, arch=arch, **kwargs)
+                candidate = rt.itree_combine_plan(split, 4, arch=uniform, **kwargs)
+            self.assertEqual(baseline.combine_tile, 256)
+            self.assertEqual(candidate.combine_tile, weighted_tile if weights else 512)
+            self.assertEqual(candidate.combine_weights, weights)
+
+    @parametrize(
+        "split", [(2**24, 8192, 8192, 512, 512), (1024, 2**24, 2**24, 512, 512)]
+    )
+    def test_uniform_combine_ok_limits(self, split):
+        """Accept 2**24 partials and 2**24-value partials, whose counts stay exact in fp32."""
+        import cutlass
+
+        from torch._native.ops.reductions import tile, traits as T
+
+        trait = T.VarMeanOps(correction=1, acc=cutlass.Float32)
+        self.assertTrue(tile.uniform_combine_ok(trait, split))
 
     @parametrize(
         "updates,msg",
@@ -243,10 +267,12 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         self, device, name, uniform, unroll
     ):
         """Fold several cp.async tiles, fully and partly unrolled and with uniform Welford
-        counts, to the default bits through the row and general-axis entry points."""
+        counts, to the default bits through the row, general-axis and, for var_mean,
+        ordered column entry points."""
         import cutlass
 
         from torch._native.ops.reductions import (
+            kernel_coltile as ct,
             kernel_general as kg,
             kernel_rowtile as rt,
             traits as T,
@@ -262,29 +288,34 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         x = torch.randn(1, 1 << 23, device=device)
         # A strided copy of the row takes the general-axis indexed tree.
         strided = torch.stack([x[0], x[0]], dim=1)[:, 0]
+        # 128 split partitions per column, a whole number of 128-partial tiles.
+        cols = None if name == "sum" else torch.randn(1 << 20, 32, device=device)
 
         def run(arch, key):
             with mock.patch.object(rt, "_itree_arch", return_value=arch):
-                combines = [
-                    rt.itree_combine_plan(
-                        rt.trait_itree_plan(
-                            trait, x.shape[1], 1, 4, stage=stage, device=x.device
-                        ),
-                        4,
-                        nrows=1,
-                        trait=trait,
-                    )
-                    for stage in (None, False)
-                ]
+                combine = rt.itree_combine_plan(
+                    rt.trait_itree_plan(trait, x.shape[1], 1, 4, device=x.device),
+                    4,
+                    nrows=1,
+                    trait=trait,
+                )
                 rows = rt.reduce_row_tile(
                     trait, key, x, dsts, nouts=nouts, order="inner_tree"
                 )
                 general = kg._reduce_all(
                     trait, key, strided, dsts, nouts, order="inner_tree"
                 )
-            return combines, rows + general
+                if cols is None:
+                    return combine, None, rows + general
+                plan = rt.trait_itree_plan(trait, *cols.shape, 4, stage=False)
+                col_combine = rt.itree_combine_plan(plan, 4, nrows=32, trait=trait)
+                config = ct.OrderedColConfig(0)
+                col = ct.reduce_ordered_col(
+                    trait, f"{key}_col", cols, dsts, nouts, config=config
+                )
+            return combine, col_combine, rows + general + col
 
-        _, want = run(rt._ITREE_ARCH["default"], f"multitile_default_{name}")
+        *_, want = run(rt._ITREE_ARCH["default"], f"multitile_default_{name}")
         # 128-partial tiles still repeat, and keep full unrolling's compile short.
         arch = rt._ITREE_ARCH[(9, 0)]._replace(
             combine_unroll=unroll,
@@ -292,12 +323,24 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             uniform_count=uniform != "off",
             combine_weights=uniform == "weights",
         )
-        combines, got = run(arch, f"multitile_{unroll}_{uniform}_{name}")
-        for combine in combines:
-            self.assertGreater(combine.split[0] // max(combine.combine_tile, 1), 1)
-            self.assertEqual(combine.combine_unroll, unroll)
-            self.assertEqual(bool(combine.combine_count), uniform != "off")
-            self.assertEqual(combine.combine_weights, uniform == "weights")
+        key = f"multitile_{unroll}_{uniform}_{name}"
+        combine, col_combine, got = run(arch, key)
+        self.assertGreater(combine.split[0] // max(combine.combine_tile, 1), 1)
+        self.assertEqual(combine.combine_unroll, unroll)
+        self.assertEqual(bool(combine.combine_count), uniform != "off")
+        self.assertEqual(combine.combine_weights, uniform == "weights")
+        # Both entry points ran this plan: the row stage-two key ends with its sig, and the
+        # general one has the input alignments after it.
+        row_sigs = {k[-1] for k in rt._CACHE if k[:2] == ("rowitree2", key)}
+        general = {k[-2] for k in kg._COMPILE_CACHE if k[1:3] == ("genitree2", key)}
+        self.assertEqual(row_sigs, {combine.sig})
+        self.assertEqual(general, {combine.sig})
+        if col_combine is not None:
+            # Split columns fold their partials through the general genitree2 combine.
+            self.assertEqual(bool(col_combine.combine_count), uniform != "off")
+            col_key = ("genitree2", f"{key}_col")
+            col_sigs = {k[-2] for k in kg._COMPILE_CACHE if k[1:3] == col_key}
+            self.assertEqual(col_sigs, {col_combine.sig})
         for g, w in zip(got, want):
             self.assertEqual(g.view(torch.int32), w.view(torch.int32))
 
