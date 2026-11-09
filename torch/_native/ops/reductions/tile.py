@@ -479,18 +479,19 @@ def fold_row_aligned(
     r,
     tm: cutlass.Constexpr,
     lane,
-    n,
     unroll: cutlass.Constexpr = _ROLL_UNROLL,
 ):
-    """Fold a ragged row with aligned wide interior loads and scalar edges.
+    """Fold a ragged tm.N-wide row with aligned wide interior loads and scalar edges.
 
-    Requires vec * itemsize == TRANSFER_ALIGNMENT (TileReduce checks it), rows packed at
-    stride N from a 16-byte aligned base, so the logical prefix below matches the
-    pointer's alignment, and nonempty rows, since edge loads are unconditional
-    (reduce_row_tile checks both).
+    Requires vec * itemsize == TRANSFER_ALIGNMENT (TileReduce checks it) and rows packed
+    at stride N from a 16-byte aligned base, so the logical prefix below matches the
+    pointer's alignment (reduce_row_tile checks it). TileReduce and reduce_row_tile also
+    reject empty rows: one would fold nothing and return trait.init(), which is no
+    result for min, max or arg traits.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
+    n = Int32(tm.N)
     vec = const_expr(tm.vec)
     threads_per_row = const_expr(tm.threads_per_row)
     rowv = mX[Int64(r), None]
@@ -506,7 +507,9 @@ def fold_row_aligned(
     tail = prefix + groups * Int32(vec)
     # B200 64 MiB: 16-bit sums at N = 255/257 ran 1.4-1.5x N = 256/258 (27 vs 18-20 us)
     # yet beat scalar 1.7x; Welford (from N = 1025) pays at most 7%, N >= 4095 none.
-    # Both edges are multiples of gcd(N, vec) and at most vec - gcd(N, vec) long.
+    # Both edges are multiples of gcd(N, vec) and at most vec - gcd(N, vec) long, so lane
+    # 0 keeps them rather than spreading them over lanes; the path beat ATen 1.07-2.4x
+    # (fp16 std/all/any, B200).
     for i in cutlass.range_constexpr(vec - math.gcd(tm.N, vec)):
         prefix_valid = (lane == Int32(0)) & (Int32(i) < prefix)
         prefix_index = Int32(i) if prefix_valid else Int32(0)
@@ -1807,7 +1810,6 @@ class TileReduce:
                 unit,
                 self.tm,
                 lane,
-                Int32(const_expr(self.N)),
                 const_expr(self.unroll),
             )
             acc = merge_lanes(trait, acc, const_expr(self.threads_per_row))
