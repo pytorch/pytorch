@@ -57,7 +57,7 @@ def select_xcta_config(
 ) -> _XctaConfig:
     # B200 single-row Welford at 256 MiB and 2 GiB takes longer sub-rows.
     if (
-        cc == (10, 0)
+        cc in _RB._B200_CCS
         and dtype in _RB._B200_DTYPES
         and M == 1
         and N * dtype.itemsize in (256 << 20, 2 << 30)
