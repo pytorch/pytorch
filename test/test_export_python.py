@@ -9,6 +9,7 @@ import uuid
 
 import torch
 from torch.compiler import PrecompileError
+from torch.compiler._export_python import _CODE_BEGIN, _CODE_END
 from torch.compiler.precompile import no_compilation
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -25,41 +26,17 @@ _MODULE = """
 import os
 
 import torch
-import torch._dynamo.testing
 
 def scaled(x, *, scale=2.0):
     return (x * scale).relu()
-
-def inner(x):
-    y = x.sin()
-    print("graph break")
-    return y.cos()
-
-def outer(x):
-    return inner(x * 2) + 1
-
-live_counter = torch._dynamo.testing.CompileCounter()
-
-@torch.compile(backend=live_counter)
-def live(x):
-    y = x.sin()
-    print("graph break")
-    return y.cos()
-
-def calls_live(x):
-    return live(x) + 1
 
 def breaks(x):
     y = x.sin()
     print("graph break")
     return y.cos()
 
-def flaky(x, fail):
-    y = x.sin()
-    print("graph break")
-    if fail:
-        raise ValueError("first call failed")
-    return y.cos()
+def matmul(x, y):
+    return x @ y
 
 _ARTIFACTS = os.path.join(os.path.dirname(__file__), "decorated")
 
@@ -67,14 +44,26 @@ _ARTIFACTS = os.path.join(os.path.dirname(__file__), "decorated")
 def decorated_scaled(x):
     return (x * 2.0).relu()
 
-@torch.compiler.export_python(path=os.path.join(_ARTIFACTS, "outer.py"))
-def decorated_outer(x):
-    return inner(x * 2) + 1
+def shifted(x):
+    return x * 7.25 + 1
 
-@torch.compiler.export_python(path=os.path.join(_ARTIFACTS, "countdown.py"))
-def countdown(x, n):
-    return x if n == 0 else countdown(x + 1, n - 1)
 """
+
+
+def _graph_code(path):
+    with open(path) as f:
+        return f.read().partition(_CODE_BEGIN)[2].rpartition(_CODE_END)[0]
+
+
+def _edit_graph_code(path, old, new):
+    # Only the graph code, as an agent hill-climbing the file would.
+    with open(path) as f:
+        head, begin, rest = f.read().partition(_CODE_BEGIN)
+    code, end, tail = rest.rpartition(_CODE_END)
+    if old not in code:
+        raise AssertionError(f"{old!r} not in the graph code of {path}")
+    with open(path, "w") as f:
+        f.write(head + begin + code.replace(old, new) + end + tail)
 
 
 def _in_a_fresh_process(test, body):
@@ -95,10 +84,7 @@ def _in_a_fresh_process(test, body):
     return out.stdout
 
 
-@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
-class TestExportPython(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
+class _ExportPythonTestCase(TestCase):
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -118,6 +104,11 @@ class TestExportPython(TestCase):
             getattr(self.module, name)
         )
 
+
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+class TestExportPython(_ExportPythonTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_first_call_captures_and_later_calls_serve_the_file(self):
         path = os.path.join(self.dir, "artifacts", "scaled.py")
         run = self._export("scaled", path)
@@ -130,85 +121,58 @@ class TestExportPython(TestCase):
             y = torch.randn(8)
             self.assertEqual(run(y, scale=3.0), (y * 3.0).relu())
 
-    def test_graph_break_serves_in_the_capturing_process(self):
-        path = os.path.join(self.dir, "breaks.py")
-        run = self._export("breaks", path)
-        x = torch.randn(4)
-        self.assertEqual(run(x), x.sin().cos())
-        with no_compilation():
-            self.assertEqual(run(x), x.sin().cos())
-        # The capture's live compile is released, not broken: fn still compiles.
-        self.assertEqual(torch.compile(self.module.breaks)(x), x.sin().cos())
-
-    def test_a_graph_break_in_a_called_function_serves_in_the_capturing_process(self):
-        # Written as an installed artifact, which refuses frames with live entries.
-        path = os.path.join(self.dir, "outer.py")
-        run = self._export("outer", path)
-        x = torch.randn(4)
-        self.assertEqual(run(x), (x * 2).sin().cos() + 1)
-        with no_compilation():
-            self.assertEqual(run(x), (x * 2).sin().cos() + 1)
-
-    def test_a_live_compile_of_another_function_survives_the_capture(self):
-        x = torch.randn(4)
-        self.assertEqual(self.module.live(x), x.sin().cos())
-        compiles = self.module.live_counter.frame_count
-        run = self._export("calls_live", os.path.join(self.dir, "calls_live.py"))
-        self.assertEqual(run(x), x.sin().cos() + 1)
-        self.assertEqual(self.module.live(x), x.sin().cos())
-        # Its frames ran under its own compile, so the capture released none of them.
-        self.assertEqual(self.module.live_counter.frame_count, compiles)
-
-    def test_a_capture_beside_a_loaded_artifact_on_a_shared_frame(self):
-        # outer and decorated_outer both graph-break in inner, where the installed
-        # artifact loaded first keeps its entries while the second is captured.
-        x = torch.randn(4)
-        expected = (x * 2).sin().cos() + 1
-        run = self._export("outer", os.path.join(self.dir, "outer.py"))
-        self.assertEqual(run(x), expected)
-        self.assertEqual(self.module.decorated_outer(x), expected)
-        with no_compilation():
-            self.assertEqual(run(x), expected)
-            self.assertEqual(self.module.decorated_outer(x), expected)
-        # The first artifact served inner during the second capture, which therefore
-        # did not compile it: the second artifact is standalone, inner left to Python.
-        with open(os.path.join(self.dir, "decorated", "outer.py")) as f:
-            self.assertIn('SERVING_MODE = "standalone"', f.read())
-        _in_a_fresh_process(
-            self,
-            """
-            from torch.compiler.precompile import no_compilation
-            x = torch.randn(4)
-            with no_compilation():
-                torch.testing.assert_close(m.decorated_outer(x), (x * 2).sin().cos() + 1)
-            """,
+    def test_the_file_is_the_graph_code_and_one_captured_line(self):
+        path = os.path.join(self.dir, "scaled.py")
+        self._export("scaled", path)(torch.randn(8))
+        with open(path) as f:
+            lines = f.read().splitlines()
+        self.assertTrue(
+            lines[0].startswith("# Exported by torch.compiler.export_python")
         )
+        self.assertIn("def call(", _graph_code(path))
+        self.assertTrue(lines[-1].startswith("_CAPTURED = '"))
+        # Nothing between the graph code and that line but a comment.
+        tail = lines[lines.index(_CODE_END) + 1 : -1]
+        self.assertTrue(all(not line or line.startswith("#") for line in tail), tail)
+
+    def test_a_graph_break_is_refused(self):
+        path = os.path.join(self.dir, "breaks.py")
+        with self.assertRaisesRegex(PrecompileError, "does not trace as one graph"):
+            self._export("breaks", path)(torch.randn(4))
+        self.assertFalse(os.path.exists(path))
+
+    def test_a_call_that_needs_a_backward_graph_is_refused(self):
+        path = os.path.join(self.dir, "scaled.py")
+        run = self._export("scaled", path)
+        x = torch.randn(8, requires_grad=True)
+        with self.assertRaisesRegex(PrecompileError, "backward graph too"):
+            run(x)
+        self.assertFalse(os.path.exists(path))
+        with torch.no_grad():
+            self.assertEqual(run(x), (x * 2.0).relu())
+            with no_compilation():
+                self.assertEqual(run(x), (x * 2.0).relu())
 
     def test_a_new_process_serves_the_file_without_compiling(self):
-        path = os.path.join(self.dir, "breaks.py")
-        self._export("breaks", path)(torch.randn(4))
+        path = os.path.join(self.dir, "scaled.py")
+        self._export("scaled", path)(torch.randn(4))
         _in_a_fresh_process(
             self,
             f"""
             from torch.compiler.precompile import no_compilation
-            run = torch.compiler.export_python(path={path!r})(m.breaks)
+            run = torch.compiler.export_python(path={path!r})(m.scaled)
             x = torch.randn(4)
             with no_compilation():
-                torch.testing.assert_close(run(x), x.sin().cos())
+                torch.testing.assert_close(run(x), (x * 2.0).relu())
             """,
         )
 
     def test_the_decorator_serves_here_and_in_a_new_process(self):
-        # The module binds export_python's wrapper under each decorated name, which
-        # loading looks the captured function up through.
+        # The module binds export_python's wrapper under the decorated name.
         x = torch.randn(4)
-        for fn, expected in [
-            (self.module.decorated_scaled, (x * 2.0).relu()),
-            (self.module.decorated_outer, (x * 2).sin().cos() + 1),
-        ]:
-            self.assertEqual(fn(x), expected)
-            with no_compilation():
-                self.assertEqual(fn(x), expected)
+        self.assertEqual(self.module.decorated_scaled(x), (x * 2.0).relu())
+        with no_compilation():
+            self.assertEqual(self.module.decorated_scaled(x), (x * 2.0).relu())
         _in_a_fresh_process(
             self,
             """
@@ -216,28 +180,19 @@ class TestExportPython(TestCase):
             x = torch.randn(4)
             with no_compilation():
                 torch.testing.assert_close(m.decorated_scaled(x), (x * 2.0).relu())
-                torch.testing.assert_close(m.decorated_outer(x), (x * 2).sin().cos() + 1)
             """,
         )
 
-    def test_a_recursive_first_call_is_refused(self):
-        # Refused every time, writing nothing: each refusal resets the capture.
-        for _ in range(2):
-            with self.assertRaisesRegex(PrecompileError, "called itself during the"):
-                self.module.countdown(torch.zeros(2), 2)
-        artifact = os.path.join(self.dir, "decorated", "countdown.py")
-        self.assertFalse(os.path.exists(artifact))
-
     def test_a_first_call_that_raises_writes_nothing_and_the_next_call_captures(self):
-        path = os.path.join(self.dir, "flaky.py")
-        run = self._export("flaky", path)
-        x = torch.randn(4)
-        with self.assertRaisesRegex(ValueError, "first call failed"):
-            run(x, True)
+        path = os.path.join(self.dir, "matmul.py")
+        run = self._export("matmul", path)
+        x, y = torch.randn(2, 3), torch.randn(3, 2)
+        with self.assertRaises(RuntimeError):
+            run(x, x)
         self.assertFalse(os.path.exists(path))
-        self.assertEqual(run(x, False), x.sin().cos())
+        self.assertEqual(run(x, y), x @ y)
         with no_compilation():
-            self.assertEqual(run(x, False), x.sin().cos())
+            self.assertEqual(run(x, y), x @ y)
 
     def test_deleting_the_file_recaptures(self):
         path = os.path.join(self.dir, "scaled.py")
@@ -257,6 +212,54 @@ class TestExportPython(TestCase):
             self.assertRaisesRegex(PrecompileError, "no captured variant"),
         ):
             run(torch.randn(3, 3))
+
+    def test_an_edited_file_runs_the_edit(self):
+        path = os.path.join(self.dir, "shifted.py")
+        x = torch.randn(8)
+        self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
+        _edit_graph_code(path, "7.25", "3.5")
+        with self.assertRaisesRegex(
+            PrecompileError, "other code for the same compiled"
+        ):
+            self._export("shifted", path)(x)
+        _in_a_fresh_process(
+            self,
+            f"""
+            run = torch.compiler.export_python(path={path!r})(m.shifted)
+            x = torch.ones(8)
+            torch.testing.assert_close(run(x), x * 3.5 + 1)
+            """,
+        )
+
+    def test_a_missing_cache_still_serves(self):
+        path = os.path.join(self.dir, "shifted.py")
+        x = torch.randn(8)
+        self._export("shifted", path)(x)
+        with self.assertNoLogs("torch.compiler._export_python", "INFO"):
+            self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
+        os.remove(path + ".cache")
+        with self.assertLogs("torch.compiler._export_python", "INFO") as logs:
+            self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
+        self.assertIn("serving it without the cache", logs.output[0])
+        with (
+            no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "delete .* to recapture"),
+        ):
+            self._export("shifted", path)(x)
+
+    def test_a_corrupt_cache_is_reported_as_corrupt(self):
+        path = os.path.join(self.dir, "shifted.py")
+        x = torch.randn(8)
+        self._export("shifted", path)(x)
+        with open(path + ".cache", "wb") as f:
+            f.write(b"not a cache")
+        with self.assertLogs("torch._precompile", "WARNING") as logs:
+            self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
+        self.assertIn("could not read the cache envelope", logs.output[0])
+        os.remove(path + ".cache")
+        os.mkdir(path + ".cache")
+        with self.assertRaisesRegex(PrecompileError, "could not read the cache"):
+            self._export("shifted", path)(x)
 
     def test_a_main_module_function_is_refused(self):
         def fn(x):
