@@ -605,28 +605,26 @@ else:
             # would raise inside split_group, so fall back to the new_group
             # path below when splitting is unsupported. torchcomms handles
             # splitting independently of supportsSplitting(), so it is exempt.
-            parent_supports_splitting = (
-                dist_config.use_torchcomms
-                or (
-                    torch.accelerator.is_available()
-                    and default_group._get_backend(
-                        torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
-                    ).supports_splitting
-                )
-            )
+            # This check is the last term so the backend lookup only happens
+            # once the split path is otherwise viable.
             if (
                 (
                     getattr(default_group, "bound_device_id", None) is not None
                     or dist_config.use_torchcomms
                 )
                 and torch.accelerator.is_available()
-                and parent_supports_splitting
                 and (
                     backend is None
                     or default_group._get_backend(
                         torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
                     ).name()
                     == backend
+                )
+                and (
+                    dist_config.use_torchcomms
+                    or default_group._get_backend(
+                        torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
+                    ).supports_splitting
                 )
             ):
                 split_ranks = pg_ranks_by_dim.tolist()
