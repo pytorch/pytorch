@@ -133,7 +133,7 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
 
         triton_kernel_wrapper_functional returns a dict.  If the dict node is
         threaded through control_deps as a pass-through value,
-        decompose_triton_kernel_wrapper_functional later replaces it with a
+        decompose_user_kernel_wrapper_functional later replaces it with a
         raw Python dict (via replace_with_graph -> replace_all_uses_with),
         corrupting the graph and causing KeyError during lowering.
 

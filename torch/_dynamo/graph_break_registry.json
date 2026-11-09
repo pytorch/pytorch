@@ -2729,6 +2729,69 @@
       "Hints": []
     }
   ],
+  "GB3719": [
+    {
+      "Gb_type": "wrap_cutedsl: improper arguments",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "wrap_cutedsl takes the host function as its only positional argument and the keyword argument mutates_args.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB6625": [
+    {
+      "Gb_type": "wrap_cutedsl: host_fn is not a @cute.jit function",
+      "Context": "host_fn={host_fn}",
+      "Explanation": "wrap_cutedsl only works on host functions decorated with @cute.jit: not on a wrapper that wrap_cutedsl returned, a functools.wraps decorator of a host function, a @cute.kernel function, a kernel object (one whose class's __call__ is @cute.jit) or a bound @cute.jit method. For the last two, as eager wrap_cutedsl says, wrap a @cute.jit function that takes the object as a cutlass.Constexpr parameter and calls the method on it, and pass the object to that wrapper.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB3795": [
+    {
+      "Gb_type": "wrap_cutedsl: non-constant mutates_args",
+      "Context": "mutates_args={mutates_args}",
+      "Explanation": "Dynamo supports wrap_cutedsl(host_fn, mutates_args=...) only where mutates_args is a constant.",
+      "Hints": [
+        "Pass mutates_args as 'unknown' or a list of parameter names.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9356": [
+    {
+      "Gb_type": "CuTeDSL kernel unsupported feature",
+      "Context": "",
+      "Explanation": "Dynamo cannot capture this call of a CuTeDSL host function, which eager may run: {msg}",
+      "Hints": [
+        "Change the code as the explanation says.",
+        "To capture the launch as it is, make it in a custom operator (torch.library.custom_op), whose call Dynamo captures without tracing into it."
+      ]
+    }
+  ],
+  "GB6579": [
+    {
+      "Gb_type": "CuTeDSL kernel call error",
+      "Context": "",
+      "Explanation": "Eager refuses this call too: {exc}",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB3754": [
+    {
+      "Gb_type": "CuTeDSL kernel wrapper attribute",
+      "Context": "",
+      "Explanation": "CuTeDSL kernel {cutedsl_kernel_name(self.kernel)}: Dynamo takes a CuTeDSL kernel wrapper (what torch._library.cutedsl.wrap_cutedsl returns) for its host function and write set, so in the compiled region it reads only the wrapper's kernel and mutates_args, not {name}.",
+      "Hints": [
+        "Read the attribute outside the compiled region and pass its value in.",
+        "To launch the kernel, call the wrapper itself, which Dynamo captures."
+      ]
+    }
+  ],
   "GB0159": [
     {
       "Gb_type": "Unsupported ndarray.__version__ access",
