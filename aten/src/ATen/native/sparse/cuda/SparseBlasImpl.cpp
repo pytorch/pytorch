@@ -545,14 +545,13 @@ class CuSparseSpMatCooFromCsrDescriptor
                        col_indices_,
                        /*out_int32=*/col_indices_.scalar_type() == kInt)
                        .select(0, -2);
-#if CUDA_VERSION < 13010
     // SpMM with one output column can use SpMV, which requires aligned COO
-    // row indices before CUDA 13.1 (gh-167901).
+    // row indices before cuSPARSE 12.7 (CUDA 13.1, gh-167901).
     if (is_vector &&
-        reinterpret_cast<uintptr_t>(row_indices_.data_ptr()) % 16 != 0) {
+        reinterpret_cast<uintptr_t>(row_indices_.data_ptr()) % 16 != 0 &&
+        at::cuda::sparse::cusparse_runtime_version() < 12700) {
       row_indices_ = row_indices_.clone();
     }
-#endif
 
     cusparseSpMatDescr_t raw_descriptor = nullptr;
     TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
