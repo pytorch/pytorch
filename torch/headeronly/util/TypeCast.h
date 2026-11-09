@@ -7,9 +7,9 @@
 #include <torch/headeronly/util/Float8_e5m2fnuz.h>
 #include <torch/headeronly/util/Float8_e5m3fnu.h>
 #include <torch/headeronly/util/Float8_e8m0fnu.h>
-#include <torch/headeronly/util/FloatRounding.h>
 #include <torch/headeronly/util/Half.h>
 #include <torch/headeronly/util/complex.h>
+#include <torch/headeronly/util/floating_point_utils.h>
 #include <torch/headeronly/util/overflows.h>
 
 #include <limits>

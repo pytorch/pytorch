@@ -67,9 +67,9 @@ def _overflow_value(dtype):
     return math.inf
 
 
-def _expected_narrow(x, dst, mode):
-    """Reference rounding of the float64 values x (exact source values) to dst,
-    computed from a table of all of dst's finite values."""
+def _expected_narrow(x, dst):
+    """Reference rounding to nearest even of the float64 values x (exact source
+    values) to dst, computed from a table of all of dst's finite values."""
     mags = _finite_magnitudes(dst)
     n = len(mags)
     signed = dst not in UNSIGNED_DTYPES
@@ -85,26 +85,12 @@ def _expected_narrow(x, dst, mode):
     down = down.clamp(min=0)
     up = torch.where((mags[down] == a) | below, down, down + 1)
     up_value = torch.where(up < n, mags[up.clamp(max=n - 1)], virtual_next)
-
-    if mode == "to_nearest_even":
-        to_zero = torch.zeros_like(neg)
-        mid = (mags[down] + up_value) / 2
-        tie = up if no_mantissa else torch.where(down % 2 == 0, down, up)
-        r = torch.where(a < mid, down, torch.where(a > mid, up, tie))
-    else:
-        to_zero = {
-            "toward_zero": torch.ones_like(neg),
-            "toward_positive": neg,
-            "toward_negative": ~neg,
-        }[mode]
-        r = torch.where(to_zero, down, up)
+    mid = (mags[down] + up_value) / 2
+    tie = up if no_mantissa else torch.where(down % 2 == 0, down, up)
+    r = torch.where(a < mid, down, torch.where(a > mid, up, tie))
 
     value = mags[r.clamp(max=n - 1)]
-    value = torch.where(
-        r >= n,
-        torch.where(to_zero, mags[-1], torch.full_like(value, overflow_value)),
-        value,
-    )
+    value = torch.where(r >= n, torch.full_like(value, overflow_value), value)
     value = torch.where(x.isinf(), torch.full_like(value, overflow_value), value)
     value = torch.where(neg, -value, value)
     if not has_neg_zero:
@@ -112,41 +98,11 @@ def _expected_narrow(x, dst, mode):
     return torch.where(x.isnan(), torch.full_like(value, math.nan), value)
 
 
-def _expected_float32(x, mode):
-    """Reference rounding of float64 values to float32."""
-    x = x.numpy()
-    with np.errstate(over="ignore", invalid="ignore"):
-        rn = x.astype(np.float32)
-    if mode == "to_nearest_even":
-        return torch.from_numpy(rn).double()
-    neg = np.signbit(x)
-    finite_max = np.float32(np.finfo(np.float32).max)
-    down = np.where(
-        np.isinf(rn) & np.isfinite(x), np.copysign(finite_max, x).astype(np.float32), rn
-    )
-    down = np.where(
-        np.abs(down.astype(np.float64)) > np.abs(x),
-        np.nextafter(down, np.float32(0)),
-        down,
-    )
-    toward_inf = np.where(neg, np.float32(-np.inf), np.float32(np.inf))
-    up = np.where(
-        np.abs(down.astype(np.float64)) < np.abs(x),
-        np.nextafter(down, toward_inf),
-        down,
-    )
-    to_zero = {
-        "toward_zero": np.ones_like(neg),
-        "toward_positive": neg,
-        "toward_negative": ~neg,
-    }[mode]
-    return torch.from_numpy(np.where(to_zero, down, up)).double()
-
-
-def _expected(x, dst, mode):
+def _expected(x, dst):
     if dst is torch.float32:
-        return _expected_float32(x, mode)
-    return _expected_narrow(x, dst, mode)
+        with np.errstate(over="ignore", invalid="ignore"):
+            return torch.from_numpy(x.numpy().astype(np.float32)).double()
+    return _expected_narrow(x, dst)
 
 
 def _boundary_inputs(src, dst):
@@ -241,7 +197,7 @@ class TestRoundedConversion(TestCase):
     def test_default_matches_reference(self, device, pair):
         src, dst = pair
         x = _all_inputs(src, dst)
-        expected = _expected(x.double(), dst, "to_nearest_even")
+        expected = _expected(x.double(), dst)
         self.assertSameValues(x.to(device).to(dst), expected, x)
 
     @dtypes(torch.float16, torch.bfloat16)

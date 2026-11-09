@@ -73,6 +73,7 @@ from torch.export.graph_signature import (
 from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -948,6 +949,255 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(output_after[1][0], output_before[1][0]))
         self.assertTrue(torch.allclose(output_after[1][1], output_before[1][1]))
 
+    def _check_functorch_fake_views(self, graph, num_batched):
+        # Values recorded inside vmap and jvp are fake views of the tensors the
+        # functorch wrappers wrap, as in eager. Saving and loading rebuild the
+        # values without aliasing, so callers pass the graph of a direct export.
+        for node in graph.nodes:
+            if isinstance(node.meta.get("val"), torch.Tensor):
+                self.assertTrue(is_fake_tensor(node.meta["val"]), node.name)
+        add_batch_dim = torch._functorch.predispatch._add_batch_dim
+        batched = graph.find_nodes(op="call_function", target=add_batch_dim)
+        self.assertEqual(len(batched), num_batched)
+        for node in batched:
+            val, wrapped, dim = node.meta["val"], node.args[0].meta["val"], node.args[1]
+            self.assertEqual(
+                StorageWeakRef(val.untyped_storage()),
+                StorageWeakRef(wrapped.untyped_storage()),
+            )
+            self.assertEqual(val.storage_offset(), wrapped.storage_offset())
+            self.assertEqual(
+                val.stride(), wrapped.stride()[:dim] + wrapped.stride()[dim + 1 :]
+            )
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_nested_vmap_export(self) -> None:
+        class NestedVmap(torch.nn.Module):
+            def forward(self, x):
+                return torch.vmap(torch.vmap(lambda v: v * 2 + 1), in_dims=1)(x)
+
+        # x starts at a storage offset, and the outer vmap is over its second dim.
+        x = torch.randn(3, 4, 6)[:, :, 1:]
+        graph = torch.export.export(NestedVmap(), (x,)).graph
+        self._check_functorch_fake_views(graph, num_batched=2)
+        self.assertEqual(export(NestedVmap(), (x,)).module()(x), NestedVmap()(x))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_vmap_export_dynamic_shapes(self) -> None:
+        # The recorded views get symbolic sizes from x, and a symbolic stride
+        # and storage offset from the slice of y.
+        class VmapOverColumns(torch.nn.Module):
+            def forward(self, x, y):
+                f = torch.vmap(lambda col: col * 2 + 1, in_dims=1)
+                return f(x), f(y[1:])
+
+        inp = (torch.randn(5, 4), torch.randn(4, 6))
+        dynamic_shapes = ({0: Dim("s")}, {1: Dim("t")})
+        graph = torch.export.export(
+            VmapOverColumns(), inp, dynamic_shapes=dynamic_shapes
+        ).graph
+        self._check_functorch_fake_views(graph, num_batched=2)
+        ep = export(VmapOverColumns(), inp, dynamic_shapes=dynamic_shapes)
+        for args in (inp, (torch.randn(7, 4), torch.randn(4, 9))):
+            self.assertEqual(ep.module()(*args), VmapOverColumns()(*args))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_jvp_in_vmap_export(self) -> None:
+        class JvpInVmap(torch.nn.Module):
+            def forward(self, x, t):
+                def sin_jvp(x, t):
+                    return torch.func.jvp(torch.sin, (x,), (t,))
+
+                return torch.vmap(sin_jvp, in_dims=(0, 1))(x, t)
+
+        # x starts at a storage offset, and t is batched along its second dim.
+        inp = (torch.randn(3, 5)[:, 1:], torch.randn(4, 3))
+        graph = torch.export.export(JvpInVmap(), inp).graph
+        self._check_functorch_fake_views(graph, num_batched=2)
+        # Passes must not remove, fold or run the vmap and jvp calls on their
+        # own, and the calls that enter and leave a level have no users.
+        predispatch = torch._functorch.predispatch.__name__
+        calls = [
+            node
+            for node in graph.nodes
+            if getattr(node.target, "__module__", None) == predispatch
+        ]
+        self.assertLessEqual(
+            {
+                "_vmap_increment_nesting",
+                "_vmap_decrement_nesting",
+                "_jvp_increment_nesting",
+                "_jvp_decrement_nesting",
+                "_enter_dual_level",
+                "_exit_dual_level",
+            },
+            {node.target.__name__ for node in calls},
+        )
+        for node in calls:
+            self.assertTrue(node.is_impure(), node.name)
+        gm = export(JvpInVmap(), inp).module()
+        self.assertEqual(gm(*inp), JvpInVmap()(*inp))
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        self.assertEqual(gm(*inp), JvpInVmap()(*inp))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_vmap_dead_code_elimination(self) -> None:
+        # The calls that enter and leave the vmap level have no users.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.vmap(lambda row: row * 2 + 1)(x)
+
+        x = torch.randn(3, 4)
+        gm = export(M(), (x,)).module()
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        self.assertEqual(gm(x), M()(x))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_scan_in_vmap_strict_export(self) -> None:
+        # Strict export traces scan inside vmap with batched operands. The
+        # outputs of scan stay batched, so leaving vmap does not broadcast them
+        # along the batch dim.
+
+        def combine(carry, x):
+            carry = carry + x
+            return carry, carry * 2
+
+        def scan_rows(x):
+            return scan(combine, torch.zeros_like(x[0]), x)
+
+        class ScanInVmap(torch.nn.Module):
+            def forward(self, xs):
+                return torch.vmap(scan_rows)(xs)
+
+        xs = torch.randn(3, 5, 4)
+        ep = torch.export.export(ScanInVmap(), (xs,), strict=True)
+        for node in ep.graph.output_node().args[0]:
+            self.assertNotIn(0, node.meta["val"].stride(), node.name)
+        ep = export(ScanInVmap(), (xs,), strict=True)
+        self.assertEqual(ep.module()(xs), ScanInVmap()(xs))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_scan_in_vmap_inplace_write_strict_export(self) -> None:
+        # Writing a batched value in place into a scan output needs that output
+        # to be batched too.
+        def combine(carry, x):
+            return carry + x, carry * 2
+
+        class WriteIntoScanOutput(torch.nn.Module):
+            def forward(self, xs, other):
+                def per_sample(x, o):
+                    _, ys = scan(combine, torch.zeros_like(x[0]), x)
+                    return ys.add_(o)
+
+                return torch.vmap(per_sample)(xs, other)
+
+        inp = (torch.randn(3, 5, 4), torch.randn(3, 5, 4))
+        m = WriteIntoScanOutput()
+        self.assertEqual(export(m, inp, strict=True).module()(*inp), m(*inp))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_cond_in_vmap_strict_export(self) -> None:
+        # The placeholders of the branches are batched values. They are
+        # recorded as fake views, except under real tensor propagation, where
+        # they keep the wrapper that carries the real tensor.
+        class CondInVmap(torch.nn.Module):
+            def forward(self, x, flag):
+                def branches(row):
+                    return torch.cond(flag.sum() > 0, torch.sin, torch.cos, (row,))
+
+                return torch.vmap(branches)(x)
+
+        inp = (torch.randn(3, 4), torch.ones(2))
+        functorch = torch._C._functorch
+        for real in (False, True):
+            with self.subTest(real=real):
+                with torch._functorch.config.patch(
+                    fake_tensor_propagate_real_tensors=real
+                ):
+                    ep = torch.export.export(CondInVmap(), inp, strict=True)
+                    exported = export(CondInVmap(), inp, strict=True)
+                placeholders = [
+                    node
+                    for name in ("true_graph_0", "false_graph_0")
+                    for node in getattr(ep.graph_module, name).graph.find_nodes(
+                        op="placeholder"
+                    )
+                ]
+                self.assertEqual(len(placeholders), 2)
+                for node in placeholders:
+                    val = node.meta["val"]
+                    if real:
+                        self.assertIsNotNone(functorch.get_unwrapped(val).real_tensor)
+                    else:
+                        self.assertTrue(is_fake_tensor(val), node.name)
+                for args in (inp, (torch.randn(3, 4), -torch.ones(2))):
+                    self.assertEqual(exported.module()(*args), CondInVmap()(*args))
+
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_scan_output_keeps_no_constant(self) -> None:
+        # Tracing runs the combine function for one step, and the outputs of
+        # scan must not keep the constant values of that step. Outside vmap the
+        # output takes meta["val"], which holds none, not the combine output.
+
+        def combine(carry, x):
+            step, acc = carry
+            return (step + 1, acc + x), acc * 2
+
+        class StepCounter(torch.nn.Module):
+            def forward(self, xs):
+                (step, _), _ = scan(combine, (torch.tensor(0), torch.zeros(4)), xs)
+                return torch.zeros(step.item())
+
+        xs = torch.randn(5, 4)
+        ep = export(StepCounter(), (xs,), strict=False)
+        self.assertEqual(ep.module()(xs).shape, (5,))
+
+    # run_decompositions fails on a TwoTensor input, with or without vmap.
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    @skipIfCrossRef
+    @skipIfTorchDynamo("export inside dynamo is not supported")
+    def test_vmap_over_tensor_subclass(self) -> None:
+        # A wrapped tensor subclass may not support the view that is recorded
+        # for a plain fake tensor, so its values keep their functorch wrapper,
+        # also in nested vmap and inside jvp.
+        class Vmap(torch.nn.Module):
+            def forward(self, x):
+                return torch.vmap(lambda row: row * 2 + 1)(x)
+
+        class NestedVmap(torch.nn.Module):
+            def forward(self, x):
+                return torch.vmap(torch.vmap(lambda v: v * 2 + 1))(x)
+
+        class VmapInJvp(torch.nn.Module):
+            def forward(self, x):
+                return torch.func.jvp(torch.vmap(torch.sin), (x,), (x,))
+
+        x = TwoTensor(torch.randn(3, 4), torch.randn(3, 4))
+        add_batch_dim = torch._functorch.predispatch._add_batch_dim
+        for m in (Vmap(), NestedVmap(), VmapInJvp()):
+            with self.subTest(type(m).__name__):
+                # Saving and loading rebuild the values, so check a direct export.
+                graph = torch.export.export(m, (x,)).graph
+                batched = graph.find_nodes(op="call_function", target=add_batch_dim)
+                self.assertTrue(batched)
+                for node in batched:
+                    val = node.meta["val"]
+                    self.assertTrue(
+                        torch._C._functorch.is_batchedtensor(val), node.name
+                    )
+                self.assertEqual(export(m, (x,)).module()(x), m(x))
+
     @testing.expectedFailureStrictV2
     @skipIfCrossRef
     def test_custom_tag_metadata_re_export(self):
@@ -1787,7 +2037,7 @@ graph():
         )
 
     def test_inline_script_function(self):
-        @torch.jit.script
+        @torch.jit._script.script
         def _forward(x: torch.Tensor):
             if torch.jit.is_scripting():
                 return x.cos()
@@ -1902,7 +2152,7 @@ graph():
     def test_inline_script_class_method(self):
         class M(torch.nn.Module):
             @staticmethod
-            @torch.jit.script
+            @torch.jit._script.script
             def _forward(x: torch.Tensor):
                 if torch.jit.is_scripting():
                     return x.cos()
@@ -2038,13 +2288,13 @@ def forward(self, primals, tangents):
         i = 2
         s = "foo"
 
-        @torch.jit.script
+        @torch.jit._script.script
         def _inner(x: torch.Tensor, y: torch.Tensor, f: float, i: int, s_len: int):
             return x * y * f * i * s_len
 
         class M(torch.nn.Module):
             @staticmethod
-            @torch.jit.script
+            @torch.jit._script.script
             def _forward(x: torch.Tensor, y: torch.Tensor, f: float, i: int, s: str):
                 if torch.jit.is_scripting():
                     return _inner(x.cos(), y.cos(), f, i, len(s))
@@ -2068,7 +2318,7 @@ def forward(self, primals, tangents):
 
     def test_inline_script_method(self):
         class M(torch.jit.ScriptModule):
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def _forward(self, x: torch.Tensor):
                 if torch.jit.is_scripting():
                     return x.cos()
@@ -4000,34 +4250,6 @@ def forward(self, add_tensor):
         ):
             log_prob_ep.module()(invalid_log_prob_input)
 
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    def test_non_strict_export_distribution_validation_cuda(self):
-        script = """\
-import torch
-
-
-class NormalMean(torch.nn.Module):
-    def forward(self, scale):
-        return torch.distributions.Normal(torch.zeros_like(scale), scale).mean
-
-
-scale = torch.ones(2, 3, device="cuda")
-ep = torch.export.export(NormalMean(), (scale,), strict=False)
-try:
-    ep.module()(-scale)
-except RuntimeError as exc:
-    if "Expected parameter to satisfy its distribution constraint" not in str(exc):
-        raise
-else:
-    raise AssertionError("invalid scale did not raise")
-torch.ones(1, device="cuda")
-torch.cuda.synchronize()
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", script], capture_output=True, text=True, timeout=60
-        )
-        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
-
     def test_draft_export_checks_mutation_with_nan(self):
         @torch.library.custom_op("export::foo", mutates_args={})
         def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -4765,7 +4987,7 @@ graph():
                 return rv + i
 
         foo = Foo()
-        foo_script = torch.jit.script(foo)
+        foo_script = torch.jit._script.script(foo)
         inp = (torch.zeros(3, 4), torch.tensor(7))
 
         with self.assertRaisesRegex(
@@ -15487,13 +15709,19 @@ def forward(self, x, b_t, y):
 
             def forward(self, x):
                 with torch.no_grad():
+                    torch._check(x.sum().item() > 0)
                     return self.linear(x)
 
         model = Model()
-        ep = export(model, (torch.randn(4, 4),), {})
+        ep = export(model, (torch.ones(4, 4),), {})
         FileCheck().check_count(
             "torch.ops.higher_order.wrap_with_set_grad_enabled", 1, exactly=True
         ).run(ep.graph_module.code)
+        # An error inside the region must not leak the region's grad mode.
+        with torch.enable_grad():
+            with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed"):
+                ep.module()(-torch.ones(4, 4))
+            self.assertTrue(torch.is_grad_enabled())
 
     def test_export_with_autocast(self):
         class Model(torch.nn.Module):
@@ -19457,6 +19685,36 @@ class TestExportDevice(TorchTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
+    def test_non_strict_export_distribution_validation(self, device):
+        # Runs in a subprocess so a device-side assert triggered by the
+        # distribution constraint check cannot poison this process.
+        script = f"""\
+import torch
+
+
+class NormalMean(torch.nn.Module):
+    def forward(self, scale):
+        return torch.distributions.Normal(torch.zeros_like(scale), scale).mean
+
+
+scale = torch.ones(2, 3, device="{device}")
+ep = torch.export.export(NormalMean(), (scale,), strict=False)
+try:
+    ep.module()(-scale)
+except RuntimeError as exc:
+    if "Expected parameter to satisfy its distribution constraint" not in str(exc):
+        raise
+else:
+    raise AssertionError("invalid scale did not raise")
+torch.ones(1, device="{device}")
+torch.accelerator.synchronize()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=60
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
+    @onlyAccelerator
     def test_assert_tensor_metadata_device_index(self, device):
         class N(torch.nn.Module):
             def __init__(self):
@@ -19621,7 +19879,7 @@ class TestExportCustomClass(TorchTestCase):
         class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.add_mod = torch.jit.script(Add())._c
+                self.add_mod = torch.jit._script.script(Add())._c
 
             def forward(self, x, y):
                 return self.add_mod.forward(x, y)

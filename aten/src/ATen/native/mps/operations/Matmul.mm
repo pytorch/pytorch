@@ -9,6 +9,8 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
 #include <ATen/native/mps/operations/GemmHeuristics.h>
+#include <ATen/native/mps/operations/MatmulUtils.h>
+#include <utility>
 
 #include <fmt/format.h>
 
@@ -348,14 +350,19 @@ Tensor& int_mm_out_mps_impl(const Tensor& self, const Tensor& mat2, Tensor& resu
     return result.zero_();
   }
 
+  // The kernels tile the output, so its threads cover m and n rounded up to the tile size.
+  TORCH_CHECK(std::in_range<int32_t>(self.size(0)) && std::in_range<int32_t>(mat2.size(1)),
+              func_name,
+              ": MPS does not support output of size ",
+              result.sizes());
   const auto m = c10::checked_convert<uint32_t>(self.size(0), "self.size(0)");
   const auto k = c10::checked_convert<uint32_t>(self.size(1), "self.size(1)");
   const auto n = c10::checked_convert<uint32_t>(mat2.size(1), "mat2.size(1)");
-  constexpr auto int_max = static_cast<uint32_t>(std::numeric_limits<int32_t>::max());
   constexpr const char* mpp_kernel = "int_mm_mpp_64_64_4";
   // MPP integer matmul requires operands with matching signedness, while _int_mm permits uint8 only for self.
-  const bool use_mpp = self.scalar_type() == at::kChar && self.stride(1) == 1 && mat2.stride(1) == 1 && m <= int_max &&
-      k <= int_max && n <= int_max && self.stride(0) <= int_max && mat2.stride(0) <= int_max && has_mpp() &&
+  const bool use_mpp = self.scalar_type() == at::kChar && self.stride(1) == 1 && mat2.stride(1) == 1 &&
+      std::in_range<int32_t>(m) && std::in_range<int32_t>(k) && std::in_range<int32_t>(n) &&
+      std::in_range<int32_t>(self.stride(0)) && std::in_range<int32_t>(mat2.stride(0)) && has_mpp() &&
       lib.hasFunction(mpp_kernel);
   const auto kernel_name = use_mpp ? mpp_kernel : self.scalar_type() == at::kByte ? "int_mm_uchar" : "int_mm_char";
   auto stream = getCurrentMPSStream();
@@ -628,6 +635,59 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
 }
 
 } // anonymous namespace
+
+void metal_mm_out(const Tensor& a, const Tensor& b, const Tensor& out) {
+  check_mm_shapes(a, b, "metal_mm_out");
+  checkSize("metal_mm_out", TensorArg(out, "out", 3), {a.size(0), b.size(1)});
+  const auto scalar_type = out.scalar_type();
+  TORCH_CHECK_TYPE(a.scalar_type() == scalar_type && b.scalar_type() == scalar_type,
+                   "metal_mm_out: expected matching dtypes, got ",
+                   a.scalar_type(),
+                   ", ",
+                   b.scalar_type(),
+                   " and ",
+                   scalar_type);
+  TORCH_CHECK_TYPE(supportedFloatingType(scalar_type), "metal_mm_out: unsupported dtype ", scalar_type);
+  if (out.numel() == 0) {
+    return;
+  }
+  if (a.size(1) == 0) {
+    out.zero_();
+    return;
+  }
+  const auto params = matmul_params<uint64_t>(a, b, out);
+  const auto bm = matmul_tile_rows(params.m);
+  const bool use_mpp = has_mpp() && params.out_stride_n == 1 && (params.a_stride_m == 1 || params.a_stride_k == 1) &&
+      (params.b_stride_k == 1 || params.b_stride_n == 1) && matmul_mpp_indices_fit(params, bm, kMatmulTileN);
+  const bool use_u32 = !use_mpp && offsetsFitIn<int32_t>(a, b, out);
+  const auto dtype = scalarToMetalTypeString(out);
+  const auto name = use_mpp ? fmt::format("matmul_mpp_{}{}_{}_bm{}",
+                                          params.a_stride_k == 1 ? 'n' : 't',
+                                          params.b_stride_k == 1 ? 't' : 'n',
+                                          dtype,
+                                          bm)
+                            : fmt::format("matmul_simd_{}_bm{}{}", dtype, bm, mtlIdxSuffix(use_u32));
+  const auto pso = lib.getPipelineStateForFunc(name);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, "metal_mm", {a, b}, stream);
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      if (use_u32) {
+        mtl_setArgs(encoder, a, b, out, matmul_params<uint32_t>(a, b, out));
+      } else {
+        mtl_setArgs(encoder, a, b, out, params);
+      }
+      const auto grid_size_x = at::ceil_div<NSUInteger>(params.n, kMatmulTileN);
+      const auto grid_size_y = at::ceil_div<NSUInteger>(params.m, bm);
+      [encoder
+           dispatchThreadgroups:MTLSizeMake(grid_size_x, grid_size_y, 1)
+          threadsPerThreadgroup:MTLSizeMake(matmul_simdgroups(bm, kMatmulTileN) * c10::metal::simdgroup_size, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+}
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
