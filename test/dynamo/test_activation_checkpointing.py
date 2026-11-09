@@ -3,6 +3,7 @@ import contextlib
 import copy
 import functools
 import math
+import operator
 import re
 import unittest
 from importlib import import_module
@@ -3913,6 +3914,209 @@ class DeterministicRecomputeHelperTests(torch._dynamo.test_case.TestCase):
         self.assertFalse([n for n in copies if n.target is draw])
         targets = [[n.target for n in nodes] for nodes in regions.values()]
         self.assertEqual(targets, [[torch.ops.aten.mm.default]])
+
+    def _outline(self, fn, args, names):
+        """Replace the nodes of fn's graph named ``names`` with a call of one
+        subgraph computing them, as the pass does in each graph, and check that
+        the graph still computes fn. Returns the graph, or the reason the call
+        can't be placed."""
+        from torch._functorch._aot_autograd.deterministic_recompute import (
+            _place,
+            _slice_module,
+            _splice_slice_call,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        gm = make_fx(fn, tracing_mode="fake")(*args)
+        index = {n: i for i, n in enumerate(gm.graph.nodes)}
+        nodes = [n for n in gm.graph.nodes if n.name in names]
+        inputs = [a for n in nodes for a in n.all_input_nodes if a not in nodes]
+        inputs = list(dict.fromkeys(inputs))
+        outputs = [n for n in nodes if any(u not in nodes for u in n.users)]
+        last_input = max(inputs, key=index.__getitem__)
+        point, moved, reason = _place(set(nodes), inputs, last_input, index)
+        if reason is not None:
+            return reason
+        _splice_slice_call(
+            gm,
+            _slice_module(gm, inputs, nodes, outputs),
+            "piece",
+            [n.meta["val"] for n in outputs],
+            operands=inputs,
+            replace={n.name: n for n in outputs},
+            slice_index={n.name: i for i, n in enumerate(outputs)},
+            erase_names=set(names),
+            insert_after=point,
+            move_below=moved,
+        )
+        gm.graph.lint()
+        gm.recompile()
+        self.assertEqual(gm(*args), fn(*args))
+        return gm
+
+    def _ops(self, gm):
+        return [n.target for n in gm.graph.nodes if n.op == "call_function"]
+
+    def test_outline_before_first_reader(self):
+        # The call goes right before the first node that reads one of the nodes
+        # it replaces, so it computes them no earlier than the first of them is
+        # needed.
+        from torch._higher_order_ops import invoke_subgraph
+
+        def fn(x, w):
+            y = w * 2
+            return x.sin().cos() + y
+
+        args = (torch.randn(4), torch.randn(4))
+        gm = self._outline(fn, args, {"sin", "cos"})
+        aten = torch.ops.aten
+        ops = [aten.mul.Tensor, invoke_subgraph, operator.getitem, aten.add.Tensor]
+        self.assertEqual(self._ops(gm), ops)
+
+    def test_outline_moves_readers(self):
+        # The call needs exp, which comes after mul reads sin, so the call goes
+        # after exp and mul moves below it.
+        from torch._higher_order_ops import invoke_subgraph
+
+        def fn(x, w):
+            a = x.sin()
+            return a * 3, a + w.exp()
+
+        args = (torch.randn(4), torch.randn(4))
+        gm = self._outline(fn, args, {"sin", "add"})
+        aten = torch.ops.aten
+        getitem = operator.getitem
+        ops = [aten.exp.default, invoke_subgraph, getitem, getitem, aten.mul.Tensor]
+        self.assertEqual(self._ops(gm), ops)
+
+    @parametrize("hops", [1, 2])
+    def test_outline_rejects_path_back(self, hops):
+        # exp (and neg) read sin and are read by add: no single call can replace
+        # sin and add.
+        def fn(x):
+            a = x.sin()
+            b = a.exp().neg() if hops == 2 else a.exp()
+            return a + b
+
+        reason = self._outline(fn, (torch.randn(4),), {"sin", "add"})
+        last = "neg" if hops == 2 else "exp"
+        self.assertEqual(reason, f"its input {last} depends on its own recompute")
+
+    def test_outline_moves_view_it_copies(self):
+        # A view the call copies in rather than returns (t) reads a replaced
+        # node (sin), so it moves below the call, while add, replaced, still
+        # reads it above the call until both are erased.
+        from torch._functorch._aot_autograd.deterministic_recompute import (
+            _place,
+            _slice_module,
+            _splice_slice_call,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x, w):
+            b = x.sin().t() + 1
+            return b * (x @ w)
+
+        args = (torch.randn(4, 4), torch.randn(4, 4))
+        gm = make_fx(fn, tracing_mode="fake")(*args)
+        n = {n.name: n for n in gm.graph.nodes}
+        nodes = [n["sin"], n["t"], n["add"], n["mul"]]
+        inputs = [n["x_1"], n["mm"]]
+        index = {node: i for i, node in enumerate(gm.graph.nodes)}
+        replaced = {n["sin"], n["add"], n["mul"]}
+        point, moved, reason = _place(replaced, inputs, n["mm"], index)
+        self.assertEqual((point, moved, reason), (n["mm"], [n["t"]], None))
+        _splice_slice_call(
+            gm,
+            _slice_module(gm, inputs, nodes, [n["mul"]]),
+            "piece",
+            [n["mul"].meta["val"]],
+            operands=inputs,
+            replace={"mul": n["mul"]},
+            slice_index={"mul": 0},
+            erase_names={"sin", "t", "add", "mul"},
+            insert_after=point,
+            move_below=moved,
+        )
+        gm.graph.lint()
+        gm.recompile()
+        self.assertEqual(gm(*args), fn(*args))
+
+    def test_outline_keeps_random_readers(self):
+        # Moving rand_like below the call could reorder it with another random
+        # op, which changes what each draws.
+        def fn(x, w):
+            a = x.sin()
+            return torch.rand_like(a) * a, a + w.exp()
+
+        reason = self._outline(fn, (torch.randn(4), torch.randn(4)), {"sin", "add"})
+        self.assertEqual(reason, "it would move the random op rand_like")
+
+    def test_rng_and_inplace_writes(self):
+        # Outlining can't re-run a random op (it would draw again), and has to
+        # keep an in-place write in order with the reads and writes of the
+        # storage it writes: a write into a view writes its base, and an op with
+        # side effects but no write in its schema (resize_storage_bytes_ frees
+        # its tensor's storage) writes all of its tensor inputs.
+        from torch._functorch._aot_autograd.deterministic_recompute import (
+            _is_rng,
+            _writes,
+        )
+        from torch._inductor.fx_utils import get_node_storage
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x, y, z):
+            x[0].add_(y[0].sin())
+            torch.ops.inductor.resize_storage_bytes_(z, 0)
+            _, r = torch._prims.rng_prims.run_and_save_rng_state(
+                torch.ops.aten.rand_like.default, y
+            )
+            return torch.rand_like(y) + r
+
+        args = [torch.randn(4, 4) for _ in range(3)]
+        gm = make_fx(fn, tracing_mode="fake")(*args)
+        nodes = {n.name: n for n in gm.graph.nodes}
+        rng = [n.name for n in gm.graph.nodes if _is_rng(n)]
+        self.assertEqual(rng, ["run_and_save_rng_state", "rand_like"])
+        writes = {n.name: _writes(n) for n in gm.graph.nodes if _writes(n)}
+        storage = {name: get_node_storage(nodes[name]) for name in ("x_1", "z_1")}
+        expected = {"add_": {storage["x_1"]}, "resize_storage_bytes_": {storage["z_1"]}}
+        self.assertEqual(writes, expected)
+
+    def test_unbound_symbols(self):
+        # Inductor binds a symbol in a subgraph from a SymInt input that is the
+        # symbol, and, under size_asserts, from an input size or stride that is:
+        # x.view(s0 * s1, s2) binds neither s0 nor s1, while x's sizes or the
+        # SymInts s0 and s1 do, and y[:, 0]'s stride binds y's second size.
+        # Without size_asserts only the SymInts bind, and nor do the sizes of
+        # z, of a static size 0.
+        from torch._functorch._aot_autograd.deterministic_recompute import (
+            _unbound_symbols,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x, w, y, z):
+            n0, n1 = x.shape[0], x.shape[1]
+            return (x.view(n0 * n1, -1) @ w).sin(), y[:, 0].cos(), z.sum(1).sin()
+
+        args = (torch.randn(4, 6, 8), torch.randn(8, 10), torch.randn(3, 5))
+        args += (torch.randn(7, 0),)
+        gm = make_fx(fn, tracing_mode="symbolic")(*args)
+        n = {n.name: n for n in gm.graph.nodes}
+        s0, s1, s2 = (d.node.expr for d in n["x_1"].meta["val"].shape)
+        s3 = n["w_1"].meta["val"].shape[1].node.expr
+        sizes = n["sym_size_int"], n["sym_size_int_1"]
+        x, w, view, body = n["x_1"], n["w_1"], n["view"], [n["mm"], n["sin"]]
+        with torch._inductor.config.patch(size_asserts=True):
+            self.assertEqual(_unbound_symbols([view, w], body), {s0, s1})
+            self.assertEqual(_unbound_symbols([x, view, w], body), set())
+            self.assertEqual(_unbound_symbols([view, w, *sizes], body), set())
+            self.assertEqual(_unbound_symbols([n["select"]], [n["cos"]]), set())
+            z, z_sum = n["z_1"], n["sum_1"]
+            s4 = z.meta["val"].shape[0].node.expr
+            self.assertEqual(_unbound_symbols([z], [z_sum, n["sin_1"]]), {s4})
+        with torch._inductor.config.patch(size_asserts=False):
+            self.assertEqual(_unbound_symbols([x, view, w, *sizes], body), {s2, s3})
 
 
 instantiate_parametrized_tests(DeterministicRecomputeHelperTests)
