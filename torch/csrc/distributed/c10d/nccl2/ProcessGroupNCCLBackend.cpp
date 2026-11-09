@@ -953,7 +953,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::alltoall(
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::barrier(
     const ::c10d::BarrierOptions& opts) {
   ++sequence_number_;
-  return barrierImpl(/*async_op=*/false, operationTimeout(opts.timeout));
+  return barrierImpl(opts.asyncOp, operationTimeout(opts.timeout));
 }
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::send(
