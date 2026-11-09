@@ -5082,7 +5082,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend=cnt, dynamic=False)
         self.assertEqual(compiled(a, b), torch.tensor(10.0))
 
-        cache_entries = _debug_get_cache_entry_list(fn.__code__)
+        cache_entries = _debug_get_cache_entry_list(compiled._torchdynamo_orig_callable.__code__)
         self.assertEqual(len(cache_entries), 1)
         guard_str = str(cache_entries[0].guard_manager)
         self.assertIn("untyped_storage()._cdata ==", guard_str)
@@ -5111,6 +5111,37 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(base[2], torch.tensor(10.0))
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_storage_identity_skips_intermediate_none_sources(self):
+        from torch._functorch._aot_autograd.input_output_analysis import (
+            compute_overlapping_inputs,
+        )
+        from torch._guards import StorageIdentity
+
+        base = torch.arange(8, dtype=torch.float32)
+        inputs = [base[2:5], base[3:6], base[:2]]
+        sources = {
+            0: types.SimpleNamespace(name="a"),
+            1: None,
+            2: types.SimpleNamespace(name="c"),
+        }
+        tracing_context = types.SimpleNamespace(
+            fake_mode=types.SimpleNamespace(shape_env=None),
+            shape_env=None,
+            guards_context=types.SimpleNamespace(aotautograd_guards=[]),
+        )
+        aot_config = types.SimpleNamespace(aot_autograd_arg_pos_to_source=sources)
+
+        with mock.patch.object(torch._guards.TracingContext, "try_get", return_value=tracing_context):
+            actual = compute_overlapping_inputs(aot_config, inputs, [0, 1, 2])
+
+        self.assertEqual(actual, {0, 1})
+        for guard in tracing_context.guards_context.aotautograd_guards:
+            if isinstance(guard, StorageIdentity):
+                sources = guard.aliased_sources
+                for source in sources[1:]:
+                    self.assertIsNotNone(source.name)
+        self.assertEqual(tracing_context.guards_context.aotautograd_guards, [])
+
     def test_stale_base_adds_no_base_guard_and_no_recompile(self):
         # A rebound tensor's _base is not a live view base, so dynamo must not
         # fakify it or build a symbolic context from it. Before this change both
@@ -5134,7 +5165,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         dest, storage = fresh(5)
         self.assertEqual(opt(dest, storage), storage[0] + 7.0)
 
-        cache_entries = _debug_get_cache_entry_list(fn.__code__)
+        cache_entries = _debug_get_cache_entry_list(opt._torchdynamo_orig_callable.__code__)
         self.assertEqual(len(cache_entries), 1)
         guard_str = str(cache_entries[0].guard_manager)
 

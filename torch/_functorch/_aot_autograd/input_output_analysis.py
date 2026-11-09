@@ -388,8 +388,8 @@ def compute_overlapping_inputs(
         }
 
     # Keep the pairwise StorageOverlap guard on symbolic-shape paths. A merged
-    # storage group needs an identity guard for every member, including static
-    # shapes and members that do not overlap any other member.
+    # storage group needs an identity guard for every sourced member, including
+    # static shapes and members that do not overlap any other member.
     if (
         tracing_context is not None
         # We check that we have more than 1 aliased tensor, which should be true at
@@ -410,9 +410,12 @@ def compute_overlapping_inputs(
             tracing_context.guards_context.aotautograd_guards.append(
                 StorageOverlap(overlapping_sources, non_overlapping_sources)
             )
-        if len(actual_aliased_indices) > 1:
+        identity_sources = overlapping_sources + non_overlapping_sources
+        if len(actual_aliased_indices) > 1 and all(
+            source is not None for source in identity_sources
+        ):
             tracing_context.guards_context.aotautograd_guards.append(
-                StorageIdentity(overlapping_sources + non_overlapping_sources)
+                StorageIdentity(identity_sources)
             )
 
     return actual_aliased_indices
