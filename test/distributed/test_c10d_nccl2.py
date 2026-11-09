@@ -2609,8 +2609,12 @@ assert not torch.cuda.is_initialized(), "creating a process group initialized CU
 dist.destroy_process_group()
 """
 
-# A single-rank group without a device_id creates its communicator here.
-_FIRST_OP = 'dist.all_reduce(torch.ones(1, device="cuda"))'
+# A single-rank group without a device_id creates its communicator on first use.
+_FIRST_OP = """
+assert dist.group.WORLD._get_backend(torch.device("cuda")).comm_ptr == 0
+dist.all_reduce(torch.ones(1, device="cuda"))
+assert dist.group.WORLD._get_backend(torch.device("cuda")).comm_ptr != 0
+"""
 
 
 class ProcessGroupNCCL2UninitializedCudaTest(TestCase):

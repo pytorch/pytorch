@@ -14,7 +14,6 @@
 #include <unordered_set>
 
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
@@ -263,8 +262,8 @@ at::Device ProcessGroupNCCL::defaultDevice() const {
   const auto deviceCount = c10::cuda::device_count_ensure_non_zero();
   uint64_t deviceRank = static_cast<uint64_t>(getRank());
   const auto& globalRanks = options_c10d_->global_ranks_in_group;
-  if (const auto localRank = c10::utils::get_env("LOCAL_RANK")) {
-    deviceRank = std::stoull(*localRank);
+  if (const auto localRank = getCvarInt({"LOCAL_RANK"}, -1); localRank >= 0) {
+    deviceRank = static_cast<uint64_t>(localRank);
   } else if (static_cast<size_t>(getRank()) < globalRanks.size()) {
     deviceRank = globalRanks[getRank()];
   }
@@ -431,8 +430,10 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
       "NCCL tensor allocator expects a CUDA device but got ",
       device);
   if (!device.has_index()) {
+    // An unbound lazy single-rank group keeps its default device in device_.
     device = getBoundDeviceId().value_or(
-        at::Device(at::kCUDA, at::cuda::current_device()));
+        device_.has_index() ? device_
+                            : at::Device(at::kCUDA, at::cuda::current_device()));
     options = options.device(device);
   }
   TORCH_CHECK(

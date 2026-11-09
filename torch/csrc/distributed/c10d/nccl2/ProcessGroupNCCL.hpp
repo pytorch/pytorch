@@ -707,7 +707,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   const bool blocking_wait_;
 
   c10::intrusive_ptr<Options> options_c10d_;
-  // options_c10d_->lazy_init, or a single-rank group bound without a device.
+  // options_c10d_->lazy_init, or a single-rank group created without a device.
   bool lazy_init_;
 
   std::mutex ephemeral_timeout_mutex_;
