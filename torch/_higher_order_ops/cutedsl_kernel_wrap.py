@@ -60,6 +60,10 @@ if TYPE_CHECKING:
 # The parameter names the kernel writes, or "unknown": every tensor argument.
 MutatesArgs = tuple[str, ...] | Literal["unknown"]
 
+# The write set Dynamo gives a raw call (a host function called as in eager code, not
+# through wrap_cutedsl): every tensor argument.
+RAW_CALL_MUTATES_ARGS: MutatesArgs = "unknown"
+
 
 def cutedsl_kernel_name(fn: Callable[..., Any]) -> str:
     return getattr(inspect.unwrap(fn), "__name__", "cutedsl_kernel")
@@ -811,15 +815,18 @@ class CuteDSLHOPifier(UserKernelHOPifier):
 
     1. When Dynamo sees a host function, raw or wrapped, it becomes a
     CuteDSLKernelVariable, whose calls DynamoCuteDSLHOPifier turns into a call to the
-    HOP. A raw call (not through wrap_cutedsl) graph-breaks.
+    HOP. A raw call is written as for eager, with ``from_dlpack(t)`` for each tensor
+    and ``cutlass.torch.current_stream()`` for the stream; it is captured as the call
+    of ``wrap_cutedsl(fn, mutates_args=RAW_CALL_MUTATES_ARGS)`` with the torch
+    tensors and no stream.
 
-    2. For make_fx and non-strict export, wrap_cutedsl returns a
-    TraceableCuteDSLKernelWrapper, whose calls TracingCuteDSLHOPifier turns into a
-    call to the HOP (which can then be traced).
+    2. For make_fx and non-strict export, which cannot see a raw call, wrap_cutedsl
+    returns a TraceableCuteDSLKernelWrapper, whose calls TracingCuteDSLHOPifier turns
+    into a call to the HOP (which can then be traced).
 
     A CuTeDSL launch has no grid, autotuner or heuristics, so what is left is binding
-    the call to the host function's signature: the stream parameter is supplied at
-    launch and must not be passed; Constexpr arguments are baked into the compiled
+    the call to the host function's signature: the stream is supplied at launch, so a
+    wrapper's caller does not pass it; Constexpr arguments are baked into the compiled
     kernel, so symbolic values for them are specialized; tensors and scalars are
     kernel arguments (see CuteDSLHostFnInfo).
 
@@ -852,6 +859,22 @@ class CuteDSLHOPifier(UserKernelHOPifier):
         """val with every symbolic value in it (or itself) specialized."""
         raise NotImplementedError("abstract method")
 
+    def cute_tensor_arg(self, name: str, key: str, val: Any) -> Any:
+        """The torch tensor ``t`` if ``val`` is ``from_dlpack(t)`` (in a raw call),
+        else None; refused if ``t`` lost the layout it had at from_dlpack. ``name``
+        and ``key`` name the host function and the parameter."""
+        raise NotImplementedError("abstract method")
+
+    def is_current_stream(self, val: Any, tx: Any) -> bool:
+        """Whether ``val`` is ``cutlass.torch.current_stream()`` read on the stream
+        that is current at the call (in a raw call)."""
+        raise NotImplementedError("abstract method")
+
+    def wrap_raw(self, variable: Any) -> Any:
+        """The wrapper a raw call of ``variable`` is captured through:
+        ``wrap_cutedsl(variable.kernel, mutates_args=RAW_CALL_MUTATES_ARGS)``."""
+        raise NotImplementedError("abstract method")
+
     def call_HOP(  # type: ignore[no-untyped-def]
         self,
         variable,
@@ -877,7 +900,8 @@ class CuteDSLHOPifier(UserKernelHOPifier):
     ) -> None:
         """Record the host function on ``variable`` and add it, with its write set,
         to the side table. A ``raw`` host function (Dynamo met the @cute.jit function
-        itself, not a wrapper) has no write set and gets no record of its own."""
+        itself, not a wrapper) has no write set and gets no record of its own: a call
+        of it is captured through ``wrap_raw``."""
         variable.kernel = kernel
         variable.mutates_args = None
         variable.kernel_idx = None
@@ -1009,13 +1033,95 @@ class CuteDSLHOPifier(UserKernelHOPifier):
                 combined_args[key] = self.specialize_nested(variable, val)
         return combined_args
 
+    def unwrap_raw_args(
+        self,
+        variable: Any,
+        args: tuple[Any, ...] | list[Any],
+        kwargs: dict[str, Any],
+        tx: Any,
+    ) -> dict[str, Any]:
+        """A raw call's arguments, by name, as its wrapper takes them: each
+        ``from_dlpack(t)`` as ``t``, and no stream. The stream has to be
+        ``cutlass.torch.current_stream()`` read on the stream current at the call,
+        because the wrapper launches on that stream. A call that does not bind, or
+        that passes a torch.Tensor for a parameter, is a user error (see
+        raise_user_error), as eager CuTeDSL refuses it too; a host function that PT2
+        cannot launch is refused as the wrapper refuses it (see host_fn_info), as is
+        anything else the wrapper refuses (see bind_args)."""
+        kernel = variable.kernel
+        name = cutedsl_kernel_name(kernel)
+        info = self.host_fn_info(kernel)
+        if len(args) > len(info.params):
+            self.raise_user_error(
+                TypeError(
+                    f"CuTeDSL kernel {name}: takes {len(info.params)} positional "
+                    f"arguments but got {len(args)}"
+                )
+            )
+        bound = dict(zip(info.params, args))
+        for key, val in kwargs.items():
+            if key not in info.params:
+                self.raise_user_error(
+                    TypeError(
+                        f"CuTeDSL kernel {name}: got an unexpected keyword argument "
+                        f"{key!r}"
+                    )
+                )
+            if key in bound:
+                self.raise_user_error(
+                    TypeError(
+                        f"CuTeDSL kernel {name}: got multiple values for argument "
+                        f"{key!r}"
+                    )
+                )
+            bound[key] = val
+        missing = [p for p in info.params if p not in bound and p not in info.defaults]
+        if missing:
+            self.raise_user_error(
+                TypeError(f"CuTeDSL kernel {name}: missing arguments {missing}")
+            )
+        stream = bound.pop(info.stream_param, None)
+        if stream is None or not self.is_current_stream(stream, tx):
+            self.raise_unsupported(
+                f"CuTeDSL kernel {name}: pass cutlass.torch.current_stream(), read on "
+                f"the stream current at this call, for {info.stream_param!r}; a "
+                "captured kernel is launched on the current CUDA stream"
+            )
+        for key, val in bound.items():
+            tensor = self.cute_tensor_arg(name, key, val)
+            if tensor is not None:
+                bound[key] = tensor
+            elif self.is_tensor(val):
+                self.raise_user_error(
+                    TypeError(
+                        f"CuTeDSL kernel {name}: parameter {key!r}: pass "
+                        "from_dlpack(tensor), not a torch.Tensor (eager CuTeDSL "
+                        "refuses one too)"
+                    )
+                )
+            elif is_dsl_runtime_object(self.python_type(val)):
+                self.raise_unsupported(
+                    f"CuTeDSL kernel {name}: parameter {key!r} is a "
+                    f"{self.python_type(val).__name__} made outside the compiled "
+                    "region; only from_dlpack(tensor) and "
+                    "cutlass.torch.current_stream() called inside it are captured"
+                )
+        return bound
+
     def call_cutedsl_kernel(
         self,
         variable: Any,
         args: tuple[Any, ...] | list[Any],
         kwargs: dict[str, Any],
         tx: Any,
+        *,
+        raw: bool = False,
     ) -> Any:
+        if raw:
+            # A raw call: captured as the call of its wrapper.
+            kwargs = self.unwrap_raw_args(variable, args, kwargs, tx)
+            args = ()
+            variable = self.wrap_raw(variable)
         return self.call_HOP(variable, self.bind_args(variable, args, kwargs), tx)
 
 

@@ -49,6 +49,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 HAS_CUDA = torch.cuda.is_available() and torch.version.hip is None
@@ -60,6 +61,7 @@ try:
     import cuda.bindings.driver as cuda
     import cutlass
     import cutlass.cute as cute
+    import cutlass.torch as cutlass_torch
     from cutlass.cute.runtime import from_dlpack
 
     HAS_CUTLASS = True
@@ -504,6 +506,48 @@ if HAS_CUTEDSL:
     add_scalar_w = _wrap(add_scalar_kernel, ["mOut"])
     same_name_add_w = _wrap(same_name_add_kernel, ["mOut"])
     same_name_sub_w = _wrap(same_name_sub_kernel, ["mOut"])
+
+
+if HAS_CUTEDSL:
+    # The toy: out = relu(x + y), the add launched as in eager CuTeDSL code (cute
+    # tensors from from_dlpack, the current stream) with no wrap_cutedsl. Dynamo
+    # captures the raw call (torch.compile, strict export); make_fx cannot see it.
+    @cute.kernel
+    def toy_add_device(
+        gX: cute.Tensor, gY: cute.Tensor, gOut: cute.Tensor, n: cutlass.Int32
+    ):
+        tidx, _, _ = cute.arch.thread_idx()
+        bidx, _, _ = cute.arch.block_idx()
+        i = bidx * 1024 + tidx
+        if i < n:
+            gOut[i] = gX[i] + gY[i]
+
+    @cute.jit
+    def toy_add_kernel(
+        mX: cute.Tensor,
+        mY: cute.Tensor,
+        mOut: cute.Tensor,
+        n: cutlass.Int32,
+        stream: cuda.CUstream,
+    ):
+        toy_add_device(mX, mY, mOut, n).launch(
+            grid=((n + 1023) // 1024, 1, 1), block=(1024, 1, 1), stream=stream
+        )
+
+    def toy_launch_add(x, y, out):
+        n = out.numel()
+        toy_add_kernel(
+            from_dlpack(x),
+            from_dlpack(y),
+            from_dlpack(out),
+            n,
+            cutlass_torch.current_stream(),
+        )
+
+    def toy(x, y):
+        out = torch.empty_like(x)
+        toy_launch_add(x, y, out)
+        return out.relu()
 
 
 def _rand(*shape, dtype=torch.float32, requires_grad=False):
@@ -3487,8 +3531,9 @@ global_inner = types.SimpleNamespace(alpha=3.0)
 @requires_cutedsl
 class CuteDSLDynamoTests(TestCase):
     """torch.compile front end: the wrapper (global or created inline) becomes one
-    HOP node; recompiles follow the arg classes and the contents of object
-    constants."""
+    HOP node, and so does a raw @cute.jit call written as for eager (from_dlpack,
+    cutlass.torch.current_stream()); recompiles follow the arg classes and the
+    contents of object constants."""
 
     hw_classification = HardwareClassification.CUDA
 
@@ -4142,8 +4187,8 @@ class CuteDSLDynamoTests(TestCase):
         # As in a tuple or a list, a tensor or a DSL object inside an object
         # constant (a dict key included) would be baked into the side table, which
         # is never reset and so also keeps it alive: the call graph-breaks, with the
-        # error of the side table's walk, as a user error. A tensor in a tuple made
-        # in the region graph-breaks too.
+        # error of the side table's walk, as a user error. A tensor or a DSL object
+        # in a tuple made in the region graph-breaks too.
         class Cfg:
             def __init__(self, alpha, held):
                 self.alpha = alpha
@@ -4182,6 +4227,11 @@ class CuteDSLDynamoTests(TestCase):
         for held, message in (
             (lambda x: x, spec + self._walk_error((3.0, x))),
             (lambda x: x + 1, spec + self._walk_error((3.0, x))),
+            (from_dlpack, spec + dsl_object.format("_Tensor", "[1]")),
+            (
+                lambda x: cutlass_torch.current_stream(),
+                spec + dsl_object.format("CUstream", "[1]"),
+            ),
         ):
             with self.subTest(message=message):
                 self._assert_call_error(in_a_tuple, (x, held), message)
@@ -4735,8 +4785,9 @@ class CuteDSLDynamoTests(TestCase):
         # one for a runtime scalar parameter), and guarded on its type and value: an
         # equal new one, such as one built for each call, reuses the graph, while
         # another value or another type recompiles (for a runtime scalar parameter
-        # too, where eager compiles once), bare, in a config object or in a tuple. A
-        # numpy scalar made in the region graph-breaks.
+        # too, where eager compiles once), in a wrapper or a raw call, bare, in a
+        # config object or in a tuple. A numpy scalar made in the region
+        # graph-breaks.
         class Cfg:
             def __init__(self, alpha):
                 self.alpha = alpha
@@ -4747,6 +4798,17 @@ class CuteDSLDynamoTests(TestCase):
         def constexpr(x, alpha):
             out = torch.empty_like(x)
             mul_const_w(x, out, x.numel(), alpha)
+            return out
+
+        def raw_constexpr(x, alpha):
+            out = torch.empty_like(x)
+            mul_const_kernel(
+                from_dlpack(x),
+                from_dlpack(out),
+                x.numel(),
+                alpha,
+                cutlass_torch.current_stream(),
+            )
             return out
 
         def runtime(x, k):
@@ -4769,11 +4831,16 @@ class CuteDSLDynamoTests(TestCase):
 
         x = _rand(1000)
         calls = ((np.int64(3), 1), (np.int64(3), 1), (np.int64(5), 2), (np.int32(5), 3))
-        for f in (constexpr, runtime):
-            with self.subTest(f=f.__name__):
+        for f, fullgraph in (
+            (constexpr, True),
+            (raw_constexpr, True),
+            (raw_constexpr, False),
+            (runtime, True),
+        ):
+            with self.subTest(f=f.__name__, fullgraph=fullgraph):
                 torch._dynamo.reset()
                 cnt = CompileCounterWithBackend("aot_eager")
-                cf = torch.compile(f, backend=cnt, fullgraph=True)
+                cf = torch.compile(f, backend=cnt, fullgraph=fullgraph)
                 for value, frame_count in calls:
                     expected = x + float(value) if f is runtime else float(value) * x
                     self.assertEqual(cf(x, value), expected)
@@ -5093,6 +5160,751 @@ class CuteDSLDynamoTests(TestCase):
         self.assertEqual((s1, d1), (x + y, x - y))
         self.assertEqual((s2, d2), ((x + y) * 0.25, (x - y) * 0.25))
 
+    def test_toy_raw_call(self):
+        # The toy: Dynamo captures the raw call as one HOP node, as the call of
+        # wrap_cutedsl(toy_add_kernel) with the write set of a raw call. A new size
+        # does not recompile: n is a runtime Int32.
+        x, y = _rand(2048), _rand(2048)
+        self.assertEqual(toy(x, y), (x + y).relu())
+        backend = AotEagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+        cf = torch.compile(toy, backend=cnt, fullgraph=True, dynamic=True)
+        for n in (2048, 1000):
+            x, y = _rand(n), _rand(n)
+            self.assertEqual(cf(x, y), (x + y).relu())
+        self.assertEqual(cnt.frame_count, 1)
+        (node,) = _hop_nodes(backend.graphs[0], cutedsl_kernel_wrapper_mutation)
+        self.assertEqual(sorted(node.kwargs["kwargs"]), ["mOut", "mX", "mY", "n"])
+        kernel = cutedsl_kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+        self.assertIs(kernel.fn, toy_add_kernel)
+        self.assertEqual(kernel.mutates_args, "unknown")
+        (fn_node,) = _hop_nodes(backend.fw_graphs[0], cutedsl_kernel_wrapper_functional)
+        self.assertEqual(
+            sorted(fn_node.kwargs["tensors_to_clone"]), ["mOut", "mX", "mY"]
+        )
+
+    def test_raw_call_guards_the_host_function(self):
+        # The @cute.jit function of a raw call, passed in, is guarded on its
+        # identity: another host function of the same name recompiles into a node
+        # for it instead of launching the first one.
+        def f(kernel, x, y):
+            out = torch.empty_like(x)
+            stream = cutlass_torch.current_stream()
+            kernel(from_dlpack(x), from_dlpack(y), from_dlpack(out), x.numel(), stream)
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        cnt = CompileCounterWithBackend("aot_eager")
+        cf = torch.compile(f, backend=cnt, fullgraph=True)
+        for kernel, expected, frame_count in (
+            (same_name_add_kernel, x + y, 1),
+            (same_name_sub_kernel, x - y, 2),
+            (same_name_add_kernel, x + y, 2),
+        ):
+            self.assertEqual(cf(kernel, x, y), expected)
+            self.assertEqual(cnt.frame_count, frame_count)
+
+    def test_raw_call_keywords_defaults_and_constexpr(self):
+        # A raw call binds like a wrapper call: keywords, a default after the stream,
+        # a Constexpr baked into the compiled kernel.
+        stream = cutlass_torch.current_stream
+
+        def f(x, y):
+            s1, d1, s2, d2, m = [torch.empty_like(x) for _ in range(5)]
+            n = x.numel()
+            add_sub_kernel(
+                from_dlpack(x),
+                from_dlpack(y),
+                from_dlpack(s1),
+                from_dlpack(d1),
+                n,
+                stream(),
+            )
+            add_sub_kernel(
+                mX=from_dlpack(x),
+                mY=from_dlpack(y),
+                mSum=from_dlpack(s2),
+                mDiff=from_dlpack(d2),
+                n=n,
+                stream=stream(),
+                scale=0.25,
+            )
+            mul_const_kernel(from_dlpack(x), from_dlpack(m), n, 3.0, stream())
+            return s1, d1, s2, d2, m
+
+        x, y = _rand(1000), _rand(1000)
+        expected = (x + y, x - y, (x + y) * 0.25, (x - y) * 0.25, 3 * x)
+        self.assertEqual(f(x, y), expected)
+        cf = torch.compile(f, backend="aot_eager", fullgraph=True)
+        self.assertEqual(cf(x, y), expected)
+
+    def test_raw_call_from_dlpack_options(self):
+        # assumed_align is a hint PT2 replaces with the alignment it compiles for (each
+        # pointer's own, at most 16 bytes), and has to be a constant; an option that
+        # changes the compiled kernel graph-breaks.
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_kernel(
+                from_dlpack(x, assumed_align=16),
+                from_dlpack(y, 4),
+                from_dlpack(out, use_32bit_stride=False),
+                x.numel(),
+                cutlass_torch.current_stream(),
+            )
+            return out
+
+        def g(x, y):
+            out = torch.empty_like(x)
+            add_kernel(
+                from_dlpack(x, use_32bit_stride=True),
+                from_dlpack(y),
+                from_dlpack(out),
+                x.numel(),
+                cutlass_torch.current_stream(),
+            )
+            return out
+
+        def h(x, y, align):
+            out = torch.empty_like(x)
+            add_kernel(
+                from_dlpack(x, assumed_align=align),
+                from_dlpack(y),
+                from_dlpack(out),
+                x.numel(),
+                cutlass_torch.current_stream(),
+            )
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        cf = torch.compile(f, backend="aot_eager", fullgraph=True)
+        self.assertEqual(cf(x, y), x + y)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "use_32bit_stride"):
+            torch.compile(g, backend="eager", fullgraph=True)(x, y)
+        # A dynamic int, so a symbolic value in the region.
+        ch = torch.compile(h, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "assumed_align must be a constant"
+        ):
+            ch(x, y, 16)
+
+    def test_raw_call_stream_made_outside_graph_breaks(self):
+        # Only cutlass.torch.current_stream() called in the region can be the stream:
+        # the captured kernel is launched on the current stream.
+        def f(x, y, stream):
+            out = torch.empty_like(x)
+            add_kernel(
+                from_dlpack(x), from_dlpack(y), from_dlpack(out), x.numel(), stream
+            )
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, r"pass cutlass\.torch\.current_stream\(\)"
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x, y, _stream())
+
+    def test_raw_call_torch_tensor_graph_breaks(self):
+        # Eager CuTeDSL refuses a torch.Tensor for a cute.Tensor param, and so does
+        # the capture of a raw call, as a user error.
+        from cutlass.base_dsl.common import DSLBaseError
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_kernel(x, y, out, x.numel(), cutlass_torch.current_stream())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        eager = r"expects argument #1 \(mX\) to be .*, but got .*torch\.Tensor"
+        with self.assertRaisesRegex(DSLBaseError, eager):
+            f(x, y)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"parameter 'mX': pass from_dlpack\(tensor\), not a torch\.Tensor",
+        ) as cm:
+            torch.compile(f, backend="eager", fullgraph=True)(x, y)
+        self.assertEqual(cm.exception.gb_type, "CuTeDSL kernel call error")
+
+    def test_raw_call_graph_break_messages(self):
+        # Each refusal of a raw call graph-breaks with its own message, in the
+        # explanation: as a user error where eager CuTeDSL refuses the call too (with
+        # the message, not its type: eager raises its own), as an unsupported feature
+        # where only Dynamo cannot capture the call (an assumed_align that eager
+        # takes, a value other than a tensor for from_dlpack, a from_dlpack whose
+        # signature it does not know), and as a read of a cute tensor or a stream made
+        # in the region, each kind with hints of its own.
+        from cutlass.base_dsl.common import DSLBaseError
+
+        from torch._dynamo import graph_break_hints
+
+        stream = cutlass_torch.current_stream
+
+        def keyword_only_from_dlpack(*, tensor_dlpack):
+            pass
+
+        # Taken for the DSL's own from_dlpack (see is_cutedsl_from_dlpack).
+        keyword_only_from_dlpack.__module__ = "cutlass.cute.runtime"
+        keyword_only_from_dlpack.__qualname__ = "from_dlpack"
+
+        def cute(x, y):
+            return from_dlpack(x), from_dlpack(y), from_dlpack(torch.empty_like(x))
+
+        def aligned(x, y, align):
+            return from_dlpack(x, assumed_align=align), *cute(x, y)[1:]
+
+        n = 1000
+        no_stream = (
+            "Required argument `stream` is missing"
+            "|Missing required argument in `add_kernel`: 'stream'"
+        )
+        no_n = (
+            "Required argument `n` is missing"
+            "|Missing required argument in `add_kernel`: 'n'"
+        )
+        cute_read = "a cute tensor made in the compiled region cannot be read there"
+        stream_read = "the stream cannot be read in the compiled region"
+        cases = (
+            (
+                lambda x, y: add_kernel(*cute(x, y), n, stream(), 1),
+                (DSLBaseError, "too many positional arguments"),
+                "CuTeDSL kernel add_kernel: takes 5 positional arguments but got 6",
+            ),
+            (
+                lambda x, y: add_kernel(*cute(x, y), n, stream(), bogus=1),
+                (DSLBaseError, "unexpected keyword argument 'bogus'"),
+                "CuTeDSL kernel add_kernel: got an unexpected keyword argument 'bogus'",
+            ),
+            (
+                lambda x, y: add_kernel(*cute(x, y), n, stream(), mX=from_dlpack(x)),
+                (DSLBaseError, "multiple values for argument 'mX'"),
+                "CuTeDSL kernel add_kernel: got multiple values for argument 'mX'",
+            ),
+            (
+                lambda x, y: add_kernel(*cute(x, y), n),
+                (DSLBaseError, no_stream),
+                "CuTeDSL kernel add_kernel: missing arguments ['stream']",
+            ),
+            (
+                lambda x, y: add_kernel(*cute(x, y)),
+                (DSLBaseError, no_n),
+                "CuTeDSL kernel add_kernel: missing arguments ['n', 'stream']",
+            ),
+            (
+                lambda x, y: add_kernel(*cute(x, y), n, stream(1)),
+                (TypeError, r"takes 0 positional arguments but 1 was given"),
+                "cutlass.torch.current_stream() takes no arguments",
+            ),
+            (
+                lambda x, y: from_dlpack(),
+                (TypeError, "missing 1 required positional argument: 'tensor_dlpack'"),
+                "from_dlpack(): missing a required argument: 'tensor_dlpack'",
+            ),
+            (
+                lambda x, y: from_dlpack(x, bogus=1),
+                (TypeError, "unexpected keyword argument 'bogus'"),
+                "from_dlpack(): got an unexpected keyword argument 'bogus'",
+            ),
+            (
+                lambda x, y: add_kernel(*aligned(x, y, 16.0), n, stream()),
+                (TypeError, r"build_memref_desc\(\): incompatible function arguments"),
+                "from_dlpack(): assumed_align must be an int, got 16.0",
+            ),
+            (
+                lambda x, y: add_kernel(*aligned(x, y, 32), n, stream()),
+                None,
+                "from_dlpack(): assumed_align must be a power of two up to 16",
+            ),
+            (
+                lambda x, y: add_kernel(*aligned(x, y, 3), n, stream()),
+                None,
+                "from_dlpack(): assumed_align must be a power of two up to 16",
+            ),
+            (
+                lambda x, y: from_dlpack(3),
+                None,
+                "from_dlpack() of a value of type int: only a torch.Tensor is captured",
+            ),
+            (
+                lambda x, y: keyword_only_from_dlpack(tensor_dlpack=x),
+                None,
+                "from_dlpack(*, tensor_dlpack): unexpected signature; pass the torch "
+                "tensors to a wrap_cutedsl wrapper of the host function instead",
+            ),
+            (
+                lambda x, y: from_dlpack(x).element_type,
+                None,
+                f"from_dlpack(...).element_type: {cute_read}",
+            ),
+            (
+                lambda x, y: from_dlpack(x).mark_layout_dynamic(),
+                None,
+                f"from_dlpack(...).mark_layout_dynamic: {cute_read}",
+            ),
+            (
+                lambda x, y: from_dlpack(x) == 1,
+                None,
+                f"from_dlpack(...).__eq__(): {cute_read}",
+            ),
+            (
+                lambda x, y: hasattr(from_dlpack(x), "shape"),
+                None,
+                f"hasattr(from_dlpack(...), 'shape'): {cute_read}",
+            ),
+            (
+                lambda x, y: stream().getPtr,
+                None,
+                f"cutlass.torch.current_stream().getPtr: {stream_read}",
+            ),
+            (
+                lambda x, y: stream().getPtr(),
+                None,
+                f"cutlass.torch.current_stream().getPtr: {stream_read}",
+            ),
+            (
+                lambda x, y: stream() == 1,
+                None,
+                f"cutlass.torch.current_stream().__eq__(): {stream_read}",
+            ),
+            (
+                lambda x, y: hasattr(stream(), "getPtr"),
+                None,
+                f"hasattr(cutlass.torch.current_stream(), 'getPtr'): {stream_read}",
+            ),
+        )
+        x, y = _rand(n), _rand(n)
+        user_error = graph_break_hints.USER_ERROR[0]
+        unsupported = (
+            "Dynamo cannot capture this call of a CuTeDSL host function, or of "
+            "from_dlpack for one, which eager may run: "
+        )
+        read_hints = [
+            "Pass the value to the host function without reading it in the compiled "
+            "region.",
+            "Read what you need from the torch tensor (its dtype, shape or stride) or "
+            "from torch.cuda.current_stream() instead, which Dynamo traces.",
+        ]
+        unsupported_hints = [
+            "Change the code as the explanation says.",
+            "To capture the launch as it is, make it in a custom operator "
+            "(torch.library.custom_op), whose call Dynamo captures without tracing "
+            "into it.",
+        ]
+        for f, eager, message in cases:
+            with self.subTest(message=message):
+                torch._dynamo.reset()
+                if eager is not None:
+                    with self.assertRaisesRegex(*eager):
+                        f(x, y)
+                with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+                    torch.compile(f, backend="eager", fullgraph=True)(x, y)
+                if eager is not None:
+                    gb_type = "CuTeDSL kernel call error"
+                    explanation = f"Eager refuses this call too: {message}\n"
+                    hints = [user_error]
+                elif message.endswith((cute_read, stream_read)):
+                    gb_type = "CuTeDSL raw-call value read"
+                    explanation = f"{message}: such a value, made by from_dlpack"
+                    hints = read_hints
+                else:
+                    gb_type = "CuTeDSL kernel unsupported feature"
+                    explanation = unsupported + message
+                    hints = unsupported_hints
+                self.assertEqual(cm.exception.gb_type, gb_type)
+                self.assertIn(f"Explanation: {explanation}", str(cm.exception))
+                for hint in hints:
+                    self.assertIn(f"Hint: {hint}\n", str(cm.exception))
+                self.assertEqual(user_error in str(cm.exception), eager is not None)
+
+    def test_raw_call_arguments_live_across_graph_break(self):
+        # from_dlpack(t) and current_stream() made before a graph break are made
+        # again after it. The resumed frame then sees DSL objects made outside its
+        # region, so the call graph-breaks there and runs eagerly. The reason is the
+        # stream's, which is checked first, and only comes from tracing the rebuilt
+        # stream.
+        def f(x, y):
+            out = torch.zeros_like(x)
+            args = (from_dlpack(x), from_dlpack(y, assumed_align=16), from_dlpack(out))
+            stream = cutlass_torch.current_stream()
+            torch._dynamo.graph_break()
+            add_kernel(*args, x.numel(), stream)
+            return out, args[1]
+
+        x, y = _rand(1000), _rand(1000)
+        torch._dynamo.utils.counters.clear()
+        out, ty = torch.compile(f, backend="eager")(x, y)
+        self.assertEqual(out, x + y)
+        self.assertEqual(ty._assumed_align, 16)
+        reasons = list(torch._dynamo.utils.counters["graph_break"])
+        stream_reason = "pass cutlass.torch.current_stream(), read on the stream"
+        self.assertTrue(any(stream_reason in r for r in reasons), reasons)
+        failures = list(torch._dynamo.utils.counters["unimplemented"])
+        self.assertFalse(any("Reconstruction failure" in r for r in failures), failures)
+
+    def test_raw_call_stream_is_the_one_read(self):
+        # cutlass.torch.current_stream() stands for the stream current where it is
+        # called. A raw call on another stream graph-breaks (the captured kernel would
+        # launch on the call's stream), and a value that leaves the graph is the stream
+        # it was read on, not the one current at the graph break.
+        side = torch.cuda.Stream()
+
+        def read_outside_call_inside(x, y):
+            out = torch.empty_like(x)
+            stream = cutlass_torch.current_stream()
+            with torch.cuda.stream(side):
+                add_kernel(
+                    from_dlpack(x), from_dlpack(y), from_dlpack(out), x.numel(), stream
+                )
+            return out
+
+        def read_inside(x):
+            with torch.cuda.stream(side):
+                stream = cutlass_torch.current_stream()
+            return x + 1, stream
+
+        x, y = _rand(1000), _rand(1000)
+        cf = torch.compile(read_outside_call_inside, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, r"read on the stream current at this call"
+        ):
+            cf(x, y)
+        _, stream = torch.compile(read_inside, backend="eager", fullgraph=True)(x)
+        self.assertEqual(int(stream), side.cuda_stream)
+
+    @requires_cuda_and_triton
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_raw_call_on_a_side_stream(self, backend):
+        # With the stream read and the call inside torch.cuda.stream(side), the raw
+        # call is captured under fullgraph, and its node carries the region's stream
+        # annotation, as the node of a user Triton kernel launched there does. A
+        # backend that runs each node on its annotated stream, as Inductor does,
+        # launches the kernel on side. The eager and aot_eager backends ignore the
+        # annotations and run every node, aten ops and Triton kernels too, on the
+        # current stream, so this does not check which stream the kernel runs on.
+        import triton
+
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_functional as triton_functional,
+            triton_kernel_wrapper_mutation as triton_mutation,
+        )
+        from torch.testing._internal.triton_utils import add_kernel as triton_add
+
+        side = torch.cuda.Stream()
+
+        def f(x, y):
+            out, ref = torch.empty_like(x), torch.empty_like(x)
+            n = x.numel()
+            with torch.cuda.stream(side):
+                add_kernel(
+                    from_dlpack(x),
+                    from_dlpack(y),
+                    from_dlpack(out),
+                    n,
+                    cutlass_torch.current_stream(),
+                )
+                triton_add[(triton.cdiv(n, 128),)](x, y, ref, n, BLOCK_SIZE=128)
+            torch.cuda.current_stream().wait_stream(side)
+            return out, ref
+
+        if backend == "eager":
+            record = EagerAndRecordGraphs()
+        else:
+            record = AotEagerAndRecordGraphs()
+        x, y = _rand(1000), _rand(1000)
+        torch.cuda.synchronize()  # the region reads x and y without waiting for them
+        out, ref = torch.compile(f, backend=record, fullgraph=True)(x, y)
+        self.assertEqual((out, ref), (x + y, x + y))
+        (gm,) = record.graphs
+        hops = [(gm, cutedsl_kernel_wrapper_mutation, triton_mutation)]
+        if backend == "aot_eager":
+            (fw,) = record.fw_graphs
+            hops.append((fw, cutedsl_kernel_wrapper_functional, triton_functional))
+        for gm, hop, triton_hop in hops:
+            (node,) = _hop_nodes(gm, hop)
+            (triton_node,) = _hop_nodes(gm, triton_hop)
+            self.assertIn("stream", triton_node.meta["custom"])
+            self.assertEqual(node.meta.get("custom"), triton_node.meta["custom"])
+
+    def test_raw_call_cute_tensor_attributes_graph_break(self):
+        # A from_dlpack(t) made in the region cannot be read there: reading the cute
+        # tensor (its element type, shape, ...) graph-breaks and runs eagerly.
+        def f(x, y):
+            out = torch.zeros_like(x)
+            mx = from_dlpack(x)
+            if mx.element_type is cutlass.Float32 and mx.shape == (1000,):
+                add_kernel(
+                    mx,
+                    from_dlpack(y),
+                    from_dlpack(out),
+                    x.numel(),
+                    cutlass_torch.current_stream(),
+                )
+            else:
+                out.fill_(-1.0)
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        self.assertEqual(f(x, y), x + y)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"from_dlpack\(\.\.\.\)\.element_type: a cute",
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x, y)
+        torch._dynamo.reset()  # the compiled code is cached on f's code object
+        self.assertEqual(torch.compile(f, backend="eager")(x, y), x + y)
+
+    def test_raw_call_values_have_no_repr_in_the_region(self):
+        # repr() and str() of a from_dlpack(t) or current_stream() value made in the
+        # region graph-break like any other read, and then run on the real object, as
+        # in eager. An f-string of one is formatted after the graph, from the real
+        # object made there.
+        def f(x):
+            return x + 1, str(from_dlpack(x)), str(cutlass_torch.current_stream())
+
+        def formatted(x):
+            return x + 1, f"{from_dlpack(x)}", f"{cutlass_torch.current_stream()}"
+
+        x = _rand(8)
+        for g in (
+            lambda x: str(from_dlpack(x)),
+            lambda x: repr(cutlass_torch.current_stream()),
+        ):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "cannot be read"
+            ):
+                torch.compile(g, backend="eager", fullgraph=True)(x)
+        for g, fullgraph in ((f, False), (formatted, True)):
+            with self.subTest(g=g.__name__):
+                cg = torch.compile(g, backend="eager", fullgraph=fullgraph)
+                _, tensor_text, stream_text = cg(x)
+                self.assertEqual(tensor_text, str(from_dlpack(x)))
+                self.assertTrue(stream_text.startswith("<CUstream"), stream_text)
+
+    def test_raw_call_from_dlpack_requires_grad_graph_breaks(self):
+        # Eager from_dlpack refuses a tensor that requires grad, and so does the
+        # capture; from_dlpack(t.detach()) is captured.
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_kernel(
+                from_dlpack(x),
+                from_dlpack(y),
+                from_dlpack(out),
+                x.numel(),
+                cutlass_torch.current_stream(),
+            )
+            return out
+
+        def g(x, y):
+            out = torch.empty_like(x)
+            add_kernel(
+                from_dlpack(x.detach()),
+                from_dlpack(y),
+                from_dlpack(out),
+                x.numel(),
+                cutlass_torch.current_stream(),
+            )
+            return out
+
+        x, y = _rand(1000, requires_grad=True), _rand(1000)
+        with self.assertRaisesRegex(BufferError, "Can't export tensors that require"):
+            f(x, y)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"from_dlpack\(\) of a tensor that requires grad",
+        ) as cm:
+            torch.compile(f, backend="eager", fullgraph=True)(x, y)
+        self.assertEqual(cm.exception.gb_type, "CuTeDSL kernel call error")
+        cg = torch.compile(g, backend="aot_eager", fullgraph=True)
+        self.assertEqual(cg(x, y), (x + y).detach())
+
+    def test_raw_call_replaced_from_dlpack_is_traced(self):
+        # A functools.wraps wrapper of from_dlpack (such as one stored under its
+        # name) has its __module__ and __qualname__ but is not taken for it: Dynamo
+        # inlines it like any function, so its body runs (it records each call), and
+        # captures the from_dlpack it calls.
+        from torch._library.cutedsl import is_cutedsl_from_dlpack
+
+        calls = []
+
+        @functools.wraps(from_dlpack)
+        def logged(tensor, **kwargs):
+            calls.append(tensor.shape)
+            return from_dlpack(tensor, **kwargs)
+
+        self.assertTrue(is_cutedsl_from_dlpack(from_dlpack))
+        self.assertFalse(is_cutedsl_from_dlpack(logged))
+
+        def f(x, y):
+            out = torch.zeros_like(x)
+            add_kernel(
+                logged(x),
+                logged(y),
+                logged(out),
+                x.numel(),
+                cutlass_torch.current_stream(),
+            )
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        backend = EagerAndRecordGraphs()
+        cf = torch.compile(f, backend=backend, fullgraph=True)
+        self.assertEqual(cf(x, y), x + y)
+        self.assertEqual(calls, [x.shape] * 3)
+        (gm,) = backend.graphs
+        self.assertEqual(len(_hop_nodes(gm, cutedsl_kernel_wrapper_mutation)), 1)
+
+    def test_raw_call_through_a_decorator_runs_its_body(self):
+        # A functools.wraps decorator around a host function (here one that rewrites
+        # an argument) copies its _dsl_cls, but is not a @cute.jit function: Dynamo
+        # inlines it, read with or without a source, so its body runs, and captures
+        # the raw call of the host function in it.
+        def first_half(fn):
+            @functools.wraps(fn)
+            def wrapper(mX, mY, mOut, n, stream):
+                return fn(mX, mY, mOut, n // 2, stream)
+
+            return wrapper
+
+        add_first_half = first_half(add_kernel)
+
+        class M(torch.nn.Module):
+            kernel = staticmethod(add_first_half)
+
+        def launch(kernel, x, y):
+            out = torch.zeros_like(x)
+            stream = cutlass_torch.current_stream()
+            kernel(from_dlpack(x), from_dlpack(y), from_dlpack(out), x.numel(), stream)
+            return out
+
+        def with_a_source(x, y):
+            return launch(add_first_half, x, y)
+
+        def without_a_source(x, y):
+            return launch(M().kernel, x, y)
+
+        x, y = _rand(1000), _rand(1000)
+        expected = torch.cat([(x + y)[:500], torch.zeros_like(x[500:])])
+        self.assertEqual(with_a_source(x, y), expected)
+        for f in (with_a_source, without_a_source):
+            with self.subTest(f=f.__name__):
+                backend = EagerAndRecordGraphs()
+                cf = torch.compile(f, backend=backend, fullgraph=True)
+                self.assertEqual(cf(x, y), expected)
+                (gm,) = backend.graphs
+                (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+                record = cutedsl_kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+                self.assertEqual(record, CuteDSLKernel(add_kernel, "unknown"))
+
+    def test_raw_call_of_a_disabled_host_function_runs_eagerly(self):
+        # torch.compiler.disable(host_fn), a functools.wraps wrapper too, is
+        # respected, read with or without a source: the call is not captured, and
+        # runs eagerly.
+        disabled_add = torch.compiler.disable(add_kernel)
+
+        class M(torch.nn.Module):
+            kernel = staticmethod(disabled_add)
+
+        def launch(kernel, x, y):
+            out = torch.zeros_like(x)
+            stream = cutlass_torch.current_stream()
+            kernel(from_dlpack(x), from_dlpack(y), from_dlpack(out), x.numel(), stream)
+            return out
+
+        def with_a_source(x, y):
+            return launch(disabled_add, x, y)
+
+        def without_a_source(x, y):
+            return launch(M().kernel, x, y)
+
+        x, y = _rand(1000), _rand(1000)
+        for f in (with_a_source, without_a_source):
+            with self.subTest(f=f.__name__):
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported, r"torch\.compiler\.disable"
+                ):
+                    torch.compile(f, backend="eager", fullgraph=True)(x, y)
+                backend = EagerAndRecordGraphs()
+                self.assertEqual(torch.compile(f, backend=backend)(x, y), x + y)
+                self.assertGreaterEqual(len(backend.graphs), 1)
+                for gm in backend.graphs:
+                    hops = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+                    self.assertEqual(hops, [])
+
+    def test_raw_call_after_a_layout_change_graph_breaks(self):
+        # A cute tensor stands for its tensor with the layout it had at from_dlpack:
+        # a call after an in-place view op changed the size, stride or storage
+        # offset graph-breaks, and runs eagerly on a cute tensor made from the tensor
+        # as it is then, which for t_() is what eager CuTeDSL launches with too (it
+        # reads the shape and stride through the DLPack capsule at the launch). A
+        # layout restored before the call is captured, and so is one whose symbolic
+        # size a guard specialized in between.
+        def transpose(t):
+            t.t_()
+
+        def unsqueeze(t):
+            t.unsqueeze_(0)
+
+        def transpose_twice(t):
+            t.t_().t_()
+
+        def specialize(t):
+            if t.shape[0] != 16:
+                raise AssertionError(t.shape)
+
+        def f(x, view_op):
+            out = torch.zeros_like(x)
+            mo = from_dlpack(out)
+            view_op(out)
+            add_one_2d_kernel(from_dlpack(x), mo, cutlass_torch.current_stream())
+            return out
+
+        x = _rand(16, 16)
+        for view_op in (transpose, unsqueeze):
+            with self.subTest(view_op=view_op.__name__):
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported,
+                    "parameter 'mOut': the tensor passed to from_dlpack changed its "
+                    "size, stride or storage offset in place after from_dlpack",
+                ):
+                    torch.compile(f, backend="eager", fullgraph=True)(x, view_op)
+        cf = torch.compile(f, backend="aot_eager")
+        self.assertEqual(cf(x, transpose), f(x, transpose))
+        for view_op, dynamic in ((transpose_twice, False), (specialize, True)):
+            with self.subTest(view_op=view_op.__name__):
+                backend = EagerAndRecordGraphs()
+                cf = torch.compile(f, backend=backend, fullgraph=True, dynamic=dynamic)
+                self.assertEqual(cf(x, view_op), x + 1)
+                (gm,) = backend.graphs
+                hops = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
+                self.assertEqual(len(hops), 1)
+
+    def test_raw_call_after_a_storage_change_graph_breaks(self):
+        # A cute tensor stands for its tensor with the storage it had at from_dlpack:
+        # after set_() (on a tensor made in the region) or an assignment to .data (on
+        # a graph input), eager would launch on the data pointer from_dlpack
+        # recorded, which the captured kernel would not write, so the call
+        # graph-breaks.
+        def through_set(t, other):
+            t = t.clone()
+            mt = from_dlpack(t)
+            t.set_(other)
+            scale_inplace_kernel(mt, t.numel(), cutlass_torch.current_stream())
+            return t
+
+        def through_data(t, other):
+            mt = from_dlpack(t)
+            t.data = other
+            scale_inplace_kernel(mt, t.numel(), cutlass_torch.current_stream())
+            return t
+
+        swapped = (
+            "parameter 'mX': the tensor passed to from_dlpack was given another "
+            "storage in place after from_dlpack"
+        )
+        for f in (through_set, through_data):
+            with self.subTest(f=f.__name__):
+                cf = torch.compile(f, backend="eager", fullgraph=True)
+                with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, swapped):
+                    cf(_rand(8), _rand(8))
+
     def test_wrapper_call_with_overlapping_written_args(self):
         # Two written arguments that are the same memory, under mutates_args="unknown"
         # or for two named parameters, cannot be functionalized, so the call
@@ -5119,6 +5931,40 @@ class CuteDSLDynamoTests(TestCase):
                 with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, pattern):
                     torch.compile(f, backend="aot_eager", fullgraph=True)(x, y)
                 self.assertEqual(torch.compile(f, backend="aot_eager")(x, y), expected)
+
+    def test_raw_cute_jit_call_runs_eagerly_after_graph_break(self):
+        # Without fullgraph, a raw call of cute tensors made outside the region
+        # graph-breaks with its own reason, though it reads the stream in the region;
+        # with a stream made outside too, the reason is the stream's, which is
+        # checked first. The call then runs eagerly.
+        stream = _stream()
+
+        def tensors_made_outside(x, tx, ty, tout, n):
+            y = x + 1
+            add_kernel(tx, ty, tout, n, cutlass_torch.current_stream())
+            return y * 2
+
+        def stream_made_outside(x, tx, ty, tout, n):
+            y = x + 1
+            add_kernel(tx, ty, tout, n, stream)
+            return y * 2
+
+        x, a, b = _rand(1000), _rand(1000), _rand(1000)
+        tensor_reason = "'mX' is a _Tensor made outside the compiled region"
+        stream_reason = "pass cutlass.torch.current_stream(), read on the stream"
+        for f, reason in (
+            (tensors_made_outside, tensor_reason),
+            (stream_made_outside, stream_reason),
+        ):
+            with self.subTest(f=f.__name__):
+                out = torch.zeros_like(a)
+                tx, ty, tout = (from_dlpack(t, assumed_align=16) for t in (a, b, out))
+                torch._dynamo.utils.counters.clear()
+                cf = torch.compile(f, backend="eager")
+                self.assertEqual(cf(x, tx, ty, tout, 1000), (x + 1) * 2)
+                self.assertEqual(out, a + b)
+                reasons = list(torch._dynamo.utils.counters["graph_break"])
+                self.assertTrue(any(reason in r for r in reasons), reasons)
 
     def test_strict_export(self):
         class M(torch.nn.Module):

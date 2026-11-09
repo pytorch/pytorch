@@ -2764,7 +2764,7 @@
     {
       "Gb_type": "CuTeDSL kernel unsupported feature",
       "Context": "",
-      "Explanation": "Dynamo cannot capture this call of a CuTeDSL host function, which eager may run: {msg}",
+      "Explanation": "Dynamo cannot capture this call of a CuTeDSL host function, or of from_dlpack for one, which eager may run: {msg}",
       "Hints": [
         "Change the code as the explanation says.",
         "To capture the launch as it is, make it in a custom operator (torch.library.custom_op), whose call Dynamo captures without tracing into it."
@@ -2778,6 +2778,17 @@
       "Explanation": "Eager refuses this call too: {exc}",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB5948": [
+    {
+      "Gb_type": "CuTeDSL raw-call value read",
+      "Context": "",
+      "Explanation": "{read}: {self.unreadable}: such a value, made by from_dlpack or cutlass.torch.current_stream, only stands for its tensor or stream in a raw call of a CuTeDSL host function.",
+      "Hints": [
+        "Pass the value to the host function without reading it in the compiled region.",
+        "Read what you need from the torch tensor (its dtype, shape or stride) or from torch.cuda.current_stream() instead, which Dynamo traces."
       ]
     }
   ],

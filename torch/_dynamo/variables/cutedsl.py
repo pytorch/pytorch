@@ -5,17 +5,31 @@ counterpart of DynamoTritonHOPifier and TritonKernelVariable in functions.py.
 A host function reaches Dynamo either raw (the ``@cute.jit`` function itself, read
 with or without a source) or wrapped
 (``torch._library.cutedsl.wrap_cutedsl(fn, mutates_args=...)``, called inside or
-outside the compiled region). Both become a CuteDSLKernelVariable, and a call of a
-wrapper becomes a cutedsl_kernel_wrapper_mutation node; a raw call graph-breaks.
+outside the compiled region). Both become a CuteDSLKernelVariable, and a call of
+either becomes a cutedsl_kernel_wrapper_mutation node. A raw call is written as for
+eager::
+
+    add_kernel(
+        from_dlpack(x),
+        from_dlpack(y),
+        from_dlpack(out),
+        n,
+        cutlass.torch.current_stream(),
+    )
+
+``from_dlpack(t)`` becomes a CuteDSLTensorVariable standing for ``t``, the stream a
+CuteDSLCurrentStreamVariable, and the call is captured as
+``wrap_cutedsl(add_kernel, mutates_args=RAW_CALL_MUTATES_ARGS)(x, y, out, n)``.
 """
 
 import collections
 import dataclasses
 import enum
+import inspect
 import sys
 import weakref
 from collections.abc import Callable, Sequence
-from typing import Any, NamedTuple, Never, TYPE_CHECKING
+from typing import Any, ClassVar, NamedTuple, Never, TYPE_CHECKING
 from typing_extensions import TypeIs
 
 import torch
@@ -29,6 +43,7 @@ from torch._higher_order_ops.cutedsl_kernel_wrap import (
     CuteDSLHOPifier,
     is_dsl_runtime_object,
     MutatesArgs,
+    RAW_CALL_MUTATES_ARGS,
     TraceableCuteDSLKernelWrapper,
 )
 from torch._higher_order_ops.user_kernel_hop import constant_contents, constant_key
@@ -137,7 +152,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
             gb_type="CuTeDSL kernel unsupported feature",
             context="",
             explanation="Dynamo cannot capture this call of a CuTeDSL host function, "
-            f"which eager may run: {msg}",
+            f"or of from_dlpack for one, which eager may run: {msg}",
             hints=[
                 "Change the code as the explanation says.",
                 "To capture the launch as it is, make it in a custom operator (torch.library.custom_op), whose call Dynamo captures without tracing into it.",
@@ -145,6 +160,8 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         )
 
     def raise_user_error(self, exc: TypeError | ValueError) -> Never:
+        # Without exc's type: for a raw call, eager CuTeDSL raises its own (a
+        # DSLBaseError, say).
         unimplemented(
             gb_type="CuTeDSL kernel call error",
             context="",
@@ -238,6 +255,51 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
                 }
             )
         return specialize_symbolic_variable(val)
+
+    def cute_tensor_arg(
+        self, name: str, key: str, val: VariableTracker
+    ) -> VariableTracker | None:
+        val = val.realize()
+        if not isinstance(val, CuteDSLTensorVariable):
+            return None
+
+        def exprs(layout: tuple[object, ...]) -> list[object]:
+            # Each symbolic value as its expression under the guards so far, so
+            # that comparing two layouts adds no guards.
+            return [v.node.expr if isinstance(v, torch.SymInt) else v for v in layout]
+
+        if _storage(val.tensor) != val.storage:
+            self.raise_unsupported(
+                f"CuTeDSL kernel {name}: parameter {key!r}: the tensor passed to "
+                "from_dlpack was given another storage in place after from_dlpack "
+                "(with set_() or an assignment to .data), and the cute tensor still "
+                "points at the old one; call from_dlpack after the change"
+            )
+        if exprs(_layout(val.tensor)) != exprs(val.layout):
+            self.raise_unsupported(
+                f"CuTeDSL kernel {name}: parameter {key!r}: the tensor passed to "
+                "from_dlpack changed its size, stride or storage offset in place after "
+                "from_dlpack (with an in-place view op such as t_() or unsqueeze_()); "
+                "call from_dlpack after the change"
+            )
+        return val.tensor
+
+    def is_current_stream(
+        self, val: VariableTracker, tx: "InstructionTranslatorBase"
+    ) -> bool:
+        val = val.realize()
+        return (
+            isinstance(val, CuteDSLCurrentStreamVariable)
+            and val.stream_id == _current_stream(tx)[1]
+        )
+
+    def wrap_raw(self, variable: "CuteDSLKernelVariable") -> "CuteDSLKernelVariable":
+        return CuteDSLKernelVariable(  # noqa: RVT001
+            variable.kernel,
+            RAW_CALL_MUTATES_ARGS,
+            None,
+            wrapper_type=TraceableCuteDSLKernelWrapper,
+        )
 
     def overlapping_args(
         self, tensors: dict[str, VariableTracker]
@@ -742,11 +804,8 @@ class CuteDSLKernelVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if not self.is_wrapper:
-            # A raw call, which Dynamo does not capture: a graph break.
-            return super().call_function(tx, list(args), kwargs)
         return dynamo_cutedsl_hopifier_singleton.call_cutedsl_kernel(
-            self, list(args), kwargs, tx
+            self, list(args), kwargs, tx, raw=not self.is_wrapper
         )
 
     def with_mutates_args(self, mutates_args: object) -> "CuteDSLKernelVariable":
@@ -759,3 +818,268 @@ class CuteDSLKernelVariable(VariableTracker):
             kernel_source=self.kernel_source,
             wrapper_type=TraceableCuteDSLKernelWrapper,
         )
+
+
+def _current_stream(
+    tx: "InstructionTranslatorBase",
+) -> tuple[VariableTracker | None, int | None]:
+    """The stream Dynamo tracks as current at this point of the trace (it follows
+    torch.cuda.stream contexts), and an id for it that does not realize the lazy
+    variable of the stream current when the trace started. The stream is read off the
+    stack rather than with cur_stream(), which also marks it as used by the graph: it
+    never enters the graph, and is only rebuilt, from its source, at a graph break."""
+    state = tx.symbolic_stream_state
+    if not state.in_stream_context():
+        return None, None
+    return state.cur_stream_stack[-1], state.cur_stream_id()
+
+
+def _layout(tensor: VariableTracker) -> tuple[object, ...]:
+    """The size, stride and storage offset of ``tensor``, as it is at this point of
+    the trace."""
+    fake = tensor.as_proxy().node.meta["example_value"]
+    return (*fake.size(), *fake.stride(), fake.storage_offset())
+
+
+def _storage(tensor: VariableTracker) -> object:
+    """The identity of the storage of ``tensor``, as it is at this point of the
+    trace (None if it has none)."""
+    from torch.multiprocessing.reductions import StorageWeakRef
+
+    fake = tensor.as_proxy().node.meta["example_value"]
+    try:
+        return StorageWeakRef(fake.untyped_storage())
+    except RuntimeError:  # NotImplementedError is a RuntimeError
+        return None
+
+
+class CuteDSLFromDlpackVariable(VariableTracker):
+    """``cutlass.cute.runtime.from_dlpack``, whose result stands for its tensor in a
+    raw call. ``assumed_align`` is accepted and dropped: the launch compiles the
+    kernel for the alignment of each tensor's own pointer, at most 16 bytes. The
+    other options would change the compiled kernel, so only their defaults are
+    accepted. As in eager, a tensor that requires grad is refused."""
+
+    def __init__(self, value: Callable[..., Any], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def python_type(self) -> type:
+        return type(self.value)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        hopifier = dynamo_cutedsl_hopifier_singleton
+        signature = inspect.signature(self.value)
+        first = next(iter(signature.parameters.values()), None)
+        if first is None or first.kind not in (
+            first.POSITIONAL_ONLY,
+            first.POSITIONAL_OR_KEYWORD,
+        ):
+            hopifier.raise_unsupported(
+                f"from_dlpack{signature}: unexpected signature; pass the torch tensors "
+                "to a wrap_cutedsl wrapper of the host function instead"
+            )
+        try:
+            arguments = dict(signature.bind(*args, **kwargs).arguments)
+        except TypeError as e:
+            hopifier.raise_user_error(TypeError(f"from_dlpack(): {e}"))
+        tensor = arguments.pop(first.name).realize()
+        if not tensor.is_tensor():
+            hopifier.raise_unsupported(
+                f"from_dlpack() of a value of type {tensor.python_type_name()}: only a "
+                "torch.Tensor is captured"
+            )
+        if tensor.requires_grad:
+            hopifier.raise_user_error(
+                ValueError(
+                    "from_dlpack() of a tensor that requires grad, which eager "
+                    "CuTeDSL refuses too; pass from_dlpack(t.detach())"
+                )
+            )
+        align_vt = arguments.pop("assumed_align", None)
+        align = None
+        if align_vt is not None:
+            if not align_vt.is_python_constant():
+                hopifier.raise_unsupported(
+                    "from_dlpack(): assumed_align must be a constant"
+                )
+            align = align_vt.as_python_constant()
+        if align is not None:
+            if type(align) is bool or not isinstance(align, int):
+                msg = f"from_dlpack(): assumed_align must be an int, got {align!r}"
+                hopifier.raise_user_error(TypeError(msg))
+            if not 0 < align <= 16 or align & (align - 1):
+                hopifier.raise_unsupported(
+                    "from_dlpack(): assumed_align must be a power of two up to 16 (PT2 "
+                    "compiles for at most 16-byte alignment)"
+                )
+        for key, val in arguments.items():
+            default = signature.parameters[key].default
+            if not (val.is_python_constant() and val.as_python_constant() == default):
+                hopifier.raise_unsupported(
+                    f"from_dlpack(): {key}= is not supported; PT2 makes the cute "
+                    "tensor itself, accepting only assumed_align"
+                )
+        # noqa: RVT001
+        return CuteDSLTensorVariable(tensor, align, _layout(tensor), _storage(tensor))
+
+
+class _CuteDSLValueVariable(VariableTracker):
+    """A value that from_dlpack or cutlass.torch.current_stream made in the compiled
+    region for a raw call. It cannot be read there: an attribute (a method too), a
+    comparison, hasattr(), repr() or str() of it graph-breaks, and the real value is
+    made at the break, as wherever the value leaves the graph (an f-string of it is
+    formatted after the graph, from that value)."""
+
+    # How the value is written, and why it cannot be read.
+    expr: ClassVar[str]
+    unreadable: ClassVar[str]
+
+    def refuse_read(self, read: str) -> Never:
+        unimplemented(
+            gb_type="CuTeDSL raw-call value read",
+            context="",
+            explanation=f"{read}: {self.unreadable}: such a value, made by from_dlpack "
+            "or cutlass.torch.current_stream, only stands for its tensor or stream in "
+            "a raw call of a CuTeDSL host function.",
+            hints=[
+                "Pass the value to the host function without reading it in the compiled region.",
+                "Read what you need from the torch tensor (its dtype, shape or stride) or from torch.cuda.current_stream() instead, which Dynamo traces.",
+            ],
+        )
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        self.refuse_read(f"{self.expr}.{name}")
+
+    def call_obj_hasattr(self, tx: "InstructionTranslatorBase", name: str) -> Never:
+        self.refuse_read(f"hasattr({self.expr}, {name!r})")
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        self.refuse_read(f"{self.expr}.{op}()")
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # Also str(), whose default goes through tp_repr.
+        self.refuse_read(f"repr() of {self.expr}")
+
+
+class CuteDSLTensorVariable(_CuteDSLValueVariable):
+    """``from_dlpack(tensor)`` made in the compiled region: stands for ``tensor`` in a
+    raw call, whose launcher makes the cute tensor, with the ``layout`` (see _layout)
+    and the ``storage`` (see _storage) it had at from_dlpack. A call after an in-place
+    view op changed the layout graph-breaks, and so does one after the tensor was
+    given another storage (t.set_(other), or t.data = other for a graph input): eager
+    would launch on the data pointer that from_dlpack recorded, the captured kernel on
+    the new storage, and the call after the graph break, on a cute tensor made again
+    from the tensor, on the new storage too."""
+
+    expr = "from_dlpack(...)"
+    unreadable = "a cute tensor made in the compiled region cannot be read there"
+
+    def __init__(
+        self,
+        tensor: VariableTracker,
+        assumed_align: int | None,
+        layout: tuple[object, ...],
+        storage: object,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.tensor = tensor
+        self.assumed_align = assumed_align
+        self.layout = layout
+        self.storage = storage
+
+    def python_type(self) -> type:
+        # Already imported: it defines from_dlpack, which made this value.
+        return sys.modules["cutlass.cute.runtime"]._Tensor
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Live across a graph break: made again from the tensor.
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("cutlass.cute.runtime", "from_dlpack")
+        )
+        codegen(self.tensor)
+        if self.assumed_align is None:
+            codegen.call_function(1, False)
+            return
+        codegen.append_output(codegen.create_load_const(self.assumed_align))
+        codegen.extend_output(
+            codegen.create_call_function_kw(2, ("assumed_align",), False)
+        )
+
+
+class CuteDSLCurrentStreamFunctionVariable(VariableTracker):
+    """``cutlass.torch.current_stream``, whose result is the stream of a raw call."""
+
+    def __init__(self, value: Callable[..., Any], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def python_type(self) -> type:
+        return type(self.value)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if args or kwargs:
+            dynamo_cutedsl_hopifier_singleton.raise_user_error(
+                TypeError("cutlass.torch.current_stream() takes no arguments")
+            )
+        return CuteDSLCurrentStreamVariable(*_current_stream(tx))  # noqa: RVT001
+
+
+class CuteDSLCurrentStreamVariable(_CuteDSLValueVariable):
+    """``cutlass.torch.current_stream()`` called in the compiled region: the stream
+    Dynamo tracks as current there (``stream``; ``stream_id`` identifies it). A raw
+    call captures it only when that stream is also current at the call, because the
+    captured kernel is launched on the call's stream when the graph runs."""
+
+    _nonvar_fields = {"stream", "stream_id", *VariableTracker._nonvar_fields}
+
+    expr = "cutlass.torch.current_stream()"
+    unreadable = "the stream cannot be read in the compiled region"
+
+    def __init__(
+        self,
+        stream: VariableTracker | None,
+        stream_id: int | None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.stream = stream
+        self.stream_id = stream_id
+
+    def python_type(self) -> type:
+        # Already imported by cutlass.torch, whose current_stream made this value.
+        return sys.modules["cuda.bindings.driver"].CUstream
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Live across a graph break: the CUstream of the recorded torch stream, which
+        # Dynamo rebuilds as it rebuilds torch.cuda.current_stream() values (a
+        # torch.Stream: native_handle is the raw stream). It is rebuilt from its source
+        # when it has one, which keeps the lazy variable of the stream current when the
+        # trace started unrealized.
+        if self.stream is None:
+            codegen.add_push_null(
+                lambda: codegen.load_import_from("cutlass.torch", "current_stream")
+            )
+            codegen.call_function(0, False)
+            return
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("cuda.bindings.driver", "CUstream")
+        )
+        codegen(self.stream.source if self.stream.source is not None else self.stream)
+        codegen.extend_output([codegen.create_load_attr("native_handle")])
+        codegen.call_function(1, False)
