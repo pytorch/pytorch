@@ -5,8 +5,8 @@ into the backward graph. The forward and backward are compiled separately, so
 the two copies can lower to different kernels and the recompute can drift
 numerically from the forward (gh-186572). With
 torch._functorch.config.deterministic_recompute, each checkpointed region's
-recompute is outlined into a subgraph that both graphs invoke, so both run the
-same computation.
+recompute is outlined into a subgraph that both graphs invoke, compiled with
+Inductor deterministic=True so both lowerings match.
 
 The pass runs after partitioning because that is the first point where the
 recomputed ops are known: a selective-checkpointing policy is evaluated per aten
@@ -45,7 +45,8 @@ def deterministic_recompute(
     """Rewrite the partitioned fw_module and bw_module in place so each piece of
     the backward's recompute runs as a shared subgraph."""
     # Both trace the graphs again and can't trace the shared calls (compiled
-    # autograd would graph-break on each backward call).
+    # autograd would graph-break on each backward call and compile its subgraph
+    # without deterministic mode).
     if config.enable_complex_wrapper or torch._dynamo.config.compiled_autograd:
         msg = "not applied under enable_complex_wrapper or compiled_autograd"
         torch._logging.warning_once(log, "deterministic_recompute: %s", msg)
@@ -188,6 +189,49 @@ def _writes(n: torch.fx.Node) -> set[int]:
     return {s for a in written if (s := get_node_storage(a)) is not None}
 
 
+def _accumulates(n: torch.fx.Node) -> bool:
+    """Whether ``n``'s kernel accumulates floating-point values in an order that
+    can change run to run (in Inductor, and in eager on CUDA). This has to track
+    the ops Inductor lowers to atomic adds, the floating-point scans (Inductor
+    splits a long one, and ATen's CUDA cumsum isn't deterministic either), and
+    the fallbacks whose kernels use atomics (e.g. index_reduce, histc on
+    floats); Inductor's deterministic mode changes none of them. Integer
+    accumulation is exact in any order. (An op that overwrites with duplicate
+    indices, e.g. index_put without accumulate, races too, but its result is
+    undefined anyway. Backward ops, which a recompute holds only when traced
+    with trace_autograd_ops, aren't listed.)"""
+    aten = torch.ops.aten
+    val = n.meta.get("val")
+    if not isinstance(val, torch.Tensor) or not (
+        val.is_floating_point() or val.is_complex()
+    ):
+        return False
+    if n.target in (
+        aten.index_add.default,
+        aten.scatter_add.default,
+        aten.index_reduce.default,
+        aten._unsafe_masked_index_put_accumulate.default,
+        aten.histc.default,
+        aten.cumsum.default,
+        aten.cumprod.default,
+        aten.logcumsumexp.default,
+    ):
+        return True
+    if n.target in (
+        aten.index_put.default,
+        aten._unsafe_index_put.default,
+        aten.put.default,
+    ):
+        return bool(n.kwargs.get("accumulate", n.args[3] if len(n.args) > 3 else False))
+    if n.target is aten.scatter_reduce.two:
+        return n.kwargs.get("reduce", n.args[4] if len(n.args) > 4 else None) in (
+            "sum",
+            "mean",
+            "prod",
+        )
+    return n.target in (aten.scatter.reduce, aten.scatter.value_reduce)
+
+
 def _is_rng(n: torch.fx.Node) -> bool:
     from torch._functorch.partitioners import is_rng_op
     from torch._prims.rng_prims import (
@@ -231,10 +275,14 @@ def _share_region(
 
     s_set = set(s_nodes)
 
-    # A recompute that re-draws RNG can't share the forward's draw.
+    # A recompute that re-draws RNG can't share the forward's draw, and one
+    # whose kernel accumulates in an order that can change run to run (see
+    # _accumulates) can't match it bit for bit.
     for n in s_nodes:
         if _is_rng(n):
             return _skip(f"its recompute contains RNG ({n.name})")
+        if _accumulates(n):
+            return _skip(f"{n.name} accumulates in an order that can change")
 
     # Slice inputs: values the slice reads from outside it, in first-seen order
     # for a stable signature.
@@ -481,7 +529,10 @@ def _splice_slice_call(
     the nodes in ``move_below`` (in order) right after the call's outputs, and
     erase the nodes named in ``erase_names``. Returns the output getitems by the name
     of the node they replaced."""
-    from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+    from torch._higher_order_ops.invoke_subgraph import (
+        invoke_subgraph,
+        NestedCompileRegionOptions,
+    )
 
     g = parent_gm.graph
     # Erased in reverse topological order, as before the move, so no node is
@@ -497,6 +548,28 @@ def _splice_slice_call(
             invoke_subgraph, args=(get_attr_node, identifier, *operands)
         )
     call.meta["val"] = tuple(slice_out_vals)
+    # Each Inductor compile autotunes the slice on its own and could pick
+    # numerically different kernel configs; deterministic mode uses fixed
+    # heuristics instead, so both calls lower identically. It doesn't allow
+    # benchmark_fusion or combo-kernel benchmarking, which may be on globally.
+    patches = {
+        "deterministic": True,
+        "benchmark_fusion": False,
+        "benchmark_combo_kernel": False,
+    }
+    options = NestedCompileRegionOptions(inductor_config_patches=patches)
+    call.meta.setdefault("custom", {})["nested_region_config"] = options
+    # The forward's compile keeps an invoke_subgraph's output strides as traced
+    # and the backward's may pad them, and the backward's operands may come
+    # padded too (e.g. a saved value); with different strides the two copies
+    # can accumulate in different orders. So both keep the strides the
+    # forward traced, which slice_gm's placeholders carry.
+    slice_gm.graph.output_node().meta["user_visible_output_idxs"] = list(
+        range(len(slice_out_vals))
+    )
+    operand_vals = [p.meta["val"] for p in slice_gm.graph.find_nodes(op="placeholder")]
+    no_kwargs: dict[str, Any] = {}
+    call.meta["eager_input_vals"] = ((None, identifier, *operand_vals), no_kwargs)
     anchor = call
     getitems = {}
     for name, tgt in replace.items():
