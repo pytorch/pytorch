@@ -1,9 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 
 import logging
+import os
 import subprocess
 import sys
 import textwrap
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -11,7 +13,13 @@ from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor.debug import _clear_sharding_prop_cache
-from torch.testing._internal.common_utils import run_concurrently, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    IS_SANDCASTLE,
+    run_concurrently,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
@@ -153,6 +161,9 @@ sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[
         self.assertIn("MISS", log_records[0].getMessage())
         self.assertIn("HIT", log_records[1].getMessage())
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    def test_sharding_prop_cache_hit_worker_thread_exit_subprocess(self):
+        """A worker thread hitting an unreferenced logger in C++ must exit cleanly."""
         # Run the worker-thread C++ cache-hit scenario in a fresh subprocess and
         # drop Python references to the logger before the worker thread exits.
         # This ensures that if C++ stored the logger in a thread_local py::object
@@ -174,8 +185,13 @@ sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[
                 backend="fake", rank=0, world_size=2, store=FakeStore()
             )
             try:
+                messages = []
+                handler = logging.Handler()
+                handler.emit = lambda record: messages.append(record.getMessage())
+
                 logger = logging.Logger("torch.distributed.tensor._dispatch")
                 logger.setLevel(logging.DEBUG)
+                logger.addHandler(handler)
                 _dispatch.logger = logger
                 logging.Logger.manager.loggerDict[
                     "torch.distributed.tensor._dispatch"
@@ -194,6 +210,9 @@ sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[
                         torch._C._get_DTensor_sharding_propagator_cache_stats()
                     )
                     assert hits >= 1
+                    assert any(
+                        "HIT (C++ fast path)" in m for m in messages
+                    ), messages
                     _dispatch.logger = None
                     logging.Logger.manager.loggerDict.pop(
                         "torch.distributed.tensor._dispatch", None
@@ -204,8 +223,10 @@ sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[
                 dist.destroy_process_group()
             """
         )
+        env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
         proc = subprocess.run(
             [sys.executable, "-c", script],
+            env=env,
             capture_output=True,
             text=True,
             timeout=120,

@@ -1202,9 +1202,10 @@ struct hash<NativeOpSchema> {
 } // namespace std
 
 // Helper to check if dtensor debug logging is enabled and log cache hits.
-// We cache the logger process-wide (via DEFINE_CACHING_PYTHON_IMPORT_GETTER)
-// and the debug-enabled check per thread to avoid repeated Python calls. A
-// thread_local py::object is otherwise destroyed at thread exit after
+// We cache the logger process-wide at first use (via
+// DEFINE_CACHING_PYTHON_IMPORT_GETTER; rebinding _dispatch.logger later is not
+// supported) and the debug-enabled check per thread to avoid repeated Python
+// calls. A thread_local py::object is otherwise destroyed at thread exit after
 // PyThreadState_DeleteCurrent() has released the GIL, so it would require
 // explicit cleanup before thread-state teardown (as
 // get_thread_local_native_sharding_propagator_cache does); this helper avoids
