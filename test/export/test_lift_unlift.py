@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: export"]
+import warnings
 from collections import OrderedDict
 from typing import Any
 
@@ -365,6 +366,26 @@ class TestLift(TestCase):
         self.assertEqual(non_persistent_buf, foo.get_buffer("non_persistent_buf"))
         self.assertIn("non_persistent_buf", stateful_gm._non_persistent_buffers_set)
         self.assertNotIn("non_persistent_buf", stateful_gm.state_dict())
+
+    def test_unlift_dotted_constant_requiring_grad(self):
+        # A dotted constant that the unlifted module already holds is not
+        # handled a second time, so it warns once.
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.sub = torch.nn.Module()
+                self.sub.c = torch.randn(2, requires_grad=True)
+
+            def forward(self, x):
+                return x + self.sub.c
+
+        foo, x = Foo(), torch.randn(2)
+        exported = torch.export.export(foo, (x,), strict=False)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            module = exported.module()
+        self.assertEqual(len([w for w in caught if "`sub.c`" in str(w.message)]), 1)
+        self.assertEqual(module(x), foo(x))
 
 
 class ConstantAttrMapTest(TestCase):
