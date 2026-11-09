@@ -5632,9 +5632,36 @@ def inplace_constant_pad_nd(
     if len(padding) != 4 or len(x.get_size()) != 2:
         return None
 
-    # No harm to realize since we already know that
-    # the op can not be fused into the single user.
-    # It need to be realized later anyways.
+    def single_use_producer() -> bool:
+        node = V.graph.current_node.args[0]
+        while isinstance(node, torch.fx.Node):
+            if len(node.users) != 1:
+                return False
+            if node.op != "call_function":
+                return True
+            if node.target is operator.getitem:
+                node = node.args[0]
+            elif isinstance(node.target, torch._ops.OpOverload) and is_view(
+                node.target
+            ):
+                node = node.all_input_nodes[0]
+            else:
+                return True
+        return False
+
+    # Without stride padding, Pointwise realizes contiguously: this attempt
+    # cannot succeed and only makes the fallback copy. Preserve realization
+    # for shared producers to avoid recomputation across graph consumers.
+    if not config.comprehensive_padding and isinstance(x, ir.TensorBox):
+        storage = x.data.unwrap_view() if isinstance(x.data, ir.BaseView) else x.data
+        if (
+            isinstance(storage, ir.StorageBox)
+            and isinstance(storage.data, ir.Pointwise)
+            and single_use_producer()
+        ):
+            counters["inductor"]["inplace_padding_skipped_single_use"] += 1
+            return None
+
     x.realize()
 
     # If x is a view (e.g. a SliceView), realizing it just realizing the

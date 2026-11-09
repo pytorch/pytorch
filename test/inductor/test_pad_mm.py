@@ -24,6 +24,7 @@ from torch._inductor.fx_passes.pad_mm import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -733,6 +734,149 @@ class PadMMTest(TestCase):
         compiled = torch.compile(fn)(x, y)
         self.assertEqual(compiled, expected)
         self.assertEqual(compiled.stride(), expected.stride())
+
+
+@unittest.skipIf(not HAS_GPU_AND_TRITON, "Needs an accelerator with Triton")
+class PadInputRealizationTest(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(
+            inductor_config.patch(
+                {
+                    "fx_graph_cache": False,
+                    "force_shape_pad": True,
+                    "inplace_padding": True,
+                    "comprehensive_padding": False,
+                    "max_autotune": False,
+                    "triton.autotune_at_compile_time": False,
+                    "triton.cudagraphs": False,
+                }
+            )
+        )
+
+    @torch.no_grad()
+    def _check_padded_input_memory(self, device, producer, cpp_wrapper):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = torch.nn.Linear(533, 68, device=device, dtype=torch.bfloat16)
+
+            def forward(self, x):
+                return self.lin(producer(x))
+
+        model = Model()
+        x = torch.randn(1024, 533, 160, device=device, dtype=torch.bfloat16)
+        expected = model(x)
+        device_module = torch.get_device_module(device)
+
+        def compiled_peak(shape_padding):
+            torch.compiler.reset()
+            counters.clear()
+            torch._dynamo.mark_dynamic(x, 0)
+            with inductor_config.patch(
+                shape_padding=shape_padding, cpp_wrapper=cpp_wrapper
+            ):
+                compiled = torch.compile(model, fullgraph=True)
+                self.assertEqual(compiled(x), expected, atol=5e-2, rtol=5e-2)
+                device_module.synchronize()
+                device_module.reset_peak_memory_stats()
+                base = device_module.memory_allocated()
+                self.assertEqual(compiled(x), expected, atol=5e-2, rtol=5e-2)
+                device_module.synchronize()
+                return device_module.max_memory_allocated() - base
+
+        unpadded = compiled_peak(shape_padding=False)
+        self.assertEqual(counters["inductor"]["pad_rewritten_as_cat"], 0)
+        self.assertEqual(counters["inductor"]["inplace_padding_skipped_single_use"], 0)
+        padded = compiled_peak(shape_padding=True)
+        self.assertEqual(counters["inductor"]["inplace_padding"], 0)
+        self.assertGreater(counters["inductor"]["pad_rewritten_as_cat"], 0)
+        self.assertLess(padded, 1.1 * unpadded)
+        self.assertGreater(
+            counters["inductor"]["inplace_padding_skipped_single_use"], 0
+        )
+
+    @parametrize("cpp_wrapper", [False, True])
+    def test_pad_mm_input_produced_through_view(self, device, cpp_wrapper):
+        self._check_padded_input_memory(
+            device,
+            lambda x: x.permute(0, 2, 1).contiguous().reshape(-1, 533),
+            cpp_wrapper,
+        )
+
+    @parametrize("cpp_wrapper", [False, True])
+    def test_pad_mm_input_produced_by_pointwise(self, device, cpp_wrapper):
+        self._check_padded_input_memory(
+            device, lambda x: torch.relu(x.view(-1, 533)), cpp_wrapper
+        )
+
+    @parametrize("consumer", ["producer", "view", "output"])
+    @parametrize("cpp_wrapper", [False, True])
+    @torch.no_grad()
+    def test_pad_input_shared_through_views(self, device, consumer, cpp_wrapper):
+        class Model(torch.nn.Module):
+            def forward(self, x, w):
+                p = torch.sin(x)
+                view = p.reshape(-1, 533)
+                padded = torch.nn.functional.pad(view, (0, 3, 0, 0))
+                if consumer == "producer":
+                    other = p + 1
+                elif consumer == "view":
+                    other = view + 1
+                else:
+                    other = p
+                return padded @ w, other
+
+        model = Model()
+        x = torch.randn(8, 128, 533, device=device, dtype=torch.bfloat16)
+        w = torch.randn(536, 64, device=device, dtype=torch.bfloat16)
+        torch._dynamo.mark_dynamic(x, 0)
+        counters.clear()
+        with inductor_config.patch(shape_padding=False, cpp_wrapper=cpp_wrapper):
+            compiled = torch.compile(model, fullgraph=True)
+            result, codes = run_and_get_code(compiled, x, w)
+            self.assertEqual(result, model(x, w), atol=5e-2, rtol=5e-2)
+            for batch in (3, 1):
+                sample = torch.randn(
+                    batch, 128, 533, device=device, dtype=torch.bfloat16
+                )
+                self.assertEqual(
+                    compiled(sample, w), model(sample, w), atol=5e-2, rtol=5e-2
+                )
+        if not cpp_wrapper:
+            self.assertEqual("\n".join(codes).count("sin("), 1)
+        self.assertEqual(counters["inductor"]["inplace_padding"], 0)
+        self.assertGreater(counters["inductor"]["pad_rewritten_as_cat"], 0)
+        self.assertEqual(counters["inductor"]["inplace_padding_skipped_single_use"], 0)
+
+    @parametrize("cpp_wrapper", [False, True])
+    @torch.no_grad()
+    def test_pad_input_before_mutation(self, device, cpp_wrapper):
+        class Model(torch.nn.Module):
+            def forward(self, x, w):
+                p = torch.sin(x).reshape(-1, 533)
+                padded = torch.nn.functional.pad(p, (0, 3, 0, 0))
+                x.add_(1)
+                return padded @ w, x
+
+        model = Model()
+        x = torch.randn(8, 128, 533, device=device, dtype=torch.bfloat16)
+        w = torch.randn(536, 64, device=device, dtype=torch.bfloat16)
+        expected = model(x.clone(), w)
+        counters.clear()
+        with inductor_config.patch(shape_padding=False, cpp_wrapper=cpp_wrapper):
+            result = torch.compile(model, fullgraph=True)(x.clone(), w)
+        self.assertEqual(result, expected, atol=5e-2, rtol=5e-2)
+        self.assertEqual(counters["inductor"]["inplace_padding"], 0)
+        self.assertGreater(counters["inductor"]["pad_rewritten_as_cat"], 0)
+        self.assertGreater(
+            counters["inductor"]["inplace_padding_skipped_single_use"], 0
+        )
+
+
+instantiate_device_type_tests(PadInputRealizationTest, globals(), only_for=GPU_TYPE)
 
 
 @instantiate_parametrized_tests
