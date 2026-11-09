@@ -1259,12 +1259,43 @@ inline Vectorized<T>& operator>>=(Vectorized<T>& a, const Vectorized<T>& b) {
   return a;
 }
 
+// Applies op(a, b) +/- c to each element. Reduced floating-point types compute
+// in float, like their vectorized specializations: rounding the product to T
+// before adding would round twice.
+template <typename T, typename Op>
+inline Vectorized<T> fused_multiply_add(
+    const Vectorized<T>& a,
+    const Vectorized<T>& b,
+    const Vectorized<T>& c,
+    Op op) {
+  if constexpr (is_reduced_floating_point_v<T>) {
+    __at_align__ T va[Vectorized<T>::size()];
+    __at_align__ T vb[Vectorized<T>::size()];
+    __at_align__ T vc[Vectorized<T>::size()];
+    a.store(va);
+    b.store(vb);
+    c.store(vc);
+    for (int i = 0; i != Vectorized<T>::size(); i++) {
+      va[i] = static_cast<T>(
+          op(static_cast<float>(va[i]),
+             static_cast<float>(vb[i]),
+             static_cast<float>(vc[i])));
+    }
+    return Vectorized<T>::loadu(va);
+  } else {
+    return op(a, b, c);
+  }
+}
+
 template <typename T>
 inline Vectorized<T> fmadd(
     const Vectorized<T>& a,
     const Vectorized<T>& b,
     const Vectorized<T>& c) {
-  return a * b + c;
+  return fused_multiply_add(
+      a, b, c, [](const auto& x, const auto& y, const auto& z) {
+        return x * y + z;
+      });
 }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fmadd)
@@ -1274,7 +1305,10 @@ inline Vectorized<T> fnmadd(
     const Vectorized<T>& a,
     const Vectorized<T>& b,
     const Vectorized<T>& c) {
-  return -(a * b) + c;
+  return fused_multiply_add(
+      a, b, c, [](const auto& x, const auto& y, const auto& z) {
+        return -(x * y) + z;
+      });
 }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fnmadd)
@@ -1284,7 +1318,10 @@ inline Vectorized<T> fmsub(
     const Vectorized<T>& a,
     const Vectorized<T>& b,
     const Vectorized<T>& c) {
-  return a * b - c;
+  return fused_multiply_add(
+      a, b, c, [](const auto& x, const auto& y, const auto& z) {
+        return x * y - z;
+      });
 }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fmsub)
@@ -1294,7 +1331,10 @@ inline Vectorized<T> fnmsub(
     const Vectorized<T>& a,
     const Vectorized<T>& b,
     const Vectorized<T>& c) {
-  return -(a * b) - c;
+  return fused_multiply_add(
+      a, b, c, [](const auto& x, const auto& y, const auto& z) {
+        return -(x * y) - z;
+      });
 }
 
 VECTORIZED_SUPPORT_SCALARS_FOR_TERNARY_FUNC(fnmsub)
