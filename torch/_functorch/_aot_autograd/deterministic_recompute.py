@@ -77,6 +77,47 @@ def deterministic_recompute(
     saved = {n for n in fw_outs[num_fwd_outputs:] if isinstance(n, torch.fx.Node)}
     copies, regions = _recomputed_copies(fw_module, bw_module, saved)
 
+    # A recomputed node that reads or produces a value carrying an unbacked
+    # symbol (e.g. from .item() or nonzero, including those nodes themselves)
+    # stays out of pieces: Inductor can't bind one coming out of a
+    # subgraph, nor in general one passed in, and the symbol almost always
+    # leaves the piece (runtime asserts and the backward use it too). So does
+    # everything computed from it: a piece holding that would read the dropped
+    # value, which each graph computes on its own and which it couldn't
+    # recompute itself.
+    # (unbacked_bindings may name a symbol before a rename the values see, so
+    # the symbols are read off the values, minus those of graph inputs, which
+    # are fine.)
+    unbacked = set()
+    for n in fw_module.graph.nodes:
+        if n.meta.get("unbacked_bindings"):
+            unbacked |= free_unbacked_symbols(n.meta.get("val"))
+    for p in fw_module.graph.find_nodes(op="placeholder"):
+        unbacked -= free_unbacked_symbols(p.meta.get("val"))
+    if unbacked:
+        dropped: set[torch.fx.Node] = set()
+        for n in fw_module.graph.nodes:
+            if n in copies and (
+                any(a in dropped for a in n.all_input_nodes)
+                or any(
+                    free_unbacked_symbols(m.meta.get("val")) & unbacked
+                    for m in (n, *n.all_input_nodes)
+                )
+            ):
+                dropped.add(n)
+        copies -= dropped
+        # Say so once, where it starts.
+        for n in fw_module.graph.nodes:
+            if n in dropped and not any(a in dropped for a in n.all_input_nodes):
+                log.info(
+                    "deterministic_recompute: %s left as partitioned, with what "
+                    "is computed from it: it reads or computes a value carrying "
+                    "an unbacked symbol",
+                    n.name,
+                )
+        for nodes in regions.values():
+            nodes[:] = [n for n in nodes if n not in dropped]
+
     # A constant is a value computed from no tensor graph input: an arange, an
     # attribute such as a tensor constant, math on those, or SymInt
     # arithmetic. An impure op isn't one, since copying it would run it again.
@@ -146,7 +187,7 @@ def deterministic_recompute(
     for i, piece in enumerate(pieces):
         identifier = f"recompute_{i}"
         outputs = _share_region(
-            fw_module, bw_module, piece, saved, copied, bw_of, identifier
+            fw_module, bw_module, piece, saved, copies, copied, bw_of, identifier
         )
         if outputs is not None:
             bw_of.update(outputs)
@@ -213,7 +254,8 @@ def _recomputed_copies(
             continue
         copies.add(n)
         # Recompute the partitioner chose outside checkpoint regions (e.g. under
-        # activation_memory_budget) is a copy in no region.
+        # activation_memory_budget) is a copy in no region; pieces recompute
+        # what they read from it if it's cheap (see _share_region).
         if (key := n.meta.get("ac_graph_id")) is not None:
             regions[key].append(n)
     return copies, regions
@@ -242,6 +284,13 @@ def _is_view(target: Any) -> bool:
         torch.ops.aten.unsafe_split_with_sizes.default,
     )
     return _is_view_op(target) or target in (operator.getitem, *unsafe, *_waits())
+
+
+@functools.cache
+def _cheap_ops() -> Any:
+    from torch._functorch.partitioners import get_default_op_list
+
+    return get_default_op_list()
 
 
 # Ops that end the use of their tensors' storage without a write in their
@@ -331,6 +380,7 @@ def _share_region(
     bw_module: torch.fx.GraphModule,
     s_nodes: list[torch.fx.Node],
     saved: set[torch.fx.Node],
+    copies: set[torch.fx.Node],
     copied: set[torch.fx.Node],
     bw_of: dict[torch.fx.Node, torch.fx.Node],
     identifier: str,
@@ -350,7 +400,26 @@ def _share_region(
     bw_by_name = {n.name: n for n in bw_graph.nodes}
     node_index = {n: i for i, n in enumerate(fw_graph.nodes)}
 
+    # The piece's two calls read their inputs from different graphs. An input
+    # each graph computes separately (a copy no earlier piece shares, e.g.
+    # recompute outside the region) could differ between them, so the piece
+    # recomputes it itself instead, with the attributes it reads, and returns
+    # it if something else reads it, so that later pieces read it too. That
+    # moves its work into the piece, which runs wherever the call is placed and
+    # fuses with nothing outside it, so only what the partitioner considers
+    # cheap to recompute (views, pointwise ops and the like) is recomputed so.
     s_set = set(s_nodes)
+    stack = [a for n in s_nodes for a in n.all_input_nodes]
+    while stack:
+        a = stack.pop()
+        if a in s_set or (a not in copies and a.op != "get_attr"):
+            continue
+        cheap = a.op == "get_attr" or a in copied or _is_view(a.target)
+        if not cheap and not _cheap_ops().is_recomputable(a):
+            return _skip(f"its input {a.name} is computed in each graph")
+        s_set.add(a)
+        stack.extend(a.all_input_nodes)
+    s_nodes = sorted(s_set, key=node_index.__getitem__)
 
     # A recompute that re-draws RNG can't share the forward's draw, and one
     # whose kernel accumulates in an order that can change run to run (see
@@ -372,13 +441,6 @@ def _share_region(
 
     def _is_tuple_val(n: torch.fx.Node) -> bool:
         return isinstance(n.meta.get("val"), (tuple, list))
-
-    # Inductor can't bind an unbacked symbol (e.g. from .item() or nonzero)
-    # coming out of a subgraph, nor in general one passed in; such a piece is
-    # left as partitioned for now.
-    for n in (*s_inputs, *s_nodes):
-        if free_unbacked_symbols(n.meta.get("val")):
-            return _skip(f"{n.name} carries an unbacked symbol")
 
     # Inductor treats invoke_subgraph outputs as fresh buffers and may reuse one
     # in place, so the slice must not return a view of one of its inputs (e.g.
