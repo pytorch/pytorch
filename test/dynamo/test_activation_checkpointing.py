@@ -6124,6 +6124,22 @@ def forward(self, arg0_1, arg1_1):
     return (mm_2,)""",
         )
 
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_rejected_under_non_strict(self):
+        # The recompute is traced as separate ops here, so it can't be shared.
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                return checkpoint(
+                    lambda x: torch.sin(x @ self.w), x, use_reentrant=False
+                )
+
+        with self.assertRaisesRegex(NotImplementedError, "train-step tracing"):
+            self._trace_train_step(Model(), torch.randn(2, 4))
+
     def test_sac_traces_through_eager_ac_under_non_strict(self):
         def policy_fn(ctx, func, *args, **kwargs):
             if func == torch.ops.aten.mm.default:
