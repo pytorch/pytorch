@@ -1,3 +1,4 @@
+#include <ATen/DeviceAccelerator.h>
 #include <torch/csrc/Device.h>
 
 #include <torch/csrc/Exceptions.h>
@@ -100,6 +101,14 @@ static PyObject* THPDevice_index(THPDevice* self, PyObject* /*noargs*/) {
   } else {
     Py_RETURN_NONE;
   }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPDevice_isAccelerator(
+    THPDevice* self,
+    PyObject* /*noargs*/) {
+  HANDLE_TH_ERRORS
+  return PyBool_FromLong(at::accelerator::isAccelerator(self->device.type()));
   END_HANDLE_TH_ERRORS
 }
 
@@ -219,6 +228,11 @@ static const std::initializer_list<PyGetSetDef> THPDevice_properties = {
      nullptr},
     {"index",
      reinterpret_cast<getter>(THPDevice_index),
+     nullptr,
+     nullptr,
+     nullptr},
+    {"is_accelerator",
+     reinterpret_cast<getter>(THPDevice_isAccelerator),
      nullptr,
      nullptr,
      nullptr},

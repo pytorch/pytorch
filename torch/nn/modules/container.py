@@ -774,7 +774,7 @@ class ParameterList(Module):
         for k, p in enumerate(self):
             if isinstance(p, torch.Tensor):
                 size_str = "x".join(str(size) for size in p.size())
-                if p.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
+                if p.device.is_accelerator:
                     device_str = f" ({p.device})"
                 else:
                     device_str = ""
@@ -1009,7 +1009,7 @@ class ParameterDict(Module):
         for k, p in self.items():
             if isinstance(p, torch.Tensor):
                 size_str = "x".join(str(size) for size in p.size())
-                if p.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
+                if p.device.is_accelerator:
                     device_str = f" ({p.device})"
                 else:
                     device_str = ""

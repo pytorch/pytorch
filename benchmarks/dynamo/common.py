@@ -554,12 +554,12 @@ def patch_torch_manual_seed():
     torch.manual_seed = deterministic_torch_manual_seed
 
 
-def empty_gpu_cache(device):
+def empty_gpu_cache(device: str):
     """
     Explicitly empty gpu cache to avoid OOM in subsequent run.
     """
 
-    if device not in ["cuda", "xpu", "mps", torch._C._get_privateuse1_backend_name()]:
+    if not torch.device(device).is_accelerator:
         log.warning(
             "Trying to call the empty_gpu_cache for device: %s, which is not in list [cuda, xpu, mps, %s]",
             device,
