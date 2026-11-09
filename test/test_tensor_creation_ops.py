@@ -8,6 +8,7 @@ import sys
 import math
 import warnings
 import unittest
+from functools import partial
 from itertools import product, combinations, combinations_with_replacement, permutations
 import random
 import tempfile
@@ -43,7 +44,8 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast,
     largeTensorTest, precisionOverride, dtypes, skipCPUIf, skipCUDAIf, skipXPU, dtypesIfCUDA,
-    dtypesIfCPU, dtypesIfXPU, skipMeta, onlyAccelerator, expectedFailureXLA, onlyCPU
+    dtypesIfCPU, dtypesIfXPU, skipMeta, onlyAccelerator, expectedFailureXLA, onlyCPU,
+    onlyCUDA,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
@@ -696,6 +698,72 @@ class TestTensorCreation(TestCase):
                 dim1_cat.sum().backward()
                 self.assertEqual(c.grad, expected_c_grad)
                 self.assertEqual(d.grad, expected_d_grad)
+
+    # The CUDA _chunk_cat kernel casts bf16 inputs into an fp32 out (FSDP2's
+    # reduce-scatter copy-in). These tests compare it bitwise against
+    # _chunk_cat on fp32 copies.
+    def _bf16_view(self, device, shape, offset=0):
+        # A view `offset` elements into its buffer: odd offsets leave the src
+        # only 2-byte aligned.
+        numel = torch.Size(shape).numel()
+        buf = torch.randn(numel + offset, device=device, dtype=torch.bfloat16)
+        return buf[offset:].view(shape)
+
+    def _check_chunk_cat_bf16_to_fp32(self, tensors, dim, num_chunks):
+        expected = torch._chunk_cat([t.float() for t in tensors], dim, num_chunks)
+        # Filled with a bit pattern no bf16 -> fp32 cast produces (a cast leaves
+        # the low 16 bits zero), so an element the kernel never writes fails.
+        out = torch.empty_like(expected)
+        out.view(torch.int32).fill_(-1)
+        torch._chunk_cat(tensors, dim, num_chunks, out=out)
+        self.assertEqual(out.view(torch.int32), expected.view(torch.int32))
+
+    @onlyCUDA
+    def test_chunk_cat_bf16_to_fp32_out(self, device):
+        # Chunks of at least 8 KiB of fp32 take a vectorized path and smaller
+        # ones a per-element loop. Check both, alone and in one launch.
+        bf16 = partial(self._bf16_view, device)
+        check = self._check_chunk_cat_bf16_to_fp32
+        vec = 2048  # fp32 elements in 8 KiB
+        # Chunks shorter than one 16-byte vector, around one vector and around
+        # the 8 KiB threshold. A leading chunk of `shift` elements moves the dst
+        # to every 4-byte offset within 16 bytes.
+        sizes = (1, 3, 4, 5, 17, vec - 1, vec, vec + 1, 2 * vec + 5)
+        for size, shift, src_off, num_chunks in product(
+            sizes, range(4), (0, 1), (1, 3)
+        ):
+            lead = [bf16((shift * num_chunks,), 1 - src_off)] if shift else []
+            check(lead + [bf16((size * num_chunks,), src_off)], 0, num_chunks)
+        # Small chunks next to a vectorized one in the same launch.
+        small = [bf16((n * 8,), n % 2) for n in (1, 5, 129, 1025, vec - 1)]
+        check(small + [bf16(((4 * vec + 7) * 8,), 1)] + small, 0, 8)
+        # Padding: the last chunk is partly padding; with (9, vec) over 8
+        # chunks, chunks 5 to 7 are all padding.
+        check([bf16((vec * 8 - 5,), 1)], 0, 8)
+        check([bf16((9, vec)), bf16((3,))], 0, 8)
+        # Calls that write at least 8 MiB use more vectors per thread on SM 10.7:
+        # a misaligned dst, a partly padded last chunk, both src alignments.
+        for src_off in (0, 1):
+            check([bf16((5,)), bf16((2**21 + 3,), src_off)], 0, 8)
+        # dim=1: one chunk per row, above and below the threshold.
+        check([bf16((4, 2 * vec)), bf16((4, 7, 3)), bf16((4, 2 * vec + 3))], 1, 2)
+        # Every bf16 bit pattern (NaN payloads, infinities, -0, subnormals),
+        # from an aligned and a misaligned src.
+        bits = torch.arange(-(2**15), 2**15, device=device, dtype=torch.int32)
+        all_bf16 = bits.to(torch.int16).view(torch.bfloat16)
+        for off in (0, 1):
+            check([bf16((3,)), torch.cat([all_bf16[:off], all_bf16])[off:]], 0, 4)
+
+    @onlyCUDA
+    @largeTensorTest("28GB", "cuda")
+    def test_chunk_cat_bf16_to_fp32_out_64bit_indexing(self, device):
+        # With one chunk, the middle tensor's chunk has more than 2**31
+        # elements; with two, the second chunk starts more than 2**31 bytes
+        # into the src and 2**32 bytes into out.
+        bf16 = partial(self._bf16_view, device)
+        tensors = [bf16((3,)), bf16((2**31 + 2**20 + 3,), 1), bf16((5,))]
+        for num_chunks in (1, 2):
+            self._check_chunk_cat_bf16_to_fp32(tensors, 0, num_chunks)
 
     def test_cat_out_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8))
