@@ -28,6 +28,7 @@ from torch.testing._internal.common_cuda import (
     blas_library_context,
     IS_SM90,
     PLATFORM_SUPPORTS_BF16,
+    PLATFORM_SUPPORTS_CK_GEMMS,
     SM90OrLater,
     SM100OrLater,
     SM120OrLater,
@@ -1188,6 +1189,10 @@ class TestMatmulCuda(InductorTestCase):
         self.assertEqual(C, C_ref)
 
     @skipCUDAIfNotRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CK_GEMMS,
+        "CK GEMM is not supported on this platform",
+    )
     # Fails with triton 3.7
     def test_grouped_gemm_rocm_ck_flag(self):
         CK_EQUAL_K_HINT = "kernel_grouped_gemm_xdl_splitk"

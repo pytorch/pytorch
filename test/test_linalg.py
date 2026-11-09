@@ -28,8 +28,8 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
-     skipIfRocmArch, skipIfRocmVersionInRange, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
-     MI200_ARCH, NAVI_ARCH, TEST_CUDA,
+     skipIfRocmVersionInRange, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
+     MI200_ARCH, TEST_CUDA,
      skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
@@ -43,7 +43,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, CDNA5OrLater, IS_SM90, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, \
-    _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context, ROCM_VERSION
+    _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_CK_GEMMS, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context, ROCM_VERSION
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -11858,7 +11858,10 @@ class TestLinalgCudaOnly(TestCase):
         self.assertEqual(out1, out2)
         self.assertEqual(out_ref, out2.cpu())
 
-    @skipIfRocmArch(NAVI_ARCH)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CK_GEMMS,
+        "CK GEMM is not supported on this platform",
+    )
     @skipCUDAIfNotRocm
     @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
     @setBlasBackendsToDefaultFinally
@@ -11873,7 +11876,10 @@ class TestLinalgCudaOnly(TestCase):
 
         self.assertEqual(ck_out, cpu_out)
 
-    @skipIfRocmArch(NAVI_ARCH)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CK_GEMMS,
+        "CK GEMM is not supported on this platform",
+    )
     @skipCUDAIfNotRocm
     @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
     @setBlasBackendsToDefaultFinally
