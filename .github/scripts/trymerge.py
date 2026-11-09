@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import os
 import re
+import socket
 import time
 import traceback
 import urllib.parse
@@ -15,7 +17,8 @@ from dataclasses import dataclass
 from functools import cache, partial
 from pathlib import Path
 from re import Pattern
-from typing import Any, cast, NamedTuple, TYPE_CHECKING
+from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
+from urllib.error import HTTPError, URLError
 from warnings import warn
 
 import yaml
@@ -493,6 +496,18 @@ IMPORT_STATUS_CHECKRUN_NAME = "Import Status"
 # Also caps how many gates one merge may skip on an AI CI Advisor verdict -- see
 # categorize_checks.
 IGNORABLE_FAILED_CHECKS_THESHOLD = 10
+# How long merge() waits between checks of a PR's pending jobs.
+MERGE_RETRY_INTERVAL_SECONDS = 5 * 60
+# Pauses before each retry of a failed Dr.CI call. Back-to-back retries land in the
+# same second and fail together, as on #199675 and #201134, whose merges were then
+# blocked by failures the AI CI Advisor had cleared.
+DRCI_RETRY_DELAYS_SECONDS = (5, 15, 30)
+# Longest a Dr.CI socket may sit silent. HUD caps the endpoint at 900 s
+# (maxDuration in drci.ts) and sends nothing until it finishes, so only a
+# connection that is truly stuck waits longer. A timed-out call is not retried.
+DRCI_TIMEOUT_SECONDS = 960
+# What to do after a failed Dr.CI call; see _drci_retry_kind.
+DrciRetry = Literal["pause", "now", "stop"]
 
 REVIEWS_PER_PAGE = 100
 REVIEW_PAGE_LIMIT = 10
@@ -508,6 +523,10 @@ REVIEW_PAGE_LIMIT = 10
 # #190927 / #186302 land race).
 DOCKER_CI_PATH = ".ci/docker"
 DOCKER_BUILDS_WORKFLOW_NAME = "docker-builds"
+# GitHub's GraphQL API can report a workflow by its file path instead of its
+# `name:` (for example after a run of the workflow file failed to start), which
+# prefixes its check names with the path.
+DOCKER_BUILDS_WORKFLOW_PATH = ".github/workflows/docker-builds.yml"
 
 
 def iter_issue_timeline_until_comment(
@@ -637,11 +656,14 @@ def is_docker_affecting_files(files: Iterable[str]) -> bool:
 
 def get_docker_build_checks(checks: JobNameToStateDict) -> JobNameToStateDict:
     """Return the subset of checks that belong to the docker-builds workflow."""
+    workflow_names = (DOCKER_BUILDS_WORKFLOW_NAME, DOCKER_BUILDS_WORKFLOW_PATH)
     return {
         name: check
         for name, check in checks.items()
-        if name == DOCKER_BUILDS_WORKFLOW_NAME
-        or name.startswith(f"{DOCKER_BUILDS_WORKFLOW_NAME} / ")
+        if any(
+            name == workflow_name or name.startswith(f"{workflow_name} / ")
+            for workflow_name in workflow_names
+        )
     }
 
 
@@ -1603,8 +1625,11 @@ class GitHubPR:
         labels = self.get_labels() if self.labels is not None else []
         full_label = label_base
         count = 0
+        numbered = re.compile(rf"{re.escape(label_base)}X\d+")
         for label in labels:
-            if label_base in label:
+            # Count only this label's own repeats: a substring match let an
+            # unrelated label such as "mergedog" turn "merged" into "mergedX1".
+            if label == label_base or numbered.fullmatch(label):
                 count += 1
                 full_label = f"{label_base}X{count}"
         self.add_label(full_label, dry_run)
@@ -1782,11 +1807,25 @@ class GitHubPR:
         ignore_current_checks: set[tuple[int, str]] | None = None,
     ) -> list[GitHubPR]:
         """
+        Commits the PR, or the open PRs of its ghstack stack up to and including it,
+        onto `branch` (the default branch when None) in `repo`, without pushing them.
+
+        First fetches `branch` from the remote, which needs network access, and
+        force-resets the local `branch` to `<remote>/<branch>`, discarding any local
+        commits on it. merge() retries on the same repo, so this keeps the commits of
+        an attempt that failed before its push from landing again.
+
         :param skip_all_rule_checks: If true, skips all rule checks on ghstack PRs, useful for dry-running merge locally
         """
         branch_to_merge_into = self.default_branch() if branch is None else branch
-        if repo.current_branch() != branch_to_merge_into:
-            repo.checkout(branch_to_merge_into)
+        remote_tip = f"refs/remotes/{repo.remote}/{branch_to_merge_into}"
+        try:
+            repo.fetch(f"+refs/heads/{branch_to_merge_into}", remote_tip)
+        except RuntimeError as e:
+            raise RuntimeError(
+                f"Could not fetch {branch_to_merge_into} from {repo.remote}: {e}"
+            ) from e
+        repo._run_git("checkout", "-B", branch_to_merge_into, remote_tip)
 
         # It's okay to skip the commit SHA check for ghstack PRs since
         # authoring requires write access to the repo.
@@ -2185,9 +2224,12 @@ def check_stacked_pr_merge_rule(
     ignore_current_checks: set[tuple[int, str]] | None,
 ) -> None:
     """find_matching_merge_rule for `pr`, which lands below the PR being merged, with
-    any refusal naming `pr`."""
+    any refusal naming `pr`. Unless `skip_mandatory_checks`, `pr` is then held to the
+    checks merge() holds the merged PR to, not only the mandatory ones of its rule: a
+    startup failure, or a failure Dr.CI does not excuse, refuses and a pending check
+    waits."""
     try:
-        find_matching_merge_rule(
+        _, pending, failing, _ = find_matching_merge_rule(
             pr,
             repo,
             skip_mandatory_checks=skip_mandatory_checks,
@@ -2199,6 +2241,26 @@ def check_stacked_pr_merge_rule(
             f"Merge rule check failed for stacked PR #{pr.pr_num}:\n\n{ex}",
             ex.rule,
         ) from ex
+    if skip_mandatory_checks:
+        return
+    startup_failures = filter_checks_with_lambda(
+        pr.get_checkrun_conclusions(), lambda status: status == "STARTUP_FAILURE"
+    )
+    if startup_failures:
+        raise RuntimeError(
+            f"{len(startup_failures)} STARTUP failures reported on stacked PR #{pr.pr_num}, please check workflows syntax! "
+            + ", ".join(f"[{x.name}]({x.url})" for x in startup_failures[:5])
+        )
+    if failing:
+        raise RuntimeError(
+            f"{len(failing)} jobs have failed on stacked PR #{pr.pr_num}, first few of them are: "
+            + ", ".join(f"[{x[0]}]({x[1]})" for x in failing[:5])
+        )
+    if pending:
+        raise MandatoryChecksMissingError(
+            f"Still waiting for {len(pending)} jobs to finish on stacked PR #{pr.pr_num}, "
+            + f"first few of them are: {', '.join(x[0] for x in pending[:5])}"
+        )
 
 
 # One merge command runs as one process, and its retry loop re-asks this question every
@@ -2603,26 +2665,104 @@ def save_merge_record(
         json.dump(data, f)
 
 
-@retries_decorator()
 def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
     """
-    Query HUD API to find similar failures to decide if they are flaky
+    Query HUD API to find similar failures to decide if they are flaky.
+
+    Returns None when every attempt has failed, or after a single attempt that
+    timed out, stalled on its error body or got HTTP 504. get_classifications
+    reads None as "Dr.CI unavailable" and answers from the Dr.CI check run
+    summary -- a fallback that drops AI_NOT_RELATED, so a failed call here
+    un-clears every failure the AI CI Advisor cleared.
     """
     # NB: This doesn't work internally atm because this requires making an
     # external API call to HUD
-    failures = gh_fetch_url(
-        f"https://hud.pytorch.org/api/drci/drci?prNumber={pr_num}",
-        data=f"repo={project}",
-        headers={
-            "Authorization": os.getenv("DRCI_BOT_KEY", ""),
-            "Accept": "application/vnd.github.v3+json",
-            "x-hud-internal-bot": os.getenv("HUD_API_TOKEN", ""),
-        },
-        method="POST",
-        reader=json.load,
-    )
+    delays = (0, *DRCI_RETRY_DELAYS_SECONDS)
+    retry: DrciRetry = "now"
+    for attempt, delay in enumerate(delays):
+        if retry == "stop":
+            break
+        if retry == "pause":
+            time.sleep(delay)
+        try:
+            failures = gh_fetch_url(
+                f"https://hud.pytorch.org/api/drci/drci?prNumber={pr_num}",
+                data=f"repo={project}",
+                headers={
+                    "Authorization": os.getenv("DRCI_BOT_KEY", ""),
+                    "Accept": "application/vnd.github.v3+json",
+                    "x-hud-internal-bot": os.getenv("HUD_API_TOKEN", ""),
+                },
+                method="POST",
+                reader=json.load,
+                timeout=DRCI_TIMEOUT_SECONDS,
+            )
+            return failures.get(str(pr_num), {}) if failures else {}
+        except HTTPError as err:
+            # gh_fetch_url has already printed the status. Dr.CI answers 400 for
+            # any exception it hits while recomputing and names it only in the
+            # body.
+            try:
+                body, retry = _http_error_body(err), _drci_retry_kind(err)
+            except TimeoutError as e:  # the body stalled after the headers
+                body, retry = f"<body timed out: {e}>", "stop"
+            print(
+                f"Attempt {attempt + 1} of {len(delays)} to call Dr.CI failed, "
+                f"response body: {body}"
+            )
+        except Exception as e:
+            print(
+                f"Attempt {attempt + 1} of {len(delays)} to call Dr.CI failed "
+                f'with "{e}"'
+            )
+            retry = _drci_retry_kind(e)
+    return None
 
-    return failures.get(str(pr_num), {}) if failures else {}
+
+def _drci_retry_kind(err: Exception) -> DrciRetry:
+    """How to follow a failed Dr.CI call, guessed from the exception type:
+    "pause" when waiting may clear it, "now" to retry at once, "stop" when
+    another attempt would only wait out the endpoint's time limit again."""
+    if isinstance(err, HTTPError):
+        if err.code == 504:  # HUD ran out its maxDuration
+            return "stop"
+        return "pause" if err.code in (400, 408, 429) or err.code >= 500 else "now"
+    if isinstance(err, TimeoutError):  # silent for DRCI_TIMEOUT_SECONDS
+        return "stop"
+    if isinstance(err, URLError):
+        reason = err.reason
+        if isinstance(reason, TimeoutError):
+            # No errno: DRCI_TIMEOUT_SECONDS ran out while sending. An errno
+            # (ETIMEDOUT): the kernel gave up while connecting or sending, which
+            # a later attempt may get past; Dr.CI's recompute is safe to repeat.
+            return "stop" if reason.errno is None else "pause"
+        # urlopen wraps errors raised while connecting and sending. Refused
+        # connections, no route (as on internal runners) and unknown hosts do
+        # not clear by waiting; a temporary DNS failure or a connection broken
+        # mid-send may.
+        if isinstance(reason, socket.gaierror):
+            return "pause" if reason.errno == socket.EAI_AGAIN else "now"
+        broken = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
+        return "pause" if isinstance(reason, broken) else "now"
+    # Raised while waiting for or reading the response, e.g. RemoteDisconnected,
+    # IncompleteRead, or JSONDecodeError on a cut-off body. Anything else is
+    # most likely a bug, which waiting will not fix.
+    transient = (
+        http.client.HTTPException,
+        OSError,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+    )
+    return "pause" if isinstance(err, transient) else "now"
+
+
+def _http_error_body(err: HTTPError, limit: int = 500) -> str:
+    try:
+        return err.read(limit).decode("utf-8", errors="replace")
+    except TimeoutError:
+        raise
+    except Exception as e:
+        return f"<unreadable body: {e}>"
 
 
 REMOVE_JOB_NAME_SUFFIX_REGEX = re.compile(r", [0-9]+, [0-9]+, .+\)$")
@@ -3626,10 +3766,10 @@ def merge(
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(
-                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in 5 min",
+                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in {MERGE_RETRY_INTERVAL_SECONDS // 60} min",
                 flush=True,
             )
-            time.sleep(5 * 60)
+            time.sleep(MERGE_RETRY_INTERVAL_SECONDS)
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"

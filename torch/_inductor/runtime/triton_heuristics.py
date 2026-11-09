@@ -2097,9 +2097,7 @@ class CachingAutotuner(KernelInterface):
                 )
 
         best_launcher = builtins.min(timings, key=timings.get)
-        self._release_static_launchers_except(best_launcher)
-        self.launchers = [best_launcher]
-        self._prune_compile_results_to_launcher(best_launcher)
+        self._keep_launcher(best_launcher)
         self.autotune_time_taken_ns = (
             self.precompile_time_taken_ns + benchmark_time_taken_ns
         )
@@ -2277,6 +2275,46 @@ class CachingAutotuner(KernelInterface):
         if self.save_cache_hook:
             self.save_cache_hook(launcher.config, self.autotune_time_taken_ns)
         return launcher
+
+    def use_first_config(self, stream):
+        """Keep the first config without launching the kernel, and store its
+        binary when one is needed (AOTI). Returns whether autotuning would have
+        had a choice to make.
+
+        For a kernel that the compile-time autotune block cannot launch on its
+        generated tensors.
+        """
+        if not self.launchers:
+            self.precompile()
+        had_choices = self.has_tuning_choices()
+        launcher = self.launchers[0]
+        self._keep_launcher(launcher)
+        TritonBundler.put_winner(launcher.cache_hash)
+        if launcher.store_cubin:
+            self._save_kernel_binary(stream, launcher)
+        return had_choices
+
+    def has_tuning_choices(self):
+        """Whether autotuning would choose among several configs, or refine one
+        with coordinate descent."""
+        return len(self.compile_results) > 1 or bool(
+            self.inductor_meta.get("coordinate_descent_tuning")
+            and self._should_coordesc_tune
+        )
+
+    def _keep_launcher(self, launcher):
+        """Drop every launcher and compile result except `launcher`."""
+        self._release_static_launchers_except(launcher)
+        self.launchers = [launcher]
+        self._prune_compile_results_to_launcher(launcher)
+
+    def _save_kernel_binary(self, stream, launcher):
+        """Save the binary of `launcher` for AOTI packaging."""
+        if self.device_props.type == "cpu":
+            if not self.cpu_kernel_saved:
+                self.save_cpu_kernel(launcher)
+        else:
+            self.save_gpu_kernel(stream, launcher)
 
     def save_gpu_kernel(self, stream, launcher):
         """Save the selected GPU kernel binary and assembly for AOTI packaging."""
@@ -2729,11 +2767,7 @@ class CachingAutotuner(KernelInterface):
         # autotuning entirely, this is the only call site that records the winner.
         TritonBundler.put_winner(launcher.cache_hash)
         if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
-            if self.device_props.type == "cpu":
-                if not self.cpu_kernel_saved:
-                    self.save_cpu_kernel(launcher)
-            else:
-                self.save_gpu_kernel(stream, launcher)
+            self._save_kernel_binary(stream, launcher)
 
         try:
             self._pre_launch(launcher, *args, stream=stream, **kwargs)
@@ -2783,12 +2817,12 @@ class CachingAutotuner(KernelInterface):
             ) from None
 
     def _build_fast_launcher(self, launcher: LauncherType) -> LauncherType | None:
-        """Try to build a _FastCudaLauncher-backed version of the launcher.
+        """Try to build a fast-launcher-backed version of the launcher.
 
         Returns a new launcher function with the runner replaced by a
-        _FastCudaLauncher instance (vectorcall C extension), or None if
-        conditions are not met.  Falls back silently on expected errors,
-        logs a warning on unexpected ones.
+        _FastCudaLauncher / _FastXpuLauncher instance (vectorcall C extension),
+        or None if conditions are not met.  Falls back silently on expected
+        errors, logs a warning on unexpected ones.
         """
         import types
 
@@ -2798,19 +2832,19 @@ class CachingAutotuner(KernelInterface):
         ):
             return None
 
-        # The _FastCudaLauncher vectorcall bypasses run(), so it can't do the
+        # The fast launcher's vectorcall bypasses run(), so it can't do the
         # variable-length TMA descriptor expansion; fall back to the regular
         # (still static) launcher.
         if self.inductor_meta.get("host_tma_descriptor_args"):
             return None
 
-        # _FastCudaLauncher binds CUDA/HIP function pointers; XPU static
-        # launchers use SYCL kernels stored in PyCapsules.
-        if self.device_props.type not in ("cuda", "hip"):
-            return None
-
         try:
-            from torch._C import _FastCudaLauncher
+            if self.device_props.type == "xpu":
+                from torch._C import _FastXpuLauncher as fast_launcher_cls
+            elif self.device_props.type in ("cuda", "hip"):
+                from torch._C import _FastCudaLauncher as fast_launcher_cls
+            else:
+                return None
         except ImportError:
             return None
 
@@ -2831,11 +2865,12 @@ class CachingAutotuner(KernelInterface):
                 return None
             if getattr(kernel, "global_scratch_size", 0):
                 return None
-            cu_function = kernel.function
+            # A raw CUfunction on CUDA/HIP, the loaded kernel's capsule on XPU.
+            kernel_function = kernel.function
             num_warps = kernel.num_warps
             shared = kernel.shared
             arg_tys = kernel.arg_tys
-            if cu_function is None or num_warps is None:
+            if kernel_function is None or num_warps is None:
                 return None
 
             n_scratch = sum(
@@ -2847,8 +2882,10 @@ class CachingAutotuner(KernelInterface):
             if torch.version.hip:
                 n_scratch = max(n_scratch, 2)
 
-            fast_runner = _FastCudaLauncher(
-                cu_function, num_warps, shared, arg_tys, n_scratch, kernel.launch_pdl
+            # Only launchers with supports_launch_pdl take the trailing launch_pdl flag.
+            launch_pdl = (True,) if kernel.launch_pdl else ()
+            fast_runner = fast_launcher_cls(
+                kernel_function, num_warps, shared, arg_tys, n_scratch, *launch_pdl
             )
 
             new_globals = {**launcher.__globals__, "runner": fast_runner}
@@ -2882,11 +2919,20 @@ class CachingAutotuner(KernelInterface):
             # close()/__del__ then unloads the module and leaves the baked pointer
             # dangling, producing a CUDA "misaligned address" error on the next
             # launch. Keep the owner alive for as long as the fast launcher is.
+            # _FastXpuLauncher holds the kernel capsule itself, so the kernel it
+            # launches cannot be freed either way. The cost of that on XPU is
+            # that close() no longer releases the sycl::kernel and its Level
+            # Zero module for a fast-launched kernel, and a launch after
+            # close() succeeds where run() would have raised.
             new_launcher._static_kernel_owner = kernel  # type: ignore[attr-defined]
             return new_launcher
         except (AttributeError, TypeError, KeyError, ValueError):
-            # Expected failures - silent fallback is OK.
-            # ValueError is raised when nArgs > MAX_ARGS in the C extension.
+            # Expected failures - silent fallback is OK. Both C extensions rely
+            # on ValueError staying in this list: it is what they raise for a
+            # launch configuration they cannot bind, which is nArgs > MAX_ARGS
+            # for _FastCudaLauncher, plus an unloaded kernel, non-positive
+            # num_warps, negative shared/scratch sizes, or a kernel argument
+            # count that disagrees with arg_tys for _FastXpuLauncher.
             return None
         except Exception:
             # Unexpected failures - log for debugging
@@ -3336,7 +3382,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
         # we're sure static cuda launcher was used for this compile
         set_feature_use("static_triton_launcher", True)
         # Load the binary on the parent
-        if not self.kernel.cubin_path:
+        if not self.kernel.cubin_path and self.kernel.function is None:
             self.reload_cubin_path()
         # compile-on-one-rank: a None device in compile_meta marks a rank/device-agnostic
         # kernel, so the launcher must keep its loaded handles per device.
@@ -3864,9 +3910,14 @@ def cached_autotune(
     if compiled is not None and (thunk := compiled.pop(name, None)) is not None:
         kernel = thunk()
         return lambda fn: kernel
-    if size_hints is not None and heuristic_type in (
-        HeuristicType.REDUCTION,
-        HeuristicType.PERSISTENT_REDUCTION,
+    if (
+        size_hints is not None
+        and heuristic_type
+        in (
+            HeuristicType.REDUCTION,
+            HeuristicType.PERSISTENT_REDUCTION,
+        )
+        and not triton_meta.get("native_matmul")
     ):
         configs = _enforce_reduction_config_block_minimums(
             configs, size_hints, inductor_meta
@@ -4110,6 +4161,45 @@ def _cap_native_matmul_configs(configs: list[Config], r0_block: int) -> list[Con
             capped_configs.append(cfg)
 
     return unique_configs(capped_configs)
+
+
+def _enforce_native_matmul_config_min_xblock(
+    configs: list[Config],
+    min_xblock: int | None,
+    *,
+    r0_block: int | None = None,
+) -> list[Config]:
+    if min_xblock is None:
+        return configs
+    min_xblock = next_power_of_2(min_xblock)
+
+    adjusted_configs: list[Config] = []
+    for original in configs:
+        cfg = copy.deepcopy(original)
+        original_numel = native_matmul_block_numel(cfg.kwargs, r0_block=r0_block)
+        cfg.kwargs["XBLOCK"] = max(cfg.kwargs["XBLOCK"], min_xblock)
+
+        def shrink(field: str, floor: int) -> None:
+            while (
+                native_matmul_block_numel(cfg.kwargs, r0_block=r0_block)
+                > original_numel
+                and cfg.kwargs.get(field, floor) > floor
+            ):
+                cfg.kwargs[field] //= 2
+
+        # Native matmul requires at least 16 elements in the dot tile.
+        # Prefer shrinking the independent output-row tile when raising X.
+        shrink("YBLOCK", 1)
+        if r0_block is None:
+            shrink("R0_BLOCK", 16)
+
+        if not _native_matmul_config_under_numel_limit(cfg, r0_block=r0_block):
+            continue
+        if cfg.kwargs.get("R0_BLOCK", r0_block or 16) < 16:
+            continue
+        adjusted_configs.append(cfg)
+
+    return unique_configs(adjusted_configs)
 
 
 def _enforce_reduction_config_block_minimums(
@@ -5782,14 +5872,47 @@ class FixedGrid(GridExpr):
 
 
 class PrecomputedGrid(GridExpr):
-    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
-        for candidate in self.inductor_meta["precomputed_grids"]:
-            if all(meta.get(k) == v for k, v in candidate["config"].items()):
-                self.x_grid, self.y_grid, self.z_grid = candidate[self.mode]
-                return
-        raise AssertionError(
-            f"Precomputed grid not found for {meta} in {self.inductor_meta['precomputed_grids']}"
+    @staticmethod
+    def _match_key(
+        config: dict[str, Any], declared_constexpr_names: Container[str]
+    ) -> dict[str, Any]:
+        # The pipelining-disabled retry lowers num_stages (and a NUM_STAGES
+        # kwarg, which stays in the key). A grid sees num_stages only when the
+        # kernel declares it as a constexpr (Dynamo then copies it into the
+        # config kwargs), so otherwise leave it out of the key. Every other
+        # key, launch options included, must match.
+        key = dict(config)
+        if "num_stages" not in declared_constexpr_names:
+            key.pop("num_stages", None)
+        return key
+
+    @staticmethod
+    def find_candidate_index(
+        inductor_meta: InductorMeta,
+        config: dict[str, Any],
+    ) -> int:
+        """Return the index of the precomputed-grid candidate for `config`.
+
+        The first candidate whose `_match_key` equals that of `config`
+        wins. Raises RuntimeError when no candidate matches.
+        """
+        declared_constexpr_names = inductor_meta.get("declared_constexpr_names", ())
+        lookup_key = PrecomputedGrid._match_key(config, declared_constexpr_names)
+        precomputed_grids = inductor_meta.get("precomputed_grids", [])
+        for idx, candidate in enumerate(precomputed_grids):
+            candidate_key = PrecomputedGrid._match_key(
+                candidate["config"], declared_constexpr_names
+            )
+            if candidate_key == lookup_key:
+                return idx
+        raise RuntimeError(
+            f"Precomputed grid not found for {config} in {precomputed_grids}"
         )
+
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
+        candidate_index = self.find_candidate_index(self.inductor_meta, meta)
+        candidate = self.inductor_meta["precomputed_grids"][candidate_index]
+        self.x_grid, self.y_grid, self.z_grid = candidate[self.mode]
 
 
 class ComboKernelGrid(GridExpr):
