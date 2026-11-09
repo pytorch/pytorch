@@ -478,6 +478,17 @@ selective_decompose: bool = False
 # then converting back to a regular tensor.
 enable_complex_wrapper: bool = False
 
+# Experimental: make the backward's recompute lower identically to the forward,
+# so recomputed activations can't drift from it numerically (gh-186572); see
+# _aot_autograd/deterministic_recompute.py. This covers activation-checkpointed
+# regions, except inside nested_compile_region bodies. It costs memory and time:
+# the shared recompute runs as its own subgraph, so the forward also writes out
+# values only the backward reads, and neither graph can fuse across it.
+# Recompute it can't share is left as partitioned (TORCH_LOGS=aot says why).
+# Not applied with enable_complex_wrapper or compiled autograd; rejected under
+# non-strict train-step tracing.
+deterministic_recompute: bool = False
+
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F403
