@@ -2570,6 +2570,8 @@ class ProcessGroupNCCL2SingleRankLazyInitTest(TestCase):
             sub = dist.new_group([0])
             self.assertEqual(world.bound_device_id, device)
             self.assertEqual(sub.bound_device_id, device)
+            self.assertEqual(self._comm_ptr(world), 0)
+            self.assertEqual(self._comm_ptr(sub), 0)
             dist.all_reduce(torch.ones(1, device=device))
             dist.all_reduce(torch.ones(1, device=device), group=sub)
             self.assertNotEqual(self._comm_ptr(world), 0)
@@ -2752,6 +2754,7 @@ opts.group_size = 1
 opts.timeout = dist.constants.default_pg_timeout
 opts.group_id = "standalone"
 opts.global_ranks_in_group = [0]
+opts.device_requested = True
 backend = dist.distributed_c10d._create_nccl2_process_group(opts, None)
 backend.shutdown()
 """

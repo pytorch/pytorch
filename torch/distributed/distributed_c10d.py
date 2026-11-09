@@ -822,7 +822,8 @@ def _create_nccl_process_group(
 def _can_split_from_now(pg: ProcessGroup) -> bool:
     """Whether ``pg``'s backend on its bound device can be split from now.
 
-    A lazy_init nccl2 communicator cannot be until its first operation creates it.
+    A lazy_init nccl2 communicator cannot be split from until its first operation
+    creates it.
     """
     device = pg.bound_device_id
     if device is None:
@@ -831,6 +832,24 @@ def _can_split_from_now(pg: ProcessGroup) -> bool:
         return pg._get_backend(device).supports_splitting
     except RuntimeError:
         return False
+
+
+def _has_uncreated_lazy_nccl2_comm(pg: ProcessGroup) -> bool:
+    """Whether ``pg``'s bound backend is an nccl2 lazy_init communicator not created yet."""
+    device = pg.bound_device_id
+    if device is None or device.type != "cuda" or not is_nccl_available():
+        return False
+    try:
+        backend = pg._get_backend(device)
+    except RuntimeError:
+        return False
+    while is_gloo_available() and isinstance(backend, _ProcessGroupWrapper):
+        backend = backend.wrapped_pg
+    # nccl2 reports supports_splitting=False only for an uncreated lazy communicator.
+    return (
+        isinstance(backend, (ProcessGroupNCCL2, ProcessGroupNCCLLazy))
+        and not backend.supports_splitting
+    )
 
 
 def _nccl2_options(
@@ -7139,8 +7158,7 @@ def split_group(
     ) and not _use_torchcomms_enabled():
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting. "
-            "A lazy_init nccl2 group can be split after its first collective; pass device_id "
-            "to init_process_group/new_group to create its communicator eagerly."
+            "A lazy_init nccl2 group supports splitting only after its first operation."
         )
 
     device_id = parent_pg.bound_device_id
@@ -7432,7 +7450,9 @@ def _new_group_with_tag(
         device_id = default_pg.bound_device_id
         # The device of a default group whose communicator is still lazy is a
         # fallback, so inheriting it should not make the new group eager.
-        device_requested = _can_split_from_now(default_pg)
+        device_requested = device_id is not None and not _has_uncreated_lazy_nccl2_comm(
+            default_pg
+        )
     elif default_pg.bound_device_id is not None:
         if device_id != default_pg.bound_device_id:
             raise AssertionError(

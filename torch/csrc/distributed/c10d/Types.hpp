@@ -205,8 +205,9 @@ struct DistributedBackendOptions {
   c10::intrusive_ptr<ProcessGroup> process_group;
   c10::intrusive_ptr<Backend> split_from;
   bool enable_reconfigure = false;
-  // Whether the caller asked for process_group's bound device, as opposed to
-  // a fallback device that a backend may bind without creating resources.
+  // Whether the caller asked for process_group's bound device. A device that
+  // new_group inherits from a default group whose nccl2 communicator is still
+  // lazy does not count; nccl2 creates single-rank groups lazily without one.
   bool device_requested = false;
 };
 
