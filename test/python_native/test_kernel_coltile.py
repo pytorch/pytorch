@@ -841,7 +841,7 @@ class TestOrderedColDevice(TestCase):
 
     def test_split_plans_can_be_declined(self, device):
         """Decline split plans when no config is given or selected."""
-        # The column policy never selects batched views.
+        # No entry is selected for this key (test_policy_contract covers the batch rule).
         x = torch.randn(2, 32768, 32, device=device)
         trait = T.SumOps(acc=cutlass.Float32)
         out = [torch.float32]
