@@ -43,7 +43,9 @@ from torch._inductor.runtime.triton_heuristics import (
 )
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -1774,20 +1776,21 @@ class TestFastLauncher(StaticLauncherTestMixin, TestCase):
         self.assertEqual(sys.getrefcount(capsule), refcount - 1)
 
 
-@requires_gpu_and_triton
-@torch._inductor.config.patch(
-    {
-        "use_static_triton_launcher": True,
-        "strict_static_triton_launcher": True,
-        "use_fast_triton_launcher": True,
-    }
-)
-class TestFastLauncherCompileResult(TestCase):
-    """E2E tests verifying fast launcher handling in torch.compile.
+class _FastLauncherCompileMixin:
+    def setUp(self):
+        super().setUp()
+        self._config_ctx = torch._inductor.config.patch(
+            {
+                "use_static_triton_launcher": True,
+                "strict_static_triton_launcher": True,
+                "use_fast_triton_launcher": True,
+            }
+        )
+        self._config_ctx.__enter__()
 
-    They assert both correctness (output matches eager) and that the fast
-    launcher C extension was constructed, not silently skipped.
-    """
+    def tearDown(self):
+        self._config_ctx.__exit__(None, None, None)
+        super().tearDown()
 
     def _patch_build_fast_launcher(self):
         """Context manager that tracks _build_fast_launcher calls.
@@ -1809,29 +1812,16 @@ class TestFastLauncherCompileResult(TestCase):
             CachingAutotuner, "_build_fast_launcher", tracking_build
         ), results
 
-    def test_basic_compile(self):
-        """Verify torch.compile uses the fast launcher and produces correct output."""
-        patcher, results = self._patch_build_fast_launcher()
-        with patcher:
 
-            @torch.compile
-            def foo(x, y):
-                return x + y
+@requires_gpu_and_triton
+class TestFastLauncherFallbackCompileResult(_FastLauncherCompileMixin, TestCase):
+    """Config-off path for any accelerator: the regular launcher must be
+    used and results stay correct without the fast launcher.
+    """
 
-            x = torch.randn(10, device=GPU_TYPE)
-            y = torch.randn(10, device=GPU_TYPE)
-            self.assertEqual(foo(x, y), x + y)
-            self.assertTrue(
-                any(results),
-                "no fast launcher was built by any CachingAutotuner",
-            )
-            # The fast launcher replaces the cached launcher only after the
-            # first launch, so the call above ran through the slow one. Launch
-            # again to check the numerics the fast launcher produces.
-            x, y = torch.randn(10, device=GPU_TYPE), torch.randn(10, device=GPU_TYPE)
-            self.assertEqual(foo(x, y), x + y)
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_disable_fast_launcher(self):
+    def test_disable_fast_launcher(self, device):
         """Verify disabling the config falls back to the regular launcher."""
         patcher, results = self._patch_build_fast_launcher()
         with patcher, torch._inductor.config.patch("use_fast_triton_launcher", False):
@@ -1840,8 +1830,8 @@ class TestFastLauncherCompileResult(TestCase):
             def foo(x, y):
                 return x + y
 
-            x = torch.randn(10, device=GPU_TYPE)
-            y = torch.randn(10, device=GPU_TYPE)
+            x = torch.randn(10, device=device)
+            y = torch.randn(10, device=device)
             result = foo(x, y)
             self.assertEqual(result, x + y)
             self.assertFalse(
@@ -1849,7 +1839,38 @@ class TestFastLauncherCompileResult(TestCase):
                 "no fast launcher should be built when config is disabled",
             )
 
-    @skipIfXpu(msg="Tests CUDA device-side TMA global scratch")
+
+@requires_gpu_and_triton
+class TestFastCudaLauncherCompileResult(_FastLauncherCompileMixin, TestCase):
+    """E2E tests verifying the fast launcher handling in torch.compile on
+    CUDA: assert both correctness (output matches eager) and that the fast
+    launcher C extension was constructed, not silently skipped.
+    """
+
+    hw_classification = HardwareClassification.CUDA
+
+    def test_basic_compile(self, device):
+        """Verify torch.compile uses the fast launcher and produces correct output."""
+        patcher, results = self._patch_build_fast_launcher()
+        with patcher:
+
+            @torch.compile
+            def foo(x, y):
+                return x + y
+
+            x = torch.randn(10, device=device)
+            y = torch.randn(10, device=device)
+            self.assertEqual(foo(x, y), x + y)
+            self.assertTrue(
+                any(results),
+                "no fast launcher was built by any CachingAutotuner",
+            )
+            # The fast launcher replaces the cached launcher only after the
+            # first launch, so the call above ran through the slow one. Launch
+            # again to check the numerics the fast launcher produces.
+            x, y = torch.randn(10, device=device), torch.randn(10, device=device)
+            self.assertEqual(foo(x, y), x + y)
+
     @unittest.skipIf(
         not has_triton_cuda_tma_device(),
         "requires Triton device-side TMA support on CUDA",
@@ -1857,7 +1878,8 @@ class TestFastLauncherCompileResult(TestCase):
     @torch._inductor.config.patch(
         {"compile_threads": 1, "static_launch_user_defined_triton_kernels": True}
     )
-    def test_device_tma_gemm_falls_back_from_fast_launcher(self):
+    def test_device_tma_gemm_falls_back_from_fast_launcher(self, device):
+        """A global-scratch kernel repeatedly uses the regular static launcher."""
         """A global-scratch kernel repeatedly uses the regular static launcher."""
 
         @triton.jit
@@ -1928,7 +1950,7 @@ class TestFastLauncherCompileResult(TestCase):
         patcher, results = self._patch_build_fast_launcher()
         alloc_fn = mock.Mock(
             side_effect=lambda size, _alignment, _stream: torch.empty(
-                size, dtype=torch.uint8, device="cuda"
+                size, dtype=torch.uint8, device=device
             )
         )
         allocator_var = SimpleNamespace(get=lambda: alloc_fn)
@@ -1941,8 +1963,8 @@ class TestFastLauncherCompileResult(TestCase):
             ),
         ):
             for _ in range(3):
-                a = torch.randn((M, K), device="cuda", dtype=torch.bfloat16)
-                b = torch.randn((N, K), device="cuda", dtype=torch.bfloat16)
+                a = torch.randn((M, K), device=device, dtype=torch.bfloat16)
+                b = torch.randn((N, K), device=device, dtype=torch.bfloat16)
                 self.assertEqual(gemm(a, b), a @ b.T, atol=1e-2, rtol=1e-2)
 
         self.assertTrue(results, "_build_fast_launcher was not reached")
@@ -1953,6 +1975,17 @@ class TestFastLauncherCompileResult(TestCase):
         self.assertGreater(alloc_fn.call_count, 0)
         for call in alloc_fn.call_args_list:
             self.assertGreater(call.args[0], 0)
+
+
+instantiate_device_type_tests(
+    TestFastLauncherFallbackCompileResult,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFastCudaLauncherCompileResult, globals(), only_for=("cuda",)
+)
 
 
 if __name__ == "__main__":
