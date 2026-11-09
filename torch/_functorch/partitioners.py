@@ -2100,6 +2100,8 @@ def apply_graphsafe_rng_functionalization(
             args=(fw_node.target, *fw_node.args),  # type: ignore[arg-type]
             kwargs=fw_kwargs,
         )
+        # (It returns what the op does.)
+        functional_fw_node.meta["val"] = fw_node.meta.get("val")
     fw_node.replace_all_uses_with(functional_fw_node)
     fw_graph.erase_node(fw_node)
 
@@ -2113,6 +2115,7 @@ def apply_graphsafe_rng_functionalization(
             args=(bw_node.target, *bw_node.args),  # type: ignore[arg-type]
             kwargs=bwd_kwargs,
         )
+        rng_output.meta["val"] = bw_node.meta.get("val")
         bw_node.replace_all_uses_with(rng_output)
         bw_graph.erase_node(bw_node)
 
@@ -2440,9 +2443,27 @@ def cleanup_recompute_tags(
     If there are two consecutive checkpointed blocks with no operator in
     between, we would still want to stash the tensor at the boundary of
     checkpointed blocks. The following pass makes the last output node
-    non-recomputable to allow for that.
+    non-recomputable to allow for that. It also saves the results of DTensor
+    random ops, which can't be replayed.
     """
     for node in joint_module.graph.nodes:
+        if node.target is torch._prims.rng_prims.run_dtensor_rng_op:
+            # A DTensor random op draws from the generator's current state, so
+            # rerunning it in the backward would draw different values, and
+            # functionalize_rng_ops doesn't wrap it (it has no
+            # nondeterministic_seeded tag). Save its results instead.
+            if node.meta.get("recompute") == CheckpointPolicy.MUST_RECOMPUTE:
+                raise RuntimeError(
+                    "Activation checkpointing does not support MUST_RECOMPUTE for "
+                    "a random op on a DTensor: recomputing it would draw a "
+                    "different result. Use PREFER_RECOMPUTE or MUST_SAVE for it."
+                )
+            # Both the op and its getitems: the default partitioner saves through
+            # the getitems (it skips tuple-valued nodes), and min-cut bans
+            # recomputing through the op (it ignores tags on getitems).
+            for n in (node, *node.users):
+                if must_recompute(n) and (n is node or n.target is operator.getitem):
+                    n.meta["recompute"] = CheckpointPolicy.MUST_SAVE
         if must_recompute(node):
             for user in node.users:
                 if (
