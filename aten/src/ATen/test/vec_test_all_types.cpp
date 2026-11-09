@@ -595,6 +595,43 @@ namespace {
             [](const vec& v) { return v.exp_u20(); },
             test_case
         );
+
+        if constexpr (std::is_same_v<VT, float>) {
+            // Near and below ln(FLT_MIN), results must not flush to zero, and
+            // NaN must propagate. Also cover both ends of the exponent range
+            // (2^-125 and 2^128 scaling). Mix the inputs in one vector so
+            // lanes take different paths.
+            const VT inputs[] = {
+                VT(-86.64), VT(-86.8), VT(-86.99), VT(-87.0), VT(-87.2),
+                VT(-87.5), VT(-88.0), VT(-90.0), VT(-100.0), VT(-103.9),
+                VT(-110.0), -std::numeric_limits<VT>::infinity(),
+                std::numeric_limits<VT>::quiet_NaN(), VT(-1.0), VT(0.5),
+                VT(10.0), VT(88.0), VT(88.37), VT(88.5), VT(88.72)};
+            constexpr size_t num_inputs = std::size(inputs);
+            CACHE_ALIGN VT in[vec::size()];
+            CACHE_ALIGN VT out[vec::size()];
+            for (size_t base = 0; base < num_inputs; base += vec::size()) {
+                for (const auto i : c10::irange(vec::size())) {
+                    in[i] = inputs[(base + i) % num_inputs];
+                }
+                vec::loadu(in).exp_u20().store(out);
+                for (const auto i : c10::irange(vec::size())) {
+                    if (std::isnan(in[i])) {
+                        EXPECT_TRUE(std::isnan(out[i])) << "x=" << in[i];
+                        continue;
+                    }
+                    // Within 2 ulp; subnormals are 2^-149 apart.
+                    const double expected = std::exp(static_cast<double>(in[i]));
+                    const VT rounded = static_cast<VT>(expected);
+                    const double ulp = std::max<double>(
+                        std::nextafter(rounded, std::numeric_limits<VT>::infinity()) - rounded,
+                        std::numeric_limits<VT>::denorm_min());
+                    EXPECT_LE(std::abs(out[i] - expected), 2 * ulp) << "x=" << in[i];
+                    // The tolerance alone would accept a flush to zero.
+                    EXPECT_EQ(out[i] == 0, rounded == 0) << "x=" << in[i];
+                }
+            }
+        }
     }
     TYPED_TEST(ErrorFunctions, Erf) {
         using vec = TypeParam;
@@ -1925,6 +1962,58 @@ namespace {
          }
       }
     }
+    // The pointer convert from double to Half/BFloat16 has vectorized
+    // specializations; c10::convert rounds once.
+    template <typename T>
+    void test_convert_from_double() {
+      constexpr double inf = std::numeric_limits<double>::infinity();
+      const double flt_max = std::numeric_limits<float>::max();
+      std::vector<double> xs = {
+          0.0, -0.0, inf, -inf, std::numeric_limits<double>::quiet_NaN(),
+          flt_max, -flt_max, std::nextafter(flt_max, inf), 1e39, -1e39,
+          0x1p-140, -0x1.8p-140, 0x1p-149, 0x1.0000001p-130};
+      // Every finite value, the midpoints to the next encoding (past the
+      // largest value, to the next one were the exponent range wider), and
+      // their neighbours.
+      const auto value = [](int bits) {
+        return static_cast<double>(
+            static_cast<float>(T(static_cast<uint16_t>(bits), T::from_bits())));
+      };
+      for (const auto i : c10::irange(0xFFFF)) {
+        const double v = value(i);
+        if (!std::isfinite(v)) {
+          continue;
+        }
+        double next = value(i + 1);
+        if (!std::isfinite(next)) {
+          next = 2 * v - value(i - 1);
+        }
+        const double mid = (v + next) / 2;
+        xs.insert(
+            xs.end(),
+            {v, mid, std::nextafter(mid, -inf), std::nextafter(mid, inf)});
+      }
+      // Leave a tail after the vectorized loop.
+      while (xs.size() % 64 != 37) {
+        xs.push_back(1.0 + static_cast<double>(xs.size()) * 0x1p-40);
+      }
+      std::vector<T> actual(xs.size());
+      at::vec::convert(xs.data(), actual.data(), static_cast<int64_t>(xs.size()));
+      for (const auto i : c10::irange(xs.size())) {
+        const T expected = c10::convert<T>(xs[i]);
+        const bool same = std::isnan(static_cast<float>(expected))
+            ? std::isnan(static_cast<float>(actual[i]))
+            : actual[i].x == expected.x;
+        ASSERT_TRUE(same) << "x=" << xs[i] << " at " << i << ": got "
+                          << actual[i] << ", expected " << expected;
+      }
+    }
+    TEST(ConvertFromDoubleTest, Half) {
+      test_convert_from_double<c10::Half>();
+    }
+    TEST(ConvertFromDoubleTest, BFloat16) {
+      test_convert_from_double<c10::BFloat16>();
+    }
     TEST(HalfConversionTest, HalfFloat) {
       float f32s[100];
       for (const auto i : c10::irange(100)) {
@@ -2330,7 +2419,7 @@ namespace {
         x[i] = generator.get();
       }
       for (const auto i : c10::irange(N)) {
-        ref[i] = static_cast<dst_t>(x[i]);
+        ref[i] = c10::convert<dst_t>(x[i]);
       }
       auto x_vec = vec::loadu(x);
       auto y_vec = at::vec::convert<dst_t>(x_vec);

@@ -249,6 +249,9 @@ struct C10_API FakeTensorMode {
   // torch/csrc/FakeTensorMode.cpp.
   std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
 
+  // The fields below are plain, like a Python FakeTensorMode's attributes, and
+  // must not be changed while another thread is using the mode.
+
   // when false, disallow a fake tensor from having a 'meta' device
   bool allow_meta_ = true;
 
@@ -258,13 +261,20 @@ struct C10_API FakeTensorMode {
   // so read this through PyInterpreterVTable::allow_non_fake_inputs().
   bool allow_non_fake_inputs_ = false;
 
+  // Whether reading the mutable data pointer of a fake made afterwards only
+  // warns (true) or throws (false); a storage's marking is never relaxed.
+  // Python's _allow_unsafe_data_ptr_access, exposed under that name.
+  bool allow_unsafe_data_ptr_access_ = true;
+
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
       std::shared_ptr<c10::SafePyObject> converter,
-      bool allow_meta = true)
+      bool allow_meta = true,
+      bool allow_unsafe_data_ptr_access = true)
       : shape_env_(std::move(shape_env)),
         fake_tensor_converter_(std::move(converter)),
-        allow_meta_(allow_meta) {}
+        allow_meta_(allow_meta),
+        allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access) {}
 
   // record the real constant a fake tensor was created from; the constant is
   // stored on the fake's ExtraMeta so it dies with the tensor
@@ -293,6 +303,21 @@ struct C10_API FakeTensorMode {
       constant_storage_mapping_;
 };
 
+// Note [C++ fake dispatch keys]
+// A fake can record the dispatch keys of the real tensor it stands for
+// (ExtraMeta::fake_dispatch_keys_, Python's FakeTensor.dispatch_keys), so that
+// guards built from the fake check the real tensor's keys rather than the
+// fake's own. Python also derives is_mkldnn and layout from them; here only
+// guards read them, so a fake recorded with an mkldnn tensor's keys still
+// reports its own layout.
+// Python keeps them on the output of a top-level alias or detach (dispatched,
+// through functionalization, or by calling fast_detach directly), but not of
+// other views. Here ExtraMeta's copy constructor copies them, so every shallow
+// copy, such as detach, keeps them, while views, including alias, drop them;
+// matching Python is left to the C++ fake dispatch path (later in this stack).
+// Functionalization's alias/detach handling currently covers only a Python
+// FakeTensor. Unlike Python, fake.data = other gives the fake other's keys, as
+// set_data replaces the whole ExtraMeta.
 struct C10_API ExtraMeta {
   std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta_ = nullptr;
   intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;
@@ -302,6 +327,8 @@ struct C10_API ExtraMeta {
   std::shared_ptr<FakeTensorMode> fake_tensor_mode_ = nullptr;
   // The real tensor this fake shadows, when propagate_real_tensors is on.
   c10::intrusive_ptr<c10::TensorImpl> real_tensor_ = nullptr;
+  // See Note [C++ fake dispatch keys]
+  std::optional<c10::DispatchKeySet> fake_dispatch_keys_ = std::nullopt;
   // The real constant this fake was created from (via
   // FakeTensorMode::set_constant), or null.
   c10::intrusive_ptr<c10::TensorImpl> fake_constant_ = nullptr;
@@ -333,6 +360,7 @@ struct C10_API ExtraMeta {
     fake_device_ = other.fake_device_;
     fake_tensor_mode_ = other.fake_tensor_mode_;
     real_tensor_ = other.real_tensor_;
+    fake_dispatch_keys_ = other.fake_dispatch_keys_;
     symbolic_wrapped_number_ = other.symbolic_wrapped_number_;
   }
   ExtraMeta& operator=(const ExtraMeta& other) = delete;
@@ -1559,6 +1587,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return nullptr;
     }
     return extra_meta_->fake_tensor_mode_;
+  }
+
+  // The recorded dispatch keys of the real tensor this fake stands for.
+  void set_fake_dispatch_keys(std::optional<DispatchKeySet> keys) {
+    get_extra_meta().fake_dispatch_keys_ = keys;
+  }
+
+  std::optional<DispatchKeySet> fake_dispatch_keys() const {
+    return extra_meta_ ? extra_meta_->fake_dispatch_keys_ : std::nullopt;
   }
 
   // The real tensor this fake shadows under propagate_real_tensors, or nullptr.
