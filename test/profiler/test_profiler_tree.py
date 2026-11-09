@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
 )
 from torch.testing._internal.common_utils import (
+    disable_gc,
     HardwareClassification,
     IS_ARM64,
     IS_WINDOWS,
@@ -337,6 +338,8 @@ class TestProfilerTree(_TestProfilerTreeBase):
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
+    # GC can resume unrelated generators and add frames to the recorded tree.
+    @disable_gc()
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_stack_and_modules(self):
         class MyModule(torch.nn.Module):

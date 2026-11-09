@@ -377,7 +377,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
-                torch.use_deterministic_algorithms(
+                torch._C._set_deterministic_algorithms(
                     prior_deterministic, warn_only=prior_warn_only
                 )
                 torch.random.set_rng_state(torch_rng_state)
@@ -1751,12 +1751,13 @@ def _compile(
         code: CodeType, one_graph: bool, hooks: Hooks
     ) -> tuple[ConvertFrameReturn, DynamoTracerOutput | None]:
         with contextlib.ExitStack() as stack:
-            # Hold _is_compiling_flag True for the duration of compilation so
-            # torch.compiler.is_compiling() is observable in code that runs
-            # during the compile session but is not directly Dynamo-traced
-            # (wrapper-subclass __torch_dispatch__ invoked by AOTAutograd,
-            # make_fx invoked from a custom backend, etc.). Export sets the
-            # flag itself via _compiling_state_context, so skip there.
+            # Hold the current thread's is_compiling flag True for the
+            # duration of compilation so torch.compiler.is_compiling() is
+            # observable in code that runs during the compile session in this
+            # thread but is not directly Dynamo-traced (wrapper-subclass
+            # __torch_dispatch__ invoked by AOTAutograd, make_fx invoked from
+            # a custom backend, etc.). Export sets the flag itself via
+            # _compiling_state_context, so skip there.
             if not export:
                 stack.enter_context(torch.compiler._compile_session_context())
             stack.enter_context(deferred_full_gc())
