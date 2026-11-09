@@ -251,6 +251,31 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
         gc.collect()
         self.assertTrue(all(reference() is None for reference in references))
 
+    @parametrize("member", [False, True])
+    def test_hook_membership_guard_singleton_integer_equality(self, member):
+        key = 10**30
+        equal = int(str(key))
+        collision = key + sys.hash_info.modulus
+        self.assertIsNot(key, equal)
+        self.assertEqual(hash(key), hash(collision))
+        inputs = {"hooks": {key: None}, "flags": {equal if member else collision: True}}
+        root = RootGuardManager()
+        managers = [
+            root.dict_getitem_manager(name, name, inputs[name], default_mgr_enum)
+            for name in ("hooks", "flags")
+        ]
+        guards.install_nn_module_hook_membership_guard(*managers, (member,), [], None)
+        for manager in (root, root.clone_manager(lambda manager: True)):
+            self.assertTrue(manager.check(inputs))
+            inputs["flags"] = {collision if member else equal: True}
+            self.assertFalse(manager.check(inputs))
+            self.assertFalse(manager.check_verbose(inputs).result)
+            inputs["flags"] = {equal if member else collision: False}
+            self.assertTrue(manager.check(inputs))
+            inputs["flags"].clear()
+            self.assertEqual(manager.check(inputs), not member)
+            inputs["flags"] = {equal if member else collision: True}
+
     def test_hook_membership_guard_same_manager(self):
         mapping = {1: True, 2: True}
         root = RootGuardManager()
@@ -391,6 +416,42 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(root.check(inputs))
         flags[2] = flags.pop(1)
         self.assertTrue(root.check(inputs))
+
+    def test_hook_flag_validation_size_transitions(self):
+        calls = []
+
+        class Key(int):
+            def __hash__(self):
+                calls.append("hash")
+                return 1
+
+            def __eq__(self, other):
+                calls.append("eq")
+                return True
+
+        invalid = Key(1)
+        inputs = {"hooks": {1: None}, "flags": {}}
+        root = RootGuardManager()
+        managers = [
+            root.dict_getitem_manager(name, name, value, default_mgr_enum)
+            for name, value in inputs.items()
+        ]
+        guards.install_nn_module_hook_membership_guard(*managers, (True,), [], None)
+        clone = root.clone_manager(lambda manager: True)
+        for flags, expected in (
+            ({1: True, 3: True}, True),
+            ({invalid: True}, False),
+            ({1: True}, True),
+            ({invalid: True, 3: True}, False),
+            ({1: True, 3: True}, True),
+        ):
+            inputs["flags"].clear()
+            inputs["flags"].update(flags)
+            calls.clear()
+            for manager in (root, clone):
+                self.assertEqual(manager.check(inputs), expected)
+                self.assertEqual(manager.check_verbose(inputs).result, expected)
+            self.assertEqual(calls, [])
 
 
 @instantiate_parametrized_tests
