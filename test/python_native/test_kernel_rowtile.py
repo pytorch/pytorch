@@ -559,7 +559,7 @@ class TestKernelRowTile(TestCase):
             (torch.float16, 11),  # rows with and without one full group
             (torch.float64, 1),  # vec 2, no full vector group
             (torch.float32, 4098),  # even N: residues 0 and 2 only
-            (torch.float16, 4096),  # every row aligned: no edges
+            (torch.float16, 4096),  # whole vectors: the rolled path
         ),
     )
     def test_ragged_vector_edges_and_interior(self, dtype, columns):
@@ -632,7 +632,8 @@ class TestKernelRowTile(TestCase):
             final=False,
             ragged_vector=True,
         )
-        self.assertEqual(count, torch.full((rows,), float(columns), device="cuda"))
+        want = torch.full((rows,), float(columns), device="cuda")
+        self.assertEqual(count, want, atol=0, rtol=0)
         xd = x.double()
         self.assertEqual(mean, xd.mean(dim=1).float(), atol=1e-4, rtol=1e-4)
         var = m2 / (columns - 1)
@@ -653,7 +654,7 @@ class TestKernelRowTile(TestCase):
 
     def test_ragged_vector_rejects_inner_tree_and_tma(self):
         trait = T.SumOps(acc=cutlass.Float32)
-        x = torch.randn(64, 32, device="cuda")
+        x = torch.randn(64, 33, device="cuda")
         with self.assertRaisesRegex(ValueError, "require the linear order"):
             rt.reduce_row_tile(
                 trait,
@@ -703,7 +704,7 @@ class TestKernelRowTile(TestCase):
         base = torch.randn(34, 4100, device="cuda")
         cases = (
             (base.flatten()[1:4098].view(1, 4097), "16-byte aligned base"),
-            (base[:, :4097], "contiguous rows"),
+            (base[:, :4097], "packed at stride N"),
             (base[:, :0], "nonempty rows"),
         )
         for x, msg in cases:
