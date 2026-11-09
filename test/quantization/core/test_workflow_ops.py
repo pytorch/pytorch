@@ -11,7 +11,12 @@ from torch.ao.quantization import (
 )
 
 from torch.ao.quantization._learnable_fake_quantize import _LearnableFakeQuantize
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, skipCPUIf
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+    onlyCPU,
+    skipCPUIf,
+)
 from torch.testing._internal.common_quantized import (
     _fake_quantize_per_channel_affine_reference,
     _fake_quantize_per_channel_affine_grad_reference,
@@ -31,7 +36,13 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo, HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    TestCase,
+    parametrize,
+    skipIfTorchDynamo,
+    subtest,
+)
 
 # Reference method for fake quantize
 # Note: because scale/zero_point are left as float in the actual kernel, this mimics how fake_quant works for float16/64
@@ -997,7 +1008,7 @@ class TestFakeQuantizeOps(TestCase):
         self.assertEqual(result, ref_result)
 
 
-class TestFakeQuantizeOpsLearnableAccelerator(_LearnableFakeQuantizeTestMixin, TestCase):
+class TestFakeQuantizeOpsLearnable(_LearnableFakeQuantizeTestMixin, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @skipCPUIf(True,
@@ -1013,25 +1024,37 @@ class TestFakeQuantizeOpsLearnableAccelerator(_LearnableFakeQuantizeTestMixin, T
         self._test_learnable_forward_per_tensor(
             X, device, scale_base, zero_point_base)
 
+    @parametrize(
+        "input_shape, seed, dtype_order",
+        [
+            subtest(
+                (None, NP_RANDOM_SEED, (torch.float32,)),
+                name="generated_input",
+                decorators=[onlyCPU],
+            ),
+            subtest(
+                ((2, 1), 12, (torch.bfloat16, torch.float32)),
+                name="fixed_shape",
+                decorators=[onlyAccelerator],
+            ),
+        ],
+    )
     @given(data=st.data())
-    def test_learnable_backward_per_tensor(self, device, data):
-        is_cpu = torch.device(device).type == 'cpu'
-        if is_cpu:
-            X, (_, _, _) = data.draw(hu.tensor(
+    def test_learnable_backward_per_tensor(self, device, input_shape, seed, dtype_order, data):
+        generated_input = None
+        if input_shape is None:
+            generated_input, _ = data.draw(hu.tensor(
                 shapes=hu.array_shapes(1, 5,),
                 elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
                 qparams=hu.qparams(dtypes=torch.quint8)))
-            torch.random.manual_seed(NP_RANDOM_SEED)
-            dtypes = [torch.float32]
-        else:
-            # Keep the fixed seed to avoid Python/CPP downcasting mismatches.
-            torch.random.manual_seed(12)
-            dtypes = [torch.bfloat16, torch.float32]
 
-        x_shape = (2, 1)
-
-        for dtype in dtypes:
-            X_base = X if is_cpu else torch.randn(x_shape, dtype=dtype, device=device)
+        # Preserve the fixed-shape case's seed and dtype order for downcasting.
+        torch.random.manual_seed(seed)
+        for dtype in dtype_order:
+            X_base = (
+                generated_input if input_shape is None
+                else torch.randn(input_shape, dtype=dtype, device=device)
+            )
             scale_base = torch.normal(mean=0, std=1, size=(1,)).clamp(1e-4, 100).to(dtype=dtype)
             zero_point_base = torch.normal(mean=0, std=128, size=(1,)).to(dtype=dtype)
             self._test_learnable_backward_per_tensor(
@@ -1352,7 +1375,7 @@ class TestFusedObsFakeQuantDevice(TestCase):
         self.assertEqual(dX, x.grad)
         self.assertTrue(x.grad.dtype == torch.float32)
 
-instantiate_device_type_tests(TestFakeQuantizeOpsLearnableAccelerator, globals())
+instantiate_device_type_tests(TestFakeQuantizeOpsLearnable, globals())
 instantiate_device_type_tests(TestFusedObsFakeQuantDevice, globals())
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

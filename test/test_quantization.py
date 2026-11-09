@@ -158,12 +158,12 @@ except ImportError as e:
     log.warning(e)
 
 try:
-    from quantization.core.test_workflow_ops import TestFakeQuantizeOpsLearnableAcceleratorCPU  # noqa: F401
+    from quantization.core.test_workflow_ops import TestFakeQuantizeOpsLearnableCPU  # noqa: F401
 except ImportError as e:
     log.warning(e)
 
 try:
-    from quantization.core.test_workflow_ops import TestFakeQuantizeOpsLearnableAcceleratorCUDA  # noqa: F401
+    from quantization.core.test_workflow_ops import TestFakeQuantizeOpsLearnableCUDA  # noqa: F401
 except ImportError as e:
     log.warning(e)
 
