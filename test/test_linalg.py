@@ -12495,15 +12495,15 @@ class TestGroupedMM(TestCase):
         if not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
             self.skipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
         props = torch.cuda.get_device_properties(device)
-        key = (props.gcnArchName.split(":")[0], props.multi_processor_count, dtype)
+        arch_cus = (props.gcnArchName.split(":")[0], props.multi_processor_count)
+        key = (*arch_cus, dtype)
         if key not in _GROUPED_MM_CK_TILE_CONFIGS:
-            self.fail(f"no expected ck_tile configs for (arch, CUs, dtype) {key}; add them to _GROUPED_MM_CK_TILE_CONFIGS")
-        alignment = 16 // dtype.itemsize
+            if any(k[:2] == arch_cus for k in _GROUPED_MM_CK_TILE_CONFIGS):
+                self.fail(f"no expected ck_tile configs for {dtype} on {arch_cus}; add them to _GROUPED_MM_CK_TILE_CONFIGS")
+            self.skipTest(f"ck_tile config coverage is not tracked for (arch, CUs) {arch_cus}")
         names = set()
         with mock.patch.dict(os.environ, {"ROCM_ALLOW_GROUP_GEMM_CK_TILE": "1"}):
             for a_shape, b_shape, offsets, backward in (c.arg_values for c in _GROUPED_MM_CASES + _GROUPED_MM_CK_TILE_CASES):
-                if dtype != torch.float32 and any(size % alignment for size in a_shape[-2:] + b_shape[-2:] + tuple(offsets or ())):
-                    continue  # the unaligned 16-bit cases _check_grouped_gemm skips
                 for strided, a_row_major, b_row_major in itertools.product([False, True], repeat=3):
                     a = self._make_grouped_mm_matrix(a_shape, a_row_major, device, dtype, strided)
                     b = self._make_grouped_mm_matrix(b_shape, b_row_major, device, dtype, strided)
