@@ -2479,8 +2479,10 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool | torch.xpu.MemPool:
     Get the symmetric memory pool for a given device. If not found, create a new
     pool.
 
-    The tensor allocations with this pool must be symmetric across ranks.  The
-    allocated tensors can be used with symmetric operations, for example,
+    The tensor allocations with this pool must be symmetric across ranks.
+    Do not call :meth:`torch.Tensor.record_stream` on CUDA tensors allocated
+    from this pool, since stream-dependent reuse can break that symmetry.
+    The allocated tensors can be used with symmetric operations, for example,
     operations defined under `torch.ops.symm_mem`.
 
     Args:
