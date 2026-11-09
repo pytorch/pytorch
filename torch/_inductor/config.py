@@ -883,6 +883,26 @@ max_autotune_subproc_terminate_timeout_seconds = 0.0
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
 
+# should_reinplace_scatter() controls whether a chain of scatter ops in the fxgraph is
+# functionalized (scatter chain) or mutate in-place (mutation).
+# Functionalized scatter usually can be fused into a single kernel, but each threadblock
+# must bear of cost of wastefully loading all the input pointers for each scatter dim, while
+# mutate in-place usually results in many smaller inductor kernels, but does not have the
+# loading issue.
+# Therefore, when you have a long chain of scatter ops, it is usually beneficial to use the
+# mutate in-place form as the increased kernel launch cost is lower than wasted memory load
+# cost. When you have a short chain of scatter ops, it is usually beneficial to use the
+# functionalized form.
+#
+# This configuration value changes the chain length threshold. At a scatter chain length larger
+# than TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD, inductor will actively switches to
+# mutate in-place (non-fused) form to avoid wastefully loading kernel inputs.
+# At a scatter chain length lower than TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD or when
+# TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD < 0, the original form is used.
+reinplace_scatter_chain_threshold = int(
+    os.environ.get("TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD", "-1")
+)
+
 # Number of benchmark runs for collective operations
 collective_benchmark_nruns = int(
     os.environ.get("TORCHINDUCTOR_COLLECTIVE_BENCHMARK_NRUNS", "50")

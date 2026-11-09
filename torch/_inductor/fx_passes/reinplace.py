@@ -240,6 +240,36 @@ def should_reinplace_index_put(node: torch.fx.Node) -> bool:
     )
 
 
+def annotate_scatter_chain_lengths(graph: torch.fx.Graph) -> None:
+    """
+    Record on each _generalized_scatter node the length of the chain it is in.
+
+    Consider a generalized_scatter chain in the following format:
+        gs(gs(gs(base, s0, ...), s1, ...), s2, ...)
+    Every generalized_scatter op is given the same length of 3 and is stored in the
+    "scatter_chain_length" field in the node's metadata. Note that only single-user
+    links in the example above count.
+
+    When should_reinplace_scatter() runs, it will use this field to make decisions on
+    whether to preserve the chained scatter (functional form) or reinplace the chain into
+    a mutate in-place form that costs more kernel launches but is more memory bw efficient
+    per threadblock.
+    """
+    for head in graph.find_nodes(op="call_function", target=_generalized_scatter):
+        if "scatter_chain_length" in head.meta:
+            continue
+        chain = [head]
+        tail = head
+        while len(tail.users) == 1:
+            (user,) = tail.users
+            if user.target is not _generalized_scatter or user.args[0] is not tail:
+                break
+            chain.append(user)
+            tail = user
+        for node in chain:
+            node.meta["scatter_chain_length"] = len(chain)
+
+
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -269,6 +299,16 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     # realized as the output is a user of the input
     if inp.op in ("placeholder", "get_attr") and any(  # type: ignore[union-attr]
         user.target is aten.copy_.default and user.args[0] is inp for user in node.users
+    ):
+        return True
+
+    # A long chain of scatters should NOT be kept in functional variant, as each thread block
+    # in functional variant is required to load all input pointers instead of just the one it
+    # needs. Therefore, we should reinplace for longer scatter chains.
+    chain_length = node.meta.get("scatter_chain_length", 1)
+    if (
+        config.reinplace_scatter_chain_threshold > 0
+        and chain_length >= config.reinplace_scatter_chain_threshold
     ):
         return True
 
@@ -1082,5 +1122,8 @@ def reinplace_inplaceable_ops(
         # We run fake_tensor_updater to update the alias information.
         # Correct alias information is required for `reinplace_inplaceable_ops_core`.
         fake_tensor_updater.incremental_update()
+        # Must calculate scatter chain length on original fx graph. Therefore should
+        # precede reinplace_inplaceable_ops_core as that pass rewrites the scatter nodes.
+        annotate_scatter_chain_lengths(graph)
         reinplace_inplaceable_ops_core(graph)
         decompose_generalized_scatter(graph)
