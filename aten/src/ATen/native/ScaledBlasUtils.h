@@ -28,8 +28,8 @@ enum class ScaledGemmImplementation {
   NVFP4_NVFP4 = 7,
   NVFP4_NVFP4_SINGLE_SCALE = 8,
   MXFP4_MXFP4 = 9,
-  MNK4_1x32 = 10,
-  MNK4_1x128 = 11,
+  MNK4_1x32_1x32 = 10,
+  MNK4_1x128_1x128 = 11,
 };
 
 /**

@@ -861,10 +861,10 @@ std::array<ScaleKernelDispatchEntry, 11> scale_kernel_dispatch = {{
     ScaledGemmImplementation::BLOCK_128x128_1x128},
   { "block_1x128_1x128", std::bind_front(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise1x128),
     ScaledGemmImplementation::BLOCK_1x128_1x128},
-  { "mnk4_1x32", std::bind_front(scaled_blas::check_mnk4_recipe, ScalingType::BlockWise1x32),
-    ScaledGemmImplementation::MNK4_1x32},
-  { "mnk4_1x128", std::bind_front(scaled_blas::check_mnk4_recipe, ScalingType::BlockWise1x128),
-    ScaledGemmImplementation::MNK4_1x128},
+  { "mnk4_1x32_1x32", std::bind_front(scaled_blas::check_mnk4_recipe, ScalingType::BlockWise1x32),
+    ScaledGemmImplementation::MNK4_1x32_1x32},
+  { "mnk4_1x128_1x128", std::bind_front(scaled_blas::check_mnk4_recipe, ScalingType::BlockWise1x128),
+    ScaledGemmImplementation::MNK4_1x128_1x128},
   { "nvfp4_nvfp4", scaled_blas::check_nvfp4_recipe, ScaledGemmImplementation::NVFP4_NVFP4},
   { "nvfp4_nvfp4_single_scale", scaled_blas::check_nvfp4_recipe_single_scale, ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE },
   { "mxfp8_mxfp8", scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
@@ -996,7 +996,7 @@ _check_deepseek_support() {
 #endif
 }
 
-Tensor& _scaled_mnk4(
+Tensor& _scaled_mnk4_blockwise(
     const Tensor& mat_a,
     const Tensor& mat_b,
     const Tensor& scale_a,
@@ -1498,8 +1498,8 @@ void check_swizzle_lengths(ScaledGemmImplementation impl,
     {ScaledGemmImplementation::NVFP4_NVFP4, 2},
     {ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE, 1},
     {ScaledGemmImplementation::MXFP4_MXFP4, 1},
-    {ScaledGemmImplementation::MNK4_1x32, 1},
-    {ScaledGemmImplementation::MNK4_1x128, 1}
+    {ScaledGemmImplementation::MNK4_1x32_1x32, 1},
+    {ScaledGemmImplementation::MNK4_1x128_1x128, 1}
   }};
 
   // Check implementations that consume swizzle metadata.
@@ -1734,8 +1734,8 @@ void scaled_mm_cuda_v2_impl(
         gemm_impl == ScaledGemmImplementation::BLOCK_1x128_1x128) {
       _check_deepseek_support();
     }
-    if (gemm_impl == ScaledGemmImplementation::MNK4_1x32 ||
-        gemm_impl == ScaledGemmImplementation::MNK4_1x128) {
+    if (gemm_impl == ScaledGemmImplementation::MNK4_1x32_1x32 ||
+        gemm_impl == ScaledGemmImplementation::MNK4_1x128_1x128) {
       scaled_blas::check_mnk4_support();
     }
     epilogue.beta = beta.to<float>();
@@ -1810,10 +1810,10 @@ void scaled_mm_cuda_v2_impl(
         use_fast_accum,
         out_mut,
         epilogue);
-  } else if (gemm_impl == ScaledGemmImplementation::MNK4_1x32) {
-    _scaled_mnk4(mat_a, mat_b, scale_a[0], scale_b[0], ScalingType::BlockWise1x32, bias, use_fast_accum, out_mut, epilogue);
-  } else if (gemm_impl == ScaledGemmImplementation::MNK4_1x128) {
-    _scaled_mnk4(mat_a, mat_b, scale_a[0], scale_b[0], ScalingType::BlockWise1x128, bias, use_fast_accum, out_mut, epilogue);
+  } else if (gemm_impl == ScaledGemmImplementation::MNK4_1x32_1x32) {
+    _scaled_mnk4_blockwise(mat_a, mat_b, scale_a[0], scale_b[0], ScalingType::BlockWise1x32, bias, use_fast_accum, out_mut, epilogue);
+  } else if (gemm_impl == ScaledGemmImplementation::MNK4_1x128_1x128) {
+    _scaled_mnk4_blockwise(mat_a, mat_b, scale_a[0], scale_b[0], ScalingType::BlockWise1x128, bias, use_fast_accum, out_mut, epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::MXFP8_MXFP8) {
     _scaled_mxfp8_mxfp8(mat_a, mat_b, scale_a[0], swizzle_a_enum[0], scale_b[0], swizzle_b_enum[0], bias, out_dtype_, out_mut, epilogue);
   } else if (gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4) {

@@ -127,6 +127,8 @@ bool check_nvfp4_recipe(
     std::vector<ScalingType>& recipe_b,
     ArrayRef<Tensor>& scales_b,
     ArrayRef<SwizzleType> swizzle_b) {
+  if (uses_swizzle(swizzle_a, swizzle_b, SwizzleType::SWIZZLE_MN_K4)) return false;
+
   // both types must be fp4
   if (type_a != ScalarType::Float4_e2m1fn_x2 || type_b != ScalarType::Float4_e2m1fn_x2) {
     return false;
@@ -160,6 +162,8 @@ bool check_nvfp4_recipe_single_scale(
     std::vector<ScalingType>& recipe_b,
     ArrayRef<Tensor>& scales_b,
     ArrayRef<SwizzleType> swizzle_b) {
+  if (uses_swizzle(swizzle_a, swizzle_b, SwizzleType::SWIZZLE_MN_K4)) return false;
+
   // both types must be fp4
   if (type_a != ScalarType::Float4_e2m1fn_x2 || type_b != ScalarType::Float4_e2m1fn_x2) {
     return false;
@@ -237,6 +241,8 @@ bool check_mxfp8_recipe(
     std::vector<ScalingType>& recipe_b,
     ArrayRef<Tensor>& scales_b,
     ArrayRef<SwizzleType> swizzle_b) {
+  if (uses_swizzle(swizzle_a, swizzle_b, SwizzleType::SWIZZLE_MN_K4)) return false;
+
   // both types must be fp8
   if (type_a != ScalarType::Float8_e4m3fn || type_b != ScalarType::Float8_e4m3fn) {
     return false;
@@ -269,6 +275,8 @@ bool check_mxfp4_recipe(
     std::vector<ScalingType>& recipe_b,
     ArrayRef<Tensor>& scales_b,
     ArrayRef<SwizzleType> swizzle_b) {
+  if (uses_swizzle(swizzle_a, swizzle_b, SwizzleType::SWIZZLE_MN_K4)) return false;
+
   // both types must be fp4
   if (type_a != ScalarType::Float4_e2m1fn_x2 || type_b != ScalarType::Float4_e2m1fn_x2) {
     return false;
@@ -421,7 +429,7 @@ void validate_scaled_mm_v2_inputs(
       recipe_a, recipe_b, ScalingType::TensorWise, ScalingType::TensorWise);
   const bool is_rw = is_single_recipe(
       recipe_a, recipe_b, ScalingType::RowWise, ScalingType::RowWise);
-  const bool has_mnk4_swizzle = uses_swizzle(swizzle_a, swizzle_b, SwizzleType::SWIZZLE_MN_K4);
+  const bool has_mnk4_swizzle = !is_tw && !is_rw && uses_swizzle(swizzle_a, swizzle_b, SwizzleType::SWIZZLE_MN_K4);
   const bool is_mnk4_1x32 = has_mnk4_swizzle && is_single_recipe(
       recipe_a, recipe_b, ScalingType::BlockWise1x32, ScalingType::BlockWise1x32);
   const bool is_mnk4_1x128 = has_mnk4_swizzle && is_single_recipe(
@@ -744,18 +752,18 @@ void validate_scaled_grouped_mm_v2_inputs(
   const auto vec128 = static_cast<int64_t>(ScalingType::BlockWise1x128);
   const auto block128 = static_cast<int64_t>(ScalingType::BlockWise128x128);
   const auto mnk4 = static_cast<int64_t>(SwizzleType::SWIZZLE_MN_K4);
-  const bool has_mnk4 = uses_swizzle(swizzle_a, swizzle_b, mnk4);
+  const bool has_mnk4 = !tensorwise && !rowwise && uses_swizzle(swizzle_a, swizzle_b, mnk4);
   TORCH_CHECK_VALUE(
       !has_mnk4 || (same_recipe && (recipe_a[0] == vec32 || recipe_a[0] == vec128) &&
           swizzle_a.size() == 1 && swizzle_b.size() == 1 && swizzle_a[0] == mnk4 && swizzle_b[0] == mnk4 &&
           is_valid_cublaslt_input_pair(mat_a.scalar_type(), mat_b.scalar_type())),
       "Invalid scaling configuration for grouped GEMM: packed MNxK4 requires matching "
       "BlockWise1x32 or BlockWise1x128 recipes, SWIZZLE_MN_K4 on both inputs, and a valid float8 input pair");
-  const bool hopper = recipe_a.size() == 1 && recipe_b.size() == 1 &&
+  const bool fp32_block = recipe_a.size() == 1 && recipe_b.size() == 1 &&
       (recipe_a[0] == vec128 || recipe_a[0] == block128) &&
       (recipe_b[0] == vec128 || recipe_b[0] == block128) &&
       (recipe_a[0] == vec128 || recipe_b[0] == vec128);
-  const bool bf16_only = !tensorwise && !hopper && !has_mnk4;
+  const bool bf16_only = !tensorwise && !fp32_block && !has_mnk4;
   TORCH_CHECK_VALUE(
       !bf16_only || out_dtype_ == ScalarType::BFloat16,
       rowwise ? "Rowwise grouped GEMM requires BFloat16 output"

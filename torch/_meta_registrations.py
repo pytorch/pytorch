@@ -9011,10 +9011,15 @@ def _meta_grouped_mm_common(
                 offs.dtype == torch.int32,
                 lambda: f"Offsets tensor must be integer (int32) tensor, but got {offs.dtype}.",
             )
-            torch._check(
-                offs.stride() == (1,),
-                lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
-            )
+            if scaled:
+                torch._check_value(
+                    offs.is_contiguous(), lambda: "Offsets have to be contiguous"
+                )
+            else:
+                torch._check(
+                    offs.stride() == (1,),
+                    lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
+                )
     else:
         torch._check(
             offs is None,
@@ -9125,7 +9130,11 @@ def meta_scaled_grouped_mm_v2(
     vec128 = ScalingType.BlockWise1x128.value
     block128 = ScalingType.BlockWise128x128.value
     mnk4 = SwizzleType.SWIZZLE_MN_K4.value
-    has_mnk4 = mnk4 in swizzle_a or mnk4 in swizzle_b
+    has_mnk4 = (
+        (scale_recipe_a != tensorwise or scale_recipe_b != tensorwise)
+        and not rowwise
+        and (mnk4 in swizzle_a or mnk4 in swizzle_b)
+    )
     fp8_types = (torch.float8_e4m3fn, torch.float8_e5m2)
     torch._check_value(
         not has_mnk4
@@ -9140,14 +9149,14 @@ def meta_scaled_grouped_mm_v2(
         lambda: "Invalid scaling configuration for grouped GEMM: packed MNxK4 requires matching "
         "BlockWise1x32 or BlockWise1x128 recipes, SWIZZLE_MN_K4 on both inputs, and a valid float8 input pair",
     )
-    hopper = (
+    fp32_block = (
         len(scale_recipe_a) == len(scale_recipe_b) == 1
         and scale_recipe_a[0] in (vec128, block128)
         and scale_recipe_b[0] in (vec128, block128)
         and vec128 in (scale_recipe_a[0], scale_recipe_b[0])
     )
     bf16_only = (
-        not hopper
+        not fp32_block
         and not has_mnk4
         and (scale_recipe_a != tensorwise or scale_recipe_b != tensorwise)
     )
