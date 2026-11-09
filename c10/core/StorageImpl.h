@@ -73,7 +73,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
         size_bytes_(std::move(size_bytes)),
         size_bytes_is_heap_allocated_(size_bytes_.is_heap_allocated()),
         resizable_(resizable),
-        received_ipc_(false),
+        received_cuda_(false),
         allocator_(allocator) {
     if (resizable) {
       TORCH_INTERNAL_ASSERT(
@@ -298,22 +298,12 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   // This method can be used only after storage construction and cannot be used
   // to modify storage status
-  void set_received_ipc(bool received_ipc) {
-    received_ipc_ = received_ipc;
-  }
-
-  bool received_ipc() const {
-    return received_ipc_;
-  }
-
-  [[deprecated("Use set_received_ipc() instead.")]]
   void set_received_cuda(bool received_cuda) {
-    set_received_ipc(received_cuda);
+    received_cuda_ = received_cuda;
   }
 
-  [[deprecated("Use received_ipc() instead.")]]
   bool received_cuda() {
-    return received_ipc();
+    return received_cuda_;
   }
 
   impl::PyObjectSlot* pyobj_slot() {
@@ -427,9 +417,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   SymInt size_bytes_;
   bool size_bytes_is_heap_allocated_;
   bool resizable_;
-  // Identifies that Storage was received from another process via IPC and
-  // doesn't own a process-local device allocation
-  bool received_ipc_;
+  // Identifies that Storage was received from another process and doesn't have
+  // local to process cuda memory allocation
+  bool received_cuda_;
   // Keep the common data access paths behind one branch each.
   bool has_immutable_data_ptr_check_ = false;
   bool has_mutable_data_ptr_check_ = false;

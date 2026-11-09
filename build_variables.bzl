@@ -752,6 +752,7 @@ def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
     )
 
 libtorch_cuda_core_sources = [
+    "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/memory_snapshot.cpp",
     "torch/csrc/cuda/CUDAPluggableAllocator.cpp",
@@ -901,7 +902,6 @@ torch_cpp_srcs = [
 ]
 
 libtorch_python_cuda_core_sources = [
-    "torch/csrc/cuda/CudaIPCTypes.cpp",
     "torch/csrc/cuda/Event.cpp",
     "torch/csrc/cuda/Module.cpp",
     "torch/csrc/cuda/python_comm.cpp",
@@ -944,7 +944,6 @@ libtorch_python_core_sources = [
     "torch/csrc/Exceptions.cpp",
     "torch/csrc/FakeTensorMode.cpp",
     "torch/csrc/Generator.cpp",
-    "torch/csrc/IPCTypes.cpp",
     "torch/csrc/Layout.cpp",
     "torch/csrc/MemoryFormat.cpp",
     "torch/csrc/QScheme.cpp",
