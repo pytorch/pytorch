@@ -15,11 +15,9 @@ variable tracking system.
 """
 
 import collections
-import inspect
 import operator
 import sys
-import types
-from typing import Any, NoReturn, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import TypeIs
 
 import torch
@@ -70,7 +68,6 @@ from .base import (
     MutationType,
     NO_SUCH_SUBOBJ,
     readonly_setter,
-    ValueMutationExisting,
     ValueMutationNew,
     VariableTracker,
 )
@@ -83,7 +80,6 @@ from .object_protocol import (
     pyindex_check,
     pyiter_next,
     pylong_as_ssize_t,
-    pylong_check,
     pynumber_as_ssize_t,
     pynumber_index,
     python_constant_repr_impl,
@@ -2180,33 +2176,17 @@ class ByteArrayVariable(VariableTracker):
 
     _nonvar_fields = {
         "data",
-        "is_from_sourceless_builder",
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(
-        self,
-        data: bytearray,
-        *,
-        is_from_sourceless_builder: bool = False,
-        **kwargs: Any,
-    ) -> None:
+    def __init__(self, data: bytearray, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         if not isinstance(data, bytearray):
             raise AssertionError(f"data must be a bytearray, got {type(data).__name__}")
         self.data = data
-        # SourcelessBuilder cannot tell a captured existing bytearray from a new
-        # one, so a bytearray the traced operation allocates must be wrapped with
-        # create(), not VariableTracker.build().
-        self.is_from_sourceless_builder = is_from_sourceless_builder
 
     def python_type(self) -> type[bytearray]:  # type: ignore[type-arg]
         return bytearray
-
-    @staticmethod
-    def create(data: bytearray) -> "ByteArrayVariable":
-        """Wrap a bytearray allocated by the traced operation as a new, writable value."""
-        return ByteArrayVariable(data, mutation_type=ValueMutationNew())
 
     def as_python_constant(self) -> bytearray:
         return bytearray(self.data)
@@ -2234,7 +2214,7 @@ class ByteArrayVariable(VariableTracker):
                 raise_observed_exception(
                     ValueError, tx, args=["slice step cannot be zero"]
                 )
-            return ByteArrayVariable.create(bytearray(self.data[index]))
+            return VariableTracker.build(tx, bytearray(self.data[index]))
         else:
             raise_type_error(
                 tx,
@@ -2260,192 +2240,50 @@ class ByteArrayVariable(VariableTracker):
         value: VariableTracker | None,
     ) -> VariableTracker:
         # bytearray_ass_subscript: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
-        if not self.is_mutable():
-            raise AssertionError(
-                f"mp_ass_subscript_impl reached an immutable "
-                f"{type(self).__name__}; every construction site should set "
-                "mutation_type."
+        if self.source is not None:
+            unimplemented(
+                gb_type="bytearray store to an existing bytearray",
+                context=f"bytearray: {self.source.name}",
+                explanation="Dynamo leaves writes to bytearrays with a source "
+                "to eager to preserve shared buffers and resize errors.",
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
-        self._decline_store_to_existing()
-        # value=None signals delete (CPython NULL sentinel).
+
+        if not self.is_mutable():
+            raise AssertionError(f"bytearray store on immutable {type(self).__name__}")
         if pyindex_check(maybe_get_python_type(key)):
-            index = pynumber_as_ssize_t(tx, key)
-            return ByteArrayVariable.sq_ass_item_impl(self, tx, index, value)
-        elif pyslice_check(key):
-            # PySlice_Unpack calls the bounds' __index__ in step, start, stop
-            # order, and a store whose value is not a bytearray, or is self,
-            # unpacks the slice a second time. Leave Python-level __index__ to
-            # eager.
-            if any(self._has_python_index(member) for member in key.items):
-                unimplemented(
-                    gb_type="bytearray slice store with Python __index__ bounds",
-                    context=f"slice: {key.debug_repr()}",
-                    explanation="CPython calls the __index__ of slice bounds in "
-                    "step, start, stop order, and a store calls them again when "
-                    "the value is not a bytearray or is the bytearray itself. "
-                    "Dynamo does not model that order, so bytearray slice stores "
-                    "and deletes whose bounds define __index__ in Python are left "
-                    "to eager.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-            # PySlice_Unpack converts the step and rejects zero before start
-            # and stop.
-            step = key.items[2]
-            if not step.is_constant_none() and pyindex_check(
-                maybe_get_python_type(step)
-            ):
-                if pynumber_as_ssize_t(tx, step, None).as_python_constant() == 0:
-                    raise_observed_exception(
-                        ValueError, tx, args=["slice step cannot be zero"]
-                    )
-            index = key.as_index_slice(tx)
+            index: Any = pynumber_as_ssize_t(tx, key).as_python_constant()
             if value is not None:
-                value = value.realize()
-            if value is None:
-                src: Any = None
-            elif isinstance(value, ByteArrayVariable):
-                src = value.data
-            elif isinstance(value, ConstantVariable):
-                src = value.as_python_constant()
-            elif istype(value, (ListVariable, TupleVariable)):
-                # Items are converted in order and the first bad one raises.
-                src = [self._byte_value(tx, item, value) for item in value.items]
-            else:
-                self._unsupported_store_value(value)
-            new_data = bytearray(self.data)
-            try:
-                if value is None:
-                    del new_data[index]
-                else:
-                    new_data[index] = src
-            except (TypeError, ValueError) as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-            tx.output.side_effects.mutation(self)
-            self.data = new_data
-            return ConstantVariable.create(None)
+                value = pynumber_index(tx, value)
+        elif pyslice_check(key):
+            index = key.as_index_slice(tx)
         else:
             raise_type_error(
                 tx,
                 f"bytearray indices must be integers or slices, "
                 f"not {key.python_type_name()}",
             )
-
-    def sq_ass_item_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        key: VariableTracker,
-        value: VariableTracker | None,
-    ) -> VariableTracker:
-        # bytearray_setitem: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
-        if not self.is_mutable():
-            raise AssertionError(
-                f"sq_ass_item_impl reached an immutable "
-                f"{type(self).__name__}; every construction site should set "
-                "mutation_type."
-            )
-        self._decline_store_to_existing()
-        # value=None signals delete (CPython NULL sentinel).
-        index = key.nb_index_impl(tx).as_python_constant()
-        byte = None
-        if value is not None:
-            # The value is checked before the index (gh-91153).
-            byte = self._byte_value(tx, value, value)
-        if index < 0:
-            index += len(self.data)
-        if not 0 <= index < len(self.data):
-            raise_observed_exception(
-                IndexError, tx, args=["bytearray index out of range"]
+        if value is not None and not value.is_python_constant():
+            unimplemented(
+                gb_type="bytearray store with non-constant value",
+                context=f"value: {value.python_type_name()}",
+                explanation="Dynamo only traces bytearray item and slice stores "
+                "whose value is known at compile time.",
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
         new_data = bytearray(self.data)
-        if byte is None:
-            del new_data[index]
-        else:
-            new_data[index] = byte
+        try:
+            if value is None:
+                del new_data[index]
+            else:
+                new_data[index] = value.as_python_constant()
+        except (TypeError, ValueError, IndexError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
         tx.output.side_effects.mutation(self)
         self.data = new_data
         return ConstantVariable.create(None)
 
-    def _decline_store_to_existing(self) -> None:
-        # Stores run on a copy that side-effect replay writes back after the
-        # frame. A bytearray that existed before the frame may share its buffer
-        # with a memoryview, tensor or ndarray, which would read stale bytes,
-        # and eager raises BufferError for a resize at the store itself.
-        # SourcelessBuilder copies can also refer to existing objects, without
-        # a source through which to write the changes back.
-        # Other mutators retain this pre-existing limitation. See #203287.
-        if (
-            isinstance(self.mutation_type, ValueMutationExisting)
-            or self.is_from_sourceless_builder
-        ):
-            context = (
-                self.source.name
-                if self.source is not None
-                else "captured without a source"
-            )
-            unimplemented(
-                gb_type="bytearray store to an existing bytearray",
-                context=f"bytearray: {context}",
-                explanation="Dynamo traces bytearray item and slice stores and "
-                "deletes only on bytearrays created during tracing. Existing "
-                "bytearrays may share their buffer with a memoryview, tensor or "
-                "array that Dynamo cannot see, so their stores are left to eager. "
-                "Bytearrays captured without a source, including in closures, "
-                "default arguments and class or module attributes, have no source "
-                "through which to write changes back to the original object. "
-                "Their stores are also left to eager. A bytearray created before "
-                "a graph break is treated as existing in the resume function.",
-                hints=[
-                    "Return a new bytearray from the compiled function instead of storing into an existing one.",
-                ],
-            )
-
-    @staticmethod
-    def _has_python_index(member: VariableTracker) -> bool:
-        from .tensor import SymNodeVariable
-
-        # PyLong_Check bypasses Python __index__ overrides on int subclasses;
-        # Dynamo handles SymInt separately. Other Python-defined __index__
-        # methods, including assigned builtin callables, may run arbitrary code.
-        member_type = maybe_get_python_type(member)
-        if (
-            istype(member, ConstantVariable)
-            or isinstance(member, SymNodeVariable)
-            or pylong_check(member_type)
-        ):
-            return False
-        index = inspect.getattr_static(member_type, "__index__", None)
-        return index is not None and not isinstance(
-            index, (types.WrapperDescriptorType, types.MethodDescriptorType)
-        )
-
-    @staticmethod
-    def _byte_value(
-        tx: "InstructionTranslatorBase",
-        item: VariableTracker,
-        value: VariableTracker,
-    ) -> int:
-        # _getbytevalue: __index__, which also specializes a SymInt, then range.
-        index = pynumber_index(tx, item)
-        if not index.is_python_constant():
-            ByteArrayVariable._unsupported_store_value(value)
-        byte = index.as_python_constant()
-        if not 0 <= byte < 256:
-            raise_observed_exception(
-                ValueError, tx, args=["byte must be in range(0, 256)"]
-            )
-        return byte
-
-    @staticmethod
-    def _unsupported_store_value(value: VariableTracker) -> NoReturn:
-        unimplemented(
-            gb_type="bytearray store with an unsupported value",
-            context=f"value: {value.python_type_name()}",
-            explanation="Dynamo only traces bytearray stores whose value is known "
-            "at compile time: for an item, a value whose __index__ gives a "
-            "constant int; for a slice, bytes, a bytearray, or a plain list or "
-            "tuple whose items' __index__ give constant ints.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
+    sq_ass_item_impl = mp_ass_subscript_impl
 
     def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(tx, len(self.data))
@@ -2474,7 +2312,7 @@ class ByteArrayVariable(VariableTracker):
             new_data = self.data * n
         except (MemoryError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
-        return ByteArrayVariable.create(new_data)
+        return VariableTracker.build(tx, new_data)
 
     def sq_inplace_repeat_impl(
         self,
@@ -2519,7 +2357,7 @@ class ByteArrayVariable(VariableTracker):
         other: VariableTracker,
     ) -> VariableTracker:
         # bytearray_concat: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
-        return ByteArrayVariable.create(self.data + self._concat_operand(tx, other))
+        return VariableTracker.build(tx, self.data + self._concat_operand(tx, other))
 
     def sq_inplace_concat_impl(
         self,
@@ -2598,7 +2436,7 @@ class ByteArrayVariable(VariableTracker):
                 result = self.data % other.as_python_constant()
             except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
-            return ByteArrayVariable.create(bytearray(result))
+            return VariableTracker.build(tx, bytearray(result))
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.operator.mod),
             [self, other],
@@ -2734,12 +2572,9 @@ class ByteArrayVariable(VariableTracker):
         except AsPythonConstantNotImplementedError:
             return None
         try:
-            result = getattr(self.data, method)(*const_args, **const_kwargs)
-            if isinstance(result, bytearray):
-                return ByteArrayVariable.create(result)
-            if isinstance(result, (list, tuple)):
-                result = type(result)(ByteArrayVariable.create(part) for part in result)
-            return VariableTracker.build(tx, result)
+            return VariableTracker.build(
+                tx, getattr(self.data, method)(*const_args, **const_kwargs)
+            )
         except (MemoryError, OverflowError, TypeError, ValueError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 
@@ -2973,7 +2808,7 @@ class ByteArrayVariable(VariableTracker):
         # enforces arity before this handler runs, so args/kwargs are
         # always empty here (same no-arg pattern as list_copy).
         result = getattr(self.data, method_name)()
-        return ByteArrayVariable.create(result)
+        return VariableTracker.build(tx, result)
 
     def bytearray_upper(
         self,

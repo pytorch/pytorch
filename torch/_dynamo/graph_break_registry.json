@@ -39,16 +39,6 @@
       ]
     }
   ],
-  "GB3084": [
-    {
-      "Gb_type": "bytearray slice store with Python __index__ bounds",
-      "Context": "slice: {key.debug_repr()}",
-      "Explanation": "CPython calls the __index__ of slice bounds in step, start, stop order, and a store calls them again when the value is not a bytearray or is the bytearray itself. Dynamo does not model that order, so bytearray slice stores and deletes whose bounds define __index__ in Python are left to eager.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0003": [
     {
       "Gb_type": "Attempt to trace generator",
@@ -1098,16 +1088,6 @@
       ]
     }
   ],
-  "GB2918": [
-    {
-      "Gb_type": "bytearray store to an existing bytearray",
-      "Context": "bytearray: {context}",
-      "Explanation": "Dynamo traces bytearray item and slice stores and deletes only on bytearrays created during tracing. Existing bytearrays may share their buffer with a memoryview, tensor or array that Dynamo cannot see, so their stores are left to eager. Bytearrays captured without a source, including in closures, default arguments and class or module attributes, have no source through which to write changes back to the original object. Their stores are also left to eager. A bytearray created before a graph break is treated as existing in the resume function.",
-      "Hints": [
-        "Return a new bytearray from the compiled function instead of storing into an existing one."
-      ]
-    }
-  ],
   "GB0064": [
     {
       "Gb_type": "Fake tensor propagation exception",
@@ -1299,6 +1279,26 @@
       "Context": "store_targets={store_targets}, iterator_vars={iterator_vars}",
       "Explanation": "Expected exactly one comprehension result assignment.",
       "Hints": []
+    }
+  ],
+  "GB2806": [
+    {
+      "Gb_type": "bytearray store to an existing bytearray",
+      "Context": "bytearray: {self.source.name}",
+      "Explanation": "Dynamo leaves writes to bytearrays with a source to eager to preserve shared buffers and resize errors.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6677": [
+    {
+      "Gb_type": "bytearray store with non-constant value",
+      "Context": "value: {value.python_type_name()}",
+      "Explanation": "Dynamo only traces bytearray item and slice stores whose value is known at compile time.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB6012": [
@@ -1861,16 +1861,6 @@
       "Context": "TypeError {node.target}: {cause}",
       "Explanation": "",
       "Hints": []
-    }
-  ],
-  "GB6860": [
-    {
-      "Gb_type": "bytearray store with an unsupported value",
-      "Context": "value: {value.python_type_name()}",
-      "Explanation": "Dynamo only traces bytearray stores whose value is known at compile time: for an item, a value whose __index__ gives a constant int; for a slice, bytes, a bytearray, or a plain list or tuple whose items' __index__ give constant ints.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
     }
   ],
   "GB0113": [
