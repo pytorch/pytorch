@@ -21481,8 +21481,10 @@ if RUN_TPU:
 
 
 # Pinned memory is CPU memory, but pinning it needs an accelerator. Most cases
-# also compile a CPU kernel, so this needs a working C++ compiler.
-if HAS_CPU:
+# also compile a CPU kernel, so this needs a working C++ compiler. fbcode always
+# generates the CUDA class on remote GPU hosts, and generating it initializes
+# CUDA at import time, so check the accelerator works first.
+if torch.accelerator.is_available() and HAS_CPU:
     # Not based on this file's TestCase or InductorTestCase: generating each
     # accelerator class calls its setUpClass at import time, to find its primary
     # device, and their class-level config patches would then leak into every

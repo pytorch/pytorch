@@ -692,8 +692,12 @@ class StrictNumericsTest(TestCase):
         self.assertIn("tensor_descriptor" if kind == "split" else "tl.store", code)
 
 
-instantiate_device_type_tests(StrictNumericsCompileTest, globals(), only_for="cuda")
-instantiate_device_type_tests(StrictNumericsTest, globals(), only_for="cuda")
+# Generating the CUDA classes initializes CUDA at import time, and fbcode generates
+# them on remote GPU hosts even when CUDA fails to initialize; every test in them
+# skips without HAS_CUDA_AND_TRITON anyway.
+if HAS_CUDA_AND_TRITON:
+    instantiate_device_type_tests(StrictNumericsCompileTest, globals(), only_for="cuda")
+    instantiate_device_type_tests(StrictNumericsTest, globals(), only_for="cuda")
 
 
 # Compare eager and compiled pointwise OpInfos on reference and raw-bit inputs.
@@ -1570,7 +1574,10 @@ class PointwiseStrictNumericsTest(TestCase):
         )
 
 
-instantiate_device_type_tests(PointwiseStrictNumericsTest, globals(), only_for="cuda")
+if HAS_CUDA_AND_TRITON:
+    instantiate_device_type_tests(
+        PointwiseStrictNumericsTest, globals(), only_for="cuda"
+    )
 
 if __name__ == "__main__":
     run_tests()

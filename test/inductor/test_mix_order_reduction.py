@@ -1849,12 +1849,15 @@ class MixOrderReductionNumericTest(TestBase):
         self.assertNotIn("host_tma_descriptor_args", wrapper)
 
 
-instantiate_device_type_tests(
-    MixOrderReductionNumericTest,
-    globals(),
-    only_for=("cuda", "xpu"),
-    allow_xpu=True,
-)
+# Generating the GPU classes initializes CUDA at import time, and fbcode generates
+# them on remote GPU hosts even when CUDA fails to initialize.
+if HAS_GPU:
+    instantiate_device_type_tests(
+        MixOrderReductionNumericTest,
+        globals(),
+        only_for=("cuda", "xpu"),
+        allow_xpu=True,
+    )
 
 
 class MixOrderReductionHeuristicTest(TestBase):
