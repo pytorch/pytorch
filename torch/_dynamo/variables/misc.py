@@ -2475,6 +2475,11 @@ class ConstantLikeVariable(VariableTracker):
             return VariableTracker.build(tx, result)
         return GetAttrVariable(self, name, py_type=type(result))
 
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        return VariableTracker.build(tx, hasattr(self.value, name))  # type: ignore[return-value]
+
 
 class NumpyDTypeVariable(ConstantLikeVariable):
     def as_proxy(self) -> str:

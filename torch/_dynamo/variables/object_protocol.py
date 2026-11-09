@@ -2616,13 +2616,16 @@ def generic_hasattr_str(
     try:
         # generic_getattr, not tp_getattro_impl, so pending in-frame stores
         # and tp_getset/tp_members resolve the same way getattr() sees them.
-        # A GetAttrVariable means the read was deferred, not resolved, so it
-        # is no evidence the attribute exists; fall through to the graph
-        # break. A lazy VT wraps a real value, and realizing it would install
-        # guards on a value hasattr never reads.
+        # A typed GetAttrVariable is built only after a real getattr found the
+        # value, so it proves the attribute exists; an untyped one is a
+        # deferred read and no evidence, so fall through to the graph break.
+        # A lazy VT wraps a real value, and realizing it would install guards
+        # on a value hasattr never reads.
         value = generic_getattr(tx, obj, name)
-        if isinstance(value, variables.LazyVariableTracker) or not isinstance(
-            value, variables.GetAttrVariable
+        if (
+            isinstance(value, variables.LazyVariableTracker)
+            or not isinstance(value, variables.GetAttrVariable)
+            or value.py_type is not None
         ):
             # A True answer needs no guard of its own: tp_getattro_impl
             # installed whatever guards the read it performed depends on.

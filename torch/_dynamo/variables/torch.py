@@ -673,6 +673,11 @@ class BaseTorchVariable(VariableTracker):
     def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        return VariableTracker.build(tx, hasattr(self.value, name))  # type: ignore[return-value]
+
     def can_constant_fold_through(self) -> bool:
         if self.value in constant_fold_functions:
             return True
