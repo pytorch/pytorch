@@ -3225,9 +3225,14 @@ class halide:
 class helion:
     """Configuration for Inductor-generated Helion kernels (codegen/helion.py)."""
 
-    # Lower static FP16/BF16/FP32 CUDA mm/bmm/addmm/baddbmm to native matmul IR
-    # and emit each native matmul schedule (its dots and fused pointwise
-    # epilogue) as a Helion kernel. Other matmuls and schedules are unchanged.
+    # Use Helion as Inductor's CUDA kernel backend: emit each kernel that
+    # codegen/helion.py supports, e.g. a pointwise or reduction kernel, as a
+    # Helion kernel and the others as Triton. Needs the Python wrapper.
+    enabled: bool = os.getenv("TORCHINDUCTOR_HELION", "0") == "1"
+
+    # With enabled, also lower static FP16/BF16/FP32 CUDA mm/bmm/addmm/baddbmm
+    # to native matmul IR, so that each matmul and its fused pointwise epilogue
+    # is one Helion kernel. Other matmuls are unchanged.
     native_matmul: bool = os.getenv("TORCHINDUCTOR_HELION_NATIVE_MATMUL", "0") == "1"
 
     # Emitted as @helion.kernel(backend=...).

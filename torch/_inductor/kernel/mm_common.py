@@ -179,7 +179,8 @@ def scale_mm_epilogue():
 def use_helion_native_matmul(mat1) -> bool:
     """Whether config.helion.native_matmul applies to this CUDA matmul."""
     return (
-        config.helion.native_matmul
+        config.helion.enabled
+        and config.helion.native_matmul
         and config.cuda_backend == "triton"
         and mat1.get_device().type == "cuda"
         and not (V.graph.cpp_wrapper or V.graph.fx_wrapper)
