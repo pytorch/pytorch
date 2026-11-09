@@ -385,7 +385,15 @@ REDUCTIONS: dict[str, Callable[[torch.dtype], bool | float | int]] = {
 def is_helion_matmul(node: BaseSchedulerNode) -> bool:
     # is_native_matmul() asserts on templates, e.g. flex_attention in the graph:
     # AssertionError: type(self.node)=<class 'torch._inductor.ir.TritonTemplateBuffer'>
-    return not node.is_template() and node.is_native_matmul()
+    # A native matmul from config.triton.native_matmul stays Triton: only the
+    # Helion lowering realizes the operands that HelionKernel reads by tile, and
+    # a.permute(1, 0, 2).reshape(40, 64) @ b would fail with
+    #   NotImplementedError: Cannot read a Helion dot operand at 8*yindex + 320*((r0_index//8)) + (ModularIndexing(r0_index, 1, 8))
+    return (
+        config.helion.native_matmul
+        and not node.is_template()
+        and node.is_native_matmul()
+    )
 
 
 @dataclass(frozen=True)
@@ -1279,7 +1287,7 @@ class HelionScheduling(TritonScheduling):
         return all(
             isinstance(node, SchedulerNode)
             and not node.is_template()
-            and not is_helion_matmul(node)
+            and not node.is_native_matmul()
             and not OrderedSet(node._body.op_counts) - HELION_OPS
             and (
                 not isinstance(node.node, ComputedBuffer)

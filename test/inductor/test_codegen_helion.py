@@ -791,6 +791,19 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         )
         self.assertRegex(source, r"hl\.load\(in1, \[\], extra_mask=tmp\d+\)")
 
+    @config.patch({"triton.native_matmul": True})
+    def test_triton_native_matmul_stays_triton(self):
+        # Without helion.native_matmul, a Triton native matmul is a Triton
+        # kernel, also with an operand that only the Helion lowering realizes.
+        sources = self.compile(
+            lambda a, b: a.permute(1, 0, 2).reshape(40, 64) @ b,
+            torch.randn(8, 40, 8, device="cuda"),
+            torch.randn(64, 136, device="cuda"),
+            tol=1e-2,
+        )
+        self.assertIn("tl.dot(", self.code)
+        self.assertFalse(any("torch.addmm(" in source for source in sources))
+
     def test_pointwise(self):
         (source,) = self.compile(
             lambda x: torch.relu(x) * 2 + 1, torch.randn(64, 100, device="cuda")
