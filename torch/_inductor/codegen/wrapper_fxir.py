@@ -67,6 +67,7 @@ from .wrapper import (
     Line,
     MultiOutputLine,
     NullLine,
+    ProfilerMarkerLine,
     PythonWrapperCodegen,
     ReinterpretLine,
     ReuseLine,
@@ -853,6 +854,11 @@ class FxConverter:
             raise AssertionError(f"expected CommentLine, got {type(line)}")
         # We ignore comments in FX IR.
 
+    def _generate_profiler_marker(self, line: WrapperLine) -> None:
+        if not isinstance(line, ProfilerMarkerLine):
+            raise AssertionError(f"expected ProfilerMarkerLine, got {type(line)}")
+        # Profiler markers are emitted only by the Python wrapper.
+
     def _generate_dynamic_scalar(self, line: WrapperLine) -> None:
         if not isinstance(line, DynamicScalarLine):
             raise AssertionError(f"expected DynamicScalarLine, got {type(line)}")
@@ -1182,7 +1188,14 @@ class FxConverter:
                 elif not hinted(arg):
                     can_tune = False
                     break
-            if can_tune:
+            if (line.inductor_meta or {}).get("asserts_need_real_inputs"):
+                # Tuning runs the kernel on zeros, which need not hold what its device
+                # asserts check, and a failed device assert leaves the device unusable.
+                log.info(
+                    "Skipping compile-time autotuning for kernel %s, which has device asserts.",
+                    kernel_name,
+                )
+            elif can_tune:
                 tune_kernel(tuner, call_args)
             else:
                 log.info(
