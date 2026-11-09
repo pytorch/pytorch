@@ -892,11 +892,14 @@ def reduce_row_tile(
     # Row edges come from the logical row offset, so rows must start at r * N from a
     # 16-byte aligned base. Edge loads are unconditional, so rows must be nonempty.
     full_align = _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT)
-    if ragged_vector and (
-        N < 1 or not x.is_contiguous() or full_align != tile.TRANSFER_ALIGNMENT
-    ):
+    if ragged_vector and N < 1:
+        raise ValueError(f"ragged vectors require nonempty rows, got {N=}")
+    if ragged_vector and not x.is_contiguous():
+        raise ValueError(f"ragged vectors require contiguous rows, got {x.stride()=}")
+    if ragged_vector and full_align != tile.TRANSFER_ALIGNMENT:
         raise ValueError(
-            "ragged vectors require a nonempty, contiguous 16-byte aligned input"
+            f"ragged vectors require a {tile.TRANSFER_ALIGNMENT}-byte aligned base, "
+            f"got {full_align}-byte alignment"
         )
     isz = x.element_size()
     cfg = row_config(N, isz * 8)
@@ -952,8 +955,10 @@ def reduce_row_tile(
     # Final projects nouts; stage 1 stores one raw buffer per field.
     ndst = nouts if final else trait.nfields
     outs = [torch.empty(M, device=x.device, dtype=dt) for dt in out_dtypes[:ndst]]
-    nchunks = Int32(N // op.vec)
-    nwaves = Int32(math.ceil((N // op.vec) / threads_per_row))
+    # fold_row_aligned derives its own groups and waves.
+    nvec = N // op.vec
+    nchunks = None if ragged_vector else Int32(nvec)
+    nwaves = None if ragged_vector else Int32(math.ceil(nvec / threads_per_row))
     # Declare alignment to retain wide loads (worth 3x), narrowed for storage offsets
     # outside TMA and ragged vectors. Both bake N; other runtime folds share a vector
     # class.
