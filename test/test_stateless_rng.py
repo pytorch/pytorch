@@ -1036,6 +1036,23 @@ class TestStatelessRNGCompile(TestCase):
         actual = torch.compile(f, fullgraph=True)(key, low, high)
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
+    def test_dropout_backward(self, device):
+        if torch.device(device).type == "cuda" and not HAS_TRITON:
+            self.skipTest("CUDA inductor codegen requires triton")
+
+        def f(key, x):
+            return random.dropout(key, x, p=0.3)
+
+        key = random.key(42, device=device)
+        x0, grad = torch.randn(2, 8, 33, device=device)
+        results = []
+        for fn in (f, torch.compile(f, fullgraph=True)):
+            x = x0.clone().requires_grad_()
+            out = fn(key, x)
+            out.backward(grad)
+            results.append((out, x.grad))
+        self.assertEqual(results[1], results[0], atol=0, rtol=0)
+
 
 class TestStatelessRNGInteger(TestCase):
     @parametrize("dtype", all_int_dtypes)
@@ -1367,6 +1384,130 @@ class TestStatelessRNGInteger(TestCase):
         )
 
 
+class TestStatelessRNGDropout(TestCase):
+    @parametrize("keys", ["single", "batched"])
+    @parametrize("cols", [subtest(36, name="aligned"), subtest(37, name="unaligned")])
+    @dtypes(*all_floating_dtypes)
+    def test_matches_uniform_mask(self, device, dtype, keys, cols):
+        key = random.key(42, device=device)
+        if keys == "batched":
+            key = random.split(key, 3).unsqueeze(-2)
+        x = torch.randn(3, cols, dtype=dtype, device=device)
+        p = 0.3
+        actual = random.dropout(key, x, p=p)
+        u_dtype = torch.float64 if dtype == torch.float64 else torch.float32
+        keep = random.uniform(key, x.shape, dtype=u_dtype) >= p
+        expected = (x.to(u_dtype) * keep * (1 / (1 - p))).to(dtype)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    def test_statistics(self, device):
+        key = random.key(42, device=device)
+        x = torch.ones(100000, device=device)
+        for p in (0.1, 0.5, 0.9):
+            out = random.dropout(key, x, p=p)
+            self.assertEqual((out == 0).float().mean().item(), p, atol=0.01, rtol=0)
+            self.assertEqual(out.mean().item(), 1.0, atol=0.05, rtol=0)
+
+    @dtypes(*all_floating_dtypes)
+    def test_p_zero_and_one(self, device, dtype):
+        key = random.key(42, device=device)
+        vals = [1.0, -2.0, float("inf"), float("nan")]
+        x = torch.tensor(vals, dtype=dtype, device=device)
+        self.assertEqual(random.dropout(key, x, p=0.0), x, atol=0, rtol=0)
+        self.assertEqual(random.dropout(key, x, p=1.0), x * 0, atol=0, rtol=0)
+
+    def test_not_training(self, device):
+        key = random.key(42, device=device)
+        x = torch.randn(4, 3, device=device)
+        out = random.dropout(key, x, p=0.5, training=False)
+        self.assertIs(out, x)
+        self.assertEqual(out, random.dropout(key, x, p=0.0), atol=0, rtol=0)
+
+    def test_nonfinite_propagates(self, device):
+        key = random.key(42, device=device)
+        keep = random.uniform(key, (1000,)) >= 0.5
+        for v in (float("nan"), float("inf"), float("-inf")):
+            out = random.dropout(key, torch.full((1000,), v, device=device), p=0.5)
+            self.assertEqual(out, torch.where(keep, v, float("nan")), atol=0, rtol=0)
+
+    @dtypes(*all_floating_dtypes)
+    def test_noncontig_input(self, device, dtype):
+        key = random.key(42, device=device)
+        opts = {"dtype": dtype, "device": device}
+        x = torch.randn(2, 3, 4, 10, **opts)
+        offset = torch.empty(x.numel() + 1, **opts)[1:].view(x.shape)
+        inputs = (
+            x.transpose(0, 3),
+            x.contiguous(memory_format=torch.channels_last),
+            x[..., ::2],
+            x[:1].expand(x.shape),
+            offset.copy_(x),
+        )
+        to_fake = FakeTensorMode().from_tensor
+        for inp in inputs:
+            out = random.dropout(key, inp, p=0.3)
+            dense = inp.clone(memory_format=torch.contiguous_format)
+            self.assertEqual(out, random.dropout(key, dense, p=0.3), atol=0, rtol=0)
+            self.assertEqual(out.stride(), torch.empty_like(inp).stride())
+            fake_out = random.dropout(to_fake(key), to_fake(inp), p=0.3)
+            self.assertEqual(fake_out.stride(), out.stride())
+
+    def test_empty(self, device):
+        key = random.key(42, device=device)
+        for shape in ((0, 3), (3, 0)):
+            x = torch.empty(shape, device=device)
+            self.assertEqual(random.dropout(key, x, p=0.5).shape, shape)
+
+    def test_grad(self, device):
+        key = random.key(42, device=device)
+        x = torch.randn(8, 33, device=device, requires_grad=True)
+        grad = torch.randn(8, 33, device=device)
+        random.dropout(key, x, p=0.3).backward(grad)
+        self.assertEqual(x.grad, random.dropout(key, grad, p=0.3), atol=0, rtol=0)
+
+        def f(x):
+            return random.dropout(key, x, p=0.3)
+
+        x64 = torch.randn(8, 5, dtype=torch.float64, device=device, requires_grad=True)
+        self.assertTrue(gradcheck(f, (x64,), check_forward_ad=True))
+        self.assertTrue(gradgradcheck(f, (x64,)))
+
+    def test_errors(self, device):
+        for mode in (contextlib.nullcontext(), FakeTensorMode()):
+            with mode:
+                key = random.key(42, device=device)
+                x = torch.randn(4, 3, device=device)
+                for p in (-0.1, 1.1):
+                    for training in (True, False):
+                        with self.assertRaisesRegex(ValueError, "between 0 and 1"):
+                            random.dropout(key, x, p=p, training=training)
+                    with self.assertRaisesRegex(RuntimeError, "p must be in"):
+                        torch.ops.aten._philox_dropout(x, key, p)
+                with self.assertRaisesRegex(RuntimeError, "p must be in"):
+                    random.dropout(key, x, p=float("nan"))
+                with self.assertRaisesRegex(RuntimeError, "must be a floating"):
+                    random.dropout(key, x.to(torch.int64))
+                with self.assertRaisesRegex(RuntimeError, "key must have dtype uint64"):
+                    random.dropout(key.to(torch.int64), x)
+                with self.assertRaisesRegex(RuntimeError, "batched key"):
+                    random.dropout(random.split(key, 4), x)
+                if torch.device(device).type != "cpu":
+                    with self.assertRaisesRegex(RuntimeError, "same device"):
+                        random.dropout(random.key(42), x)
+
+    @dtypes(*all_floating_dtypes)
+    @parametrize("batched", [False, True])
+    @onlyAccelerator
+    def test_cross_device_consistency(self, device, dtype, batched):
+        key = random.key(42)
+        if batched:
+            key = random.split(key, 4).unsqueeze(-2)
+        x = torch.randn(4, 101, dtype=dtype)
+        expected = random.dropout(key, x, p=0.3)
+        actual = random.dropout(key.to(device), x.to(device), p=0.3)
+        self.assertEqual(actual.cpu(), expected, atol=0, rtol=0)
+
+
 instantiate_device_type_tests(TestStatelessRNGKey, globals(), only_for=("cpu", "cuda"))
 instantiate_device_type_tests(
     TestStatelessRNGKeySplit, globals(), only_for=("cpu", "cuda")
@@ -1384,6 +1525,9 @@ instantiate_device_type_tests(
     TestStatelessRNGInteger, globals(), only_for=("cpu", "cuda")
 )
 
+instantiate_device_type_tests(
+    TestStatelessRNGDropout, globals(), only_for=("cpu", "cuda")
+)
 
 class TestUnbind(TestCase):
     def test_1d_shape(self, device):

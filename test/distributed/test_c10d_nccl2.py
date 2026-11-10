@@ -581,6 +581,7 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ephemeral_timeout(self) -> None:
+        self.addCleanup(dist.set_timeout, self.timeout)
         dist.set_timeout(timedelta(seconds=3))
 
         existing_work = dist.all_reduce(
@@ -636,6 +637,17 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
                 self.assertEqual(
                     outputs[r], torch.full((s,), float(r), device=self.device)
                 )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_barrier_async_block_current_stream(self) -> None:
+        # Catches #202500 where barrier ignored async_op and defaulted to host-blocking,
+        # deadlocking when block_current_stream was called.
+        for _ in range(5):
+            work = dist.barrier(async_op=True, device_ids=[self.rank])
+            work.block_current_stream()
+            torch.cuda.synchronize(self.device)
+            self.assertTrue(work.is_completed())
 
 
 class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
