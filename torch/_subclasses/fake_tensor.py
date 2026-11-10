@@ -688,10 +688,10 @@ def infer_fake_from_real_out(fake_mode: Any, func: Any, real: RealOpResult) -> A
 @typing.final
 class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     # The Python object of a C++ FakeTensorMode, which the Python parts of fake
-    # dispatch run against. The mode's state lives on the C++ mode, so an object
-    # rebuilt by _from_cpp_mode is equivalent. See
-    # Note [C++ FakeTensorMode Python object lifetime] in
-    # torch/csrc/FakeTensorMode.cpp.
+    # dispatch run against. Its fakes and the fake mode slot keep it alive, so
+    # it must not hold a fake: GC cannot see the reference back from the fake.
+    # Hence __slots__, and final, as a subclass could add a __dict__. See
+    # Note [C++ FakeTensorMode handle] in torch/csrc/FakeTensorMode.cpp.
     __slots__ = ()
 
     def __init__(self, *, shape_env: ShapeEnv | None = None) -> None:
@@ -699,15 +699,6 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
         super().__init__(FakeTensorConverter(copy_data=copy_data), shape_env)
-        self._attach_python_object()
-
-    @classmethod
-    def _from_cpp_mode(cls, cpp_mode: object) -> Self:
-        # Rebuilds a collected CppFakeTensorMode around the same C++ mode, which
-        # getCppFakeTensorModePyObj passes in a capsule
-        self = cls.__new__(cls)
-        torch._C._CppFakeTensorMode.__init__(self, cpp_mode)
-        return self
 
 
 @functools.cache
