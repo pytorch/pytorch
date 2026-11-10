@@ -18,7 +18,7 @@ C10_API T maybe_wrap_dim_slow(T dim, T dim_post_expr, bool wrap_scalar);
 template <typename T>
 T _maybe_wrap_dim(T dim, T dim_post_expr, bool wrap_scalar = true) {
   // Inline the fast paths
-  if (C10_LIKELY(dim_post_expr * -1 <= dim && dim < dim_post_expr)) {
+  if (dim_post_expr * -1 <= dim && dim < dim_post_expr) [[likely]] {
     // For SymInts, we want an explicit control flow to trigger a guard, so we
     // may as well branch too.
     if (dim < 0) {
