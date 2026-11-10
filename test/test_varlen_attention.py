@@ -1489,31 +1489,47 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
             (16, 64, (32, 0)),
             (16, 64, (8, 4)),
             (16, 64, (-1, 0)),  # already bottom-right aligned
-            (64, 16, (8, 48)),  # seqlen_q > seqlen_k, no empty rows
+            # seqlen_q > seqlen_k + 1, where FA2's normalization changes the
+            # mask; with a left bound the first rows see no key.
+            (64, 16, (8, 48)),  # right >= max_seqlen_k becomes max_seqlen_k
+            (64, 16, (8, -1)),  # unbounded right becomes max_seqlen_k
+            (64, 16, (-1, 20)),  # right >= max_seqlen_k is dropped: no mask
         ],
     )
     def test_numeric_window_bottom_right(
         self, device, dtype, q_len, k_len, window_size
     ):
-        # Numeric sliding windows follow flash-attention's convention: both edges
-        # are anchored at the bottom-right diagonal, j - i = seqlen_k - seqlen_q.
+        # Numeric sliding windows follow flash-attention 2 (the CUDA build): both
+        # edges are anchored at each sequence's bottom-right diagonal,
+        # j - i = seqlen_k - seqlen_q, after FA2's host-side normalization in
+        # flash_api.cpp. Rows whose window holds no key give zeros.
         # Covers the dense (_flash_attention_forward without cu_seqlens) and the
         # varlen path; the varlen batch mixes two different seqlen_k - seqlen_q.
         torch.manual_seed(0)
         H, D = 2, 64
         left, right = window_size
 
-        def ref_attn(q, k, v):
+        def fa2_window(max_k):
+            # A side >= max_seqlen_k is unbounded (-1); a lone unbounded side is
+            # then replaced by max_seqlen_k. (-1, 0) is causal, which this
+            # replacement reproduces as well.
+            wl = -1 if left >= max_k else left
+            wr = -1 if right >= max_k else right
+            if wl < 0 and wr < 0:
+                return None
+            return (max_k if wl < 0 else wl, max_k if wr < 0 else wr)
+
+        def ref_attn(q, k, v, max_k):
             # q: (sq, H, D), k/v: (sk, H, D), computed in fp32
             sq, sk = q.shape[0], k.shape[0]
             i = torch.arange(sq, device=q.device)[:, None]
             j = torch.arange(sk, device=q.device)[None, :]
             d = sk - sq
             mask = torch.ones(sq, sk, dtype=torch.bool, device=q.device)
-            if left >= 0:
-                mask &= j >= i + d - left
-            if right >= 0:
-                mask &= j <= i + d + right
+            window = fa2_window(max_k)
+            if window is not None:
+                wl, wr = window
+                mask &= (j >= i + d - wl) & (j <= i + d + wr)
             qf, kf, vf = (t.float().transpose(0, 1) for t in (q, k, v))
             with sdpa_kernel(SDPBackend.MATH):
                 out = F.scaled_dot_product_attention(qf, kf, vf, attn_mask=mask)
@@ -1539,7 +1555,10 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
                 window_size_right=right if right >= 0 else None,
             )[0]
             self.assertEqual(
-                out[0].float(), ref_attn(q[0], k[0], v[0]), atol=2e-2, rtol=2e-2
+                out[0].float(),
+                ref_attn(q[0], k[0], v[0], k_len),
+                atol=2e-2,
+                rtol=2e-2,
             )
 
             # Varlen, forward and backward
@@ -1580,7 +1599,7 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
             for b in range(2):
                 qs = slice(int(cu_q[b]), int(cu_q[b + 1]))
                 ks = slice(int(cu_k[b]), int(cu_k[b + 1]))
-                refs.append(ref_attn(qr[qs], kr[ks], vr[ks]))
+                refs.append(ref_attn(qr[qs], kr[ks], vr[ks], max(k_lens)))
             ref = torch.cat(refs, dim=0)
             ref.backward(grad.float())
             self.assertEqual(out.float(), ref, atol=2e-2, rtol=2e-2)
