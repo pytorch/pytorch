@@ -7800,6 +7800,41 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertEqual(fn(Foo, torch.ones(1)), torch.full((1,), 2.0))
 
+    def test_type_mro_method_metaclass(self):
+        class Meta(type):
+            pass
+
+        class Base(metaclass=Meta):
+            pass
+
+        class Foo(Base):
+            pass
+
+        class Color(enum.Enum):
+            RED = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls):
+            return cls.mro()
+
+        self.assertEqual(fn(Foo), [Foo, Base, object])
+        self.assertEqual(fn(Color), [Color, enum.Enum, object])
+
+    def test_type_mro_method_metaclass_overridden_after_compile(self):
+        class Meta(type):
+            pass
+
+        class Foo(metaclass=Meta):
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(cls):
+            return cls.mro()
+
+        self.assertEqual(fn(Foo), [Foo, object])
+        Meta.mro = lambda cls: [cls]
+        self.assertEqual(fn(Foo), [Foo])
+
     def test_builtin_str_on_user_defined_function(self):
         def another_fn():
             pass
