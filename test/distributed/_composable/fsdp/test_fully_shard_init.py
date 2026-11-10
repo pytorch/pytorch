@@ -1030,16 +1030,12 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
         for module in model.modules():
             if isinstance(module, FSDPModule):
                 for param_group in module._get_fsdp_state()._fsdp_param_groups:
-                    self.assertIsNotNone(
-                        param_group.mesh_info.reduce_scatter_process_group
-                    )
+                    self.assertIsNotNone(param_group.storage._reduce_mesh)
+                    reduce_group = param_group.storage.reduce_mesh.get_group()
                     self.assertIsNot(
-                        param_group.storage.reduce_mesh.get_group(),
-                        param_group.mesh_info.shard_process_group,
+                        reduce_group, param_group.mesh_info.shard_process_group
                     )
-                    rs_process_groups.add(
-                        id(param_group.mesh_info.reduce_scatter_process_group)
-                    )
+                    rs_process_groups.add(id(reduce_group))
         self.assertEqual(len(rs_process_groups), 1)
 
 

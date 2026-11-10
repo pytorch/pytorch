@@ -21,6 +21,7 @@ from torch.utils._pytree import tree_leaves, tree_map_only
 
 from . import ops as _fsdp_ops  # noqa: F401  # registers the fsdp:: ops it calls
 from .bucket_comm import (
+    _get_bucket_placement,
     begin_bucket_unshard,
     begin_explicit_bucket_unshard,
     begin_post_forward_unshard,
@@ -45,13 +46,11 @@ if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
 
     from .bucket_storage import ParamInfo, ShardedBucketStorage
-    from .placements.param_driven_shard import ParamAllGatherInputs
+    from .placements.shard_all_gather import ParamAllGatherInputs
 
 
 _EAGER_COMM_CONTEXTS_ATTR = "_flex_shard_eager_comm_contexts"
 _MAX_PENDING_REDUCE_GRADS_ATTR = "_flex_shard_max_pending_reduce_grads"
-_POST_BACKWARD_PER_CALL_ATTR = "_flex_shard_post_backward_per_call"
-_KEEP_PREFETCHES_UNTIL_USED_ATTR = "_flex_shard_keep_prefetches_until_used"
 
 logger = logging.getLogger("torch.distributed.fsdp.flex_shard")
 
@@ -153,15 +152,33 @@ class ParamRepresentation:
         """The local tensor to reduce for an unsharded parameter's grad."""
         return grad
 
-    def accumulate_sharded_grads(
+    def sharded_grads(
         self,
         indices: list[int],
         sharded_params: list[nn.Parameter],
-        sharded_grads: list[torch.Tensor],
+        grads: list[torch.Tensor],
     ) -> list[torch.Tensor]:
-        """Store the reduced local grads on the sharded parameters and return
-        the tensors stored, whose memory the reduce must keep alive."""
-        return _accumulate_sharded_grads(sharded_params, sharded_grads)
+        """The reduced local grads to store on the sharded parameters, in their
+        grad dtypes and layouts, on the device of the reduce, which then copies
+        them to the parameters' device under CPU offload."""
+        return [
+            _match_param_grad_layout(grad, param)
+            for grad, param in zip(grads, sharded_params, strict=True)
+        ]
+
+    def store_sharded_grads(
+        self,
+        indices: list[int],
+        sharded_params: list[nn.Parameter],
+        grads: list[torch.Tensor],
+    ) -> None:
+        """Store the grads from ``sharded_grads`` on the sharded parameters,
+        adding them to existing grads."""
+        for param, grad in zip(sharded_params, grads, strict=True):
+            if param.grad is None:
+                param.grad = grad
+            else:
+                param.grad += grad
 
     def check_post_forward_reshard(self) -> None:
         """Raise if the frontend does not support a reshard after forward to a
@@ -191,23 +208,25 @@ class ParamRepresentation:
     def before_unshard(self) -> None:
         """Called before an unshard reads the bucket storage."""
 
-    def all_gather_inputs(self, index: int) -> ParamAllGatherInputs:
-        """The param's all-gather inputs for this unshard, for a bucket whose
-        params define them (``ParamDrivenShard``)."""
-        raise NotImplementedError(
-            f"{type(self).__name__} does not define all-gather inputs"
-        )
+    def defines_all_gathers(self) -> bool:
+        """Whether some param may define its all-gather inputs or unsharded
+        tensor, so that the engine asks each param (``all_gather_inputs``,
+        ``post_all_gather``, ``releases_all_gather_outputs``)."""
+        return False
+
+    def all_gather_inputs(self, index: int) -> ParamAllGatherInputs | None:
+        """The param's all-gather inputs for this unshard, or None to
+        all-gather its padded local shard (see ``ShardAllGather``)."""
+        return None
 
     def post_all_gather(
-        self,
-        index: int,
-        outputs: tuple[torch.Tensor, ...],
-        out: nn.Parameter | None,
+        self, index: int, outputs: tuple[torch.Tensor, ...], refill: bool
     ) -> tuple[torch.Tensor, Sequence[torch.Tensor]] | None:
         """Build the param's unsharded tensor from its gathered ``outputs`` and
         return it with the tensors that hold its data, or None if its single
-        output holds the unsharded data. With ``out``, the unsharded param that
-        the first unshard built, rebuild that in place instead."""
+        output holds the unsharded data. On a ``refill``, rebuild the unsharded
+        param that the first unshard built (``adopt_unsharded_params``) in
+        place instead."""
         return None
 
     def releases_all_gather_outputs(self, index: int) -> bool:
@@ -273,9 +292,6 @@ class PendingUnshard:
 
     bucket: BucketRuntime
     result: UnshardHandle
-    # From an explicit prefetch list (ShardedBucketStorage.
-    # set_buckets_to_forward_prefetch), not the learned order.
-    explicit: bool = False
 
 
 @dataclass
@@ -381,21 +397,8 @@ class BucketCommContext:
     pending_finalization: GradientReductionHandle | None = None
     # Whether the end of backward waits for the reductions, as FSDP2's
     # set_is_last_backward; without, they stay pending until the next one, and
-    # with keep_prefetches_until_used, so do unused prefetches.
+    # so do unused prefetches.
     wait_reductions_at_backward_end: bool = True
-    # Scheduling trade-offs, chosen by the frontend (fully_shard enables both,
-    # as FSDP2 schedules). With post_backward_per_call, a bucket called several
-    # times in a forward reduces and reshards after each call's backward, and
-    # the next call's backward re-gathers; without, it does so once, after the
-    # last call's backward, holding its unsharded params in between.
-    post_backward_per_call: bool = False
-    # With keep_prefetches_until_used, backward prefetches the previous bucket
-    # in post-forward order, any number of learned-order prefetches may be in
-    # flight, and each stays until its bucket takes it or the last backward
-    # ends. Without, one learned-order prefetch runs at a time, to the nearest
-    # bucket that still needs a gather, and is released when execution diverges
-    # from the learned order, which bounds the memory prefetches hold.
-    keep_prefetches_until_used: bool = False
     # Frontend callbacks run at the end of each backward's final callback.
     backward_end_callbacks: list[Callable[[], None]] = field(default_factory=list)
     # The open partial backward, if any (see PartialBackward)
@@ -462,12 +465,6 @@ class BucketCommContext:
             max_pending_reduce_grads=getattr(
                 root_module, _MAX_PENDING_REDUCE_GRADS_ATTR
             ),
-            post_backward_per_call=getattr(
-                root_module, _POST_BACKWARD_PER_CALL_ATTR, False
-            ),
-            keep_prefetches_until_used=getattr(
-                root_module, _KEEP_PREFETCHES_UNTIL_USED_ATTR, False
-            ),
         )
         contexts[device] = context
         return context
@@ -480,53 +477,32 @@ class BucketCommContext:
         return self.forward_order[idx + 1]
 
     def next_backward_bucket(self, bucket: BucketRuntime) -> BucketRuntime | None:
-        """Return the bucket whose backward re-gather follows ``bucket``'s.
-
-        Backward visits buckets in reverse post-forward order. Buckets without
-        reshard-after-forward, already unsharded, or that do not unshard in
-        backward (``ShardedBucketStorage._unshard_in_backward``) need no
-        re-gather.
-        """
+        """Return the bucket to prefetch in ``bucket``'s backward: the previous
+        one in post-forward order, as FSDP2's backward visits its groups in
+        reverse post-forward order, and its prefetch is a no-op if that bucket
+        is unsharded already. As in FSDP2, none if it does not unshard in
+        backward (``ShardedBucketStorage._unshard_in_backward``), since nothing
+        would take the prefetch."""
         idx = bucket.post_forward_index
-        if idx is None:
+        previous = self.post_forward_order[idx - 1] if idx else None
+        if previous is None or not previous.bucket_storage._unshard_in_backward:
             return None
-        if self.keep_prefetches_until_used:
-            # The previous bucket in post-forward order, a no-op if it is
-            # unsharded already. As in FSDP2, none if it does not unshard in
-            # backward, since nothing would take the prefetch.
-            previous = self.post_forward_order[idx - 1] if idx > 0 else None
-            if previous is None or not previous.bucket_storage._unshard_in_backward:
-                return None
-            return previous
-        for candidate in reversed(self.post_forward_order[:idx]):
-            if (
-                candidate.bucket_storage._reshard_after_forward
-                and candidate.bucket_storage._unshard_in_backward
-                and not candidate.is_unsharded
-            ):
-                return candidate
-        return None
+        return previous
 
     def prefetch(
         self,
         bucket: BucketRuntime | None,
         *,
-        explicit: bool = False,
         on_current_stream: bool = False,
     ) -> None:
-        """Start ``bucket``'s unshard ahead of its hook. Learned-order prefetches
-        run one at a time, explicit ones as many as the lists name. With
+        """Start ``bucket``'s unshard ahead of its hook; it stays pending until
+        the bucket takes it, as FSDP2's prefetches do. With
         ``on_current_stream``, for ``FlexShardModule.unshard(async_op=True)``,
         the all-gather runs asynchronously on the current stream."""
         if (
             bucket is None
             or bucket.is_unsharded
             or any(pending.bucket is bucket for pending in self.pending_unshards)
-            or (
-                not explicit
-                and not self.keep_prefetches_until_used
-                and any(not pending.explicit for pending in self.pending_unshards)
-            )
         ):
             return
         self.pending_unshards.append(
@@ -535,7 +511,6 @@ class BucketCommContext:
                 bucket.begin_unshard(
                     on_current_stream=on_current_stream, async_op=on_current_stream
                 ),
-                explicit,
             )
         )
 
@@ -570,38 +545,18 @@ class BucketCommContext:
                 kept.append(pending)
         self.pending_unshards = kept
 
-    def finish_other_prefetches(self, bucket: BucketRuntime) -> None:
-        """Finish other buckets' learned-order prefetches into their storage,
-        where their own unshards find them, instead of releasing them."""
-        kept, finished = [], []
-        for pending in self.pending_unshards:
-            if pending.bucket is not bucket and not pending.explicit:
-                finished.append(pending)
-            else:
-                kept.append(pending)
-        self.pending_unshards = kept
-        for pending in finished:
-            pending.bucket.finish_unshard(pending.result)
-
     def take_pending_unshard(
         self,
         bucket: BucketRuntime | None,
     ) -> UnshardHandle | None:
-        """Return ``bucket``'s prefetched unshard and release other buckets'
-        learned-order prefetches; ``None`` releases every prefetch.
-
-        A learned-order prefetch for another bucket means execution diverged
-        from the learned order; releasing it bounds memory and frees the
-        prefetch slot. Explicit prefetches stay until their buckets take them.
-        """
+        """Return ``bucket``'s prefetched unshard, keeping the other buckets'
+        prefetches for their own unshards; ``None`` releases every prefetch."""
         result = None
         kept = []
         for pending in self.pending_unshards:
             if bucket is not None and pending.bucket is bucket:
                 result = pending.result
-            elif bucket is not None and (
-                pending.explicit or self.keep_prefetches_until_used
-            ):
+            elif bucket is not None:
                 kept.append(pending)
             else:
                 self._release_prefetch(pending)
@@ -668,11 +623,10 @@ class BucketCommContext:
                 self.finish_buckets()
             if self.wait_reductions_at_backward_end:
                 self.wait_and_clear_reduce_grad_states(debug_fqn=None)
-            if finish and (
-                self.wait_reductions_at_backward_end
-                or not self.keep_prefetches_until_used
-            ):
-                self.take_pending_unshard(None)
+                if finish:
+                    self.take_pending_unshard(None)
+        for bucket in self.buckets:
+            bucket.wait_for_grad_offload()
         for callback in self.backward_end_callbacks:
             callback()
 
@@ -931,6 +885,19 @@ class BucketRuntime:
     post_forward_storage: torch.Tensor | None = None
     post_forward_chunk_nbytes: list[int] = field(default_factory=list)
     post_forward_group: dist.ProcessGroup | None = None
+    # With CPU offload, the copies of reduced grads into pinned memory that the
+    # end of backward waits for
+    grad_offload_events: list[torch.Event] = field(default_factory=list)
+    # What the bucket's placement keeps across unshards (see
+    # Placement.new_bucket_state)
+    placement_state: object | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.bucket_params:
+            placement = _get_bucket_placement(self.infos, "unshard")
+            self.placement_state = placement.new_bucket_state(
+                self.infos, self.representation
+            )
 
     def _post_reduce_scatter(self) -> PostReduceScatter | None:
         storage = self.bucket_storage
@@ -1017,6 +984,7 @@ class BucketRuntime:
         rebound = BucketRuntime.from_bucket_storage(bucket_storage, self.context)
         self.bucket_storage = rebound.bucket_storage
         self.bucket_params = rebound.bucket_params
+        self.placement_state = rebound.placement_state
         self.fsdp2_reduce_scatter_order = None
         self.grads_in_param_layout = None
 
@@ -1103,6 +1071,10 @@ class BucketRuntime:
         prepare_kwargs = {
             "comm": storage._all_gather_comm,
             "device": storage._compute_device,
+            # A traced unshard keeps no state across calls
+            "bucket_state": None
+            if torch.compiler.is_compiling()
+            else self.placement_state,
         }
         if storage._unshard_async_op and not on_current_stream:
             on_current_stream = async_op = True
@@ -1181,12 +1153,22 @@ class BucketRuntime:
                         self.debug_fqn,
                     ):
                         sharded_grads = result.finish()
-                        new_grads = self.representation.accumulate_sharded_grads(
+                        param_indices = (
                             list(range(len(sharded_params)))
                             if indices is None
-                            else indices,
-                            sharded_params,
-                            sharded_grads,
+                            else indices
+                        )
+                        representation = self.representation
+                        new_grads = representation.sharded_grads(
+                            param_indices, sharded_params, sharded_grads
+                        )
+                        stored = new_grads
+                        if (offload := self.bucket_storage._cpu_offload) is not None:
+                            stored = self._offload_sharded_grads(
+                                sharded_params, new_grads, offload.pin_memory
+                            )
+                        representation.store_sharded_grads(
+                            param_indices, sharded_params, stored
                         )
                         if post_stream != consumer_stream:
                             _record_grad_output_stream(
@@ -1202,25 +1184,54 @@ class BucketRuntime:
             self.context.reduce_grad_states.append(PendingReduceGrad(result))
             self.context.queue_post_backward_callback(finish=False)
 
+    def _offload_sharded_grads(
+        self,
+        sharded_params: list[nn.Parameter],
+        grads: list[torch.Tensor],
+        pin_memory: bool,
+    ) -> list[torch.Tensor]:
+        """Copy the reduced grads of a CPU offloaded bucket to the CPU, as
+        FSDP2 does: into pinned memory and overlapped, unless the CPU
+        accumulation or a post-accumulate-grad hook (e.g. an optimizer in
+        backward) reads it right away. The end of backward waits for the
+        overlapped copies (``wait_for_grad_offload``)."""
+        offloaded, overlapped = [], False
+        # A param whose grad another index of this reduce stores first (e.g. a
+        # parameter tied after fully_shard) accumulates too
+        stored: set[int] = set()
+        for param, grad in zip(sharded_params, grads, strict=True):
+            non_blocking = (
+                pin_memory
+                and param.grad is None
+                and id(param) not in stored
+                and not getattr(param, "_post_accumulate_grad_hooks", None)
+            )
+            stored.add(id(param))
+            offloaded.append(grad.to(torch.device("cpu"), non_blocking=non_blocking))
+            overlapped |= non_blocking
+        if overlapped:
+            stream = self.context.device_handle.current_stream()
+            self.grad_offload_events.append(stream.record_event())
+        return offloaded
+
+    def wait_for_grad_offload(self) -> None:
+        for event in self.grad_offload_events:
+            event.synchronize()
+        self.grad_offload_events.clear()
+
     # ------------------------------------------------------------------
     # Eager: persistent unsharded parameters
     # ------------------------------------------------------------------
 
     @_outside_functorch
-    def unshard(
-        self, *, finish_other_prefetch: bool = False, on_current_stream: bool = False
-    ) -> None:
+    def unshard(self, *, on_current_stream: bool = False) -> None:
         """Make the unsharded params hold data and swap them into the modules.
 
-        With ``finish_other_prefetch``, other buckets' learned-order prefetches
-        are finished into those buckets' storage, where their own unshards find
-        them, instead of being released. Without a pending unshard to finish,
-        it all-gathers on the shared stream, or, with ``on_current_stream``,
-        for ``FlexShardModule.unshard()``, synchronously on the current stream.
+        Without a pending unshard to finish, it all-gathers on the shared
+        stream, or, with ``on_current_stream``, for
+        ``FlexShardModule.unshard()``, synchronously on the current stream.
         """
         if not self.is_unsharded:
-            if finish_other_prefetch:
-                self.context.finish_other_prefetches(self)
             result = self.context.take_pending_unshard(self)
             if result is None:
                 result = self.begin_unshard(on_current_stream=on_current_stream)
@@ -1420,13 +1431,6 @@ class BucketRuntime:
         a tensor's hooks before its node's pre-hooks, so a consumer bucket's
         post-backward trigger (a hook on that same output) frees its params
         before this re-gather, as FSDP2's ordering does.
-
-        In a syncing backward of a bucket called more than once in the forward,
-        the first of these hooks reduce-scatters the grads kept from backwards
-        without sync on their own. FSDP2 runs a post-backward per call, and the
-        first one fires before autograd sums the calls' grads into the kept
-        ones, so it reduce-scatters the kept grads alone and this backward's
-        in a second reduce-scatter.
         """
         if not torch.compiler.is_compiling():
             self.logger.debug("%s::pre_backward (%s)", self.log_name, self.debug_fqn)
@@ -1441,15 +1445,6 @@ class BucketRuntime:
                 self.post_backward_ran = False
             else:
                 self.backward_without_unshard = True
-            if (
-                self.backward_calls > 1
-                and self.needs_sync
-                and self.bucket_storage._requires_gradient_sync
-                and not self.bucket_storage._defer_post_backward
-                and not self.context.post_backward_per_call
-                and not partial
-            ):
-                self._post_backward(reshard=False)
             self._run_pre_backward_hook()
             if not partial:
                 self._prefetch(forward=False)
@@ -1491,7 +1486,7 @@ class BucketRuntime:
             # A bucket that does not unshard in backward would never take a
             # backward prefetch, which then would stay in flight
             if forward or runtime.bucket_storage._unshard_in_backward:
-                self.context.prefetch(runtime, explicit=True)
+                self.context.prefetch(runtime)
 
     def _set_unsharded_grad_dtypes(self, *, defer_upcast: bool) -> None:
         """Defer or restore the upcast of grads accumulating in a wider dtype.
@@ -1577,11 +1572,9 @@ class BucketRuntime:
         if self.bucket_storage._defer_post_backward:
             return
         all_ran = self.backward_calls == self.input_triggers == self.input_triggers_run
-        # A post-backward per call reshards after each call's backward, whose
-        # grads autograd may not have accumulated yet, and the next call's
-        # backward re-gathers (see BucketCommContext.post_backward_per_call)
-        if all_ran or self.context.post_backward_per_call:
-            self.post_backward()
+        # As in FSDP2, after each call's backward: a later call's backward
+        # re-gathers
+        self.post_backward()
         if all_ran:
             self.backward_calls = self.input_triggers = self.input_triggers_run = 0
 
@@ -1864,14 +1857,12 @@ class BucketRuntime:
         """Unshard for an activation-checkpoint recompute in backward.
 
         The pre-backward hook usually re-gathered already; otherwise this
-        consumes its prefetch. The recompute visits its buckets in forward
-        order, but backward prefetched in reverse, so another bucket's
-        prefetch is finished for that bucket rather than released and
-        gathered again. A forward without grad (reentrant checkpointing) left
-        no pre-backward hook to run the bucket's pre_backward_hook, so run it
-        here, before the recomputed backward.
+        consumes its prefetch, and other buckets' prefetches stay for them. A
+        forward without grad (reentrant checkpointing) left no pre-backward
+        hook to run the bucket's pre_backward_hook, so run it here, before the
+        recomputed backward.
         """
-        self.unshard(finish_other_prefetch=True)
+        self.unshard()
         self._run_pre_backward_hook()
 
     def _check_forward_allowed(self) -> None:
@@ -2262,10 +2253,11 @@ def _match_param_grad_layout(
     grad: torch.Tensor,
     param: nn.Parameter,
 ) -> torch.Tensor:
-    """Return a grad tensor suitable for assignment to ``param.grad``."""
+    """Return a grad tensor suitable for assignment to ``param.grad``, but on
+    the grad's device."""
     dtype = param.grad_dtype or grad.dtype
-    if grad.dtype != dtype or grad.device != param.device:
-        grad = grad.to(device=param.device, dtype=dtype)
+    if grad.dtype != dtype:
+        grad = grad.to(dtype=dtype)
     if grad.layout != param.layout:
         raise RuntimeError(
             "FlexShard reduced gradient layout does not match the local "
@@ -2276,27 +2268,11 @@ def _match_param_grad_layout(
             tuple(param.shape),
             tuple(param.stride()),
             dtype=dtype,
-            device=param.device,
+            device=grad.device,
         )
         aligned.copy_(grad)
         grad = aligned
     return grad
-
-
-def _accumulate_sharded_grads(
-    sharded_params: list[nn.Parameter],
-    sharded_grads: list[torch.Tensor],
-) -> list[torch.Tensor]:
-    """Cast sharded grads to param grad dtype/layout and accumulate into .grad."""
-    stored_grads: list[torch.Tensor] = []
-    for param, grad in zip(sharded_params, sharded_grads, strict=True):
-        grad = _match_param_grad_layout(grad, param)
-        stored_grads.append(grad)
-        if param.grad is None:
-            param.grad = grad
-        else:
-            param.grad += grad
-    return stored_grads
 
 
 def _install_bucket_unshard_hooks(

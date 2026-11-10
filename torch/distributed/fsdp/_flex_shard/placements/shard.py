@@ -16,6 +16,12 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
 
+from ..all_gather_layout import (
+    AllGatherInputMetadata,
+    AllGatherResult,
+    foreach_all_gather_copy_out,
+)
+from ..bucket_runtime import _PLAIN_REPRESENTATION
 from ..placement_contract import (
     BucketParamStorageLayout,
     BucketStorageLayout,
@@ -33,14 +39,18 @@ from ..utils import (
     _record_copy_out_if_eager,
     _record_function_if_eager,
 )
+from .shard_all_gather import ShardAllGather
 from .utils import foreach_copy_, reduce_grads_on_one_rank, reduce_scatter_grads
 
 
 if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
 
+    from ..all_gather_layout import AllGatherLayout
+    from ..bucket_runtime import ParamRepresentation
     from ..bucket_storage import ParamInfo, PlacementFn
     from ..placement_contract import GradientReduction
+    from .shard_all_gather import ParamAllGather
 
 
 class Shard(Placement):
@@ -58,6 +68,11 @@ class Shard(Placement):
     pytorch/pytorch#197204 and ``fsdp::chunk_cat_mixed_dtype`` with
     ``num_leading_dims`` from pytorch/pytorch#200179; a bucket with uneven
     ``Shard(i)``, ``i > 0``, parameters copies each parameter separately.
+
+    The all-gather gathers each parameter's padded local shard, or the inputs
+    that its representation gives (FSDP2's all-gather extensions), into
+    outputs that back its unsharded tensor (see ``ShardAllGather``). A custom
+    ``AllGatherLayout`` packs and finalizes them instead of the native copies.
     """
 
     # Finish copies the gathered values into a refill's persistent buffers;
@@ -68,27 +83,39 @@ class Shard(Placement):
     class _ReduceGradLayout:
         padded_sizes: list[torch.Size]
 
-    @dataclass(frozen=True)
-    class _PaddedUnshardLayout:
-        padded_local_numels: tuple[int, ...]
-        # Per-param mode, for buckets whose params differ in dtype: each
-        # param's slot (offset, size) in a rank's chunk of the gather buffer,
-        # in elements of slot_dtype (uint8 when the unsharded dtypes differ)
-        slots: tuple[tuple[int, int], ...] | None = None
-        slot_dtype: torch.dtype | None = None
-
-    @dataclass(frozen=True)
+    @dataclass
     class _UnshardState:
         infos: list[ParamInfo]
         world_size: int
         pg: Any
         debug_fqn: str | None
-        padded_layout: Shard._PaddedUnshardLayout
-        # A 1-rank unshard without all-gather: finish copies the local shards.
-        local_copy_out: bool = False
+        device: torch.device
+        all_gather: ShardAllGather
+        # Whether the bucket's all-gather keeps the outputs across unshards;
+        # otherwise a refill's outputs are its persistent buffers
+        bucket_keeps_outputs: bool
+        # Whether each param all-gathers its padded local shard, rather than
+        # inputs from its representation
+        local_shards: list[bool]
+        # Each param's inputs' dtypes and elements as all-gathered
+        param_dtypes: list[list[torch.dtype]]
+        param_numels: list[list[int]]
+        # Each input's elements in a rank's chunk of the gather buffer (bytes
+        # for a uint8 buffer) and its outer size (see _AllGatherOutputLayout)
+        split_sizes: list[int]
+        outer_sizes: list[int]
+        # Whether FSDP's native copies run instead of the layout's (see
+        # AllGatherLayout._uses_native_copies)
+        native: bool
+        # The layout that finalizes this unshard, and its metadata
+        layout: AllGatherLayout
+        output_metadata: object | None = None
         # An FSDP2 AllGather comm (e.g. symmetric memory) that allocated the
         # gather buffer and runs the collective, or None for all_gather_single
         comm: Any = None
+        # A 1-rank unshard without all-gather: finish copies these inputs, on
+        # the compute device, into the outputs
+        single_rank_inputs: list[list[torch.Tensor]] | None = None
 
     @dataclass(frozen=True)
     class _ReduceGradState:
@@ -117,6 +144,12 @@ class Shard(Placement):
     @override
     def bucket_compatibility_key(self) -> object:
         return type(self)
+
+    @override
+    def new_bucket_state(
+        self, infos: list[ParamInfo], representation: ParamRepresentation
+    ) -> ShardAllGather:
+        return ShardAllGather(representation, len(infos))
 
     def _check_shardable(self, fqn: str, shape: torch.Size) -> None:
         if not 0 <= self.dim < len(shape):
@@ -225,97 +258,6 @@ class Shard(Placement):
             world_size,
         )
 
-    def _padded_unshard_layout(
-        self,
-        infos: list[ParamInfo],
-    ) -> Shard._PaddedUnshardLayout:
-        itemsize = infos[0].dtype.itemsize
-        padded_local_numels = tuple(info.storage_nbytes // itemsize for info in infos)
-        return Shard._PaddedUnshardLayout(
-            padded_local_numels=padded_local_numels,
-        )
-
-    def _get_padded_bucket_storage_view(
-        self,
-        tensors: list[torch.Tensor],
-        infos: list[ParamInfo],
-        layout: Shard._PaddedUnshardLayout,
-    ) -> torch.Tensor:
-        """Return the padded bucket-storage alias used as all-gather input."""
-        itemsize = tensors[0].dtype.itemsize
-        bucket_byte_offset = infos[0].byte_offset
-
-        return torch.as_strided(
-            tensors[0],
-            (sum(layout.padded_local_numels),),
-            (1,),
-            storage_offset=bucket_byte_offset // itemsize,
-        )
-
-    def _copy_out_unshard(
-        self,
-        gathered: torch.Tensor,
-        infos: list[ParamInfo],
-        world_size: int,
-        layout: Shard._PaddedUnshardLayout,
-        persistent_buffers: list[torch.Tensor] | None = None,
-        local_copy_out: bool = False,
-    ) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
-        """Return full params and the padded buffers backing them.
-
-        ``persistent_buffers`` are padded buffers from a previous persistent unshard
-        to write into instead of allocating. Such a refill returns no full params:
-        the caller keeps the ones from the first unshard, which view these buffers.
-        """
-        full_params: list[torch.Tensor] = []
-        padded_full_params: list[torch.Tensor] = []
-        for idx, (info, padded_local_numel) in enumerate(
-            zip(infos, layout.padded_local_numels, strict=True)
-        ):
-            padded_full_param = (
-                persistent_buffers[idx]
-                if persistent_buffers is not None
-                else torch.empty(
-                    _full_param_numel(info, padded_local_numel, world_size),
-                    dtype=info.unsharded_dtype,
-                    device=gathered.device,
-                )
-            )
-            padded_full_params.append(padded_full_param)
-            if persistent_buffers is None:
-                full_params.append(
-                    padded_full_param[: info.global_numel].view(info.global_shape)
-                )
-
-        if local_copy_out:
-            # The local shards are the full params: cast each straight into
-            # its buffer, as FSDP2 initializes unsharded params on a 1-rank
-            # group.
-            foreach_copy_(
-                padded_full_params,
-                list(gathered.split(list(layout.padded_local_numels))),
-            )
-            return full_params, padded_full_params
-        if any(_has_uneven_chunks(info, world_size) for info in infos):
-            slots, offset = [], 0
-            for numel in layout.padded_local_numels:
-                slots.append((offset, numel))
-                offset += numel
-            _copy_out_rank_chunks(
-                padded_full_params, gathered.view(world_size, -1), slots, infos
-            )
-            return full_params, padded_full_params
-        # One copy places every rank's chunk: each padded param is a
-        # [leading size, world size, rest] view of its full layout.
-        torch.ops.fsdp._all_gather_copy_out_(
-            padded_full_params,
-            gathered,
-            list(layout.padded_local_numels),
-            [math.prod(info.global_shape[: info.placement.dim]) for info in infos],
-            world_size,
-        )
-        return full_params, padded_full_params
-
     @override
     def prepare_unshard_bucket(
         self,
@@ -326,10 +268,12 @@ class Shard(Placement):
         *,
         comm: Any = None,
         device: torch.device | None = None,
+        bucket_state: ShardAllGather | None = None,
     ) -> PlacementPreparedUnshard:
         """Prepare buffers for the bucket all-gather unshard. ``comm`` replaces
         the all-gather (FSDP2's custom ``AllGather``); ``device`` is where to
-        gather local shards stored elsewhere (CPU offload)."""
+        gather local shards stored elsewhere (CPU offload); ``bucket_state`` is
+        the bucket's all-gather (see ``new_bucket_state``)."""
         return self._prepare_unshard_bucket(
             tensors,
             infos,
@@ -338,6 +282,7 @@ class Shard(Placement):
             skip_single_rank_all_gather=True,
             comm=comm,
             device=device,
+            bucket_state=bucket_state,
         )
 
     def _prepare_unshard_bucket(
@@ -350,175 +295,150 @@ class Shard(Placement):
         skip_single_rank_all_gather: bool,
         comm: Any = None,
         device: torch.device | None = None,
+        bucket_state: ShardAllGather | None = None,
     ) -> PlacementPreparedUnshard:
         """Prepare the send and gather buffers, or on a 1-rank mesh only the
-        local storage when ``skip_single_rank_all_gather``. MixedBucket, which
-        all-gathers every group in one collective, needs the buffers."""
-        ws = mesh.size()
-        dtype = infos[0].unsharded_dtype
+        inputs when ``skip_single_rank_all_gather``. MixedBucket, which
+        all-gathers every group in one collective, needs the buffers. Without
+        ``bucket_state`` (a traced unshard, a MixedBucket group), the unshard
+        keeps its own all-gather, whose outputs are the persistent buffers."""
+        world_size, rank = mesh.size(), mesh.get_local_rank()
         # The collective's device, which differs from the storage's for CPU
         # offload
         device = tensors[0].device if device is None else device
-        if any(
-            info.unsharded_dtype != dtype or info.dtype != infos[0].dtype
-            for info in infos
-        ):
-            return self._prepare_unshard_bucket_bytes(
-                tensors,
-                infos,
-                mesh,
-                debug_fqn,
-                skip_single_rank_all_gather=skip_single_rank_all_gather,
-                comm=comm,
-                device=device,
-            )
-
+        all_gather = bucket_state or ShardAllGather(_PLAIN_REPRESENTATION, len(infos))
+        layout = all_gather.layout
         with _record_copy_in_if_eager():
-            padded_layout = self._padded_unshard_layout(infos)
-            local_storage = self._get_padded_bucket_storage_view(
-                tensors,
-                infos,
-                padded_layout,
-            )
-            numel = local_storage.numel()
-            if ws == 1 and skip_single_rank_all_gather:
-                # As FSDP2 on a 1-rank group: no all-gather and no gather
-                # buffer. Finish copies the local shards into the unsharded
-                # params, which live on the compute device under CPU offload.
-                return PlacementPreparedUnshard(
-                    placement=self,
-                    buffers=[local_storage.to(device, non_blocking=True)],
-                    placement_state=Shard._UnshardState(
-                        infos=infos,
-                        world_size=ws,
-                        pg=mesh.get_group(),
-                        debug_fqn=debug_fqn,
-                        padded_layout=padded_layout,
-                        local_copy_out=True,
-                    ),
+            # Each param's flattened inputs from its representation, or None
+            # for its padded local shard
+            param_inputs = _record_all_gather_inputs(all_gather, infos, world_size)
+            params = all_gather.params
+            param_dtypes = [
+                [info.unsharded_dtype] if inputs is None else [t.dtype for t in inputs]
+                for inputs, info in zip(param_inputs, infos, strict=True)
+            ]
+            param_numels = [
+                [info.storage_nbytes // info.dtype.itemsize]
+                if inputs is None
+                else [t.numel() for t in inputs]
+                for inputs, info in zip(param_inputs, infos, strict=True)
+            ]
+            single_rank = world_size == 1 and skip_single_rank_all_gather
+            dtypes = {dtype for input_dtypes in param_dtypes for dtype in input_dtypes}
+            if not dtypes and not single_rank:
+                raise ValueError(
+                    "cannot all-gather a parameter group without any payloads"
                 )
-            if comm is None:
-                gather_buf = torch.empty(ws * numel, dtype=dtype, device=device)
-            else:
-                gather_buf = comm.allocate((ws * numel,), dtype=dtype, device=device)
-            if (
-                local_storage.dtype == dtype
-                and local_storage.device == device
-                and comm is None
-            ):
-                send_buf = local_storage
-            else:
-                # Cast straight into this rank's chunk of the gather buffer and
-                # all-gather in place, as FSDP2's copy-in does, rather than
-                # into a send buffer that would live until finish. Custom comms
-                # (e.g. symmetric memory) also all-gather in place.
-                send_buf = gather_buf.narrow(0, mesh.get_local_rank() * numel, numel)
-                if numel > 0 and local_storage.device != device:
-                    send_buf.copy_(local_storage, non_blocking=True)
-                elif numel > 0:
-                    foreach_copy_([send_buf], [local_storage])
-
-        return PlacementPreparedUnshard(
-            placement=self,
-            buffers=[send_buf, gather_buf],
-            placement_state=Shard._UnshardState(
+            dtype = dtypes.pop() if len(dtypes) == 1 else torch.uint8
+            split_sizes = [
+                numel * input_dtype.itemsize // dtype.itemsize
+                for numels, input_dtypes in zip(param_numels, param_dtypes)
+                for numel, input_dtype in zip(numels, input_dtypes)
+            ]
+            state = Shard._UnshardState(
                 infos=infos,
-                world_size=ws,
+                world_size=world_size,
                 pg=mesh.get_group(),
                 debug_fqn=debug_fqn,
-                padded_layout=padded_layout,
+                device=device,
+                all_gather=all_gather,
+                bucket_keeps_outputs=bucket_state is not None,
+                local_shards=[inputs is None for inputs in param_inputs],
+                param_dtypes=param_dtypes,
+                param_numels=param_numels,
+                split_sizes=split_sizes,
+                outer_sizes=[
+                    output_layout.outer_size
+                    for param in params
+                    for output_layout in param.output_layouts
+                ],
+                # The native copies read uneven Shard(i), i > 0, chunks stored
+                # compactly, as local shards are, not padded inside their rows
+                native=layout._uses_native_copies
+                and not any(
+                    param.drops_row_padding and inputs is not None
+                    for param, inputs in zip(params, param_inputs, strict=True)
+                ),
+                layout=layout,
                 comm=comm,
-            ),
-        )
-
-    def _prepare_unshard_bucket_bytes(
-        self,
-        tensors: list[torch.Tensor],
-        infos: list[ParamInfo],
-        mesh: DeviceMesh,
-        debug_fqn: str | None,
-        *,
-        skip_single_rank_all_gather: bool,
-        comm: Any = None,
-        device: torch.device | None = None,
-    ) -> PlacementPreparedUnshard:
-        """Prepare a bucket whose params differ in dtype, as FSDP2 does: each
-        param is copied into its own slot of the gather buffer, which is uint8
-        when the unsharded dtypes differ and the unsharded dtype otherwise."""
-        ws = mesh.size()
-        device = tensors[0].device if device is None else device
-        padded_local_numels = tuple(
-            info.storage_nbytes // info.dtype.itemsize for info in infos
-        )
-        locals_ = [
-            torch.as_strided(
-                tensor,
-                (numel,),
-                (1,),
-                storage_offset=info.byte_offset // info.dtype.itemsize,
             )
-            for tensor, info, numel in zip(
-                tensors, infos, padded_local_numels, strict=True
-            )
-        ]
-        unsharded_dtypes = {info.unsharded_dtype for info in infos}
-        slot_dtype = (
-            next(iter(unsharded_dtypes)) if len(unsharded_dtypes) == 1 else torch.uint8
-        )
-        # Slots are packed back to back, as in FSDP2's all-gather input
-        slots = []
-        offset = 0
-        for info, numel in zip(infos, padded_local_numels, strict=True):
-            size = numel * info.unsharded_dtype.itemsize // slot_dtype.itemsize
-            slots.append((offset, size))
-            offset += size
-        chunk_numel = offset
-        layout = Shard._PaddedUnshardLayout(
-            padded_local_numels=padded_local_numels,
-            slots=tuple(slots),
-            slot_dtype=slot_dtype,
-        )
-        state = Shard._UnshardState(
-            infos=infos,
-            world_size=ws,
-            pg=mesh.get_group(),
-            debug_fqn=debug_fqn,
-            padded_layout=layout,
-            local_copy_out=ws == 1 and skip_single_rank_all_gather,
-            comm=comm,
-        )
-        if state.local_copy_out:
-            # CPU offload: the unsharded params live on the compute device
-            locals_ = [t.to(device, non_blocking=True) for t in locals_]
-            return PlacementPreparedUnshard(
-                placement=self, buffers=locals_, placement_state=state
-            )
-        with _record_copy_in_if_eager():
-            size = (ws * chunk_numel,)
+            if single_rank:
+                # As FSDP2 on a 1-rank group: no all-gather and no gather
+                # buffer. Finish copies the inputs into the outputs, which live
+                # on the compute device under CPU offload.
+                local = (
+                    _packed_local_shards(tensors, infos)
+                    if all(inputs is None for inputs in param_inputs)
+                    else None
+                )
+                if local is not None:
+                    local = local.to(device, non_blocking=True)
+                    buffers = [local]
+                    state.single_rank_inputs = [
+                        [t] for t in local.split([n for (n,) in param_numels])
+                    ]
+                else:
+                    state.single_rank_inputs = [
+                        [
+                            t.to(device, non_blocking=True)
+                            for t in (
+                                [_local_shard_slot(tensor, info)]
+                                if inputs is None
+                                else inputs
+                            )
+                        ]
+                        for inputs, tensor, info in zip(
+                            param_inputs, tensors, infos, strict=True
+                        )
+                    ]
+                    buffers = [t for ts in state.single_rank_inputs for t in ts]
+                return PlacementPreparedUnshard(
+                    placement=self, buffers=buffers, placement_state=state
+                )
+            numel = sum(split_sizes)
+            copy_in = None
+            if not state.native:
+                # Copies, since copy_in and the default copy-out read these lists
+                copy_in, state.layout, state.output_metadata = layout.prepare(
+                    AllGatherInputMetadata(
+                        input_split_sizes=list(split_sizes),
+                        input_outer_sizes=list(state.outer_sizes),
+                        input_numel=numel,
+                        world_size=world_size,
+                        dtype=dtype,
+                        device=device,
+                    )
+                )
+            size = (world_size * numel,)
             gather_buf = (
-                torch.empty(size, dtype=slot_dtype, device=device)
+                torch.empty(size, dtype=dtype, device=device)
                 if comm is None
-                else comm.allocate(size, dtype=slot_dtype, device=device)
+                else comm.allocate(size, dtype=dtype, device=device)
             )
-            send_buf = gather_buf.narrow(
-                0, mesh.get_local_rank() * chunk_numel, chunk_numel
-            )
-            dsts, srcs = [], []
-            for (slot_offset, slot_size), info, src in zip(
-                slots, infos, locals_, strict=True
-            ):
-                if slot_size == 0:
-                    continue
-                if src.device != device:  # CPU offload
-                    src = src.to(device, non_blocking=True)
-                if slot_dtype == torch.uint8:
-                    # Byte slots: cast into a temporary, as FSDP2's copy-in does
-                    src = src.to(info.unsharded_dtype).view(torch.uint8)
-                dsts.append(send_buf.narrow(0, slot_offset, slot_size))
-                srcs.append(src)
-            if dsts:
-                # Casts to the slot dtype as it copies
-                foreach_copy_(dsts, srcs)
+            if copy_in is None:
+                send_buf = _native_copy_in(
+                    tensors,
+                    infos,
+                    param_inputs,
+                    split_sizes,
+                    gather_buf.narrow(0, rank * numel, numel),
+                    gather_in_place=comm is not None,
+                )
+            else:
+                inputs = [
+                    t.view(torch.uint8) if dtype == torch.uint8 else t
+                    for inputs, tensor, info in zip(
+                        param_inputs, tensors, infos, strict=True
+                    )
+                    for t in (
+                        [_padded_input(tensor, info, world_size, device)]
+                        if inputs is None
+                        else inputs
+                    )
+                ]
+                send_buf, gather_buf = copy_in(
+                    inputs, gather_buf, state.split_sizes, numel, rank
+                )
         return PlacementPreparedUnshard(
             placement=self, buffers=[send_buf, gather_buf], placement_state=state
         )
@@ -528,30 +448,28 @@ class Shard(Placement):
         self, prepared: PlacementPreparedUnshard, *, async_op: bool = False
     ) -> dist.Work | None:
         """Launch the prepared bucket all-gather."""
-        if not isinstance(prepared.placement_state, Shard._UnshardState):
+        state = prepared.placement_state
+        if not isinstance(state, Shard._UnshardState):
             raise AssertionError(
-                "Expected Shard._UnshardState, "
-                f"got {type(prepared.placement_state).__name__}"
+                f"Expected Shard._UnshardState, got {type(state).__name__}"
             )
-        if prepared.placement_state.local_copy_out:
+        if state.single_rank_inputs is not None:
             return None
-        send_buf = prepared.buffers[0]
-        with _record_comm_if_eager(
-            "FlexShard::all_gather",
-            prepared.placement_state.debug_fqn,
-        ):
-            if (comm := prepared.placement_state.comm) is not None:
-                return comm(
-                    output_tensor=prepared.buffers[1],
-                    input_tensor=send_buf,
-                    group=prepared.placement_state.pg,
-                    async_op=async_op,
+        send_buf, gather_buf = prepared.buffers
+        with _record_comm_if_eager("FlexShard::all_gather", state.debug_fqn):
+            if state.comm is None:
+                return dist.all_gather_single(
+                    gather_buf, send_buf, group=state.pg, async_op=async_op
                 )
-            return dist.all_gather_single(
-                prepared.buffers[1],
-                send_buf,
-                group=prepared.placement_state.pg,
+            kwargs = {}
+            if state.layout.comm_type is not None:
+                kwargs["output_metadata"] = state.output_metadata
+            return state.comm(
+                output_tensor=gather_buf,
+                input_tensor=send_buf,
+                group=state.pg,
                 async_op=async_op,
+                **kwargs,
             )
 
     @override
@@ -559,98 +477,92 @@ class Shard(Placement):
         self,
         prepared: PlacementPreparedUnshard,
     ) -> PlacementUnshardResult:
-        """Finish the prepared bucket all-gather and assemble full parameters."""
-        if not isinstance(prepared.placement_state, Shard._UnshardState):
+        """Finish the prepared bucket all-gather into the params' outputs and
+        return the unsharded params built from them."""
+        state = prepared.placement_state
+        if not isinstance(state, Shard._UnshardState):
             raise AssertionError(
-                "Expected Shard._UnshardState, "
-                f"got {type(prepared.placement_state).__name__}"
+                f"Expected Shard._UnshardState, got {type(state).__name__}"
             )
+        all_gather, params = state.all_gather, state.all_gather.params
+        # A refill's persistent buffers
+        refilled = prepared.persistent_buffers
+        if refilled is not None and not state.bucket_keeps_outputs:
+            all_gather.adopt_outputs(refilled)
         with _record_copy_out_if_eager():
-            state = prepared.placement_state
-            if state.padded_layout.slots is not None:
-                full_params, padded_full_params = self._copy_out_unshard_bytes(
-                    prepared, state
+            if state.single_rank_inputs is not None:
+                _copy_single_rank_inputs(
+                    params, state.single_rank_inputs, state.param_dtypes, state.device
                 )
-                return PlacementUnshardResult(
-                    full_params=full_params,
-                    persistent_buffers=padded_full_params
-                    if prepared.persistent
-                    else [],
+            elif state.native:
+                # A refill's outputs are persistent buffers, which the runtime
+                # re-allocated, but for those that a representation released
+                # (releases_all_gather_outputs) before their sizes were recorded
+                if refilled is None or all_gather.representation.defines_all_gathers():
+                    for param, numels, dtypes in zip(
+                        params, state.param_numels, state.param_dtypes, strict=True
+                    ):
+                        param.init_all_gather_outputs(
+                            numels, dtypes, state.world_size, state.device
+                        )
+                        param.alloc_all_gather_outputs()
+                _native_copy_out(
+                    prepared.buffers[1],
+                    params,
+                    state.local_shards,
+                    state.infos,
+                    state.split_sizes,
+                    state.outer_sizes,
+                    state.world_size,
                 )
-            full_params, padded_full_params = self._copy_out_unshard(
-                prepared.buffers[0 if state.local_copy_out else 1],
-                state.infos,
-                state.world_size,
-                state.padded_layout,
-                persistent_buffers=prepared.persistent_buffers,
-                local_copy_out=state.local_copy_out,
+            else:
+                result = AllGatherResult(
+                    prepared.buffers[1],
+                    None,
+                    None,
+                    state.param_dtypes,
+                    state.param_numels,
+                    state.split_sizes,
+                    state.outer_sizes,
+                    state.layout,
+                    state.output_metadata,
+                    prepared.buffers[0],
+                )
+                try:
+                    all_gather.layout_buffers = foreach_all_gather_copy_out(
+                        result, params, state.pg, all_gather.layout_buffers
+                    )
+                except ValueError:
+                    # Free what a rejected refill re-allocated, as FSDP2 does
+                    if not all_gather.keep_storage:
+                        if all_gather.layout_buffers is not None:
+                            all_gather.layout_buffers.free()
+                        for param in params:
+                            param.free_all_gather_outputs()
+                    raise
+            full_params = _unsharded_tensors(
+                all_gather, state.infos, refill=refilled is not None
             )
-
+        if refilled is not None:
+            return PlacementUnshardResult(full_params=[], persistent_buffers=refilled)
+        persistent: dict[int, torch.Tensor] = {}
+        if prepared.persistent:
+            for param in params:
+                unpadded = (
+                    [] if param.unpadded_output is None else [param.unpadded_output]
+                )
+                for tensor in (
+                    *param.all_gather_outputs,
+                    *unpadded,
+                    *param.inner_tensors,
+                ):
+                    persistent.setdefault(id(tensor), tensor)
+            if all_gather.layout_buffers is not None:
+                for tensor in all_gather.layout_buffers.tensors:
+                    persistent.setdefault(id(tensor), tensor)
         return PlacementUnshardResult(
-            full_params=full_params,
-            persistent_buffers=padded_full_params if prepared.persistent else [],
+            full_params=full_params, persistent_buffers=list(persistent.values())
         )
-
-    def _copy_out_unshard_bytes(
-        self, prepared: PlacementPreparedUnshard, state: Shard._UnshardState
-    ) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
-        layout = state.padded_layout
-        persistent_buffers = prepared.persistent_buffers
-        device = prepared.buffers[0].device
-        full_params: list[torch.Tensor] = []
-        padded_full_params: list[torch.Tensor] = []
-        for idx, (info, numel) in enumerate(
-            zip(state.infos, layout.padded_local_numels, strict=True)
-        ):
-            padded_full_param = (
-                persistent_buffers[idx]
-                if persistent_buffers is not None
-                else torch.empty(
-                    _full_param_numel(info, numel, state.world_size),
-                    dtype=info.unsharded_dtype,
-                    device=device,
-                )
-            )
-            padded_full_params.append(padded_full_param)
-            if persistent_buffers is None:
-                full_params.append(
-                    padded_full_param[: info.global_numel].view(info.global_shape)
-                )
-        if state.local_copy_out:
-            foreach_copy_(padded_full_params, list(prepared.buffers))
-            return full_params, padded_full_params
-        # One copy places every rank's chunk. Byte views keep its rank
-        # interleaving: a param's chunk is [leading size, rest] elements, i.e.
-        # [leading size, rest * itemsize] bytes.
-        slot_dtype = layout.slot_dtype
-        outputs = [
-            p if slot_dtype != torch.uint8 else p.view(torch.uint8)
-            for p in padded_full_params
-        ]
-        slots = layout.slots
-        if slots is None:
-            raise AssertionError("The native copy-out needs the slots of its layout")
-        if any(_has_uneven_chunks(info, state.world_size) for info in state.infos):
-            _copy_out_rank_chunks(
-                outputs,
-                prepared.buffers[1].view(state.world_size, -1),
-                list(slots),
-                state.infos,
-            )
-            return full_params, padded_full_params
-        keep = [i for i, (_, size) in enumerate(slots) if size]
-        if keep:
-            torch.ops.fsdp._all_gather_copy_out_(
-                [outputs[i] for i in keep],
-                prepared.buffers[1],
-                [slots[i][1] for i in keep],
-                [
-                    math.prod(state.infos[i].global_shape[: _shard_dim(state.infos[i])])
-                    for i in keep
-                ],
-                state.world_size,
-            )
-        return full_params, padded_full_params
 
     def _pack_reduce_scatter_grad(
         self,
@@ -848,25 +760,19 @@ def _has_uneven_chunks(info: ParamInfo, world_size: int) -> bool:
     return dim != 0 and info.global_shape[dim] % world_size != 0
 
 
-def _full_param_numel(info: ParamInfo, padded_local_numel: int, world_size: int) -> int:
-    """The elements of the buffer behind a full param: every rank's slot, or,
-    for uneven chunks on a nonzero dim, only the param, which then needs no
-    padding inside its rows."""
-    if _has_uneven_chunks(info, world_size):
-        return info.global_numel
-    return world_size * padded_local_numel
-
-
 def _copy_out_rank_chunks(
     outputs: list[torch.Tensor],
     rank_major: torch.Tensor,
-    slots: list[tuple[int, int]],
-    infos: list[ParamInfo],
+    split_sizes: list[int],
+    outer_sizes: list[int],
+    uneven_infos: list[ParamInfo | None],
 ) -> None:
-    """Copy each param's chunks out of ``rank_major``, whose row r holds rank
-    r's slots, into its output (both in the gather buffer's dtype, bytes for a
-    uint8 buffer), one param at a time: the native copy-out reads every slot,
-    while uneven chunks on a nonzero dim are not rows of one padded layout.
+    """Copy each output's chunks out of ``rank_major``, whose row r holds rank
+    r's chunk, one output at a time (both in the gather buffer's dtype, bytes
+    for a uint8 buffer). Each rank's chunk is [outer size, rest], as for the
+    native copy, filling a prefix of a larger output, except for an output in
+    ``uneven_infos``: its param splits unevenly on a nonzero dim, so that its
+    ranks' compact chunks are not rows of one padded layout.
 
     For example, a (2, 5) param on Shard(1) over 4 ranks stores chunks of 2, 2,
     1 and 0 columns compactly, written here as p13 for P[1, 3] and .. for
@@ -881,19 +787,21 @@ def _copy_out_rank_chunks(
     world_size = rank_major.size(0)
     dsts: list[torch.Tensor] = []
     srcs: list[torch.Tensor] = []
-    for output, (offset, size), info in zip(outputs, slots, infos, strict=True):
+    offset = 0
+    for output, size, outer, info in zip(
+        outputs, split_sizes, outer_sizes, uneven_infos, strict=True
+    ):
+        chunks = rank_major[:, offset : offset + size]
+        offset += size
         if size == 0 or output.numel() == 0:
             continue
-        chunks = rank_major[:, offset : offset + size]
-        dim = _shard_dim(info)
-        shape = info.global_shape
-        outer = math.prod(shape[:dim])
-        if not _has_uneven_chunks(info, world_size):
-            # Each rank's chunk is [outer, size / outer], as for the native copy
+        if info is None:
             row = size // outer
             dsts.append(output[: world_size * size].view(outer, world_size, row))
             srcs.append(chunks.view(world_size, outer, row).transpose(0, 1))
             continue
+        dim = _shard_dim(info)
+        shape = info.global_shape
         dim_size = shape[dim]
         chunk_size = -(-dim_size // world_size)
         num_full, short_size = divmod(dim_size, chunk_size)
@@ -914,6 +822,288 @@ def _copy_out_rank_chunks(
             srcs.append(short.view(outer, short_size, inner))
     if dsts:
         torch._foreach_copy_(dsts, srcs)
+
+
+def _record_all_gather_inputs(
+    all_gather: ShardAllGather, infos: list[ParamInfo], world_size: int
+) -> list[list[torch.Tensor] | None]:
+    """Record each param's all-gather inputs for this unshard and return them
+    flattened: those its representation gives, or None for its padded local
+    shard."""
+    representation = all_gather.representation
+    custom_layout = not all_gather.layout._rank_major_output_only
+    if not representation.defines_all_gathers():
+        # A local shard's output layout depends only on these
+        key = (world_size, custom_layout)
+        if all_gather.local_shards_key != key:
+            for param, info in zip(all_gather.params, infos, strict=True):
+                param.name = info.fqn
+                param.use_local_shard(
+                    shard_world_size=world_size,
+                    shard_dim=_shard_dim(info),
+                    global_shape=info.global_shape,
+                    custom_layout=custom_layout,
+                )
+            all_gather.local_shards_key = key
+        return [None] * len(infos)
+    all_gather.local_shards_key = None
+    param_inputs: list[list[torch.Tensor] | None] = []
+    for index, (param, info) in enumerate(zip(all_gather.params, infos, strict=True)):
+        param.name = info.fqn
+        inputs = representation.all_gather_inputs(index)
+        sharding = {
+            "shard_world_size": world_size,
+            "shard_dim": _shard_dim(info),
+            "global_shape": info.global_shape,
+            "custom_layout": custom_layout,
+        }
+        if inputs is None:
+            param.use_local_shard(**sharding)
+            param_inputs.append(None)
+        else:
+            param_inputs.append(param.flatten_inputs(inputs, **sharding))
+    return param_inputs
+
+
+def _local_shard_slot(tensor: torch.Tensor, info: ParamInfo) -> torch.Tensor:
+    """The param's slot of the bucket storage that ``tensor``, its local shard,
+    views: the local shard first, then zeros (see ``Shard``)."""
+    itemsize = info.dtype.itemsize
+    return torch.as_strided(
+        tensor,
+        (info.storage_nbytes // itemsize,),
+        (1,),
+        storage_offset=info.byte_offset // itemsize,
+    )
+
+
+def _packed_local_shards(
+    tensors: list[torch.Tensor], infos: list[ParamInfo]
+) -> torch.Tensor | None:
+    """The slots of every param as one flat view of the bucket storage, if they
+    lie back to back in one dtype."""
+    first = infos[0]
+    end = first.byte_offset
+    for info in infos:
+        if info.dtype != first.dtype or info.byte_offset != end:
+            return None
+        end += info.storage_nbytes
+    itemsize = first.dtype.itemsize
+    return torch.as_strided(
+        tensors[0],
+        ((end - first.byte_offset) // itemsize,),
+        (1,),
+        storage_offset=first.byte_offset // itemsize,
+    )
+
+
+def _padded_input(
+    tensor: torch.Tensor, info: ParamInfo, world_size: int, device: torch.device
+) -> torch.Tensor:
+    """The param's padded local shard as FSDP2 all-gathers it, which an
+    ``AllGatherLayout`` receives: on ``device``, in the unsharded dtype, and an
+    uneven ``Shard(i)``, ``i > 0``, chunk padded at the end of each row rather
+    than stored compactly."""
+    slot = _local_shard_slot(tensor, info)
+    if slot.device != device:  # CPU offload
+        slot = slot.to(device, non_blocking=True)
+    if not _has_uneven_chunks(info, world_size):
+        return slot.to(info.unsharded_dtype)
+    dim = _shard_dim(info)
+    padded_size = list(info.global_shape)
+    padded_size[dim] = -(-padded_size[dim] // world_size)
+    padded = slot.new_zeros(padded_size, dtype=info.unsharded_dtype)
+    padded.narrow(dim, 0, info.local_shape[dim]).copy_(
+        slot[: info.local_numel].view(info.local_shape)
+    )
+    return padded.view(-1)
+
+
+def _native_copy_in(
+    tensors: list[torch.Tensor],
+    infos: list[ParamInfo],
+    param_inputs: list[list[torch.Tensor] | None],
+    split_sizes: list[int],
+    send_buf: torch.Tensor,
+    *,
+    gather_in_place: bool,
+) -> torch.Tensor:
+    """Copy the inputs into ``send_buf``, this rank's chunk of the gather
+    buffer, and return the collective's input: the bucket storage itself if it
+    holds every local shard back to back in the gather dtype, unless a custom
+    comm gathers in place, else ``send_buf``, which the collective gathers in
+    place, as FSDP2's copy-in does. Local shards are cast to their unsharded
+    dtypes as they are copied."""
+    if all(inputs is None for inputs in param_inputs) and all(
+        info.unsharded_dtype == send_buf.dtype for info in infos
+    ):
+        local = _packed_local_shards(tensors, infos)
+        if local is not None:
+            if (
+                local.dtype == send_buf.dtype
+                and local.device == send_buf.device
+                and not gather_in_place
+            ):
+                return local
+            if send_buf.numel() > 0 and local.device != send_buf.device:
+                send_buf.copy_(local, non_blocking=True)  # CPU offload
+            elif send_buf.numel() > 0:
+                foreach_copy_([send_buf], [local])
+            return send_buf
+    dsts, srcs = [], []
+    offset = 0
+    sizes = iter(split_sizes)
+    for inputs, tensor, info in zip(param_inputs, tensors, infos, strict=True):
+        for src in [_local_shard_slot(tensor, info)] if inputs is None else inputs:
+            size = next(sizes)
+            if size:
+                if src.device != send_buf.device:  # CPU offload
+                    src = src.to(send_buf.device, non_blocking=True)
+                if send_buf.dtype == torch.uint8:
+                    if inputs is None:
+                        # Cast into a temporary, as FSDP2's copy-in does
+                        src = src.to(info.unsharded_dtype)
+                    src = src.view(torch.uint8)
+                dsts.append(send_buf.narrow(0, offset, size))
+                srcs.append(src)
+            offset += size
+    # Casts to the gather dtype as it copies
+    foreach_copy_(dsts, srcs)
+    return send_buf
+
+
+def _native_copy_out(
+    gathered: torch.Tensor,
+    params: list[ParamAllGather],
+    local_shards: list[bool],
+    infos: list[ParamInfo],
+    split_sizes: list[int],
+    outer_sizes: list[int],
+    world_size: int,
+) -> None:
+    """Copy the rank-major ``gathered`` output into the params' outputs with
+    one ``fsdp::_all_gather_copy_out_``, or one output at a time when an output
+    does not take every rank's whole chunk: the compactly stored chunks of an
+    uneven ``Shard(i)``, ``i > 0``, local shard, or an extension's smaller
+    payload, which fills a prefix of its output."""
+    if gathered.numel() == 0:
+        return
+    byte_views = gathered.dtype == torch.uint8
+    outputs: list[torch.Tensor] = []
+    uneven: list[ParamInfo | None] = []
+    one_copy = True
+    for param, local_shard, info in zip(params, local_shards, infos, strict=True):
+        compact = local_shard and param.drops_row_padding
+        for output in param.all_gather_outputs:
+            if byte_views:
+                output = output.view(torch.uint8)
+            if compact or (
+                not local_shard
+                and output.numel() != world_size * split_sizes[len(outputs)]
+            ):
+                one_copy = False
+            outputs.append(output)
+            uneven.append(info if compact else None)
+    if not one_copy:
+        _copy_out_rank_chunks(
+            outputs, gathered.view(world_size, -1), split_sizes, outer_sizes, uneven
+        )
+        return
+    keep = [i for i, size in enumerate(split_sizes) if size]
+    if keep:
+        # One copy places every rank's chunk: each output is a [outer size,
+        # world size, rest] view of its full layout
+        torch.ops.fsdp._all_gather_copy_out_(
+            [outputs[i] for i in keep],
+            gathered,
+            [split_sizes[i] for i in keep],
+            [outer_sizes[i] for i in keep],
+            world_size,
+        )
+
+
+def _copy_single_rank_inputs(
+    params: list[ParamAllGather],
+    param_inputs: list[list[torch.Tensor]],
+    param_dtypes: list[list[torch.dtype]],
+    device: torch.device,
+) -> None:
+    """As FSDP2 on one rank: copy the inputs into the outputs, casting local
+    shards to their unsharded dtypes."""
+    dsts, srcs = [], []
+    for param, inputs, dtypes in zip(params, param_inputs, param_dtypes, strict=True):
+        param.init_all_gather_outputs([t.numel() for t in inputs], dtypes, 1, device)
+        param.alloc_all_gather_outputs()
+        for output, inp in zip(param.all_gather_outputs, inputs, strict=True):
+            if output.dtype == inp.dtype and output.numel() != inp.numel():
+                output = output[: inp.numel()]
+            elif inp.dtype == torch.uint8 != output.dtype:
+                output = output.view(torch.uint8)
+            dsts.append(output)
+            srcs.append(inp)
+    foreach_copy_(dsts, srcs)
+
+
+def _unsharded_tensors(
+    all_gather: ShardAllGather, infos: list[ParamInfo], *, refill: bool
+) -> list[torch.Tensor]:
+    """Return each param's unsharded tensor: its output, or the tensor that its
+    representation builds from its outputs. A refill fills the outputs behind
+    the tensors of the first unshard, which the representation may rebuild in
+    place (FSDP2's ``fsdp_post_all_gather(..., out=...)``), and returns none."""
+    representation = all_gather.representation
+    defines_all_gathers = representation.defines_all_gathers()
+    if refill and not defines_all_gathers:
+        return []
+    tensors: list[torch.Tensor] = []
+    for index, (param, info) in enumerate(zip(all_gather.params, infos, strict=True)):
+        outputs = param.unsharded_outputs
+        built = (
+            representation.post_all_gather(index, outputs, refill)
+            if defines_all_gathers
+            else None
+        )
+        if refill:
+            continue
+        if built is None:
+            if len(outputs) != 1:
+                raise AssertionError(
+                    f"Expected 1 all_gather_output, got {len(outputs)}"
+                )
+            param.inner_tensors = []
+            tensors.append(outputs[0][: info.global_numel].view(info.global_shape))
+            continue
+        tensor, inner_tensors = built[0], list(built[1])
+        if param.outputs_view_layout_buffers:
+            # Inner tensors that view the layout buffers are the bucket's to free
+            ptrs = {t.untyped_storage().data_ptr() for t in param.all_gather_outputs}
+            inner_tensors = [
+                t for t in inner_tensors if t.untyped_storage().data_ptr() not in ptrs
+            ]
+        param.inner_tensors = inner_tensors
+        # The representation rebuilds this param in place on refills, so it
+        # need not view the persistent buffers, and the runtime takes it as is
+        unsharded_param = nn.Parameter(
+            representation.unsharded_param(
+                index,
+                torch.as_strided(
+                    tensor,
+                    info.global_shape,
+                    info.global_stride,
+                    storage_offset=tensor.storage_offset(),
+                ),
+            ),
+            requires_grad=info.requires_grad,
+        )
+        for name, value in info.param_attrs.items():
+            setattr(unsharded_param, name, value)
+        unsharded_param.grad_dtype = info.unsharded_grad_dtype
+        tensors.append(unsharded_param)
+    if defines_all_gathers:
+        for index, param in enumerate(all_gather.params):
+            if representation.releases_all_gather_outputs(index):
+                param.free_all_gather_outputs()
+    return tensors
 
 
 def _shard_dim(info: ParamInfo) -> int:

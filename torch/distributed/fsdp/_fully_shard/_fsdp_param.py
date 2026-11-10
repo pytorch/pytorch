@@ -9,7 +9,7 @@ from typing import Any, cast, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
-    from torch.distributed.fsdp._flex_shard.placements.param_driven_shard import (
+    from torch.distributed.fsdp._flex_shard.placements.shard_all_gather import (
         ParamAllGather,
     )
 
@@ -30,7 +30,7 @@ from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
-from torch.distributed.fsdp._flex_shard.placements.param_driven_shard import (
+from torch.distributed.fsdp._flex_shard.placements.shard_all_gather import (
     ParamAllGatherInputs,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
@@ -245,7 +245,6 @@ class FSDPParam:
         self.pin_memory = (
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
-        self.grad_offload_event: torch.Event | None = None
         self._init_sharded_param(param, device, shard_placement_fn, mesh_info)
         self._param_fqn: str | None = None  # prefixed from root module
         # TODO: Remove this padding logic once DTensor pads the local tensor:

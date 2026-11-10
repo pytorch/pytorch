@@ -29,6 +29,7 @@ from .utils import _get_single_placement, _set_param_on_module
 
 if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
+    from torch.distributed.fsdp._fully_shard._fsdp_api import CPUOffloadPolicy
 
     from .bucket_runtime import BucketCommContext, BucketRuntime
     from .placement_contract import (
@@ -407,9 +408,10 @@ class ShardedBucketStorage:
         # The smaller group a reshard after forward keeps chunks for, as
         # FSDP2's reshard_after_forward=int (see BucketRuntime.reshard).
         self._post_forward_group: dist.ProcessGroup | None = None
-        # The all-gather replacing the placement's (FSDP2's custom AllGather),
-        # and where to gather a storage kept on another device (CPU offload).
+        # The all-gather replacing the placement's (FSDP2's custom AllGather).
         self._all_gather_comm: Any = None
+        # See set_cpu_offload
+        self._cpu_offload: CPUOffloadPolicy | None = None
         self._compute_device: torch.device | None = None
         # FSDP2's custom ReduceScatter and set_reduce_scatter_input_fn.
         self._reduce_scatter_comm: Any = None
@@ -426,6 +428,16 @@ class ShardedBucketStorage:
         self._gradient_reduction = GradientReduction(
             gradient_reduce_op, gradient_divide_factor
         )
+
+    def set_cpu_offload(
+        self, policy: CPUOffloadPolicy, compute_device: torch.device
+    ) -> None:
+        """Keep the sharded parameters and their grads on the CPU, as FSDP2's
+        ``CPUOffloadPolicy``: unshards gather onto ``compute_device``, and
+        reduced grads are copied back to the CPU (see
+        ``BucketRuntime._offload_sharded_grads``)."""
+        self._cpu_offload = policy
+        self._compute_device = compute_device
 
     @classmethod
     def from_bucket(
