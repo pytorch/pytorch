@@ -116,11 +116,35 @@ def _warn_if_env_blocks(
         )
 
 
+def _warn_if_caching_enabled(consequence: str) -> None:
+    """Both passes work while lowering, so a cached graph is never tuned.
+
+    The mirror of _warn_if_env_blocks: that one warns about a variable set
+    that breaks the mode, this one about a variable unset that it needs. The
+    caches are left alone deliberately -- suppressing them from here costs
+    every graph its serialized form, since an entry is what standalone_compile
+    and precompile build their artifact from. So the pass does not enforce a
+    cold cache, it asks for one, once, up front where a long run will see it.
+    """
+    if torch.compiler.config.force_disable_caches:
+        return
+    kind = f"caching:{consequence}"
+    if kind not in _env_warned:
+        _env_warned.add(kind)
+        log.warning(
+            "TunableOp %s for any graph served from a compile cache: a cache "
+            "hit skips lowering, which is where the pass does its work. Set "
+            "TORCHINDUCTOR_FORCE_DISABLE_CACHES=1 for a tuning run.",
+            consequence,
+        )
+
+
 def is_tune_mode() -> bool:
     """True while building the results file: tune GEMMs and record solutions."""
     if _mode() != "tune" or not torch.cuda.is_available():
         return False
     _warn_if_env_blocks(_TUNE_BLOCKING_ENV, "tune mode will record nothing")
+    _warn_if_caching_enabled("tune mode will record nothing")
     return True
 
 
@@ -135,161 +159,12 @@ def is_reuse_mode() -> bool:
     if _mode() != "reuse" or not torch.cuda.is_available():
         return False
     _warn_if_env_blocks(_REUSE_BLOCKING_ENV, "reuse mode will not borrow or record")
+    _warn_if_caching_enabled("reuse mode will not borrow or record")
     return True
 
 
 def is_enabled() -> bool:
     return is_tune_mode() or is_reuse_mode()
-
-
-def graph_has_routable_gemm(gm: Any) -> bool:
-    """Whether any node is a CUDA GEMM a TunableOp pass would act on.
-
-    The cache bypass costs a full recompile, so it must not fire for graphs
-    that do no compile-time TunableOp work at all -- CPU-only ones, and ones
-    with no GEMM. Keyed on the aten overload packet, the op the choice names
-    in _TUNABLEOP_ROUTING_CHOICES lower to.
-    """
-    routable = _routable_packets()
-    convs = _conv_packets()
-    for module in gm.modules():
-        if not isinstance(module, torch.fx.GraphModule):
-            continue
-        for node in module.graph.nodes:
-            packet = getattr(node.target, "overloadpacket", None)
-            if packet not in routable:
-                continue
-            # Most convs stay convs. Only the ones the lowering rewrites into
-            # an mm are GEMMs the graph does not show as GEMMs.
-            if packet in convs and not _conv_lowers_to_mm(node):
-                continue
-            val = node.meta.get("val")
-            if getattr(getattr(val, "device", None), "type", None) == "cuda":
-                return True
-    return False
-
-
-def _every(values: Any, expected: int) -> bool:
-    """Whether no element is known to differ from `expected`.
-
-    Not "every element equals": a value that cannot be decided statically
-    counts as matching, because the caller uses this to rule a conv OUT, and
-    ruling one out wrongly means its tuning silently never happens. Keeping
-    it costs a recompile, which is the cheaper way to be wrong.
-
-    Decided without guarding. int() on a backed SymInt specializes it, which
-    a cache validator has no business doing, and on an unbacked one it raises
-    GuardOnDataDependentSymNode -- a RuntimeError, so it would escape this
-    helper and fail the compile.
-    """
-    from torch.fx.experimental.symbolic_shapes import statically_known_true
-
-    for v in values:
-        if isinstance(v, torch.fx.Node):
-            continue  # a traced value: nothing static to compare
-        if statically_known_true(v != expected):
-            return False
-    return True
-
-
-def _conv_lowers_to_mm(node: Any) -> bool:
-    """Whether this convolution node becomes an mm during lowering.
-
-    Mirrors the gate in the convolution lowering (torch/_inductor/kernel/
-    conv.py), which rewrites a 1x1 conv as L[aten.mm] or L[aten.addmm] --
-    choices TunableOp then routes like any other GEMM. _convolution shares
-    it: its lowering just calls convolution(), and its first nine arguments
-    are in the same positions. Reads the arguments the lowering reads rather
-    than re-deriving them:
-
-        convolution(input, weight, bias, stride, padding, dilation,
-                    transposed, output_padding, groups)
-
-    The lowering's last condition, that the input is non-empty, is left out:
-    it only excludes a degenerate graph, and over-bypassing costs a recompile
-    while under-bypassing tunes nothing and says nothing.
-    """
-    if not (config.conv_1x1_as_mm or config.max_autotune or config.max_autotune_gemm):
-        return False
-    args = node.args
-    if len(args) < 9:
-        # Not the shape this knows how to rule out; let the bypass stand.
-        return True
-    weight_val = getattr(args[1], "meta", {}).get("val")
-    kernel = getattr(weight_val, "shape", None)
-    return (
-        _every(() if kernel is None else kernel[2:], 1)  # 1x1 spatial extent
-        and _every(args[3], 1)  # stride
-        and _every(args[4], 0)  # padding
-        and _every(args[5], 1)  # dilation
-        and args[6] is not True  # transposed
-        and _every(args[7], 0)  # output_padding
-        and _every((args[8],), 1)  # groups
-    )
-
-
-_ROUTABLE_PACKETS: Any = None
-
-
-def _routable_packets() -> Any:
-    """aten packets whose lowering can put a GEMM in front of the worker.
-
-    Packets, not overloads: mm_dtype is aten.mm.dtype_out and bias_addmm
-    lowers from an addmm node, so the packet covers both. Built once rather
-    than per call, and kept beside _TUNABLEOP_ROUTING_CHOICES, the
-    choice-name set these are the graph-level counterpart of.
-    """
-    global _ROUTABLE_PACKETS
-    if _ROUTABLE_PACKETS is None:
-        aten = torch.ops.aten
-        _ROUTABLE_PACKETS = frozenset(
-            [
-                aten.mm,
-                aten.addmm,
-                aten.bmm,
-                aten.baddbmm,
-                aten._scaled_mm,
-                aten._scaled_mm_v2,
-                # Routable only when _conv_lowers_to_mm says so.
-                aten.convolution,
-                aten._convolution,
-            ]
-        )
-    return _ROUTABLE_PACKETS
-
-
-_CONV_PACKETS: Any = None
-
-
-def _conv_packets() -> Any:
-    """Conv packets a 1x1 can be rewritten out of.
-
-    _convolution is CompositeExplicitAutograd and untagged, so nothing
-    decomposes it: a direct torch._convolution call reaches the validator
-    as itself rather than as aten.convolution.
-    """
-    global _CONV_PACKETS
-    if _CONV_PACKETS is None:
-        aten = torch.ops.aten
-        _CONV_PACKETS = frozenset([aten.convolution, aten._convolution])
-    return _CONV_PACKETS
-
-
-def routes_to_worker(choices: list[Any]) -> bool:
-    """Whether any choice would be benchmarked in the TunableOp worker.
-
-    Mirrors the gate in ExternKernelCaller.benchmark, device included: submit()
-    runs the job on a CUDA worker, so a CPU extern candidate is timed inline
-    and must keep its cache entry. A non-extern choice has no .choice.
-    """
-    if not is_enabled():
-        return False
-    return any(
-        is_tunableop_gemm(getattr(getattr(c, "choice", None), "name", ""))
-        and getattr(getattr(c, "layout", None), "device", None) is not None
-        and c.layout.device.type == "cuda"
-        for c in choices
-    )
 
 
 def is_tunableop_gemm(choice_name: str) -> bool:

@@ -35,7 +35,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, IS_BIG_GPU
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -943,106 +943,6 @@ class TestTunableOpPretune(TestCase):
         g.output(node)
         return torch.fx.GraphModule(torch.nn.Module(), g)
 
-    def _conv_gm(self, device, kernel=1, stride=1, groups=1, padding=0):
-        """A one-node conv graph, argument for argument as make_fx emits one."""
-        g = torch.fx.Graph()
-        x = g.placeholder("x")
-        w = g.placeholder("w")
-        w.meta["val"] = mock.Mock(shape=torch.Size([4, 4, kernel, kernel]))
-        node = g.call_function(
-            torch.ops.aten.convolution.default,
-            # input, weight, bias, stride, padding, dilation, transposed,
-            # output_padding, groups
-            (
-                x,
-                w,
-                None,
-                [stride, stride],
-                [padding, padding],
-                [1, 1],
-                False,
-                [0, 0],
-                groups,
-            ),
-        )
-        node.meta["val"] = mock.Mock(device=torch.device(device))
-        g.output(node)
-        return torch.fx.GraphModule(torch.nn.Module(), g)
-
-    @parametrize(
-        "kwargs,gates,expect_bypass",
-        (
-            # A 1x1 conv is lowered to mm/addmm, so it is a routed GEMM the
-            # graph does not show as one. Each term of the lowering's gate
-            # reaches it on its own.
-            ({"kernel": 1}, {"max_autotune": True}, True),
-            ({"kernel": 1}, {"max_autotune_gemm": True}, True),
-            ({"kernel": 1}, {"conv_1x1_as_mm": True}, True),
-            # Everything the lowering's gate turns away stays cacheable.
-            ({"kernel": 3}, {"max_autotune": True}, False),
-            ({"kernel": 1, "stride": 2}, {"max_autotune": True}, False),
-            ({"kernel": 1, "groups": 2}, {"max_autotune": True}, False),
-            ({"kernel": 1, "padding": 1}, {"max_autotune": True}, False),
-            # No gate set at all: the lowering never rewrites it.
-            ({"kernel": 1}, {}, False),
-        ),
-    )
-    def test_only_a_1x1_conv_counts_as_a_routable_gemm(
-        self, kwargs, gates, expect_bypass
-    ):
-        from torch._inductor.codecache import BypassFxGraphCache, FxGraphCache
-
-        gm = self._conv_gm("cuda", **kwargs)
-        # Every term pinned: max_autotune_gemm defaults from an environment
-        # variable, so leaving it alone makes the no-gate row depend on the
-        # runner rather than on the code.
-        gate_off = {
-            "max_autotune": False,
-            "max_autotune_gemm": False,
-            "conv_1x1_as_mm": False,
-        }
-        with mock.patch("torch.cuda.is_available", return_value=True):
-            with config.patch(
-                {"cuda.autotune_tunableop_mode": "tune", **gate_off, **gates}
-            ):
-                try:
-                    FxGraphCache._check_can_cache(gm, require_shape_env=False)
-                except BypassFxGraphCache as e:
-                    bypassed = "TunableOp" in str(e)
-                else:
-                    bypassed = False
-        self.assertEqual(bypassed, expect_bypass)
-
-    @parametrize(
-        "mode,dev,expect_bypass",
-        (
-            ("off", "cuda", False),
-            ("tune", "cuda", True),
-            ("reuse", "cuda", True),
-            ("tune", "cpu", False),
-        ),
-    )
-    def test_enabled_modes_bypass_the_fx_graph_cache(self, mode, dev, expect_bypass):
-        # Both passes work while lowering -- tune records, reuse borrows and
-        # validates -- so a cache hit does neither and a rerun writes an empty
-        # results file. Only for graphs that would do that work: bypassing a
-        # CPU or GEMM-free graph recompiles it every time for nothing. The AOT
-        # level is a separate check with a different answer -- it skips the
-        # lookup rather than bypassing, see
-        # test_a_mode_misses_the_aot_cache_instead_of_bypassing.
-        from torch._inductor.codecache import BypassFxGraphCache, FxGraphCache
-
-        gm = self._gemm_gm(dev)
-        with mock.patch("torch.cuda.is_available", return_value=True):
-            with config.patch({"cuda.autotune_tunableop_mode": mode}):
-                try:
-                    FxGraphCache._check_can_cache(gm, require_shape_env=False)
-                except BypassFxGraphCache as e:
-                    bypassed = "TunableOp" in str(e)
-                else:
-                    bypassed = False
-        self.assertEqual(bypassed, expect_bypass)
-
     @parametrize("tunableop_on", (True, False))
     def test_pipelined_autotuning_is_off_when_enabled(self, tunableop_on):
         # The pipelined path benchmarks the bmreq directly, so the routing in
@@ -1055,35 +955,55 @@ class TestTunableOpPretune(TestCase):
             ):
                 self.assertEqual(use_pipelined_autotuning(), not tunableop_on)
 
-    @parametrize("dev", ("cuda", "cpu"))
-    def test_autotune_local_cache_is_bypassed_for_routed_gemms(self, dev):
-        # A cached timing skips benchmark(), so neither tuning nor borrow
-        # validation runs. The write side matters as much: update_local_cache
-        # rewrites the whole file from the dict given, so a bypass that still
-        # called it would replace the machine's cache. A CPU GEMM is timed
-        # inline, never routed, and must keep its cache.
-        from torch._inductor.codecache import PersistentCache
-
-        s = sympy.Symbol(f"s_cache_{dev}", positive=True, integer=True)
-        winner = self._mm_winner("mm", s)
-        winner.hash_key = lambda: "fake-choice"
-        winner.layout = ir.FixedLayout(
-            torch.device(dev), DTYPE, [s, 512], _contiguous_strides([s, 512])
-        )
-        routed = dev == "cuda"
+    @parametrize(
+        "mode,disable_caches,expect_warning",
+        (
+            ("tune", False, True),
+            ("reuse", False, True),
+            # Asked for and granted: nothing to say.
+            ("tune", True, False),
+            ("reuse", True, False),
+            # No mode, no pass, no warning -- the control that keeps this from
+            # passing just because the string is never emitted at all.
+            ("off", False, False),
+        ),
+    )
+    def test_a_mode_warns_while_the_compile_caches_are_live(
+        self, mode, disable_caches, expect_warning
+    ):
+        # Both passes work while lowering, so a cached graph is never tuned.
+        # The pass asks for a cold cache rather than enforcing one: suppressing
+        # the caches from here costs every graph the cache entry that
+        # standalone_compile and precompile build their artifact from.
+        tunableop._env_warned.clear()
         with (
-            mock.patch.object(
-                PersistentCache, "get_local_cache", return_value={}
-            ) as read_cache,
-            mock.patch.object(PersistentCache, "update_local_cache") as write_cache,
-            mock.patch("torch._inductor.tunableop.is_enabled", return_value=True),
+            mock.patch("torch.cuda.is_available", return_value=True),
+            config.patch({"cuda.autotune_tunableop_mode": mode}),
+            torch.compiler.config.patch({"force_disable_caches": disable_caches}),
+            mock.patch.object(tunableop.log, "warning") as warn,
         ):
-            timings = PersistentCache().lookup(
-                [winner], "mm", "inputs", lambda cs: dict.fromkeys(cs, 1.0)
-            )
-        self.assertEqual(timings, {winner: 1.0})
-        self.assertEqual(read_cache.called, not routed)
-        self.assertEqual(write_cache.called, not routed)
+            tunableop.is_enabled()
+        emitted = " ".join(str(c) for c in warn.call_args_list)
+        self.assertEqual(
+            "FORCE_DISABLE_CACHES" in emitted,
+            expect_warning,
+            f"mode={mode} disable_caches={disable_caches}: {emitted}",
+        )
+
+    def test_the_caching_warning_is_emitted_once_per_mode(self):
+        # It is consulted per GEMM; without the memo a compile would bury the
+        # log in one line per candidate.
+        tunableop._env_warned.clear()
+        with (
+            mock.patch("torch.cuda.is_available", return_value=True),
+            config.patch({"cuda.autotune_tunableop_mode": "tune"}),
+            torch.compiler.config.patch({"force_disable_caches": False}),
+            mock.patch.object(tunableop.log, "warning") as warn,
+        ):
+            for _ in range(5):
+                tunableop.is_enabled()
+        hits = [c for c in warn.call_args_list if "FORCE_DISABLE_CACHES" in str(c)]
+        self.assertEqual(len(hits), 1, f"expected one warning, got {hits}")
 
 
 @instantiate_parametrized_tests
@@ -1095,11 +1015,11 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
     hipBLASLt accepts and that each reaches the file runtime reads.
 
     InductorTestCase enters fresh_cache(), which isolates the cache directory
-    per test and clears _pretuned_gemms with it, so each test starts cold.
-    test_a_warm_rerun_still_lowers_the_gemm compiles twice inside that one
-    directory, which is what actually exercises the cache bypass --
-    test_enabled_modes_bypass_the_fx_graph_cache only asks the validator
-    about a hand-built aten graph, so it cannot see the AOT level at all.
+    per test and clears _pretuned_gemms with it, so each test starts cold --
+    which is what a pass needs, since a cached graph is not lowered and so is
+    never tuned. The passes do not enforce that; _warn_if_caching_enabled
+    asks for it instead, because suppressing the caches from here would cost
+    every graph the cache entry standalone_compile builds its artifact from.
     """
 
     hw_classification = HardwareClassification.CUDA
@@ -1128,78 +1048,6 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
             tunableop._rotating_buffer_mb(tunable.get_rotating_buffer_size()),
         )
         self.addCleanup(tunableop.shutdown_worker)
-
-    @parametrize("bundled", (False, True))
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
-    # Below the SM threshold tuned_mm offers no Triton template, so autotune
-    # takes the single-choice exit without benchmarking and nothing is
-    # routed -- a skip rather than a failure, since the bypass is untestable
-    # where no choice reaches the worker in the first place.
-    @unittest.skipIf(not IS_BIG_GPU, "requires a GPU that gets Triton choices")
-    @skipIfWindows(msg="pass_fds not supported on Windows.")
-    def test_a_warm_rerun_still_lowers_the_gemm(self, bundled):
-        """The bypass, end to end: a second compile must still reach the worker.
-
-        test_enabled_modes_bypass_the_fx_graph_cache asks the validator about a
-        hand-built aten graph, which is what the Inductor FX cache sees.
-        AOTAutogradCache asks the same validator about the pre-decomposition
-        graph, so only a real second compile can show whether the entry was
-        bypassed at both levels. Counted as submissions to the worker rather
-        than rows in the results file: the first compile tunes the shape, so a
-        second one that does lower it records nothing new.
-        """
-
-        def fn(a, b):
-            return a @ b
-
-        self._tunableop_process_cleanup()
-        tunable = torch.cuda.tunable
-        submitted: list = []
-        real_submit = tunableop.submit
-
-        def _spy(job, timeout=None):
-            submitted.append(job)
-            return real_submit(job, timeout=timeout)
-
-        with tempfile.TemporaryDirectory(prefix="tunableop_warm_rerun_") as d:
-            tunable.enable(False)
-            tunable.set_filename(os.path.join(d, "results.csv"), False)
-            tunable.set_max_tuning_duration(1)
-            tunable.set_max_tuning_iterations(1)
-            tunable.set_rotating_buffer_size(0)
-            with (
-                config.patch(
-                    {
-                        "cuda.autotune_tunableop_mode": "tune",
-                        # Ladder off: its per-bucket memo is module-global and
-                        # would make the second compile look idle even when it
-                        # did lower. The routed aten candidate has no memo.
-                        "cuda.autotune_tunableop_ladder": False,
-                        # Needed for the aten candidate to be benchmarked at
-                        # all; with one choice autotune returns without it.
-                        "max_autotune": True,
-                    }
-                ),
-                torch._functorch.config.patch({"bundled_autograd_cache": bundled}),
-                mock.patch("torch._inductor.tunableop.submit", side_effect=_spy),
-            ):
-                a = torch.randn(64, 64, device="cuda", dtype=DTYPE)
-                b = torch.randn(64, 64, device="cuda", dtype=DTYPE)
-                torch.compile(fn)(a, b)
-                cold = len(submitted)
-                # Same graph, same cache directory, fresh Dynamo state: the
-                # shape a deployed second run would take.
-                torch._dynamo.reset()
-                torch.compile(fn)(a, b)
-                warm = len(submitted) - cold
-
-        self.assertGreater(cold, 0, "the cold compile never routed a GEMM")
-        self.assertGreater(
-            warm,
-            0,
-            "the warm rerun never routed a GEMM: the compile was served from "
-            "cache, so the pass did no work",
-        )
 
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
     @skipIfWindows(msg="pass_fds not supported on Windows.")
@@ -1263,59 +1111,6 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
             {frozenset(expected_dims)},
             f"recorded dims do not match the ladder: {sorted(shapes)}",
         )
-
-
-    @parametrize("mode", ("off", "tune", "reuse"))
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
-    @skipIfWindows(msg="pass_fds not supported on Windows.")
-    def test_a_mode_misses_the_aot_cache_instead_of_bypassing(self, mode):
-        # A mode has to stop an AOT *hit*, because a hit skips the lowering
-        # both passes do their work in. It must not stop the *save*: bypassing
-        # drops the cache key, and with no key no entry is built, so the
-        # compiled function never gets the serialize method that
-        # standalone_compile(aot=True) and regional inductor require.
-        #
-        # So the assertion is miss-not-bypass. The "off" row is the control: it
-        # must hit on the rerun, which proves the cache really works here and
-        # that the other rows' misses mean something.
-        from torch._dynamo.utils import counters
-
-        def fn(a, b):
-            return (a @ b).relu()
-
-        tunable = torch.cuda.tunable
-        self._tunableop_process_cleanup()
-        with tempfile.TemporaryDirectory(prefix="tunableop_aotcache_") as d:
-            tunable.enable(False)
-            tunable.set_filename(os.path.join(d, "results.csv"), False)
-            tunable.set_max_tuning_duration(1)
-            tunable.set_max_tuning_iterations(1)
-            a = torch.randn(64, 64, device="cuda", dtype=DTYPE)
-            b = torch.randn(64, 64, device="cuda", dtype=DTYPE)
-            with config.patch(
-                {"cuda.autotune_tunableop_mode": mode, "fx_graph_cache": True}
-            ):
-                for _ in range(2):
-                    counters.clear()
-                    torch._dynamo.reset()
-                    torch.compile(fn)(a, b)
-                    aot = counters["aot_autograd"]
-
-        self.assertEqual(
-            aot["autograd_cache_bypass"],
-            0,
-            f"a mode set must not bypass the AOT cache: {dict(aot)}",
-        )
-        if mode == "off":
-            self.assertEqual(
-                aot["autograd_cache_hit"], 1, f"control did not hit: {dict(aot)}"
-            )
-        else:
-            self.assertEqual(
-                aot["autograd_cache_hit"],
-                0,
-                f"a hit skips the lowering the pass works in: {dict(aot)}",
-            )
 
 
 if __name__ == "__main__":

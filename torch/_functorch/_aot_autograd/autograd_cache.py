@@ -1238,26 +1238,13 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             if config.strict_autograd_cache or torch._dynamo.config.strict_precompile:
                 raise e
 
-        # Both TunableOp passes do their work while lowering, so a hit skips all
-        # of it and the rerun records nothing. A miss, not a bypass: bypassing
-        # drops the key, and without a key nothing is saved and the compiled
-        # function never gets a serialize method, which breaks standalone_compile
-        # and precompile for every graph -- CPU-only and GEMM-free included,
-        # since unlike the Inductor-level check this one cannot ask whether the
-        # graph holds a CUDA GEMM (pre-decomposition, so its targets are
-        # torch-level and carry no aten overload packet). Skipping only the
-        # lookup keeps the pass honest and leaves the save path intact, so the
-        # artifact this run compiles is still there for the next one.
-        from torch._inductor import tunableop
-
         try:
             cache_key, debug_lines = autograd_cache_key(
                 mod, args, aot_config, compiler_config_extra, act_input_paths
             )
-            if not tunableop.is_enabled():
-                result = AOTAutogradCache._lookup(
-                    cache_key, local, remote, args, cache_info, aot_config
-                )
+            result = AOTAutogradCache._lookup(
+                cache_key, local, remote, args, cache_info, aot_config
+            )
         except Exception as e:
             record_bypass(e)
 

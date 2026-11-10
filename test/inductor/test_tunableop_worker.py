@@ -686,6 +686,9 @@ class TunableopModeValidationTest(TestCase):
                     expect = self.assertLogs if warn_now else self.assertNoLogs
                     with (
                         inductor_config.patch({"cuda.autotune_tunableop_mode": mode}),
+                        # Caches off: a live one warns on its own account, which
+                        # the assertNoLogs rows would read as an env warning.
+                        torch.compiler.config.patch({"force_disable_caches": True}),
                         mock.patch("torch.cuda.is_available", return_value=True),
                         mock.patch.dict(os.environ, {**env, var: value}, clear=True),
                         expect(tunableop.log, level="WARNING") as logs,
@@ -698,8 +701,11 @@ class TunableopModeValidationTest(TestCase):
         # Without this "Tune" turns both passes off behind a one-time warning.
         tunableop._mode_warned = False
         self.addCleanup(setattr, tunableop, "_mode_warned", False)
+        # Caches off so the only warning left to catch is the mode one: a live
+        # cache is its own warning, and this test is not about that.
         with (
             inductor_config.patch({"cuda.autotune_tunableop_mode": "Tune"}),
+            torch.compiler.config.patch({"force_disable_caches": True}),
             mock.patch("torch.cuda.is_available", return_value=True),
             self.assertNoLogs(tunableop.log, level="WARNING"),
         ):
@@ -711,7 +717,12 @@ class TunableopModeValidationTest(TestCase):
         self.addCleanup(setattr, tunableop, "_mode_warned", False)
         for mode in ("off", "tune", "reuse"):
             with self.subTest(mode=mode):
-                with inductor_config.patch({"cuda.autotune_tunableop_mode": mode}):
+                with (
+                    inductor_config.patch({"cuda.autotune_tunableop_mode": mode}),
+                    # As above: a live cache warns on its own account, which
+                    # would otherwise make this pass or fail on test order.
+                    torch.compiler.config.patch({"force_disable_caches": True}),
+                ):
                     with self.assertNoLogs(tunableop.log, level="WARNING"):
                         tunableop.is_enabled()
 
