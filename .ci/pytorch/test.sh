@@ -437,11 +437,6 @@ test_tsan() {
   assert_git_not_dirty
 }
 
-test_python_legacy_jit() {
-  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
-  assert_git_not_dirty
-}
-
 test_python_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
@@ -453,14 +448,14 @@ test_python_shard() {
 
   # modify LD_LIBRARY_PATH to ensure it has the conda env.
   # This set of tests has been shown to be buggy without it for the split-build
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests $EXCLUDE_CLAUSE $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --exclude-distributed-tests --exclude-quantization-tests $EXCLUDE_CLAUSE $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 
   assert_git_not_dirty
 }
 
 test_python() {
   # shellcheck disable=SC2086
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests $EXCLUDE_CLAUSE $INCLUDE_CLAUSE --verbose $PYTHON_TEST_EXTRA_OPTION
+  time python test/run_test.py --exclude-distributed-tests --exclude-quantization-tests $EXCLUDE_CLAUSE $INCLUDE_CLAUSE --verbose $PYTHON_TEST_EXTRA_OPTION
   assert_git_not_dirty
 }
 
@@ -773,7 +768,6 @@ test_dynamo_wrapped_shard() {
   # Instead, use @skipIfTorchDynamo on your tests.
   time python test/run_test.py --dynamo \
     --exclude-inductor-tests \
-    --exclude-jit-executor \
     --exclude-distributed-tests \
     --exclude-torch-export-tests \
     --exclude-aot-dispatch-tests \
@@ -1017,6 +1011,22 @@ test_inductor_cpp_wrapper_shard() {
 # .github/workflows/inductor-perf-test-nightly.yml
 DYNAMO_BENCHMARK_FLAGS=()
 
+# Re-enable these CPU/GPU Inductor models after https://github.com/pytorch/pytorch/issues/203757.
+INDUCTOR_TORCHBENCH_MIGRATION_MODELS=(
+  BERT_pytorch
+  detectron2_fasterrcnn_r_101_c4
+  detectron2_fasterrcnn_r_101_dc5
+  detectron2_fasterrcnn_r_101_fpn
+  detectron2_fasterrcnn_r_50_c4
+  detectron2_fasterrcnn_r_50_dc5
+  detectron2_fasterrcnn_r_50_fpn
+  detectron2_fcos_r_50_fpn
+  detectron2_maskrcnn_r_101_c4
+  detectron2_maskrcnn_r_101_fpn
+  detectron2_maskrcnn_r_50_c4
+  detectron2_maskrcnn_r_50_fpn
+)
+
 pr_time_benchmarks() {
 
   pip_install "fbscribelogger"
@@ -1121,6 +1131,28 @@ test_perf_for_dashboard() {
   shift
 
   local backend=inductor
+  local effective_backend=inductor
+  local benchmark_args=("$@")
+  local i
+  for ((i=0; i<${#benchmark_args[@]}; i++)); do
+    case "${benchmark_args[i]}" in
+      --backend) effective_backend="${benchmark_args[i+1]}" ;;
+      --backend=*) effective_backend="${benchmark_args[i]#--backend=}" ;;
+    esac
+  done
+  local inductor_model_args=()
+  local run_inductor=1
+  if [[ "$suite" == "torchbench" && "$effective_backend" == "inductor" &&
+        " ${DYNAMO_BENCHMARK_FLAGS[*]} " != *" --export-aot-inductor "* ]]; then
+    local model
+    for model in "${INDUCTOR_TORCHBENCH_MIGRATION_MODELS[@]}"; do
+      inductor_model_args+=(--exclude-exact "$model")
+    done
+    if [[ "${TEST_CONFIG}" == *b200* && "$TORCHBENCH_ONLY_MODELS" == "BERT_pytorch" ]]; then
+      # Re-enable B200's BERT-only Inductor subcase after https://github.com/pytorch/pytorch/issues/203757.
+      run_inductor=0
+    fi
+  fi
   local modes=()
   if [[ "$DASHBOARD_TAG" == *training-true* ]]; then
     modes+=(training)
@@ -1175,64 +1207,64 @@ test_perf_for_dashboard() {
         target_flag+=( --freezing)
       fi
 
-      if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
+      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *default-true* ]]; then
         local profiler_trace_flags=()
         if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}")
         fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${inductor_model_args[@]}" --disable-cudagraphs "$@" \
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$DASHBOARD_TAG" == *cudagraphs-true* ]]; then
+      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *cudagraphs-true* ]]; then
         local profiler_trace_flags=()
         if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}")
         fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${inductor_model_args[@]}" "$@" \
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$DASHBOARD_TAG" == *dynamic-true* ]]; then
+      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *dynamic-true* ]]; then
         local profiler_trace_flags=()
         if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}")
         fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${inductor_model_args[@]}" --dynamic-shapes \
             --dynamic-batch-only "$@" \
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]]; then
+      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *cppwrapper-true* ]]; then
         local profiler_trace_flags=()
         if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}")
         fi
         TORCHINDUCTOR_CPP_WRAPPER=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${inductor_model_args[@]}" --disable-cudagraphs "$@" \
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$DASHBOARD_TAG" == *freezing_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
+      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *freezing_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
         local profiler_trace_flags=()
         if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_${device}")
         fi
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${inductor_model_args[@]}" "$@" --freezing \
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$DASHBOARD_TAG" == *freeze_autotune_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
+      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *freeze_autotune_cudagraphs-true* ]] && [[ "$mode" == "inference" ]]; then
         local profiler_trace_flags=()
         if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_${device}")
         fi
         TORCHINDUCTOR_MAX_AUTOTUNE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" --freezing \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${inductor_model_args[@]}" "$@" --freezing \
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_freezing_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
@@ -1252,24 +1284,24 @@ test_perf_for_dashboard() {
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$DASHBOARD_TAG" == *maxautotune-true* ]]; then
+      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *maxautotune-true* ]]; then
         local profiler_trace_flags=()
         if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
           profiler_trace_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_max_autotune_${suite}_${dtype}_${mode}_${device}")
         fi
         TORCHINDUCTOR_MAX_AUTOTUNE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${inductor_model_args[@]}" "$@" \
             "${profiler_trace_flags[@]}" \
             --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$DASHBOARD_TAG" == *deterministic_perf-true* ]]; then
+      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *deterministic_perf-true* ]]; then
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --deterministic "$@" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${inductor_model_args[@]}" --disable-cudagraphs --deterministic "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_deterministic_perf_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$DASHBOARD_TAG" == *batch_invariant_accuracy-true* ]] && [[ "$target" == "accuracy" ]]; then
+      if [[ "$run_inductor" == 1 && "$DASHBOARD_TAG" == *batch_invariant_accuracy-true* ]] && [[ "$target" == "accuracy" ]]; then
         $TASKSET python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --batch-invariant "$@" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "${inductor_model_args[@]}" --disable-cudagraphs --batch-invariant "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_batch_invariant_accuracy_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
     done
@@ -1458,6 +1490,15 @@ test_dynamo_benchmark() {
     extra_args=(--exclude-exact torchrec_dlrm)
   fi
 
+  if [[ "$suite" == "torchbench" &&
+        ( "${TEST_CONFIG}" == *perf_compare* ||
+          ( "${TEST_CONFIG}" != *perf* && " ${DYNAMO_BENCHMARK_FLAGS[*]} " == *" --inductor "* ) ) ]]; then
+    local model
+    for model in "${INDUCTOR_TORCHBENCH_MIGRATION_MODELS[@]}"; do
+      extra_args+=(--exclude-exact "$model")
+    done
+  fi
+
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
     test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "${extra_args[@]}" "$@"
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
@@ -1498,22 +1539,16 @@ test_inductor_torchbench_smoketest_perf() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
-    --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only BERT_pytorch \
-    --output "$TEST_REPORTS_DIR/inductor_training_smoketest.csv"
-  # The threshold value needs to be actively maintained to make this check useful
-  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_training_smoketest.csv" -t 1.4
+  # Re-enable BERT_pytorch speedup and memory checks after https://github.com/pytorch/pytorch/issues/203757.
 
-  # Check memory compression ratio for a few models
-  for test in BERT_pytorch yolov3; do
-    python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --amp --training \
-      --disable-cudagraphs --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" \
-      --only $test --output "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv"
-    cat "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv"
-    python benchmarks/dynamo/check_memory_compression_ratio.py --actual \
-      "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv" \
-      --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
-  done
+  # Check memory compression ratio for yolov3
+  python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --amp --training \
+    --disable-cudagraphs --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" \
+    --only yolov3 --output "$TEST_REPORTS_DIR/inductor_training_smoketest_yolov3.csv"
+  cat "$TEST_REPORTS_DIR/inductor_training_smoketest_yolov3.csv"
+  python benchmarks/dynamo/check_memory_compression_ratio.py --actual \
+    "$TEST_REPORTS_DIR/inductor_training_smoketest_yolov3.csv" \
+    --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
 
   # Perform some "warm-start" runs for a few huggingface models.
   for test in AllenaiLongformerBase DistilBertForMaskedLM DistillGPT2 GoogleFnet YituTechConvBert; do
@@ -1948,10 +1983,6 @@ test_aot_compilation() {
   if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then
     CPP_TESTS_DIR="${TORCH_BIN_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_mobile_nnc
   fi
-
-  if [ -f "$TORCH_BIN_DIR"/aot_model_compiler_test ]; then
-    source test/mobile/nnc/test_aot_compile.sh
-  fi
 }
 
 test_vulkan() {
@@ -2344,8 +2375,6 @@ EOF
   fi
   export SHA_TO_COMPARE
 
-  # create a dummy ts model at this version
-  python test/create_dummy_torchscript_model.py /tmp/model_new.pt
   create_venv_over_image venv
   # shellcheck disable=SC1091
   . venv/bin/activate
@@ -2368,21 +2397,10 @@ EOF
 
   git reset --hard "${SHA1}"
   git submodule sync && git submodule update --init --recursive
-  # FC: verify new model can be load with old code.
-  if ! python ../load_torchscript_model.py /tmp/model_new.pt; then
-      echo "FC check failed: new model cannot be load in old code"
-      return 1
-  fi
-  python ../create_dummy_torchscript_model.py /tmp/model_old.pt
   deactivate
   rm -r "${REPO_DIR}/venv" "${REPO_DIR}/base_dist"
   pip show torch
   python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt
-  # BC: verify old model can be load with new code
-  if ! python ../load_torchscript_model.py /tmp/model_old.pt; then
-      echo "BC check failed: old model cannot be load in new code"
-      return 1
-  fi
   popd
   set +x
   assert_git_not_dirty
@@ -2394,14 +2412,10 @@ test_benchmarks() {
     pip_install "requests"
     BENCHMARK_DATA="benchmarks/.data"
     mkdir -p ${BENCHMARK_DATA}
-    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_default.json --fuser=default --executor=default
-    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_legacy_old.json --fuser=old --executor=legacy
-    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_profiling_te.json --fuser=te --executor=profiling
+    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_default.json
     # TODO: Enable these for GHA once we have credentials for forked pull requests
     if [[ -z "${GITHUB_ACTIONS}" ]]; then
       python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_default.json
-      python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_legacy_old.json
-      python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_profiling_te.json
     fi
     assert_git_not_dirty
   fi
@@ -2627,8 +2641,6 @@ elif [[ "$TEST_CONFIG" == *torchtitan* ]]; then
   test_torchtitan
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
-elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
-  test_python_legacy_jit
 elif [[ "$TEST_CONFIG" == 'quantization' ]]; then
   test_quantization
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then

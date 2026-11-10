@@ -665,7 +665,7 @@ def lookup_spec_from_dynamo_source(
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
-    if not issubclass(type(value), types.BuiltinMethodType):
+    if not isinstance(value, types.BuiltinMethodType):
         return None
 
     method_self = value.__self__
@@ -948,13 +948,14 @@ def _is_dim_dynamic_from_source_dynamism(
 def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
     try:
         return list(enumerate_items_with_dict_position(value))
-    except InvalidOrderedDict:
+    except InvalidOrderedDict as error:
         unimplemented(
             gb_type="OrderedDict storage differs from linked keys",
-            context="OrderedDict input snapshot",
-            explanation="Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
+            context=f"OrderedDict input snapshot: {error}",
+            explanation="Dynamo cannot safely match this OrderedDict's linked order to its dictionary storage.",
             hints=[
                 "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
+                "On free-threaded builds, use Python 3.14.1 or newer.",
                 *graph_break_hints.FUNDAMENTAL,
             ],
             skip_frame=True,
@@ -1632,10 +1633,7 @@ class VariableBuilder:
         elif istype(value, frozenset) and all(
             (
                 # For DBR quantization, we could get a frozenset of torch funcs.
-                (
-                    issubclass(type(x), types.BuiltinMethodType)
-                    and x.__module__ == "torch"
-                )
+                (type(x) is types.BuiltinMethodType and x.__module__ == "torch")
                 or
                 # Another commonly used frozenset of types.
                 x in torch.utils._pytree.BUILTIN_TYPES
@@ -1841,7 +1839,7 @@ class VariableBuilder:
             obj_vt = VariableTracker.build(self.tx, random_self, obj_source)
             return GetAttrVariable(obj_vt, value.__name__, py_type=type(value))
         elif (
-            issubclass(type(value), types.BuiltinMethodType)
+            isinstance(value, types.BuiltinMethodType)
             and isinstance(value.__self__, random.Random)
             and RandomVariable.is_supported_random_obj(value.__self__)
             and value in UserDefinedObjectVariable._supported_random_functions()
