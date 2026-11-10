@@ -387,3 +387,10 @@ jobs:
   !{{ upload.upload_extracted_libtorch(lt_config, True) }}
   {%- endif %}
 {%- endfor %}
+
+{#- Tail: refresh the package index and validate once every wheel is uploaded.
+    validate-binaries.yml has no windows-arm64 lane, so that one only refreshes the index. -#}
+{%- if branches == "nightly" and build_configs and build_configs[0]['package_type'] != 'libtorch' %}
+
+  !{{ common.update_index_and_validate(['wheel-upload'], "" if os == "windows-arm64" else "windows") }}
+{%- endif %}

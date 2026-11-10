@@ -974,3 +974,21 @@ jobs:
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 {%- endif %}
 {%- endfor %}
+
+{#- Tail: refresh the package index and validate once every wheel is uploaded.
+    The preview lane never runs on a tag or the nightly branch, so it is not waited on. -#}
+{%- if branches == "nightly" and build_configs and build_configs[0]['package_type'] != 'libtorch' %}
+  {%- set index_upload_jobs = upload_jobs | rejectattr('name', 'equalto', 'manywheel-rocm-preview-upload') | map(attribute='name') | list %}
+  {%- if "aarch64" in build_environment %}
+    {%- set index_validate_os = "linux-aarch64" %}
+  {%- elif "s390x" in build_environment %}
+    {#- validate-binaries.yml has no s390x lane -#}
+    {%- set index_validate_os = "" %}
+  {%- else %}
+    {%- set index_validate_os = "linux" %}
+  {%- endif %}
+  {%- if index_upload_jobs %}
+
+  !{{ common.update_index_and_validate(index_upload_jobs, index_validate_os) }}
+  {%- endif %}
+{%- endif %}
