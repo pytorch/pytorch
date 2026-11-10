@@ -333,6 +333,11 @@ class FSDPMemTracker(MemTracker):
         # after the post backward.
         @wraps(orig_fsdp_param_group_post_backward)
         def inner(*args: _P.args, **kwargs: _P.kwargs) -> None:
+            if fsdp_mod not in self.memory_tracking:
+                # The root's final callback also runs post-backward for groups
+                # whose modules did not run forward, which have nothing to track
+                orig_fsdp_param_group_post_backward(*args, **kwargs)
+                return
             fsdp_state = fsdp_mod._get_fsdp_state()
             if fsdp_param_group := fsdp_state._fsdp_param_group:
                 for fsdp_param in fsdp_param_group.fsdp_params:
