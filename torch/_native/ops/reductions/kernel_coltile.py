@@ -22,7 +22,6 @@ from ...utils.device import check_current
 from . import kernel_general as kg, tile
 from .inner_tree_plan import _MAX_WARPS
 from .kernel_general import (
-    _B200_CCS,
     _B200_DTYPES,
     _B200_RAGGED_COL_ONE_FIELD,
     _combine_itree_partials,
@@ -232,7 +231,7 @@ def select_ordered_col_config(
                 minimum //= 2
             cfg = OrderedColConfig(minimum, tile_columns=16, full_tiles=True)
     # B200 rows are measured on routed split views only (one field, B = 1, C >= 128).
-    elif cc in _B200_CCS and cfg.full_tiles and rows is not None and nfields == 1:
+    elif cc in kg._B200_CCS and cfg.full_tiles and rows is not None and nfields == 1:
         if rows == 65536 and columns == 1024:
             cfg = cfg._replace(tile_columns=16)
         # A band of shapes rather than measured anchors; its R bounds are its own, not
@@ -321,7 +320,7 @@ def select_col_config(
     if (
         not explicit
         and anchor is not None
-        and cc in _B200_CCS
+        and cc in kg._B200_CCS
         and dtype in _B200_DTYPES
         and columns in (257, 4095)
         and acc_bits == 32
@@ -1020,7 +1019,9 @@ def reduce_col_tile(
     npar: int | None = None,
     vec: int | None = None,
 ) -> torch.Tensor:
-    """Reduce dim 0 of contiguous 2D x to (C,), splitting it npar ways."""
+    """Reduce dim 0 of contiguous 2D x to (C,), splitting it npar ways. Inner-tree
+    policies, such as the B200 C = 4095 / 16 MiB anchor (b200_ragged_c4095_ordered),
+    hand off to the ordered inner-tree kernel instead when it accepts the view."""
     if x.dim() != 2:
         raise AssertionError(f"want 2D x, got {tuple(x.shape)}")
     return _reduce_col_tile(
