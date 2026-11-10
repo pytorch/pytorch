@@ -80,9 +80,36 @@ class ClassWithVal:
 _mixed_hook_module = torch.nn.Identity()
 
 
+def add_forward_hook(module, args, *rest):
+    return rest[-1] + 1
+
+
+def multiply_forward_hook(module, args, *rest):
+    return rest[-1] * 2
+
+
 @instantiate_parametrized_tests
 class HookDictionaryTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("mapping_type", [dict, OrderedDict])
+    @parametrize("fromkeys", [False, True])
+    def test_detached_dictionary_observes_hook_keys(self, mapping_type, fromkeys):
+        def fn(x, module):
+            hooks = module._forward_hooks
+            detached = (
+                dict.fromkeys(hooks) if fromkeys else defaultdict(int).__ror__(hooks)
+            )
+            return x + (1 in detached)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for keys in ((2, 3), (1, 3)):
+            module = torch.nn.Identity()
+            module._forward_hooks = mapping_type.fromkeys(keys, identity_forward_hook)
+            self.assertEqual(compiled(x, module), fn(x, module))
+        self.assertEqual(counter.frame_count, 2)
 
     @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize("subclass", [False, True])
@@ -99,12 +126,6 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
     ):
         if subclass:
             mapping_type = type("HookDict", (mapping_type,), {})
-
-        def add(module, args, *rest):
-            return rest[-1] + 1
-
-        def multiply(module, args, *rest):
-            return rest[-1] * 2
 
         def fn(x, module):
             if operation == "forward":
@@ -123,7 +144,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(1)
         for _ in range(2):
             module = torch.nn.Identity()
-            for callback in (add, multiply):
+            for callback in (add_forward_hook, multiply_forward_hook):
                 module.register_forward_hook(callback, with_kwargs=with_kwargs)
             module._forward_hooks = mapping_type(module._forward_hooks)
             self.assertEqual(compiled(x, module), fn(x, module))
@@ -136,13 +157,10 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             )
         self.assertEqual(compiled(x, module), fn(x, module))
         # Plain keys retain storage positions, so returned IDs need no order specialization.
-        expected_frames = (
-            2
-            if operation != "len_keys"
-            and (operation != "keys" or issubclass(mapping_type, OrderedDict))
-            else 1
+        order_observed = operation not in ("keys", "len_keys") or (
+            operation == "keys" and issubclass(mapping_type, OrderedDict)
         )
-        self.assertEqual(counter.frame_count, expected_frames)
+        self.assertEqual(counter.frame_count, 2 if order_observed else 1)
 
     @parametrize("mapping_type", [dict, OrderedDict])
     def test_hook_dict_subclass_protocol(self, mapping_type):
@@ -150,17 +168,11 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             def items(self):
                 return list(super().items())[::-1]
 
-        def add(module, args, output):
-            return output + 1
-
-        def multiply(module, args, output):
-            return output * 2
-
         def fn(x, module):
             return module(x), type(module._forward_hooks)
 
         module = torch.nn.Identity()
-        module._forward_hooks = Hooks({1: add, 2: multiply})
+        module._forward_hooks = Hooks({1: add_forward_hook, 2: multiply_forward_hook})
         x = torch.ones(1)
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
@@ -447,21 +459,12 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             return output + 1
 
         def fn(x, module):
+            first, second = module, _mixed_hook_module
+            if not local_first:
+                first, second = second, first
             if backward:
-                if local_first:
-                    return (
-                        x
-                        + len(module._backward_hooks)
-                        + len(_mixed_hook_module._backward_hooks)
-                    )
-                return (
-                    x
-                    + len(_mixed_hook_module._backward_hooks)
-                    + len(module._backward_hooks)
-                )
-            if local_first:
-                return module(x) + _mixed_hook_module(x)
-            return _mixed_hook_module(x) + module(x)
+                return x + len(first._backward_hooks) + len(second._backward_hooks)
+            return first(x) + second(x)
 
         global_module = torch.nn.Identity()
         if not backward:
@@ -493,25 +496,6 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         }
         self.assertIn(f"L['module'].{name}", guarded)
         self.assertIn(f"G['_mixed_hook_module'].{name}", guarded)
-
-    @parametrize("mapping_type", [dict, OrderedDict])
-    @parametrize("fromkeys", [False, True])
-    def test_detached_dictionary_observes_hook_keys(self, mapping_type, fromkeys):
-        def fn(x, module):
-            hooks = module._forward_hooks
-            detached = (
-                dict.fromkeys(hooks) if fromkeys else defaultdict(int).__ror__(hooks)
-            )
-            return x + (1 in detached)
-
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
-        for keys in ((2, 3), (1, 3)):
-            module = torch.nn.Identity()
-            module._forward_hooks = mapping_type.fromkeys(keys, identity_forward_hook)
-            self.assertEqual(compiled(x, module), fn(x, module))
-        self.assertEqual(counter.frame_count, 2)
 
     @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize("populated", [False, True])
@@ -1256,16 +1240,25 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 2)
 
     @torch._dynamo.config.patch(skip_nnmodule_hook_guards=True)
-    @parametrize("count", [1, 4])
-    def test_empty_hook_dispatch_skips_type_guards(self, count):
+    @parametrize("hook_mode", ["empty", "local", "global"])
+    def test_builtin_hook_dispatch_skips_type_guards(self, hook_mode):
+        def hook(module, args, output):
+            return output + 2
+
         def fn(x, modules):
             for module in modules:
                 x = module(x)
             return x + 1
 
-        x = torch.ones(1)
-        modules = [torch.nn.Identity() for _ in range(count)]
-        explanation = torch._dynamo.explain(fn)(x, modules)
+        modules = [torch.nn.Identity() for _ in range(4)]
+        with contextlib.ExitStack() as stack:
+            if hook_mode == "global":
+                handle = torch.nn.modules.module.register_module_forward_hook(hook)
+                stack.callback(handle.remove)
+            elif hook_mode == "local":
+                for module in modules:
+                    stack.callback(module.register_forward_hook(hook).remove)
+            explanation = torch._dynamo.explain(fn)(torch.ones(1), modules)
         self.assertEqual(explanation.graph_count, 1)
         guards = [
             guard
