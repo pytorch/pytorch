@@ -1891,10 +1891,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
           static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type) {
         params.varlen_bits = sdp::aotriton_adapter::with_bottom_right_diagonal(params.varlen_bits);
       }
-#else
-      TORCH_CHECK(!use_window ||
-                  static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) != custom_mask_type,
-                  "bottom-right window_size on varlen requires AOTriton >= 0.15");
 #endif
     }
 #else

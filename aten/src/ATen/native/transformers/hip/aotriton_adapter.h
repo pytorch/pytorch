@@ -235,6 +235,12 @@ mem_eff_window_aot(int64_t window_size,
   if (!bottom_right) {
     return std::make_tuple(window_left, 0);
   }
+#if !AOTRITON_PRINCIPAL_DIAGONAL_API
+  // bottom_right_window cannot place the window there; do not silently fall
+  // back to a top-left window.
+  TORCH_CHECK(false,
+              "window_size with a bottom-right causal mask requires AOTriton >= 0.15");
+#endif
   return bottom_right_window(window_left,
                              0,
                              static_cast<int>(max_seqlen_q),
