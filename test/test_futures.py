@@ -16,6 +16,10 @@ def add_one(fut):
     return fut.wait() + 1
 
 
+class CustomError(Exception):
+    pass
+
+
 class TestFuture(TestCase):
     def test_set_exception(self) -> None:
         # This test is to ensure errors can propagate across futures.
@@ -51,9 +55,6 @@ class TestFuture(TestCase):
     def test_set_exception_is_error(self) -> None:
         # set_exception completes the C++ future with an error and raises the
         # original exception object.
-        class CustomError(Exception):
-            pass
-
         err = CustomError("Intentional")
         f = Future[T]()  # type: ignore[valid-type]
         # pyrefly: ignore [bad-argument-type]
