@@ -354,7 +354,9 @@ TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
 
   ASSERT_TRUE(fake_device.has_value());
   EXPECT_EQ(*fake_device, c10::Device(c10::kCPU));
-  EXPECT_EQ(result_impl->fake_tensor_mode(), mode);
+  auto handle = result_impl->fake_tensor_mode();
+  ASSERT_NE(handle, nullptr);
+  EXPECT_EQ(handle->mode, mode->mode);
 }
 
 TEST(TestNative, InitCppFake) {
@@ -362,7 +364,8 @@ TEST(TestNative, InitCppFake) {
   auto make_fake = [&]() {
     auto t = at::empty({2}, at::device(at::kMeta));
     at::init_cpp_fake(t.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode);
-    EXPECT_EQ(t.unsafeGetTensorImpl()->fake_tensor_mode(), mode);
+    auto handle = t.unsafeGetTensorImpl()->fake_tensor_mode();
+    EXPECT_EQ(handle ? handle->mode : nullptr, mode->mode);
     EXPECT_EQ(t.device(), c10::Device(c10::kCPU));
     return t;
   };
