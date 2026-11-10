@@ -225,43 +225,54 @@ void ProcessGroupXCCL::checkWorkQueue() {
 // are therefore only observed once they make a work item time out.
 void ProcessGroupXCCL::timeoutWatchdog() noexcept {
   TC_LOG(INFO, this) << "Timeout thread starting for rank: " << rank_;
-  while (!shutdown_) {
-    {
-      std::unique_lock<std::mutex> lock(timeout_mutex_);
-      // Wait for a shorter interval to check work objects periodically
-      // Wake up either after 1 second or immediately if shutdown is requested
-      timeout_cv_.wait_for(
-          lock, std::chrono::seconds(1), [this]() { return shutdown_.load(); });
 
-      // If we're shutting down, exit the loop
+  // Honor the noexcept contract: the loop issues XCCL probes (XCCL_CHECK) and
+  // abort paths that can throw; swallow here so nothing escapes this thread.
+  try {
+    while (!shutdown_) {
+      {
+        std::unique_lock<std::mutex> lock(timeout_mutex_);
+        // Wait for a shorter interval to check work objects periodically
+        // Wake up either after 1 second or immediately if shutdown is requested
+        timeout_cv_.wait_for(lock, std::chrono::seconds(1), [this]() {
+          return shutdown_.load();
+        });
+
+        // If we're shutting down, exit the loop
+        if (shutdown_) {
+          break;
+        }
+      }
+
+      // Check work objects for completion or timeout
+      checkWorkQueue();
       if (shutdown_) {
         break;
       }
-    }
+      if (comm_state_ != CommState::NORMAL &&
+          abort_process_on_timeout_or_error_) {
+        // Log the error and abort the process.  We cannot abort the XCCL
+        // communicator as it is not safe to call XCCL operations from
+        // multiple threads at the same time.
+        if (comm_state_ == CommState::TIMEOUT) {
+          TC_LOG(ERROR, this)
+              << "Aborting process due to timeout on rank " << rank_
+              << " - timeout watchdog detected operation timeout";
+        } else if (comm_state_ == CommState::ERROR) {
+          TC_LOG(ERROR, this)
+              << "Aborting process due to error on rank " << rank_
+              << " - timeout watchdog detected operation error. ";
+        }
 
-    // Check work objects for completion or timeout
-    checkWorkQueue();
-    if (shutdown_) {
-      break;
-    }
-    if (comm_state_ != CommState::NORMAL &&
-        abort_process_on_timeout_or_error_) {
-      // Log the error and abort the process.  We cannot abort the XCCL
-      // communicator as it is not safe to call XCCL operations from
-      // multiple threads at the same time.
-      if (comm_state_ == CommState::TIMEOUT) {
-        TC_LOG(ERROR, this)
-            << "Aborting process due to timeout on rank " << rank_
-            << " - timeout watchdog detected operation timeout";
-      } else if (comm_state_ == CommState::ERROR) {
-        TC_LOG(ERROR, this) << "Aborting process due to error on rank " << rank_
-                            << " - timeout watchdog detected operation error. ";
+        runAbortHooks();
+
+        ::abort();
       }
-
-      runAbortHooks();
-
-      ::abort();
     }
+  } catch (const std::exception& e) {
+    TC_LOG(ERROR, this) << "Timeout watchdog caught exception: " << e.what();
+  } catch (...) {
+    TC_LOG(ERROR, this) << "Timeout watchdog caught unknown exception.";
   }
 
   TC_LOG(INFO, this) << "Timeout thread exiting for rank: " << rank_;
@@ -340,8 +351,10 @@ c10::xpu::XPUStream ProcessGroupXCCL::getOperationStream(bool async_op) {
 }
 
 void ProcessGroupXCCL::ensureTensorContiguous(const at::Tensor& tensor) {
-  TORCH_CHECK(
-      tensor.is_contiguous(), "Tensor must be contiguous for XCCL operations");
+  if (!tensor.is_contiguous(tensor.suggest_memory_format())) {
+    C10_THROW_ERROR(
+        ValueError, "Tensors must be contiguous for XCCL operations");
+  }
 }
 
 void ProcessGroupXCCL::register_address(void* addr, size_t len) {
