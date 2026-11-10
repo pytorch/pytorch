@@ -527,6 +527,31 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             partial_dt.clamp_(max=10)
 
     @with_comms
+    def test_sign_partial_nan_collective(self):
+        mesh = self.build_device_mesh()
+        for reduction, value in (("max", 5.0), ("min", -5.0)):
+            for op in (torch.sign, torch.sgn):
+                for nan_rank in range(min(self.world_size, 2)):
+                    local = map_local_for_rank(
+                        self.rank,
+                        lambda rank: torch.tensor(
+                            [float("nan") if rank == nan_rank else value],
+                            device=self.device_type,
+                        ),
+                    )
+                    partial = DTensor.from_local(local, mesh, [Partial(reduction)])
+                    expected = op(partial.full_tensor())
+                    result = op(partial)
+                    self.assertEqual(result.placements, (Replicate(),))
+                    self.assertEqual(result.full_tensor(), expected)
+                    alias = partial.detach()
+                    inplace_op = partial.sign_ if op is torch.sign else partial.sgn_
+                    self.assertIs(inplace_op(), partial)
+                    self.assertEqual(partial.placements, (Partial(reduction),))
+                    self.assertEqual(partial.full_tensor(), expected)
+                    self.assertEqual(alias.full_tensor(), expected)
+
+    @with_comms
     def test_mul_div_scalar_partial(self):
         aten = torch.ops.aten
         mesh = self.build_device_mesh()

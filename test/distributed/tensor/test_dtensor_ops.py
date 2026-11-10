@@ -16,10 +16,12 @@ from torch.distributed.tensor import (
     distribute_tensor,
     DTensor,
     init_device_mesh,
+    Partial,
     Replicate,
     Shard,
 )
 from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
+from torch.distributed.tensor._utils import ExplicitRedistributionContext
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -33,6 +35,7 @@ from torch.testing._internal.common_ops_unbacked import ops_dde_xfail, ops_unbac
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
     np,
+    parametrize,
     run_tests,
     SEED,
     suppress_warnings,
@@ -736,6 +739,135 @@ class TestLocalDTensorOps(TestDTensorOps):
     )
     def test_dtensor_op_db(self, dtype, op):
         self.run_opinfo_test(dtype, op)
+
+    def test_sign_partial_integral(self):
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            for dtype in (torch.bool, torch.uint8, torch.int8, torch.int64):
+                is_unsigned = dtype in (torch.bool, torch.uint8)
+                full = torch.full(
+                    (self.world_size, 1), 1 if is_unsigned else 5, dtype=dtype
+                )
+                full[0] = 0 if is_unsigned else -2
+                for reduction in ("amax", "amin"):
+                    for op_name in ("sign", "sgn"):
+                        with self.subTest(dtype=dtype, reduction=reduction, op=op_name):
+                            op = getattr(torch, op_name)
+                            expected = op(getattr(full, reduction)(dim=0))
+                            shard = distribute_tensor(full, mesh, [Shard(0)])
+                            pending = getattr(shard, reduction)(dim=0)
+                            placement = pending.placements
+
+                            result = op(pending)
+                            self.assertEqual(result.placements, placement)
+                            self.assertEqual(result.full_tensor(), expected)
+
+                            out = pending.clone()
+                            self.assertIs(op(pending, out=out), out)
+                            self.assertEqual(out.placements, placement)
+                            self.assertEqual(out.full_tensor(), expected)
+
+                            self.assertIs(getattr(pending, op_name + "_")(), pending)
+                            self.assertEqual(pending.placements, placement)
+                            self.assertEqual(pending.full_tensor(), expected)
+
+    @parametrize("has_nan", [False, True])
+    def test_sign_partial_nan(self, has_nan):
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            for reduction, value in (("amax", 5.0), ("amin", -5.0)):
+                full = torch.full((self.world_size, 1), value)
+                full[0] = float("nan") if has_nan else -value
+                for op_name in ("sign", "sgn"):
+                    op = getattr(torch, op_name)
+                    expected = op(getattr(full, reduction)(dim=0))
+                    with self.subTest(reduction=reduction, op=op_name):
+                        shard = distribute_tensor(full, mesh, [Shard(0)])
+                        pending = getattr(shard, reduction)(dim=0)
+
+                        result = op(pending)
+                        self.assertEqual(result.placements, (Replicate(),))
+                        self.assertEqual(result.full_tensor(), expected)
+
+                        out = distribute_tensor(
+                            torch.zeros_like(expected), mesh, [Replicate()]
+                        )
+                        self.assertIs(op(pending, out=out), out)
+                        self.assertEqual(out.full_tensor(), expected)
+
+                        with self.assertRaisesRegex(
+                            RuntimeError, "no valid sharding strategy"
+                        ):
+                            op(pending, out=pending.clone())
+
+                        alias = pending.detach()
+                        placements = pending.placements
+                        version = pending._version
+                        self.assertIs(getattr(pending, op_name + "_")(), pending)
+                        self.assertEqual(pending.placements, placements)
+                        self.assertEqual(pending._version, version + 1)
+                        self.assertEqual(alias._version, version + 1)
+                        self.assertEqual(pending.full_tensor(), expected)
+                        self.assertEqual(alias.full_tensor(), expected)
+
+                        replicated = distribute_tensor(full, mesh, [Replicate()])
+                        self.assertIs(getattr(replicated, op_name + "_")(), replicated)
+                        self.assertEqual(replicated.full_tensor(), op(full))
+
+    @parametrize("op_name", ["sign", "sgn"])
+    def test_sign_inplace_other_placements(self, op_name):
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            full = torch.tensor([[-2.0, 0.0, 5.0]]).repeat(self.world_size, 1)
+            for placement in (Replicate(), Shard(0), Shard(1)):
+                value = distribute_tensor(full, mesh, [placement])
+                alias = value.detach()
+                self.assertIs(getattr(value, op_name + "_")(), value)
+                self.assertEqual(value.placements, (placement,))
+                self.assertEqual(alias.full_tensor(), getattr(torch, op_name)(full))
+            pending = distribute_tensor(full, mesh, [Shard(0)]).sum(dim=0)
+            before = pending.full_tensor()
+            with self.assertRaisesRegex(RuntimeError, "in-place operations"):
+                getattr(pending, op_name + "_")()
+            self.assertEqual(pending.placements, (Partial(),))
+            self.assertEqual(pending.full_tensor(), before)
+
+    def test_sign_inplace_partial_backward(self):
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            for reduction in ("max", "min"):
+                source = DTensor.from_local(
+                    torch.tensor([-2.0, 0.0, 5.0], requires_grad=True),
+                    mesh,
+                    [Partial(reduction)],
+                )
+                source.retain_grad()
+                value = source.clone()
+                value.sign_().sum().backward()
+                self.assertEqual(source.grad.full_tensor(), torch.zeros(3))
+
+    @parametrize("op_name", ["sign", "sgn"])
+    def test_sign_inplace_explicit_redistribution(self, op_name):
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            full = torch.tensor([[-2.0, 0.0, 5.0]]).repeat(self.world_size, 1)
+            for reduction in ("amax", "amin"):
+                shard = distribute_tensor(full, mesh, [Shard(0)])
+                pending = getattr(shard, reduction)(dim=0)
+                before = pending.full_tensor()
+                version = pending._version
+                with ExplicitRedistributionContext():
+                    with self.assertRaisesRegex(
+                        RuntimeError, "Implicit redistribution"
+                    ):
+                        getattr(pending, op_name + "_")()
+                self.assertEqual(pending.full_tensor(), before)
+                self.assertEqual(pending._version, version)
+            for placement in (Replicate(), Shard(0)):
+                value = distribute_tensor(full, mesh, [placement])
+                with ExplicitRedistributionContext():
+                    getattr(value, op_name + "_")()
+                self.assertEqual(value.full_tensor(), getattr(torch, op_name)(full))
 
     def test_mean(self):
         with LocalTensorMode(frozenset(range(self.world_size))):
