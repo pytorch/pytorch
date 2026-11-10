@@ -8369,7 +8369,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         }
         # Carried in the source, so compile workers and source-keyed caches see it.
         if entry := tuning_list.lookup(
-            self._get_heuristic(), size_hints, triton_meta["device"]
+            self._get_heuristic(), size_hints, triton_meta, inductor_meta
         ):
             inductor_meta["tuning_list"] = entry
 

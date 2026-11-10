@@ -4,6 +4,8 @@ import sys
 import unittest
 from unittest import mock
 
+import numpy as np
+
 import torch
 from torch._inductor import config as inductor_config, tuning_list
 from torch._inductor.async_compile import AsyncCompile
@@ -64,6 +66,18 @@ KERNELS = {
         {"x": 8192, "r0_": 16, "r1_": 16},
         ReductionHint.INNER,
     ),
+    "small_persistent_reduction": (
+        persistent_reduction,
+        {"x": 2, "r0_": 128},
+        ReductionHint.OUTER,
+    ),
+}
+
+# fake_device overrides. The registry picks heuristics by device type and falls back to the
+# default ones where none is registered, as for "hip" off ROCm builds.
+DEVICES = {
+    "cuda": {},
+    "hip": {"type": "hip", "cc": "gfx942", "major": 9, "warp_size": 64},
 }
 
 # A valid entry for each kernel.
@@ -101,13 +115,20 @@ def fake_device(**overrides):
 class TestTuningList(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def candidates(self, label, table=None, **inductor_meta):
+    def lookup(self, label, table, inductor_meta=None, **triton_meta):
+        """The entry codegen would carry in this kernel's source, or None."""
+        entry_point, size_hints, _ = KERNELS[label]
+        triton_meta.setdefault("device", fake_device())
+        with inductor_config.patch({"tuning_list.table": table}):
+            return tuning_list.lookup(
+                entry_point.__name__, size_hints, triton_meta, inductor_meta or {}
+            )
+
+    def candidates(self, label, table=None, device_type="cuda", **inductor_meta):
         """The candidates the compiler would benchmark, looked up as codegen does."""
         entry_point, size_hints, reduction_hint = KERNELS[label]
-        device = fake_device()
-        with inductor_config.patch({"tuning_list.table": table or {}}):
-            entry = tuning_list.lookup(entry_point.__name__, size_hints, device)
-        if entry is not None:
+        device = fake_device(**DEVICES[device_type])
+        if entry := self.lookup(label, table or {}, inductor_meta, device=device):
             inductor_meta["tuning_list"] = entry
         kwargs = {
             "size_hints": size_hints,
@@ -127,17 +148,19 @@ class TestTuningList(TestCase):
     def table(self, label, *configs, **entry):
         return {self.key(label): {"configs": list(configs) or [BLOCKS[label]], **entry}}
 
+    @parametrize("device_type", list(DEVICES))
     @parametrize("label", ["reduction", "persistent_reduction"])
-    def test_reduction_kernels_get_one_candidate_by_default(self, label):
-        self.assertEqual(len(self.candidates(label)), 1)
+    def test_reduction_kernels_get_one_candidate_by_default(self, label, device_type):
+        self.assertEqual(len(self.candidates(label, device_type=device_type)), 1)
 
+    @parametrize("device_type", list(DEVICES))
     @parametrize("label", ["reduction", "persistent_reduction"])
-    def test_supplied_configs_reach_single_candidate_kernels(self, label):
+    def test_supplied_configs_reach_single_candidate_kernels(self, label, device_type):
         # A splice inside the heuristic would miss these: its single-candidate return
         # comes first.
         table = self.table(label, BLOCKS[label], SECOND[label])
-        self.assertEqual(len(self.candidates(label)), 1)
-        self.assertEqual(len(self.candidates(label, table)), 3)
+        self.assertEqual(len(self.candidates(label, device_type=device_type)), 1)
+        self.assertEqual(len(self.candidates(label, table, device_type=device_type)), 3)
 
     @requires_gpu_and_triton
     @parametrize("compile_threads", [1, 2])
@@ -165,9 +188,10 @@ class TestTuningList(TestCase):
                 inductor_config.patch({"tuning_list.table": table}),
                 mock.patch.object(CachingAutotuner, "benchmark_all_configs", record),
             ):
-                torch.compile(total)(x)
+                actual = torch.compile(total)(x)
         self.assertIn(BLOCKS["reduction"], benchmarked)
         self.assertIn(SECOND["reduction"], benchmarked)
+        self.assertEqual(actual, total(x), atol=1e-3, rtol=1e-3)
 
     @parametrize("max_autotune", [False, True])
     def test_nothing_is_gated_on_max_autotune(self, max_autotune):
@@ -193,7 +217,8 @@ class TestTuningList(TestCase):
         self.assertEqual([c.kwargs["XBLOCK"] for c in replaced], [64])
 
     # Not pointwise: its heuristic sets num_elements_per_warp per candidate, so an entry
-    # has to name that too to match.
+    # has to name that too to match. The ROCm heuristic does the same with waves_per_eu.
+    @parametrize("device_type", list(DEVICES))
     @parametrize(
         "label",
         [
@@ -203,12 +228,20 @@ class TestTuningList(TestCase):
             "tiled_reduction",
         ],
     )
-    def test_naming_the_heuristics_own_blocks_reproduces_its_configs(self, label):
-        stock = self.candidates(label)
-        blocks = [
-            {k: v for k, v in c.kwargs.items() if k.endswith("BLOCK")} for c in stock
+    def test_naming_the_heuristics_own_blocks_reproduces_its_configs(
+        self, label, device_type
+    ):
+        stock = self.candidates(label, device_type=device_type)
+        named = [
+            {
+                k: v
+                for k, v in c.kwargs.items()
+                if k.endswith("BLOCK") or k == "waves_per_eu"
+            }
+            for c in stock
         ]
-        supplied = self.candidates(label, self.table(label, *blocks, mode="replace"))
+        table = self.table(label, *named, mode="replace")
+        supplied = self.candidates(label, table, device_type=device_type)
         self.assertEqual(
             [(c.kwargs, c.num_warps, c.num_stages) for c in supplied],
             [(c.kwargs, c.num_warps, c.num_stages) for c in stock],
@@ -235,18 +268,12 @@ class TestTuningList(TestCase):
             "reduction/2": {"configs": [BLOCKS["reduction"]]},
             "gfx942+reduction/2": {"configs": [BLOCKS["reduction"]]},
         }
-        with inductor_config.patch({"tuning_list.table": table}):
-            entry = tuning_list.lookup(
-                "reduction", {"x": 8192, "r0_": 512}, fake_device(cc="gfx942")
-            )
+        entry = self.lookup("reduction", table, device=fake_device(cc="gfx942"))
         self.assertEqual(entry["key"], "gfx942+reduction/2")
 
     def test_generic_key_matches_when_the_device_has_no_entry(self):
         table = {"reduction/2": {"configs": [BLOCKS["reduction"]]}}
-        with inductor_config.patch({"tuning_list.table": table}):
-            entry = tuning_list.lookup(
-                "reduction", {"x": 8192, "r0_": 512}, fake_device(cc="gfx942")
-            )
+        entry = self.lookup("reduction", table, device=fake_device(cc="gfx942"))
         self.assertEqual(entry["key"], "reduction/2")
 
     def test_numeric_device_capability_is_not_a_device_key(self):
@@ -254,11 +281,40 @@ class TestTuningList(TestCase):
             "reduction/2": {"configs": [BLOCKS["reduction"]]},
             "80+reduction/2": {"configs": [SECOND["reduction"]]},
         }
-        with inductor_config.patch({"tuning_list.table": table}):
-            entry = tuning_list.lookup(
-                "reduction", {"x": 8192, "r0_": 512}, fake_device()
-            )
-        self.assertEqual(entry["key"], "reduction/2")
+        self.assertEqual(self.lookup("reduction", table)["key"], "reduction/2")
+
+    @parametrize(
+        "key", ["reductions/2", "reduction", "reduction/two", "gfx942+reduction"]
+    )
+    def test_malformed_key_is_fatal(self, key):
+        # Checked on every lookup, so a typo fails even where no kernel would match it.
+        table = {key: {"configs": [BLOCKS["reduction"]]}}
+        with self.assertRaisesRegex(InvalidTuningList, "is not '"):
+            self.candidates("pointwise", table)
+
+    def test_native_matmul_kernel_is_left_alone(self):
+        # Its configs come from a matmul-specific constructor with its own limits.
+        table = self.table("tiled_reduction")
+        self.assertIsNone(self.lookup("tiled_reduction", table, native_matmul=True))
+
+    def test_numpy_ints_are_stored_as_plain_ints(self):
+        # The entry is written into the kernel source, which does not import numpy.
+        config = {"XBLOCK": np.int64(8), "R0_BLOCK": np.int64(128)}
+        entry = self.lookup("reduction", self.table("reduction", config))
+        self.assertEqual(
+            {type(v) for one in entry["configs"] for v in one.values()}, {int}
+        )
+
+    def test_batch_invariant_persistent_reduction_ignores_the_batch(self):
+        # batch_invariant implies deterministic, which ships one candidate; replace makes
+        # it the supplied one.
+        table = self.table("persistent_reduction", mode="replace")
+        meta = {"batch_invariant": True, "deterministic": True}
+        small, large = (
+            [(c.kwargs, c.num_warps) for c in self.candidates(label, table, **meta)]
+            for label in ("small_persistent_reduction", "persistent_reduction")
+        )
+        self.assertEqual(small, large)
 
     def test_persistent_candidates_carry_no_reduction_block(self):
         table = self.table("persistent_reduction")
@@ -299,8 +355,13 @@ class TestTuningList(TestCase):
         [
             ({"XBLOCK": 8, "R0_BLOCK": 128, "nonsense": 1}, "does not accept"),
             ({"XBLOCK": 8}, "does not name R0_BLOCK"),
-            ({"XBLOCK": 0, "R0_BLOCK": 128}, "expected a positive int"),
-            ({"XBLOCK": True, "R0_BLOCK": 128}, "expected a positive int"),
+            ({"XBLOCK": 0, "R0_BLOCK": 128}, "expected a power of 2"),
+            ({"XBLOCK": 3, "R0_BLOCK": 128}, "expected a power of 2"),
+            ({"XBLOCK": 8, "R0_BLOCK": 96}, "expected a power of 2"),
+            ({**BLOCKS["reduction"], "num_warps": 6}, "expected a power of 2"),
+            ({**BLOCKS["reduction"], "num_stages": -1}, "expected a non-negative int"),
+            ({"XBLOCK": True, "R0_BLOCK": 128}, "expected an int"),
+            ({"XBLOCK": 8.0, "R0_BLOCK": 128}, "expected an int"),
             ("not a dict", "expected a dict"),
         ],
     )
@@ -309,7 +370,9 @@ class TestTuningList(TestCase):
             self.candidates("reduction", self.table("reduction", config))
 
     def test_config_that_cannot_be_built_is_dropped_not_fatal(self):
-        table = self.table("pointwise", {"XBLOCK": 3})
+        # Above every backend's XBLOCK limit, and below this kernel's extent, so clamping
+        # leaves it there.
+        table = self.table("pointwise", {"XBLOCK": 16384})
         self.assertEqual(
             len(self.candidates("pointwise", table)),
             len(self.candidates("pointwise")),

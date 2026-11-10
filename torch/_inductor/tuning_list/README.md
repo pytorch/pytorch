@@ -43,7 +43,8 @@ Each value is a dictionary with:
 ### What a configuration names
 
 Block names follow the constructors' positional order, `XBLOCK`, `YBLOCK`, `ZBLOCK`, `R0_BLOCK`, restricted to the axes
-the kernel has. A knob left out is derived as the heuristic's own constructor derives it for that kernel.
+the kernel has. A knob left out is derived by the constructor the heuristic uses. A reduction with many loads gets that
+constructor's register-pressure limit on every supplied configuration; the heuristic gives it to only some of its own.
 
 | Category | Blocks | Knobs |
 | --- | --- | --- |
@@ -60,17 +61,23 @@ The device-specific key is tried first, then the device-agnostic one. Only one e
 
 ## Validation
 
+Keys are checked whenever a kernel is generated, and an entry when a kernel under its key is.
+
 **Fatal**, raising `InvalidTuningList`:
 
+- a key that is not `[<device>+]<category>/<arity>` with one of the three categories
 - an entry that is not a dictionary, or carries no `configs`
 - an unknown `mode`
 - a name that is neither a block size nor a knob for that category, including the exclusions above
 - a block size the key's kernels take but the configuration does not name
-- a block size that is not a positive integer
+- a value that is not an integer; NumPy integers are accepted and stored as plain ones
+- a block size or `num_warps` that is not a power of 2, which would fail the whole kernel in Triton
+- a negative knob
 
 **Dropped with a warning**:
 
-- anything the compiler cannot build for a particular kernel's shape
+- a configuration the constructors reject for a particular kernel's shape, such as a block above the backend's limit on
+  a kernel whose extent is larger still
 
 A block larger than the kernel's extent is clamped to the extent.
 
@@ -96,6 +103,7 @@ Supplied candidates go through everything generated ones do:
 ## Not Covered
 
 - Kernels whose reduction block is planned (`strict_reduction_rblock`), since every candidate must agree with the plan.
+- Native matmul kernels (`config.triton.native_matmul`), whose configurations come from a matmul-specific constructor.
 - Kernels tiled over two reduction axes (`config.triton.tile_reductions`), which share their key with kernels tiled on
   `y` but take different blocks.
 - Combo kernels (`config.combo_kernels`) and cooperative reductions.

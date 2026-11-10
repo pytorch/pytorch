@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import operator
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -12,6 +13,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from triton import Config
+
+    from torch._inductor.runtime.hints import TritonMeta
 
 
 log = logging.getLogger(__name__)
@@ -37,16 +40,35 @@ class InvalidTuningList(ValueError):
 
 
 def lookup(
-    category: str, size_hints: dict[str, int], device: Any = None
+    category: str,
+    size_hints: dict[str, int],
+    triton_meta: TritonMeta,
+    inductor_meta: dict[str, Any],
 ) -> dict[str, Any] | None:
-    """Find the entry for this category and arity, device-specific key first."""
+    """Find and validate this kernel's entry, device-specific key first."""
     table = torch._inductor.config.tuning_list.table
-    if not table or category not in KNOB_ARGS:
+    if not table:
+        return None
+    for key in table:
+        named, _, arity = str(key).rpartition("+")[2].partition("/")
+        if named not in KNOB_ARGS or not arity.isdigit():
+            raise InvalidTuningList(
+                f"tuning_list key {key!r} is not '[<device>+]<category>/<arity>' with a "
+                f"category in {sorted(KNOB_ARGS)}"
+            )
+    if (
+        category not in KNOB_ARGS
+        # A native matmul builds its configs its own way, a planned reduction block must
+        # match every candidate, and r1_ kernels share their key with kernels tiled on y.
+        or triton_meta.get("native_matmul")
+        or inductor_meta.get("strict_reduction_rblock") is not None
+        or "r1_" in size_hints
+    ):
         return None
 
     suffix = f"{category}/{len(size_hints)}"
     # DeviceProperties.cc is the gfx arch name on ROCm and an int elsewhere.
-    cc = getattr(device, "cc", None)
+    cc = getattr(triton_meta.get("device"), "cc", None)
     keys = (f"{cc}+{suffix}", suffix) if isinstance(cc, str) and cc else (suffix,)
     for key in keys:
         if key in table:
@@ -62,7 +84,13 @@ def lookup(
                     f"tuning_list entry {key!r} has mode {mode!r}, expected one of "
                     f"{sorted(MODES)}"
                 )
-            return {"key": key, "mode": mode, "configs": entry["configs"]}
+            names = _block_names(category, size_hints)
+            knobs = _knob_names(category, size_hints)
+            configs = [
+                _validate_config(category, names, knobs, one, key)
+                for one in entry["configs"]
+            ]
+            return {"key": key, "mode": mode, "configs": configs}
     return None
 
 
@@ -82,10 +110,10 @@ def _knob_names(category: str, size_hints: dict[str, int]) -> frozenset[str]:
     return knobs
 
 
-def _split(
+def _validate_config(
     category: str, names: list[str], knobs: frozenset[str], supplied: Any, key: str
-) -> tuple[list[int], dict[str, Any]]:
-    """Split an entry into positional block sizes and keyword knobs."""
+) -> dict[str, int]:
+    """Check one supplied config and return it with plain int values."""
     if not isinstance(supplied, dict):
         raise InvalidTuningList(
             f"tuning_list entry {key!r} holds {type(supplied).__name__}, expected a dict "
@@ -104,21 +132,32 @@ def _split(
             f"not accept{reason}. Block sizes are {names}; knobs are {sorted(knobs)}"
         )
 
-    blocks = []
     for name in names:
         if name not in supplied:
             raise InvalidTuningList(
                 f"tuning_list entry {key!r} does not name {name}; kernels under this key "
                 f"take {names}"
             )
-        value = supplied[name]
-        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-            raise InvalidTuningList(
-                f"tuning_list entry {key!r} has {name}={value!r}, expected a positive int"
-            )
-        blocks.append(value)
 
-    return blocks, {k: v for k, v in supplied.items() if k not in names}
+    # Stored as plain ints: the kernel source carries the config's repr, and a NumPy
+    # int's repr (np.int64(8)) does not evaluate there.
+    checked: dict[str, int] = {}
+    for name, value in supplied.items():
+        problem = f"tuning_list entry {key!r} has {name}={value!r}, expected"
+        try:
+            number = None if isinstance(value, bool) else operator.index(value)
+        except TypeError:
+            number = None
+        if number is None:
+            raise InvalidTuningList(f"{problem} an int")
+        if name in names or name == "num_warps":
+            # Triton fails the whole kernel on any other block size or warp count.
+            if number <= 0 or number & (number - 1):
+                raise InvalidTuningList(f"{problem} a power of 2")
+        elif number < 0:
+            raise InvalidTuningList(f"{problem} a non-negative int")
+        checked[name] = number
+    return checked
 
 
 def apply(
@@ -130,10 +169,10 @@ def apply(
 ) -> list[Config]:
     """Fold a looked-up entry into the candidates the heuristic generated."""
     names = _block_names(category, size_hints)
-    accepted = _knob_names(category, size_hints)
     supplied = []
     for one in entry["configs"]:
-        blocks, knobs = _split(category, names, accepted, one, entry["key"])
+        blocks = [one[name] for name in names]
+        knobs = {k: v for k, v in one.items() if k not in names}
         try:
             supplied.append(make_config(size_hints, *blocks, **knobs))
         except Exception as exc:

@@ -5002,9 +5002,14 @@ def _make_reduction_config(
 
 
 def _make_persistent_reduction_config(
-    size_hints, *blocks, reduction_hint, warp_size, **knobs
+    size_hints, *blocks, reduction_hint, inductor_meta, warp_size, **knobs
 ):
     """Build a persistent reduction candidate the way get_persistent_configs does."""
+    from torch._inductor.heuristics.triton_codegen.reduction import (
+        _batch_invariant_size_hints,
+    )
+
+    size_hints = _batch_invariant_size_hints(size_hints, inductor_meta)
     rnumel = get_total_reduction_numel(size_hints)
     if "y" in size_hints:
         config = triton_config_tiled_reduction(
@@ -5033,12 +5038,6 @@ def _apply_tuning_list(category, size_hints, configs, make_config, inductor_meta
     """
     entry = inductor_meta.get("tuning_list")
     if entry is None:
-        return configs
-    if inductor_meta.get("strict_reduction_rblock") is not None:
-        # reduction() raises on any candidate that disagrees with the planned block.
-        return configs
-    if "r1_" in size_hints:
-        # Same arity as a kernel tiled on y, so it shares that key's block names.
         return configs
 
     from torch._inductor import tuning_list
@@ -5492,6 +5491,7 @@ def persistent_reduction(
     make_config = functools.partial(
         _make_persistent_reduction_config,
         reduction_hint=reduction_hint,
+        inductor_meta=inductor_meta,
         warp_size=triton_meta["device"].warp_size_or_default,
     )
     configs = _apply_tuning_list(

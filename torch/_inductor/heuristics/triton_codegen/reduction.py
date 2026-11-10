@@ -185,6 +185,14 @@ def _register_intensive(
     return size_hints["x"] >= 1024 and loads_and_red >= 10
 
 
+def _batch_invariant_size_hints(
+    size_hints: dict[str, int], inductor_meta: dict[str, Any]
+) -> dict[str, int]:
+    if inductor_meta.get("batch_invariant") and "x" in size_hints:
+        return {**size_hints, "x": max(size_hints["x"], 4096)}
+    return size_hints
+
+
 # ------------------------------------------------------------------
 # Default (CUDA) reduction heuristic
 # ------------------------------------------------------------------
@@ -420,10 +428,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         # a different (XBLOCK, num_warps) for bs=N vs bs=N/2. Different picks
         # change the bf16 reduction order and break batch invariance in
         # persistent reductions like LayerNorm.
-        if inductor_meta.get("batch_invariant"):
-            size_hints = dict(size_hints)
-            if "x" in size_hints:
-                size_hints["x"] = max(size_hints["x"], 4096)
+        size_hints = _batch_invariant_size_hints(size_hints, inductor_meta)
 
         xnumel = size_hints["x"]
         rnumel = get_total_reduction_numel(size_hints)
