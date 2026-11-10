@@ -718,7 +718,11 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnts.op_count, 2)
             self.assertEqual(counters["frames"]["total"], 2)
             self.assertTrue(
-                any("graph break in loop" in msg for msg in counters["unimplemented"])
+                any(
+                    "Call to `torch._dynamo.step_unsupported()`" in msg
+                    and "graph break in loop" in msg
+                    for msg in counters["unimplemented"]
+                )
             )
 
     @torch._dynamo.config.patch(fail_on_recompile_limit_hit=True)
