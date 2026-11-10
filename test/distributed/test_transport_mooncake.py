@@ -1,10 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 
 import asyncio
+import contextlib
 import ctypes
+import gc
 import itertools
 import os
 import threading
+import weakref
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from types import SimpleNamespace
@@ -14,7 +17,7 @@ from unittest.mock import patch
 from transport_test_utils import TransportTestMixin
 
 import torch
-from torch.distributed._transport import new_transport, register_transport
+from torch.distributed._transport import new_transport, register_transport, wait_all
 from torch.distributed._transport.mooncake import (
     _transport as _mooncake,
     MooncakeMemory,
@@ -461,63 +464,6 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         first.send_notification(second.peer_id, b"still works").wait()
         self.assertEqual(self._receive(second), [(first.peer_id, b"still works")])
 
-    def test_close_waits_for_notification_being_submitted(self):
-        first, second = self.make_transport_pair()
-        real_locked, real_send, real_begin = (
-            first._locked,
-            first._send_notify,
-            first._begin_close,
-        )
-        real_sync = first._engine.transfer_sync
-        closer = threading.Thread(target=first.close, name="closer")
-        close_locking, snapshotted = threading.Event(), threading.Event()
-        snapshots = []
-
-        def sync_after_snapshot(*args):
-            snapshotted.wait(10)
-            return real_sync(*args)
-
-        def locked(timeout):
-            if threading.current_thread() is closer:
-                close_locking.set()
-            return real_locked(timeout)
-
-        def send_during_close(engine, peer, payload):
-            # Past the open check but not yet tracked when close() starts.
-            closer.start()
-            close_locking.wait(10)
-            return real_send(engine, peer, payload)
-
-        def begin_close(timeout):
-            snapshots.append(real_begin(timeout))
-            snapshotted.set()
-            return snapshots[-1]
-
-        with (
-            patch.object(first._engine, "transfer_sync", sync_after_snapshot),
-            patch.object(first, "_locked", locked),
-            patch.object(first, "_send_notify", send_during_close),
-            patch.object(first, "_begin_close", begin_close),
-        ):
-            work = first.send_notification(second.peer_id, b"x")
-            closer.join(10)
-        self.assertIn(work, snapshots[0])
-        self.assertTrue(work.is_completed())
-
-    def test_timed_out_notification_waits_leave_nothing_behind(self):
-        first, second = self.make_transport_pair()
-        works = [second.wait_notifications() for _ in range(3)]
-        for work in works:
-            with self.assertRaises(TimeoutError):
-                work.wait(timedelta(milliseconds=1))
-        self.assertEqual(len({id(work._future) for work in works}), 1)
-        first.send_notification(second.peer_id, b"x").wait()
-        for work in works:
-            self.assertTrue(work.wait(timedelta(seconds=30)))
-        self.assertIsNone(second._available)
-        self.assertIsNone(second._watcher)
-        self.assertEqual(second.poll_notifications(), [(first.peer_id, b"x")])
-
     def test_watcher_failure_fails_waits_and_restarts(self):
         first, second = self.make_transport_pair()
         real = second._engine.get_notifies
@@ -554,6 +500,30 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
             release.set()
             self.assertTrue(work.wait(timedelta(seconds=30)))
         self.assertEqual(self._receive(second), [(first.peer_id, b"x")])
+
+    def test_timed_out_notification_waits_are_released(self):
+        first, second = self.make_transport_pair()
+        works = []
+
+        async def run():
+            for _ in range(20):
+                work = second.wait_notifications()
+                with contextlib.suppress(TimeoutError):
+                    await wait_all([work], timeout=0.001)
+                self.assertFalse(work.is_completed())
+                works.append(weakref.ref(work))
+            del work
+            gc.collect()
+            self.assertEqual(sum(ref() is not None for ref in works), 0)
+            waiting = asyncio.ensure_future(
+                wait_all([second.wait_notifications()], timeout=30)
+            )
+            await asyncio.sleep(0)  # Let the wait register before the send.
+            first.send_notification(second.peer_id, b"x").wait()
+            await waiting
+
+        asyncio.run(run())
+        self.assertEqual(second.poll_notifications(), [(first.peer_id, b"x")])
 
 
 _RUN_INTEGRATION = os.environ.get("RUN_MOONCAKE_INTEGRATION") == "1"

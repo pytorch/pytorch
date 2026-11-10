@@ -275,6 +275,13 @@ class TransportTestMixin:
             asyncio.run(wait_all([second.wait_notifications()], timeout=30))
             self.assertEqual(self._receive(second), [(first.peer_id, b"asyncio")])
 
+            chained = second.wait_notifications().get_future().then(lambda _: None)
+            done = threading.Event()
+            chained.add_done_callback(lambda _: done.set())
+            first.send_notification(second.peer_id, b"chained").wait()
+            self.assertTrue(done.wait(30))
+            self.assertEqual(self._receive(second), [(first.peer_id, b"chained")])
+
             pending = second.wait_notifications()
             second.close()
             with self.assertRaisesRegex(RuntimeError, "closed"):
