@@ -23,6 +23,11 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
+      tests-to-exclude:
+        required: false
+        type: string
+        default: ""
+        description: Space-separated tests to exclude (empty string implies none)
       timeout-minutes:
         required: false
         type: number
@@ -199,6 +204,7 @@ jobs:
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           TEST_CONFIG: ${{ matrix.config }}
+          TESTS_TO_EXCLUDE: ${{ inputs.tests-to-exclude }}
           REENABLED_ISSUES: ${{ github.event.pull_request.reenabled-issues }}
           TORCH_CUDA_ARCH_LIST: "8.6"
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}

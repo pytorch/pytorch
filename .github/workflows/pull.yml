@@ -96,7 +96,6 @@ jobs:
           { config: "default", shard: 9, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
           { config: "default", shard: 10, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
           { config: "docs_test", shard: 1, num_shards: 1,  runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           { config: "backwards_compat", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           # Use m7i instead of m7a to match the existing (Intel Xeon) numerics. DTensor crossref tests like linalg.multi_dot have tight
           # float32 tolerances sensitive to different FMA/reduction order across CPU vendors.
@@ -130,7 +129,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_11-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_11-gcc11-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      tests-to-exclude: "inductor/test_torchinductor_opinfo test_modules functorch/test_aotdispatch_moduleinfo"
       python-version: "3.11"
       compiler: gcc11
     secrets: inherit
@@ -193,7 +192,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-aarch64-py3_11-gcc13-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_11-gcc13-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      tests-to-exclude: "inductor/test_torchinductor_opinfo test_modules functorch/test_aotdispatch_moduleinfo"
       python-version: "3.11"
       compiler: gcc13
     secrets: inherit
@@ -224,16 +223,6 @@ jobs:
           { config: "default", shard: 9, num_shards: 11, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
           { config: "default", shard: 10, num_shards: 11, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
           { config: "default", shard: 11, num_shards: 11, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
-          # Free-threaded Python 3.14t has ~20-50% higher per-object memory overhead from biased reference counting and
-          # per-object locks, and test_nn (531 tests) under dynamo wrapping with compiled autograd consistently OOMs at 64GB.
-          { config: "dynamo_wrapped", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
-          { config: "dynamo_wrapped", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
-          { config: "dynamo_wrapped", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
-          { config: "dynamo_wrapped", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
-          { config: "dynamo_wrapped", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
-          { config: "dynamo_wrapped", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
           { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
         ]}
@@ -252,7 +241,7 @@ jobs:
       build-environment: linux-jammy-py3.14t-clang21
       docker-image: ${{ needs.linux-jammy-py3_14t-clang21-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14t-clang21-build.outputs.test-matrix }}
-      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      tests-to-exclude: "inductor/test_torchinductor_opinfo test_modules functorch/test_aotdispatch_moduleinfo"
       python-version: "3.14t"
       compiler: clang21
     secrets: inherit
@@ -344,7 +333,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_11-clang21-asan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_11-clang21-asan-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      tests-to-exclude: "inductor/test_torchinductor_opinfo test_modules functorch/test_aotdispatch_moduleinfo"
       python-version: "3.11"
       compiler: clang21
       # TODO (huydhn): Add this back once other workflow migrates
@@ -380,12 +369,6 @@ jobs:
           { config: "default", shard: 8, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
           { config: "default", shard: 9, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
           { config: "default", shard: 10, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 4, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 5, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 6, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
         ]}
@@ -441,13 +424,6 @@ jobs:
           { config: "default", shard: 8, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
           { config: "default", shard: 9, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
           { config: "default", shard: 10, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
         ]}
@@ -468,7 +444,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_14-clang21-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14-clang21-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-      tests-to-exclude: "inductor/test_torchinductor_opinfo"
+      tests-to-exclude: "inductor/test_torchinductor_opinfo test_modules functorch/test_aotdispatch_moduleinfo"
       python-version: "3.14"
       compiler: clang21
     secrets: inherit
@@ -590,6 +566,14 @@ jobs:
       test-matrix: |
         { include: [
           { config: "dynamo_cpython", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "dynamo_core", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "dynamo_wrapped", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "dynamo_wrapped", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "dynamo_wrapped", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "dynamo_wrapped", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
         ]}
       python-version: "3.13"
       compiler: clang21
