@@ -2615,64 +2615,57 @@ class InstructionTranslatorBase(
         self.output.side_effects.store_global(target, name, variables.DeletedVariable())
 
     def _delete_global(self, name: str, target: VariableTracker) -> None:
-        """Raise what eager raises for `del name`, and clean up the dict."""
+        """Guard the name, raise what eager raises, and sync a dropped tensor."""
         side_effects = self.output.side_effects
-        # The membership guard tracks the live dict; `present` below is what
-        # eager would answer, which a pending write to the same dict through
-        # its module VT also decides.
+        present = name in self.f_globals
         guard_builder = (
-            GuardBuilder.DICT_CONTAINS
-            if name in self.f_globals
-            else GuardBuilder.DICT_NOT_CONTAINS
+            GuardBuilder.DICT_CONTAINS if present else GuardBuilder.DICT_NOT_CONTAINS
         )
         install_guard(
             self._globals_dict_source.make_guard(
                 functools.partial(guard_builder, key=name)
             )
         )
-        present = name in self.f_globals
-        msg = f"name '{name}' is not defined"
-        siblings_to_cancel = []
-        for item in list(side_effects.store_attr_mutations):
-            value = getattr(item, "value", None)
-            # Target global variables only.
-            if not (
-                (
-                    isinstance(value, types.ModuleType)
-                    and value.__dict__ is self.f_globals
+        # A pending write to the same dict through the module VT races the
+        # replayed delete; eager resume orders it instead.
+        registered_module = _registered_module_for_globals(
+            self.f_globals.get("__name__"), self.f_globals
+        )
+        if registered_module is not None:
+            module_value = registered_module[1]
+            if (
+                module_value in side_effects
+                and side_effects[module_value] is not target
+                and (
+                    side_effects.has_pending_mutation_of_attr(
+                        side_effects[module_value], name
+                    )
                 )
-                or (not isinstance(value, types.ModuleType) and value is self.f_globals)
             ):
-                continue
-            # Duplicate Deletion
-            if self._global_deleted_in_trace(item, name):
-                raise_name_error(self, msg, name=name)
-            if side_effects.has_pending_mutation_of_attr(item, name):
-                present = True
-                if item is not target:
-                    siblings_to_cancel.append(item)
+                unimplemented(
+                    gb_type="DELETE_GLOBAL with a pending module-object write",
+                    context=name,
+                    explanation=(
+                        "Dynamo cannot order a global delete against a pending "
+                        "write to the same dict through the module object."
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+        msg = f"name '{name}' is not defined"
         pending_on_target = side_effects.has_pending_mutation_of_attr(target, name)
         if pending_on_target:
             if self._global_deleted_in_trace(target, name):
-                # An earlier delete in this trace already removed the name.
                 raise_name_error(self, msg, name=name)
         elif not present:
-            # Nothing ever bound the name.
             raise_name_error(self, msg, name=name)
         # A pre-existing global's tensor is not covered: syncing its dealloc
         # would need a guard on the tensor identity, which is not tracked.
         self._maybe_sync_dealloc_attr(target, name)
-        for item in siblings_to_cancel:
-            side_effects.discard_attr_mutation(item, name)
 
     @functools.cached_property
     def _globals_dict_source(self) -> Source:
-        # Whether a DELETE_GLOBAL replays depends on membership, and
-        # GlobalSource(name) raises for an absent name, so membership is guarded
-        # on the dict itself. Root the guard at the module's __dict__ so a
-        # loaded artifact can bind it again; a dict that is no module's has no
-        # import source to root at, so the delete breaks, the way the inlined
-        # handler does.
+        # Guard membership on the dict itself, since GlobalSource(name) raises
+        # for an absent name.
         registered_module = _registered_module_for_globals(
             self.f_globals.get("__name__"), self.f_globals
         )

@@ -580,16 +580,6 @@ class SideEffects:
             if item_source is not None:
                 self.mutated_sources.add(AttrSource(item_source, name))
 
-    def discard_attr_mutation(self, item: VariableTracker, name: str) -> None:
-        """Drop a recorded mutation that eager never leaves behind."""
-        self.store_attr_mutations.get(item, {}).pop(name, None)
-        self.attr_mutation_kinds.get(item, {}).pop(name, None)
-        if item in self.store_attr_mutations and (
-            not self.store_attr_mutations[item] and not self.attr_mutation_kinds[item]
-        ):
-            self.store_attr_mutations.pop(item, None)
-            self.attr_mutation_kinds.pop(item, None)
-
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
     ) -> None:
@@ -1011,6 +1001,8 @@ class SideEffects:
         return variable
 
     def track_global_existing(self, source: Source, item: object) -> VariableTracker:
+        # Re-tracks are keyed by object identity and return the vt the first
+        # call built; the source of a later call is not honored.
         if id(item) in self.id_to_variable:
             return self.id_to_variable[id(item)]
         variable = variables.NewGlobalVariable.create(source)

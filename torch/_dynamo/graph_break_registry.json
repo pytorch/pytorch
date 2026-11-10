@@ -1211,6 +1211,16 @@
       ]
     }
   ],
+  "GB7728": [
+    {
+      "Gb_type": "DELETE_GLOBAL with a pending module-object write",
+      "Context": "name",
+      "Explanation": "Dynamo cannot order a global delete against a pending write to the same dict through the module object.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0071": [
     {
       "Gb_type": "Inline attempt with __self__",
