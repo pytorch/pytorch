@@ -7602,6 +7602,36 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(len(sub_of_foo_subclass_var_optim), 1)
         self.assertEqual(sub_of_foo_subclass_var_optim, sub_of_foo_subclass_var_reg)
 
+    def test_reuse_hash_fn_does_not_suppress_mro_absence_guard(self):
+        class Layer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(2))
+
+        layer = Layer()
+
+        def hash_fn(mod, x):
+            return mod.weight.shape[0]
+
+        @torch.compiler.nested_compile_region(reuse_hash_fn=hash_fn)
+        def region(mod, x):
+            return x + mod.weight
+
+        def fn(x):
+            return region(layer, x)
+
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.zeros(2)
+        for _ in range(2):
+            self.assertEqual(compiled(x), torch.ones(2))
+            self.assertEqual(counter.frame_count, 1)
+
+        Layer.weight = torch.full((2,), 5.0)
+        for _ in range(2):
+            self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(counter.frame_count, 2)
+
     def test_type_mro_method(self):
         class Foo:
             pass
@@ -8149,6 +8179,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             expected_repr = repr(finalizer)
             frames = 3 if operation in ("detach", "peek") and not alive else 2
             result, value = compiled(x, finalizer)
+            if operation == "detach":
+                self.assertFalse(finalizer.alive)
             self.assertEqual(result, x + 2)
             if operation == "call":
                 self.assertEqual(value, 7 if alive else None)
