@@ -10,6 +10,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/intrusive_ptr.h>
+#include <atomic>
 #include <cstddef>
 #include <optional>
 #include <utility>
@@ -211,10 +212,11 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     std::swap(resizable_, other.resizable_);
     std::swap(allocator_, other.allocator_);
     std::swap(throw_on_immutable_data_ptr_, other.throw_on_immutable_data_ptr_);
-    std::swap(throw_on_mutable_data_ptr_, other.throw_on_mutable_data_ptr_);
-    std::swap(
-        warn_deprecated_on_mutable_data_ptr_,
-        other.warn_deprecated_on_mutable_data_ptr_);
+    throw_on_mutable_data_ptr_ = other.throw_on_mutable_data_ptr_.exchange(
+        throw_on_mutable_data_ptr_.load());
+    warn_deprecated_on_mutable_data_ptr_ =
+        other.warn_deprecated_on_mutable_data_ptr_.exchange(
+            warn_deprecated_on_mutable_data_ptr_.load());
     refresh_has_data_ptr_check();
     other.refresh_has_data_ptr_check();
   }
@@ -339,13 +341,19 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void set_throw_on_mutable_data_ptr() {
+    if (throw_on_mutable_data_ptr_ && has_mutable_data_ptr_check_) {
+      return;
+    }
     throw_on_mutable_data_ptr_ = true;
-    refresh_has_data_ptr_check();
+    has_mutable_data_ptr_check_ = true;
   }
 
   void set_warn_deprecated_on_mutable_data_ptr() {
+    if (warn_deprecated_on_mutable_data_ptr_ && has_mutable_data_ptr_check_) {
+      return;
+    }
     warn_deprecated_on_mutable_data_ptr_ = true;
-    refresh_has_data_ptr_check();
+    has_mutable_data_ptr_check_ = true;
   }
 
   // One materializer at a time.
@@ -422,13 +430,14 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   bool received_cuda_;
   // Keep the common data access paths behind one branch each.
   bool has_immutable_data_ptr_check_ = false;
-  bool has_mutable_data_ptr_check_ = false;
+  // Fake views can mark the same storage concurrently.
+  std::atomic<bool> has_mutable_data_ptr_check_ = false;
   // If we should throw when mutable_data_ptr() or mutable_data() is called.
-  bool throw_on_mutable_data_ptr_ = false;
+  std::atomic<bool> throw_on_mutable_data_ptr_ = false;
   // If we should throw when data_ptr() or data() is called.
   bool throw_on_immutable_data_ptr_ = false;
   // If we warn when mutable_data_ptr() or mutable_data() is called.
-  bool warn_deprecated_on_mutable_data_ptr_ = false;
+  std::atomic<bool> warn_deprecated_on_mutable_data_ptr_ = false;
   // Pluggable materialization hook. See MaterializeFn in StorageMaterializer.h.
   MaterializeFn materialize_fn_ = nullptr;
   Allocator* allocator_;

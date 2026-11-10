@@ -39,7 +39,7 @@
 //    registrations do not run here;
 //  - symbolic inputs (sizes, strides or scalars), for which Python decomposes
 //    most ops that lack a C++ Meta kernel supporting them;
-//  - tensors nested deeper than Tensor[] (Tensor[][], dicts of tensors);
+//  - tensors nested deeper than Tensor[] (Tensor[][], dicts of tensors), or Any;
 //  - sparse inputs;
 //  - ops whose Meta kernel raises c10::NotImplementedError (as the Meta
 //    backend fallback does for an op without one), which Python then runs
@@ -106,7 +106,8 @@ class UnsetFakeTensorModeGuard {
   }
   ~UnsetFakeTensorModeGuard() {
     if (mode_ != nullptr) {
-      c10::impl::FakeTensorModeTLS::create_state(std::move(mode_));
+      auto prev_mode =
+          c10::impl::FakeTensorModeTLS::create_state(std::move(mode_));
       c10::impl::tls_set_dispatch_key_included(
           c10::DispatchKey::Fake, fake_included_);
     }
@@ -134,7 +135,9 @@ bool is_symbolic(const c10::IValue& ivalue) {
 }
 
 bool contains_tensor_types(const c10::TypePtr& type) {
-  if (type->isSubtypeOf(*c10::TensorType::get())) {
+  // Any can hide tensors in containers the shallow IValue walk cannot visit.
+  if (type->kind() == c10::TypeKind::AnyType ||
+      type->isSubtypeOf(*c10::TensorType::get())) {
     return true;
   }
   const auto contained = type->containedTypes();
