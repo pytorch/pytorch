@@ -1314,6 +1314,28 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   endif()
 endif()
 
+# libuv for the TCPStore server. Elsewhere it is built by TensorPipe above;
+# Windows has no TensorPipe, so use libuv_ROOT, the same libuv Gloo uses.
+if(USE_DISTRIBUTED AND WIN32)
+  find_library(
+    libuv_LIBRARY
+    NAMES uv libuv
+    HINTS ${libuv_ROOT} ENV libuv_ROOT
+    PATH_SUFFIXES lib/release lib/debug lib
+    REQUIRED
+    NO_DEFAULT_PATH)
+  find_path(
+    libuv_INCLUDE_DIR
+    NAMES uv.h
+    HINTS ${libuv_ROOT} ENV libuv_ROOT
+    PATH_SUFFIXES include
+    REQUIRED
+    NO_DEFAULT_PATH)
+  include_directories(SYSTEM ${libuv_INCLUDE_DIR})
+  add_compile_definitions(TORCH_USE_LIBUV)
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${libuv_LIBRARY})
+endif()
+
 if(USE_GLOO)
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(WARNING "Gloo can only be used on 64-bit systems.")
