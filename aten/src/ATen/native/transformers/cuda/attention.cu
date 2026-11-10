@@ -1725,10 +1725,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     at::ROCmFABackend::Ck) {
 
 #if defined(USE_ROCM_CK_SDPA)
-    TORCH_CHECK(num_heads == num_heads_kv,
-                "CK mem_eff_forward does not support grouped query attention");
-    TORCH_CHECK(!window_size.has_value(),
-                "CK mem_eff_forward does not support window_size");
     std::optional<Tensor> out(res);
     std::optional<Tensor> seqused_k = std::nullopt;
     std::optional<Tensor> alibi_slopes = std::nullopt;

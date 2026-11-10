@@ -574,10 +574,6 @@ _efficient_attention_backward(
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck)
   {
 #if defined(USE_ROCM_CK_SDPA)
-    TORCH_CHECK(nH == nHkv,
-                "CK mem_eff_backward does not support grouped query attention");
-    TORCH_CHECK(!window_size.has_value(),
-                "CK mem_eff_backward does not support window_size");
     const auto my_softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     // Store grad_bias in optional
     std::optional<at::Tensor> opt_grad_bias = grad_bias;
