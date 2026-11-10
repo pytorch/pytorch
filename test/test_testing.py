@@ -3121,6 +3121,7 @@ class TestImports(TestCase):
                            "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
                            "torch._native.ops.norm.rmsnorm_kernels",  # depends on cutlass
                            "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
+                           "torch._native.ops.pointwise.aot_kernels",  # depends on cutlass
                            "torch._native.ops.pointwise.kernel",  # depends on cutlass
                            "torch._native.ops.pointwise.ops",  # depends on cutlass
                            "torch._native.ops.reductions.kernel_general",  # depends on cutlass
