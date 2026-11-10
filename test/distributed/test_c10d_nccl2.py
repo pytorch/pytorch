@@ -690,6 +690,87 @@ class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
         gc.collect()
 
 
+_TEST_PSK = "0123456789abcdef0123456789abcdef"
+
+
+@unittest.skipIf(TEST_WITH_ROCM, "ncclSetEncryption is not supported on ROCm")
+@requires_nccl_version((2, 32, 3), "Need NCCL 2.32.3+ for ncclSetEncryption")
+class ProcessGroupNCCL2EncryptionPskValidationTest(TestCase):
+    def tearDown(self) -> None:
+        dist.ProcessGroupNCCL2._set_encryption_psk(None)
+        super().tearDown()
+
+    @requires_nccl()
+    def test_rejects_short_key(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "ncclSetEncryption failed"):
+            dist.ProcessGroupNCCL2._set_encryption_psk("x" * 31)
+
+    @requires_nccl()
+    def test_rejects_nul_byte(self) -> None:
+        with self.assertRaisesRegex(ValueError, "NUL"):
+            dist.ProcessGroupNCCL2._set_encryption_psk(_TEST_PSK + "\0")
+
+    @requires_nccl()
+    def test_set_and_clear(self) -> None:
+        dist.ProcessGroupNCCL2._set_encryption_psk(_TEST_PSK)
+        dist.ProcessGroupNCCL2._set_encryption_psk(_TEST_PSK.encode())
+        dist.ProcessGroupNCCL2._set_encryption_psk(None)
+
+
+@unittest.skipIf(TEST_WITH_ROCM, "ncclSetEncryption is not supported on ROCm")
+@requires_nccl_version((2, 32, 3), "Need NCCL 2.32.3+ for ncclSetEncryption")
+class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
+    """The PSK is process global, so each test needs fresh workers."""
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Route data over the socket transport, which NCCL encrypts.
+        env = {
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_NVLS_ENABLE": "0",
+            "NCCL_NET": "Socket",
+            # Nonblocking init overwrites the "built without TLS" error.
+            "TORCH_NCCL_USE_COMM_NONBLOCKING": "0",
+        }
+        with mock.patch.dict(os.environ, env):
+            self._spawn_processes()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_encrypted_allreduce(self) -> None:
+        device = torch.device("cuda", self.rank)
+        torch.cuda.set_device(device)
+        dist.ProcessGroupNCCL2._set_encryption_psk(_TEST_PSK)
+        try:
+            dist.init_process_group(
+                "nccl2",
+                world_size=self.world_size,
+                rank=self.rank,
+                store=dist.FileStore(self.file_name, self.world_size),
+                device_id=device,
+            )
+        except RuntimeError as e:
+            # Both ranks fail locally before connecting.
+            self.assertIn("built without TLS support", str(e))
+            raise unittest.SkipTest("NCCL built without TLS support") from e
+        tensor = torch.full((1024,), self.rank + 1.0, device=device)
+        dist.all_reduce(tensor)
+        self.assertEqual(tensor, torch.full_like(tensor, 3.0))
+        dist.destroy_process_group()
+
+
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
     """Base for groups initialized with backend specific options."""
 

@@ -347,6 +347,24 @@ void ProcessGroupNCCL::shutdown() {
   }
 }
 
+void ProcessGroupNCCL::setEncryptionPsk(const std::optional<std::string>& psk) {
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 32, 3) || defined(USE_ROCM)
+  TORCH_CHECK(
+      false,
+      "NCCL encryption requires NCCL >= 2.32.3 and is not supported on ROCm");
+#endif
+  // NCCL reads the key as a C string.
+  TORCH_CHECK_VALUE(
+      !psk.has_value() || psk->find('\0') == std::string::npos,
+      "NCCL encryption PSK must not contain NUL bytes");
+  DefaultNcclApi nccl_api;
+  NCCL_CHECK(
+      &nccl_api,
+      nullptr,
+      nccl_api.setEncryptionPsk(psk.has_value() ? psk->c_str() : nullptr),
+      "ncclSetEncryption failed");
+}
+
 std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
   // Symmetric (VMM-backed) CUDA allocator backed by ncclMemAlloc/ncclMemFree.
   // Moved here from torchcomms' TorchCommFactory allocator registration.

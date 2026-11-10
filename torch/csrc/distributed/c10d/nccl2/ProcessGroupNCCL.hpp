@@ -133,6 +133,13 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       c10::intrusive_ptr<Options> options = Options::create());
   ~ProcessGroupNCCL() override;
 
+  // Sets the process-global pre-shared key NCCL uses to encrypt and
+  // authenticate its TCP sockets (NCCL 2.32.3+ built with TLS support).
+  // std::nullopt disables encryption. NCCL rereads the key for every new
+  // socket, including those of existing communicators: set it identically on
+  // all ranks before any communicator exists and do not change it afterwards.
+  static void setEncryptionPsk(const std::optional<std::string>& psk);
+
   ProcessGroupNCCL(const ProcessGroupNCCL&) = delete;
   ProcessGroupNCCL(ProcessGroupNCCL&&) = delete;
   ProcessGroupNCCL& operator=(const ProcessGroupNCCL&) = delete;

@@ -4784,6 +4784,32 @@ Returns:
           .def(
               "perform_nocolor_split",
               &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
+          .def_static(
+              "_set_encryption_psk",
+              &::c10d::nccl2::ProcessGroupNCCL::setEncryptionPsk,
+              py::arg("psk"),
+              py::pos_only(),
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+            Set the process-global pre-shared key NCCL uses to encrypt and
+            authenticate its built-in TCP sockets (bootstrap, proxy, RAS,
+            socket transport and InfiniBand connection setup) with TLS 1.3.
+            GPU data paths, external net plugins and the c10d Store are not
+            encrypted. ``None`` disables encryption.
+
+            Applies to every NCCL user sharing this libnccl in the process.
+            NCCL rereads the key for every new socket, and its RAS thread
+            uses it until process exit. Set the same key on every rank before
+            the first communicator is created and never change or clear it
+            afterwards (clearing is undefined behavior). Ranks with mismatched
+            keys may hang rather than error. Use a uniformly random secret of
+            at least 32 bytes (e.g. ``secrets.token_hex(32)``), not a
+            passphrase; it must not contain NUL bytes.
+
+            Raises on NCCL < 2.32.3 and ROCm. NCCL 2.32.3+ must be built with
+            ``TLS_BACKEND=OPENSSL3`` and find ``libcrypto.so.3`` and
+            ``libssl.so.3`` at runtime; otherwise communicator creation fails.
+            )")
           .def("_comm_ptr", &::c10d::nccl2::ProcessGroupNCCL::getCommPtr)
           .def_property_readonly(
               "comm_ptr",
