@@ -147,7 +147,7 @@ RUN rm -rf /usr/local/cuda-${BASE_CUDA_VERSION}
 COPY --from=cuda     /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
 COPY --from=magma    /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
 # Newer CUPTI headers staged outside the default include path (see CUDA_CUPTI_VERSION in install_cuda.sh)
-COPY --from=cuda     /usr/local/cupti-headers-13.3         /usr/local/cupti-headers-13.3
+COPY --from=cuda     /usr/local/cupti-headers-13.5         /usr/local/cupti-headers-13.5
 RUN ln -sf /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda
 ENV PATH=/usr/local/cuda/bin:$PATH
 
@@ -173,6 +173,13 @@ RUN bash ./install_rocm.sh && rm install_rocm.sh
 FROM cpu_final as xpu_final
 # XPU CD use rolling driver
 ENV XPU_DRIVER_TYPE ROLLING
+# Stop PyTorch's FindMKL.cmake from searching oneAPI's 2026.1 under
+# /opt/intel/oneapi first. The static MKL from install_mkl.sh is found through
+# CMAKE_LIBRARY_PATH=/opt/intel/lib, set in .ci/wheel/linux/build_wheel.py.
+# INTEL_OMP_DIR must be set too: it defaults to oneAPI's mkl/latest. MKLROOT would
+# also redirect the oneMKL SYCL lookup of torch-xpu-ops, so it stays unset.
+ENV INTEL_MKL_DIR /opt/intel
+ENV INTEL_OMP_DIR /opt/intel
 # cmake-3.28.4 from pip
 RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4

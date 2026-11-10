@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/dynamo-unittest.yml
+      - .github/workflows/_dynamo-unittest-python.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-dynamo-unittest
@@ -30,49 +31,23 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
 
-  dynamo-build:
-    name: dynamo-build
-    uses: ./.github/workflows/_linux-build.yml
+  dynamo:
+    name: py${{ matrix.python-version }}
+    uses: ./.github/workflows/_dynamo-unittest-python.yml
     needs: get-label-type
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12', '3.13', '3.15']
+        python-version: ['3.11', '3.12', '3.14', '3.14t', '3.15']
+        include:
+          # Free-threaded Python has ~20-50% higher per-object memory overhead from biased reference counting and
+          # per-object locks, and test_nn (531 tests) under dynamo wrapping with compiled autograd consistently OOMs at 64GB.
+          - python-version: '3.14t'
+            runner: 'l-x86iavx512-16-128'
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
-      build-environment: linux-jammy-py${{ matrix.python-version }}-clang21
-      docker-image-name: ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang21
+      python-version: ${{ matrix.python-version }}
+      runner: ${{ matrix.runner || 'l-x86iavx512-8-64' }}
+      label-type: ${{ needs.get-label-type.outputs.label-type }}
+      lf-runners: ${{ needs.get-label-type.outputs.lf-runners }}
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      test-matrix: |
-        { include: [
-          { config: "dynamo_core", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-          { config: "dynamo_wrapped", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
-        ]}
-      python-version: ${{ matrix.python-version }}
-      compiler: clang21
-      cuda-version: cpu
-    secrets: inherit
-
-  dynamo-test:
-    name: dynamo-test
-    uses: ./.github/workflows/_linux-test.yml
-    needs: [get-label-type, dynamo-build]
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.11', '3.12', '3.13', '3.15']
-    with:
-      build-environment: linux-jammy-py${{ matrix.python-version }}-clang21
-      docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang21-${{ needs.get-label-type.outputs.ci-docker-hash }}
-      test-matrix: ${{ needs.dynamo-build.outputs.test-matrix }}
-      python-version: ${{ matrix.python-version }}
-      compiler: clang21
-      cuda-version: cpu
     secrets: inherit
