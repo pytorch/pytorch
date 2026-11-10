@@ -432,6 +432,7 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             ("copy", ({},)),
             ("keys", ({},)),
             ("__len__", ({},)),
+            ("__len__", ()),
         ],
     )
     def test_descriptor_type_errors(self, name, args):
@@ -441,9 +442,9 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
                     builtins.frozendict.__new__(*args)
                 else:
                     getattr(builtins.frozendict, name)(*args)
-            except TypeError:
-                return x + 1
-            return x - 1
+            except TypeError as error:
+                return x + 1, str(error) if name == "__len__" else None
+            return x - 1, None
 
         x = torch.randn(3)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
@@ -1126,6 +1127,7 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
                 alias,
                 alias | {},
                 builtins.frozendict() | alias,
+                dict.__ror__({}, alias),
             )
 
         x = torch.randn(3)
@@ -1137,6 +1139,8 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         self.assertIs(result[2], result[3])
         self.assertIs(result[2], result[4])
         self.assertIsNot(result[0], result[2])
+        self.assertIs(type(result[5]), builtins.frozendict)
+        self.assertIsNot(result[5], result[2])
 
     @parametrize(
         "operation",

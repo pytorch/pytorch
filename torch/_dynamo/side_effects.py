@@ -1826,16 +1826,16 @@ def _codegen_ordered_dict_mutation(ctx: SideEffectReplayContext) -> None:
         raise AssertionError(type(var))
     if (
         var.should_reconstruct_all
-        and var.items
         and var.source
         and isinstance(
             var.mutation_type, (ValueMutationExisting, AttributeMutationExisting)
         )
     ):
-        # Nonempty reconstruction reads positional keys. Clearing needs no key order.
-        cg.tx.output.guard_on_key_order.add(var.source)
+        # Even an empty result must not discard untracked input keys during replay.
         var.install_dict_keys_match_guard()
-        install_guard(var.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
+        if var.items:
+            cg.tx.output.guard_on_key_order.add(var.source)
+            install_guard(var.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
     cg.add_push_null(
         lambda: cg.load_import_from(__name__, "_manual_ordered_dict_update")
     )
