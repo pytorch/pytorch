@@ -763,6 +763,22 @@ def _exit_fake_mode(
             torch._C._set_only_lift_cpu_tensors(maybe_prev_only_lift_cpu_tensors)
 
 
+def _from_tensor_shape_env(
+    mode: FakeTensorMode,
+    static_shapes: bool | None,
+    symbolic_context: SymbolicContext | None,
+    /,
+) -> ShapeEnv | None:
+    shape_env: ShapeEnv | None = mode.shape_env
+    if static_shapes is None:
+        static_shapes = mode.static_shapes
+    if static_shapes:
+        if symbolic_context is not None:
+            raise AssertionError("cannot set both static_shapes and symbolic_context")
+        shape_env = None
+    return shape_env
+
+
 @typing.final
 class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     # The Python object of a C++ FakeTensorMode, which the Python parts of fake
@@ -1027,7 +1043,8 @@ class FakeTensorConverter:
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             if t.is_mkldnn and not maybe_memo.is_mkldnn:
-                maybe_memo.dispatch_keys = torch._C._dispatch_keys(t)
+                keys = torch._C._dispatch_keys(t)
+                maybe_memo.dispatch_keys = keys
             return maybe_memo
         # not yet supported in metatensors
         if t.is_quantized:
@@ -3884,15 +3901,7 @@ class FakeTensorMode(TorchDispatchMode):
         ):
             return tensor
 
-        shape_env: ShapeEnv | None = self.shape_env
-        if static_shapes is None:
-            static_shapes = self.static_shapes
-        if static_shapes:
-            if symbolic_context is not None:
-                raise AssertionError(
-                    "cannot set both static_shapes and symbolic_context"
-                )
-            shape_env = None
+        shape_env = _from_tensor_shape_env(self, static_shapes, symbolic_context)
         return self.fake_tensor_converter.from_real_tensor(
             self,
             tensor,
