@@ -2003,6 +2003,15 @@ static PyObject* THCPModule_ensureCUDADeviceGuardSet(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_ensureXPUDeviceGuardSet(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::impl::ensureXPUDeviceGuardSet();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 struct TorchModuleState {
   PyObject* log_api_usage_seen; // dict used by _log_api_usage_once
 };
@@ -2406,6 +2415,10 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_ensureCUDADeviceGuardSet",
      THCPModule_ensureCUDADeviceGuardSet,
+     METH_NOARGS,
+     nullptr},
+    {"_ensureXPUDeviceGuardSet",
+     THPModule_ensureXPUDeviceGuardSet,
      METH_NOARGS,
      nullptr},
     {nullptr, nullptr, 0, nullptr}

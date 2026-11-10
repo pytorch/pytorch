@@ -21,21 +21,27 @@ DeviceGuardImplRegistrar::DeviceGuardImplRegistrar(
   registerDeviceGuard(type, impl);
 }
 
-void ensureCUDADeviceGuardSet() {
-  constexpr auto cuda_idx = static_cast<std::size_t>(DeviceType::CUDA);
-
-  const DeviceGuardImplInterface* p =
-      device_guard_impl_registry[cuda_idx].load();
-
-  // A non-null `ptr` indicates that the CUDA guard is already set up,
-  // implying this is using cuda build
+namespace {
+// A non-null registry entry means the backend is compiled in; deviceCount() == 0
+// means no device is visible, so swap in a no-op guard. This lets us trace
+// device kernels under FakeTensorMode without touching a physical device.
+template <DeviceType T>
+void ensureFakeDeviceGuardSet() {
+  constexpr auto idx = static_cast<std::size_t>(T);
+  const DeviceGuardImplInterface* p = device_guard_impl_registry[idx].load();
   if (p && p->deviceCount() == 0) {
-    // In following cases, we override CUDA guard interface with a no-op
-    // device guard. When p->deviceCount() == 0, cuda build is enabled, but no
-    // cuda devices available.
-    static FakeGuardImpl<DeviceType::CUDA> fake_cuda_guard;
-    device_guard_impl_registry[cuda_idx].store(&fake_cuda_guard);
+    static FakeGuardImpl<T> fake_guard;
+    device_guard_impl_registry[idx].store(&fake_guard);
   }
+}
+} // namespace
+
+void ensureCUDADeviceGuardSet() {
+  ensureFakeDeviceGuardSet<DeviceType::CUDA>();
+}
+
+void ensureXPUDeviceGuardSet() {
+  ensureFakeDeviceGuardSet<DeviceType::XPU>();
 }
 
 } // namespace c10::impl
