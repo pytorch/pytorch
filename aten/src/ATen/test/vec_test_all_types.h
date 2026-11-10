@@ -75,6 +75,10 @@ template <>
 struct OpMathType<c10::Half> {
   using type = float;
 };
+template <>
+struct OpMathType<c10::BFloat16> {
+  using type = float;
+};
 
 
 template<typename T>
@@ -524,7 +528,19 @@ std::enable_if_t < !is_complex<T>::value, void> filter_sub_overflow(T& a, T& b) 
 template <typename T>
 std::enable_if_t<is_complex<T>::value, void>
 filter_mult_overflow(T& val1, T& val2) {
-    //missing
+    // Scale large parts below the square root of the largest value, so that
+    // the products and their sums stay finite: in overflowing a*c - b*d, which
+    // product the compiler contracts into an FMA decides between -inf, inf
+    // and NaN.
+    using R = typename T::value_type;
+    constexpr int half_exponent = std::numeric_limits<R>::max_exponent / 2;
+    auto scale = [](R v) {
+        return std::abs(v) < std::ldexp(R(1), half_exponent - 1)
+            ? v
+            : std::ldexp(v, -half_exponent - 1);
+    };
+    val1 = T(scale(val1.real()), scale(val1.imag()));
+    val2 = T(scale(val2.real()), scale(val2.imag()));
 }
 
 template <typename T>
