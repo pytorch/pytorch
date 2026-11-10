@@ -160,6 +160,7 @@ if(NOT __AOTRITON_INCLUDED)
     if(WIN32)
       message(STATUS "Building AOTriton Windows dependencies")
       aotriton_build_windows_dependencies(dlfcn-win32_external xz_external dlfcn-win32_DIR liblzma_DIR)
+      # AOTriton 0.15b needs no Windows patch; the step is kept for future fixes.
       file(GLOB __AOTRITON_WIN32_PATCHES "${__AOTRITON_WIN32_PATCH_DIR}/*.patch")
       list(SORT __AOTRITON_WIN32_PATCHES)
       # Without patches `git apply` would read stdin, so only set the step
