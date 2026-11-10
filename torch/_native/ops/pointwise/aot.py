@@ -15,8 +15,8 @@ from torchgen.native_aot_decl import load_by_path
 
 
 # Stage 1 loads this declaration before torch can be imported.
-_limits = load_by_path(
-    "pointwise_limits", os.path.join(os.path.dirname(__file__), "_limits.py")
+_config = load_by_path(
+    "pointwise_config", os.path.join(os.path.dirname(__file__), "_config.py")
 )
 
 _DTYPES = {
@@ -119,13 +119,13 @@ def _axes(inputs: tuple[Any, ...], out: Any, boolean: bool) -> dict[str, Any]:
             tuple(t.shape) if t.numel() != 1 else (),
             t.stride() if t.numel() != 1 else (),
             t.element_size(),
-            t.const_data_ptr() % _limits._TMA_ALIGNMENT,
+            t.const_data_ptr() % _config._TMA_ALIGNMENT,
             t.is_contiguous(),
         )
         for t in inputs
     )
     output_address = (
-        0 if out is None else out.const_data_ptr() % _limits._MAX_VECTOR_BYTES
+        0 if out is None else out.const_data_ptr() % _config._MAX_VECTOR_BYTES
     )
     output_strides = None if out is None else tuple(out.stride()[-ref.ndim :])
     if out is None and not vector:
@@ -201,54 +201,43 @@ class _Declaration:
                         geometries = dict.fromkeys(
                             geometry
                             for cc in ((10, 0), (10, 7))
-                            for geometry in _limits._tma_configs(mask, cc, sizes[dtype])
+                            for geometry in _config._tma_configs(mask, cc, sizes[dtype])
                         )
                         configs = [(0, 0, *geometry) for geometry in geometries]
                         if None in mask and True not in mask:
-                            # Emit every alignment fallback used by ATen, plus
-                            # the larger-work-per-thread variant for SM107.
-                            max_vec = min(
-                                _limits._MAX_VECTOR_ELEMENTS,
-                                _limits._VECTOR_BYTES // sizes[out_dtype],
-                            )
-                            for vec in (1, 2, 4, 8):
-                                if vec <= max_vec:
+                            # Match both architecture widths and every alignment fallback.
+                            for width, block, input_budget in (
+                                (
+                                    _config._MAX_VECTOR_BYTES,
+                                    _config._THREADS_PER_BLOCK,
+                                    _config._VECTOR_INPUT_BYTES_PER_THREAD,
+                                ),
+                                (
+                                    _config._VECTOR_BYTES,
+                                    _config._SM100_VECTOR_THREADS,
+                                    _config._SM100_VECTOR_INPUT_BYTES_PER_THREAD,
+                                ),
+                            ):
+                                max_vec = min(
+                                    _config._MAX_VECTOR_ELEMENTS,
+                                    width // max(sizes[dtype], sizes[out_dtype]),
+                                )
+                                for vec in (1, 2, 4, 8):
+                                    if vec > max_vec or (
+                                        vec == 1 and block != _config._THREADS_PER_BLOCK
+                                    ):
+                                        continue
                                     configs.append(
                                         (
                                             1 if vec == 1 else vec * sizes[dtype],
-                                            _limits._UNROLLED_EPT
+                                            _config._UNROLLED_EPT
                                             if vec == 1
-                                            else _limits._DEFAULT_VECTOR_EPT,
+                                            else input_budget // sizes[dtype],
                                             0,
-                                            _limits._THREADS_PER_BLOCK,
-                                            0,
-                                        )
-                                    )
-                            for vec in (2, 4, 8):
-                                if vec <= max_vec:
-                                    configs.append(
-                                        (
-                                            vec * sizes[dtype],
-                                            max(
-                                                _limits._DEFAULT_VECTOR_EPT,
-                                                _limits._SM100_VECTOR_BYTES_PER_THREAD
-                                                // max(sizes[dtype], sizes[out_dtype]),
-                                            ),
-                                            0,
-                                            _limits._SM100_VECTOR_THREADS,
+                                            block,
                                             0,
                                         )
                                     )
-                            configs.append(
-                                (
-                                    _limits._MAX_VECTOR_ELEMENTS * sizes[dtype],
-                                    _limits._VECTOR_INPUT_BYTES_PER_THREAD
-                                    // sizes[dtype],
-                                    0,
-                                    _limits._THREADS_PER_BLOCK,
-                                    0,
-                                )
-                            )
                         for vector_bytes, vector_ept, box, block, stages in configs:
                             points.append(
                                 {
@@ -371,31 +360,25 @@ def declarations() -> list[_Declaration]:
 
 _CPP_HELPERS = (
     f"""
-constexpr int kPointwiseMinAlignment = {_limits._MIN_ALIGNMENT};
-constexpr int kPointwiseTmaAlignment = {_limits._TMA_ALIGNMENT};
-constexpr int kPointwiseVectorBytes = {_limits._VECTOR_BYTES};
-constexpr int kPointwiseMaxVectorBytes = {_limits._MAX_VECTOR_BYTES};
-constexpr int kPointwiseMaxVectorElements = {_limits._MAX_VECTOR_ELEMENTS};
-constexpr int kPointwiseVectorEpt = {_limits._DEFAULT_VECTOR_EPT};
-constexpr int kPointwiseUnrolledEpt = {_limits._UNROLLED_EPT};
-constexpr int kPointwiseInputBytesPerThread = {_limits._VECTOR_INPUT_BYTES_PER_THREAD};
-constexpr int64_t kPointwiseSm107MinIOBytes = {_limits._SM107_MIN_IO_BYTES};
-constexpr int kPointwiseBox = {_limits._TMA_BOX_SIDE};
-constexpr int kPointwiseThreads = {_limits._THREADS_PER_BLOCK};
-constexpr int kPointwiseBf16MinStages = {_limits._TMA_BF16_MIN_STAGES};
-constexpr int64_t kPointwiseLargeInputBytes = {_limits._TMA_LARGE_INPUT_BYTES};
-constexpr int kPointwiseSm107LargeBox = {_limits._TMA_SM107_LARGE_BOX};
-constexpr int kPointwiseLargeBytesPerThread = {_limits._TMA_LARGE_BYTES_PER_THREAD};
-constexpr int kPointwiseSm100VectorThreads = {_limits._SM100_VECTOR_THREADS};
-constexpr int kPointwiseSm100VectorBytesPerThread = {_limits._SM100_VECTOR_BYTES_PER_THREAD};
-constexpr int kPointwiseSm100Transpose[] = {{{", ".join(map(str, _limits._TMA_SM100_TRANSPOSE))}}};
-constexpr int kPointwiseSm107Transpose[] = {{{", ".join(map(str, _limits._TMA_SM107_TRANSPOSE))}}};
-constexpr int kPointwiseSm100Pointwise[] = {{{", ".join(map(str, _limits._TMA_SM100_POINTWISE))}}};
-constexpr int kPointwiseSm100LargePointwise[] = {{{", ".join(map(str, _limits._TMA_SM100_LARGE_POINTWISE))}}};
-constexpr int kPointwiseSm107Pointwise[] = {{{", ".join(map(str, _limits._TMA_SM107_POINTWISE))}}};
-constexpr int kPointwiseSmemAlignment = {_limits._SMEM_ALIGNMENT};
-constexpr int kPointwiseBarrierBytes = {_limits._BARRIER_BYTES};
-constexpr int kPointwiseMaxGridYZ = {_limits._MAX_GRID_YZ};
+constexpr int kPointwiseMinAlignment = {_config._MIN_ALIGNMENT};
+constexpr int kPointwiseTmaAlignment = {_config._TMA_ALIGNMENT};
+constexpr int kPointwiseVectorBytes = {_config._VECTOR_BYTES};
+constexpr int kPointwiseMaxVectorBytes = {_config._MAX_VECTOR_BYTES};
+constexpr int kPointwiseMaxVectorElements = {_config._MAX_VECTOR_ELEMENTS};
+constexpr int kPointwiseUnrolledEpt = {_config._UNROLLED_EPT};
+constexpr int kPointwiseInputBytesPerThread = {_config._VECTOR_INPUT_BYTES_PER_THREAD};
+constexpr int kPointwiseSm100InputBytesPerThread = {_config._SM100_VECTOR_INPUT_BYTES_PER_THREAD};
+constexpr int kPointwiseBox = {_config._TMA_BOX_SIDE};
+constexpr int kPointwiseThreads = {_config._THREADS_PER_BLOCK};
+constexpr int kPointwiseBf16MinStages = {_config._TMA_BF16_MIN_STAGES};
+constexpr int kPointwiseSm100VectorThreads = {_config._SM100_VECTOR_THREADS};
+constexpr int kPointwiseSm100Transpose[] = {{{", ".join(map(str, _config._TMA_SM100_TRANSPOSE))}}};
+constexpr int kPointwiseSm107Transpose[] = {{{", ".join(map(str, _config._TMA_SM107_TRANSPOSE))}}};
+constexpr int kPointwiseSm100Pointwise[] = {{{", ".join(map(str, _config._TMA_SM100_POINTWISE))}}};
+constexpr int kPointwiseSm107Pointwise[] = {{{", ".join(map(str, _config._TMA_SM107_POINTWISE))}}};
+constexpr int kPointwiseSmemAlignment = {_config._SMEM_ALIGNMENT};
+constexpr int kPointwiseBarrierBytes = {_config._BARRIER_BYTES};
+constexpr int kPointwiseMaxGridYZ = {_config._MAX_GRID_YZ};
 """
     + r"""
 // Mirrors _axes and the shared _layout_config/_tma2d_config eligibility rules.
@@ -479,16 +462,9 @@ PointwiseTmaConfig pointwise_tma_config(
     const int* tuning = minor == 7
         ? (transpose_only ? kPointwiseSm107Transpose : kPointwiseSm107Pointwise)
         : (transpose_only ? kPointwiseSm100Transpose : kPointwiseSm100Pointwise);
-    if (minor != 7 && !transpose_only && cfg.rows * cfg.cols * ref.element_size() >= kPointwiseLargeInputBytes)
-      tuning = kPointwiseSm100LargePointwise;
     cfg.box = tuning[0]; cfg.block = tuning[1]; cfg.stages = tuning[2];
     if (ref.element_size() == 2) cfg.stages = std::max(cfg.stages, kPointwiseBf16MinStages);
-    if (minor == 7 && transpose_only && cfg.rows * cfg.cols * ref.element_size() >= kPointwiseLargeInputBytes &&
-        cfg.rows % kPointwiseSm107LargeBox == 0 && cfg.cols % kPointwiseSm107LargeBox == 0) {
-      cfg.box = kPointwiseSm107LargeBox;
-      cfg.block = cfg.box * cfg.box * ref.element_size() / kPointwiseLargeBytesPerThread;
-      cfg.stages = 1;
-    } else if (cfg.rows % cfg.box != 0 || cfg.cols % cfg.box != 0) {
+    if (cfg.rows % cfg.box != 0 || cfg.cols % cfg.box != 0) {
       cfg.box = kPointwiseBox; cfg.block = kPointwiseThreads;
       if (cfg.rows % cfg.box != 0 || cfg.cols % cfg.box != 0) return cfg;
     }
@@ -500,10 +476,9 @@ PointwiseTmaConfig pointwise_tma_config(
   if (vector) {
     const auto input_bytes = ntma * ref.element_size();
     const auto output_bytes = c10::elementSize(result_dt);
-    const bool large = minor == 7 && ref.numel() * (input_bytes + output_bytes) >= kPointwiseSm107MinIOBytes;
-    int vec = std::min<int>(kPointwiseMaxVectorElements, kPointwiseVectorBytes / output_bytes);
-    if (large) vec = std::min<int>(kPointwiseMaxVectorElements,
-        kPointwiseMaxVectorBytes / std::max<size_t>(output_bytes, ref.element_size()));
+    const int width = minor == 7 ? kPointwiseMaxVectorBytes : kPointwiseVectorBytes;
+    int vec = std::min<int>(kPointwiseMaxVectorElements,
+        width / std::max<size_t>(output_bytes, ref.element_size()));
     auto aligned = [&](int width) {
       return (!out || reinterpret_cast<uintptr_t>(out->const_data_ptr()) % (width * output_bytes) == 0) &&
           std::all_of(inputs.begin(), inputs.end(), [=](const auto& t) {
@@ -512,18 +487,11 @@ PointwiseTmaConfig pointwise_tma_config(
     };
     while (vec > 1 && !aligned(vec)) vec /= 2;
     cfg.vector_bytes = vec == 1 ? 1 : vec * ref.element_size();
-    cfg.vector_ept = vec == 1 ? kPointwiseUnrolledEpt : kPointwiseVectorEpt;
-    if (vec > 1 && minor != 7) {
-      cfg.block = kPointwiseSm100VectorThreads;
-      cfg.vector_ept = std::max<int>(kPointwiseVectorEpt,
-          kPointwiseSm100VectorBytesPerThread / std::max<size_t>(ref.element_size(), output_bytes));
-    }
-    if (large && vec == kPointwiseMaxVectorElements) {
-      size_t rounded = 1;
-      while (rounded < input_bytes) rounded *= 2;
-      auto ept = kPointwiseInputBytesPerThread / rounded;
-      if (ept >= kPointwiseVectorEpt) cfg.vector_ept = ept;
-    }
+    size_t rounded = 1;
+    while (rounded < input_bytes) rounded *= 2;
+    const int input_budget = minor == 7 ? kPointwiseInputBytesPerThread : kPointwiseSm100InputBytesPerThread;
+    cfg.vector_ept = vec == 1 ? kPointwiseUnrolledEpt : input_budget / rounded;
+    if (vec > 1 && minor != 7) cfg.block = kPointwiseSm100VectorThreads;
   }
   return cfg;
 }

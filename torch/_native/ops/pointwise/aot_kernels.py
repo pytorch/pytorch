@@ -8,7 +8,7 @@ import cutlass
 import cutlass.cute as cute
 
 from . import kernel, ops
-from ._limits import _MIN_ALIGNMENT, _TMA_ALIGNMENT
+from ._config import _MIN_ALIGNMENT, _TMA_ALIGNMENT
 
 
 class _AotTma:

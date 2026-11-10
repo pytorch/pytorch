@@ -19,8 +19,7 @@ from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from ...utils import capability as cap
-from ._layout import _layout_config, _OperandLayout, _TmaConfig
-from ._limits import (
+from ._config import (
     _FP16_ELEMENTS_PER_BANK,
     _FP16_LANES_PER_GROUP,
     _FP32_LANES_PER_GROUP,
@@ -31,8 +30,10 @@ from ._limits import (
     _SWIZZLE_BASE_LOG2,
     _SWIZZLE_SHIFT,
     _TMA_ALIGNMENT,
+    _VECTOR_MIN_RESIDENT_THREADS,
     _WARP_SIZE,
 )
+from ._layout import _layout_config, _OperandLayout, _TmaConfig
 
 
 if TYPE_CHECKING:
@@ -323,6 +324,10 @@ class _ElementwiseScalarVector(_ElementwiseTma2D):
         self.kernel(mIns, mOut, const0, const1, const2).launch(
             grid=[cute.ceil_div(mOut.shape[0], self.block * self.ept), 1, 1],
             block=[self.block, 1, 1],
+            # Two-argument launch bounds give the compiler a 64-register budget.
+            max_number_threads=[self.block, 1, 1],
+            min_blocks_per_mp=_VECTOR_MIN_RESIDENT_THREADS // self.block,
+            preferred_smem_carveout=0,  # No shared memory; avoid an export-time GPU query.
             stream=stream,
         )
 

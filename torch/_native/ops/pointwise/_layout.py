@@ -4,17 +4,15 @@ from __future__ import annotations
 import math
 from typing import NamedTuple
 
-from ._limits import (
+from ._config import (
     _BARRIER_BYTES,
-    _DEFAULT_VECTOR_EPT,
     _MAX_GRID_YZ,
     _MAX_INDEX,
     _MAX_VECTOR_BYTES,
     _MAX_VECTOR_ELEMENTS,
     _MIN_ALIGNMENT,
-    _SM100_VECTOR_BYTES_PER_THREAD,
+    _SM100_VECTOR_INPUT_BYTES_PER_THREAD,
     _SM100_VECTOR_THREADS,
-    _SM107_MIN_IO_BYTES,
     _SMEM_ALIGNMENT,
     _THREADS_PER_BLOCK,
     _TILES_PER_BLOCK,
@@ -53,9 +51,7 @@ def _tma_geometry(
     cols: int,
 ) -> tuple[int, int, int] | None:
     if element_bytes in (2, 4):
-        for box, block, stages in _tma_configs(
-            transposed, cc, element_bytes, rows * cols
-        ):
+        for box, block, stages in _tma_configs(transposed, cc, element_bytes):
             if rows % box == 0 and cols % box == 0:
                 return box, block, stages
     return None
@@ -105,34 +101,25 @@ def _scalar_vector_config(
         return None
     n = math.prod(shape)
     input_bytes = sum(t.element_bytes for t in tensors)
-    # Match CUDALoops.cuh: default output vector budget, wider SM107 budget,
-    # pointer-alignment cap, then the 128-input-bytes/thread policy at vec=8.
-    large = cc == (10, 7) and n * (input_bytes + out_bytes) >= _SM107_MIN_IO_BYTES
-    vec = min(_MAX_VECTOR_ELEMENTS, _VECTOR_BYTES // out_bytes)
-    if large:
-        vec = min(
-            _MAX_VECTOR_ELEMENTS,
-            _MAX_VECTOR_BYTES // max(out_bytes, *(t.element_bytes for t in tensors)),
-        )
+    # Fixed architecture budgets scale work per thread with the input dtype.
+    input_budget = (
+        _VECTOR_INPUT_BYTES_PER_THREAD
+        if cc == (10, 7)
+        else _SM100_VECTOR_INPUT_BYTES_PER_THREAD
+    )
+    vector_bytes = _MAX_VECTOR_BYTES if cc == (10, 7) else _VECTOR_BYTES
+    vec = min(
+        _MAX_VECTOR_ELEMENTS,
+        vector_bytes // max(out_bytes, *(t.element_bytes for t in tensors)),
+    )
     while vec > 1 and (
         output_address % (vec * out_bytes) != 0
         or any(t.address_mod % (vec * t.element_bytes) != 0 for t in tensors)
     ):
         vec //= 2
-    ept = _UNROLLED_EPT if vec == 1 else _DEFAULT_VECTOR_EPT
-    block = _THREADS_PER_BLOCK
-    if vec > 1 and cc != (10, 7):
-        block = _SM100_VECTOR_THREADS
-        ept = max(
-            _DEFAULT_VECTOR_EPT,
-            _SM100_VECTOR_BYTES_PER_THREAD
-            // max(out_bytes, *(t.element_bytes for t in tensors)),
-        )
-    if large and vec == _MAX_VECTOR_ELEMENTS:
-        rounded_bytes = 1 << (input_bytes - 1).bit_length()
-        candidate = _VECTOR_INPUT_BYTES_PER_THREAD // rounded_bytes
-        if candidate >= _DEFAULT_VECTOR_EPT:
-            ept = candidate
+    rounded_bytes = 1 << (input_bytes - 1).bit_length()
+    ept = _UNROLLED_EPT if vec == 1 else input_budget // rounded_bytes
+    block = _SM100_VECTOR_THREADS if vec > 1 and cc != (10, 7) else _THREADS_PER_BLOCK
     # Flat views let the last block handle a scalar tail without padding storage.
     view = ((n,), (1,))
     return _TmaConfig(
