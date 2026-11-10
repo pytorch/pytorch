@@ -195,9 +195,11 @@ class TestExportPythonFile(_ExportPythonTestCase):
         self.assertEqual(_captured_artifact(text, "scaled.py"), artifact)
 
     def test_a_capture_that_is_not_one_graph_is_refused(self):
-        artifact, _ = self._artifact("breaks", torch.randn(4), fullgraph=False)
-        with self.assertRaisesRegex(PrecompileError, "is not one graph"):
-            _exported_file(artifact)
+        x = torch.randn(4)
+        for backend in ("inductor", "eager"):
+            artifact, _ = self._artifact("breaks", x, fullgraph=False, backend=backend)
+            with self.assertRaisesRegex(PrecompileError, "is not one graph"):
+                _exported_file(artifact)
 
     def test_a_make_fx_capture_is_refused(self):
         artifact, _ = self._artifact("scaled", torch.randn(8), tracer=MakeFxTracer())
