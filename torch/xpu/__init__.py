@@ -107,7 +107,10 @@ def _parse_visible_devices(strict=False) -> list[int]:
             formats (e.g. COMPOSITE-style ``"0.0,0.1"``).  If ``False``
             (default), returns an empty list instead.
     """
-    if os.getenv("ONEAPI_DEVICE_SELECTOR") is not None:
+    var = os.getenv("ONEAPI_DEVICE_SELECTOR")
+    if var is not None:
+        if strict:
+            raise ValueError(f"Unsupported ONEAPI_DEVICE_SELECTOR format: '{var}'. Please unset this environment variable.")
         return []
     var = os.getenv("ZE_AFFINITY_MASK")
     if var is None:
