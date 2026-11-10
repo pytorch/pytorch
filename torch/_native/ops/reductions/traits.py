@@ -1,6 +1,7 @@
 # Reusable CuteDSL reduction traits and cross-thread helpers. leaf creates a one-element
 # accumulator, combine merges accumulators, and reduce performs a serial update. Tree folds
-# use leaf/combine, so leaf must include every element transform. Other names mirror
+# use leaf/combine, so leaf must include every element transform. has_combine_equal opts a
+# trait into combine_equal, a closed-form merge of equal-count states. Other names mirror
 # SharedReduceOps.h. Accumulator dtypes provide their identities. Scalar conditionals lower
 # only inside cute.jit methods; cute.arch.fmax suppresses NaNs, so traits handle them.
 
@@ -163,6 +164,8 @@ def _welford_denom(acc_dtype, nf, correction):
 class WelfordOps:
     # acc = (mean, m2, nf). `reduce` is the ONLINE Welford update and `combine` the PARALLEL Chan
     # merge -- deliberately different formulas. project divides m2 by the clamped dof.
+    # has_combine_equal enables combine_equal's closed-form equal-count merges; a subclass
+    # that changes leaf, combine or the (mean, m2, nf) layout must set it to False.
     nfields = 3
     has_combine_equal = True
 
