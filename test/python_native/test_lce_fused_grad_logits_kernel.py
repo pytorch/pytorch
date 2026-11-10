@@ -25,9 +25,10 @@ def _reference(logits, row_scale, target, out_dtype):
     # same values in fp32: what is compared is the kernel, not the buffer's
     # rounding.
     logits = logits.float()
-    row_max = logits.amax(dim=1, keepdim=True)
-    e = (logits - row_max).exp()
-    row_sum = e.sum(dim=1)
+    with torch.backends.python_native.cutedsl.disabled():
+        row_max = logits.amax(dim=1, keepdim=True)
+        e = (logits - row_max).exp()
+        row_sum = e.sum(dim=1)
     g = e * (row_scale / row_sum).unsqueeze(1)
     rows = torch.arange(logits.shape[0], device=logits.device)
     g[rows, target] -= row_scale
@@ -93,7 +94,7 @@ class TestFusedGradLogitsKernel(TestCase):
         )
         if dtype is torch.float32:
             # The kernel's exponential is the hardware approximation and its
-            # row sum reduces in a different order than torch's.
+            # row sum reduces in a different order than ATen's.
             self.assertEqual(g, want_g, atol=1e-6, rtol=1e-5)
         else:
             self.assertEqual(g, want_g)

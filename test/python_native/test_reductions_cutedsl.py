@@ -14,7 +14,9 @@ from torch._native.ops.reductions import cutedsl_impl, overrides as ov
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    ops,
 )
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
@@ -33,6 +35,23 @@ _TOL = {
     torch.bfloat16: {"atol": 1e-2, "rtol": 1e-2},
     torch.float32: {"atol": 1e-4, "rtol": 1e-4},
 }
+_OVERRIDDEN = ("sum", "mean", "amax", "amin", "prod")
+
+
+def _overrides_inactive():
+    """Why the overrides serve nothing here, or None when they are active."""
+    # `cu.register_op_override` drops every registration when the runtime is
+    # missing, disabled, or not known-good, so these tests would find no overrides.
+    if (
+        not cu.runtime_available()
+        or cu.check_native_jit_disabled()
+        or not cu._version_is_ok()
+    ):
+        return "CuTeDSL runtime unavailable, disabled, or at an unsupported version"
+    major = torch.cuda.get_device_capability()[0]
+    if torch.version.hip or major not in ov._ARCH_MAJORS:
+        return "the overrides serve SM90 and SM100-family CUDA GPUs only"
+    return None
 
 
 class TestCuTeDSLReductionWiring(TestCase):
@@ -40,19 +59,9 @@ class TestCuTeDSLReductionWiring(TestCase):
 
     def setUp(self):
         super().setUp()
-        # `cu.register_op_override` drops every registration when the runtime is
-        # missing, disabled, or not known-good, so these tests would find no overrides.
-        if (
-            not cu.runtime_available()
-            or cu.check_native_jit_disabled()
-            or not cu._version_is_ok()
-        ):
-            self.skipTest(
-                "CuTeDSL runtime unavailable, disabled, or at an unsupported version"
-            )
-        major = torch.cuda.get_device_capability()[0]
-        if torch.version.hip or major not in ov._ARCH_MAJORS:
-            self.skipTest("the overrides serve SM90 and SM100-family CUDA GPUs only")
+        reason = _overrides_inactive()
+        if reason is not None:
+            self.skipTest(reason)
         # The tests count served calls in replay entries, which sum and prod calls served
         # first by register_to_dispatch's inner-tree family do not add.
         if cutedsl_impl._INNER_TREE_ENABLED:
@@ -107,7 +116,8 @@ class TestCuTeDSLReductionWiring(TestCase):
         self.assertEqual(self._run(lambda: torch.sum(xd, dim=-1))[1], 0)
 
     def test_unregistered_overloads_fall_back(self, device):
-        """Leave full prod and the out= overloads, which have no override, to ATen."""
+        """Leave full prod and the dim-taking out= overloads, which have no override, to
+        ATen (aten::sum.out is served; see test_sum_out_is_served)."""
         x = torch.rand(64, 96, device=device) + 0.5
         out = torch.empty(64, device=device)
         self.assertEqual(self._run(lambda: torch.prod(x))[1], 0)
@@ -363,7 +373,43 @@ class TestCuTeDSLReductionWiring(TestCase):
         self.assertEqual(out, ref, **_TOL[torch.float32])
 
 
+class TestCuTeDSLReductionOpInfo(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        super().setUp()
+        reason = _overrides_inactive()
+        if reason is not None:
+            self.skipTest(reason)
+
+    @ops(
+        [op for op in op_db if op.name in _OVERRIDDEN],
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32),
+    )
+    def test_samples_match_aten(self, device, dtype, op):
+        """Match ATen on every OpInfo sample of the overridden operations: amax and amin
+        exactly, prod to a relative tolerance, and sum and mean to _TOL."""
+        from torch._native.ops.reductions import kernel_general as kg
+
+        tolerance = _TOL[dtype]
+        if op.name in ("amax", "amin"):
+            tolerance = {"atol": 0, "rtol": 0}
+        elif op.name == "prod":
+            tolerance = {"atol": 0, "rtol": tolerance["rtol"]}
+        # A served call adds one replay entry for its metadata, so start from none.
+        kg._REPLAYS.clear()
+        for sample in op.sample_inputs(device, dtype):
+            got = op(sample.input, *sample.args, **sample.kwargs)
+            with _disabled():
+                ref = op(sample.input, *sample.args, **sample.kwargs)
+            self.assertEqual(got, ref, **tolerance)
+        # Sum and prod calls served by the inner-tree family add no replay entries.
+        if op.name not in ("sum", "prod") or not cutedsl_impl._INNER_TREE_ENABLED:
+            self.assertGreater(len(kg._REPLAYS), 0)
+
+
 instantiate_device_type_tests(TestCuTeDSLReductionWiring, globals(), only_for="cuda")
+instantiate_device_type_tests(TestCuTeDSLReductionOpInfo, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()

@@ -112,9 +112,10 @@ def one_thread_row_ok(
 
 # --- INNER-TREE ORDER (opt-in) --- Unlike launch-shape orders, this fixes the DAG from N,
 # making it hash-pinnable, and covers every N to prevent silent fallback. It costs
-# 0.92-1.41x the rolled fold and requires per-N compilation. Its independent env var avoids
-# affecting upstream kernels, which register first. `1` prefers the order and warns once when
-# a call cannot use it; `strict` raises instead, as an explicit order= argument does.
+# 0.92-1.41x the rolled fold and requires per-N compilation. Its independent env var,
+# inner_tree_plan._INNER_TREE_ENV (PYTORCH_NATIVE_INNER_TREE), avoids affecting upstream
+# kernels, which register first. `1` prefers the order and warns once when a call cannot use
+# it; `strict` raises instead, as an explicit order= argument does.
 _INNER_TREE_STRICT = "strict"
 # Block size for both one-thread-per-row shapes and fixed multirow carry cap.
 _MULTIROW_ROWS_PER_BLOCK = 128

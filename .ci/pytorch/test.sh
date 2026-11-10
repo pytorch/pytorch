@@ -494,6 +494,9 @@ PYTHON_NATIVE_CUTEDSL_SUITES=(
   python_native/test_tile_datapath
   python_native/test_reductions_cutedsl
 )
+# test_reductions and test_ops checks of the CuTeDSL sum, mean, amax, amin and prod overrides.
+PYTHON_NATIVE_REDUCTIONS_FILTER='test_ref_ and not large_input and (_sum_ or _mean_ or _amax_ or _amin_ or _prod_)'
+PYTHON_NATIVE_REDUCTION_OPS_FILTER='(_sum_cuda or _mean_cuda or _amax_cuda or _amin_cuda or _prod_cuda) and not scatter_reduce and not index_reduce and not cartesian and not var_mean and not std_mean and not number_mean'
 
 test_python_smoke() {
   # Smoke tests for H100/B200
@@ -504,8 +507,8 @@ test_python_smoke() {
   # test_ops checks (selected by name, as in test_python_smoke_b200) run with the sum,
   # mean, amax, amin and prod overrides active on SM90 where their conditions accept a
   # call; declined calls stay on ATen.
-  time python test/run_test.py --include test_reductions -k "test_ref_ and not large_input and (_sum_ or _mean_ or _amax_ or _amin_ or _prod_)" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include test_ops -k "(_sum_cuda or _mean_cuda or _amax_cuda or _amin_cuda or _prod_cuda) and not scatter_reduce and not index_reduce and not cartesian and not var_mean and not std_mean and not number_mean" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_reductions -k "$PYTHON_NATIVE_REDUCTIONS_FILTER" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_ops -k "$PYTHON_NATIVE_REDUCTION_OPS_FILTER" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_triton_kernels -k test_tma_descriptor_subclass_codegen $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_cuda -k test_graph_capture_cublas_workspace $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
@@ -625,11 +628,11 @@ test_python_smoke_b200() {
   # The CuTeDSL runtime is installed here, so the selected test_reductions checks run
   # with the sum, mean, amax, amin and prod overrides active where their conditions
   # accept a call; declined calls stay on ATen.
-  time python test/run_test.py --include test_reductions -k "test_ref_ and not large_input and (_sum_ or _mean_ or _amax_ or _amin_ or _prod_)" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_reductions -k "$PYTHON_NATIVE_REDUCTIONS_FILTER" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # Their OpInfo checks too. Unlike linear_cross_entropy, these overrides replace core
   # ops that have no DSL OpInfo variants (OPINFO_RESTRICT_TO_DSL=cutedsl would collect
   # none), so select the standard OpInfos by name.
-  time python test/run_test.py --include test_ops -k "(_sum_cuda or _mean_cuda or _amax_cuda or _amin_cuda or _prod_cuda) and not scatter_reduce and not index_reduce and not cartesian and not var_mean and not std_mean and not number_mean" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_ops -k "$PYTHON_NATIVE_REDUCTION_OPS_FILTER" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 
   time python test/run_test.py --include test_linalg -k "mm or addmv" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # Dynamically discover the DSL override tests so new ones are picked up. This

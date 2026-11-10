@@ -8,6 +8,7 @@ from unittest import mock
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -146,6 +147,8 @@ class TestKernelXcta(TestCase):
 
 
 class TestXctaConfig(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "case,updates,subrow_target",
         [

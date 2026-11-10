@@ -213,8 +213,9 @@ class TestRmsNormJit(TestCase):
         actual_dx, actual_dw = quack_rmsnorm_bwd(dy, x, rstd, w, [n], compute_dw)
         xf = x.float().requires_grad_()
         wf = w.float().requires_grad_()
-        y = xf * (xf.square().mean(-1, keepdim=True) + 1e-5).rsqrt() * wf
-        dx, dw = torch.autograd.grad(y, (xf, wf), dy.float())
+        with torch.backends.python_native.cutedsl.disabled():
+            y = xf * (xf.square().mean(-1, keepdim=True) + 1e-5).rsqrt() * wf
+            dx, dw = torch.autograd.grad(y, (xf, wf), dy.float())
         tol = _TOLERANCES[dtype]
         self.assertEqual(actual_dx, dx.to(dtype), atol=tol, rtol=tol)
         self.assertEqual(

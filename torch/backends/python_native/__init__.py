@@ -244,8 +244,8 @@ class PythonNativeModule(PropModule):
 
         Example::
 
-            ops = torch.backends.python_native.get_dsl_operations("triton")
-            print(ops)  # ['triton_to_mxfp8_dim0', ...]
+            ops = torch.backends.python_native.get_dsl_operations("cutedsl")
+            print(ops)  # [..., 'sum.dim_IntList', ...]
         """
         from torch._native.registry import get_dsl_operations
 
@@ -256,7 +256,8 @@ class PythonNativeModule(PropModule):
 
         Names match registered op symbols exactly: non-default overloads need their
         suffix (``"sum.dim_IntList"``, not ``"sum"``), and default overloads use the
-        plain name (``"amax"``, not ``"amax.default"``).
+        plain name (``"amax"``, not ``"amax.default"``). ``get_dsl_operations`` lists
+        the exact names a DSL registered, e.g. ``get_dsl_operations("cutedsl")``.
 
         Args:
             *op_symbols (str): Names of operations to disable.

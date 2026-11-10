@@ -225,10 +225,8 @@ class TestKernelColTile(TestCase):
                 got = ct.reduce_col_tile_2out(trait, key, x, out)
             else:
                 got = (ct.reduce_col_tile(trait, key, x, torch.float32),)
-        # Plan keys end with TileReduce.cache_sig; locate col_group by varying only it.
-        op = (trait, cutlass.Float32, "col", 1)
-        sigs = [tile.TileReduce(*op, vec=1, col_group=g).cache_sig for g in (4, 8)]
-        (slot,) = (i - len(sigs[0]) for i, (a, b) in enumerate(zip(*sigs)) if a != b)
+        # Plan keys end with TileReduce.cache_sig.
+        slot = _col_sig_slot("col_group", 4, 8)
         groups = {k[slot] for k in ct._CACHE if k[:2] == ("coltile", key)}
         self.assertEqual(groups, {group})
         with torch.backends.python_native.cutedsl.disabled():
