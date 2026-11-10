@@ -70,6 +70,10 @@ echo Checking that MKL is available
 %PYTHON_EXEC% -c "import torch; exit(0 if torch.backends.mkl.is_available() else 1)"
 if ERRORLEVEL 1 exit /b 1
 
+echo Checking that MKL has the LAPACK DLASD2 fix
+%PYTHON_EXEC% %PYTORCH_ROOT%\.ci\pytorch\smoke_test\smoke_test.py --mkl-version-only
+if ERRORLEVEL 1 exit /b 1
+
 if "%NVIDIA_GPU_EXISTS%" == "0" (
     echo "Skip CUDA tests for machines without a Nvidia GPU card"
     goto end
