@@ -10,6 +10,7 @@ import tempfile
 import textwrap
 import unittest
 import uuid
+import warnings
 
 import torch
 from torch.compiler import PrecompileError
@@ -168,11 +169,20 @@ class TestExportPython(_ExportPythonTestCase):
         tail = lines[lines.index(_CODE_END) + 1 : -1]
         self.assertTrue(all(not line or line.startswith("#") for line in tail), tail)
 
+    def test_only_a_file_this_process_did_not_write_gets_the_exec_warning(self):
+        path = os.path.join(self.dir, "scaled.py")
+        with self.assertNoLogs("torch._precompile", "WARNING"):
+            self._export("scaled", path)(torch.randn(8))
+        with self.assertLogs("torch._precompile", "WARNING") as logs:
+            self._export("scaled", path)(torch.randn(8))
+        self.assertIn("about to EXEC", logs.output[0])
+
     def test_a_graph_break_is_refused(self):
         path = os.path.join(self.dir, "breaks.py")
         with self.assertRaisesRegex(PrecompileError, "does not trace as one graph"):
             self._export("breaks", path)(torch.randn(4))
         self.assertFalse(os.path.exists(path))
+        self.assertFalse(os.path.exists(path + ".cache"))
 
     def test_a_call_that_needs_a_backward_graph_is_refused(self):
         path = os.path.join(self.dir, "scaled.py")
@@ -181,6 +191,7 @@ class TestExportPython(_ExportPythonTestCase):
         with self.assertRaisesRegex(PrecompileError, "backward graph too"):
             run(x)
         self.assertFalse(os.path.exists(path))
+        self.assertFalse(os.path.exists(path + ".cache"))
         with torch.no_grad():
             self.assertEqual(run(x), (x * 2.0).relu())
             with no_compilation():
@@ -481,11 +492,19 @@ class TestExportPythonCUDA(_ExportPythonTestCase):
         # holds what it chose, served without compiling and without CUDA graphs.
         path = os.path.join(self.dir, "linear_relu.py")
         x, w = (torch.randn(256, 256, device="cuda") for _ in range(2))
-        with self.assertWarnsRegex(UserWarning, "CUDA graphs"):
+        # CUDA graphs stay off even where the process turns them on globally.
+        with (
+            torch._inductor.config.patch({"triton.cudagraphs": True}),
+            self.assertWarnsRegex(UserWarning, "CUDA graphs"),
+        ):
             out = self._export("linear_relu", path, mode="max-autotune")(x, w)
         self.assertEqual(out, (x @ w).relu(), atol=1e-3, rtol=1e-3)
         code = _graph_code(path)
         self.assertIn("'max_autotune': True", code)
+        # Serving the file it wrote is not a capture, so it does not warn.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            self._export("linear_relu", path, mode="max-autotune")
         # No CUDA graph partitions for the served file to call.
         self.assertIn("Runner(partitions=[])", code)
         torch.save((x, w, out), os.path.join(self.dir, "io.pt"))

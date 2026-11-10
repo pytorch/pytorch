@@ -128,7 +128,8 @@ def export_python(
             floating-point or complex tensor is held to a relative tolerance of at
             least 1e-3 (``torch._dynamo.config.repro_tolerance``) and an absolute one
             of 1e-3 of its largest finite magnitude: smaller differences are not
-            caught.
+            caught, so a tensor holding large sentinel values (a mask's ``-1e9``,
+            say) is checked only to 1e-3 of them.
             ``fn``'s outputs must be values ``assert_close`` compares. Tensor
             arguments are copied one by one, so arguments that alias each other (one
             tensor passed twice, or views of one tensor) do not alias in the eager
@@ -324,11 +325,13 @@ class _ExportedPython:
                     "turns on CUDA graphs (triton.cudagraphs), and a served file does "
                     "not run under them."
                 )
-            warnings.warn(
-                "export_python: a served file does not run under CUDA graphs, so the "
-                "capture leaves off the triton.cudagraphs that mode or options set.",
-                stacklevel=3,
-            )
+            if not os.path.exists(self._path):
+                warnings.warn(
+                    "export_python: a served file does not run under CUDA graphs, so "
+                    "the capture leaves off the triton.cudagraphs that mode or options "
+                    "set.",
+                    stacklevel=3,
+                )
         # torch.compile's own validation of option names and types; triton.cudagraphs
         # is already out, so none of its CUDA graph setup runs.
         self._inductor_config = torch._TorchCompileInductorWrapper(
@@ -401,7 +404,11 @@ class _ExportedPython:
             # An edit (or a missing cache) leaves nothing to accelerate: the edited
             # graph compiles the kernels its code defines.
             log.info("export_python: %s; serving it without the cache", stale)
-        return _runnable_from_pair(python_code, cache, _trusted=trusted)
+        from torch._inductor import config as inductor_config
+
+        # A served file never runs under CUDA graphs, whatever the process sets.
+        with inductor_config.patch({"triton.cudagraphs": False}):
+            return _runnable_from_pair(python_code, cache, _trusted=trusted)
 
     def _capture(self, *args: object, **kwargs: object) -> object:
         from torch._dynamo.exc import Unsupported
@@ -409,6 +416,7 @@ class _ExportedPython:
         os.makedirs(os.path.dirname(os.path.abspath(self._path)), exist_ok=True)
         # The precompile artifact the file is made from; its cache is the file's.
         artifact = f"{self._path}.capture"
+        written = f"{self._path}.{os.getpid()}.tmp"
         cap = capture(
             self._fn,
             artifact_path=artifact,
@@ -429,6 +437,8 @@ class _ExportedPython:
                             {
                                 "triton.autotune_at_compile_time": True,
                                 **self._inductor_config,
+                                # Off whatever the process sets: no file runs them.
+                                "triton.cudagraphs": False,
                             }
                         )
                     )
@@ -451,10 +461,15 @@ class _ExportedPython:
                     )
             with open(artifact, "rb") as f:
                 text = _exported_file(f.read().decode())
-            written = f"{self._path}.{os.getpid()}.tmp"
             with open(written, "wb") as f:
                 f.write(text.encode())
             os.replace(written, self._path)
+        except BaseException:
+            # Nothing serves without the file, so no half of it is left behind.
+            for leftover in (self._cache_path, written):
+                with contextlib.suppress(FileNotFoundError):
+                    os.remove(leftover)
+            raise
         finally:
             with contextlib.suppress(FileNotFoundError):
                 os.remove(artifact)
