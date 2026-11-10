@@ -254,21 +254,20 @@ class PythonNativeModule(PropModule):
     def disable_operations(self, *op_symbols: str):
         """Disable specific operations across all DSLs.
 
-        Names match registered op symbols exactly, including any overload (e.g.
-        ``"sum.dim_IntList"``); a bare ``"sum"`` matches no registration.
+        Names match registered op symbols exactly: non-default overloads need their
+        suffix (``"sum.dim_IntList"``, not ``"sum"``), and default overloads use the
+        plain name (``"amax"``, not ``"amax.default"``).
 
         Args:
             *op_symbols (str): Names of operations to disable.
 
         Example::
 
-            # Disable scaled matrix multiply across all DSLs
-            torch.backends.python_native.disable_operations("scaled_mm")
+            # Disable sum.dim_IntList overrides across all DSLs
+            torch.backends.python_native.disable_operations("sum.dim_IntList")
 
             # Disable multiple operations
-            torch.backends.python_native.disable_operations(
-                "scaled_mm", "flash_attention"
-            )
+            torch.backends.python_native.disable_operations("sum.dim_IntList", "amax")
         """
         deregister_op_overrides = _get_registry_functions()[0]
         deregister_op_overrides(disable_op_symbols=list(op_symbols))
@@ -282,9 +281,7 @@ class PythonNativeModule(PropModule):
         Example::
 
             # Re-enable previously disabled operations
-            torch.backends.python_native.enable_operations(
-                "scaled_mm", "flash_attention"
-            )
+            torch.backends.python_native.enable_operations("sum.dim_IntList", "amax")
         """
         reenable_op_overrides = _get_registry_functions()[1]
         reenable_op_overrides(enable_op_symbols=list(op_symbols))

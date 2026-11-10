@@ -680,12 +680,15 @@ class TestKernelRowTile(TestCase):
                 order="inner_tree",
                 ragged_vector=True,
             )
-        # A 16388-byte row stride would otherwise fail TMA's own stride check.
-        x, f32 = torch.randn(64, 4097, device="cuda"), [torch.float32]
-        with self.assertRaisesRegex(ValueError, "cannot use TMA"):
-            rt.reduce_row_tile(
-                trait, "ragged_tma", x, f32, use_tma=True, ragged_vector=True
-            )
+        # 4096 is whole and TMA-able; 4097 is ragged, and the ragged check must fire
+        # before TMA's own check rejects its 16388-byte row stride.
+        f32 = [torch.float32]
+        for n in (4096, 4097):
+            x = torch.randn(64, n, device="cuda")
+            with self.assertRaisesRegex(ValueError, "cannot use TMA"):
+                rt.reduce_row_tile(
+                    trait, "ragged_tma", x, f32, use_tma=True, ragged_vector=True
+                )
 
     @parametrize(
         "axis,kwargs,msg",
