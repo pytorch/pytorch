@@ -172,8 +172,7 @@ class LazyConstantVariableTests(TestCase):
             def __class__(self):
                 return types.BuiltinFunctionType
 
-        key = Key()
-        lazy = LazyVariableTracker.create(key, LocalSource("key"))
+        lazy = LazyVariableTracker.create(Key(), LocalSource("key"))
         self.assertFalse(lazy.is_hashable_lazy())
         self.assertFalse(lazy.is_realized())
 
