@@ -551,6 +551,9 @@ void VariableHooks::set_data(
   // hatch for changing a tensor's metadata regardless of its
   // `allow_tensor_metadata_change_` value, and the users are responsible for
   // ensuring this is the behavior they want.
+  // Releasing the old mode can run Python. Keep it alive until storage, keys,
+  // and any subclass metadata have all been replaced.
+  auto old_fake_mode = self.unsafeGetTensorImpl()->fake_tensor_mode();
   self.unsafeGetTensorImpl()->shallow_copy_from(new_data.getIntrusivePtr());
 }
 
