@@ -209,8 +209,9 @@ def lift_constants_pass(
         input_spec.kind == InputKind.CONSTANT_TENSOR for input_spec in input_specs
     )
 
-    placeholder_vals = (n.meta["val"] for n in gm.graph.nodes if n.op == "placeholder")
-    fake_mode = detect_fake_mode(tuple(placeholder_vals))
+    fake_mode = detect_fake_mode(
+        tuple(node.meta["val"] for node in gm.graph.nodes if node.op == "placeholder")
+    )
 
     first_user_input_loc, first_user_input = 0, next(iter(gm.graph.nodes))
     used_target_names = set()
