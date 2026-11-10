@@ -2456,6 +2456,29 @@ Arguments:
     multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
     master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. To bind an ephemeral port we recommend setting the port to 0 and reading ``.port``. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
     use_libuv (bool, optional): If True, use libuv for ``TCPServer`` backend. Default is True.
+    auth_cert (str, optional): Path to a PEM certificate chain (leaf first) for mutual certificate authentication. Keyword-only.
+    auth_key (str, optional): Path to the unencrypted PEM private key for ``auth_cert``. Keyword-only.
+    auth_ca (str, optional): Path to the PEM CA bundle used to verify the peer. Keyword-only.
+
+.. note:: Authentication is enabled when ``auth_cert``, ``auth_key`` and ``auth_ca`` are
+    all set (setting only some raises). If none of them is passed, all three are read from
+    ``TORCH_TCPSTORE_AUTH_CERT``, ``TORCH_TCPSTORE_AUTH_KEY`` and ``TORCH_TCPSTORE_AUTH_CA``;
+    passing any of them ignores the environment variables, and empty strings disable
+    authentication. Stores created internally, such as torchrun's agent store and
+    ``env://`` rendezvous, only read the environment variables, so set them for the launcher
+    too. Each connection starts with a challenge-response handshake that proves the peer
+    holds a certificate signed by the CA. Any such certificate is accepted in either role,
+    with no subject, purpose, CA:FALSE or revocation checks, so use a CA that only issues
+    certificates to trusted hosts. Keys and chain signatures must meet OpenSSL security
+    level 2 (e.g. RSA keys of at least 2048 bits, no SHA-1). Traffic after the handshake is
+    plaintext: an on-path attacker can read, modify or hijack the connection or relay the
+    handshake. Gloo and NCCL traffic remains unauthenticated. Only the libuv server supports
+    it, and it requires Linux and ``libcrypto.so.3`` (OpenSSL 3) at runtime. The server
+    signs on its event loop before verifying the client, so use EC keys: with large RSA
+    keys, unauthenticated connections are a cheap way to stall the server. Mismatched
+    configurations fail promptly only when both sides support authentication and the
+    server uses libuv; otherwise the client fails at the store timeout.
+
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
@@ -2476,7 +2499,10 @@ Example::
                       bool waitWorkers,
                       bool multiTenant,
                       std::optional<int> masterListenFd,
-                      bool useLibUV) {
+                      bool useLibUV,
+                      std::optional<std::string> authCert,
+                      std::optional<std::string> authKey,
+                      std::optional<std::string> authCa) {
             // gil_scoped_release is not safe as a call_guard in init.
             // https://github.com/pybind/pybind11/issues/5473
             py::gil_scoped_release nogil{};
@@ -2496,7 +2522,10 @@ Example::
                 .timeout = timeout,
                 .multiTenant = multiTenant,
                 .masterListenFd = masterListenFd,
-                .useLibUV = useLibUV};
+                .useLibUV = useLibUV,
+                .authCert = std::move(authCert),
+                .authKey = std::move(authKey),
+                .authCa = std::move(authCa)};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -2512,6 +2541,10 @@ Example::
           py::arg("multi_tenant") = false,
           py::arg("master_listen_fd") = py::none(),
           py::arg("use_libuv") = true,
+          py::kw_only(),
+          py::arg("auth_cert") = py::none(),
+          py::arg("auth_key") = py::none(),
+          py::arg("auth_ca") = py::none(),
           R"(Creates a new TCPStore.)")
       .def_property_readonly(
           "host",

@@ -6,6 +6,7 @@
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
+#include <torch/csrc/distributed/c10d/store/TCPStoreAuth.hpp>
 #include <torch/csrc/distributed/c10d/store/TCPStoreBackend.hpp>
 
 #include <chrono>
@@ -21,7 +22,9 @@ namespace detail {
 // Manages the lifecycle of a server daemon.
 class TCPServer {
  public:
-  static std::shared_ptr<TCPServer> start(const TCPStoreOptions& opts);
+  static std::shared_ptr<TCPServer> start(
+      const TCPStoreOptions& opts,
+      std::shared_ptr<const TCPStoreAuth> auth);
 
   std::uint16_t port() const noexcept {
     return port_;
@@ -29,8 +32,9 @@ class TCPServer {
 
   explicit TCPServer(
       std::uint16_t port,
-      std::unique_ptr<BackgroundThread>&& daemon)
-      : port_{port}, daemon_{std::move(daemon)} {}
+      std::unique_ptr<BackgroundThread>&& daemon,
+      std::shared_ptr<const TCPStoreAuth> auth)
+      : port_{port}, daemon_{std::move(daemon)}, auth_{std::move(auth)} {}
 
   std::string repr() const {
     return fmt::format("TCPServer(port={})", port_);
@@ -39,6 +43,7 @@ class TCPServer {
  private:
   std::uint16_t port_;
   std::unique_ptr<BackgroundThread> daemon_;
+  std::shared_ptr<const TCPStoreAuth> auth_;
 
   // We store weak references to all TCPServers for which the caller requested
   // multi-tenancy.
@@ -53,12 +58,14 @@ std::unordered_map<std::uint16_t, std::weak_ptr<TCPServer>>
 
 std::mutex TCPServer::cache_mutex_{};
 
-std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
-  auto startCore = [&opts]() {
-    auto daemon = opts.useLibUV ? create_libuv_tcpstore_backend(opts)
+std::shared_ptr<TCPServer> TCPServer::start(
+    const TCPStoreOptions& opts,
+    std::shared_ptr<const TCPStoreAuth> auth) {
+  auto startCore = [&opts, &auth]() {
+    auto daemon = opts.useLibUV ? create_libuv_tcpstore_backend(opts, auth)
                                 : create_tcpstore_backend(opts);
     daemon->start();
-    return std::make_shared<TCPServer>(daemon->port(), std::move(daemon));
+    return std::make_shared<TCPServer>(daemon->port(), std::move(daemon), auth);
   };
 
   std::shared_ptr<TCPServer> server{};
@@ -73,6 +80,12 @@ std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
       if (pos != cachedServers_.end()) {
         server = pos->second.lock();
         if (server != nullptr) {
+          TORCH_CHECK_WITH(
+              DistStoreError,
+              TCPStoreAuth::sameConfig(server->auth_.get(), auth.get()),
+              "multi_tenant TCPStore server on port ",
+              opts.port,
+              " was started with a different authentication configuration");
           return server;
         }
 
@@ -97,7 +110,8 @@ class TCPClient {
   static std::unique_ptr<TCPClient> connect(
       const SocketAddress& addr,
       const TCPStoreOptions& opts,
-      std::shared_ptr<Backoff> backoff);
+      std::shared_ptr<Backoff> backoff,
+      const TCPStoreAuth* auth);
 
   void sendRaw(uint8_t* data, size_t length) {
     try {
@@ -155,13 +169,18 @@ class TCPClient {
 std::unique_ptr<TCPClient> TCPClient::connect(
     const SocketAddress& addr,
     const TCPStoreOptions& opts,
-    std::shared_ptr<Backoff> backoff) {
+    std::shared_ptr<Backoff> backoff,
+    const TCPStoreAuth* auth) {
+  auto deadline = std::chrono::steady_clock::now() + opts.timeout;
   Socket socket = Socket::connect(
       addr.host,
       addr.port,
       SocketOptions{}
           .connect_timeout(opts.timeout)
           .connect_backoff(std::move(backoff)));
+  if (auth) {
+    auth->clientHandshake(socket.handle(), deadline);
+  }
 
   return std::make_unique<TCPClient>(std::move(socket));
 }
@@ -247,9 +266,22 @@ using detail::Socket;
 // removed from cpp and we construct the opts implicitly for users in the pybind
 // of TCPStore.
 TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
+    : TCPStore(
+          std::move(host),
+          opts,
+          detail::TCPStoreAuth::create(
+              opts.authCert,
+              opts.authKey,
+              opts.authCa)) {}
+
+TCPStore::TCPStore(
+    std::string host,
+    const TCPStoreOptions& opts,
+    std::shared_ptr<const detail::TCPStoreAuth> auth)
     : Store{opts.timeout},
       addr_{std::move(host)},
       numWorkers_{opts.numWorkers},
+      auth_{std::move(auth)},
       usingLibUv_{opts.useLibUV} {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__init);
 
@@ -260,13 +292,19 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
         "use_libuv was requested but PyTorch was built without libuv support, run with USE_LIBUV=0 to disable it.");
   }
 
+  TORCH_CHECK_WITH(
+      DistStoreError,
+      !auth_ || !opts.isServer || opts.useLibUV,
+      "TCPStore authentication requires the libuv backend (use_libuv=True, "
+      "or USE_LIBUV=1 for env:// and tcp:// initialization)");
+
   Socket::initialize();
 
   addr_.port = opts.port;
 
   if (opts.isServer) {
     try {
-      server_ = detail::TCPServer::start(opts);
+      server_ = detail::TCPServer::start(opts, auth_);
       // server successfully started
       C10D_DEBUG("The server has started on port = {}.", server_->port());
       addr_.port = server_->port();
@@ -311,7 +349,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   auto retry = 0;
   do {
     try {
-      client_ = detail::TCPClient::connect(addr_, opts, backoff);
+      client_ = detail::TCPClient::connect(addr_, opts, backoff, auth_.get());
       // TCP connection established
       C10D_DEBUG("TCP client connected to host {}:{}", addr_.host, addr_.port);
 
@@ -366,7 +404,9 @@ c10::intrusive_ptr<Store> TCPStore::clone() {
   opts.timeout = timeout_;
   opts.useLibUV = usingLibUv_;
 
-  return c10::make_intrusive<TCPStore>(addr_.host, opts);
+  // Reuse the parsed auth config instead of reading the environment again.
+  return c10::intrusive_ptr<Store>::unsafe_steal_from_new(
+      new TCPStore(addr_.host, opts, auth_));
 }
 
 void TCPStore::waitForWorkers() {
@@ -423,6 +463,12 @@ void TCPStore::ping() {
   buffer.flush();
 
   uint32_t returnedNonce = client_->receiveValue<std::uint32_t>();
+  TORCH_CHECK_WITH(
+      DistStoreError,
+      returnedNonce != detail::kAuthMismatch,
+      "TCPStore server requires authentication; set auth_cert, auth_key and "
+      "auth_ca or TORCH_TCPSTORE_AUTH_CERT, TORCH_TCPSTORE_AUTH_KEY and "
+      "TORCH_TCPSTORE_AUTH_CA");
   if (nonce != returnedNonce) {
     C10_THROW_ERROR(
         DistNetworkError,
