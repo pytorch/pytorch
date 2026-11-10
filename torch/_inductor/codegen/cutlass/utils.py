@@ -101,12 +101,7 @@ def try_import_cutlass() -> bool:
 
     # contains both cutlass and cutlass_library
     # we need cutlass for eVT
-    cutlass_dir = (
-        config.xpu.cutlass_dir
-        if torch.xpu._is_compiled()
-        else config.cutlass.cutlass_dir
-    )
-    cutlass_python_path = path_join(cutlass_dir, "python")
+    cutlass_python_path = path_join(config.cutlass.cutlass_dir, "python")
     torch_root = os.path.abspath(os.path.dirname(torch.__file__))
     mock_src_path = os.path.join(
         torch_root,
@@ -246,15 +241,6 @@ def toolkit_version(device_type: str) -> str:
         return get_xpu_version()
     else:
         return get_cuda_version()
-
-
-def get_device_cutlass_config(device_type: str):
-    """Get device-specific CUTLASS config (xpu/cuda overrides general cutlass config)."""
-    if device_type == "xpu":
-        return config.xpu
-    from ...config import cutlass as inductor_cutlass_config
-
-    return inductor_cutlass_config
 
 
 @dataclass
