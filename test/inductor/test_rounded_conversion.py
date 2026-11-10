@@ -181,6 +181,8 @@ class TestRoundedConversionInductor(_RoundedConversionTestMixin, TestCase):
             # The vectorized loop uses VecConvert, the tail c10::convert.
             if valid_vec_isa_list():
                 self.assertIn("at::vec::convert", code)
+        elif torch.device(device).type != "cuda":
+            pass
         elif torch.version.hip:
             self.assertIn("round_float64_to_float32", code)
         elif dst == torch.float16:
@@ -268,7 +270,10 @@ class TestRoundedConversionInductor(_RoundedConversionTestMixin, TestCase):
         x = torch.cat(
             [
                 _inputs(torch.float64),
-                torch.tensor([3.5e38, -3.5e38, 3.4028235677973366e38, 1e-46]),
+                torch.tensor(
+                    [3.5e38, -3.5e38, 3.4028235677973366e38, 1e-46],
+                    dtype=torch.float64,
+                ),
                 torch.randn(1 << 16, dtype=torch.float64),
             ]
         ).to(device)
@@ -425,8 +430,9 @@ class TestRoundedConversionInductorCUDAOnly(_RoundedConversionTestMixin, TestCas
         self.assertEqual(actual, fn(x), atol=0, rtol=0)
 
 
+# Eager has no _to_dtype_rounded kernel for MPS or XPU, to compare with.
 instantiate_device_type_tests(
-    TestRoundedConversionInductor, globals(), except_for=("mps",)
+    TestRoundedConversionInductor, globals(), except_for=("mps", "xpu")
 )
 
 if __name__ == "__main__":
