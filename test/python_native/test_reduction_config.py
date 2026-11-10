@@ -48,6 +48,7 @@ _TRAITS = {
 _SM107_TYPES = {
     "sum": T.SumOps,
     "mean": T.MeanOps,
+    "amax": T.AMaxOps,
     "nansum": T.NanSumOps,
     "argmaxi32": T.ArgMaxOps,
     "argmin": T.ArgMinOps,
@@ -85,6 +86,8 @@ class TestReductionConfig(TestCase):
             nfields=1,
             nouts=1,
             welford_outs=0,
+            acc_bits=32,
+            alignment=16,
         )
         args.update(updates)
         return kg.select_general_config(**args)
@@ -149,6 +152,8 @@ class TestReductionConfig(TestCase):
             (torch.bfloat16, 256, 16, "sum", 1, 1, "inner_tree"),
             (torch.bfloat16, 256, 16, "argmaxi32", 2, 1, "linear"),
             (torch.bfloat16, 256, 64, "sum", 1, 1, "linear"),
+            # Unmeasured one-field traits keep the linear order.
+            (torch.float32, 256, 64, "nansum", 1, 1, "linear"),
             (torch.float32, 1024, 64, "var0", 3, 1, "inner_tree"),
             (torch.float32, 1024, 64, "var0", 3, 2, "linear"),
             (torch.float32, 1024, 256, "argmaxi32", 2, 1, "linear"),
@@ -195,6 +200,7 @@ class TestReductionConfig(TestCase):
             (torch.float32, 256, "var0", 3, 2, "general_default"),
             (torch.float32, 64, "mean", 1, 1, "rubin_strided_inner"),
             (torch.float32, 64, "sum", 1, 1, "rubin_strided_inner"),
+            (torch.float32, 64, "amax", 1, 1, "rubin_strided_inner"),
             (torch.float32, 16, "sum", 1, 1, "general_default"),
             (torch.bfloat16, 64, "argmaxi32", 2, 1, "rubin_strided_argmax"),
             (torch.bfloat16, 64, "argmin", 2, 1, "general_default"),
@@ -217,6 +223,8 @@ class TestReductionConfig(TestCase):
             nfields=fields,
             nouts=nouts,
             welford_outs=_WELFORD_OUTS.get(key, 0),
+            acc_bits=32,
+            alignment=16,
         )
         self.assertEqual(cfg.rule, rule)
         self.assertEqual(cfg.block, 64 if rule == "rubin_strided_sum" else kg._K0_BLOCK)
@@ -261,7 +269,7 @@ class TestReductionConfig(TestCase):
         [
             {"alignment": 8},
             {"acc_bits": 64},
-            {"dtype": torch.float16},
+            {"dtype": torch.float16, "M": 131072},
             {"N": 2048, "M": 32768},
             {"M": 65535},
             {"trait_type": T.ProdOps, "nfields": 1, "welford_outs": 0},
@@ -369,7 +377,8 @@ class TestReductionConfig(TestCase):
         num_o = 4096
         pairs = (((count, 2),), ((num_o, 2 * count),))
         args = ((10, 0), torch.float16, count, num_o, *pairs)
-        cfg = kg.select_general_config(*args, **_contract(_TRAITS[trait]))
+        contract = _contract(_TRAITS[trait])
+        cfg = kg.select_general_config(*args, **contract, acc_bits=32, alignment=16)
         self.assertEqual(cfg, expected)
 
     def test_b200_rules_match_trait_types(self):
@@ -444,6 +453,8 @@ class TestReductionConfig(TestCase):
                 nfields=3,
                 nouts=1,
                 welford_outs=1,
+                acc_bits=32,
+                alignment=16,
             )
             self.assertTrue(cfg.uniform_tree)
             self.assertTrue(tile.uniform_tree_ok(T.WelfordOps(), count, cfg.block, 1))

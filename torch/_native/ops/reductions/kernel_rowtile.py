@@ -22,6 +22,7 @@ from .kernel_general import (  # safe: kernel_general imports us only lazily
     _SM107_LARGE_SIZES,
     _SM107_MIN_SIZE,
     _SM107_ONE_FIELD,
+    _sm107_outputs,
     _SM107_SIZES,
 )
 from .traits import ArgMaxOps, MeanOps, SumOps, WARP, welford_outputs
@@ -233,8 +234,10 @@ def select_full_itree_arch(
     contiguous: bool,
 ) -> _ItreeArch | None:
     """Return SM107's inner-tree profile for a measured full reduction, or None to keep
-    the device's _ITREE_ARCH row: fp32 sums, argmax with int32 indices, and Welford
-    traits with 32-bit fields and outputs in the input dtype."""
+    the device's _ITREE_ARCH row. Every field must be 32-bit, with _sm107_outputs.
+    fp32 sums and argmax (int32 indices, an int64 output) take the profile; Welford
+    traits with welford_outs != 0 (not return_mean) take a variant with
+    combine_unroll=64, uniform_count and combine_weights."""
     if (
         cc not in _SM107_CCS
         or dtype not in _SM107_DTYPES
@@ -244,14 +247,15 @@ def select_full_itree_arch(
         or alignment < tile.TRANSFER_ALIGNMENT
     ):
         return None
-    welford_dtypes = (dtype,) * welford_outs
-    welford = field_bits == (32,) * 3 and welford_outs and out_dtypes == welford_dtypes
-    one_field = (field_bits, out_dtypes) == ((32,), (torch.float32,))
-    index = (field_bits, out_dtypes) == ((32, 32), (torch.int64,))
-    fp32_sum = one_field and trait_type is SumOps and dtype == torch.float32
-    if fp32_sum or index and trait_type is ArgMaxOps:
+    nfields = len(field_bits)
+    nouts = welford_outs if nfields == 3 else 1
+    measured = _sm107_outputs(dtype, trait_type, nfields, nouts)
+    if field_bits != (32,) * nfields or out_dtypes != measured:
+        return None
+    fp32_sum = nfields == 1 and trait_type is SumOps and dtype == torch.float32
+    if fp32_sum or nfields == 2 and trait_type is ArgMaxOps:
         return _SM107_FULL_ITREE_ARCH
-    if not welford:
+    if nfields != 3 or not welford_outs:
         return None
     return _SM107_FULL_ITREE_ARCH._replace(
         combine_unroll=64, uniform_count=True, combine_weights=True
@@ -1045,9 +1049,9 @@ def reduce_row_tile(
     """Reduce 2-D `x` rows, returning outputs or raw field partials when `final=False`.
 
     x's device must be current. `ragged_vector` asks for aligned wide loads with scalar
-    edges (one kernel per N) and rejects order="inner_tree" and TMA for every N. Rows of
-    whole 16-byte vectors otherwise ignore it (rolled path); ragged rows need a
-    contiguous, 16-byte aligned input.
+    edges (one kernel per N) and rejects empty rows, order="inner_tree" and TMA for every
+    N. Rows of whole 16-byte vectors otherwise fall through to normal path selection;
+    ragged rows need a contiguous, 16-byte aligned input.
     """
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
