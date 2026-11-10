@@ -81,6 +81,10 @@ void RocprofActivityApi::setPerThreadBuffers(bool enabled) {
   d->setPerThreadBuffers(enabled);
 }
 
+void RocprofActivityApi::setDispatchRecordWait(std::chrono::milliseconds wait) {
+  d->setDispatchRecordWait(wait);
+}
+
 void RocprofActivityApi::setMaxBufferSize([[maybe_unused]] int64_t size) {
   // FIXME: implement?
   // maxGpuBufferCount_ = 1 + size / kBufSize;
