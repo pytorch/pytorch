@@ -1741,6 +1741,24 @@ class TestForeachDevice(TestCase):
                 for t, ref_t in zip(out, ref_out):
                     self.assertTrue(torch.equal(t, ref_t))
 
+    def test_foreach_copy_mismatched_list_lengths(self, device):
+        one = [torch.ones(2, device=device)]
+        three = [torch.zeros(2, device=device) for _ in range(3)]
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Tensor lists must have the same number of tensors, got 1 and 3",
+        ):
+            torch.ops.aten._foreach_copy(one, three, False)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Tensor lists must have the same number of tensors, got 3 and 1",
+        ):
+            torch.ops.aten._foreach_copy(three, one, False)
+        with self.assertRaisesRegex(
+            RuntimeError, "Tensor list must have at least one tensor."
+        ):
+            torch.ops.aten._foreach_copy([], [], False)
+
     @onlyAccelerator
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_mixed_dtypes_within_tensor(self, device, dtype, op):
@@ -1798,6 +1816,19 @@ class TestForeachDevice(TestCase):
         torch.foreach.copy_([self_tensor], [src_tensor])
         ref_out = torch.empty_like(self_tensor).copy_(src_tensor)
         self.assertEqual(self_tensor, ref_out)
+
+    @onlyAccelerator
+    @skipXPU
+    @dtypes(torch.uint16, torch.uint32, torch.uint64)
+    def test_foreach_copy_barebones_unsigned(self, device, dtype):
+        # The fused kernel doesn't instantiate these, so they take the slow path.
+        dtype_pairs = ((dtype, dtype), (dtype, torch.int64), (torch.float32, dtype))
+        for dst_dtype, src_dtype in dtype_pairs:
+            src = [torch.arange(n, device=device).to(src_dtype) for n in (3, 5)]
+            dst = [torch.zeros(n, device=device, dtype=dst_dtype) for n in (3, 5)]
+            ref = [torch.empty_like(d).copy_(s) for d, s in zip(dst, src)]
+            torch._foreach_copy_(dst, src)
+            self.assertEqual(dst, ref)
 
     @requires_gpu_and_triton
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
