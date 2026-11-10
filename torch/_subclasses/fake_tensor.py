@@ -690,7 +690,8 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     # The Python object of a C++ FakeTensorMode, which the Python parts of fake
     # dispatch run against. Its fakes and the fake mode slot keep it alive, so
     # it must not hold a fake: GC cannot see the reference back from the fake.
-    # Hence __slots__, and final, as a subclass could add a __dict__. See
+    # Hence __slots__; a subclass could add a __dict__, so it is final, which
+    # getCppFakeTensorModeHandle enforces by accepting only this exact type. See
     # Note [C++ FakeTensorMode handle] in torch/csrc/FakeTensorMode.cpp.
     __slots__ = ()
 
