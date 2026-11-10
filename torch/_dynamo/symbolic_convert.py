@@ -6517,14 +6517,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.gi_exc_state = Segment()
 
     @contextlib.contextmanager
-    def link_gi_exc_state(self):
-        try:
-            self.exn_vt_stack.push_segment(self.gi_exc_state)
-            yield
-        finally:
-            self.exn_vt_stack.pop_segment()
-
-    @contextlib.contextmanager
     def temporarily_set_frame_state(self, state: FrameState):
         saved_frame_state = self.frame_state
         try:
