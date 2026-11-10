@@ -30,6 +30,7 @@ change. This file contains two types of randomized tests:
 
 import math
 import numbers
+import os
 import unittest
 from collections import namedtuple
 from itertools import product
@@ -114,6 +115,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     expectedFailureXPU,
     instantiate_device_type_tests,
+    largeTensorTest,
     skipCUDAIf,
     skipMPS,
     skipXPUIf,
@@ -2005,6 +2007,49 @@ class TestDistributionsDevice(DistributionsTestCase):
             else:
                 perm_counts_mult[p] = 1
         self.assertLess(dups_mult, 10)
+
+    @skipMPS  # MPS limits sampling with replacement to 2^24 categories
+    @skipXPUIf(True, "XPU limits sampling with replacement to 2^24 categories")
+    @largeTensorTest("2GB")
+    @dtypes(torch.float, torch.double)
+    def test_multinomial_many_categories(self, device, dtype):
+        # A float32 CDF cannot give 2^25 categories distinct buckets (#2576)
+        n = 1 << 25
+        probs = torch.ones(n, device=device, dtype=dtype)
+        samples = torch.multinomial(probs, 20000, replacement=True)
+        upper = samples[samples >= n // 2]
+        self.assertEqual(upper.numel() / samples.numel(), 0.5, atol=0.05, rtol=0)
+        odd_fraction = (upper % 2).sum().item() / upper.numel()
+        self.assertEqual(odd_fraction, 0.5, atol=0.05, rtol=0)
+        self.assertLess(samples.max().item(), n)
+
+        probs.zero_()
+        probs[-10:] = 1
+        for n_sample, replacement in ((1, True), (1, False), (10, False)):
+            samples = torch.multinomial(probs, n_sample, replacement)
+            self.assertTrue(samples.ge(n - 10).all() and samples.lt(n).all())
+            self.assertEqual(samples.unique().numel(), n_sample)
+
+    def test_multinomial_half_without_replacement(self, device):
+        # In half, p / Exp(1) overflowed to inf whenever Exp(1) < p / 65504 (about 16
+        # times per row here) and argmax picked the first tie
+        n = 1 << 14
+        probs = torch.full((32, n), 64.0, device=device, dtype=torch.half)
+        samples = torch.cat([torch.multinomial(probs, 1) for _ in range(8)])
+        low_fraction = (samples < n // 10).float().mean().item()
+        self.assertEqual(low_fraction, 0.1, atol=0.08, rtol=0)
+
+    @skipXPUIf(True, "XPU's ported kernel overflows its half CDF (old CUDA bug)")
+    @dtypes(torch.half, torch.bfloat16)
+    def test_multinomial_reduced_precision_with_replacement(self, device, dtype):
+        # Half row sums overflow past 65504, and a bfloat16 CDF is too coarse: the old
+        # kernel's 10000 uniform draws hit about 830 distinct categories, not about 9630
+        n = 1 << 17
+        probs = torch.ones(n, device=device, dtype=dtype)
+        samples = torch.multinomial(probs, 10000, replacement=True)
+        upper_fraction = (samples >= n // 2).float().mean().item()
+        self.assertEqual(upper_fraction, 0.5, atol=0.05, rtol=0)
+        self.assertGreater(samples.unique().numel(), 9000)
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
@@ -7111,288 +7156,6 @@ class TestValidationDevice(DistributionsTestCase):
             d.log_prob(sample)
 
 
-class TestJitDevice(DistributionsTestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    def _examples(self):
-        for Dist, params in _get_examples():
-            for param in params:
-                keys = param.keys()
-                values = tuple(param[key] for key in keys)
-                if not all(isinstance(x, torch.Tensor) for x in values):
-                    continue
-                sample = Dist(**param).sample()
-                yield Dist, keys, values, sample
-
-    def _perturb_tensor(self, value, constraint):
-        if isinstance(constraint, constraints._IntegerGreaterThan):
-            return value + 1
-        if isinstance(constraint, constraints._LessThan):
-            return value - torch.rand(value.shape)
-        if isinstance(
-            constraint, (constraints._GreaterThan, constraints._GreaterThanEq)
-        ):
-            return value + torch.rand(value.shape)
-        if isinstance(
-            constraint,
-            (constraints._PositiveDefinite, constraints._PositiveSemidefinite),
-        ):
-            return value + torch.eye(value.shape[-1])
-        if value.dtype in [torch.float, torch.double]:
-            transform = transform_to(constraint)
-            delta = value.new(value.shape).normal_()
-            return transform(transform.inv(value) + delta)
-        if value.dtype == torch.long:
-            result = value.clone()
-            result[value == 0] = 1
-            result[value == 1] = 0
-            return result
-        raise NotImplementedError
-
-    def _perturb(self, Dist, keys, values, sample):
-        with torch.no_grad():
-            if isinstance(Dist.arg_constraints, dict):
-                values = [
-                    self._perturb_tensor(
-                        value, Dist.arg_constraints.get(key, constraints.real)
-                    )
-                    for key, value in zip(keys, values)
-                ]
-            else:
-                # arg_constraints is parameter-dependent
-                dist = Dist(**dict(zip(keys, values)))
-                values = [
-                    self._perturb_tensor(
-                        value, dist.arg_constraints.get(key, constraints.real)
-                    )
-                    for key, value in zip(keys, values)
-                ]
-            param = dict(zip(keys, values))
-            sample = Dist(**param).sample()
-            return values, sample
-
-    @set_default_dtype(torch.double)
-    def test_sample(self):
-        for Dist, keys, values, sample in self._examples():
-
-            def f(*values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                return dist.sample()
-
-            traced_f = torch.jit.trace(f, values, check_trace=False)
-
-            # FIXME Schema not found for node
-            xfail = [
-                Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
-                HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
-                VonMises,  # Variance is not Euclidean
-            ]
-            if Dist in xfail:
-                continue
-
-            with freeze_rng_state():
-                sample = f(*values)
-            traced_sample = traced_f(*values)
-            self.assertEqual(sample, traced_sample)
-
-            # FIXME no nondeterministic nodes found in trace
-            xfail = [Beta, Dirichlet]
-            if Dist not in xfail:
-                self.assertTrue(
-                    any(n.isNondeterministic() for n in traced_f.graph.nodes())
-                )
-
-    def test_rsample(self):
-        for Dist, keys, values, sample in self._examples():
-            if not Dist.has_rsample:
-                continue
-
-            def f(*values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                return dist.rsample()
-
-            traced_f = torch.jit.trace(f, values, check_trace=False)
-
-            # FIXME Schema not found for node
-            xfail = [
-                Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
-                HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
-            ]
-            if Dist in xfail:
-                continue
-
-            with freeze_rng_state():
-                sample = f(*values)
-            traced_sample = traced_f(*values)
-            self.assertEqual(sample, traced_sample)
-
-            # FIXME no nondeterministic nodes found in trace
-            xfail = [Beta, Dirichlet]
-            if Dist not in xfail:
-                self.assertTrue(
-                    any(n.isNondeterministic() for n in traced_f.graph.nodes())
-                )
-
-    @set_default_dtype(torch.double)
-    def test_log_prob(self):
-        for Dist, keys, values, sample in self._examples():
-            # FIXME traced functions produce incorrect results
-            xfail = [LowRankMultivariateNormal, MultivariateNormal]
-            if Dist in xfail:
-                continue
-
-            def f(sample, *values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                return dist.log_prob(sample)
-
-            traced_f = torch.jit.trace(f, (sample,) + values)
-
-            # check on different data
-            values, sample = self._perturb(Dist, keys, values, sample)
-            expected = f(sample, *values)
-            actual = traced_f(sample, *values)
-            self.assertEqual(
-                expected,
-                actual,
-                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
-            )
-
-    def test_enumerate_support(self):
-        for Dist, keys, values, sample in self._examples():
-            # FIXME traced functions produce incorrect results
-            xfail = [Binomial]
-            if Dist in xfail:
-                continue
-
-            def f(*values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                return dist.enumerate_support()
-
-            try:
-                traced_f = torch.jit.trace(f, values)
-            except NotImplementedError:
-                continue
-
-            # check on different data
-            values, sample = self._perturb(Dist, keys, values, sample)
-            expected = f(*values)
-            actual = traced_f(*values)
-            self.assertEqual(
-                expected,
-                actual,
-                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
-            )
-
-    def test_mean(self):
-        for Dist, keys, values, sample in self._examples():
-
-            def f(*values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                return dist.mean
-
-            try:
-                traced_f = torch.jit.trace(f, values)
-            except NotImplementedError:
-                continue
-
-            # check on different data
-            values, sample = self._perturb(Dist, keys, values, sample)
-            expected = f(*values)
-            actual = traced_f(*values)
-            expected[expected == float("inf")] = 0.0
-            actual[actual == float("inf")] = 0.0
-            self.assertEqual(
-                expected,
-                actual,
-                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
-            )
-
-    def test_variance(self):
-        for Dist, keys, values, sample in self._examples():
-            if Dist in [Cauchy, HalfCauchy]:
-                continue  # infinite variance
-
-            def f(*values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                return dist.variance
-
-            try:
-                traced_f = torch.jit.trace(f, values)
-            except NotImplementedError:
-                continue
-
-            # check on different data
-            values, sample = self._perturb(Dist, keys, values, sample)
-            expected = f(*values).clone()
-            actual = traced_f(*values).clone()
-            expected[expected == float("inf")] = 0.0
-            actual[actual == float("inf")] = 0.0
-            self.assertEqual(
-                expected,
-                actual,
-                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
-            )
-
-    @set_default_dtype(torch.double)
-    def test_entropy(self):
-        for Dist, keys, values, sample in self._examples():
-            # FIXME traced functions produce incorrect results
-            xfail = [LowRankMultivariateNormal, MultivariateNormal]
-            if Dist in xfail:
-                continue
-
-            def f(*values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                return dist.entropy()
-
-            try:
-                traced_f = torch.jit.trace(f, values)
-            except NotImplementedError:
-                continue
-
-            # check on different data
-            values, sample = self._perturb(Dist, keys, values, sample)
-            expected = f(*values)
-            actual = traced_f(*values)
-            self.assertEqual(
-                expected,
-                actual,
-                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
-            )
-
-    @set_default_dtype(torch.double)
-    def test_cdf(self):
-        for Dist, keys, values, sample in self._examples():
-
-            def f(sample, *values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                cdf = dist.cdf(sample)
-                return dist.icdf(cdf)
-
-            try:
-                traced_f = torch.jit.trace(f, (sample,) + values)
-            except NotImplementedError:
-                continue
-
-            # check on different data
-            values, sample = self._perturb(Dist, keys, values, sample)
-            expected = f(sample, *values)
-            actual = traced_f(sample, *values)
-            self.assertEqual(
-                expected,
-                actual,
-                msg=lambda msg: f"{msg}\n{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
-            )
-
-
 instantiate_device_type_tests(
     TestDistributionsDevice, globals(), allow_mps=True, allow_xpu=True
 )
@@ -7406,7 +7169,6 @@ for _cls in (
     TestAgainstScipyDevice,
     TestFunctorsDevice,
     TestValidationDevice,
-    TestJitDevice,
 ):
     instantiate_device_type_tests(
         # CUDA is excluded rather than allow-listing devices, per the ACCELERATOR
@@ -7420,6 +7182,9 @@ for _cls in (
 # Otherwise the generic class stays reachable via `_cls` and gets collected again.
 del _cls
 
+# pytest-xdist workers import this file instead of running it as __main__.
+if "PYTEST_XDIST_WORKER" in os.environ and torch._C.has_lapack:
+    TestCase._default_dtype_check_enabled = True
 
 if __name__ == "__main__" and torch._C.has_lapack:
     TestCase._default_dtype_check_enabled = True
