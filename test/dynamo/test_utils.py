@@ -50,6 +50,43 @@ class TestUtils(TestCase):
         hook2()
         self.assertNotIn("myglobal", scope)
 
+    def test_tabulate_no_deferred_import(self):
+        # Ensure tabulate does not attempt deferred imports during shutdown or execution
+        # (issue #201962).
+        import builtins
+
+        real_import = builtins.__import__
+        imported = []
+
+        def tracking_import(name, *args, **kwargs):
+            if name == "tabulate":
+                imported.append(name)
+            return real_import(name, *args, **kwargs)
+
+        with mock.patch("builtins.__import__", side_effect=tracking_import):
+            res = utils.tabulate([("metric", 1.23)], ("header1", "header2"))
+            self.assertIsInstance(res, str)
+            self.assertEqual(
+                imported, [], "tabulate() attempted deferred import of tabulate"
+            )
+
+    def test_tabulate_with_and_without_package(self):
+        rows = [("metric1", 1.0), ("metric2", 2.0)]
+        headers = ("Metric", "Value")
+
+        # Test fallback format when tabulate is not available
+        with mock.patch.object(utils, "_tabulate", None):
+            res = utils.tabulate(rows, headers)
+            self.assertEqual(res, "Metric, Value\nmetric1, 1.0\nmetric2, 2.0")
+
+        # Test delegating to tabulate when available
+        mock_tab = mock.MagicMock()
+        mock_tab.tabulate.return_value = "formatted table"
+        with mock.patch.object(utils, "_tabulate", mock_tab):
+            res = utils.tabulate(rows, headers)
+            self.assertEqual(res, "formatted table")
+            mock_tab.tabulate.assert_called_once_with(rows, headers=headers)
+
     @dynamo_config.patch(gc_gen2_threshold_during_compile=12345)
     def test_deferred_full_gc(self):
         saved = gc.get_threshold()

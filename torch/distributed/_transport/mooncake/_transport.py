@@ -374,7 +374,9 @@ class MooncakeTransport(Transport):
         if registration := self._registrations.get(key):
             return MooncakeMemory(self, registration)
         device_id = max(tensor.get_device(), 0)
-        location = f"cuda:{device_id}" if tensor.is_cuda else "cpu:0"
+        # "*" lets Mooncake (>= 0.3.14) pick NICs by the memory's NUMA node;
+        # "cpu:0" would use NUMA node 0's NICs for every host buffer.
+        location = f"cuda:{device_id}" if tensor.is_cuda else "*"
         if engine.register_memory(tensor.data_ptr(), length, location) != 0:
             raise RuntimeError("Mooncake memory registration failed")
         registration = _Registration(
