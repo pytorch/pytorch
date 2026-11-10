@@ -2039,7 +2039,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         low_fraction = (samples < n // 10).float().mean().item()
         self.assertEqual(low_fraction, 0.1, atol=0.08, rtol=0)
 
-    @skipXPUIf(True, "XPU builds the with-replacement CDF in the input dtype")
+    @skipXPUIf(True, "XPU's ported kernel overflows its half CDF (old CUDA bug)")
     @dtypes(torch.half, torch.bfloat16)
     def test_multinomial_reduced_precision_with_replacement(self, device, dtype):
         # Half row sums overflow past 65504, and a bfloat16 CDF is too coarse: the old
