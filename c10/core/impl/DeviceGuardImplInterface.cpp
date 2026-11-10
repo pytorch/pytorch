@@ -22,26 +22,29 @@ DeviceGuardImplRegistrar::DeviceGuardImplRegistrar(
 }
 
 namespace {
-// A non-null registry entry means the backend is compiled in; deviceCount() == 0
-// means no device is visible, so swap in a no-op guard. This lets us trace
-// device kernels under FakeTensorMode without touching a physical device.
+
+// A non-null registry entry means the backend is compiled in;
+// deviceCount() == 0 means no device is visible, so swap in a no-op guard.
+// This lets us trace device kernels under FakeTensorMode without touching
+// a physical device.
 template <DeviceType T>
-void ensureFakeDeviceGuardSet() {
-  constexpr auto idx = static_cast<std::size_t>(T);
+void ensureDeviceGuardSet() {
+  constexpr std::size_t idx = static_cast<std::size_t>(T);
   const DeviceGuardImplInterface* p = device_guard_impl_registry[idx].load();
   if (p && p->deviceCount() == 0) {
     static FakeGuardImpl<T> fake_guard;
     device_guard_impl_registry[idx].store(&fake_guard);
   }
 }
+
 } // namespace
 
 void ensureCUDADeviceGuardSet() {
-  ensureFakeDeviceGuardSet<DeviceType::CUDA>();
+  ensureDeviceGuardSet<DeviceType::CUDA>();
 }
 
 void ensureXPUDeviceGuardSet() {
-  ensureFakeDeviceGuardSet<DeviceType::XPU>();
+  ensureDeviceGuardSet<DeviceType::XPU>();
 }
 
 } // namespace c10::impl
