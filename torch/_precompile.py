@@ -436,7 +436,8 @@ class DynamoTracer:
     configuration-chosen slot (``require_no_risky_drops``). Other dropped guards,
     such as the identity guards every model drops because they cannot be serialized,
     are listed in the artifact rather than refused. ``fullgraph`` makes a graph break
-    an error, as ``torch.compile(fullgraph=True)`` does, so the capture is one graph.
+    an error, as ``torch.compile(fullgraph=True)`` does, so the capture is one graph;
+    a recompile past ``recompile_limit`` then raises too, rather than running eager.
     """
 
     guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
