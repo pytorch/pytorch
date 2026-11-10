@@ -439,6 +439,12 @@ def _write_files_from_queue(
                     if not tensor.is_cpu:
                         raise AssertionError("Tensor must be on CPU")
                     if serialization_format == SerializationFormat.SAFETENSORS:
+                        if write_item.index.fqn in tensor_dict:  # type: ignore[attr-defined]
+                            raise ValueError(
+                                f"Cannot save several chunks of '{write_item.index.fqn}' "  # type: ignore[attr-defined]
+                                "to one safetensors file: it holds one tensor per name, "
+                                "so each chunk would overwrite the previous one"
+                            )
                         # safetensors only serializes contiguous tensors, and a
                         # state_dict may hold views such as transposed weights.
                         tensor = tensor.contiguous()
