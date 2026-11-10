@@ -16,7 +16,12 @@ from torch.compiler._export_python import (
     _CODE_END,
     _exported_file,
 )
-from torch.compiler.precompile import capture, DynamoTracer, no_compilation
+from torch.compiler.precompile import (
+    capture,
+    DynamoTracer,
+    MakeFxTracer,
+    no_compilation,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -115,10 +120,10 @@ class _ExportPythonTestCase(TestCase):
 class TestExportPythonFile(_ExportPythonTestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def _artifact(self, name, *args, fullgraph=True, **kwargs):
+    def _artifact(self, name, *args, fullgraph=True, tracer=None, **kwargs):
         # The precompile artifact a capture writes, which the file is made from.
         artifact, cache = (os.path.join(self.dir, name + e) for e in (".a", ".cache"))
-        tracer = DynamoTracer(fullgraph=fullgraph)
+        tracer = tracer or DynamoTracer(fullgraph=fullgraph)
         fn = getattr(self.module, name)
         with capture(
             fn, artifact_path=artifact, cache_path=cache, tracer=tracer, **kwargs
@@ -173,12 +178,33 @@ class TestExportPythonFile(_ExportPythonTestCase):
         with self.assertRaisesRegex(PrecompileError, "is not one graph"):
             _exported_file(artifact)
 
-    def test_a_file_that_lost_its_captured_line_or_markers_is_refused(self):
+    def test_a_make_fx_capture_is_refused(self):
+        artifact, _ = self._artifact("scaled", torch.randn(8), tracer=MakeFxTracer())
+        with self.assertRaisesRegex(PrecompileError, "is not one graph"):
+            _exported_file(artifact)
+
+    def test_a_damaged_file_is_refused(self):
         text = _exported_file(self._artifact("scaled", torch.randn(8))[0])
         with self.assertRaisesRegex(PrecompileError, "no _CAPTURED line"):
             _captured_artifact(text.rpartition("_CAPTURED")[0], "f.py")
         with self.assertRaisesRegex(PrecompileError, "lost the lines"):
             _captured_artifact(text.replace(_CODE_BEGIN, "#"), "f.py")
+        corrupt = text.replace("_CAPTURED = 'eN", "_CAPTURED = 'xN")
+        with self.assertRaisesRegex(
+            PrecompileError, "_CAPTURED line of f.py is corrupt"
+        ):
+            _captured_artifact(corrupt, "f.py")
+
+    def test_running_the_file_benchmarks_it(self):
+        path = os.path.join(self.dir, "scaled.py")
+        text = _exported_file(self._artifact("scaled", torch.randn(8))[0])
+        self.assertRegex(text, r"Running this file\s+(#\s+)?benchmarks it")
+        with open(path, "w") as f:
+            f.write(text)
+        out = subprocess.run(
+            [sys.executable, path], capture_output=True, text=True, timeout=900
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
 
 
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
@@ -262,6 +288,7 @@ class TestExportPython(_ExportPythonTestCase):
         with self.assertRaises(RuntimeError):
             run(x, x)
         self.assertFalse(os.path.exists(path))
+        self.assertFalse(os.path.exists(path + ".cache"))
         self.assertEqual(run(x, y), x @ y)
         with no_compilation():
             self.assertEqual(run(x, y), x @ y)
@@ -282,6 +309,13 @@ class TestExportPython(_ExportPythonTestCase):
         y = torch.randn(16)
         with no_compilation():
             self.assertEqual(self._export("scaled", path)(y), (y * 2.0).relu())
+
+    def test_a_file_captured_from_another_function_is_refused(self):
+        path = os.path.join(self.dir, "shared.py")
+        self._export("scaled", path)(torch.randn(8))
+        x, y = torch.randn(2, 3), torch.randn(3, 2)
+        with self.assertRaisesRegex(PrecompileError, r"scaled, not .*\.matmul"):
+            self._export("matmul", path)(x, y)
 
     def test_deleting_the_file_recaptures(self):
         path = os.path.join(self.dir, "scaled.py")
