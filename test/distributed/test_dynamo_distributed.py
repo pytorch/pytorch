@@ -2937,6 +2937,49 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
 
 @unittest.skipIf(not dist.is_available(), "requires distributed")
+class TestObjectCollectives(DynamoDistributedSingleProcTestCase):
+    def test_object_collectives(self):
+        def fn(x):
+            gathered = [None]
+            dist.all_gather_object(gathered, 0, group=dist.group.WORLD)
+            gathered_at_root = [None]
+            dist.gather_object(0, gathered_at_root, dst=0)
+            scattered = [None]
+            dist.scatter_object_list(scattered, [0], src=0)
+            return x + gathered[0] + gathered_at_root[0] + scattered[0]
+
+        x = torch.ones(1, device=self.device)
+        expected = fn(x)
+        counter = CompileCounter()
+        actual = torch.compile(fn, backend=counter)(x)
+        self.assertEqual(actual, expected)
+        self.assertGreater(counter.frame_count, 0)
+
+    def test_object_collective_device_update(self):
+        from torch._C._distributed_c10d import Backend
+
+        backend = Backend(0, 1)
+        pg = dist.ProcessGroup(dist.HashStore(), 0, 1)
+        pg._register_backend(
+            torch.device("cuda"), dist.ProcessGroup.BackendType.CUSTOM, backend
+        )
+        pg._set_default_backend(dist.ProcessGroup.BackendType.CUSTOM)
+        pg._set_group_name("object-collective-device-update")
+
+        def fn(x):
+            return dist.distributed_c10d._get_object_coll_device(pg), x + 1
+
+        x = torch.ones(1, device=self.device)
+        compiled = torch.compile(fn, backend="eager")
+        self.assertEqual(compiled(x)[0], "cuda")
+
+        # Only the backend metadata changes; no accelerator is required.
+        pg._register_backend(torch.device("cpu"), dist.ProcessGroup.BackendType.CUSTOM)
+        self.assertEqual(fn(x)[0], "cpu")
+        self.assertEqual(compiled(x)[0], "cpu")
+
+
+@unittest.skipIf(not dist.is_available(), "requires distributed")
 class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
     """Tests for torch.distributed.nn.functional under torch.compile."""
 
