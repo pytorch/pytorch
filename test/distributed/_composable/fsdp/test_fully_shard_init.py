@@ -636,15 +636,28 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         )
 
     def test_fully_shard_multi_module_lazy_init_from_nested_state(self):
+        """
+        Tests that lazy initialization started below a multi-module state makes
+        the outermost single-module state the root.
+
+        FSDP(model(
+            0: FSDP([0, 2])(MLP(FSDP(in_proj), out_proj)),
+            1: MLP(in_proj, out_proj),
+            2: FSDP([0, 2])(MLP(in_proj, out_proj)),
+        ))
+        """
         model = nn.Sequential(MLP(8), MLP(8), MLP(8))
+        fully_shard(model[0].in_proj)
         fully_shard([model[0], model[2]])
         fully_shard(model)
         root_state = fully_shard.state(model)
         multi_module_state = fully_shard.state(model[0])
-        multi_module_state._lazy_init()
+        model0_in_proj_state = fully_shard.state(model[0].in_proj)
+        model0_in_proj_state._lazy_init()
 
         self.assertTrue(root_state._is_root)
         self.assertFalse(multi_module_state._is_root)
+        self.assertFalse(model0_in_proj_state._is_root)
 
     def test_fully_shard_double_lazy_init(self):
         model = nn.Sequential(MLP(8), MLP(8))

@@ -74,9 +74,9 @@ class FSDPState(_State):
         # Each group has params with the same mesh_info.
         self._fsdp_param_groups: list[FSDPParamGroup] = []
         self._is_root: bool | None = None  # root set during lazy init
-        # Outermost single-module state whose module contains this state's
-        # modules; lazy init makes it the root
-        self._outermost_enclosing_state: FSDPState | None = None
+        # State of the nearest ``fully_shard`` call enclosing this state's
+        # modules; lazy init walks up these to find the root
+        self._enclosing_state: FSDPState | None = None
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
@@ -123,13 +123,14 @@ class FSDPState(_State):
         for module in modules:
             _insert_module_state(module, self)
         self._modules = modules
-        if len(modules) == 1:
-            # ``fully_shard`` runs bottom-up, so the last state to record
-            # itself here is the outermost one
-            for submodule in modules[0].modules():
+        # ``fully_shard`` runs bottom-up, so a state that already has an
+        # enclosing state is inside a nearer one
+        for module in modules:
+            for submodule in module.modules():
                 state = self._get_state_for_module(submodule)
-                if state is not None and state is not self:
-                    state._outermost_enclosing_state = self
+                if state is None or state is self or state._enclosing_state is not None:
+                    continue
+                state._enclosing_state = self
         self._device = device
         self._device_handle = _get_device_handle(device.type)
         self._mp_policy = replace(mp_policy, param_dtype_override_fn=None)
@@ -196,7 +197,14 @@ class FSDPState(_State):
         """
         if self._is_root is not None:
             return  # no-op: already initialized
-        if (root_state := self._outermost_enclosing_state) is not None:
+        # Multi-module states cannot be the root, so skip them
+        root_state = None
+        state = self._enclosing_state
+        while state is not None:
+            if len(state._modules) == 1:
+                root_state = state
+            state = state._enclosing_state
+        if root_state is not None:
             root_state._lazy_init()
             if self._is_root is not None:
                 return
