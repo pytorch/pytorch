@@ -26,6 +26,9 @@ C10_METAL_CONSTEXPR uint32_t kMatmulBlock = 32;
 C10_METAL_CONSTEXPR uint32_t kMatmulBlockSimdgroups = 4;
 C10_METAL_CONSTEXPR uint32_t kMatmulStepBytes = 128;
 C10_METAL_CONSTEXPR uint32_t kMatmulFullGridPerCore = 4;
+// fp32 K steps between barriers that keep a tile's simdgroups on the same
+// operand rows, which then stay in cache. half and bfloat do not drift.
+C10_METAL_CONSTEXPR uint32_t kMatmulPaceSteps = 4;
 
 template <typename idx_t>
 struct MatmulParams {
@@ -299,8 +302,13 @@ inline void matmul_mpp_block_gemm(
   using Str = array<int32_t, 2>;
   using Mat = tensor<device T, Ext, tensor_inline>;
   constexpr int RN = kMatmulBlock, KC = kMatmulStepBytes / sizeof(T);
-  const int col = simd_group * RN;
+  const int col = simd_group * RN, pace = kMatmulPaceSteps * KC;
+  constexpr bool paced = is_same_v<T, float>;
   if (col >= int(tile.cols)) {
+    // A simdgroup without a block still meets the barriers of the others.
+    for (int kk = pace; paced && kk < int(tile.k); kk += pace) {
+      threadgroup_barrier(mem_flags::mem_none);
+    }
     return;
   }
   const int rows = tile.rows, cols = min(RN, int(tile.cols) - col), k = tile.k;
@@ -328,6 +336,9 @@ inline void matmul_mpp_block_gemm(
     acc[i] = 0;
   }
   for (int kk = 0; kk < k; kk += KC) {
+    if (paced && kk && kk % pace == 0) {
+      threadgroup_barrier(mem_flags::mem_none);
+    }
     if (rows == BM && cols == RN && kk + KC <= k) {
       // Static slices skip the bounds checks.
       auto sa = a.template slice<TA ? BM : KC, TA ? KC : BM>(
