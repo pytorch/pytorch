@@ -255,7 +255,9 @@ class TransportTestMixin:
 
             with self.assertRaisesRegex(ValueError, "zero-byte"):
                 first.write(view[:0], remote, notification=b"x")
-            self.assertEqual(first.poll_notifications(), [])
+            first.send_notification(second.peer_id, b"after").wait()
+            self.assertEqual(self._receive(second), [(first.peer_id, b"after")])
+            self.assertEqual(second.poll_notifications(), [])
         finally:
             first.close()
             second.close()
