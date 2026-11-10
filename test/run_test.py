@@ -265,10 +265,6 @@ S390X_BLOCKLIST = [
     # these tests fail when mkldnn is not available
     "inductor/test_custom_post_grad_passes",
     "inductor/test_mkldnn_pattern_matcher",
-    "test_metal",
-    # lacks quantization support
-    "onnx/test_models_quantized_onnxruntime",
-    "onnx/test_pytorch_onnx_onnxruntime",
     # sysctl -n hw.memsize is not available
     "test_mps",
     # https://github.com/pytorch/pytorch/issues/102078
@@ -291,7 +287,6 @@ S390X_BLOCKLIST = [
     "fx/test_z3_gradual_types",
     "test_proxy_tensor",
     # depends on torchvision
-    "onnx/test_utility_funs",
     # crash on s390x that needs investigation
     "test_schema_check",
     "test_meta",
@@ -316,12 +311,10 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_stream_and_event",
     "test_cpp_extensions_mtia_backend",
     "test_jit_disabled",
-    "test_mobile_optimizer",
     "test_multiprocessing",
     "test_multiprocessing_spawn",
     "test_namedtuple_return_api",
     "test_overrides",
-    "test_show_pickle",
     "test_tensorexpr",
     "test_cuda_primary_ctx",
     "test_gpu_trace",
@@ -339,7 +332,6 @@ RUN_PARALLEL_BLOCKLIST = [
 CI_SERIAL_LIST = [
     "test_nn",
     "test_fake_tensor",
-    "test_cpp_api_parity",
     "test_reductions",
     "test_fx_backends",
     "test_cpp_extensions_jit",
@@ -380,15 +372,6 @@ XDIST_SERIAL_CPU_LIST = [
     "test_torch",
 ]
 XDIST_SERIAL_FILES = XDIST_SERIAL_LIST + XDIST_SERIAL_CPU_LIST
-# A subset of onnx tests that cannot run in parallel due to high memory usage.
-ONNX_SERIAL_LIST = [
-    "onnx/test_models",
-    "onnx/test_models_quantized_onnxruntime",
-    "onnx/test_models_onnxruntime",
-    "onnx/test_custom_ops",
-    "onnx/test_utility_funs",
-]
-
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
 CORE_TEST_LIST = [
     "test_autograd",
@@ -398,7 +381,6 @@ CORE_TEST_LIST = [
     "test_ops",
     "test_ops_gradients",
     "test_ops_fwd_gradients",
-    "test_ops_jit",
     "test_torch",
 ]
 
@@ -454,12 +436,6 @@ or `conda install ninja`. Alternatively, disable said tests with
 """
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
-
-JIT_EXECUTOR_TESTS = [
-    "test_jit_profiling",
-    "test_jit_legacy",
-    "test_jit_fuser_legacy",
-]
 
 INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
@@ -1925,11 +1901,6 @@ def parse_args():
         help="run non-serial tests with N pytest-xdist workers",
     )
     parser.add_argument(
-        "--exclude-jit-executor",
-        action="store_true",
-        help="exclude tests that are run for a specific jit config",
-    )
-    parser.add_argument(
         "--exclude-torch-export-tests",
         action="store_true",
         help="exclude torch export tests",
@@ -2025,8 +1996,6 @@ def must_serial(file: str | ShardedTest) -> bool:
         or file in RUN_PARALLEL_BLOCKLIST
         or file in CI_SERIAL_LIST
         or file in XDIST_SERIAL_FILES
-        or file in JIT_EXECUTOR_TESTS
-        or file in ONNX_SERIAL_LIST
         or NUM_PROCS == 1
     )
 
@@ -2140,7 +2109,6 @@ def get_selected_tests(options) -> list[str]:
         selected_tests = [
             "test_ops",
             "test_mps",
-            "test_metal",
             "test_modules",
             "test_linalg",
             "test_scaled_matmul_cuda",
@@ -2175,9 +2143,6 @@ def get_selected_tests(options) -> list[str]:
         options.exclude.extend(onnx_tests)
 
     # process exclusion
-    if options.exclude_jit_executor:
-        options.exclude.extend(JIT_EXECUTOR_TESTS)
-
     if options.exclude_distributed_tests:
         options.exclude.extend(DISTRIBUTED_TESTS)
 

@@ -41,6 +41,7 @@ from torch._guards import (
     Source,
 )
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
+from torch.fx.experimental.dynamic_spec import TensorSpec
 from torch.fx.graph_module import GraphModule
 from torch.fx.proxy import Proxy
 from torch.utils import _pytree as pytree
@@ -763,7 +764,12 @@ def static_capture_policy_matches(
     /,
 ) -> bool:
     """Captured dimensions must retain the expressions the cached body lifts."""
-    from .builder import lookup_tracked_variable, VariableBuilder
+    from .builder import (
+        lookup_spec_from_dynamo_source,
+        lookup_tracked_variable,
+        VariableBuilder,
+        wrap_to_fake_tensor_and_record,
+    )
 
     cached = tx.output.input_source_to_var.get(source)
     if not isinstance(cached, TensorVariable):
@@ -780,13 +786,27 @@ def static_capture_policy_matches(
         hc_log.debug("subgraph_reuse: no cached tensor example for %s", source.name)
         return False
     current = tx.output.input_source_to_var.get(new_source)
-    if not isinstance(current, TensorVariable):
+    if not isinstance(current, TensorVariable) and (
+        type(value) is torch.Tensor or type(value) is torch.nn.Parameter
+    ):
+        # Check the fake policy before constructing a tracker for the winning match.
+        spec = cast(
+            TensorSpec | None,
+            lookup_spec_from_dynamo_source(
+                new_source, torch._dynamo.config._dynamic_shapes_spec
+            ),
+        )
+        current_example = wrap_to_fake_tensor_and_record(
+            value, tx, source=new_source, is_tensor=True, tensor_spec=spec
+        )
+    else:
         # Use the same source-specific policy and merged PGO state as stamp-out.
-        current = VariableBuilder(tx, new_source)(value)
-    if not isinstance(current, TensorVariable):
-        hc_log.debug("subgraph_reuse: no current tensor for %s", new_source.name)
-        return False
-    current_example = current.proxy.node.meta.get("example_value")
+        if not isinstance(current, TensorVariable):
+            current = VariableBuilder(tx, new_source)(value)
+        if not isinstance(current, TensorVariable):
+            hc_log.debug("subgraph_reuse: no current tensor for %s", new_source.name)
+            return False
+        current_example = current.proxy.node.meta.get("example_value")
     if current_example is None:
         hc_log.debug(
             "subgraph_reuse: no current tensor example for %s", new_source.name
@@ -1397,6 +1417,11 @@ def build_subgraph_input_mapping(
                 # no entry for.
                 subgraph_input_mapping.append(LiftedBoundSymbol(example.node._expr))
                 continue
+            if source is None and outer_proxy.node.op == "get_attr":
+                # Registered parameters/buffers have get_attr nodes, not graphargs.
+                registered = tx.output.param_name_to_source
+                if registered is not None:
+                    source = registered.get(cast(str, outer_proxy.node.target))
             if source is None:
                 raise AssertionError(
                     f"Freevar has no source: node.op={outer_proxy.node.op} "
