@@ -3,6 +3,7 @@ from __future__ import annotations
 import builtins
 import collections
 import functools
+import inspect
 import operator
 from typing import Any, TYPE_CHECKING
 
@@ -349,7 +350,11 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         # path for unrealized LazyVTs.
         def _helper(value: object) -> bool:
             # TODO: Add support for more types
-            return issubclass(type(value), type) or is_function_or_wrapper(value)
+            return (
+                inspect.isbuiltin(value)
+                or issubclass(type(value), type)
+                or is_function_or_wrapper(value)
+            )
 
         if self.is_realized():
             raise AssertionError(
