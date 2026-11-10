@@ -18,9 +18,7 @@ GITLAB_LOAD = (
     "The requested URL returned error: 503\n"
 )
 
-# One realistic git message per alternative of the retry pattern, plus the
-# case-insensitive match. The POST samples are matched by the `returned error`
-# alternative; the `RPC failed; curl` ones by their own.
+# One realistic git message per alternative of the retry pattern.
 TRANSIENT = {
     "gitlab load page": "remote: GitLab is currently unable to handle this request due to load",
     "get 503": "fatal: unable to access 'https://gitlab.com/libeigen/eigen/': The requested URL returned error: 503",
@@ -38,8 +36,7 @@ TRANSIENT = {
     "syscall while reading": "fatal: unable to access 'https://gitlab.com/libeigen/eigen/': OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 104",
     "stalled transfer": "fatal: unable to access 'https://gitlab.com/libeigen/eigen/': Operation too slow. Less than 1000 bytes/sec transferred the last 60 seconds",
     "case": "FATAL: EARLY eof",
-    # A curl error that is not retried on its own is retried when it breaks a
-    # pack that was already streaming, because git then also reports early EOF.
+    # Not retried alone, but retried when it breaks a streaming pack (early EOF).
     "framing error while streaming": (
         "error: RPC failed; curl 16 Error in the HTTP2 framing layer\n"
         "fetch-pack: unexpected disconnect while reading sideband packet\n"
@@ -51,9 +48,7 @@ TRANSIENT = {
         "fatal: early EOF\n"
     ),
 }
-# Failures that must fail at once. Each entry is the line git prints for the
-# failure itself; a real run also prints `Cloning into '...'...` before it, and
-# the "empty" entry is no output at all.
+# Failures that must fail at once; "empty" is no output.
 PERMANENT = {
     "missing tag": "fatal: Remote branch 5.0.1 not found in upstream origin",
     "get 404": "fatal: unable to access 'https://gitlab.com/libeigen/eigen/': The requested URL returned error: 404",
