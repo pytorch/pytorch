@@ -68,7 +68,8 @@ __global__ void convert_indices_from_coo_to_csr_cuda_kernel(output_t* data_out, 
 template <typename input_t, typename output_t>
 void convert_indices_from_coo_to_csr_cuda(const Tensor& result, const Tensor& input, const int64_t size) {
   int64_t numel = input.numel();
-  const input_t* data_in = input.const_data_ptr<input_t>();
+  const auto input_ = input.expect_contiguous();
+  const input_t* data_in = input_->const_data_ptr<input_t>();
   output_t* data_out = result.mutable_data_ptr<output_t>();
 
   if (numel == 0) {
@@ -353,14 +354,13 @@ Tensor& add_out_sparse_compressed_cuda(
 TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cuda) (
   const Tensor& input, const int64_t size, const bool out_int32, const Tensor& result
 ) {
-  const auto input_ = input.expect_contiguous();
   if (out_int32) {
-    AT_DISPATCH_INTEGRAL_TYPES(input_->scalar_type(), "convert_indices_from_coo_to_csr_cuda", [&] {
-      convert_indices_from_coo_to_csr_cuda<scalar_t, int>(result, *input_, size);
+    AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_indices_from_coo_to_csr_cuda", [&] {
+      convert_indices_from_coo_to_csr_cuda<scalar_t, int>(result, input, size);
     });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(input_->scalar_type(), "convert_indices_from_coo_to_csr_cuda", [&] {
-      convert_indices_from_coo_to_csr_cuda<scalar_t, int64_t>(result, *input_, size);
+    AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_indices_from_coo_to_csr_cuda", [&] {
+      convert_indices_from_coo_to_csr_cuda<scalar_t, int64_t>(result, input, size);
     });
   }
 }

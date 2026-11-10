@@ -1865,7 +1865,8 @@ void convert_indices_from_coo_to_csr_cpu(
     const Tensor& input,
     const int64_t size) {
   int64_t numel = input.numel();
-  const input_t* data_in = input.const_data_ptr<input_t>();
+  const auto input_ = input.expect_contiguous();
+  const input_t* data_in = input_->const_data_ptr<input_t>();
   output_t* data_out = result.data_ptr<output_t>();
 
   if (numel == 0) {
@@ -1944,18 +1945,17 @@ TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cpu)
  const int64_t size,
  const bool out_int32,
  const Tensor& result) {
-  const auto input_ = input.expect_contiguous();
   if (out_int32) {
     AT_DISPATCH_INTEGRAL_TYPES(
-        input_->scalar_type(), "convert_indices_from_coo_to_csr_cpu", [&] {
+        input.scalar_type(), "convert_indices_from_coo_to_csr_cpu", [&] {
           convert_indices_from_coo_to_csr_cpu<scalar_t, int32_t>(
-              result, *input_, size);
+              result, input, size);
         });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(
-        input_->scalar_type(), "convert_indices_from_coo_to_csr_cpu", [&] {
+        input.scalar_type(), "convert_indices_from_coo_to_csr_cpu", [&] {
           convert_indices_from_coo_to_csr_cpu<scalar_t, int64_t>(
-              result, *input_, size);
+              result, input, size);
         });
   }
 }
