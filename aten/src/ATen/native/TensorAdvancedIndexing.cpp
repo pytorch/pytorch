@@ -2062,12 +2062,18 @@ static bool can_use_expanded_index_path(
     return false;
   }
 
-  // The kernels step src and self rows by index's row size, so only dim 0 may
-  // differ (https://github.com/pytorch/pytorch/issues/99595).
+  // The kernels walk one index row's worth of consecutive elements from the
+  // start of each src and self row. Those are the right elements when the
+  // sizes match after index's first non-singleton dim; that dim itself may be
+  // larger in src and self (https://github.com/pytorch/pytorch/issues/99595).
+  bool seen_non_singleton = false;
   for (const auto dim : c10::irange(1, index.dim())) {
-    if (src.size(dim) != index.size(dim) || self.size(dim) != index.size(dim)) {
+    if (seen_non_singleton &&
+        (src.size(dim) != index.size(dim) ||
+         self.size(dim) != index.size(dim))) {
       return false;
     }
+    seen_non_singleton |= index.size(dim) > 1;
   }
 
   if (is_scatter_like) {
@@ -2080,18 +2086,15 @@ static bool can_use_expanded_index_path(
     }
   }
 
-  // usually the expanded index has stride on the first dimension to be 1,
-  // and strides on other dims to be 0 or 1, e.g.
+  // The expanded index has consecutive rows along dim 0 and repeats along
+  // every other dim, e.g.
   //   shape [108365, 16]; strides [1, 0]
   //   shape [13264, 1, 7]; strides [1, 1, 0]
-  // Note: the size should not > 1 when the stride == 1
+  // The stride of a size-1 dim is never used.
   // See https://github.com/pytorch/pytorch/issues/129093
-  auto index_strides = index.strides().vec();
-  auto index_sizes = index.sizes().vec();
-  bool is_index_expanded = index_strides[0] == 1;
-  for (const auto dim : c10::irange(1, index_strides.size())) {
-    if (index_strides[dim] > 1 ||
-        (index_strides[dim] == 1 && index_sizes[dim] > 1)) {
+  bool is_index_expanded = index.size(0) == 1 || index.stride(0) == 1;
+  for (const auto dim : c10::irange(1, index.dim())) {
+    if (index.size(dim) > 1 && index.stride(dim) != 0) {
       is_index_expanded = false;
     }
   }

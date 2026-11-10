@@ -908,13 +908,18 @@ std::pair<K*, V*> radix_sort_parallel(
 
 template <typename scalar_t, ReductionType reduce>
 void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, const Tensor& src, bool include_self) {
-  const int64_t* index_data = index.const_data_ptr<int64_t>();
   scalar_t* self_data = self.data_ptr<scalar_t>();
   const scalar_t* src_data = src.const_data_ptr<scalar_t>();
 
   const int64_t M = ensure_nonempty_size(self, 0);
   const int64_t nnz = ensure_nonempty_size(index, 0);
   const int64_t K = index.numel() / nnz;
+  // index repeats along every dim but 0, so its first nnz elements are the rows
+  const Tensor index_rows = index.as_strided({nnz}, {1}).to(ScalarType::Long);
+  const int64_t* index_data = index_rows.const_data_ptr<int64_t>();
+  // Rows of self and src can be longer than K; see can_use_expanded_index_path
+  const int64_t self_row_size = self.numel() / M;
+  const int64_t src_row_size = src.numel() / ensure_nonempty_size(src, 0);
 
   const int64_t index_upper_bound = M;
 
@@ -1019,7 +1024,7 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
       int64_t row = row_index[m];
       int64_t off_start = row_index_offset[m];
       int64_t off_end = row_index_offset[m + 1];
-      scalar_t* self_ptr = self_data + row * K;
+      scalar_t* self_ptr = self_data + row * self_row_size;
       if constexpr (need_acc) {
         buffer_ptr = buffer_data + tid * K;
       } else {
@@ -1032,7 +1037,7 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
       // step 2: reduce
       for (const auto n : c10::irange(off_start, off_end)) {
         int64_t col = sorted_col_index_values[n];
-        update<scalar_t, reduce>(buffer_ptr, src_data + col * K, K);
+        update<scalar_t, reduce>(buffer_ptr, src_data + col * src_row_size, K);
       }
       if constexpr (need_acc) {
         vec::convert(buffer_ptr, self_ptr, K);
@@ -1047,15 +1052,18 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
 }
 
 template <typename scalar_t>
-void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& _index, const Tensor& self) {
-  Tensor index = _index.to(ScalarType::Long);
-  const int64_t* index_data = index.const_data_ptr<int64_t>();
+void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& index, const Tensor& self) {
   scalar_t* result_data = result.data_ptr<scalar_t>();
   const scalar_t* self_data = self.const_data_ptr<scalar_t>();
 
   const int64_t M = ensure_nonempty_size(result, 0);
   const int64_t N = ensure_nonempty_size(self, 0);
   const int64_t K = index.numel() / M;
+  // index repeats along every dim but 0, so its first M elements are the rows
+  const Tensor index_rows = index.as_strided({M}, {1}).to(ScalarType::Long);
+  const int64_t* index_data = index_rows.const_data_ptr<int64_t>();
+  // Rows of self can be longer than K; see can_use_expanded_index_path
+  const int64_t self_row_size = self.numel() / N;
 
   const int64_t index_upper_bound = N;
 
@@ -1069,7 +1077,7 @@ void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& _index
                   "index ", index,
                   " is out of bounds for dimension ", 0,
                   " with size ", index_upper_bound);
-      const scalar_t* self_ptr = self_data + index * K;
+      const scalar_t* self_ptr = self_data + index * self_row_size;
       int64_t d = 0;
       for (; d < K - (K % Vec::size()); d += Vec::size()) {
         Vec out_vec = Vec::loadu(self_ptr + d);
