@@ -63,13 +63,6 @@ re-evaluation. They comment on the issue and mention the maintainer who applied 
 
 ## Reviewing Pull Requests
 
-Once a PR is triaged, the bot adds `in progress` and the automated review starts, unless the PR has
-`no automated review`. PRs labeled `ready for review` are waiting for one of their assigned reviewers. Only one of them
-needs to do the full review.
-
-PRs from authors without write access either have a corresponding `actionable` issue or name the maintainer who
-pre-approved them. Authors with write access may send PRs without one.
-
 When a PR is in your `ready for review` queue, you can expect that:
 
 - The automated review ([pr-review skill](https://github.com/pytorch/pytorch/blob/main/.agents/skills/pr-review/SKILL.md)) <!-- @lint-ignore -->
@@ -84,7 +77,7 @@ withdraws the automated review's change requests, so anyone who can label the PR
 then the only check.
 
 Do your review as usual. Once you accept the PR, the author is able to merge it.
-If the PR needs a design discussion first, close it and continue the discussion on the issue.
+If the PR needs a design discussion first, move it back to draft or close it, and continue the discussion on the issue.
 If the PR requires significant changes, use "Request changes".
 If you see patterns that shouldn't happen, update the
 [pr-review skill](https://github.com/pytorch/pytorch/blob/main/.agents/skills/pr-review/SKILL.md) <!-- @lint-ignore --> so that the
