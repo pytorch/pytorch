@@ -210,6 +210,11 @@ class TestRoundedConversion(TestCase):
         for n in (1, 2):
             y = torch.full((n,), v, dtype=dtype, device=device)
             self.assertEqual(y.tolist(), [1 + eps] * n)
+        if dtype is torch.bfloat16:
+            # Integer Scalars still round through float, on every fill path.
+            big = 2**24 + 2**16 + 1
+            ys = [torch.full((n,), big, dtype=dtype, device=device) for n in (1, 2)]
+            self.assertEqual([y[0].item() for y in ys], [2.0**24] * 2)
         out = torch.zeros(1, dtype=dtype, device=device)
         self.assertEqual(torch.add(x, 0, out=out).item(), 1 + eps)
         out.zero_()
@@ -229,6 +234,9 @@ class TestRoundedConversion(TestCase):
         for n in (1, 2):
             w = torch.full((n,), complex(v, -v), dtype=torch.complex32, device=device)
             self.assertEqual(w.to(torch.complex128).tolist(), [expected] * n)
+            # Like float16 fills, every complex32 fill checks for overflow.
+            with self.assertRaisesRegex(RuntimeError, "without overflow"):
+                torch.full((n,), complex(1e5, 0), dtype=torch.complex32, device=device)
 
 
 instantiate_device_type_tests(TestRoundedConversion, globals())
