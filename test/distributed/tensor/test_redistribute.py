@@ -3210,8 +3210,11 @@ class UnevenFlattenedAllGatherTest(DTensorContinuousTestBase):
 
     world_size = 4  # 2 x 2 mesh
 
-    def test_shard_shard_to_replicate_replicate_uneven(self):
-        """Test that Shard(0),Shard(0) -> Replicate,Replicate round-trips uneven dims.
+    @parametrize("tensor_size, expected_all_gathers", [(5, 2), (8, 1)])
+    def test_shard_shard_to_replicate_replicate(
+        self, tensor_size, expected_all_gathers
+    ):
+        """Check correctness and collective counts for uneven and even dims.
 
         With mesh [2, 2] and tensor dim 0 size = 5:
         - Nested chunking: dim split [3, 2] across mesh dim 0, then [2, 1] and
@@ -3224,13 +3227,24 @@ class UnevenFlattenedAllGatherTest(DTensorContinuousTestBase):
         # Create flattened mesh so the flattened optimization is eligible
         mesh["A", "B"]._flatten("A_B")
 
-        # Tensor size 5 on dim 0 is not divisible by the flattened mesh size 4
-        full_tensor = torch.arange(5 * 3, dtype=torch.float32).reshape(5, 3)
+        full_tensor = torch.arange(
+            tensor_size * 3, dtype=torch.float32, device=self.device_type
+        ).reshape(tensor_size, 3)
         dt = distribute_tensor(full_tensor, mesh, (Shard(0), Shard(0)))
 
-        result = dt.redistribute(mesh, (Replicate(), Replicate()))
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            result = dt.redistribute(mesh, (Replicate(), Replicate()))
 
         self.assertEqual(result.to_local(), full_tensor)
+        self.assertEqual(
+            comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+            expected_all_gathers,
+        )
+        self.assertEqual(comm_mode.get_total_counts(), expected_all_gathers)
+
+
+instantiate_parametrized_tests(UnevenFlattenedAllGatherTest)
 
 
 RedistributeTestWithLocalTensor = create_local_tensor_test_class(
