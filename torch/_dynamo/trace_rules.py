@@ -442,6 +442,8 @@ manual_torch_name_rule_map: dict[
     # torch.utils._python_dispatch is in MOD_INLINELIST; override so the handler
     # in variables/torch.py fires instead of graph-breaking on _len_torch_dispatch_stack.
     "torch.utils._python_dispatch._get_current_dispatch_mode_stack": TorchInGraphFunctionVariable,
+    # Folded with a guard; see its comment
+    "torch.utils._python_dispatch._is_cpp_fake_mode_active": TorchInGraphFunctionVariable,
     "torch._utils_internal.justknobs_check": UserFunctionVariable,
     "inspect.signature": InspectSignatureVariable,
 }
@@ -850,6 +852,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._is_any_autocast_enabled",
         "torch._C._is_autocast_available",
         "torch._C._is_cached_tensor",
+        "torch._C._is_cpp_fake_mode_set",
         "torch._C._is_flash_attention_available",
         "torch._C._is_fwd_grad_enabled",
         "torch._C._is_key_in_tls",

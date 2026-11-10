@@ -6189,9 +6189,13 @@ if __name__ == "__main__":
 
     def test_cpp_fake_tensor_mode_enter_exit(self):
         from torch._subclasses.fake_tensor import CppFakeTensorMode
-        from torch.utils._python_dispatch import _cpp_fake_mode_tls
+        from torch.utils._python_dispatch import (
+            _cpp_fake_mode_tls,
+            is_in_torch_dispatch_mode,
+        )
 
         self.addCleanup(self._restore_fake_mode_state)
+        self.assertFalse(is_in_torch_dispatch_mode())
         mode = CppFakeTensorMode()
         self.assertFalse(torch._C._only_lift_cpu_tensors())
         # Without a device, a fake mode only lifts CPU tensors while active
@@ -6199,9 +6203,11 @@ if __name__ == "__main__":
             with mode:
                 self.assertEqual(self._installed(), (mode, True))
                 self.assertTrue(torch._C._only_lift_cpu_tensors())
-                # Temporarily removing the mode empties the slot
+                self.assertTrue(is_in_torch_dispatch_mode())
+                # As for a Python mode, taking it out of its slot still counts
                 with unset_fake_temporarily():
                     self.assertEqual(self._installed(), (None, False))
+                    self.assertTrue(is_in_torch_dispatch_mode())
                 # Re-entering the active mode is a no-op
                 with mode:
                     self.assertEqual(self._installed(), (mode, True))
@@ -6214,8 +6220,10 @@ if __name__ == "__main__":
                     self.assertEqual(self._installed(), (inner, True))
                 self.assertEqual(self._installed(), (mode, True))
                 self.assertTrue(torch._C._only_lift_cpu_tensors())
+                self.assertTrue(is_in_torch_dispatch_mode())
             self.assertEqual(self._installed(), (None, False))
             self.assertFalse(torch._C._only_lift_cpu_tensors())
+            self.assertFalse(is_in_torch_dispatch_mode())
 
         # A no-op re-entry of a mode installed directly, as on a thread that
         # inherited it, also restores only_lift_cpu_tensors
@@ -6260,6 +6268,7 @@ if __name__ == "__main__":
             torch._C._unset_dispatch_mode(fake_key)
             with self.assertRaisesRegex(RuntimeError, msg):
                 mode.__exit__(None, None, None)
+        self.assertFalse(is_in_torch_dispatch_mode())
         self.assertFalse(torch._C._only_lift_cpu_tensors())
         del mode
         gc.collect()
@@ -6289,6 +6298,7 @@ if __name__ == "__main__":
         self.assertEqual(self._installed(), (None, False))
         self.assertEqual(_cpp_fake_mode_tls.entered, [])
         self.assertEqual((inner.enter_stack, inner2.enter_stack), ([], []))
+        self.assertFalse(is_in_torch_dispatch_mode())
 
         # A mode entered over itself is tracked per entry
         def entered_ids():
@@ -6309,6 +6319,43 @@ if __name__ == "__main__":
             self.assertEqual(self._installed(), (a, True))
         self.assertEqual(self._installed(), (None, False))
         self.assertEqual(entered_ids(), [])
+
+    @skipIfTorchDynamo("uses torch.compile")
+    def test_is_in_torch_dispatch_mode_compiles(self):
+        # Dynamo traces with the C++ mode suspended, but folds the check to the
+        # state the frame was entered with, guarded, rather than graph-breaking
+        # or recompiling on every call
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+        from torch.utils._python_dispatch import is_in_torch_dispatch_mode
+
+        self.addCleanup(self._restore_fake_mode_state)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f():
+            return is_in_torch_dispatch_mode()
+
+        self.assertFalse(f())
+        mode = CppFakeTensorMode()
+        with mode:
+            self.assertTrue(f())
+            with torch._dynamo.config.patch(error_on_recompile=True):
+                self.assertTrue(f())
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            self.assertFalse(f())
+
+        # Also for a mode installed without entering it, as on a thread that
+        # inherited it, traced first in that state
+        @torch.compile(backend="eager", fullgraph=True)
+        def g():
+            return is_in_torch_dispatch_mode()
+
+        torch._C._set_dispatch_mode(mode)
+        try:
+            self.assertTrue(g())
+            with torch._dynamo.config.patch(error_on_recompile=True):
+                self.assertTrue(g())
+        finally:
+            torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
 
     def test_cpp_fake_tensor_mode_exit_on_another_thread(self):
         # Exiting on a thread that did not enter the mode raises before changing
@@ -6369,10 +6416,14 @@ if __name__ == "__main__":
     def test_cpp_fake_tensor_mode_thread_exit_without_exiting(self):
         # The mode slot and the list of entered modes are per thread: a thread
         # that ends without exiting its mode releases it.
+        # is_in_torch_dispatch_mode() reports the C++ mode only on its thread.
         import threading
 
         from torch._subclasses.fake_tensor import CppFakeTensorMode
-        from torch.utils._python_dispatch import _cpp_fake_mode_tls
+        from torch.utils._python_dispatch import (
+            _cpp_fake_mode_tls,
+            is_in_torch_dispatch_mode,
+        )
 
         self.addCleanup(self._restore_fake_mode_state)
         refs, entered, errors = [], [], []
@@ -6384,7 +6435,8 @@ if __name__ == "__main__":
                 mode.__enter__()
                 installed = self._installed() == (mode, True)
                 tls_modes = _cpp_fake_mode_tls.entered
-                entered.append((installed, mode in tls_modes))
+                in_mode = is_in_torch_dispatch_mode()
+                entered.append((installed, mode in tls_modes, in_mode))
             except Exception as e:
                 errors.append(repr(e))
 
@@ -6392,8 +6444,9 @@ if __name__ == "__main__":
         thread.start()
         thread.join()
         self.assertEqual(errors, [])
-        self.assertEqual(entered, [(True, True)])
+        self.assertEqual(entered, [(True, True, True)])
         self.assertEqual(self._installed(), (None, False))
+        self.assertFalse(is_in_torch_dispatch_mode())
         # The thread's C++ slot releases the mode when the OS thread ends,
         # which can be after join() returns (before Python 3.13)
         for _ in range(500):
