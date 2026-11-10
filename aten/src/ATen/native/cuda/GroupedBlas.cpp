@@ -1098,6 +1098,20 @@ static bool ck_tile_group_gemm_supported(const Tensor& mat_a, const Tensor& mat_
   const int64_t vector_elems = 16 / mat_a.element_size();
   return (a_row_major ? K : M) % vector_elems == 0 && (b_row_major ? N : K) % vector_elems == 0;
 }
+
+// hipBLASLt runs one GEMM per expert, each with a fixed cost, but beats ck_tile's single persistent kernel once each
+// expert's GEMM is large relative to the GPU's compute (CUs x clock). The constant puts the cutoff at a per-expert
+// M*N*K of 4.5e10 on MI355X (256 CUs, 2.4 GHz), fitted on the Primus-Turbo MoE shapes in bf16 and fp16.
+static bool should_use_ck_tile_group_gemm(const Tensor& mat_a, const Tensor& mat_b, const std::optional<at::Tensor>& offs) {
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+  // In the 2D cases one of M, N and K is the jagged total over all groups.
+  const int64_t experts = a_is_2d && b_is_2d ? offs->size(0) : (a_is_2d ? mat_b.size(0) : (b_is_2d ? mat_a.size(0) : 1));
+  const double per_expert_mnk = double(mat_a.size(-2)) * mat_b.size(-1) * mat_a.size(-1) / (experts > 0 ? experts : 1);
+  const auto* props = at::cuda::getCurrentDeviceProperties();
+  const double cu_clock_hz = double(props->multiProcessorCount) * props->clockRate * 1e3;
+  return per_expert_mnk <= 0.0733 * cu_clock_hz;
+}
 #endif
 
 Tensor _grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
@@ -1137,7 +1151,8 @@ std::optional<c10::ScalarType> out_dtype) {
   const bool supported_ck_tile_arch = at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"});
 
   const bool use_ck_tile = at::globalContext().rocmAllowGroupGemmCkTile() &&
-      supported_ck_tile_arch && ck_tile_group_gemm_supported(mat_a, mat_b, offs);
+      supported_ck_tile_arch && ck_tile_group_gemm_supported(mat_a, mat_b, offs) &&
+      should_use_ck_tile_group_gemm(mat_a, mat_b, offs);
   // ck_tile zeroes the 2D x 2D groups with K == 0 itself, so it skips the zero-filled allocation the other paths need.
   Tensor out = use_ck_tile
       ? at::empty(compute_grouped_gemm_output_size_stride(mat_a, mat_b, offs, out_dtype_).first, mat_a.options().dtype(out_dtype_))
