@@ -729,7 +729,7 @@ class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
         except OSError:
             pass
 
-    def _new_pg(self, psk: str | None) -> dist.ProcessGroupNCCL2:
+    def _new_pg(self, psk: str | None) -> "dist.ProcessGroupNCCL2":
         opts = _psk_options(psk)
         # The key is applied at construction; skip creating communicators.
         opts.lazy_init = True
