@@ -123,7 +123,7 @@ def _callback_worker(fail, capture=False):
     tensor = torch.zeros(8, device="cuda")
     memory = transport.register_memory(tensor)
     remote = memory.to_remote_buffer()
-    transport._peer_name = remote.agent_name
+    transport._peers.add(remote.agent_name)
     stream = torch.cuda.Stream()
     if not fail:
         native_work = SimpleNamespace(wait=lambda: True)

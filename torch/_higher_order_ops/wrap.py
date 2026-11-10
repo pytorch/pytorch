@@ -243,11 +243,14 @@ class WrapWithSetGradEnabled(HigherOrderOperator):
 
         @disable
         def wrapper():
+            # Not `with torch.set_grad_enabled(...)`: it sets the mode in both
+            # __init__ and __enter__, and export retracing would record both calls.
             prev = torch.is_grad_enabled()
             torch.set_grad_enabled(enable_grad)
-            res = wrapped_func(*args, **kwargs)
-            torch.set_grad_enabled(prev)
-            return res
+            try:
+                return wrapped_func(*args, **kwargs)
+            finally:
+                torch.set_grad_enabled(prev)
 
         return wrapper()
 

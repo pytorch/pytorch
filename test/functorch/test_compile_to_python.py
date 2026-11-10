@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: pt2"]
 import ast
 import unittest
+import unittest.mock
 
 import torch
 import torch._functorch.config as functorch_config
@@ -498,6 +499,60 @@ class TestAOTCompileToPython(TestCase):
         with torch.no_grad():
             self.assertEqual(load_from_python(src)(_flat_inputs(m, x))[0], m(x))
 
+    def test_options_reach_both_steps_under_the_standalone_pins(self):
+        # Both steps (step 1's compile_fx, capturing the dense graph, and step 2's
+        # compile_fx_inner, the lowering) run under the options with the pins over
+        # them, so cpp_wrapper=True or fx_wrapper=True cannot send step 1 down the
+        # wrapper branch that step 2 then compiles without (it loses the aliasing
+        # between inputs), and freezing, from the options or the ambient config,
+        # cannot route it through freezing's compiler.
+        import torch._inductor.compile_fx as compile_fx_module
+
+        seen = {"compile_fx": [], "compile_fx_inner": []}
+
+        def spy(name):
+            real = getattr(compile_fx_module, name)
+
+            def wrapper(*args, **kwargs):
+                c = torch._inductor.config
+                seen[name].append(
+                    (c.cpp_wrapper, c.fx_wrapper, c.freezing, c.nan_asserts)
+                )
+                return real(*args, **kwargs)
+
+            return unittest.mock.patch.object(compile_fx_module, name, wrapper)
+
+        def alias_step(x, y):
+            x.add_(1)
+            return (y * 2,)
+
+        m = _Pointwise().eval()
+        x = torch.randn(8, 4)
+        pointwise = _capture(m, x), _flat_inputs(m, x)
+        aliased = make_fx(alias_step)(torch.zeros(4, 4), torch.zeros(4))
+        pinned = {"cpp_wrapper": True, "fx_wrapper": True, "freezing": True}
+        want = (False, False, False, True)
+        for options in ({**pinned, "nan_asserts": True}, {"nan_asserts": True}):
+            for k in seen:
+                seen[k].clear()
+            with (
+                torch._inductor.config.patch(freezing=True),
+                spy("compile_fx"),
+                spy("compile_fx_inner"),
+            ):
+                src, _ = compile_to_python(*pointwise, options=options)
+            self.assertEqual(seen["compile_fx"], [want])
+            self.assertEqual(set(seen["compile_fx_inner"]), {want})
+            with torch.no_grad():
+                self.assertEqual(load_from_python(src)(pointwise[1])[0], m(x))
+
+            base = torch.zeros(4, 4)
+            src, _ = compile_to_python(aliased, [base, base[0]], options=options)
+            base = torch.zeros(4, 4)
+            out = load_from_python(src)([base, base[0]])[0]
+            self.assertEqual(out, torch.full((4,), 2.0))
+            self.assertEqual(base, torch.ones(4, 4))
+
     def test_orchestration_inlined_as_real_def(self):
         # The orchestration is spliced as a real top-level ``def _runtime_wrapper`` that the
         # outer ``call`` invokes directly by name -- no string re-exec, no ``_orchestration``
@@ -541,44 +596,6 @@ class TestAOTCompileToPython(TestCase):
         self.assertIsInstance(out, TwoTensor)
         self.assertEqual(out.a, eager.a)
         self.assertEqual(out.b, eager.b)
-
-    @unittest.skipIf(
-        not torch.cuda.is_available(),
-        "functionalize_rng_ops threads CUDA RNG state via CUDARngStateHelper, which "
-        "requires a CUDA device (the graph itself lowers through the CPU backend).",
-    )
-    def test_functionalized_rng_runs_like_eager(self):
-        # functionalize_rng_ops rewrites the RNG op into a functional form during the inner
-        # AOTAutograd lowering, producing a FunctionalizedRngRuntimeWrapper that threads RNG
-        # state via CUDARngStateHelper. ``CUDARngStateHelper`` in the source is the RNG-specific
-        # signal (it appears only under functionalize_rng_ops and exercises the helper-table
-        # rows); the wrapper's ``_compiled_fn_`` inner-name is real but not asserted here, as
-        # that token is the orchestration's first parameter and appears in every composed
-        # module. Seeded so dropout's mask is deterministic for the eager comparison.
-        class _Dropout(torch.nn.Module):
-            def forward(self, x):
-                return torch.nn.functional.dropout(x, p=0.5, training=True)
-
-        m = _Dropout()
-        x = torch.randn(8, 4)
-
-        def flat_fn(flat):
-            return pytree.tree_flatten(m(flat[-1]))[0]
-
-        with functorch_config.patch(functionalize_rng_ops=True):
-            with torch.enable_grad():
-                gm = make_fx(flat_fn, tracing_mode="real")([x])
-            src, _cache = compile_to_python(gm, [x])
-        _assert_composed(self, src)
-        self.assertIn("CUDARngStateHelper", src)
-        fn = load_from_python(src)
-        torch.manual_seed(123)
-        with torch.no_grad():
-            out = fn([x])[0]
-        torch.manual_seed(123)
-        with torch.no_grad():
-            eager = m(x)
-        self.assertEqual(out, eager)
 
     def test_helpers_imported_from_standalone_runtime_surface(self):
         # End-to-end lock for the stability contract: a graph closing over a runtime helper
@@ -719,6 +736,48 @@ class TestAOTCompileToPython(TestCase):
             t.join()
         self.assertEqual(sinks["a"], ["a_fn"])
         self.assertEqual(sinks["b"], ["b_fn"])
+
+
+class TestAOTCompileToPythonCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(
+        not torch.cuda.is_available(),
+        "functionalize_rng_ops threads CUDA RNG state via CUDARngStateHelper, which "
+        "requires a CUDA device (the graph itself lowers through the CPU backend).",
+    )
+    def test_functionalized_rng_runs_like_eager(self):
+        # functionalize_rng_ops rewrites the RNG op into a functional form during the inner
+        # AOTAutograd lowering, producing a FunctionalizedRngRuntimeWrapper that threads RNG
+        # state via CUDARngStateHelper. ``CUDARngStateHelper`` in the source is the RNG-specific
+        # signal (it appears only under functionalize_rng_ops and exercises the helper-table
+        # rows); the wrapper's ``_compiled_fn_`` inner-name is real but not asserted here, as
+        # that token is the orchestration's first parameter and appears in every composed
+        # module. Seeded so dropout's mask is deterministic for the eager comparison.
+        class _Dropout(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.dropout(x, p=0.5, training=True)
+
+        m = _Dropout()
+        x = torch.randn(8, 4)
+
+        def flat_fn(flat):
+            return pytree.tree_flatten(m(flat[-1]))[0]
+
+        with functorch_config.patch(functionalize_rng_ops=True):
+            with torch.enable_grad():
+                gm = make_fx(flat_fn, tracing_mode="real")([x])
+            src, _cache = compile_to_python(gm, [x])
+        _assert_composed(self, src)
+        self.assertIn("CUDARngStateHelper", src)
+        fn = load_from_python(src)
+        torch.manual_seed(123)
+        with torch.no_grad():
+            out = fn([x])[0]
+        torch.manual_seed(123)
+        with torch.no_grad():
+            eager = m(x)
+        self.assertEqual(out, eager)
 
 
 @instantiate_parametrized_tests
