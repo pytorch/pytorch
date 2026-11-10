@@ -693,34 +693,16 @@ class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
 _TEST_PSK = "0123456789abcdef0123456789abcdef"
 
 
-@unittest.skipIf(TEST_WITH_ROCM, "ncclSetEncryption is not supported on ROCm")
-@requires_nccl_version((2, 32, 3), "Need NCCL 2.32.3+ for ncclSetEncryption")
-class ProcessGroupNCCL2EncryptionPskValidationTest(TestCase):
-    def tearDown(self) -> None:
-        dist.ProcessGroupNCCL2._set_encryption_psk(None)
-        super().tearDown()
-
-    @requires_nccl()
-    def test_rejects_short_key(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "ncclSetEncryption failed"):
-            dist.ProcessGroupNCCL2._set_encryption_psk("x" * 31)
-
-    @requires_nccl()
-    def test_rejects_nul_byte(self) -> None:
-        with self.assertRaisesRegex(ValueError, "NUL"):
-            dist.ProcessGroupNCCL2._set_encryption_psk(_TEST_PSK + "\0")
-
-    @requires_nccl()
-    def test_set_and_clear(self) -> None:
-        dist.ProcessGroupNCCL2._set_encryption_psk(_TEST_PSK)
-        dist.ProcessGroupNCCL2._set_encryption_psk(_TEST_PSK.encode())
-        dist.ProcessGroupNCCL2._set_encryption_psk(None)
+def _psk_options(psk: str | None) -> dist.ProcessGroupNCCL.Options:
+    opts = dist.ProcessGroupNCCL.Options()
+    opts.encryption_psk = psk
+    return opts
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ncclSetEncryption is not supported on ROCm")
 @requires_nccl_version((2, 32, 3), "Need NCCL 2.32.3+ for ncclSetEncryption")
 class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
-    """The PSK is process global, so each test needs fresh workers."""
+    """The key is process-global, so each test needs fresh workers."""
 
     @property
     def world_size(self) -> int:
@@ -747,12 +729,62 @@ class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
         except OSError:
             pass
 
+    def _new_pg(self, psk: str | None) -> dist.ProcessGroupNCCL2:
+        opts = _psk_options(psk)
+        # The key is applied at construction; skip creating communicators.
+        opts.lazy_init = True
+        store = dist.FileStore(self.file_name, self.world_size)
+        return dist.ProcessGroupNCCL2(store, self.rank, self.world_size, opts)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_encryption_psk_validation(self) -> None:
+        with self.assertRaisesRegex(ValueError, "NUL"):
+            self._new_pg(_TEST_PSK + "\0")
+        with self.assertRaisesRegex(RuntimeError, "ncclSetEncryption failed"):
+            self._new_pg("x" * 31)
+        # Failed keys are not applied, so this is still the first group.
+        self._new_pg(_TEST_PSK)
+        self._new_pg(_TEST_PSK)
+        self._new_pg(None)
+        with self.assertRaisesRegex(RuntimeError, "differs"):
+            self._new_pg(_TEST_PSK[::-1])
+        with self.assertRaisesRegex(RuntimeError, "use the nccl2 backend"):
+            dist.ProcessGroupNCCL(
+                dist.FileStore(self.file_name, self.world_size),
+                self.rank,
+                self.world_size,
+                _psk_options(_TEST_PSK),
+            )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_encryption_psk_requires_first_group(self) -> None:
+        self._new_pg(None)
+        with self.assertRaisesRegex(RuntimeError, "first nccl2 group"):
+            self._new_pg(_TEST_PSK)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_encryption_psk_split(self) -> None:
+        device = torch.device("cuda", self.rank)
+        dist.init_process_group(
+            "nccl2",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=dist.FileStore(self.file_name, self.world_size),
+            device_id=device,
+        )
+        ranks = list(range(self.world_size))
+        with self.assertRaisesRegex(RuntimeError, "first nccl2 group"):
+            dist.split_group(split_ranks=[ranks], pg_options=_psk_options(_TEST_PSK))
+        dist.destroy_process_group()
+
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_encrypted_allreduce(self) -> None:
         device = torch.device("cuda", self.rank)
         torch.cuda.set_device(device)
-        dist.ProcessGroupNCCL2._set_encryption_psk(_TEST_PSK)
         try:
             dist.init_process_group(
                 "nccl2",
@@ -760,10 +792,14 @@ class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
                 rank=self.rank,
                 store=dist.FileStore(self.file_name, self.world_size),
                 device_id=device,
+                pg_options=_psk_options(_TEST_PSK),
             )
         except RuntimeError as e:
             # Both ranks fail locally before connecting.
-            self.assertIn("built without TLS support", str(e))
+            self.assertRegex(
+                str(e),
+                "built without TLS support|ncclCrypt: (failed to open|ncclOsDlsym failed)",
+            )
             raise unittest.SkipTest("NCCL built without TLS support") from e
         tensor = torch.full((1024,), self.rank + 1.0, device=device)
         dist.all_reduce(tensor)

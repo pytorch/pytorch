@@ -946,6 +946,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       !options_->enable_reconfigure,
       "ProcessGroupNCCL does not support enable_reconfigure "
       "(reconfigure-based fault tolerance).");
+  TORCH_CHECK(
+      !options_->encryption_psk.has_value(),
+      "ProcessGroupNCCL does not support encryption_psk; use the nccl2 "
+      "backend.");
 
   // An empty global_ranks_in_group means "this group spans the whole world, in
   // rank order"; see groupRanks(). Materialize that mapping here rather than

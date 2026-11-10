@@ -476,6 +476,8 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
   // rendezvous on this shared Store connection.
   childOpts->group_name = ncclOpts->group_name;
   childOpts->group_desc = ncclOpts->group_desc;
+  // Validated by the child constructor against the process-global key.
+  childOpts->encryption_psk = ncclOpts->encryption_psk;
 
   // The child's membership in world-rank terms, as stock's split() records it.
   // nccl2 never reads this itself; its one consumer is FlightRecorderHook,
@@ -494,8 +496,23 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
   }
   childOpts->global_ranks_in_group = std::move(childRanks);
 
-  auto child = c10::make_intrusive<ProcessGroupNCCL>(
-      store, newRank, static_cast<int>(ranks.size()), childOpts);
+  c10::intrusive_ptr<ProcessGroupNCCL> child;
+  try {
+    child = c10::make_intrusive<ProcessGroupNCCL>(
+        store, newRank, static_cast<int>(ranks.size()), childOpts);
+  } catch (...) {
+    try {
+      waitForNcclCompletion(
+          *nccl_api_,
+          new_comm,
+          nccl_api_->commAbort(new_comm),
+          ncclOpts->timeout,
+          "NCCL abort of split child failed");
+    } catch (const std::exception& e) {
+      LOG(ERROR) << e.what();
+    }
+    throw;
+  }
   child->initFromComm(new_comm, device_, nccl_api_);
   return c10::static_intrusive_pointer_cast<::c10d::Backend>(child);
 }

@@ -298,6 +298,8 @@ def _pg_options_to_hints(pg_options: object) -> dict[str, str] | None:
     """Convert ProcessGroupNCCL.Options to a torchcomms hints dict."""
     if pg_options is None:
         return None
+    if getattr(pg_options, "encryption_psk", None) is not None:
+        raise ValueError("encryption_psk is not supported with torchcomms")
 
     hints: dict[str, str] = {}
 
@@ -313,7 +315,7 @@ def _pg_options_to_hints(pg_options: object) -> dict[str, str] | None:
                     pass
 
     for attr in dir(pg_options):
-        if not attr.startswith("_") and attr != "config":
+        if not attr.startswith("_") and attr not in ("config", "encryption_psk"):
             try:
                 value = getattr(pg_options, attr)
                 if not callable(value):
