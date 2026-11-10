@@ -727,18 +727,33 @@ def foreach_reduce(
 
     with device_handle.stream(reduce_scatter_stream):
         _div_if_needed(reduce_scatter_input, predivide_factor)
-        if skip_reduce_scatter and all_reduce_group is None:
-            # The packed input already is the reduction output
-            reduce_output = reduce_scatter_input
-            _div_if_needed(reduce_output, gradient_divide_factor)
-        elif skip_reduce_scatter:
-            # HSDP/replicate keeps a separate output, allocated in the RS stream,
-            # since its all-reduce and partial accumulation outlive the input
-            reduce_output = torch.empty_like(reduce_scatter_input)
-            if gradient_divide_factor is not None and gradient_divide_factor != 1.0:
-                reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
+        if skip_reduce_scatter:
+            # No collective runs for a singleton group to carry a share of
+            # the gradient divide factor, so this branch owes the full
+            # divide only when neither the pre-divide above nor the
+            # post-divide below already carries a share of it. The factor
+            # is split across pre/post for fp16/fp64 reduce dtypes and
+            # with force-sum, and dividing by the full factor here as
+            # well would divide the gradients twice (the world-size-1
+            # case of #202170)
+            divide_factor = (
+                gradient_divide_factor
+                if predivide_factor is None and postdivide_factor is None
+                else None
+            )
+            if all_reduce_group is None:
+                # The packed input already is the reduction output
+                reduce_output = reduce_scatter_input
+                _div_if_needed(reduce_output, divide_factor)
             else:
-                reduce_output.copy_(reduce_scatter_input)
+                # HSDP/replicate keeps a separate output, allocated in the
+                # RS stream, since its all-reduce and partial accumulation
+                # outlive the input
+                reduce_output = torch.empty_like(reduce_scatter_input)
+                if divide_factor is not None and divide_factor != 1.0:
+                    reduce_output.copy_(reduce_scatter_input / divide_factor)
+                else:
+                    reduce_output.copy_(reduce_scatter_input)
         else:
             reduce_output = reduce_scatter_comm.allocate(
                 (reduce_scatter_output_numel,),
