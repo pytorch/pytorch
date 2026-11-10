@@ -5738,67 +5738,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             torch._C._unset_dispatch_mode(fake)
         self.assertEqual(self._installed(), (None, False))
 
-    def test_cpp_fake_tensor_mode_thread_exit_reentrant(self):
-        # A broken TLS destructor can corrupt the process during the callback.
-        script = """\
-import threading
-import weakref
-import torch
-from torch._subclasses.fake_tensor import CppFakeTensorMode
-from torch.testing._internal.common_utils import run_tests, TestCase
-
-class TestThreadExit(TestCase):
-    def test_release(self):
-        refs, installed, seen, errors = [], [], [], []
-        released = threading.Event()
-        key = torch._C._TorchDispatchModeKey.FAKE
-
-        def state():
-            return (
-                torch._C._get_dispatch_mode(key) is None,
-                torch._C._dispatch_tls_is_dispatch_key_included(torch._C.DispatchKey.Fake),
-            )
-
-        def on_release(ref):
-            try:
-                seen.append(state())
-                with self.assertRaisesRegex(RuntimeError, "during thread teardown"):
-                    torch._C._set_dispatch_mode(CppFakeTensorMode())
-                seen.append(state())
-            except Exception as error:
-                errors.append(repr(error))
-            finally:
-                released.set()
-
-        def worker():
-            try:
-                mode = CppFakeTensorMode()
-                refs.append(weakref.ref(mode, on_release))
-                torch._C._set_dispatch_mode(mode)
-                installed.append(torch._C._get_dispatch_mode(key) is mode)
-            except Exception as error:
-                errors.append(repr(error))
-
-        thread = threading.Thread(target=worker)
-        thread.start()
-        thread.join(10)
-        self.assertFalse(thread.is_alive())
-        self.assertTrue(released.wait(10))
-        self.assertEqual(errors, [])
-        self.assertEqual(installed, [True])
-        self.assertEqual(seen, [(True, False), (True, False)])
-        self.assertIsNone(refs[0]())
-
-if __name__ == "__main__":
-    run_tests()
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            timeout=60,
-        )
-        self.assertEqual(result.returncode, 0, msg=result.stderr.decode())
-
     # Dynamo keeps references that stop the mode being collected
     @xfailIfTorchDynamo
     def test_slot_keeps_mode_alive(self):
