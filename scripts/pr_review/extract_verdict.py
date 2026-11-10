@@ -71,6 +71,14 @@ MAX_DROPPED_TRACKED = (
 MAX_LINE = 10_000_000  # no source file has this many lines; bounds a published integer
 MAX_STRUCTURED_BYTES = 1024 * 1024  # whole-document ceiling, applied before parsing
 
+# CONTRIBUTING.md: stacks must have fewer than 10 PRs, so the 10th PR from the
+# bottom and everything above it get changes requested.
+STACK_POSITION_LIMIT = 10
+# One ghstack stack-list entry, "* #12345" or "* __->__ #12345" for the current
+# PR, as matched by .github/scripts/filter_test_configs.py.
+_GHSTACK_ENTRY = re.compile(r"\* (?:__->__ )?#\d+\s*")
+_GHSTACK_CURRENT = "__->__"
+
 # Printable ASCII plus tab and newline. Everything else — control characters,
 # zero-width joiners, variation selectors, RTL overrides, any non-ASCII — fails.
 _ALLOWED_CHARS = re.compile(r"^[\x09\x0a\x20-\x7e]*$")
@@ -641,12 +649,15 @@ def published_findings(verdict: dict) -> list[dict]:
 
 
 def parse_diff(diff_text: str) -> dict[str, set[int]]:
-    """Map each changed file to the set of new-side line numbers the diff touches.
+    """Map each changed file to the set of line numbers the diff touches.
 
-    Only the post-image (``+++ b/...``) side is recorded, because that is what a
-    finding's ``line`` refers to. Both added and context lines inside a hunk
-    count, so a reviewer may anchor a finding on an unchanged line next to the
-    change.
+    For a file that still exists, the post-image (``+++ b/...``) side is
+    recorded, because that is what a finding's ``line`` refers to. Both added and
+    context lines inside a hunk count, so a reviewer may anchor a finding on an
+    unchanged line next to the change. A file the diff deletes has no post-image,
+    so its removed lines are recorded instead, numbered as in the deleted file;
+    the publish step posts those on the diff's left side. Without them a PR that
+    only deletes files has no anchor at all and can never be asked for changes.
 
     HEADERS ARE ONLY RECOGNISED OUTSIDE A HUNK BODY, and the hunk's own declared
     line counts are what say where the body ends. This is the anchoring
@@ -668,16 +679,24 @@ def parse_diff(diff_text: str) -> dict[str, set[int]]:
     from the new side, ``-`` one from the old. While either budget is open every
     line is body, whatever it looks like.
 
-    KNOWN LIMITS, deliberate: pure renames, mode-only changes, binary files and
-    deletions have no new-side hunk lines, so findings about them can never
-    anchor and are dropped. Combined (merge) diffs are not parsed; a PR diff
-    against its base is never one. A malformed diff whose body is shorter than
-    its header declares leaves the budget open and swallows what follows — that
-    loses anchors, never invents them, which is the safe direction.
+    KNOWN LIMITS, deliberate: pure renames, mode-only changes and binary files
+    have no hunk lines, so findings about them can never anchor and are dropped.
+    Combined (merge) diffs are not parsed; a PR diff against its base is never
+    one. A malformed diff whose body is shorter than its header declares leaves
+    the budget open and swallows what follows — that loses anchors, never
+    invents them, which is the safe direction.
     """
     touched: dict[str, set[int]] = {}
+    deleted: dict[str, set[int]] = {}
     current: str | None = None
+    # The file a deletion stanza removes, from its `---` header.
+    old_path: str | None = None
+    deleting: str | None = None
+    stanza = ""  # the current stanza's `diff --git` line
+    last_deletion: tuple[str, str] | None = None  # (stanza, path)
+    recreated: str | None = None  # a deleted path whose header came round again
     new_line = 0
+    old_line = 0
     old_remaining = 0
     new_remaining = 0
     saw_git_header = False
@@ -704,6 +723,9 @@ def parse_diff(diff_text: str) -> dict[str, set[int]]:
                 new_remaining -= 1
             elif raw.startswith("-"):
                 old_remaining -= 1
+                if deleting is not None:
+                    deleted[deleting].add(old_line)
+                old_line += 1
                 i += 1
                 continue  # deletions consume no new-side number
             elif raw == "" or raw.startswith(" "):
@@ -711,6 +733,7 @@ def parse_diff(diff_text: str) -> dict[str, set[int]]:
                 # the trailing space from an empty context line.
                 old_remaining -= 1
                 new_remaining -= 1
+                old_line += 1
             else:
                 # DESYNC. An unprefixed line cannot occur inside a real hunk —
                 # a content line reading `diff --git ...` is emitted as
@@ -728,15 +751,31 @@ def parse_diff(diff_text: str) -> dict[str, set[int]]:
 
         i += 1
         if raw.startswith("diff --git "):
+            # A type change is a deletion stanza followed by a creation stanza
+            # with the same header, which carries no `+++` when the new file is
+            # empty or binary. The path still exists, so it has no old side. The
+            # header alone does not prove it (unquoted spaces let a rename
+            # collide), so wait for the stanza's `new file mode`.
+            recreated = None
+            if last_deletion is not None and raw == last_deletion[0]:
+                recreated = last_deletion[1]
+            last_deletion = None
+            stanza = raw
             # A new stanza always closes the previous file, even if its hunks
             # were malformed.
-            current = None
+            current = deleting = old_path = None
             saw_git_header = True
             prev_was_old_header = False
             continue
+        if raw.startswith("new file mode ") and recreated is not None:
+            deleted.pop(recreated, None)
+            recreated = None
+            continue
         if raw.startswith("--- "):
             prev_was_old_header = True
-            current = None
+            current = deleting = None
+            old = _header_target(raw)
+            old_path = old if old != "/dev/null" and _is_repo_path(old) else None
             continue
         if raw.startswith("+++ ") and prev_was_old_header and saw_git_header:
             # `saw_git_header` is the third guard. Real `git diff` always emits
@@ -746,16 +785,14 @@ def parse_diff(diff_text: str) -> dict[str, set[int]]:
             # attacker a header position.
             prev_was_old_header = False
             saw_git_header = False
-            # Cut at the TAB, do not strip: git delimits a trailing-whitespace
-            # path with one, so `victim.py ` recorded as the untouched
-            # `victim.py`.
-            header = raw[4:]
-            header = header.split("\t", 1)[0] if "\t" in header else header.strip()
-            target = unquote_git_path(header)
+            target = _header_target(raw)
             if target == "/dev/null":
                 current = None
+                deleting = old_path
+                if deleting is not None:
+                    deleted.setdefault(deleting, set())
+                    last_deletion = (stanza, deleting)
             else:
-                target = target[2:] if target.startswith(("a/", "b/")) else target
                 current = target if _is_repo_path(target) else None
             if current is not None:
                 touched.setdefault(current, set())
@@ -764,8 +801,9 @@ def parse_diff(diff_text: str) -> dict[str, set[int]]:
 
         if raw.startswith("@@"):
             m = re.match(r"@@+ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", raw)
-            if m and current is not None:
+            if m and (current is not None or deleting is not None):
                 old_remaining = int(m.group(2)) if m.group(2) is not None else 1
+                old_line = int(m.group(1))
                 new_line = int(m.group(3))
                 new_remaining = int(m.group(4)) if m.group(4) is not None else 1
             else:
@@ -773,9 +811,25 @@ def parse_diff(diff_text: str) -> dict[str, set[int]]:
                 # nothing rather than guess.
                 old_remaining = new_remaining = 0
                 new_line = 0
-                current = None
+                current = deleting = None
             continue
+    # A path deleted and re-added in one diff (a type change) keeps only its new
+    # side: the publish step could not tell which side a line meant.
+    for path, removed in deleted.items():
+        touched.setdefault(path, removed)
     return touched
+
+
+def _header_target(raw: str) -> str:
+    """The path a `--- `/`+++ ` header names, without its a/ or b/ prefix."""
+    # Cut at the TAB, do not strip: git delimits a trailing-whitespace path with
+    # one, so `victim.py ` recorded as the untouched `victim.py`.
+    header = raw[4:]
+    header = header.split("\t", 1)[0] if "\t" in header else header.strip()
+    target = unquote_git_path(header)
+    if target == "/dev/null":
+        return target
+    return target[2:] if target.startswith(("a/", "b/")) else target
 
 
 def sanitize_findings(  # noqa: C901
@@ -981,6 +1035,85 @@ def build(obj: dict, touched: dict[str, set[int]]) -> dict:
     return result
 
 
+def ghstack_position(body: str) -> int:
+    """The PR's 1-based position from the bottom of its ghstack, 0 outside one.
+
+    ghstack lists the stack newest-first, so the PRs below this one are the
+    entries right after its `__->__` line. Counting stops at the first line
+    that is not an entry: a `* #N` bullet elsewhere in the body is not a PR in
+    the stack, and counting it could request changes on the bottom PR.
+    """
+    if not body or _GHSTACK_CURRENT not in body:
+        return 0
+    lines = body.split("\n")
+    for i, line in enumerate(lines):
+        if _GHSTACK_CURRENT in line and _GHSTACK_ENTRY.fullmatch(line):
+            below = 0
+            for after in lines[i + 1 :]:
+                if not _GHSTACK_ENTRY.fullmatch(after):
+                    break
+                below += 1
+            return below + 1
+    return 0
+
+
+def apply_stack_policy(result: dict, body: str, touched: dict[str, set[int]]) -> dict:
+    """Request changes on a PR at or above STACK_POSITION_LIMIT in its ghstack.
+
+    Decided here, from the PR body, rather than by the model: the rule is
+    mechanical, and a model reviewing the code can miss it or be argued out of
+    it. Only a succeeded review is touched; a failed one stays a failure.
+    """
+    position = ghstack_position(body)
+    if result.get("status") != "succeeded" or position < STACK_POSITION_LIMIT:
+        return result
+    policy = (
+        f"This PR is number {position} from the bottom of its ghstack. "
+        f"PyTorch requires stacks of fewer than {STACK_POSITION_LIMIT} PRs "
+        f"(CONTRIBUTING.md): land the PRs below it, then rebase and submit the "
+        f"stack again, or split the stack."
+    )
+    summary = _drop_dangling_escape(f"{policy} {result['summary']}"[:MAX_SUMMARY])
+    if not is_neutral_prose(summary, MAX_SUMMARY):
+        summary = policy
+    findings = list(result["findings"])
+    # post_review blocks on every finding of an objection with no major one.
+    # Keep such a model objection blocking next to the major policy finding.
+    if result["verdict"] == "changes_requested" and all(
+        f["severity"] != "major" for f in findings
+    ):
+        findings = [{**f, "severity": "major"} for f in findings]
+    for path in sorted(p for p, lines in touched.items() if lines):
+        finding = {
+            "path": neutralize_path(path)[:MAX_PATH],
+            "line": min(touched[path]),
+            "severity": "major",
+            "message": policy,
+        }
+        if is_publishable_finding(finding):
+            findings = [finding, *findings][:MAX_FINDINGS]
+            break
+    else:
+        # Like build(), never publish an objection with no finding to point at.
+        return result
+    return {
+        **result,
+        "verdict": "changes_requested",
+        "summary": summary,
+        "findings": findings,
+    }
+
+
+def load_pr_body(path: Path) -> str:
+    """The PR body from fetch_pr_comments.py's output, or "" if unreadable."""
+    try:
+        data = json.loads(path.read_bytes())
+    except (OSError, ValueError, RecursionError):
+        return ""
+    body = data.get("body") if isinstance(data, dict) else None
+    return body if isinstance(body, str) else ""
+
+
 def failure(status: str, reason: str) -> dict:
     # `reason` can quote attacker-influenced text, so it gets the same
     # neutralization and cap as any other published string.
@@ -1077,6 +1210,11 @@ def main() -> int:
         help="GitHub outcome of the step that produced the structured output; "
         "anything but 'success' downgrades the published status",
     )
+    ap.add_argument(
+        "--pr-comments-file",
+        help="fetch_pr_comments.py's output; its PR body places the PR in its "
+        "ghstack for the stack-size policy",
+    )
     args = ap.parse_args()
 
     try:
@@ -1095,7 +1233,11 @@ def main() -> int:
                 result = failure("blocked", f"could not read the diff: {exc}")
             else:
                 try:
-                    result = build(obj, parse_diff(diff_text))
+                    touched = parse_diff(diff_text)
+                    result = build(obj, touched)
+                    if args.pr_comments_file:
+                        body = load_pr_body(Path(args.pr_comments_file))
+                        result = apply_stack_policy(result, body, touched)
                 except Rejected as exc:
                     result = failure("sanitizer_rejected", str(exc))
                 except RecursionError:
