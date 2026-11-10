@@ -14789,6 +14789,10 @@ class TestConsistency(TestCaseMPS):
         if dtype == torch.complex64:
             if op.name == "mv":
                 return (2e-5, 1e-5)
+            # A sample has an eigenvalue near 0.05, which amplifies the
+            # rounding difference between the MPS and CPU eigh.
+            if op.name == "linalg.pinv" and op.variant_test_name == "hermitian":
+                return (1.5e-5, 1.3e-6)
             # Complex pow uses the float32 polar form exp(y*log(x)); its
             # precise:: transcendentals round differently than CPU libm, and
             # the phase error is amplified by the result magnitude.
