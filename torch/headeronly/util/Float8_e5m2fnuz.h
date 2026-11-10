@@ -30,6 +30,7 @@
 #endif
 
 #include <iosfwd>
+#include <limits>
 #include <ostream>
 
 namespace c10 {

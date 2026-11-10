@@ -34,9 +34,8 @@ C10_HOST_DEVICE inline uint32_t fp32_to_bits(float f) {
 // has at least two more mantissa bits than the narrower formats and covers
 // their ranges, so rounding the result to one of them again rounds x correctly.
 C10_HOST_DEVICE inline float round_to_odd_float(double x) {
-#if defined(__CUDA_ARCH__)
-  // Truncate, then set the last bit if inexact (false for NaN). Not used for
-  // HIP, where it is untested; the portable version below is correct there.
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+  // Truncate, then set the last bit if inexact (false for NaN).
   const float t = __double2float_rz(x);
   return fp32_from_bits(
       fp32_to_bits(t) | ((static_cast<double>(t) != x) & (x == x)));

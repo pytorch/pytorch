@@ -577,22 +577,24 @@ Vectorized<c10::Half> inline fmadd(
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vfmaq_f16(c, a, b));
 #else
-  return fused_multiply_add(
-      a, b, c, [](float x, float y, float z) { return x * y + z; });
+  // Compute in float, where the product is exact: rounding it to Half before
+  // adding would round twice.
+  const auto [a_float_low, a_float_high] = convert_half_float(a);
+  const auto [b_float_low, b_float_high] = convert_half_float(b);
+  const auto [c_float_low, c_float_high] = convert_half_float(c);
+  return convert_float_half(
+      fmadd(a_float_low, b_float_low, c_float_low),
+      fmadd(a_float_high, b_float_high, c_float_high));
 #endif
 }
 
+#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
 template <>
 Vectorized<c10::Half> inline fnmadd(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b,
     const Vectorized<c10::Half>& c) {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vfmsq_f16(c, a, b));
-#else
-  return fused_multiply_add(
-      a, b, c, [](float x, float y, float z) { return -(x * y) + z; });
-#endif
 }
 
 template <>
@@ -600,12 +602,7 @@ Vectorized<c10::Half> inline fmsub(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b,
     const Vectorized<c10::Half>& c) {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vnegq_f16(vfmsq_f16(c, a, b)));
-#else
-  return fused_multiply_add(
-      a, b, c, [](float x, float y, float z) { return x * y - z; });
-#endif
 }
 
 template <>
@@ -613,13 +610,9 @@ Vectorized<c10::Half> inline fnmsub(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b,
     const Vectorized<c10::Half>& c) {
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vnegq_f16(vfmaq_f16(c, a, b)));
-#else
-  return fused_multiply_add(
-      a, b, c, [](float x, float y, float z) { return -(x * y) - z; });
-#endif
 }
+#endif
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)
 
 } // namespace CPU_CAPABILITY
