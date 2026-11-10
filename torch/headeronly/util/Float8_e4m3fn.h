@@ -31,6 +31,7 @@
 
 #include <climits>
 #include <iostream>
+#include <limits>
 
 namespace c10 {
 

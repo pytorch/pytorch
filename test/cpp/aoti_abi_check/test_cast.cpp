@@ -43,8 +43,7 @@ TEST(TestCast, TestConvertRoundsDoubleOnce) {
 
 TEST(TestCast, TestRoundsThroughFloat) {
   using namespace torch::headeronly;
-  // An implementation detail of convert, which has no headeronly alias.
-  using c10::detail::rounds_through_float;
+  using torch::headeronly::detail::rounds_through_float;
   static_assert(
       rounds_through_float<Half> && rounds_through_float<BFloat16> &&
       rounds_through_float<Float8_e4m3fn> &&
