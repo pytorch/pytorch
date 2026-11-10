@@ -567,6 +567,31 @@ class BatchLinearLHSFusion(BatchFusion):
                         pending.append(user)
         return False
 
+    @staticmethod
+    def _reaches_raw_storage_op(node: torch.fx.Node) -> bool:
+        raw_storage_ops = (
+            aten.as_strided.default,
+            aten.as_strided_.default,
+            aten.as_strided_scatter.default,
+            aten.resize.default,
+            aten.resize_as.default,
+        )
+        pending = [node]
+        seen = OrderedSet([node])
+        while pending:
+            cur = pending.pop()
+            multi_output_view = _get_view_type(cur.target) is _ViewType.MultiOutputView
+            for user in cur.users:
+                if user.target in raw_storage_ops:
+                    return True
+                if _is_view_op(user.target) or (
+                    multi_output_view and user.target is operator.getitem
+                ):
+                    if user not in seen:
+                        seen.add(user)
+                        pending.append(user)
+        return False
+
     def match(self, node: torch.fx.Node):
         if CallFunctionVarArgs(aten.mm.default).match(node):
             input_m, weight_m = node.args
@@ -582,9 +607,10 @@ class BatchLinearLHSFusion(BatchFusion):
         # Replacing a mutated mm output with a split view can break autograd.
         if any(_is_mutable_node(user.target) for user in node.users):
             return None
-        # as_strided reinterprets the raw storage and would observe the wide
-        # GEMM row stride instead of the eager slice, so do not fuse across it.
-        if any(user.target is aten.as_strided.default for user in node.users):
+        # Raw-storage consumers reinterpret physical storage and would observe
+        # the wide GEMM row stride instead of the eager slice. Follow views so
+        # an aliased consumer such as t().as_strided() also blocks the fusion.
+        if self._reaches_raw_storage_op(node):
             return None
         weight_val = weight_m.meta["val"]  # type: ignore[union-attr]
         if not statically_known_true(weight_val.shape[1] > 0):
