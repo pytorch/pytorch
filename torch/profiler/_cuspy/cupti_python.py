@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
 
-# libcupti soname for the supported CUDA major (Cuspy's floor is 13.3). Loaded
+# libcupti soname for the supported CUDA major (Cuspy's floor is 13.5). Loaded
 # by name so dlopen returns the copy already mapped into the process: torch front-loads
 # the nvidia-cuda-cupti wheel (torch._preload_cuda_deps) and cupti-python / kineto load
 # it otherwise, so every consumer shares one CUPTI -- a second instance would collide
@@ -65,9 +65,12 @@ CUPTI_ACTIVITY_FLAG_FLUSH_FORCED = 1
 # header) rather than hardcoded ints -- they are renumbered vs cupti-python's own enum.
 
 # Minimum libcupti Cuspy supports. The v2 user-defined-record API arrived in
-# 13.2, but only 13.3 populates pBufferCompleteInfo->ppRecordLayouts (CUPTI's own
-# per-kind record layout) that Cuspy decodes against, so 13.3 is the floor.
-LIBCUPTI_MIN_VERSION = 130300
+# 13.2 and 13.3 first populates pBufferCompleteInfo->ppRecordLayouts (CUPTI's own
+# per-kind record layout) that Cuspy decodes against; Cuspy is only supported on 13.5+.
+LIBCUPTI_MIN_VERSION = 130500
+
+# Minimum CUDA version PyTorch must be built with (torch.version.cuda) for Cuspy.
+CUDA_MIN_VERSION = (13, 5)
 
 # CUPTI overhead-kind codes (CUpti_ActivityOverheadKind in cupti_activity.h).
 # cupti-python does not surface these as an enum, so the code -> name mapping is
@@ -463,6 +466,30 @@ class _PyLibCupti:
             self._lib.cuptiActivityEnableHWTrace(1 if enabled else 0),
             "cuptiActivityEnableHWTrace",
         )
+
+    def activity_enable_hes(self) -> None:
+        """Turn on HES (hardware event) timestamps process-wide through
+        CUPTI_ACTIVITY_ATTR_ENABLE_HES, the v2 form of cuptiActivityEnableHWTrace. Must be
+        set before any subscriber enables an activity kind. libcupti 13.5 rejects
+        user-defined records (CUPTI_ERROR_NOT_COMPATIBLE) once HES was turned on through
+        cuptiActivityEnableHWTrace, but not through this attribute. Falls back to
+        cuptiActivityEnableHWTrace when the attribute is unavailable or rejected, so an
+        unsupported platform still reports CUPTI_ERROR_NOT_SUPPORTED."""
+        attr = getattr(ActivityAttr, "ENABLE_HES", None)
+        set_attribute = getattr(self._lib, "cuptiActivitySetAttribute_v2", None)
+        if attr is not None and set_attribute is not None:
+            enabled = ctypes.c_uint8(1)
+            size = ctypes.c_size_t(1)
+            rc = set_attribute(None, attr, ctypes.byref(size), ctypes.byref(enabled))
+            if rc == CUPTI_SUCCESS:
+                return
+            logger.warning(
+                "cuptiActivitySetAttribute_v2(ENABLE_HES) failed with %s; falling back "
+                "to cuptiActivityEnableHWTrace, after which libcupti >= 13.5 rejects "
+                "user-defined records",
+                self._result_string(rc),
+            )
+        self.activity_enable_hw_trace(True)
 
     def finalize(self) -> None:
         """cuptiFinalize -- detach and release ALL of CUPTI process-wide. This is a

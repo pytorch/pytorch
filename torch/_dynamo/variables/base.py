@@ -62,8 +62,6 @@ _RICHCOMPARE_OPS = frozenset(
 
 
 if TYPE_CHECKING:
-    import types
-
     from torch._guards import Guard
     from torch.fx.proxy import Node
 
@@ -427,14 +425,8 @@ class Method:
         name: str,
         args: Any,
         kwargs: Any,
-        *,
-        descriptor: types.MethodDescriptorType | None = None,
     ) -> VariableTracker | None:
-        flags = (
-            _derive_method_flags(vt, name)
-            if descriptor is None
-            else _flags_from_ml_flags(descriptor.__objclass__, name)
-        )
+        flags = _derive_method_flags(vt, name)
         _check_method_arity(vt, tx, name, flags, args, kwargs)
         return self.handler(vt, tx, args, kwargs)
 
@@ -931,17 +923,6 @@ def _wrap_new(
     return func(self, tx, args, kwargs)
 
 
-def check_setattr_args(
-    tx: InstructionTranslatorBase,
-    args: list[VariableTracker],
-    kwargs: dict[str, VariableTracker],
-) -> None:
-    if kwargs:
-        raise_type_error(tx, "__setattr__ takes no keyword arguments")
-    if len(args) != 2:
-        raise_type_error(tx, f"__setattr__ expected 2 arguments, got {len(args)}")
-
-
 def _wrap_setattr(
     self: VariableTracker,
     tx: InstructionTranslatorBase,
@@ -950,7 +931,10 @@ def _wrap_setattr(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # tp_setattro via __setattr__: (name, value).
-    check_setattr_args(tx, args, kwargs)
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) != 2:
+        raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
     return func(self, tx, args[0], args[1])
 
 
@@ -1877,31 +1861,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def lookup_tp_method(self, name: str) -> Method | None:
         return self._lookup_tp_table(name, "tp_methods")
-
-    def lookup_method_descriptor(
-        self, descriptor: types.MethodDescriptorType
-    ) -> Method | None:
-        from .object_protocol import mro_lookup
-
-        # For example, `dict.update(ordered, src)` must bypass `OrderedDict.update`.
-        name = descriptor.__name__
-        python_type = self._cpython_type
-        for cls in type(self).__mro__:
-            python_type = cls.__dict__.get("_cpython_type", python_type)
-            table = cls.__dict__.get("tp_methods")
-            if isinstance(table, property):
-                table = table.__get__(self)
-            if table is None or name not in table:
-                continue
-            python_types = (
-                python_type if isinstance(python_type, tuple) else (python_type,)
-            )
-            if any(
-                typ is not None and mro_lookup(typ, name) is descriptor
-                for typ in python_types
-            ):
-                return table[name]
-        return None
 
     def lookup_slotdefs(self, name: str) -> SlotDef | None:
         return self._slotdefs.get(name)
