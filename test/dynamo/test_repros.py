@@ -5114,13 +5114,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
 
     def test_storage_identity_skips_intermediate_none_sources(self):
-        from torch._functorch._aot_autograd.input_output_analysis import (
-            compute_overlapping_inputs,
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            AOTSyntheticBaseWrapper,
         )
-        from torch._guards import StorageIdentity
 
-        base = torch.arange(8, dtype=torch.float32)
-        inputs = [base[2:5], base[3:6], base[:2]]
         sources = {
             0: types.SimpleNamespace(name="a"),
             1: None,
@@ -5134,19 +5131,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         aot_config = types.SimpleNamespace(
             aot_autograd_arg_pos_to_source=sources, cache_info=object()
         )
+        wrapper = AOTSyntheticBaseWrapper(trace_joint=False)
+        wrapper.base_groups = {0: [0, 1, 2]}
+        wrapper.base_group_names = {0: ["a", "b", "c"]}
 
         with mock.patch.object(
             torch._guards.TracingContext, "try_get", return_value=tracing_context
         ):
-            actual = compute_overlapping_inputs(aot_config, inputs, [0, 1, 2])
+            wrapper.post_compile(lambda *args: args, aot_config, runtime_metadata=None)
 
-        self.assertEqual(actual, {0, 1})
         self.assertIsNotNone(aot_config.cache_info)
-        for guard in tracing_context.guards_context.aotautograd_guards:
-            if isinstance(guard, StorageIdentity):
-                sources = guard.aliased_sources
-                for source in sources[1:]:
-                    self.assertIsNotNone(source.name)
         self.assertEqual(tracing_context.guards_context.aotautograd_guards, [])
 
     def test_synthetic_base_post_compile_restores_storage_identity(self):
@@ -5155,9 +5149,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
         from torch._guards import StorageIdentity
 
-        sources = {
-            index: types.SimpleNamespace(name=f"s{index}") for index in range(3)
-        }
+        sources = {index: types.SimpleNamespace(name=f"s{index}") for index in range(3)}
         tracing_context = types.SimpleNamespace(
             fake_mode=types.SimpleNamespace(shape_env=None),
             shape_env=None,
@@ -5181,6 +5173,28 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(guards[0], StorageIdentity)
         self.assertEqual(guards[0].aliased_sources, list(sources.values()))
         self.assertIs(aot_config.cache_info, cache_info)
+
+        base = torch.arange(8, dtype=torch.float32)
+        aliased_args = [base[:3], base[3:6], base[6:]]
+        self.assertIsNone(wrapper.cache_entry_bypass_reason(aliased_args, aot_config))
+        aliased_args[1] = torch.empty(3)
+        self.assertIn(
+            "flat input group [0, 1, 2]",
+            wrapper.cache_entry_bypass_reason(aliased_args, aot_config),
+        )
+
+    def test_synthetic_base_cache_validation_skips_none_sources(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            AOTSyntheticBaseWrapper,
+        )
+
+        aot_config = types.SimpleNamespace(
+            aot_autograd_arg_pos_to_source={0: None, 1: None}
+        )
+        wrapper = AOTSyntheticBaseWrapper(trace_joint=False)
+        wrapper.base_groups = {0: [0, 1]}
+        args = [torch.empty(3), torch.empty(3)]
+        self.assertIsNone(wrapper.cache_entry_bypass_reason(args, aot_config))
 
     def test_stale_base_adds_no_base_guard_and_no_recompile(self):
         # A rebound tensor's _base is not a live view base, so dynamo must not

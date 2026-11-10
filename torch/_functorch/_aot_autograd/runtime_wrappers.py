@@ -2078,6 +2078,30 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             fw_metadata_updated,
         )
 
+    def cache_entry_bypass_reason(
+        self, flat_args: Sequence[FxValue], aot_config: AOTConfig
+    ) -> str | None:
+        if not self.needs_post_compile or not aot_config.aot_autograd_arg_pos_to_source:
+            return None
+        for group in self.base_groups.values():
+            if len(group) < 2:
+                continue
+            sources = [aot_config.aot_autograd_arg_pos_to_source[i] for i in group]
+            # Without a complete source list Dynamo cannot install the identity
+            # guard that would request a fresh compile after an input rebind.
+            if not all(source is not None for source in sources):
+                continue
+            first_storage = flat_args[group[0]].untyped_storage()._cdata
+            if any(
+                flat_args[index].untyped_storage()._cdata != first_storage
+                for index in group[1:]
+            ):
+                return (
+                    "cached synthetic-base inputs no longer share storage in "
+                    f"flat input group {group}"
+                )
+        return None
+
     def post_compile(
         self,
         compiled_fn: Callable[..., Any],
@@ -2088,7 +2112,9 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         if not self.needs_post_compile:
             return compiled_fn
 
-        # Both cold compiles and warm cache hits restore guards through this wrapper.
+        # StorageIdentity is persisted indirectly through base_groups and must
+        # be restored on both cold compiles and warm cache hits. Other AOT
+        # guards are still emitted only by their respective pre_compile passes.
         tracing_context = TracingContext.try_get()
         if tracing_context and aot_config.aot_autograd_arg_pos_to_source:
             for group in self.base_groups.values():
@@ -2145,17 +2171,21 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                     buf.writeline(f"_b.set_(args[{first_orig}].untyped_storage())")
                 if len(group) > 1:
                     # Direct AOT callers have no Dynamo recompile path. Name the
-                    # current storage groups so the caller can repair the aliasing.
-                    buf.writeline("_storage_groups = {}")
-                    for orig_idx, name in zip(group, group_names):
-                        buf.writeline(
-                            f"_storage_groups.setdefault(_cdata_{orig_idx}, []).append({name!r})"
-                        )
-                    buf.writeline(
-                        "_current_storage_groups = list(_storage_groups.values())"
+                    # current storage groups only on the rare mismatch path.
+                    identity_checks = " or ".join(
+                        f"_cdata_{orig_idx} != _cdata_{first_orig}"
+                        for orig_idx in group[1:]
                     )
-                    buf.writeline("if len(_current_storage_groups) > 1:")
+                    buf.writeline(f"if {identity_checks}:")
                     with buf.indent():
+                        buf.writeline("_storage_groups = {}")
+                        for orig_idx, name in zip(group, group_names):
+                            buf.writeline(
+                                f"_storage_groups.setdefault(_cdata_{orig_idx}, []).append({name!r})"
+                            )
+                        buf.writeline(
+                            "_current_storage_groups = list(_storage_groups.values())"
+                        )
                         buf.writeline(
                             'raise RuntimeError("input storage aliasing changed after compilation: one compiled alias group now splits into storage groups %s. Recompile for the new aliasing pattern or restore the original storage sharing before calling." % _current_storage_groups)'
                         )

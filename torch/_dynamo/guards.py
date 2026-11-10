@@ -6539,6 +6539,8 @@ class CheckFunctionManager:
                     builder.add_python_lambda_leaf_guard_to_root(
                         identity_code_parts, identity_code_parts
                     )
+                    for code_part in identity_code_parts:
+                        add_code_part(code_part, None, True)
             elif isinstance(guard, StorageOverlap):
                 overlapping_guard_managers = [
                     builder.get_guard_manager_from_source(s)

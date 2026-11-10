@@ -398,11 +398,14 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
         self._clear_dynamo_and_codecache()
         compiled = torch.compile(fn, backend="inductor", dynamic=False)
+        cache_hits = counters["aot_autograd"]["autograd_cache_hit"]
         self.assertEqual(compiled(a, b), torch.tensor(10.0))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], cache_hits + 1)
 
         a.set_(torch.tensor([3.0, 4.0, 5.0]))
         self.assertEqual(compiled(a, b), torch.tensor(3.0))
         self.assertEqual(b, torch.tensor([10.0, 1.0, 2.0, 3.0, 4.0]))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], cache_hits + 1)
 
     @requires_triton()
     @functorch_config.patch({"enable_autograd_cache": True})
