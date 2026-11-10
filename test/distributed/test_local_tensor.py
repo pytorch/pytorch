@@ -13,6 +13,7 @@ from torch.distributed._local_tensor import (
     LocalTensor,
     LocalTensorMode,
     maybe_disable_local_tensor_mode,
+    maybe_run_for_local_tensor,
     rank_map,
     tensor_map,
 )
@@ -276,6 +277,22 @@ class TestLocalTensorWorld2(LocalTensorWorldTest):
         for r in range(self.world_size):
             self.assertEqual(lt._local_tensors[r], torch.full((2, 3), float(r)))
             self.assertEqual(scaled._local_tensors[r], torch.full((2, 3), float(r) * 2))
+
+    def test_maybe_run_for_local_tensor_nested_result(self):
+        # Nested results with the same structure on every rank are combined leaf
+        # by leaf.
+        @maybe_run_for_local_tensor
+        def nested(rank):
+            return rank, ((rank * 2, 5), (torch.full((2,), float(rank)),))
+
+        with LocalTensorMode(self.world_size):
+            rank, ((doubled, five), (tensor,)) = nested(dist.get_rank())
+        self.assertEqual(rank.node._local_ints, {0: 0, 1: 1})
+        self.assertEqual(doubled.node._local_ints, {0: 0, 1: 2})
+        self.assertEqual(five, 5)
+        self.assertIsInstance(tensor, LocalTensor)
+        for r in range(self.world_size):
+            self.assertEqual(tensor._local_tensors[r], torch.full((2,), float(r)))
 
 
 class TestLocalTensorRankWorld2(LocalTensorRankTest):
