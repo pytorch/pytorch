@@ -242,6 +242,9 @@ class TestCuTeDSLReductionWiring(TestCase):
         """Serve same-dtype and widening requests and leave input-casting requests to ATen."""
         fn = getattr(torch, op)
         x16 = torch.rand(64, 96, device=device, dtype=torch.float16) + 0.5
+        if op == "prod":
+            # Keep the 96-long products near 1 so atol=1e-2 does not swallow them.
+            x16 = torch.randn(64, 96, device=device, dtype=torch.float16) * 0.01 + 1.0
         xb = x16.bfloat16()
         x32 = x16.float()
         served = ((x16, torch.float32), (xb, torch.float32), (xb, torch.bfloat16))

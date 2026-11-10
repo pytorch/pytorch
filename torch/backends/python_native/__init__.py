@@ -254,6 +254,9 @@ class PythonNativeModule(PropModule):
     def disable_operations(self, *op_symbols: str):
         """Disable specific operations across all DSLs.
 
+        Names match registered op symbols exactly, including any overload (e.g.
+        ``"sum.dim_IntList"``); a bare ``"sum"`` matches no registration.
+
         Args:
             *op_symbols (str): Names of operations to disable.
 

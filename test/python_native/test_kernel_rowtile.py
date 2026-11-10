@@ -657,10 +657,20 @@ class TestKernelRowTile(TestCase):
             self.assertEqual(got, want, atol=0, rtol=0)
         mine = [k for k in rt._CACHE if "ragged_width" in k]
         self.assertEqual(len(mine), 2, f"expected one plan per width, got {mine}")
+        # Whole-vector widths fall back to the rolled path's one plan per vector class.
+        for columns in (2048, 2052):
+            x = torch.randint(1, 9, (64, columns), device="cuda").float()
+            (got,) = rt.reduce_row_tile(
+                trait, "ragged_whole", x, [torch.float32], ragged_vector=True
+            )
+            self.assertEqual(got, x.sum(dim=1), atol=0, rtol=0)
+        mine = [k for k in rt._CACHE if "ragged_whole" in k]
+        self.assertEqual(len(mine), 1, f"expected one plan per vec class, got {mine}")
 
     def test_ragged_vector_rejects_inner_tree_and_tma(self):
         trait = T.SumOps(acc=cutlass.Float32)
-        x = torch.randn(64, 33, device="cuda")
+        # A whole width: the contract holds for every N, not only ragged ones.
+        x = torch.randn(64, 32, device="cuda")
         with self.assertRaisesRegex(ValueError, "require the linear order"):
             rt.reduce_row_tile(
                 trait,
