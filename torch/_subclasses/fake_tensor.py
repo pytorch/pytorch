@@ -1947,6 +1947,9 @@ class _DispatchCacheBypassEntry:
 
 if TYPE_CHECKING:
     _DispatchCacheEntry = _DispatchCacheValidEntry | _DispatchCacheBypassEntry
+    # An enter_stack entry of FakeTensorMode: whether the enter installed the
+    # mode, the fake mode it suspended, and the previous only_lift_cpu_tensors
+    _FakeModeEnterRecord = tuple[bool, TorchDispatchMode | None, bool | None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -2078,7 +2081,7 @@ class FakeTensorMode(TorchDispatchMode):
         # in_kernel_invocation
         # If another fake mode was already active when we enter, we also stash it here.
         # That way when we exit, we know to re-enable the previous fake mode.
-        self.enter_stack: list[tuple[bool, TorchDispatchMode | None, bool | None]] = []
+        self.enter_stack: list[_FakeModeEnterRecord] = []
 
         self.shape_env = shape_env
 
