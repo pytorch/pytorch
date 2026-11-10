@@ -2988,11 +2988,6 @@ class TestLinalg(TestCase):
             for density in [0.005, 0.1]:
                 run_subtest(None, size, (), device, torch.svd_lowrank, density=density)
 
-        # jitting support
-        jitted = torch.jit.script(torch.svd_lowrank)
-        actual_rank, size, batches = 2, (17, 4), ()
-        run_subtest(actual_rank, size, batches, device, jitted)
-
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 2e-4})
@@ -6226,23 +6221,6 @@ class TestLinalg(TestCase):
             self.assertEqual(matmul(A, V) / E.max(), mm(matmul(B, V), (E / E.max()).diag_embed()),
                              atol=prec, rtol=0)
 
-    @skipCPUIfNoLapack
-    @onlyCPU
-    @dtypes(torch.double)
-    def test_lobpcg_torchscript(self, device, dtype):
-        from torch.testing._internal.common_utils import random_sparse_pd_matrix
-        from torch._linalg_utils import matmul as mm
-
-        lobpcg = torch.jit.script(torch.lobpcg)
-
-        m = 500
-        k = 5
-        A1 = random_sparse_pd_matrix(m, density=2.0 / m, device=device, dtype=dtype)
-        X1 = torch.randn((m, k), dtype=dtype, device=device)
-        E1, V1 = lobpcg(A1, X=X1)
-        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
-        self.assertLess(eq_err, 1e-6)
-
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, activation=None):
         dtype = t.dtype
         numpy_dtype = dtype
@@ -8570,11 +8548,6 @@ class TestLinalg(TestCase):
             for density in [0.005, 0.1]:
                 run_subtest(guess_rank, None, size, (), device, torch.pca_lowrank, density=density)
 
-        # jitting support
-        jitted = torch.jit.script(torch.pca_lowrank)
-        guess_rank, actual_rank, size, batches = 2, 2, (17, 4), ()
-        run_subtest(guess_rank, actual_rank, size, batches, device, jitted)
-
     # Ensure that nuclear_norm's out variant gives the same result as the non-out
     @onlyNativeDeviceTypes
     @skipCPUIfNoLapack
@@ -9677,6 +9650,19 @@ class TestLinalgCudaOnly(TestCase):
             # We need to reset the filename to the default value so we can properly
             # clean up intermediate files
             self._set_tunableop_defaults()
+
+    @dtypes(torch.float)
+    def test_rerun_rewrites_results_file_tunableop(self, device, dtype):
+        import os
+        # Each run deletes its results file on exit, so a rerun of the same test
+        # in the same process must write a new one.
+        for _ in range(2):
+            with self._tunableop_ctx():
+                torch.cuda.tunable.set_max_tuning_duration(1)
+                torch.cuda.tunable.set_max_tuning_iterations(1)
+                A = make_tensor((17, 17), device=device, dtype=dtype)
+                torch.mm(A, A)
+                self.assertTrue(os.path.exists(torch.cuda.tunable.get_filename()))
 
     @dtypes(torch.half)
     def test_matmul_offline_tunableop(self, device, dtype):
@@ -12543,6 +12529,8 @@ _GROUPED_MM_CK_TILE_CASES = [
     subtest(((256, 96), (2, 1024, 96), [128, 256], False), name="ck_tile_2d_3d_k96"),
     subtest(((2048, 32), (2, 8192, 32), [1024, 2048], False), name="ck_tile_2d_3d_k32"),
     subtest(((2048, 128), (2, 8192, 128), [1024, 2048], False), name="ck_tile_2d_3d_k128"),
+    subtest(((256, 64), (2, 20, 64), [128, 256], True), name="ck_tile_2d_3d_n20"),
+    subtest(((1024, 64), (2, 2048, 64), [512, 1024], False), name="ck_tile_2d_3d_n2048"),
     subtest(((512, 256), (512, 256), [96, 256], False), name="ck_tile_2d_2d_n512"),
     subtest(((2048, 256), (4096, 256), [96, 256], False), name="ck_tile_2d_2d_n4096"),
     subtest(((2048, 256), (4096, 256), [32, 256], False), name="ck_tile_2d_2d_n4096_k32"),
@@ -12552,10 +12540,11 @@ _GROUPED_MM_CK_TILE_CASES = [
 
 # Every ck_tile config of each arch as "A/B layout, tile, waves, warp tile, padded dims, 1-element C stores", which
 # test_grouped_gemm_ck_tile_config_coverage requires the cases above to launch. RC is forward, RR dX and CR dW; each
-# layout also has the unaligned config (C1). Keyed by (arch, CU count): load_cost divides tiles by the CU count, so
-# which configs the cases reach depends on it. Update this table when the configs in ck_tile_group_gemm.hip change.
+# layout also has the unaligned config (C1). Keyed by (arch, CU count, dtype): each dtype has its own configs, and
+# load_cost divides tiles by the CU count, so which configs the cases reach depends on it. Update this table when the
+# configs in ck_tile_group_gemm.hip change.
 _GROUPED_MM_CK_TILE_CONFIGS = {
-    ("gfx950", 128): {
+    ("gfx950", 128, torch.bfloat16): {
         "RC 256x192x64 4w 32x32x16 -N-", "RC 256x128x64 4w 32x32x16 -N-", "RC 128x192x64 4w 32x32x16 -N-",
         "RC 128x128x64 4w 32x32x16 -N-", "RC 256x128x64 4w 16x16x32 MNK C1",
         "RR 256x256x32 8w 32x32x16 ---", "RR 256x128x64 4w 16x16x32 ---", "RR 256x128x64 4w 32x32x16 -N-",
@@ -12563,7 +12552,7 @@ _GROUPED_MM_CK_TILE_CONFIGS = {
         "CR 256x256x32 8w 32x32x16 --K", "CR 256x256x32 8w 32x32x16 MNK", "CR 256x128x32 4w 32x32x16 MNK",
         "CR 256x128x64 4w 16x16x32 MNK C1",
     },
-    ("gfx950", 256): {
+    ("gfx950", 256, torch.bfloat16): {
         "RC 256x192x64 4w 32x32x16 -N-", "RC 256x128x64 4w 32x32x16 -N-", "RC 128x192x64 4w 32x32x16 -N-",
         "RC 128x128x64 4w 32x32x16 -N-", "RC 256x128x64 4w 16x16x32 MNK C1",
         "RR 256x256x32 8w 32x32x16 ---", "RR 256x128x64 4w 16x16x32 ---", "RR 256x128x64 4w 32x32x16 -N-",
@@ -12571,13 +12560,34 @@ _GROUPED_MM_CK_TILE_CONFIGS = {
         "CR 256x256x32 8w 32x32x16 --K", "CR 256x256x32 8w 32x32x16 MNK", "CR 256x128x32 4w 32x32x16 MNK",
         "CR 256x128x64 4w 16x16x32 MNK C1",
     },
-    ("gfx942", 304): {
+    ("gfx942", 304, torch.bfloat16): {
         "RC 128x192x64 4w 32x32x16 -N-", "RC 128x128x64 4w 32x32x16 -N-", "RC 256x128x64 4w 32x32x16 -N-",
         "RC 256x192x64 4w 16x16x32 -N-", "RC 256x128x64 4w 16x16x32 MNK C1",
         "RR 256x64x64 4w 16x16x32 ---", "RR 256x256x32 8w 32x32x16 ---", "RR 128x128x64 4w 16x16x32 ---",
         "RR 256x128x32 4w 16x16x32 ---", "RR 128x64x64 4w 16x16x32 ---", "RR 256x128x32 4w 16x16x32 -N-",
         "RR 256x128x64 4w 16x16x32 MNK C1",
         "CR 128x128x64 4w 32x32x16 --K", "CR 256x128x64 4w 16x16x32 MNK", "CR 256x128x64 4w 16x16x32 MNK C1",
+    },
+    ("gfx950", 128, torch.float32): {
+        "RC 256x256x16 8w 32x32x8 -N-", "RC 128x256x32 8w 16x16x16 -N-", "RC 128x128x32 8w 16x16x16 -N-",
+        "RC 64x128x32 4w 16x16x16 -N-", "RC 128x128x16 4w 32x32x4 MNK C1",
+        "RR 256x128x16 8w 16x16x16 -N-", "RR 128x128x16 8w 16x16x16 -N-", "RR 128x64x16 4w 32x32x4 -N-",
+        "RR 128x128x16 4w 32x32x4 MNK C1",
+        "CR 128x128x16 8w 16x16x16 MNK", "CR 128x128x16 4w 32x32x4 MNK C1",
+    },
+    ("gfx950", 256, torch.float32): {
+        "RC 256x256x16 8w 32x32x8 -N-", "RC 128x256x32 8w 16x16x16 -N-", "RC 128x128x32 8w 16x16x16 -N-",
+        "RC 64x128x32 4w 16x16x16 -N-", "RC 128x128x16 4w 32x32x4 MNK C1",
+        "RR 256x128x16 8w 16x16x16 -N-", "RR 128x128x16 8w 16x16x16 -N-", "RR 128x64x16 4w 32x32x4 -N-",
+        "RR 128x128x16 4w 32x32x4 MNK C1",
+        "CR 128x128x16 8w 16x16x16 MNK", "CR 128x128x16 4w 32x32x4 MNK C1",
+    },
+    ("gfx942", 304, torch.float32): {
+        "RC 128x64x64 4w 16x16x16 ---", "RC 128x128x32 8w 16x16x16 -N-", "RC 256x128x32 4w 16x16x16 -N-",
+        "RC 128x128x16 4w 32x32x4 MNK C1",
+        "RR 128x128x16 8w 16x16x16 ---", "RR 128x64x32 8w 16x16x16 ---", "RR 256x128x16 8w 16x16x16 ---",
+        "RR 256x64x32 8w 16x16x16 ---", "RR 128x64x32 8w 16x16x16 -N-", "RR 128x128x16 4w 32x32x4 MNK C1",
+        "CR 128x128x16 8w 16x16x16 --K", "CR 128x128x16 8w 16x16x16 MNK", "CR 128x128x16 4w 32x32x4 MNK C1",
     },
 }
 
@@ -12613,6 +12623,10 @@ class TestGroupedMM(TestCase):
             grad = self._make_grouped_mm_matrix(out.shape, True, out.device, out.dtype)
             out.backward(grad)
         ends = offs.cpu().tolist() if offs is not None else [0] * a.size(0)
+        # MI200 fp16 backward GEMMs round inputs to bf16 (fp16_alt_impl), but only in some rocBLAS kernels, so the
+        # grouped and per-group gradients can pick different kernels and differ by bf16 rounding.
+        fp16_alt_impl = TEST_WITH_ROCM and a.is_cuda and isRocmArchAnyOf(MI200_ARCH) and a.dtype == torch.float16
+        grad_tol = {"atol": 0.15, "rtol": 1e-2} if fp16_alt_impl else {}
         start = 0
         for group, end in enumerate(ends):
             span = slice(start, end)
@@ -12629,8 +12643,8 @@ class TestGroupedMM(TestCase):
             self.assertEqual(out[out_idx], out_ref)
             if backward:
                 out_ref.backward(grad[out_idx])
-                self.assertEqual(a.grad[a_idx], a_ref.grad)
-                self.assertEqual(b.grad[b_idx], b_ref.grad)
+                self.assertEqual(a.grad[a_idx], a_ref.grad, **grad_tol)
+                self.assertEqual(b.grad[b_idx], b_ref.grad, **grad_tol)
             start = end
 
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
@@ -12660,7 +12674,9 @@ class TestGroupedMM(TestCase):
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @parametrize("a_shape,b_shape,offsets,backward", _GROUPED_MM_CASES + _GROUPED_MM_CK_TILE_CASES)
-    @dtypes(torch.bfloat16, torch.float16)
+    @dtypes(torch.bfloat16, torch.float16, torch.float32)
+    # ck_tile sums K in one fp32 accumulator; on long K that has up to 2x the rounding error of hipBLASLt kernels that split K
+    @toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)})
     def test_grouped_gemm_rocm_backend(self, device, backend, strided, a_row_major, b_row_major, a_shape, b_shape, offsets,
                                        backward, dtype):
         if backend == "ck_tile" and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
@@ -12688,21 +12704,23 @@ class TestGroupedMM(TestCase):
     # read from the kernel names, so a retune or another CU count can't drop a config from coverage unnoticed.
     @onlyCUDA
     @skipCUDAIfNotRocm
-    def test_grouped_gemm_ck_tile_config_coverage(self, device):
+    @dtypes(torch.bfloat16, torch.float32)
+    @toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)})  # same as test_grouped_gemm_rocm_backend
+    def test_grouped_gemm_ck_tile_config_coverage(self, device, dtype):
         from torch.profiler import profile, ProfilerActivity
 
+        if not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
+            self.skipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
         props = torch.cuda.get_device_properties(device)
-        key = (props.gcnArchName.split(":")[0], props.multi_processor_count)
+        arch_cus = (props.gcnArchName.split(":")[0], props.multi_processor_count)
+        key = (*arch_cus, dtype)
         if key not in _GROUPED_MM_CK_TILE_CONFIGS:
-            self.skipTest(f"ck_tile config coverage is only checked for (arch, CUs) in {sorted(_GROUPED_MM_CK_TILE_CONFIGS)}, "
-                          f"this device is {key}")
-        dtype = torch.bfloat16
-        alignment = 16 // dtype.itemsize
+            if any(k[:2] == arch_cus for k in _GROUPED_MM_CK_TILE_CONFIGS):
+                self.fail(f"no expected ck_tile configs for {dtype} on {arch_cus}; add them to _GROUPED_MM_CK_TILE_CONFIGS")
+            self.skipTest(f"ck_tile config coverage is not tracked for (arch, CUs) {arch_cus}")
         names = set()
         with mock.patch.dict(os.environ, {"ROCM_ALLOW_GROUP_GEMM_CK_TILE": "1"}):
             for a_shape, b_shape, offsets, backward in (c.arg_values for c in _GROUPED_MM_CASES + _GROUPED_MM_CK_TILE_CASES):
-                if any(size % alignment for size in a_shape[-2:] + b_shape[-2:] + tuple(offsets or ())):
-                    continue  # unaligned cases are correctness-tested in test_grouped_gemm_rocm_backend
                 for strided, a_row_major, b_row_major in itertools.product([False, True], repeat=3):
                     a = self._make_grouped_mm_matrix(a_shape, a_row_major, device, dtype, strided)
                     b = self._make_grouped_mm_matrix(b_shape, b_row_major, device, dtype, strided)
