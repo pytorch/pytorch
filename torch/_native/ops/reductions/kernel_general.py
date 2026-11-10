@@ -93,9 +93,6 @@ class ReduceBlock:
         self.ragged_chunk = ragged_chunk  # clamp each output's reduced run
         self.from_partials = from_partials
         self.block = block
-        # TileReduce reads a zero count as the tree being off.
-        if uniform_tree and count == 0:
-            raise ValueError("the uniform Welford tree needs a nonempty reduction")
         # Plan one general-axis block per output; the shared body performs mixed-radix folding.
         self.tile = tile.TileReduce(
             trait,
@@ -117,7 +114,7 @@ class ReduceBlock:
             ragged_chunk=ragged_chunk,
             order=order,
             itree=itree,
-            uniform_tree_count=count if uniform_tree else 0,
+            uniform_tree_count=count if uniform_tree else None,
         )
 
     @property
