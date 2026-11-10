@@ -2065,10 +2065,6 @@ void initJITBindings(PyObject* module) {
           // Intentionally not releasing GIL
           &PythonFutureWrapper::markCompleted)
       .def(
-          "_set_exception",
-          // Intentionally not releasing GIL
-          &PythonFutureWrapper::setError)
-      .def(
           "_set_unwrap_func",
           // Intentionally not releasing GIL as this just does an assign
           [](PythonFutureWrapper& self, py::function unwrapFunc) {

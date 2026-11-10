@@ -275,15 +275,18 @@ class Future(torch._C.Future, Generic[T]):
                 f"{result} is of type {type(result)}, not an Exception."
             )
 
-        super()._set_exception(result)
+        def raise_error(fut_result):
+            raise fut_result
+
+        super()._set_unwrap_func(raise_error)
+        self.set_result(result)  # type: ignore[arg-type]
 
 
 def collect_all(futures: list[Future]) -> Future[list[Future]]:
     r"""
     Collects the provided :class:`~torch.futures.Future` objects into a single
     combined :class:`~torch.futures.Future` that is completed when all of the
-    sub-futures are completed, or with the error of the first sub-future that
-    fails.
+    sub-futures are completed.
 
     Args:
         futures (list): a list of :class:`~torch.futures.Future` objects.
