@@ -1953,10 +1953,11 @@
   ],
   "GB3303": [
     {
-      "Gb_type": "Unsupported builtin __hash__ receiver",
+      "Gb_type": "Unsupported unbound builtin __hash__ call",
       "Context": "{self.fn.__name__}.__hash__({arg})",
-      "Explanation": "Dynamo cannot safely trace this unbound builtin __hash__ call.",
+      "Explanation": "Dynamo cannot safely trace this explicit builtin type's __hash__ method.",
       "Hints": [
+        "Use hash(x) if calling x's own hash implementation is intended.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

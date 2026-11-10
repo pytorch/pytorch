@@ -201,7 +201,7 @@ IN_PLACE_DESUGARING_MAP = {
 
 _BUILTIN_CONSTANT_FOLDABLE_METHODS: dict[type, frozenset[str]] = {
     int: frozenset({"__new__", "from_bytes"}),
-    bool: frozenset({"__new__", "from_bytes"}),
+    bool: frozenset({"__new__", "__hash__", "from_bytes"}),
     float: frozenset({"fromhex", "hex"}),
 }
 if sys.version_info >= (3, 14):
@@ -2105,19 +2105,21 @@ class BuiltinVariable(BaseBuiltinVariable):
             # e.g., int.__invert__(4) → ~4
             return pynumber_invert(tx, args[0])
 
-        if name == "__hash__" and len(args) == 1 and not kwargs:
+        if (
+            isinstance(self.fn, type)
+            and name == "__hash__"
+            and len(args) == 1
+            and not kwargs
+        ):
             arg = args[0]
-            if (
-                self.fn is bool
-                and isinstance(arg, ConstantVariable)
-                and type(arg.value) is bool
-            ):
-                return generic_hash(tx, arg)
             unimplemented(
-                gb_type="Unsupported builtin __hash__ receiver",
+                gb_type="Unsupported unbound builtin __hash__ call",
                 context=f"{self.fn.__name__}.__hash__({arg})",
-                explanation="Dynamo cannot safely trace this unbound builtin __hash__ call.",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                explanation="Dynamo cannot safely trace this explicit builtin type's __hash__ method.",
+                hints=[
+                    "Use hash(x) if calling x's own hash implementation is intended.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         return super().call_method(tx, name, args, kwargs)
