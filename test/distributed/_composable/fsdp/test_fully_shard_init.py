@@ -608,14 +608,52 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
             model0_out_proj_param_fqns, {"0.out_proj.weight", "0.out_proj.bias"}
         )
 
+    def test_fully_shard_lazy_init_from_nested_state(self):
+        """
+        Tests that lazy initialization started from a nested state makes the
+        outermost state the root.
+
+        FSDP(model(
+            0: FSDP(MLP(FSDP(in_proj), out_proj)),
+            1: MLP(in_proj, out_proj),
+        ))
+        """
+        model = nn.Sequential(MLP(8), MLP(8))
+        fully_shard(model[0].in_proj)
+        fully_shard(model[0])
+        fully_shard(model)
+        root_state = fully_shard.state(model)
+        model0_state = fully_shard.state(model[0])
+        model0_in_proj_state = fully_shard.state(model[0].in_proj)
+        model0_in_proj_state._lazy_init()
+
+        self.assertTrue(root_state._is_root)
+        self.assertFalse(model0_state._is_root)
+        self.assertFalse(model0_in_proj_state._is_root)
+        self.assertEqual(
+            root_state._state_ctx.all_states,
+            [root_state, model0_state, model0_in_proj_state],
+        )
+
+    def test_fully_shard_multi_module_lazy_init_from_nested_state(self):
+        model = nn.Sequential(MLP(8), MLP(8), MLP(8))
+        fully_shard([model[0], model[2]])
+        fully_shard(model)
+        root_state = fully_shard.state(model)
+        multi_module_state = fully_shard.state(model[0])
+        multi_module_state._lazy_init()
+
+        self.assertTrue(root_state._is_root)
+        self.assertFalse(multi_module_state._is_root)
+
     def test_fully_shard_double_lazy_init(self):
         model = nn.Sequential(MLP(8), MLP(8))
         fully_shard(model[0].in_proj)
         fully_shard(model[0].out_proj)
+        # Lazy init before ``model`` is sharded makes ``0.in_proj`` a root
+        fully_shard.state(model[0].in_proj)._lazy_init()
         fully_shard(model)
         root_state = fully_shard.state(model)
-        model0_in_proj_state = fully_shard.state(model[0].in_proj)
-        model0_in_proj_state._lazy_init()
         regex = (
             "FSDP state has already been lazily initialized for 0.in_proj\n"
             "FSDP requires running forward through the root module first"

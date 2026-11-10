@@ -74,6 +74,9 @@ class FSDPState(_State):
         # Each group has params with the same mesh_info.
         self._fsdp_param_groups: list[FSDPParamGroup] = []
         self._is_root: bool | None = None  # root set during lazy init
+        # Outermost single-module state whose module contains this state's
+        # modules; lazy init makes it the root
+        self._outermost_enclosing_state: FSDPState | None = None
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
@@ -120,6 +123,13 @@ class FSDPState(_State):
         for module in modules:
             _insert_module_state(module, self)
         self._modules = modules
+        if len(modules) == 1:
+            # ``fully_shard`` runs bottom-up, so the last state to record
+            # itself here is the outermost one
+            for submodule in modules[0].modules():
+                state = self._get_state_for_module(submodule)
+                if state is not None and state is not self:
+                    state._outermost_enclosing_state = self
         self._device = device
         self._device_handle = _get_device_handle(device.type)
         self._mp_policy = replace(mp_policy, param_dtype_override_fn=None)
@@ -180,11 +190,16 @@ class FSDPState(_State):
         """
         Lazy initialization represents when all modules' parallelisms have
         finalized (e.g. FSDP has been applied to all desired modules). This
-        means that we can determine which state is the root, and we do so by
-        the 1st state to run forward.
+        means that we can determine which state is the root, and we do so when
+        the 1st state runs forward. The root is the outermost state enclosing
+        that state, so submodules may run forward before the root module.
         """
         if self._is_root is not None:
             return  # no-op: already initialized
+        if (root_state := self._outermost_enclosing_state) is not None:
+            root_state._lazy_init()
+            if self._is_root is not None:
+                return
         if len(self._modules) > 1:
             raise RuntimeError(
                 f"{self._state_name} requires a single root module but got {self._modules}"

@@ -154,6 +154,11 @@ def fully_shard(
     overlap. Users generally should *not* call :meth:`fully_shard` only on the
     topmost root module.
 
+    The module of the outermost :meth:`fully_shard` call is the root. FSDP
+    initializes it lazily when any FSDP module inside it first runs forward,
+    so submodules may run forward before or without the root module, e.g. when
+    an inference engine calls the embedding and the decoder layers itself.
+
     When called with a list (``fully_shard([a, b, ...])``), the model's
     forward may run only a subset of the grouped modules, with the rest
     called later in the same iteration. Chunked-loss training with
@@ -456,10 +461,9 @@ class FSDPModule:
         ``RuntimeError``. Reset from a different FSDP root sharing that context
         raises until the owning root waits or resets.
 
-        Must be called on the root FSDP module — i.e. the module the
-        top-level ``fully_shard`` was applied to, equivalently the
-        module first forwarded. Calling on a non-root module raises
-        ``RuntimeError``.
+        Must be called on the root FSDP module, i.e. the module the
+        top-level ``fully_shard`` was applied to. Calling on a non-root
+        module raises ``RuntimeError``.
         """
         state = self._get_fsdp_state()
         state._reset_iter_state()
@@ -532,7 +536,7 @@ class FSDPModule:
         Enable manual finalization before forward, then call this after all
         backward passes in the logical backward operation. This completes
         pending gradient reduction and resharding according to their current
-        settings. Calling this before the root module's first forward is a no-op.
+        settings. Calling this before the first forward is a no-op.
         It is also safe after a completed backward that did not reach any
         FSDP-managed parameters. Do not call it between forward and backward.
 
