@@ -14,8 +14,10 @@ import torch.distributed.tensor as dt
 from functorch import make_fx
 from torch.distributed._local_tensor import LocalTensorMode
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipIf,
+)
 
 
 if not dist.is_available():
@@ -25,17 +27,16 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     MultiThreadedTestCase,
-    requires_accelerator_dist_backend,
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_LINUX,
     run_tests,
-    skipIfHpu,
     TEST_WITH_ROCM,
     TestCase,
 )
+from torch.utils._triton import has_triton
 
 
 def new_subgroups(group_size: int, pg_tag=None):
@@ -60,7 +61,6 @@ def new_subgroups(group_size: int, pg_tag=None):
     return cur_subgroup, subgroups
 
 
-@skipIfHpu
 class TestExpand(MultiThreadedTestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -152,7 +152,6 @@ class TestExpand(MultiThreadedTestCase):
         self.assertEqual(2, group_size)
 
 
-@skipIfHpu
 class TestPgTag(MultiThreadedTestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -233,7 +232,6 @@ class TestPgTag(MultiThreadedTestCase):
         self.assertEqual(dist.group.WORLD, pg)
 
 
-@skipIfHpu
 class TestTraceableCollectives(MultiThreadedTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -386,7 +384,6 @@ class TestMetaCollectives(TestCase):
         self.assertEqual(x.size(), out.size())
 
 
-@skipIfHpu
 class TestGradCollectives(MultiThreadedTestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -509,7 +506,7 @@ def with_comms(func=None):
         # The injected device can carry an index, such as "cuda:0". Use the type.
         device = torch.device(kwargs["device"]).type
         if (
-            dist.get_default_backend_for_device(device) != dist.Backend.GLOO
+            self.backend(device) != dist.Backend.GLOO
             and torch.accelerator.device_count() < self.world_size
         ):
             sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
@@ -590,8 +587,11 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         expected = torch.cat(expected)
         self.assertEqual(y, expected)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIf(
+        not has_triton(),
+        "Inductor+gpu needs triton and recent GPU arch",
+        device_type=("cuda", "xpu"),
+    )
     @with_comms()
     def test_tracing(self, device):
         def allreduce(t, pg):
@@ -600,7 +600,11 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         compiled_allreduce = torch.compile(allreduce, fullgraph=True)
         compiled_allreduce(torch.randn(8, device=device), self.pg)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skipIf(
+        not has_triton(),
+        "Inductor+gpu needs triton and recent GPU arch",
+        device_type=("cuda", "xpu"),
+    )
     def test_tracing_with_fakepg(self, device):
         exit_if_lt_x_accelerators(self.world_size)
 
@@ -616,8 +620,11 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         allreduce(torch.randn(8, device=device), pg=dist.group.WORLD)
         dist.destroy_process_group()
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skipIf(
+        not has_triton(),
+        "Inductor+gpu needs triton and recent GPU arch",
+        device_type=("cuda", "xpu"),
+    )
     @with_comms()
     def test_tracing_with_dce_code(self, device):
         if self.world_size > 2:
