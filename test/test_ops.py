@@ -1098,7 +1098,6 @@ class TestCommon(TestCase):
             # while when executed on XPU, CPU fallback makes it pass unexpectedly.
             skip("cholesky_inverse", device_type="xpu"),
             skip("ormqr", device_type="xpu"),
-            xfail("histc", device_type="xpu"),
         }
     )
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
