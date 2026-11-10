@@ -17,6 +17,10 @@
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/LaunchUtils.h>
+#ifdef USE_ROCM
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/cuda/MemoryAccess.cuh>
+#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -83,6 +87,205 @@ __global__ void upsample_bilinear2d_out_frame(
     }
   }
 }
+
+#ifdef USE_ROCM
+// upsample_bilinear2d_out_frame runs one thread per output pixel and loops
+// over all N*C planes. Below this many output pixels per CU it leaves the
+// device idle, and the one-thread-per-element kernels below are faster.
+// Architectures without a perf sweep keep the plane kernel.
+int64_t plane_kernel_min_pixels_per_sm() {
+  const auto& hooks = at::detail::getCUDAHooks();
+  if (hooks.isGPUArch({"gfx950"})) {
+    return 512;
+  }
+  if (hooks.isGPUArch({"gfx942"})) {
+    return 256;
+  }
+  if (hooks.isGPUArch({"gfx1250"})) {
+    return 768;
+  }
+  return 0;
+}
+
+// One thread per output element, w2 fastest so neighbouring lanes store
+// neighbouring addresses. Handles any input/output strides.
+template <typename scalar_t, typename accscalar_t, typename index_t>
+C10_LAUNCH_BOUNDS_1(256)
+__global__ void upsample_bilinear2d_out_frame_per_element(
+    const index_t numel,
+    const accscalar_t rheight,
+    const accscalar_t rwidth,
+    const bool align_corners,
+    const PackedTensorAccessor64<const scalar_t, 4> idata,
+    PackedTensorAccessor64<scalar_t, 4> odata) {
+  const int height1 = idata.size(2);
+  const int width1 = idata.size(3);
+  const index_t channels = odata.size(1);
+  const index_t height2 = odata.size(2);
+  const index_t width2 = odata.size(3);
+
+  CUDA_KERNEL_LOOP_TYPE(index, numel, index_t) {
+    const int w2 = index % width2;
+    index_t index_temp = index / width2;
+    const int h2 = index_temp % height2;
+    index_temp /= height2;
+    const int c = index_temp % channels;
+    const int n = index_temp / channels;
+
+    const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
+        rheight, h2, align_corners, /*cubic=*/false);
+    const int h1 = h1r;
+    const int h1p = (h1 < height1 - 1) ? 1 : 0;
+    const accscalar_t h1lambda = h1r - h1;
+    const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
+
+    const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
+        rwidth, w2, align_corners, /*cubic=*/false);
+    const int w1 = w1r;
+    const int w1p = (w1 < width1 - 1) ? 1 : 0;
+    const accscalar_t w1lambda = w1r - w1;
+    const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
+
+    const accscalar_t val = h0lambda *
+            (w0lambda * idata[n][c][h1][w1] +
+             w1lambda * idata[n][c][h1][w1 + w1p]) +
+        h1lambda *
+            (w0lambda * idata[n][c][h1 + h1p][w1] +
+             w1lambda * idata[n][c][h1 + h1p][w1 + w1p]);
+    odata[n][c][h2][w2] = static_cast<scalar_t>(val);
+  }
+}
+
+// Four consecutive w2 of one output row per thread: the row weights are
+// computed once and the outputs leave in one vector store. Requires a
+// contiguous output with width % 4 == 0 aligned to the vector size.
+template <typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(256)
+__global__ void upsample_bilinear2d_out_frame_vec4(
+    const int32_t numel4,
+    const accscalar_t rheight,
+    const accscalar_t rwidth,
+    const bool align_corners,
+    const PackedTensorAccessor64<const scalar_t, 4> idata,
+    scalar_t* __restrict__ odata,
+    const int32_t channels,
+    const int32_t height2,
+    const int32_t width2) {
+  using vec_t = at::native::memory::aligned_vector<scalar_t, 4>;
+  const int height1 = idata.size(2);
+  const int width1 = idata.size(3);
+  const int32_t width2_4 = width2 / 4;
+
+  CUDA_KERNEL_LOOP_TYPE(index4, numel4, int32_t) {
+    const int w2_base = (index4 % width2_4) * 4;
+    int32_t index_temp = index4 / width2_4;
+    const int h2 = index_temp % height2;
+    index_temp /= height2;
+    const int c = index_temp % channels;
+    const int n = index_temp / channels;
+
+    const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
+        rheight, h2, align_corners, /*cubic=*/false);
+    const int h1 = h1r;
+    const int h1p = (h1 < height1 - 1) ? 1 : 0;
+    const accscalar_t h1lambda = h1r - h1;
+    const accscalar_t h0lambda = static_cast<accscalar_t>(1) - h1lambda;
+
+    vec_t out;
+#pragma unroll
+    for (int k = 0; k < 4; k++) {
+      const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
+          rwidth, w2_base + k, align_corners, /*cubic=*/false);
+      const int w1 = w1r;
+      const int w1p = (w1 < width1 - 1) ? 1 : 0;
+      const accscalar_t w1lambda = w1r - w1;
+      const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
+      const accscalar_t val = h0lambda *
+              (w0lambda * idata[n][c][h1][w1] +
+               w1lambda * idata[n][c][h1][w1 + w1p]) +
+          h1lambda *
+              (w0lambda * idata[n][c][h1 + h1p][w1] +
+               w1lambda * idata[n][c][h1 + h1p][w1 + w1p]);
+      out.val[k] = static_cast<scalar_t>(val);
+    }
+    *reinterpret_cast<vec_t*>(odata + static_cast<int64_t>(index4) * 4) = out;
+  }
+}
+
+bool use_per_element_kernels(const Tensor& output) {
+  const auto* props = at::cuda::getCurrentDeviceProperties();
+  const int64_t plane_numel = output.size(2) * output.size(3);
+  return output.numel() > 0 &&
+      plane_numel < static_cast<int64_t>(props->multiProcessorCount) *
+          plane_kernel_min_pixels_per_sm();
+}
+
+template <typename scalar_t>
+void upsample_bilinear2d_out_per_element_launch(
+    const Tensor& output,
+    const Tensor& input,
+    bool align_corners,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
+  using accscalar_t = at::acc_type<scalar_t, true>;
+  const int channels = input.size(1);
+  const int input_height = input.size(2);
+  const int input_width = input.size(3);
+  const int output_height = output.size(2);
+  const int output_width = output.size(3);
+  const int64_t numel = output.numel();
+  const int64_t plane_numel =
+      static_cast<int64_t>(output_height) * output_width;
+
+  constexpr int64_t elem_threads = 256;
+  const int64_t max_blocks =
+      at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  auto idata = input.packed_accessor64<const scalar_t, 4>();
+  auto odata = output.packed_accessor64<scalar_t, 4>();
+
+  const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
+      input_height, output_height, align_corners, scales_h);
+  const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
+      input_width, output_width, align_corners, scales_w);
+
+  const bool use_32bit_indexing =
+      canUse32BitIndexMath(input) && canUse32BitIndexMath(output);
+  // vec4 helps only when upsampling: when downsampling, the input read
+  // dominates and the scalar kernel is faster.
+  const bool use_vec4 = use_32bit_indexing && output.is_contiguous() &&
+      output_width % 4 == 0 &&
+      reinterpret_cast<uintptr_t>(output.const_data_ptr()) %
+              (4 * sizeof(scalar_t)) == 0 &&
+      static_cast<int64_t>(input_height) * input_width <= plane_numel;
+
+  if (use_vec4) {
+    const int64_t numel4 = numel / 4;
+    const int64_t num_blocks =
+        std::min(ceil_div(numel4, elem_threads), max_blocks);
+    upsample_bilinear2d_out_frame_vec4<scalar_t, accscalar_t>
+        <<<num_blocks, elem_threads, 0, stream>>>(
+            static_cast<int32_t>(numel4), rheight, rwidth, align_corners,
+            idata, output.mutable_data_ptr<scalar_t>(), channels,
+            output_height, output_width);
+  } else {
+    const int64_t num_blocks =
+        std::min(ceil_div(numel, elem_threads), max_blocks);
+    if (use_32bit_indexing) {
+      upsample_bilinear2d_out_frame_per_element<scalar_t, accscalar_t, int32_t>
+          <<<num_blocks, elem_threads, 0, stream>>>(
+              static_cast<int32_t>(numel), rheight, rwidth, align_corners,
+              idata, odata);
+    } else {
+      upsample_bilinear2d_out_frame_per_element<scalar_t, accscalar_t, int64_t>
+          <<<num_blocks, elem_threads, 0, stream>>>(
+              numel, rheight, rwidth, align_corners, idata, odata);
+    }
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+#endif
 
 template <typename scalar_t, typename accscalar_t, typename index_t>
 C10_LAUNCH_BOUNDS_1(1024)
@@ -607,6 +810,24 @@ static void upsample_bilinear2d_out_cuda_template(
     output.copy_(input);
     return;
   }
+
+#ifdef USE_ROCM
+  // Output planes too small to fill the device get one thread per output
+  // element instead of the plane loop in upsample_bilinear2d_out_frame. The
+  // condition must match the channels_last heuristic below.
+  const bool channels_last_path =
+      memory_format == at::MemoryFormat::ChannelsLast && channels >= 16 &&
+      output.is_contiguous(memory_format);
+  if (!channels_last_path && use_per_element_kernels(output)) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half, at::ScalarType::BFloat16,
+        input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
+          upsample_bilinear2d_out_per_element_launch<scalar_t>(
+              output, input, align_corners, scales_h, scales_w);
+        });
+    return;
+  }
+#endif
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
