@@ -1026,134 +1026,84 @@ AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
     const auto c_type = static_cast<c10::ScalarType>(dtype_c);
     const bool add_c_bool = static_cast<bool>(add_C);
     const bool is_vnni_bool = static_cast<bool>(is_vnni);
+    const auto call_brgemm = [&](auto* a_ptr, auto* b_ptr, auto* c_ptr) {
+      at::native::cpublas::brgemm(
+          M,
+          N,
+          K,
+          ld_a,
+          ld_b,
+          ld_c,
+          add_c_bool,
+          a_ptr,
+          b_ptr,
+          c_ptr,
+          is_vnni_bool);
+    };
 
     if (a_type == c10::ScalarType::Half &&
         b_type == c10::ScalarType::Half &&
         c_type == c10::ScalarType::Float) {
-      at::native::cpublas::brgemm(
-          M,
-          N,
-          K,
-          ld_a,
-          ld_b,
-          ld_c,
-          add_c_bool,
+      call_brgemm(
           static_cast<const at::Half*>(A),
           static_cast<const at::Half*>(B),
-          static_cast<float*>(C),
-          is_vnni_bool);
+          static_cast<float*>(C));
     } else if (
         a_type == c10::ScalarType::BFloat16 &&
         b_type == c10::ScalarType::BFloat16 &&
         c_type == c10::ScalarType::Float) {
-      at::native::cpublas::brgemm(
-          M,
-          N,
-          K,
-          ld_a,
-          ld_b,
-          ld_c,
-          add_c_bool,
+      call_brgemm(
           static_cast<const at::BFloat16*>(A),
           static_cast<const at::BFloat16*>(B),
-          static_cast<float*>(C),
-          is_vnni_bool);
+          static_cast<float*>(C));
     } else if (
         a_type == c10::ScalarType::Float &&
         b_type == c10::ScalarType::Float &&
         c_type == c10::ScalarType::Float) {
-      at::native::cpublas::brgemm(
-          M,
-          N,
-          K,
-          ld_a,
-          ld_b,
-          ld_c,
-          add_c_bool,
+      call_brgemm(
           static_cast<const float*>(A),
           static_cast<const float*>(B),
-          static_cast<float*>(C),
-          is_vnni_bool);
+          static_cast<float*>(C));
     } else if (
         a_type == c10::ScalarType::Byte &&
         b_type == c10::ScalarType::Byte &&
         c_type == c10::ScalarType::Int) {
-      at::native::cpublas::brgemm(
-          M,
-          N,
-          K,
-          ld_a,
-          ld_b,
-          ld_c,
-          add_c_bool,
+      call_brgemm(
           static_cast<const unsigned char*>(A),
           static_cast<const unsigned char*>(B),
-          static_cast<int32_t*>(C),
-          is_vnni_bool);
+          static_cast<int32_t*>(C));
     } else if (
         a_type == c10::ScalarType::Byte &&
         b_type == c10::ScalarType::Char &&
         c_type == c10::ScalarType::Int) {
-      at::native::cpublas::brgemm(
-          M,
-          N,
-          K,
-          ld_a,
-          ld_b,
-          ld_c,
-          add_c_bool,
+      call_brgemm(
           static_cast<const unsigned char*>(A),
           static_cast<const signed char*>(B),
-          static_cast<int32_t*>(C),
-          is_vnni_bool);
+          static_cast<int32_t*>(C));
     } else if (
         a_type == c10::ScalarType::Char &&
         b_type == c10::ScalarType::Char &&
         c_type == c10::ScalarType::Int) {
-      at::native::cpublas::brgemm(
-          M,
-          N,
-          K,
-          ld_a,
-          ld_b,
-          ld_c,
-          add_c_bool,
+      call_brgemm(
           static_cast<const signed char*>(A),
           static_cast<const signed char*>(B),
-          static_cast<int32_t*>(C),
-          is_vnni_bool);
+          static_cast<int32_t*>(C));
     } else if (
         a_type == c10::ScalarType::Float8_e4m3fn &&
         b_type == c10::ScalarType::Float8_e4m3fn &&
         c_type == c10::ScalarType::Float) {
-      at::native::cpublas::brgemm(
-          M,
-          N,
-          K,
-          ld_a,
-          ld_b,
-          ld_c,
-          add_c_bool,
+      call_brgemm(
           static_cast<const at::Float8_e4m3fn*>(A),
           static_cast<const at::Float8_e4m3fn*>(B),
-          static_cast<float*>(C),
-          is_vnni_bool);
+          static_cast<float*>(C));
     } else if (
         a_type == c10::ScalarType::Float8_e5m2 &&
         b_type == c10::ScalarType::Float8_e5m2 &&
         c_type == c10::ScalarType::Float) {
-      at::native::cpublas::brgemm(
-          M,
-          N,
-          K,
-          ld_a,
-          ld_b,
-          ld_c,
-          add_c_bool,
+      call_brgemm(
           static_cast<const at::Float8_e5m2*>(A),
           static_cast<const at::Float8_e5m2*>(B),
-          static_cast<float*>(C),
-          is_vnni_bool);
+          static_cast<float*>(C));
     } else {
       TORCH_CHECK(
           false,

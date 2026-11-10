@@ -39,6 +39,32 @@ def my_is_warn_always_enabled() -> bool:
     return torch.ops.libtorch_agn_2_16.my_is_warn_always_enabled.default()
 
 
+def my_cpublas_brgemm(a, b, c, add_c=False) -> torch.Tensor:
+    """Write the CPU matrix product into c through stable brgemm (2.16+)."""
+    return torch.ops.libtorch_agn_2_16.my_cpublas_brgemm.default(a, b, c, add_c)
+
+
+def my_cpublas_gemm_no_downcast_default_real(
+    a, b, c, alpha=1.0, beta=0.0
+) -> torch.Tensor:
+    """Write float32 CPU GEMM into c through the stable default kernel (2.16+)."""
+    return (
+        torch.ops.libtorch_agn_2_16.my_cpublas_gemm_no_downcast_default_real.default(
+            a, b, c, alpha, beta
+        )
+    )
+
+
+def my_cpublas_could_pack(tensor) -> bool:
+    """Check whether cpublas can pack the input dtype (2.16+)."""
+    return torch.ops.libtorch_agn_2_16.my_cpublas_could_pack.default(tensor)
+
+
+def my_cpublas_brgemm_release() -> bool:
+    """Release cpublas brgemm resources (2.16+)."""
+    return torch.ops.libtorch_agn_2_16.my_cpublas_brgemm_release.default()
+
+
 def test_stable_torch_warn_once(value) -> None:
     """
     Tests STABLE_TORCH_WARN_ONCE with one call site for negative values and one

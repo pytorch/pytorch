@@ -14,10 +14,6 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, cpublas)
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
-using ScalarType = torch::headeronly::ScalarType;
-
-using TransposeType = torch::headeronly::TransposeType;
-
 namespace detail {
 
 inline void brgemm(
@@ -28,9 +24,9 @@ inline void brgemm(
     int64_t ld_b,
     int64_t ld_c,
     bool add_C,
-    ScalarType dtype_a,
-    ScalarType dtype_b,
-    ScalarType dtype_c,
+    torch::headeronly::ScalarType dtype_a,
+    torch::headeronly::ScalarType dtype_b,
+    torch::headeronly::ScalarType dtype_c,
     const void* A,
     const void* B,
     void* C,
@@ -80,9 +76,9 @@ inline void brgemm(
       ld_b,
       ld_c,
       add_C,
-      ScalarType::Half,
-      ScalarType::Half,
-      ScalarType::Float,
+      torch::headeronly::ScalarType::Half,
+      torch::headeronly::ScalarType::Half,
+      torch::headeronly::ScalarType::Float,
       A,
       B,
       C,
@@ -109,9 +105,9 @@ inline void brgemm(
       ld_b,
       ld_c,
       add_C,
-      ScalarType::BFloat16,
-      ScalarType::BFloat16,
-      ScalarType::Float,
+      torch::headeronly::ScalarType::BFloat16,
+      torch::headeronly::ScalarType::BFloat16,
+      torch::headeronly::ScalarType::Float,
       A,
       B,
       C,
@@ -138,9 +134,9 @@ inline void brgemm(
       ld_b,
       ld_c,
       add_C,
-      ScalarType::Float,
-      ScalarType::Float,
-      ScalarType::Float,
+      torch::headeronly::ScalarType::Float,
+      torch::headeronly::ScalarType::Float,
+      torch::headeronly::ScalarType::Float,
       A,
       B,
       C,
@@ -167,9 +163,9 @@ inline void brgemm(
       ld_b,
       ld_c,
       add_C,
-      ScalarType::Byte,
-      ScalarType::Byte,
-      ScalarType::Int,
+      torch::headeronly::ScalarType::Byte,
+      torch::headeronly::ScalarType::Byte,
+      torch::headeronly::ScalarType::Int,
       A,
       B,
       C,
@@ -196,9 +192,9 @@ inline void brgemm(
       ld_b,
       ld_c,
       add_C,
-      ScalarType::Byte,
-      ScalarType::Char,
-      ScalarType::Int,
+      torch::headeronly::ScalarType::Byte,
+      torch::headeronly::ScalarType::Char,
+      torch::headeronly::ScalarType::Int,
       A,
       B,
       C,
@@ -225,9 +221,9 @@ inline void brgemm(
       ld_b,
       ld_c,
       add_C,
-      ScalarType::Char,
-      ScalarType::Char,
-      ScalarType::Int,
+      torch::headeronly::ScalarType::Char,
+      torch::headeronly::ScalarType::Char,
+      torch::headeronly::ScalarType::Int,
       A,
       B,
       C,
@@ -254,9 +250,9 @@ inline void brgemm(
       ld_b,
       ld_c,
       add_C,
-      ScalarType::Float8_e4m3fn,
-      ScalarType::Float8_e4m3fn,
-      ScalarType::Float,
+      torch::headeronly::ScalarType::Float8_e4m3fn,
+      torch::headeronly::ScalarType::Float8_e4m3fn,
+      torch::headeronly::ScalarType::Float,
       A,
       B,
       C,
@@ -283,9 +279,9 @@ inline void brgemm(
       ld_b,
       ld_c,
       add_C,
-      ScalarType::Float8_e5m2,
-      ScalarType::Float8_e5m2,
-      ScalarType::Float,
+      torch::headeronly::ScalarType::Float8_e5m2,
+      torch::headeronly::ScalarType::Float8_e5m2,
+      torch::headeronly::ScalarType::Float,
       A,
       B,
       C,
@@ -308,9 +304,9 @@ inline void brgemm_release(bool is_vnni = true) {
 /// Minimum compatible version: PyTorch 2.16.
 /// Build time minimum version: PyTorch 2.16.
 inline void gemm_no_downcast_default_real(
-    ScalarType dtype,
-    TransposeType transa,
-    TransposeType transb,
+    torch::headeronly::ScalarType dtype,
+    torch::headeronly::TransposeType transa,
+    torch::headeronly::TransposeType transb,
     int64_t m,
     int64_t n,
     int64_t k,
@@ -343,7 +339,7 @@ inline void gemm_no_downcast_default_real(
 ///
 /// Minimum compatible version: PyTorch 2.16.
 /// Build time minimum version: PyTorch 2.16.
-inline bool could_pack(ScalarType dtype) {
+inline bool could_pack(torch::headeronly::ScalarType dtype) {
   bool ret = false;
   STABLE_TORCH_ERROR_CODE_CHECK(
       torch_cpublas_could_pack(static_cast<int32_t>(dtype), &ret));
