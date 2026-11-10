@@ -568,6 +568,77 @@ class TpSetattroTests(TestCase):
 
         self._check(fn, torch.ones(3), _Plain(1))
 
+    @parametrize(
+        "case, error",
+        (
+            ("setattr", r"setattr\(\) takes no keyword arguments"),
+            ("object_setattr", r"wrapper __setattr__\(\) takes no keyword arguments"),
+            ("object_delattr", r"wrapper __delattr__\(\) takes no keyword arguments"),
+        ),
+    )
+    def test_setattr_rejects_keywords(self, case, error):
+        def invalid(obj):
+            if case == "setattr":
+                setattr(obj, "x", 2, extra=1)  # noqa: B010
+            elif case == "object_setattr":
+                object.__setattr__(obj, "x", 2, extra=1)
+            else:
+                object.__delattr__(obj, "x", extra=1)
+
+        with self.assertRaisesRegex(TypeError, error):
+            invalid(_Plain(1))
+
+        def fn(x):
+            obj = _Plain(1)
+            try:
+                invalid(obj)
+            except TypeError:
+                return obj.x + x
+            return x - 1
+
+        self._check(fn, torch.ones(3))
+
+    def test_dict_property_overrides_getset(self):
+        # The class body's __dict__ property wins over the per-type __dict__
+        # getset (type_ready adds the getset with SetDefault).
+        class DictProperty:
+            __slots__ = ("encoded",)
+
+            @property
+            def __dict__(self):
+                return {"encoded": self.encoded}
+
+            @__dict__.setter
+            def __dict__(self, value):
+                self.encoded = value["v"] * 2
+
+        def fn(x):
+            obj = DictProperty()
+            obj.__dict__ = {"v": x + 1}
+            return obj.encoded + x, obj.__dict__["encoded"]
+
+        self._check(fn, torch.ones(1))
+
+    def test_dict_property_getter_only(self):
+        class DictGetter:
+            @property
+            def __dict__(self):
+                return {"prop": 1}
+
+        def fn(x):
+            obj = DictGetter()
+            obj.y = 2
+            try:
+                obj.__dict__ = {}
+            except AttributeError as e:
+                msg = str(e)
+            else:
+                msg = "no error"
+            return x + obj.y, obj.__dict__["prop"], msg
+
+        self._check(fn, torch.ones(1))
+        self.assertIn("has no setter", fn(torch.ones(1))[2])
+
     @unittest.expectedFailure
     def test_object_delattr_unbound_on_input(self):
         def fn(x, obj):

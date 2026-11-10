@@ -831,11 +831,33 @@ class TensorVariable(VariableTracker):
             hints=[],
         )
 
+    def _sourced_alias(
+        self, tx: "InstructionTranslatorBase"
+    ) -> "TensorVariable | None":
+        """The sourced TensorVariable this unsourced intermediate is the very
+        same tensor object as, if any. Ops like broadcast_tensors or .to() with
+        nothing to do return their input, so a write to .grad on the result
+        lands on the input; the fake-mode op returns the same FakeTensor, which
+        is what identifies the alias."""
+        if self.source is not None:
+            return None
+        fake = get_fake_value(self.as_proxy().node, tx)
+        for tf in tx.output.tracked_fakes:
+            if tf.fake is fake:
+                alias = tx.output.input_source_to_var.get(tf.source)
+                if isinstance(alias, TensorVariable):
+                    return alias
+        return None
+
     def method_attr_grad(
         self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker | None:
         if tx.output.side_effects.has_pending_mutation_of_attr(self, "grad"):
             return tx.output.side_effects.load_attr(self, "grad")
+        alias = self._sourced_alias(tx)
+        if alias is not None:
+            result = alias.method_attr_grad(tx)
+            return result if result is not None else alias.tp_getattro_impl(tx, "grad")
         if (
             isinstance(self.mutation_type, AttributeMutationNew)
             and not self.has_grad_fn
@@ -2818,6 +2840,9 @@ class TensorVariable(VariableTracker):
         # _grad and grad share the same setter/getter, see THPVariable_properties,
         # and here we make sure setting one enables reading `val` from the other,
         # by routing all read/write to `grad`.
+        alias = self._sourced_alias(tx)
+        if alias is not None:
+            return alias._set_grad(tx, value)
         se = tx.output.side_effects
         if not se.is_attribute_mutation(self):
             se.track_attribute_mutation_new(self)

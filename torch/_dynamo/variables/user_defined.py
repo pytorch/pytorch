@@ -3804,7 +3804,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             cls_source = self.cls_source
         return VariableTracker.build(tx, self.python_type(), cls_source)
 
-    def _get_dict(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def _dict_is_c_descriptor(self) -> bool:
+        # A class body may define __dict__ itself (e.g. as a property). type_ready
+        # adds the per-type __dict__ getset with SetDefault, so the class body's
+        # definition is what _PyType_Lookup finds; the modeled getset must then
+        # decline and let the descriptor path handle it. Static C types declare
+        # __dict__ as a PyMemberDef (e.g. SimpleNamespace), hence both kinds.
+        attr = self.lookup_class_mro_attr("__dict__")
+        return attr is NO_SUCH_SUBOBJ or isinstance(
+            attr, (types.GetSetDescriptorType, types.MemberDescriptorType)
+        )
+
+    def _get_dict(self, tx: "InstructionTranslatorBase") -> VariableTracker | None:
+        if not self._dict_is_c_descriptor():
+            return None
         # threading.local has tp_dictoffset == 0 but a per-thread dict.
         if self.value_type.__dictoffset__ == 0 and not isinstance(
             self.value, threading.local
@@ -3816,7 +3829,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _set_dict(
         self, tx: "InstructionTranslatorBase", value: VariableTracker | None
-    ) -> None:
+    ) -> VariableTracker | None:
+        if not self._dict_is_c_descriptor():
+            return None
         if self.value_type.__dictoffset__ == 0:
             raise_attribute_error(
                 tx, f"'{self.python_type_name()}' object has no __dict__"
@@ -3832,7 +3847,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             del se.attr_mutation_kinds[self][name]
         # A dict view built earlier snapshotted the old contents.
         self.dict_vt = None
-        return store_attr_mutation(tx, self, "__dict__", value)
+        store_attr_mutation(tx, self, "__dict__", value)
+        return ConstantVariable.create(None)
 
     tp_getset = {
         "__class__": GetSet(_class_vt, readonly_setter),
@@ -3855,7 +3871,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         """
         source: Source | None = AttrSource(self.source, name) if self.source else None
 
-        if name == "__dict__":
+        if name == "__dict__" and self._dict_is_c_descriptor():
             if not hasattr(self.value, "__dict__"):
                 raise_observed_exception(AttributeError, tx)
             return self.get_dict_vt(tx)
@@ -5256,6 +5272,9 @@ class DefaultDictVariable(ConstDictVariable):
 
             default_factory = ConstantVariable.create(None)
         self.default_factory = default_factory
+
+    def python_type(self) -> type:
+        return collections.defaultdict
 
     @staticmethod
     def is_supported_factory(arg: VariableTracker) -> bool:

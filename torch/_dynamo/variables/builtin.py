@@ -106,6 +106,7 @@ from .dicts import (
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
 from .misc import CellVariable, NullVariable, StringFormatVariable
 from .object_protocol import (
+    _is_skipped_constant_property,
     _NO_DEFAULT,
     binary_iop,
     binary_op,
@@ -2010,9 +2011,11 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         if self.fn is object and name in ("__setattr__", "__delattr__"):
             if name == "__setattr__":
+                no_keywords(tx, "wrapper __setattr__", kwargs)
                 check_positional(tx, "object.__setattr__", len(args), 3, 3)
                 return object_generic_setattr(tx, *args)
             else:
+                no_keywords(tx, "wrapper __delattr__", kwargs)
                 check_positional(tx, "object.__delattr__", len(args), 2, 2)
                 return object_generic_setattr(tx, *args, None)  # type: ignore[bad-argument-count]
 
@@ -3719,7 +3722,16 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
         no_keywords(tx, "getattr", kwargs)
         check_positional(tx, "getattr", len(args), 2, 3)
         try:
-            return self._call_getattr(tx, args, kwargs)
+            fold_constant = False
+            if args[1].is_python_constant():
+                name = args[1].as_python_constant()
+                fold_constant = (
+                    isinstance(name, str)
+                    and _is_skipped_constant_property(tx, args[0], name)
+                    and check_unspec_or_constant_args(args, kwargs)
+                )
+            if not fold_constant:
+                return self._call_getattr(tx, args, kwargs)
         except Unsupported:
             # Replicate the constant-fold fallback from BuiltinVariable._make_handler:
             # if all args are python constants, evaluate getattr() directly rather
@@ -3731,17 +3743,24 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
                 obj, variables.UserDefinedClassVariable
             ) and obj.getattr_needs_tracing(tx, args[1].as_python_constant()):
                 raise
-            try:
-                result = getattr(*[a.as_python_constant() for a in args])
-            except AttributeError:
-                raise_observed_exception(AttributeError, tx)
-                raise
-            except AsPythonConstantNotImplementedError:
-                raise
-            except Exception as exc:
-                raise_observed_exception(type(exc), tx, args=list(exc.args))
-                raise
-            return VariableTracker.build(tx, result)
+        return self._call_constant_getattr(tx, args)
+
+    def _call_constant_getattr(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+    ) -> VariableTracker:
+        try:
+            result = getattr(*[a.as_python_constant() for a in args])
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
+            raise
+        except AsPythonConstantNotImplementedError:
+            raise
+        except Exception as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
+            raise
+        return VariableTracker.build(tx, result)
 
     def _call_getattr(
         self,
@@ -3839,6 +3858,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         from .object_protocol import generic_setattr
 
+        no_keywords(tx, "setattr", kwargs)
         check_positional(tx, "setattr", len(args), 3, 3)
         obj, name_var, val = args
         return generic_setattr(tx, obj, name_var, val)

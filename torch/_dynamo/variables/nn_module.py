@@ -397,6 +397,43 @@ class NNModuleVariable(VariableTracker):
             GenerationTracker.mark_class_dynamic(type(mod))
         raise UnspecializeRestartAnalysis
 
+    def tp_setattro_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # A specialized module's attributes are read straight off the real
+        # module (see tp_getattro_impl), so a pending side-effect store would
+        # never be seen by later reads in this frame. Restart as unspecialized
+        # instead, which tracks mutations through the side-effects table.
+        if not tx.output.is_root_tracer():
+            unimplemented(
+                gb_type="nn.Module mutation in HigherOrderOp",
+                context=f"nn.Module: {self}",
+                explanation="Inplace modifying nn.Module params/buffers inside HigherOrderOps is not allowed.",
+                hints=[
+                    "Remove the mutation or move it outside of the HigherOrderOp.",
+                    *graph_break_hints.FUNDAMENTAL,
+                ],
+            )
+        if name.is_python_constant() and isinstance(value, variables.TensorVariable):
+            assigning_fake_val = get_fake_value(value.as_proxy().node, tx)
+            try:
+                getattr_var = self.tp_getattro_impl(tx, name.as_python_constant())
+            except (AttributeError, ObservedAttributeError):
+                getattr_var = None
+            if getattr_var is not None and getattr_var.is_tensor():
+                existing_fake_attr = get_fake_value(getattr_var.as_proxy().node, tx)
+                # Same tensor identity and the default __setattr__: a no-op.
+                mod_setattr = inspect.getattr_static(self.module_type, "__setattr__")
+                if (
+                    existing_fake_attr is assigning_fake_val
+                    and mod_setattr is torch.nn.Module.__setattr__
+                ):
+                    return variables.ConstantVariable.create(None)
+        self.convert_to_unspecialized(tx)
+
     def _custom_getattr_fallback(
         self,
         base: torch.nn.Module,

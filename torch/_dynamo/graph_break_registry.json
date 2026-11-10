@@ -2896,6 +2896,15 @@
   "GB1177": [
     {
       "Gb_type": "nn.Module mutation in HigherOrderOp",
+      "Context": "nn.Module: {self}",
+      "Explanation": "Inplace modifying nn.Module params/buffers inside HigherOrderOps is not allowed.",
+      "Hints": [
+        "Remove the mutation or move it outside of the HigherOrderOp.",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    },
+    {
+      "Gb_type": "nn.Module mutation in HigherOrderOp",
       "Context": "nn.Module: {obj}",
       "Explanation": "Inplace modifying nn.Module params/buffers inside HigherOrderOps is not allowed.",
       "Hints": [
