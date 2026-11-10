@@ -168,14 +168,16 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   at::DataPtr& mutable_data_ptr() {
-    if (C10_UNLIKELY(has_mutable_data_ptr_check_)) {
+    if (C10_UNLIKELY(
+            has_mutable_data_ptr_check_.load(std::memory_order_acquire))) {
       if (throw_on_immutable_data_ptr_) {
         throw_data_ptr_access_error();
       }
-      if (throw_on_mutable_data_ptr_) {
+      if (throw_on_mutable_data_ptr_.load(std::memory_order_relaxed)) {
         throwNullDataPtrError();
       }
-      if (warn_deprecated_on_mutable_data_ptr_) {
+      if (warn_deprecated_on_mutable_data_ptr_.load(
+              std::memory_order_relaxed)) {
         warnDeprecatedDataPtr();
       }
       maybe_materialize();
@@ -212,11 +214,17 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     std::swap(resizable_, other.resizable_);
     std::swap(allocator_, other.allocator_);
     std::swap(throw_on_immutable_data_ptr_, other.throw_on_immutable_data_ptr_);
-    throw_on_mutable_data_ptr_ = other.throw_on_mutable_data_ptr_.exchange(
-        throw_on_mutable_data_ptr_.load());
-    warn_deprecated_on_mutable_data_ptr_ =
+    throw_on_mutable_data_ptr_.store(
+        other.throw_on_mutable_data_ptr_.exchange(
+            throw_on_mutable_data_ptr_.load(std::memory_order_relaxed),
+            std::memory_order_relaxed),
+        std::memory_order_relaxed);
+    warn_deprecated_on_mutable_data_ptr_.store(
         other.warn_deprecated_on_mutable_data_ptr_.exchange(
-            warn_deprecated_on_mutable_data_ptr_.load());
+            warn_deprecated_on_mutable_data_ptr_.load(
+                std::memory_order_relaxed),
+            std::memory_order_relaxed),
+        std::memory_order_relaxed);
     refresh_has_data_ptr_check();
     other.refresh_has_data_ptr_check();
   }
@@ -226,14 +234,16 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void* mutable_data() {
-    if (C10_UNLIKELY(has_mutable_data_ptr_check_)) {
+    if (C10_UNLIKELY(
+            has_mutable_data_ptr_check_.load(std::memory_order_acquire))) {
       if (throw_on_immutable_data_ptr_) {
         throw_data_ptr_access_error();
       }
-      if (throw_on_mutable_data_ptr_) {
+      if (throw_on_mutable_data_ptr_.load(std::memory_order_relaxed)) {
         throwNullDataPtrError();
       }
-      if (warn_deprecated_on_mutable_data_ptr_) {
+      if (warn_deprecated_on_mutable_data_ptr_.load(
+              std::memory_order_relaxed)) {
         warnDeprecatedDataPtr();
       }
       maybe_materialize();
@@ -341,19 +351,21 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void set_throw_on_mutable_data_ptr() {
-    if (throw_on_mutable_data_ptr_ && has_mutable_data_ptr_check_) {
+    if (has_mutable_data_ptr_check_.load(std::memory_order_acquire) &&
+        throw_on_mutable_data_ptr_.load(std::memory_order_relaxed)) {
       return;
     }
-    throw_on_mutable_data_ptr_ = true;
-    has_mutable_data_ptr_check_ = true;
+    throw_on_mutable_data_ptr_.store(true, std::memory_order_relaxed);
+    has_mutable_data_ptr_check_.store(true, std::memory_order_release);
   }
 
   void set_warn_deprecated_on_mutable_data_ptr() {
-    if (warn_deprecated_on_mutable_data_ptr_ && has_mutable_data_ptr_check_) {
+    if (has_mutable_data_ptr_check_.load(std::memory_order_acquire) &&
+        warn_deprecated_on_mutable_data_ptr_.load(std::memory_order_relaxed)) {
       return;
     }
-    warn_deprecated_on_mutable_data_ptr_ = true;
-    has_mutable_data_ptr_check_ = true;
+    warn_deprecated_on_mutable_data_ptr_.store(true, std::memory_order_relaxed);
+    has_mutable_data_ptr_check_.store(true, std::memory_order_release);
   }
 
   // One materializer at a time.
@@ -384,7 +396,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // of the mutable-only check. Does not include the immutable case (query that
   // separately) nor materializer hooks, which materialize rather than throw.
   bool throw_on_mutable_data_ptr() const {
-    return throw_on_mutable_data_ptr_;
+    return throw_on_mutable_data_ptr_.load(std::memory_order_relaxed);
   }
 
  protected:
@@ -409,9 +421,13 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     has_immutable_data_ptr_check_ = throw_on_immutable_data_ptr_ ||
         (materialize_fn_ == &impl::cow::materialize_cow &&
          data_ptr_.device().is_cuda());
-    has_mutable_data_ptr_check_ = (materialize_fn_ != nullptr) ||
-        throw_on_mutable_data_ptr_ || warn_deprecated_on_mutable_data_ptr_ ||
-        throw_on_immutable_data_ptr_;
+    has_mutable_data_ptr_check_.store(
+        (materialize_fn_ != nullptr) ||
+            throw_on_mutable_data_ptr_.load(std::memory_order_relaxed) ||
+            warn_deprecated_on_mutable_data_ptr_.load(
+                std::memory_order_relaxed) ||
+            throw_on_immutable_data_ptr_,
+        std::memory_order_release);
   }
 
   void maybe_materialize() {
@@ -430,7 +446,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   bool received_cuda_;
   // Keep the common data access paths behind one branch each.
   bool has_immutable_data_ptr_check_ = false;
-  // Fake views can mark the same storage concurrently.
+  // Fake views can mark the same storage concurrently. Release/acquire on the
+  // gate publishes the flags; other storage mutations still need exclusive
+  // access.
   std::atomic<bool> has_mutable_data_ptr_check_ = false;
   // If we should throw when mutable_data_ptr() or mutable_data() is called.
   std::atomic<bool> throw_on_mutable_data_ptr_ = false;

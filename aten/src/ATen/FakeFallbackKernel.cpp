@@ -22,6 +22,9 @@
 // that torch._meta_registrations installs as Meta kernels run here like C++
 // ones.
 //
+// The mode is uninstalled while this Meta-only fallback runs. It does not call
+// fake_try_*; callbacks that need an active mode must run outside that scope.
+//
 // So that ops do not give results Python's FakeTensorMode would not, it raises
 // NotImplementedError where Python runs something other than the Meta kernel,
 // apart from the known divergences in the TODOs below:
@@ -106,6 +109,7 @@ class UnsetFakeTensorModeGuard {
   }
   ~UnsetFakeTensorModeGuard() {
     if (mode_ != nullptr) {
+      // Releasing a displaced mode can run callbacks that must see restored TLS.
       auto prev_mode =
           c10::impl::FakeTensorModeTLS::create_state(std::move(mode_));
       c10::impl::tls_set_dispatch_key_included(
@@ -135,9 +139,7 @@ bool is_symbolic(const c10::IValue& ivalue) {
 }
 
 bool contains_tensor_types(const c10::TypePtr& type) {
-  // Any can hide tensors in containers the shallow IValue walk cannot visit.
-  if (type->kind() == c10::TypeKind::AnyType ||
-      type->isSubtypeOf(*c10::TensorType::get())) {
+  if (type->isSubtypeOf(*c10::TensorType::get())) {
     return true;
   }
   const auto contained = type->containedTypes();
@@ -145,7 +147,8 @@ bool contains_tensor_types(const c10::TypePtr& type) {
 }
 
 // Whether type holds tensors other than as Tensor, Tensor?, Tensor[] or
-// Tensor?[], the forms for_each_tensor and the output wrapping visit
+// Tensor?[], the forms for_each_tensor and the output wrapping visit. Any can
+// hide tensors, including inside otherwise tensor-free containers.
 bool has_nested_tensors(const c10::TypePtr& type) {
   auto unwrap = [](const c10::TypePtr& t) {
     const auto optional = t->cast<c10::OptionalType>();
@@ -155,7 +158,12 @@ bool has_nested_tensors(const c10::TypePtr& type) {
   if (const auto list = t->cast<c10::ListType>()) {
     t = unwrap(list->getElementType());
   }
-  return !t->isSubtypeOf(*c10::TensorType::get()) && contains_tensor_types(t);
+  if (t->isSubtypeOf(*c10::TensorType::get())) {
+    return false;
+  }
+  const auto contained = t->containedTypes();
+  return t->kind() == c10::TypeKind::AnyType || contains_tensor_types(t) ||
+      std::any_of(contained.begin(), contained.end(), has_nested_tensors);
 }
 
 // Same as Python's _is_tensor_constructor in fake_impls.py
@@ -168,7 +176,7 @@ bool is_tensor_constructor(const c10::FunctionSchema& schema) {
                return contains_tensor_types(a.type());
              }) &&
       schema.returns().size() == 1 &&
-      schema.returns()[0].type()->kind() == c10::TypeKind::TensorType;
+      schema.returns()[0].type() == c10::TensorType::get();
 }
 
 // See fakeHasPythonFakeImpl; categories is the op's fakeDispatchTableCategories
@@ -254,7 +262,7 @@ void fakeFallback(
   for (const auto* arguments : {&schema.arguments(), &schema.returns()}) {
     for (const auto& argument : *arguments) {
       if (has_nested_tensors(argument.type())) {
-        unsupported(op, "nested containers of tensors");
+        unsupported(op, "nested containers of tensors or Any");
       }
     }
   }

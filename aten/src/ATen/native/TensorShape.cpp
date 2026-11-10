@@ -1338,8 +1338,8 @@ static void maybe_copy_fake_tensor_metadata(
   }
   auto fake_device = self.unsafeGetTensorImpl()->fake_device();
   if (!fake_device.has_value()) {
-    // Inside the fake fallback, a view of a view that inherited only the Fake
-    // key (see at::init_cpp_fake) has no fake state to copy either; the
+    // During in_kernel_invocation, a view of a view that inherited only the
+    // Fake key (see at::init_cpp_fake) has no fake state to copy either; the
     // fallback makes the op's outputs fakes
     TORCH_INTERNAL_ASSERT(c10::impl::FakeTensorModeTLS::in_kernel_invocation());
     return;

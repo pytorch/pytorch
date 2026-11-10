@@ -24,10 +24,9 @@ namespace at::impl {
 //               via torch._decomp._add_op_to_registry
 //   - OpImpl:   the exact-identity tier of
 //               torch._subclasses.fake_impls.op_implementations_dict, via
-//               register_op_impl / _deregister_op_impl, minus ops whose C++
-//               meta kernel is used instead (see cpp_meta_supports_symint_ops).
+//               register_op_impl / _deregister_op_impl, except aten::alias.
 //               (Predicate-based op_impls are not mirrored here;
-//               fakeHasPythonFakeImpl re-implements the predicates.)
+//               fakeHasPythonFakeImpl re-implements the built-in predicates.)
 //   - PrimMeta: prims ops that define a prim_meta_impl, via torch._prims
 //   - PythonCIA: Python CompositeImplicitAutograd overrides, via
 //                OpOverload.py_impl
@@ -35,10 +34,16 @@ namespace at::impl {
 //                static shapes when they are not in Meta and have no sparse
 //                input (decomposes_under_static_shapes), filled by
 //                torch._meta_registrations once the decompositions are
-//                registered (torch._decomp imports them all). Later
-//                registrations and removals are not mirrored;
-//                test_fake_fallback_static_shape_decomps checks the table
-//                against the predicate.
+//                registered. This snapshot assumes eligibility does not grow
+//                after import: stale positives only over-reject, but newly
+//                eligible ops could incorrectly run their Meta kernel.
+//                Later registrations (including _add_op_to_registry), removals
+//                and direct dictionary writes are not mirrored. Export's
+//                lstm/gru replacements currently only leave stale positives.
+//                FakeTensorMode.cpp_meta_supports_symint overrides are also
+//                outside this snapshot's module-level predicate.
+//                test_fake_fallback_static_shape_decomps checks the initial
+//                table, not these later mutations.
 //
 // This does not store the Python callables and is backed by c10::LeftRight
 enum class FakeDispatchCategory {
@@ -85,15 +90,20 @@ inline bool fakeDispatchCategoriesHave(
   return categories & fakeDispatchCategoryBit(category);
 }
 
-// Whether Python's FakeTensorMode runs op through a Python implementation
-// rather than its Meta kernel, which the C++ fake fallback must reject: an op
-// in the OpImpl, CustomOpImpl, PrimMeta or PythonCIA table, or one an
-// op_implementations predicate selects (constructors, the dynamic_output_shape
-// and data_dependent_output tags, and _foreach_ ops with a Meta kernel), as
-// _dispatch_impl checks them. Decomp and StaticShapeDecomp ops are decomposed
-// only depending on the inputs, and Meta ops run their Meta kernel, so callers
-// check those. alias's op_impl, which only keeps the recorded dispatch keys, is
-// not registered in OpImpl, as the fallback keeps them itself.
+// Whether op is in OpImpl, CustomOpImpl, PrimMeta or PythonCIA, or matches a
+// built-in fake_impls.py predicate (constructors, the dynamic_output_shape and
+// data_dependent_output tags, and aten::_foreach_ ops with a Meta kernel).
+// Defined in FakeFallbackKernel.cpp.
+//
+// This queries registry membership and predicates, not _dispatch_impl's full
+// decision: an earlier path may take precedence, or an op_impl may decline.
+// Callers must separately account for input-dependent Decomp/StaticShapeDecomp
+// selection, Meta registrations, symbolic get_fast_op_impls() paths, and
+// torch._dynamo.config._custom_ops_profile kernels. Runtime additions/removals
+// of callable op_implementations predicates are not mirrored; the predicates
+// defined in fake_impls.py must be kept in sync with this implementation.
+// alias's op_impl is deliberately absent from OpImpl: the C++ fake fallback
+// preserves its recorded dispatch keys when running its C++ Meta kernel.
 TORCH_API bool fakeHasPythonFakeImpl(const c10::OperatorHandle& op);
 
 } // namespace at::impl
