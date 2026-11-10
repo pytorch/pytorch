@@ -1182,9 +1182,7 @@ class ForeachTests(TestCase):
             opt = torch.optim.SGD(params, lr=0.1, momentum=0.9, foreach=True)
             opt.step()  # creates the momentum buffers
 
-            reference_params = [
-                torch.nn.Parameter(p.detach().clone()) for p in params
-            ]
+            reference_params = [torch.nn.Parameter(p.detach().clone()) for p in params]
             for reference, p in zip(reference_params, params):
                 reference.grad = p.grad.detach().clone()
 
