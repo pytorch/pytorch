@@ -1413,6 +1413,11 @@
   low, high: philox_uniform_bounds_backward(grad, key, low, high, grad_input_mask)
   result: self_t.copy_(low_t + (high_t - low_t) * at::empty_like(result)._philox_uniform_(key))
 
+- name: _philox_dropout(Tensor self, Tensor key, float p) -> Tensor
+  self: _philox_dropout(grad, key, p)
+  key: non_differentiable
+  result: auto_linear
+
 - name: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
   input, tau: householder_product_backward(grad, result, input, tau)
   result: householder_product_jvp(input_t, tau_t, result, input_p, tau_p)

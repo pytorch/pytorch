@@ -6642,6 +6642,12 @@
     CUDA: _philox_randint_cuda_
   autogen: _philox_randint, _philox_randint.out
 
+- func: _philox_dropout(Tensor self, Tensor key, float p) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _philox_dropout_cpu
+    CUDA: _philox_dropout_cuda
+
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
   dispatch:
     CPU: _dirichlet_grad_cpu

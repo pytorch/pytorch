@@ -1111,8 +1111,8 @@ class NativeFunction:
         # but is not actually random, feel free to amend this to special case.
         # The stateless _philox_* ops are fully determined by their key input
         # (e.g. _philox_randint_), so they are intentionally not tagged.
-        if (
-            ("rand" in str(self.func.name) and "_philox_" not in str(self.func.name))
+        if "_philox_" not in str(self.func.name) and (
+            "rand" in str(self.func.name)
             or (
                 (
                     "dropout" in str(self.func.name)
