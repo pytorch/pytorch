@@ -62,27 +62,14 @@ grouped_mm_configs_short = op_bench.config_list(
     tags=["short"],
 )
 
-DTYPES = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
+DTYPES = [torch.bfloat16, torch.float16, torch.float32]
 
 grouped_mm_configs_long = op_bench.config_list(
     attr_names=["case", "B", "M", "N", "K"],
     attrs=moe_shapes(),
-    cross_product_configs={"device": ["cuda"], "dtype": list(DTYPES.values())},
+    cross_product_configs={"device": ["cuda"], "dtype": DTYPES},
     tags=["long"],
 )
-
-# The long shapes again, one tag per dtype (e.g. --tag-filter long_bf16): the test
-# name filter is an exact match, so tags are the only way to run a single dtype.
-grouped_mm_configs_long_per_dtype = [
-    config
-    for name, dtype in DTYPES.items()
-    for config in op_bench.config_list(
-        attr_names=["case", "B", "M", "N", "K"],
-        attrs=moe_shapes(),
-        cross_product_configs={"device": ["cuda"], "dtype": [dtype]},
-        tags=[f"long_{name}"],
-    )
-]
 
 
 # (rtol, atol): Primus-Turbo's check_allclose values for 16-bit. fp32 needs a looser atol
@@ -174,11 +161,7 @@ class GroupedMMBenchmark(op_bench.TorchBenchmarkBase):
         return (total_m * K + B * N * K + total_m * N) * x.element_size()
 
 
-grouped_mm_configs = (
-    grouped_mm_configs_short
-    + grouped_mm_configs_long
-    + grouped_mm_configs_long_per_dtype
-)
+grouped_mm_configs = grouped_mm_configs_short + grouped_mm_configs_long
 op_bench.generate_pt_test(grouped_mm_configs, GroupedMMBenchmark)
 op_bench.generate_pt_gradient_test(grouped_mm_configs, GroupedMMBenchmark)
 
