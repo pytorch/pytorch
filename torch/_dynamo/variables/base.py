@@ -20,6 +20,7 @@ import dataclasses
 import functools
 import inspect
 import logging
+import operator
 import textwrap
 from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
@@ -560,16 +561,21 @@ def load_pending_mutation(
 def getset_load_or_build(
     accessor: Callable[[Any], Any],
     name: str,
-    source: Callable[[Any], Source | None] = lambda self: None,
+    source: Callable[[Any], Source | None] | None = None,
 ) -> Getter:
     """Getter that builds a VT from the raw value returned by `accessor`,
-    attaching the Source returned by `source` (defaults to sourceless)."""
+    attaching the Source returned by `source` (defaults to `self.source.name`)."""
+
+    def default_source(self: Any) -> Source | None:
+        return self.source and AttrSource(self.source, name)
+
+    get_source = default_source if source is None else source
 
     def getter(self, tx: InstructionTranslatorBase) -> VariableTracker:
         pending = load_pending_mutation(tx, self, name)
         if pending is not None:
             return pending
-        return VariableTracker.build(tx, accessor(self), source(self))
+        return VariableTracker.build(tx, accessor(self), get_source(self))
 
     return getter
 
@@ -577,7 +583,18 @@ def getset_load_or_build(
 def getset_set(name: str) -> Callable[..., None]:
     """Setter for a GetSet/Member whose value is an already-built VT."""
 
-    return lambda self, tx, val: store_attr_mutation(tx, self, name, val)
+    def setter(
+        vt: VariableTracker,
+        tx: InstructionTranslatorBase,
+        value: VariableTracker | None,
+    ) -> None:
+        if value is None:
+            from .constant import ConstantVariable
+
+            value = ConstantVariable.create(None)
+        store_attr_mutation(tx, vt, name, value)
+
+    return setter
 
 
 # This helps users of `as_python_constant` to catch unimplemented error with
@@ -1132,7 +1149,6 @@ _SLOT_FN: dict[SlotGroup, dict[str, str]] = {
     SlotGroup.TYPE: {
         **{f: f"{f}_impl" for f in _TYPE_FIELDS},
         "tp_call": "call_function",
-        "tp_hash": "hash_impl",
     },
 }
 
@@ -1238,10 +1254,10 @@ _SLOTDEFS: list[SlotDef] = [
     # SlotDef("__setattr__", ),
     # SlotDef("__delattr__", ),
     TPSLOT("__repr__", "tp_repr_impl", PyTypeSlots.TP_REPR, _wrap_unaryfunc),
-    # hash_impl returns (int, bool), not a VariableTracker like other impls.
+    # tp_hash_impl returns (int, bool), not a VariableTracker like other impls.
     TPSLOT(
         "__hash__",
-        "hash_impl",
+        "tp_hash_impl",
         PyTypeSlots.TP_HASH,
         _wrap_hashfunc,  # pyrefly: ignore[bad-argument-type]
     ),
@@ -2050,7 +2066,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return True
 
-    def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         """Default tp_hash: object.__hash__ = PyObject_GenericHash (identity hash).
 
         PyObject_GenericHash: https://github.com/python/cpython/blob/e76aa128fe/Python/pyhash.c#L143-L147
@@ -2060,7 +2076,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         a sourceless object's identity and must not escape into output bytecode.
 
         VT subclasses override this for types with their own C tp_hash.
-        UserDefinedObjectVariable.hash_impl handles the MRO walk for custom
+        UserDefinedObjectVariable.tp_hash_impl handles the MRO walk for custom
         Python __hash__, builtin-inherited C hash, and unknown C tp_hash.
         """
         # object.__hash__ = Py_HashPointer(obj) — identity hash.
@@ -2068,11 +2084,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             real_val = tx.output.resolve_source_value(self.source)
             if type(real_val).__hash__ is not object.__hash__:
                 unimplemented(
-                    gb_type="Missing hash_impl override",
-                    context=f"hash_impl {self}",
+                    gb_type="Missing tp_hash_impl override",
+                    context=f"tp_hash_impl {self}",
                     explanation=f"{type(self).__name__} wraps "
                     f"{type(real_val).__name__} which has a non-default "
-                    f"tp_hash. Add a hash_impl override to "
+                    f"tp_hash. Add a tp_hash_impl override to "
                     f"{type(self).__name__}.",
                     hints=[*graph_break_hints.DYNAMO_BUG],
                 )
@@ -2091,9 +2107,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
         op: str,
     ) -> VariableTracker:
-        """Per-VT tp_richcompare slot. Subclasses must override.
+        """Default tp_richcompare: object_richcompare.
 
-        Analogous to CPython's tp_richcompare function pointer on PyTypeObject.
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6263-L6305
+
         Returns ConstantVariable(NotImplemented) when the type does not handle
         the comparison (signaling do_richcompare to try the other operand).
 
@@ -2103,15 +2120,48 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         - generic_richcompare calls tp_richcompare_impl as part of the 4-step
           do_richcompare algorithm (subclass priority, forward, reflected,
           fallback).
+
+        VT subclasses override this for types with their own C tp_richcompare.
         """
-        unimplemented(
-            gb_type="Missing tp_richcompare_impl override",
-            context=f"tp_richcompare_impl {self} {op}",
-            explanation=f"{type(self).__name__} does not implement "
-            f"tp_richcompare_impl. Add a tp_richcompare_impl override to "
-            f"{type(self).__name__}.",
-            hints=[*graph_break_hints.DYNAMO_BUG],
+        from .builder import SourcelessBuilder
+        from .constant import ConstantVariable
+        from .object_protocol import is_richcompare_not_implemented, vt_identity_compare
+
+        value = self.get_real_python_backed_value()
+        if value is NO_SUCH_SUBOBJ and self.source:
+            try:
+                value = tx.output.resolve_source_value(self.source)
+            except Exception:
+                # Sources that need guard-scope helpers can't be resolved here.
+                pass
+        real_type = (
+            maybe_get_python_type(self) if value is NO_SUCH_SUBOBJ else type(value)
         )
+        if getattr(real_type, op) is not getattr(object, op):
+            unimplemented(
+                gb_type="Missing tp_richcompare_impl override",
+                context=f"tp_richcompare_impl {self} {op}",
+                explanation=f"{type(self).__name__} wraps "
+                f"{real_type.__name__} which has a non-default "
+                f"tp_richcompare. Add a tp_richcompare_impl override to "
+                f"{type(self).__name__}.",
+                hints=[*graph_break_hints.DYNAMO_BUG],
+            )
+
+        if op == "__eq__":
+            identity = vt_identity_compare(self, other)
+            if identity is not None and identity.as_python_constant():
+                return ConstantVariable.create(True)
+            return ConstantVariable.create(NotImplemented)
+        if op == "__ne__":
+            # __ne__ delegates to Py_TYPE(self)->tp_richcompare(Py_EQ) and
+            # inverts the result, unless it is NotImplemented.
+            res = self.tp_richcompare_impl(tx, other, "__eq__")
+            if is_richcompare_not_implemented(res):
+                return res
+            not_ = SourcelessBuilder.create_internal_builtin(operator.not_)
+            return not_.call_function(tx, [res], {})
+        return ConstantVariable.create(NotImplemented)
 
     def is_constant_match(self, *values: Any) -> bool:
         """
