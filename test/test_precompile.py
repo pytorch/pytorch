@@ -4919,6 +4919,13 @@ class TestPrecompileDynamoCapture(TestCase):
     def _capture(self, fn, **kwargs):
         return capture(fn, artifact_path=self.artifact, cache_path=self.cache, **kwargs)
 
+    def test_a_fullgraph_capture_refuses_a_graph_break(self):
+        tracer = DynamoTracer(fullgraph=True)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "graph_break"):
+            with self._capture(self.mod.step, tracer=tracer) as cap:
+                cap(self.model, self.x2)
+        self.assertFalse(os.path.exists(self.artifact))
+
     def test_two_artifacts_of_one_capture_load_side_by_side(self):
         # A save() checkpoint and the final artifact share compiled graphs, code and
         # all, so loading both binds the same code under the same names.
