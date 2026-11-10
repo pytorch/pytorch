@@ -3017,40 +3017,164 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
                 out_dtype=torch.bfloat16,
             )
 
+    def scaled_grouped_mm_helper(self, alist, blist, ascalelist, bscalelist, outlist, use_fast_accum):
+        for a, b, ascale, bscale, out in zip(alist, blist, ascalelist, bscalelist, outlist):
+            out_ref = scaled_mm_wrap(a, b.t(), ascale.view(-1, 1), bscale.view(1, -1),
+                                     out_dtype=torch.bfloat16, use_fast_accum=use_fast_accum)
+            self.assertEqual(out, out_ref, atol=5e-2, rtol=5e-4)
+
+    # Testing only _scaled_grouped_mm() with multiple shapes, as
+    # _scaled_mm() already has more combinations of parameters than
+    # _scaled_grouped_mm(), for supporting more than one inputs layout
+    # combinations.
+    @onlyAccelerator
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
+    @parametrize("fast_accum", [False, True])
+    # AMD does not support non-contiguous inputs yet
+    @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
+    # AMD does not support NVFP4
+    @parametrize("wrap_v2", [True, False])
+    def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided, wrap_v2, device):
+
+        fp8_dtype = e4m3_type
+        m, n, k, n_groups = 16, 32, 64, 4
+        a = torch.randn(m, k * n_groups + k * int(strided), device=device).to(fp8_dtype)[:, :k * n_groups]
+        b = torch.randn(n, k * n_groups + k * int(strided), device=device).to(fp8_dtype)[:, :k * n_groups]
+        scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
+        scale_b = torch.rand(n * n_groups, device=device, dtype=torch.float32)
+        offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
+        f = scaled_grouped_mm_wrap
+        out = f(a, b.t(),
+                scale_a,
+                scale_b,
+                scale_recipe_a=ScalingType.RowWise,
+                scale_recipe_b=ScalingType.RowWise,
+                offs=offs,
+                out_dtype=torch.bfloat16,
+                use_fast_accum=fast_accum,
+                wrap_v2=wrap_v2)
+        offs_cpu = offs.cpu()
+        alist, blist, ascalelist, bscalelist = [], [], [], []
+        start = 0
+        for i in range(n_groups):
+            alist.append(a[:, start:offs_cpu[i]])
+            blist.append(b[:, start:offs_cpu[i]])
+            ascalelist.append(scale_a[i * m : (i + 1) * m])
+            bscalelist.append(scale_b[i * n : (i + 1) * n])
+            start = offs_cpu[i]
+        self.scaled_grouped_mm_helper(alist, blist, ascalelist, bscalelist, out, fast_accum)
+
+
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
     @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
     @parametrize("wrap_v2", [True, False])
-    @parametrize("op,zero_group", [("2d/2d", False), ("2d/3d", False), ("2d/3d", True),
-                                  ("3d/2d", False), ("3d/2d", True), ("3d/3d", False)])
-    def test_scaled_grouped_gemm_rowwise(self, fast_accum, strided, wrap_v2, op, zero_group, device):
-        m, n, k, groups = 16, 32, 64, 4
-        group_m, group_n = [m] * groups, [n] * groups
-        if zero_group:
-            sizes = group_m if op == "2d/3d" else group_n
-            sizes[0], sizes[1] = 2 * sizes[0], 0
+    def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided, wrap_v2, device):
 
-        def make(_group, outer, inner):
-            value = torch.randn(outer, inner, device=device).to(e4m3_type)
-            return value, torch.rand(outer, device=device)
+        fp8_dtype = e4m3_type
+        m, n, k, n_groups = 16, 32, 64, 4
+        s_int = int(strided)
+        a = torch.randn(m * n_groups, k * (1 + s_int), device=device).to(fp8_dtype)[:, :k]
+        b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(fp8_dtype)[::(1 + s_int), :, :k]
+        self.assertTrue(a.is_contiguous() is not strided)
+        self.assertTrue(b.is_contiguous() is not strided)
+        for check_zero_size in (True, False):
+            if check_zero_size and n_groups <= 1:
+                continue
 
-        (a, sa), (bt, sb), offs, out_cat, a_groups, b_groups = make_grouped_gemm_inputs(
-            op, group_m, group_n, [k] * groups, make, make, device, padded=strided
-        )
-        if strided:
-            self.assertFalse(a.is_contiguous())
-            self.assertFalse(bt.is_contiguous())
-        result = scaled_grouped_mm_wrap(
-            a, bt.transpose(-2, -1), sa, sb, ScalingType.RowWise, ScalingType.RowWise,
-            offs=offs, use_fast_accum=fast_accum, wrap_v2=wrap_v2,
-        )
-        references = [
-            scaled_mm_wrap(a, b.t(), sa.view(-1, 1), sb.view(1, -1), use_fast_accum=fast_accum)
-            for (a, sa), (b, sb) in zip(a_groups, b_groups)
-        ]
-        self.assertEqual(result, combine_grouped_gemm_values(references, out_cat), atol=5e-2, rtol=5e-4)
+            offs = torch.arange(m, n_groups * m + 1, m, device=device, dtype=torch.int32)
+            if check_zero_size:
+                offs[0] = offs[1]
+            scale_a = torch.rand(n_groups * m, device=device, dtype=torch.float32)
+            scale_b = torch.rand(n_groups * n, device=device, dtype=torch.float32).view(n_groups, n)
+            f = scaled_grouped_mm_wrap
+            out = f(a, b.transpose(-2, -1),
+                    scale_a,
+                    scale_b,
+                    scale_recipe_a=ScalingType.RowWise,
+                    scale_recipe_b=ScalingType.RowWise,
+                    offs=offs,
+                    out_dtype=torch.bfloat16,
+                    use_fast_accum=fast_accum,
+                    wrap_v2=wrap_v2)
+
+            offs_cpu = offs.cpu()
+            alist, ascalelist, outlist = [], [], []
+            start = 0
+            for i in range(n_groups):
+                alist.append(a[start:offs_cpu[i]])
+                ascalelist.append(scale_a[start:offs_cpu[i]])
+                outlist.append(out[start:offs_cpu[i]])
+                start = offs_cpu[i]
+                self.scaled_grouped_mm_helper(alist, b, ascalelist, scale_b, outlist, fast_accum)
+
+
+    @onlyAccelerator
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
+    @parametrize("fast_accum", [False, True])
+    # AMD does not support non-contiguous inputs yet
+    @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
+    @parametrize("wrap_v2", [True, False])
+    def test_scaled_grouped_gemm_3d_3d(self, fast_accum, strided, wrap_v2, device):
+
+        fp8_dtype = e4m3_type
+        m, n, k, n_groups = 16, 32, 64, 4
+        s_int = int(strided)
+        a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(fp8_dtype)[::(1 + s_int), :, :k]
+        b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(fp8_dtype)[::(1 + s_int), :, :k]
+        self.assertTrue(a.is_contiguous() is not strided)
+        self.assertTrue(b.is_contiguous() is not strided)
+        scale_a = torch.rand(n_groups * m, device=device, dtype=torch.float32).view(n_groups, m)
+        scale_b = torch.rand(n_groups * n, device=device, dtype=torch.float32).view(n_groups, n)
+
+        f = scaled_grouped_mm_wrap
+        out = f(a, b.transpose(-2, -1), scale_a, scale_b,
+                scale_recipe_a=ScalingType.RowWise, scale_recipe_b=ScalingType.RowWise,
+                out_dtype=torch.bfloat16, use_fast_accum=fast_accum, wrap_v2=wrap_v2)
+
+        self.scaled_grouped_mm_helper(a, b, scale_a, scale_b, out, fast_accum)
+
+
+    @onlyAccelerator
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
+    @parametrize("fast_accum", [False, True])
+    # AMD does not support non-contiguous inputs yet
+    @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
+    @parametrize("wrap_v2", [True, False])
+    def test_scaled_grouped_gemm_3d_2d(self, fast_accum, strided, wrap_v2, device):
+
+        fp8_dtype = e4m3_type
+        m, n, k, n_groups = 16, 32, 64, 4
+        s_int = int(strided)
+        a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(fp8_dtype)[::(1 + s_int), :, :k]
+        b = torch.randn(n * n_groups, k * (1 + s_int), device=device).to(fp8_dtype)[:, :k]
+        self.assertTrue(a.is_contiguous() is not strided)
+        self.assertTrue(b.is_contiguous() is not strided)
+        scale_a = torch.rand(n_groups * m, device=device, dtype=torch.float32).view(n_groups, m)
+        scale_b = torch.rand(n_groups * n, device=device, dtype=torch.float32)
+        for check_zero_size in (True, False):
+            if check_zero_size and n_groups <= 1:
+                continue
+
+            offs = torch.arange(n, n_groups * n + 1, n, device=device, dtype=torch.int32)
+            if check_zero_size:
+                offs[0] = offs[1]
+
+            f = scaled_grouped_mm_wrap
+            out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
+                    scale_recipe_a=ScalingType.RowWise, scale_recipe_b=ScalingType.RowWise,
+                    out_dtype=torch.bfloat16, use_fast_accum=fast_accum, wrap_v2=wrap_v2)
+            offs_cpu = offs.cpu()
+            blist, bscalelist, outlist = [], [], []
+            start = 0
+            for i in range(n_groups):
+                blist.append(b[start:offs_cpu[i]])
+                bscalelist.append(scale_b[start:offs_cpu[i]])
+                outlist.append(out[:, start:offs_cpu[i]])
+                start = offs_cpu[i]
+                self.scaled_grouped_mm_helper(a, blist, scale_a, bscalelist, outlist, fast_accum)
 
 
     @onlyAccelerator
