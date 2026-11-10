@@ -4,6 +4,7 @@ import os
 import pickle
 from io import BytesIO
 from typing import cast
+from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
@@ -32,12 +33,7 @@ class SerializationTestBase(TestCase):
     def setUp(self) -> None:
         super().setUp()
         # disable debug asserts
-        self._old_debug = os.environ.get(DEBUG_ENV)
-        os.environ[DEBUG_ENV] = "0"
-
-    def tearDown(self):
-        if self._old_debug is not None:
-            os.environ[DEBUG_ENV] = self._old_debug
+        self.enterContext(patch.dict(os.environ, {DEBUG_ENV: "0"}))
 
 
 class TestSerialization(SerializationTestBase):
