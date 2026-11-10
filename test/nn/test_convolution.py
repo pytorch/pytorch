@@ -3861,6 +3861,19 @@ class TestConvolutionNNCPU(NNTestCase):
 
     hw_classification = HardwareClassification.CPU
 
+    @unittest.skipIf(
+        torch.backends.nnpack.is_available()
+        and not torch.backends.mkldnn.is_available(),
+        "NNPACK's FFT-based convolution spreads NaN across the tile",
+    )
+    @parametrize_test("batch_size", [4, 16, 32])
+    def test_conv1d_nan_does_not_spread(self, batch_size):
+        # See https://github.com/pytorch/pytorch/issues/157237
+        x = torch.randn(batch_size, 1, 24)
+        x[3, 0, 9] = float("nan")
+        y = F.conv1d(x, torch.randn(1, 1, 3))
+        self.assertEqual(y[3, 0].isnan().nonzero().flatten().tolist(), [7, 8, 9])
+
     def test_conv_contiguous_for_oneDNN(self):
         # See https://github.com/pytorch/pytorch/issues/80837.
         for dtype in [torch.float, torch.bfloat16, torch.half]:
