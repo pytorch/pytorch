@@ -78,6 +78,13 @@ from tools.testing.target_determination.heuristics.utils import (
     get_pr_number,
     td_enabled_default,
 )
+from tools.testing.target_determination.scorer.select import (
+    cut_metric,
+    describe_cut,
+    failure_position_info,
+    import_scorer,
+    select_tests,
+)
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
     calculate_shards,
@@ -2706,7 +2713,24 @@ def main():
         if options.enable_td
         else "Running all tests"
     )
-    include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
+    include, exclude, cut_info = select_tests(
+        test_prioritizations,
+        import_scorer(),
+        percent_to_run,
+        test_file_times_dict,
+        test_class_times_dict,
+    )
+    if options.enable_td:
+        print_to_stderr(describe_cut(cut_info))
+        if IS_CI and which_shard == 1:
+            try:
+                emit_metric(
+                    "td_scorer_cut", cut_metric(cut_info, len(include) + len(exclude))
+                )
+            except Exception:
+                print_to_stderr(
+                    f"Failed to emit td_scorer_cut:\n{traceback.format_exc()}"
+                )
 
     exploration = select_exploration(
         test_prioritizations,
@@ -2794,6 +2818,9 @@ def main():
                 }
                 if exploration.enabled:
                     failure_info["explored"] = str(test) in explored_names
+                scorer_info = failure_position_info(cut_info, test)
+                if scorer_info is not None:
+                    failure_info["scorer"] = scorer_info
                 print_to_stderr("Emitting td_test_failure_stats_v2")
                 emit_metric(
                     "td_test_failure_stats_v2",
