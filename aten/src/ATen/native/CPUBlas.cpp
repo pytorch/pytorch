@@ -152,7 +152,8 @@ bool mkl_xf16_gemm(
       !use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     return false;
   }
-  std::unique_ptr<float[]> c_f32(new float[m * n]);
+  at::DataPtr c_buf = c10::GetCPUAllocator()->allocate(m * n * sizeof(float));
+  float* c_f32 = static_cast<float*>(c_buf.get());
   const int64_t grain = std::max<int64_t>(1, at::internal::GRAIN_SIZE / std::max<int64_t>(1, m));
   if (beta != 0.0f) {
     at::parallel_for(0, n, grain, [&](int64_t begin, int64_t end) {
