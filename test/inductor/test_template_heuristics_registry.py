@@ -65,7 +65,7 @@ class TestBlackwellGPUGemmConfig(TestCase):
 
 
 class TestTemplateHeuristicsRegistry(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()

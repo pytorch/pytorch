@@ -502,7 +502,6 @@
   "test/inductor/test_strict_numerics.py",
   "test/inductor/test_subgraph_choice.py",
   "test/inductor/test_symmetric_mm.py",
-  "test/inductor/test_template_heuristics_registry.py",
   "test/inductor/test_template_registration.py",
   "test/inductor/test_thread_pool.py",
   "test/inductor/test_timm_emulate_precision_casts.py",
