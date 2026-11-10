@@ -2414,7 +2414,7 @@ void grouped_gemm(
 #endif
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   const bool sm90 = prop->major == 9;
-  TORCH_CHECK(cublaslt_grouped_gemm_arch_supported(), "grouped cublasLtMatmul requires SM 9.0-11.0");
+  TORCH_CHECK(cublaslt_grouped_gemm_arch_supported(), "grouped cublasLtMatmul requires SM9.x/SM10.x/SM11.x");
   if (scaled) {
     TORCH_INTERNAL_ASSERT(
         scales->A_scale_ptr != nullptr && scales->B_scale_ptr != nullptr,
