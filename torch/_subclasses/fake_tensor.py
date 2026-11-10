@@ -879,6 +879,8 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         return _avoid_device_init()
 
     def __enter__(self) -> Self:
+        if type(self) is not CppFakeTensorMode:
+            raise TypeError("Expected a CppFakeTensorMode, not a subclass")
         _enter_fake_mode(self, self._install)
         return self
 
@@ -895,9 +897,6 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         # once works only if the later entry exits first, as a worker thread's
         # does.
         noop = bool(self.enter_stack and not self.enter_stack[-1][0])
-        if noop and exc_type is None:
-            _exit_fake_mode(self, self._uninstall)
-            return
         # A live exit with no matching enter on this thread (the mode was
         # never entered, was already exited, or was entered on another thread)
         # would pop this mode's enter state and take this thread's own fake
