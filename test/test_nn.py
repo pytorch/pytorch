@@ -7427,7 +7427,7 @@ class TestNNDeviceType(NNTestCase):
         # Extremely large kernel_size (would overflow int)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"value cannot be safely converted without overflow: kernel_size",
+            r"value cannot be converted to type int without overflow",
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -7456,7 +7456,7 @@ class TestNNDeviceType(NNTestCase):
 
         # Extremely large stride (would overflow int)
         with self.assertRaisesRegex(
-            RuntimeError, r"value cannot be safely converted without overflow: stride"
+            RuntimeError, r"value cannot be converted to type int without overflow"
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -7476,7 +7476,7 @@ class TestNNDeviceType(NNTestCase):
 
         # Extremely large padding (would overflow int)
         with self.assertRaisesRegex(
-            RuntimeError, r"value cannot be safely converted without overflow: padding"
+            RuntimeError, r"value cannot be converted to type int without overflow"
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -7488,7 +7488,7 @@ class TestNNDeviceType(NNTestCase):
         # Combined invalid parameters
         with self.assertRaisesRegex(
             RuntimeError,
-            r"value cannot be safely converted without overflow: kernel_size",
+            r"value cannot be converted to type int without overflow",
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -15803,6 +15803,38 @@ class TestNNDeviceType(NNTestCase):
             grad_device, = torch.autograd.grad(res_device, log_probs, grad_out.to(device, dtype))
         self.assertEqual(res_cpu, res_device, exact_dtype=False)
         self.assertEqual(grad_cpu, grad_device)
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    def test_CTCLoss_max_threads_launch_bounds(self, device, dtype):
+        # Exercises maximum thread block sizes (768 for double, 1024 for float)
+        # in native CTC loss kernels when 2 * target_length + 1 > max_threads / 2.
+        target_length = 300
+        input_length = 600
+        vocab_size = 5
+        batch_size = 2
+
+        for target_dtype in [torch.int, torch.long]:
+            log_probs = (
+                torch.randn(input_length, batch_size, vocab_size, dtype=dtype, device=device)
+                .log_softmax(2)
+                .requires_grad_()
+            )
+            targets = torch.randint(
+                low=1, high=vocab_size, size=(batch_size, target_length), dtype=target_dtype, device=device
+            )
+            input_lengths = torch.full((batch_size,), input_length, dtype=target_dtype)
+            target_lengths = torch.full((batch_size,), target_length, dtype=target_dtype)
+
+            with torch.backends.cudnn.flags(enabled=False):
+                loss = torch.nn.functional.ctc_loss(
+                    log_probs, targets, input_lengths, target_lengths,
+                    reduction='sum', zero_infinity=True
+                )
+                grad, = torch.autograd.grad(loss, log_probs, torch.ones_like(loss))
+
+            self.assertFalse(torch.isnan(loss).any())
+            self.assertFalse(torch.isnan(grad).any())
 
     @onlyAccelerator
     def test_CTCLoss_critical_target_len(self, device):
