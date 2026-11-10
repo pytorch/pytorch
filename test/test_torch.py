@@ -10,6 +10,7 @@ import contextlib
 import gc
 import io
 import inspect
+import os
 import itertools
 import math
 import random
@@ -930,51 +931,6 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(frameinfo.lineno - 8, warning.lineno)
             self.assertEqual(len(w), 1)
 
-        # Checks jitted cpp warning
-        with warnings.catch_warnings(record=True) as w:
-            # nvfuser deprecation warning filter
-            warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
-            # ignore all deprecation warnings
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
-            # torch.jit.script emits a visible FutureWarning; ignore it too
-            warnings.filterwarnings("ignore", category=FutureWarning)
-            scripted_cpp_warn_fn = torch.jit.script(cpp_warn_fn)
-            scripted_cpp_warn_fn()
-            warning = w[0]
-
-            # Checks for cpp context in the warning message
-            escaped_warning_message = str(warning.message).encode('unicode_escape')
-            self.assertTrue(re.search(s, repr(escaped_warning_message), re.IGNORECASE) is not None)
-
-            # Checks the Python features of the warning
-            # Note: the jitted warning's lineno refers to the call to the jitted
-            # function, which in our test suite has a layer of indirection
-            # that makes checking the Python lineno fragile
-            self.assertEqual(len(w), 1)
-
-        # Checks jitted Python warning
-        def warn_fn():
-            warnings.warn("Warning!")
-
-        # The jit mimics an eager-mode Python warning in this case
-        with warnings.catch_warnings(record=True) as w:
-            # nvfuser deprecation warning filter
-            warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
-            # ignore all deprecation warnings
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
-            # torch.jit.script emits a visible FutureWarning; ignore it too
-            warnings.filterwarnings("ignore", category=FutureWarning)
-            scripted_warn_fn = torch.jit.script(warn_fn)
-            scripted_warn_fn()
-            frameinfo = inspect.getframeinfo(inspect.currentframe())
-            warning = w[0]
-
-            self.assertTrue(re.search('Warning!', str(warning.message)) is not None)
-
-            # Checks the Python features of the warning
-            self.assertEqual(frameinfo.lineno - 12, warning.lineno)
-            self.assertEqual(len(w), 1)
-
     @onlyNativeDeviceTypes
     def test_complex_half_experimental_warning(self, device):
         msg = 'ComplexHalf support is experimental'
@@ -1467,20 +1423,6 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
-    def test_nondeterministic_alert_interpolate_bilinear(self, device):
-        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
-        res = torch.nn.functional.interpolate(
-            input,
-            size=12,
-            mode='bilinear',
-            align_corners=False)
-        grad = torch.ones_like(res)
-
-        self.check_nondeterministic_alert(
-            lambda: res.backward(grad),
-            'upsample_bilinear2d_backward_out_cuda',
-            torch.device(device).type == 'cuda')
-
     def test_no_nondeterministic_alert_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
 
@@ -1572,23 +1514,85 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(grad, input.grad, atol=0, rtol=0)
                 input.grad = None
 
+    # The generic NN test covers contiguous and channels-last double precision,
+    # including the scalar channels-last fallback. Keep dtype-specific vector
+    # paths and scale-factor recomputation here.
+    @onlyCUDA
+    @skipIfRocm
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    def test_deterministic_interpolate_bilinear(self, device):
-        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+    @parametrize("case", [
+        {"name": "nhwc_vec_fp16", "shape": (1, 8, 4, 5),
+         "size": (8, 10), "dtype": torch.float16, "align_corners": False,
+         "channels_last": True},
+        {"name": "nhwc_vec_bf16", "shape": (1, 8, 4, 5),
+         "size": (8, 10), "dtype": torch.bfloat16, "align_corners": False,
+         "channels_last": True},
+        {"name": "nhwc_vec_fp32", "shape": (1, 8, 4, 5),
+         "size": (8, 10), "dtype": torch.float32, "align_corners": False,
+         "channels_last": True},
+        {"name": "nhwc_vec_fp64", "shape": (1, 8, 4, 5),
+         "size": (8, 10), "dtype": torch.float64, "align_corners": False,
+         "channels_last": True},
+        {"name": "scale_factor_recompute_fp32", "shape": (1, 3, 4, 5),
+         "scale_factor": (1.7, 2.0), "dtype": torch.float32,
+         "align_corners": False, "recompute_scale_factor": True},
+    ], name_fn=lambda case: case["name"])
+    def test_deterministic_interpolate_bilinear(self, device, case):
+        from torch._decomp import decompositions
+
+        dtype = case["dtype"]
+        atol, rtol = {
+            torch.float16: (1e-2, 1e-2),
+            torch.bfloat16: (5e-2, 5e-2),
+            torch.float32: (1e-5, 1e-5),
+            torch.float64: (1e-10, 1e-10),
+        }[dtype]
+        channels_last = case.get("channels_last", False)
+        memory_format = (
+            torch.channels_last if channels_last else torch.contiguous_format
+        )
+        n, c = case["shape"][0], case["shape"][1]
+        interp_kwargs = {"mode": "bilinear", "align_corners": case["align_corners"]}
+        if "size" in case:
+            interp_kwargs["size"] = case["size"]
+            output_spatial = case["size"]
+        else:
+            interp_kwargs["scale_factor"] = case["scale_factor"]
+            interp_kwargs["recompute_scale_factor"] = case["recompute_scale_factor"]
+            _, _, h, w = case["shape"]
+            sh, sw = case["scale_factor"]
+            output_spatial = (int(h * sh), int(w * sw))
+
+        input = torch.randn(
+            *case["shape"], device=device, dtype=dtype
+        ).contiguous(memory_format=memory_format).requires_grad_()
+        output_grad = torch.randn(
+            n, c, *output_spatial, device=device, dtype=dtype
+        ).contiguous(memory_format=memory_format)
+
         grad = None
-        with DeterministicGuard(True):
-            for _ in range(5):
-                res = torch.nn.functional.interpolate(
-                    input,
-                    size=12,
-                    mode='bilinear',
-                    align_corners=False)
-                res.backward(torch.ones_like(res))
+        with DeterministicGuard(True), unittest.mock.patch.object(
+            decompositions,
+            "_upsample_linear_vec",
+            side_effect=AssertionError("CUDA should use the native deterministic kernel"),
+        ):
+            for _ in range(2):
+                input.grad = None
+                output = torch.nn.functional.interpolate(input, **interp_kwargs)
+                output.backward(output_grad)
                 if grad is None:
-                    grad = input.grad
+                    grad = input.grad.detach().clone()
                 else:
                     self.assertEqual(grad, input.grad, atol=0, rtol=0)
-                input.grad = None
+
+        if channels_last:
+            self.assertTrue(grad.is_contiguous(memory_format=torch.channels_last))
+
+        reference_input = input.detach().cpu().contiguous().requires_grad_()
+        reference_output = torch.nn.functional.interpolate(
+            reference_input, **interp_kwargs)
+        reference_output.backward(output_grad.cpu().contiguous())
+        self.assertEqual(grad.cpu(), reference_input.grad, atol=atol, rtol=rtol)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
@@ -2142,6 +2146,25 @@ class TestTorchDeviceType(TestCase):
         # don't test CPU, that would be a long test
         x = torch.empty(50000000, device=device, dtype=dtype).exponential_()
         self.assertTrue(x.min() > 0)
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.bfloat16)
+    def test_exponential_tails(self, device, dtype):
+        # n_small catches q = -log(u) with u rounded near 1 to fp32's 2^-24 grid, which never produces q < 2^-24
+        # (skewing torch.multinomial for probabilities below ~1e-7); q_max catches building 1 - u on that grid
+        # instead, which caps q at -ln(2^-25) ~ 17.3.
+        gen = torch.Generator(device=device).manual_seed(0)
+        n_small, q_max = 0, 0.0
+        for _ in range(16):
+            q = torch.empty(2**26, device=device, dtype=dtype).exponential_(generator=gen)
+            n_small += int((q <= 5.4e-8).sum())
+            q_max = max(q_max, q.max().item())
+        # Over 2^30 draws n_small ~ Poisson(58), and P(q_max <= 17.5) = exp(-2^30 * exp(-17.5)) ~ 2e-12.
+        # The largest finite sample is -ln(2^-33) ~ 22.9.
+        self.assertGreater(n_small, 20)
+        self.assertLess(n_small, 100)
+        self.assertGreater(q_max, 17.5)
+        self.assertLess(q_max, 23)
 
     def _generate_correlation_tensors(self, device, dtype):
         yield make_tensor((0, 0), dtype=dtype, device=device)
@@ -7119,6 +7142,41 @@ class TestTorchDeviceType(TestCase):
             torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
             self.assertEqual([t.shape for t in out], [v.shape for v in views])
 
+    @skipIfXpu(msg="XPU split_with_sizes_copy.out still uses stride(dim) as the chunk size")
+    def test_split_with_sizes_copy_out_non_canonical_layouts(self, device):
+        def check(x, split_sizes, dim, out):
+            torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
+            for t, expect in zip(out, x.split_with_sizes(split_sizes, dim=dim)):
+                self.assertEqual(t, expect)
+
+        # Dense but not contiguous input
+        x = torch.arange(12.0, device=device).reshape(3, 4).t()
+        check(x, [2, 2], 0, [torch.empty(2, 3, device=device) for _ in range(2)])
+        # Contiguous input whose size-1 split dim has an arbitrary stride; nothing
+        # past the output may be written
+        x = torch.zeros(64, device=device).as_strided((2, 1, 2), (2, 16, 1))
+        x.copy_(torch.arange(4.0, device=device).view(2, 1, 2))
+        guard = torch.full((16,), -1.0, device=device)
+        check(x, [1], 1, [guard[:4].view(2, 1, 2)])
+        self.assertEqual(guard[4:], torch.full((12,), -1.0, device=device))
+        # Channels-last dim-0 split into channels-last or contiguous outputs
+        x = torch.randn(4, 3, 2, 5, device=device).to(memory_format=torch.channels_last)
+        for memory_format in (torch.channels_last, torch.contiguous_format):
+            out = [torch.empty(2, 3, 2, 5, device=device, memory_format=memory_format) for _ in range(2)]
+            check(x, [2, 2], 0, out)
+        check(x, [4, 0], 0, [torch.empty_like(x), torch.empty(0, 3, 2, 5, device=device)])
+        # Permuted leading dims, with outputs permuted the same way
+        x = torch.randn(3, 4, 6, device=device).transpose(0, 1)
+        check(x, [2, 4], 2, [torch.empty_like(x[:, :, :2]), torch.empty_like(x[:, :, 2:])])
+        # The split dim's stride is the trailing size product, though dim 0 is
+        # physically inside it and dim 2 outside
+        x = torch.arange(40.0, device=device).as_strided((2, 10, 2), (1, 2, 20))
+        sizes = [4, 4, 2]
+        check(x, sizes, 1, [torch.empty_strided((2, s, 2), (1, 2, 2 * s), device=device) for s in sizes])
+        # A single non-empty split laid out like the transposed input
+        x = torch.arange(12.0, device=device).reshape(3, 4).t()
+        check(x, [0, 3], 1, [torch.empty(4, 0, device=device), torch.empty_like(x)])
+
     def test_copy_float16(self, device):
         # Check that fbgemm code no longer reads memory out of bounds, see
         # copy_impl and fbgemm::Float16ToFloat_ref.
@@ -9722,10 +9780,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # This method is primarily exposed for torchvision's resize
         torch.backends.cpu.get_cpu_capability()
 
-        # We have to ensure that method is torchscriptable as torchvision's resize
-        # should be torchscriptable
-        torch.jit.script(torch.backends.cpu.get_cpu_capability)
-
     @slowTest
     def test_slow_test(self):
         # Just a smoketest to make sure our slowTest decorator works.
@@ -11984,6 +12038,10 @@ instantiate_device_type_tests(TestTorchCUDA, globals(), only_for="cuda")
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu', allow_xpu=True)
 instantiate_device_type_tests(TestTorchCPU, globals(), only_for="cpu")
 instantiate_parametrized_tests(TestTorch)
+
+# pytest-xdist workers import this file instead of running it as __main__.
+if "PYTEST_XDIST_WORKER" in os.environ:
+    TestCase._default_dtype_check_enabled = True
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
