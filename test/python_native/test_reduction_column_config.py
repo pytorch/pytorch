@@ -24,7 +24,11 @@ if not TEST_CUTEDSL:
 
 import cutlass
 
-from torch._native.ops.reductions import kernel_coltile as ct, traits as T
+from torch._native.ops.reductions import (
+    kernel_coltile as ct,
+    kernel_general as kg,
+    traits as T,
+)
 
 
 # Trait types and Welford outputs of the traits the test labels name.
@@ -32,6 +36,7 @@ _TYPES = {
     "sum": T.SumOps,
     "mean": T.MeanOps,
     "amax": T.AMaxOps,
+    "prod": T.ProdOps,
     "argmaxi32": T.ArgMaxOps,
     "var0": T.WelfordOps,
     "var1": T.WelfordOps,
@@ -384,6 +389,8 @@ class TestColumnConfig(TestCase):
             (torch.bfloat16, 64, 256, "sum", 1, torch.bfloat16),
             (torch.bfloat16, 64, 1024, "mean", 1, torch.bfloat16),
             (torch.bfloat16, 2048, 4096, "var0", 3, torch.float32),
+            (torch.bfloat16, 64, 256, "amax", 1, torch.float32),
+            (torch.bfloat16, 2048, 4096, "argmaxi32", 2, torch.int32),
         ],
     )
     def test_sm107_hand_offs_need_ordered_outputs(
@@ -392,8 +399,8 @@ class TestColumnConfig(TestCase):
         """Outputs other than those SM107's mappings were measured with (_sm107_outputs)
         keep SM107 columns on the linear kernel."""
         args = dict(cc=(10, 7), key=key, nfields=fields)
-        natural = torch.float32 if fields == 1 else dtype
-        cfg = self.select(dtype, size, columns, out_dtypes=(natural,), **args)
+        natural = kg._sm107_outputs(dtype, _TYPES[key], fields, 1)
+        cfg = self.select(dtype, size, columns, out_dtypes=natural, **args)
         self.assertEqual(cfg.kernel_order, "inner_tree")
         cfg = self.select(dtype, size, columns, out_dtypes=(out,), **args)
         self.assertEqual(cfg.kernel_order, "linear")
@@ -408,6 +415,7 @@ class TestColumnConfig(TestCase):
             {"nfields": 2},
             {"batches": 2},
             {"alignment": 8},
+            {"key": "prod"},
         ],
     )
     def test_sm107_column_guards(self, updates):
@@ -496,10 +504,13 @@ class TestColumnConfig(TestCase):
             (torch.float32, T.SumOps, 65536, 1024, 8, True, (0, 16)),
             (torch.float32, T.SumOps, 32768, 257, 4, True, (0, 16)),
             (torch.float32, T.SumOps, 131072, 257, 16, True, (0, 32)),
-            # The band stops at 65536 rows from 192 columns, 131072 rows below.
+            # The band stops at 65536 rows.
             (torch.float32, T.SumOps, 65536, 256, 8, True, (0, 16)),
             (torch.float32, T.SumOps, 65537, 256, 9, True, (0, 32)),
-            (torch.float32, T.SumOps, 131072, 191, 16, True, (0, 16)),
+            (torch.float32, T.SumOps, 65536, 128, 8, True, (0, 16)),
+            (torch.float32, T.SumOps, 65537, 128, 9, True, (0, 32)),
+            (torch.float16, T.MeanOps, 65536, 191, 8, True, (0, 16)),
+            (torch.float32, T.SumOps, 131072, 191, 16, True, (0, 32)),
             # It starts at 32768 rows and spans 128-257 columns.
             (torch.float32, T.SumOps, 32767, 256, 4, True, (0, 32)),
             (torch.float32, T.SumOps, 32768, 127, 4, True, (0, 32)),
