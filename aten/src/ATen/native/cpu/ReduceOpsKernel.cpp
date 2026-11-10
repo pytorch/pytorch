@@ -14,6 +14,7 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/cpu/Reduce.h>
 #include <ATen/native/cpu/LogAddExp.h>
+#include <ATen/native/cpu/SumKernel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -173,18 +174,6 @@ void prod_kernel_impl(TensorIterator& iter) {
   }
 }
 
-template <typename scalar_t, typename acc_t>
-inline void norm_two_reduce_step(Vectorized<acc_t>& acc_vec, Vectorized<scalar_t>& data_vec) {
-  acc_vec += data_vec * data_vec;
-}
-
-template <>
-inline void norm_two_reduce_step(Vectorized<float>& acc_fvec, Vectorized<BFloat16>& data_bvec) {
-  auto [data_fvec0, data_fvec1] = convert_bfloat16_float(data_bvec);
-  acc_fvec += data_fvec0 * data_fvec0;
-  acc_fvec += data_fvec1 * data_fvec1;
-}
-
 template <typename scalar_t, typename out_t=typename scalar_value_type<scalar_t>::type>
 void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
   // This reduction accumulates results as the type `acc_t`.
@@ -220,58 +209,8 @@ void norm_kernel_tensor_iterator_impl(
     return;
   }
 
-  if (val == 2.0 && is_reduce_lastdim(iter) &&
-      iter.dtype(0) == iter.input_dtype() &&
-      (iter.input_dtype() == kFloat || iter.input_dtype() == kDouble ||
-       iter.input_dtype() == kBFloat16)) {
-
-#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
-    constexpr int64_t kAccVecs = 2;
-#else
-    constexpr int64_t kAccVecs = 1;
-#endif
-
-    // If we can vectorize over the last dimension and the dtype
-    // of the output is the same as that of the input,
-    // then we go through the vectorised path.
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
-        // use float as accumulate type for BFloat16
-        using acc_t = at::opmath_type<scalar_t>;
-        binary_kernel_reduce_lastdim(iter, [](char* result_data_bytes, char* self_data_bytes, int64_t size) {
-          scalar_t* result_data = (scalar_t*)result_data_bytes;
-          scalar_t* self_data = (scalar_t*)self_data_bytes;
-
-          using Vec = Vectorized<scalar_t>;
-          using fVec = Vectorized<acc_t>;
-
-          constexpr int64_t kBlock = Vec::size() * kAccVecs;
-          constexpr int64_t kLanes = fVec::size() * kAccVecs;
-
-          fVec acc_vec[kAccVecs];
-          for (int64_t v = 0; v < kAccVecs; v++) {
-            acc_vec[v] = fVec{acc_t(0)};
-          }
-          acc_t buffer[kLanes];
-          int64_t d = 0;
-          for (; d < size - (size % kBlock); d += kBlock) {
-            for (int64_t v = 0; v < kAccVecs; v++) {
-              Vec data_vec = Vec::loadu(self_data + d + v * Vec::size());
-              norm_two_reduce_step(acc_vec[v], data_vec);
-            }
-          }
-          for (int64_t v = 0; v < kAccVecs; v++) {
-            acc_vec[v].store(buffer + v * fVec::size());
-          }
-          for (int j = 1; j < kLanes; j++) {
-            buffer[0] = buffer[0] + buffer[j];
-          }
-          for (; d < size; d++) {
-            acc_t data_val = acc_t(self_data[d]);
-            buffer[0] += data_val * data_val;
-          }
-          result_data[0] = scalar_t(std::sqrt(buffer[0]));
-        });
-      });
+  if (use_cascade_powsum(iter.input_dtype(), iter.dtype(0), val, /*is_norm=*/true, iter.output().numel() == 1)) {
+    cascade_powsum_kernel(iter, val, /*is_norm=*/true);
   } else {
     if (iter.input_dtype() == kHalf && iter.dtype(0) == kFloat) {
       // type promotion that does cast and reduction in a single kernel
@@ -507,37 +446,8 @@ void powsum_kernel_tensor_iterator_impl(
     return;
   }
 
-  if (val == 2.0 && is_reduce_lastdim(iter) &&
-      iter.dtype(0) == iter.input_dtype() &&
-      (iter.input_dtype() == kFloat || iter.input_dtype() == kDouble ||
-       iter.input_dtype() == kBFloat16)) {
-    // Vectorized path for L2 powsum (no sqrt at end)
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.input_dtype(), "powsum_cpu", [&] {
-        using acc_t = at::opmath_type<scalar_t>;
-        binary_kernel_reduce_lastdim(iter, [](char* result_data_bytes, char* self_data_bytes, int64_t size) {
-          scalar_t* result_data = (scalar_t*)result_data_bytes;
-          scalar_t* self_data = (scalar_t*)self_data_bytes;
-
-          using Vec = Vectorized<scalar_t>;
-          using fVec = Vectorized<acc_t>;
-          fVec acc_vec{acc_t(0)};
-          acc_t buffer[fVec::size()];
-          int64_t d = 0;
-          for (; d < size - (size % Vec::size()); d += Vec::size()) {
-            Vec data_vec = Vec::loadu(self_data + d);
-            norm_two_reduce_step(acc_vec, data_vec);
-          }
-          acc_vec.store(buffer);
-          for (int j = 1; j < fVec::size(); j++) {
-            buffer[0] = buffer[0] + buffer[j];
-          }
-          for (; d < size; d++) {
-            acc_t data_val = acc_t(self_data[d]);
-            buffer[0] += data_val * data_val;
-          }
-          result_data[0] = scalar_t(buffer[0]);  // No sqrt!
-        });
-      });
+  if (use_cascade_powsum(iter.input_dtype(), iter.dtype(0), val, /*is_norm=*/false, iter.output().numel() == 1)) {
+    cascade_powsum_kernel(iter, val, /*is_norm=*/false);
   } else {
     if (iter.input_dtype() == kHalf && iter.dtype(0) == kFloat) {
       powsum_kernel_cpu_impl<at::Half, float>(iter, val); return;
