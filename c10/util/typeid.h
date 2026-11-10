@@ -490,19 +490,7 @@ class C10_API TypeMeta final {
   // note: constexpr provokes Windows compilation error "member may not be
   // initialized" static constexpr size_t MaxTypeIndex = 32;
   //
-#if defined C10_MOBILE
-// The reason for this not to be UINT8_MAX is that the array
-// initialization takes space which is proportional to the size of the array.
-// The compiler seems to add code (or data padding) to initialize the array with
-// empty elements. Please see
-// https://github.com/pytorch/pytorch/pull/51881 for details.
-//
-#define MaxTypeIndex                                                           \
-  (NumScalarTypes + 15 /* number of CAFFE_DEFINE_KNOWN_TYPE in typeid.cpp */ + \
-   1 /* 1 more for caffe2 tensor */)
-#else
 #define MaxTypeIndex UINT8_MAX
-#endif
 
   // Protects type metadata allocation.
   // NOLINTNEXTLINE(facebook-hte-NonPodStaticDeclaration)

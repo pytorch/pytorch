@@ -4,6 +4,7 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <ATen/core/type_factory.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/Bitset.h>
 #include <c10/util/irange.h>
@@ -210,26 +211,20 @@ struct TORCH_API DispatchKeyExtractor final {
     // Checking isSubtypeOf on a DynamicType heap-allocates a
     // DynamicType version of the argument if it's not a DynamicType
     // already, and this has measurable overhead during startup.
-#ifdef C10_MOBILE
     struct CachedTypes {
-      DynamicTypePtr listOfTensors;
-      DynamicTypePtr listOfOptionalTensors;
-      DynamicTypePtr optionalOfTensor;
+      TypePtr listOfTensors;
+      TypePtr listOfOptionalTensors;
+      TypePtr optionalOfTensor;
     };
     static const CachedTypes ct = {
-        DynamicType::create(*ListType::ofTensors()),
-        DynamicType::create(*ListType::ofOptionalTensors()),
-        DynamicType::create(*OptionalType::ofTensor())};
-    return type.isSubtypeOf(c10::TypeFactory::get<TensorType>()) ||
+        TypeFactory::create<ListType>(TypeFactory::get<TensorType>()),
+        TypeFactory::create<ListType>(
+            TypeFactory::create<OptionalType>(TypeFactory::get<TensorType>())),
+        TypeFactory::create<OptionalType>(TypeFactory::get<TensorType>())};
+    return type.isSubtypeOf(TypeFactory::get<TensorType>()) ||
         type.isSubtypeOf(ct.listOfTensors) ||
         type.isSubtypeOf(ct.listOfOptionalTensors) ||
         type.isSubtypeOf(ct.optionalOfTensor);
-#else // C10_MOBILE
-    return type.isSubtypeOf(*TensorType::get()) ||
-        type.isSubtypeOf(*ListType::ofTensors()) ||
-        type.isSubtypeOf(*ListType::ofOptionalTensors()) ||
-        type.isSubtypeOf(*OptionalType::ofTensor());
-#endif // C10_MOBILE
   }
   static c10::utils::bitset makeBitsetForDispatchArgs(
       const FunctionSchema& schema) {

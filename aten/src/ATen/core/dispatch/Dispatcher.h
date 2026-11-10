@@ -401,13 +401,8 @@ class TORCH_API Dispatcher final {
       const std::string& debug);
 
   std::list<OperatorDef> operators_;
-#if !defined(C10_MOBILE)
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>>
       operatorLookupTable_;
-#else
-  RWSafeLeftRightWrapper<ska::flat_hash_map<OperatorName, OperatorHandle>>
-      operatorLookupTable_;
-#endif
   // Map from namespace to debug string (saying, e.g., where the library was
   // defined)
   ska::flat_hash_map<std::string, std::string> libraries_;
