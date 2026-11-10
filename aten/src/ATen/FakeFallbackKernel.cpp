@@ -117,7 +117,7 @@ class UnsetFakeTensorModeGuard {
   UnsetFakeTensorModeGuard& operator=(UnsetFakeTensorModeGuard&&) = delete;
 
  private:
-  std::shared_ptr<c10::FakeTensorMode> mode_;
+  std::shared_ptr<c10::FakeTensorModeHandle> mode_;
   bool fake_included_;
 };
 
@@ -225,8 +225,9 @@ void fakeFallback(
     unsupported(op, "fake tensors without a mode");
   }
   // Python's FakeTensorMode is out of the FAKE dispatch mode slot while its
-  // __torch_dispatch__ runs, so the code the op runs (a Python Meta kernel
-  // calling active_fake_mode(), say) sees no fake mode; so here
+  // __torch_dispatch__ runs, apart from what it runs under `with self:`
+  // (decompositions, say), so a Python Meta kernel calling active_fake_mode()
+  // sees no fake mode; so here
   UnsetFakeTensorModeGuard unset_mode;
 
   for (const auto idx : c10::irange(num_arguments)) {
@@ -290,13 +291,13 @@ void fakeFallback(
         if (input_mode == nullptr) {
           unsupported(op, "fake tensors without a mode");
         }
-        if (input_mode != mode) {
+        if (input_mode->mode != mode->mode) {
           unsupported(op, "fake tensors of another mode");
         }
         if (impl->real_tensor() != nullptr) {
           unsupported(op, "propagate_real_tensors");
         }
-        if (mode->get_constant(impl) != nullptr) {
+        if (mode->mode->get_constant(impl) != nullptr) {
           unsupported(op, "constant inputs");
         }
         input_impls.insert(impl);
