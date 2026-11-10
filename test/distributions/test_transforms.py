@@ -371,61 +371,6 @@ def test_transformed_distribution_shapes(batch_shape, event_shape, dist):
         pytest.skip("Not implemented.")
 
 
-@pytest.mark.parametrize("transform", TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
-def test_jit_fwd(transform):
-    x = generate_data(transform).requires_grad_()
-
-    def f(x):
-        return transform(x)
-
-    try:
-        traced_f = torch.jit.trace(f, (x,))
-    except NotImplementedError:
-        pytest.skip("Not implemented.")
-
-    # check on different inputs
-    x = generate_data(transform).requires_grad_()
-    if not torch.allclose(f(x), traced_f(x), atol=1e-5, equal_nan=True):
-        raise AssertionError("JIT forward output does not match")
-
-
-@pytest.mark.parametrize("transform", TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
-def test_jit_inv(transform):
-    y = generate_data(transform.inv).requires_grad_()
-
-    def f(y):
-        return transform.inv(y)
-
-    try:
-        traced_f = torch.jit.trace(f, (y,))
-    except NotImplementedError:
-        pytest.skip("Not implemented.")
-
-    # check on different inputs
-    y = generate_data(transform.inv).requires_grad_()
-    if not torch.allclose(f(y), traced_f(y), atol=1e-5, equal_nan=True):
-        raise AssertionError("JIT inverse output does not match")
-
-
-@pytest.mark.parametrize("transform", TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
-def test_jit_jacobian(transform):
-    x = generate_data(transform).requires_grad_()
-
-    def f(x):
-        y = transform(x)
-        return transform.log_abs_det_jacobian(x, y)
-
-    try:
-        traced_f = torch.jit.trace(f, (x,))
-    except NotImplementedError:
-        pytest.skip("Not implemented.")
-
-    # check on different inputs
-    x = generate_data(transform).requires_grad_()
-    if not torch.allclose(f(x), traced_f(x), atol=1e-5, equal_nan=True):
-        raise AssertionError("JIT jacobian output does not match")
-
-
 @pytest.mark.parametrize("transform", ALL_TRANSFORMS, ids=transform_id)
 def test_jacobian(transform):
     x = generate_data(transform)

@@ -5,10 +5,13 @@ first error turns the writer off, so it never changes a test's outcome."""
 from __future__ import annotations
 
 import contextlib
+import functools
 import inspect
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from collections import Counter
@@ -68,8 +71,32 @@ def _guard() -> Iterator[None]:
         _disable(error)
 
 
+def _is_gtest(item: pytest.Item) -> bool:
+    # pytest-cpp isn't a torch dependency, so check the item's module before
+    # importing it. Its Boost.Test and Catch2 items are CppItems too.
+    if not type(item).__module__.startswith("pytest_cpp."):
+        return False
+    from pytest_cpp.google import GoogleTestFacade
+
+    return isinstance(getattr(item, "facade", None), GoogleTestFacade)
+
+
+@functools.cache
+def _gtest_identities(binary: str) -> dict[str, report.TestId]:
+    # pytest-cpp parses gtest's plain-text test list; gtest's JSON test list has
+    # each test's suite and name as separate fields.
+    with tempfile.TemporaryDirectory(prefix="torchci-gtest-") as tmp:
+        path = os.path.join(tmp, "tests.json")
+        args = [binary, "--gtest_list_tests", f"--gtest_output=json:{path}"]
+        subprocess.run(args, check=True, capture_output=True)
+        with open(path, encoding="utf-8") as listing:
+            return report.gtest_identities(binary, json.load(listing))
+
+
 def identity(item: pytest.Item) -> report.TestId | None:
-    """None for an item that isn't a Python test function."""
+    """None for an item that is neither a Python test function nor a gtest."""
+    if _is_gtest(item):
+        return _gtest_identities(str(item.path)).get(item.name)
     if not isinstance(item, pytest.Function):
         return None
     # originalname drops pytest parameters. Unwrapping the function recovers the
@@ -134,6 +161,8 @@ class ReportWriter:
         # published (take_inflight).
         self.cache: pytest.Cache | None = None
         self.inflight_key = ""
+        # A session that starts no test removes its report (pytest_sessionfinish).
+        self.started_test = False
 
     def _publish(self, inflight: dict[str, Any] | None) -> None:
         # Best effort: a failed publication must not turn the report off.
@@ -165,6 +194,7 @@ class ReportWriter:
             self.tests = {item.nodeid: identity(item) for item in session.items}
 
     def pytest_runtest_logstart(self, nodeid: str) -> None:
+        self.started_test = True
         if _disabled or self.file is None:
             return
         with _guard():
@@ -229,9 +259,9 @@ class ReportWriter:
         # Cleared before the line is written: a process killed between the two
         # loses the run rather than recording it twice.
         self._publish(None)
-        # No identity: the item isn't a Python test function, its setup report never
-        # arrived (the attempt was interrupted), or, under xdist, the worker's writer
-        # turned itself off and its setup report came without one.
+        # No identity: the item is neither a Python test function nor a gtest, its
+        # setup report never arrived (the attempt was interrupted), or, under xdist,
+        # the worker's writer turned itself off and its setup report came without one.
         if self.file is not None and run.test is not None:
             record = report.run_record(
                 run.test,
@@ -249,9 +279,20 @@ class ReportWriter:
         if _disabled:
             return
         with _guard():
+            # Under xdist, -x stops right after the final failing report, so that
+            # run's teardown report never arrives; its outcome is already known.
+            for key, run in list(self.runs.items()):
+                if run.failed_phase:
+                    self._finish(key, run)
             if self.file is not None:
                 self.file.close()
                 self.file = None
+                # Nothing to upload from a session that started no test, like
+                # run_test.py's serial pass over a file without serial tests. One
+                # that started a test keeps its report even with no run in it:
+                # run_test.py appends the run an interrupt or timeout left in flight.
+                if not self.started_test:
+                    os.remove(self.path)
 
 
 def take_inflight(cache_dir: str | os.PathLike[str]) -> dict[str, Any] | None:

@@ -554,18 +554,23 @@ _efficient_attention_backward(
   const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
 
   // See Note [Seed and Offset Device]
+  // Dispatch on where the seed and offset live, not on the current capture
+  // status: a forward captured in a CUDA graph returns device tensors, and
+  // its backward may run outside capture (e.g. after graph replay).
   at::PhiloxCudaState rng_engine_inputs;
   if (use_dropout) {
-    if (at::cuda::currentStreamCaptureStatus() ==
-        at::cuda::CaptureStatus::None) {
-      rng_engine_inputs = at::PhiloxCudaState(
-          *philox_seed.data_ptr<int64_t>(),
-          *philox_offset.data_ptr<int64_t>());
-    } else { // dropout + capture
+    TORCH_CHECK(
+        philox_seed.device() == philox_offset.device(),
+        "philox_seed and philox_offset must be on the same device");
+    if (philox_seed.is_cuda()) {
       rng_engine_inputs = at::PhiloxCudaState(
           philox_seed.data_ptr<int64_t>(),
           philox_offset.data_ptr<int64_t>(),
           0);
+    } else {
+      rng_engine_inputs = at::PhiloxCudaState(
+          *philox_seed.data_ptr<int64_t>(),
+          *philox_offset.data_ptr<int64_t>());
     }
   }
 
@@ -871,6 +876,10 @@ _efficient_attention_backward(
     ASSIGN_CHECK_OVERFLOW(p.q_strideM, query.stride(1));
     ASSIGN_CHECK_OVERFLOW(p.k_strideM, key.stride(1));
     ASSIGN_CHECK_OVERFLOW(p.v_strideM, value.stride(1));
+    // The kernel's tile iterators take 32-bit row strides.
+    TORCH_CHECK(p.q_strideM <= std::numeric_limits<int32_t>::max(), "query.stride(1) overflows int32");
+    TORCH_CHECK(p.k_strideM <= std::numeric_limits<int32_t>::max(), "key.stride(1) overflows int32");
+    TORCH_CHECK(p.v_strideM <= std::numeric_limits<int32_t>::max(), "value.stride(1) overflows int32");
     ASSIGN_CHECK_OVERFLOW(p.q_strideH, query.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.k_strideH, key.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.v_strideH, value.stride(2));
