@@ -18,6 +18,7 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
   - Step 2: Transfer
   - Step 2.5: PT2 Issues — Special Handling
   - Step 3: Redirect to Secondary Oncall
+  - Step 3.1: Distributed Issues — Route to a Sub-Queue
   - Step 3.5: Approved Umbrella Reference
   - Step 4: Label the Issue
   - Step 5: Escalate — High Priority (human review), then release triage
@@ -28,6 +29,8 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
 **Labels reference:** See [labels.json](labels.json) for the full catalog of labels suitable for triage. **ONLY apply labels that exist in this file.** Do not invent or guess label names. This file excludes CI triggers, test configs, release notes, deprecated labels, and labels requiring human decision.
 
 **PT2 triage guide:** See [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed labeling guidance when triaging PT2/torch.compile issues.
+
+**Distributed triage guide:** See [distributed-triage-rubric.md](distributed-triage-rubric.md) for sub-queue routing and module classification of distributed issues (Step 3.1).
 
 **Response templates:** See [templates.json](templates.json) for standard response messages.
 
@@ -151,6 +154,9 @@ Otherwise, request a self-contained reproduction and stop when:
 - The issue describes version-upgrade breakage but only provides a high-level description without a minimal script
 - The repro depends on a specific training setup, distributed environment, or non-trivial infrastructure
 
+A self-contained multi-node script counts as a reproduction even if you cannot run it locally.
+Do not request another reproduction solely because it requires multiple nodes.
+
 ### 1.6) Edge Cases & Numerical Accuracy
 
 If the issue involves extremal values or numerical precision differences:
@@ -201,7 +207,7 @@ If the issue belongs in another repo (vision/text/audio/RL/ExecuTorch/etc.), use
 
 ### 3) Redirect to Secondary Oncall
 
-**CRITICAL:** When redirecting issues to a **non-PT2** oncall queue, apply exactly one `oncall: ...` label and **STOP**. Do NOT:
+**CRITICAL:** When redirecting issues to a **non-PT2, non-distributed** oncall queue (distributed: Step 3.1), apply exactly one `oncall: ...` label and **STOP**. Do NOT:
 - Add any `module:` labels
 - Mark it `triaged`
 - Do any further triage work
@@ -213,7 +219,7 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 | Label | When to use |
 |-------|-------------|
 | `oncall: jit` | TorchScript issues |
-| `oncall: distributed` | Distributed training (DDP, FSDP, RPC, c10d, DTensor, DeviceMesh, symmetric memory, context parallel, pipelining). **Special handling:** after this label is applied, the distributed triage workflow runs second-level triage automatically — it routes to a sub-oncall, adds module labels, and marks triaged. |
+| `oncall: distributed` | Distributed training (DDP, FSDP, RPC, c10d, DTensor, DeviceMesh, symmetric memory, context parallel, pipelining). **Not a plain redirect:** route to a sub-queue in Step 3.1. |
 | `oncall: export` | torch.export issues |
 | `oncall: quantization` | Quantization issues |
 | `oncall: mobile` | Mobile (iOS/Android), excludes ExecuTorch |
@@ -222,14 +228,33 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 
 **Common routing mistakes to avoid:**
 - **MPS ≠ Mobile.** MPS (Metal Performance Shaders) is the macOS/Apple Silicon GPU backend. Do NOT route MPS issues to `oncall: mobile`. MPS issues stay in the general queue with `module: mps`.
-- **DTensor → `oncall: distributed`.** DTensor issues should always be routed to `oncall: distributed`, even if they don't mention DDP/FSDP.
+- **DTensor:** choose a distributed sub-queue using Step 3.1, even if the issue does not mention DDP/FSDP.
 - **ONNX → `module: onnx`.** There is no `oncall: onnx`. Use `module: onnx` and keep in the general queue.
 - **CI/releng → `module: ci`.** Do not use `oncall: releng`. Use `module: ci` for CI infrastructure issues.
-- **torch.compile + distributed.** When `torch.compile` mishandles a distributed op (e.g., `dist.all_reduce`), the issue typically needs BOTH `oncall: pt2` and `oncall: distributed` since the fix may span both codebases.
+- **torch.compile + distributed.** When `torch.compile` mishandles a distributed op (e.g., `dist.all_reduce`), keep `oncall: pt2` and choose the distributed sub-queue using Step 3.1; the fix may span both codebases.
 
 **Note:** `oncall: cpu inductor` is the PT2 sub-queue for Inductor issues that reproduce only on CPU (see "CPU Inductor Routing" in [pt2-triage-rubric.md](pt2-triage-rubric.md)). Redirect those to it instead of `oncall: pt2` and stop; every other PT2 issue gets `oncall: pt2`.
 
-**Distributed sub-queues:** apply only `oncall: distributed`, never `oncall: distributed parallelisms`, `oncall: distributed infra`, or `oncall: distributed checkpointing`. The distributed triage picks the sub-queue, and it stops early on an issue that already has one, so a sub-queue applied here skips its second-level triage. The apply step replaces any sub-queue with `oncall: distributed`.
+### 3.1) Distributed Issues — Route to a Sub-Queue
+
+Route distributed issues to their sub-queue yourself. Read
+[distributed-triage-rubric.md](distributed-triage-rubric.md) (routing precedence, edge cases,
+module signals, mislabel traps).
+
+1. Apply exactly one sub-queue; the apply step adds `oncall: distributed`:
+   - `oncall: distributed checkpointing`: DCP, distributed state_dict save/load, async checkpointing.
+   - `oncall: distributed infra`: c10d, process groups, collectives, NCCL/Gloo/MPI backends,
+     elastic/torchrun, RPC, stores, DeviceMesh, symmetric memory, distributed tools.
+   - `oncall: distributed parallelisms`: FSDP, DDP, DTensor, tensor/context/pipeline parallel.
+     This is the default when unsure.
+2. For `infra` or `checkpointing`, add a distributed `module:` label only when the component is clear
+   (e.g., `module: c10d`, `module: nccl`, `module: elastic`, `module: symm_mem`, `module: DeviceMesh`).
+3. For `parallelisms`, add one or more distributed `module:` labels (e.g., `module: fsdp`,
+   `module: dtensor`, `module: ddp`, `module: pipelining`, `module: context parallel`), plus a
+   type label when it is not a bug. When the module is unclear, use `triage_review`; do not guess.
+4. Use `decision: "label"`, not `redirect_oncall`, for a confident route; the apply step marks it
+   `triaged`. Steps 1–1.6 (questions, reproduction) and 5 (high priority, release triage) still apply.
+5. For torch.compile + distributed issues, add `oncall: pt2` with its module labels and the sub-queue.
 
 ### 3.5) Approved Umbrella Reference
 
@@ -342,8 +367,8 @@ The apply step adds `bot-triaged` whenever the plan changes the issue. You do no
 ### 7) Mark triaged
 
 For a complete classification, use `decision: "label"`. The apply step adds `triaged`
-automatically unless the issue is redirected outside PT2, flagged for review, or awaiting
-information/reproduction. Other decisions do not receive automatic completion.
+automatically unless the issue is redirected outside PT2 or a distributed sub-queue, flagged for
+review, or awaiting information/reproduction. Other decisions do not receive automatic completion.
 
 ---
 
@@ -354,7 +379,7 @@ information/reproduction. Other decisions do not receive automatic completion.
 - Close issues unless they are clear usage questions (Step 1), clearly expected numerical behavior (Step 1.6), or covered by that approved umbrella rule
 - Assign issues to users
 - Add `high priority` directly without human confirmation
-- Add module labels when redirecting to oncall
+- Add module labels when redirecting to oncall (except PT2 and distributed sub-queues)
 - Add comments to bug reports or feature requests, except an info/reproduction request, a fixed possible-duplicate suggestion (Step 0.5), or the fixed approved umbrella reference
 
 **DO:**

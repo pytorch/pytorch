@@ -459,7 +459,7 @@ if(USE_SOURCE_DEBUG_ON_MOBILE)
   if(BUILD_LITE_INTERPRETER)
     set_source_files_properties(
       ${TORCH_SRC_DIR}/csrc/jit/serialization/pickle.cpp
-      PROPERTIES COMPILE_DEFINITIONS "C10_MOBILE;FEATURE_TORCH_MOBILE")
+      PROPERTIES COMPILE_DEFINITIONS "FEATURE_TORCH_MOBILE")
   endif()
 endif()
 
@@ -1517,10 +1517,6 @@ if(BUILD_TEST)
     add_subdirectory(
       ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
       ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime
-    )
-    add_subdirectory(
-      ${TORCH_ROOT}/test/mobile/lightweight_dispatch
-      ${CMAKE_BINARY_DIR}/test_codegen_unboxing
     )
   else()
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
