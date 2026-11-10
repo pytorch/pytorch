@@ -690,7 +690,8 @@ cudagraph_policy: "CUDAGraphPolicy | None" = None
 
 # register ops upon which inductor should partition the graph. name format should be
 # "namespace::kernel_name" (e.g., aten::mm) for op overload packet, or
-# "namespace::kernel_name.overload" (e.g., aten::mm.default).
+# "namespace::kernel_name.overload" (e.g., aten::mm.default). A listed op inside a
+# nested_compile_region (invoke_subgraph) body splits off the whole region call.
 custom_should_partition_ops: list[str] = []
 
 # register ops whose OUTPUT unbacked symints should cause partition. Any tensors or ops
@@ -2238,7 +2239,9 @@ class triton:
     # Minimum number of nodes (kernels) required for a cudagraph partition.
     # If a partition has fewer nodes than this threshold, it won't be cudagraphed.
     # This helps avoid overhead for very small partitions where cudagraph
-    # recording/replay cost outweighs the benefits.
+    # recording/replay cost outweighs the benefits. A nested_compile_region
+    # (invoke_subgraph) call counts the kernels of its body, once per call,
+    # estimated before fusion.
     # Set to 0 to disable this check.
     cudagraph_min_partition_size = 0
 
