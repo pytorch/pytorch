@@ -7731,11 +7731,11 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float)
     def test_InstanceNorm_empty(self, device, dtype):
-        mod = torch.nn.InstanceNorm2d(3, device=device, track_running_stats=True)
+        mod = torch.nn.InstanceNorm2d(3, device=device, track_running_stats=True, affine=True)
         inp = torch.randn(0, 3, 2, 2, device=device, dtype=dtype)
         _test_module_empty_input(self, mod, inp)
 
-        self.assertEquel(mod.running_mean, torch.zeros(3, device=device))
+        self.assertEqual(mod.running_mean, torch.zeros(3, device=device))
         self.assertEqual(mod.running_var, torch.ones(3, device=device))
         self.assertEqual(mod.weight.grad, torch.zeros(3, device=device))
         self.assertEqual(mod.bias.grad, torch.zeros(3, device=device))
