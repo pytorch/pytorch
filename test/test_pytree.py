@@ -1884,6 +1884,31 @@ class TestFrozenDictPytree(TestCase):
         )
 
     @unittest.skipIf(IS_FBCODE, "Optree is not available in fbcode")
+    def test_optree_unknown_builtin_handler(self):
+        script = """
+import torch.utils._pytree as pytree
+
+class Unknown:
+    pass
+
+pytree.BUILTIN_TYPES |= {Unknown}
+from torch._dynamo.polyfills import pytree as polyfill
+
+if Unknown in polyfill.BUILTIN_TYPES or Unknown in polyfill.STANDARD_DICT_TYPES:
+    raise RuntimeError("unknown Optree handler classified as builtin")
+if tuple not in polyfill.BUILTIN_TYPES:
+    raise RuntimeError("known Optree builtin handler was excluded")
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+            )
+        except subprocess.CalledProcessError as error:
+            self.fail(error.output.decode("utf-8"))
+
+    @unittest.skipIf(IS_FBCODE, "Optree is not available in fbcode")
     @parametrize(
         "match_type",
         [

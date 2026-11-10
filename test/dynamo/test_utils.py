@@ -15,6 +15,7 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch.compiler.config as compiler_config
 from torch._dynamo import utils
+from torch._dynamo.variables.builder import _dict_input_snapshot
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -38,6 +39,37 @@ _IS_WINDOWS = sys.platform == "win32"
 @instantiate_parametrized_tests
 class TestUtils(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("version", [(3, 13, 3), (3, 14, 0), (3, 14, 1), (3, 15, 0)])
+    @parametrize("free_threaded", [False, True])
+    def test_ordered_snapshot_runtime_safety(self, version, free_threaded):
+        mapping = OrderedDict(a=1, b=2)
+        mapping.move_to_end("a")
+        with (
+            mock.patch.object(sys, "version_info", version),
+            mock.patch("sysconfig.get_config_var", return_value=free_threaded),
+        ):
+            if free_threaded and version < (3, 14, 1):
+                with mock.patch.object(
+                    torch._C._dynamo.guards,
+                    "ordered_dict_keys",
+                    side_effect=AssertionError("unsafe native snapshot invoked"),
+                ) as native:
+                    with self.assertRaisesRegex(
+                        utils.InvalidOrderedDict, r"require Python 3\.14\.1"
+                    ):
+                        list(utils.enumerate_items_with_dict_position(mapping))
+                    self.assertIsNone(torch._dynamo.guards._ordered_dict_order(mapping))
+                    with self.assertRaisesRegex(
+                        torch._dynamo.exc.Unsupported, r"require Python 3\.14\.1"
+                    ):
+                        _dict_input_snapshot(mapping)
+                    native.assert_not_called()
+            else:
+                self.assertEqual(
+                    list(utils.enumerate_items_with_dict_position(mapping)),
+                    [(1, "b", 2), (0, "a", 1)],
+                )
 
     def test_cleanup_hook_tolerates_missing_name(self):
         # During interpreter shutdown the scope's module __dict__ may already be
