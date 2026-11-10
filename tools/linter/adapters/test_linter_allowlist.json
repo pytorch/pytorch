@@ -405,7 +405,6 @@
   "test/inductor/test_decompose_shard_dim_alltoall.py",
   "test/inductor/test_dependencies.py",
   "test/inductor/test_deterministic.py",
-  "test/inductor/test_device_assert.py",
   "test/inductor/test_device_backend_hooks.py",
   "test/inductor/test_device_backends.py",
   "test/inductor/test_distributed_patterns.py",
