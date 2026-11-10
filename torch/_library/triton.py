@@ -544,7 +544,10 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
     The ``wrap_triton`` API wraps a triton kernel into a callable that
     can actually be traced into a graph.
 
-    Please use this API together with :func:`torch.library.triton_op`.
+    Use ``wrap_triton`` together with :func:`torch.library.triton_op` when
+    defining a custom Triton operator. If no custom operator is needed,
+    call the Triton kernel directly without either API. Using
+    ``wrap_triton`` on its own works but is not recommended.
 
     Examples:
 
@@ -552,8 +555,7 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
         >>> import torch
         >>> import triton
         >>> from triton import language as tl
-        >>> from torch.fx.experimental.proxy_tensor import make_fx
-        >>> from torch.library import wrap_triton
+        >>> from torch.library import triton_op, wrap_triton
         >>>
         >>> @triton.jit
         >>> def add_kernel(
@@ -572,7 +574,8 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
         >>>     output = x + y
         >>>     tl.store(out_ptr + offsets, output, mask=mask)
         >>>
-        >>> def add(x, y):
+        >>> @triton_op("mylib::add", mutates_args={})
+        >>> def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         >>>     output = torch.empty_like(x)
         >>>     n_elements = output.numel()
         >>>
@@ -582,19 +585,14 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
         >>>     wrap_triton(add_kernel)[grid_fn](x, y, output, n_elements, 16)
         >>>     return output
         >>>
+        >>> @torch.compile
+        >>> def f(x, y):
+        >>>     return add(x, y)
+        >>>
         >>> x = torch.randn(3, device="cuda")
         >>> y = torch.randn(3, device="cuda")
-        >>> gm = make_fx(add)(x, y)
-        >>> print(gm.code)
-        >>> # def forward(self, x_1, y_1):
-        >>> #     empty_like = torch.ops.aten.empty_like.default(x_1, pin_memory = False)
-        >>> #     triton_kernel_wrapper_mutation_proxy = triton_kernel_wrapper_mutation(
-        >>> #         kernel_idx = 0, constant_args_idx = 0,
-        >>> #         grid = [(1, 1, 1)], kwargs = {
-        >>> #             'in_ptr0': x_1, 'in_ptr1': y_1, 'out_ptr': empty_like,
-        >>> #             'n_elements': 3, 'BLOCK_SIZE': 16
-        >>> #         })
-        >>> #     return empty_like
+        >>> result = f(x, y)
+        >>> assert torch.allclose(result, x + y)
 
     """
     from triton.runtime.autotuner import Autotuner
