@@ -5116,7 +5116,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_device_maps_invalid_max_local_device(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {torch.cuda.device_count(): 0})
+        options.set_device_map(dst, {torch.accelerator.device_count(): 0})
 
         self._test_device_maps(
             options,
@@ -5127,7 +5127,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_device_maps_invalid_max_remote_device(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {0: torch.cuda.device_count()})
+        options.set_device_map(dst, {0: torch.accelerator.device_count()})
 
         self._test_device_maps(
             options,
