@@ -50,12 +50,16 @@ from torch.onnx._internal.exporter._torchlib.ops import (
     core as core_ops,
     embedding as embedding_ops,
     factories as factories_ops,
+    fft as fft_ops,
     linalg as linalg_ops,
     neural as neural_ops,
     nn as nn_ops,
     normalization as normalization_ops,
+    prims as prims_ops,
     residual as residual_ops,
     sequences as sequences_ops,
+    special as special_ops,
+    vision as vision_ops,
 )
 from torch.testing._internal import common_dtype, common_methods_invocations
 from torch.testing._internal.opinfo import (
@@ -3513,6 +3517,302 @@ TESTED_TORCHLIB_OPS += (
 ops_test_common.duplicate_opinfo(
     OPS_DB, "nn.functional.group_norm", ("group_norm_op18",)
 )
+
+
+# Source dtype eligibility is numerical test metadata, not exporter dispatch.
+TESTED_TORCHLIB_OPS += (
+    (
+        TorchLibOpInfo(
+            "ops.aten._fft_c2c",  # Custom from extra_opinfo
+            fft_ops.aten__fft_c2c,
+            tolerance={torch.complex64: (3e-3, 1.8e-4)},
+            complex=True,
+            supported_dtypes=(
+                torch.complex64,
+                torch.complex128,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._fft_c2r",  # Custom from extra_opinfo
+            fft_ops.aten__fft_c2r,
+            tolerance={torch.complex64: (3e-3, 1.8e-4)},
+            complex=True,
+            supported_dtypes=(
+                torch.complex64,
+                torch.complex128,
+            ),
+        ).xfail(
+            matcher=lambda sample: True,
+            reason="Requires ONNX with IRFFT support (onesided=True, inverse=True)",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._fft_r2c",  # Custom from extra_opinfo
+            fft_ops.aten__fft_r2c,
+            tolerance={torch.float64: (2e-6, 2e-6), torch.float32: (3e-2, 3e-4)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "erf",
+            special_ops.aten_special_erf,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "erfc",
+            special_ops.aten_special_erfc,
+            tolerance={torch.float16: (5e-1, 2e-4)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "expm1",
+            special_ops.aten_special_expm1,
+            tolerance={torch.float16: (1e-2, 2e-4)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "special.erfcx",
+            special_ops.aten_special_erfcx,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        ).xfail(
+            reason="fixme: The implementation is numerically unstable: https://github.com/microsoft/onnxscript/issues/1223"
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "linalg.det",
+            linalg_ops.aten_linalg_det,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "linalg.vector_norm",
+            linalg_ops.aten_linalg_vector_norm,
+            tolerance={torch.float16: (2e-3, 2e-3)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        ).skip(
+            matcher=lambda sample: sample.kwargs.get("ord") == 6,
+            dtypes=(torch.float16,),
+            reason="ORT returns a more accurate value for float16 with ord=6 (expected=Inf, actual=9.48).",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "log_softmax",
+            special_ops.aten_special_log_softmax,
+            tolerance={torch.float32: (3.7e-5, 1.8e-4), torch.float16: (4e-4, 6e-3)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+        .xfail(
+            dtypes=(torch.float16,),
+            reason="fixme: ORT failed. https://github.com/microsoft/onnxruntime/issues/16438",
+            test_class_name="TestOutputConsistencyFullGraph",
+        )
+        .xfail(
+            variant_name="with_dtype",
+            dtypes=(torch.float16,),
+            reason="fixme: ORT failed. https://github.com/microsoft/onnxruntime/issues/16438",
+            test_class_name="TestOutputConsistencyFullGraph",
+        )
+        .skip(
+            matcher=lambda sample: len(sample.input.shape) == 0,
+            reason="fixme: LogSoftMax does not support empty tensor as input",
+        )
+        .skip(
+            variant_name="with_dtype",
+            matcher=lambda sample: len(sample.input.shape) == 0,
+            reason="fixme: LogSoftMax does not support empty tensor as input",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "sinc",
+            special_ops.aten_special_sinc,
+            tolerance={torch.float16: (1e-2, 6e-4)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "xlogy",
+            special_ops.aten_special_xlogy,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._scaled_dot_product_flash_attention",
+            neural_ops.aten__scaled_dot_product_flash_attention,
+            tolerance={torch.float32: (3e-4, 1.5e-5)},
+            # Output[0] is OK, but other outputs just have the same shape with zero values
+            nondeterministic=True,
+            compare_shape_only_for_output=(1, 2, 3, 4, 5, 6, 7, 8),
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        ).skip(
+            device_type="cpu",
+            reason="_scaled_dot_product_flash_attention only supports CUDA",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.aten._scaled_dot_product_efficient_attention",
+            neural_ops.aten__scaled_dot_product_efficient_attention,
+            tolerance={torch.float32: (3e-4, 1.5e-5)},
+            # Output[0] is OK, but other outputs just have the same shape with zero values
+            nondeterministic=True,
+            compare_shape_only_for_output=(1, 2, 3),
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        ).skip(
+            enabled_if=not torch.cuda.is_available(),
+            reason="_scaled_dot_product_efficient_attention only supports CUDA",
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.prims.broadcast_in_dim.default",
+            prims_ops.prims_broadcast_in_dim,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "ops.prims.var.default",
+            prims_ops.prims_var,
+            tolerance={torch.float16: (1e-3, 5e-2)},
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+                torch.uint8,
+                torch.bool,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "torchvision.ops.nms",
+            vision_ops.torchvision_nms,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "torchvision.ops.roi_align",
+            vision_ops.torchvision_roi_align,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+    (
+        TorchLibOpInfo(
+            "torchvision.ops.roi_pool",
+            vision_ops.torchvision_roi_pool,
+            supported_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+        )
+    ),
+)
+
 ops_test_common.duplicate_opinfo(OPS_DB, "all", ("all_dim", "all_dims"))
 ops_test_common.duplicate_opinfo(OPS_DB, "any", ("any_dim", "any_dims"))
 ops_test_common.duplicate_opinfo(

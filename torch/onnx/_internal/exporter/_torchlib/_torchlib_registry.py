@@ -25,7 +25,7 @@ _registry: list[_registration.OnnxDecompMeta] = []
 
 
 def onnx_impl(
-    target: _registration.TorchOp | tuple[_registration.TorchOp, ...],
+    target: _registration.TorchOp | str | tuple[_registration.TorchOp | str, ...],
     *,
     complex: bool = False,
     opset_introduced: int = 18,
@@ -46,7 +46,7 @@ def onnx_impl(
         if not private:
             # TODO(justinchuby): Simplify the logic and remove the private attribute
             # Skip registration if private
-            if not isinstance(target, Sequence):
+            if isinstance(target, str) or not isinstance(target, Sequence):
                 targets = (target,)
             else:
                 targets = target  # type: ignore[assignment]

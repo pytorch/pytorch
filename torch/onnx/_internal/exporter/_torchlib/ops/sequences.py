@@ -7,8 +7,9 @@ from __future__ import annotations
 import operator
 from collections.abc import Sequence
 
+import onnx_ir as ir
+
 import torch
-from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.onnx._internal.exporter._ir_builder import current_builder, GraphBuilder
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 from torch.onnx._internal.exporter._torchlib.ops import common as common_ops, core
@@ -187,7 +188,7 @@ def aten_cat(tensors: Sequence[ir.Value], dim: int = 0) -> ir.Value:
     return builder.call("Concat", *filtered_tensors, axis=dim)[0]
 
 
-@onnx_impl(operator.getitem)
+@onnx_impl((operator.getitem, "aten::getitem"))
 def aten_getitem(self: Sequence[ir.Value], i: ir.Value) -> ir.Value:
     builder = current_builder()
     if not isinstance(self, ir.Value):

@@ -9,9 +9,9 @@ import operator
 from collections.abc import Sequence
 
 import numpy as np
+import onnx_ir as ir
 
 import torch
-from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.onnx._internal.exporter._ir_builder import current_builder
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 from torch.onnx._internal.exporter._torchlib.ops import common as common_ops
@@ -4090,3 +4090,282 @@ def _aten_index_put_bool(
         flat_values,
         reduction="add" if accumulate else None,
     )[0]
+
+
+def aten_std(self: ir.Value, unbiased: bool = True) -> ir.Value:
+    """std(Tensor self, bool unbiased=True) -> Tensor"""
+    builder = current_builder()
+    var = _aten_var_onnx(self, correction=float(unbiased), keepdim=False)
+    return builder.call("Sqrt", var)[0]
+
+
+def aten_std_dim(
+    self: ir.Value,
+    dim: Sequence[int],
+    unbiased: bool | None = True,
+    keepdim: bool | None = False,
+) -> ir.Value:
+    """std.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor"""
+    builder = current_builder()
+
+    var = _aten_var_dim_onnx(
+        self, dims=dim, correction=float(unbiased), keepdim=keepdim
+    )
+    return builder.call("Sqrt", var)[0]
+
+
+def aten_std_correction(
+    self: ir.Value,
+    # FIXME(justinchuby): Make dim Optional[Sequence[int]]
+    dim: int | None = None,
+    correction: float | None = None,
+    keepdim: bool = False,
+) -> ir.Value:
+    """std.correction(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False) -> Tensor"""
+    builder = current_builder()
+
+    if correction is None:
+        correction = 1.0
+
+    if dim is None:
+        var = _aten_var_onnx(self, correction=correction, keepdim=keepdim)
+    else:
+        var = _aten_var_dim_onnx(self, dims=dim, correction=correction, keepdim=keepdim)
+    return builder.call("Sqrt", var)[0]
+
+
+def aten_std_mean(self: ir.Value, unbiased: bool = True) -> tuple[ir.Value, ir.Value]:
+    """std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)"""
+    builder = current_builder()
+
+    # Assume bool(True) and int(1) are same in ONNX, so pass "unbiased" directly as "correction"
+    # If not this case, should be explicitly set correction value according to unbiased value
+    var, mean = _aten_var_mean_onnx(self, correction=float(unbiased), keepdim=False)
+    return builder.call("Sqrt", var)[0], mean
+
+
+def aten_std_mean_dim(
+    self: ir.Value, dim: Sequence[int], unbiased: bool = True, keepdim: bool = False
+) -> tuple[ir.Value, ir.Value]:
+    """std_mean.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)"""
+    builder = current_builder()
+
+    # Although dim is Optional in signature, but we assume it must have value for this overload
+    # Assert(dim is not None)
+    var, mean = _aten_var_mean_dim_onnx(
+        self, dims=dim, correction=float(unbiased), keepdim=keepdim
+    )
+    return builder.call("Sqrt", var)[0], mean
+
+
+def aten_std_mean_correction(
+    self: ir.Value,
+    # FIXME(justinchuby): Make dim Optional[Sequence[int]]
+    dim: int | None = None,
+    correction: float | None = None,
+    keepdim: bool = False,
+) -> tuple[ir.Value, ir.Value]:
+    """std_mean.correction(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False) -> (Tensor, Tensor)"""
+    builder = current_builder()
+
+    if correction is None:
+        correction = 1.0
+
+    if dim is None:
+        var, mean = _aten_var_mean_onnx(self, correction=correction, keepdim=keepdim)
+    else:
+        var, mean = _aten_var_mean_dim_onnx(
+            self, dims=dim, correction=correction, keepdim=keepdim
+        )
+    return builder.call("Sqrt", var)[0], mean
+
+
+def aten_var(self: ir.Value, unbiased: bool | None = True) -> ir.Value:
+    """var(Tensor self, bool unbiased=True) -> Tensor"""
+
+    # Assume bool(True) and int(1) are same in ONNX, so pass "unbiased" directly as "correction"
+    # If not this case, should be explicitly set correction value according to unbiased value
+    return _aten_var_onnx(self, correction=float(unbiased), keepdim=False)
+
+
+def aten_var_dim(
+    self: ir.Value,
+    dim: Sequence[int],
+    unbiased: bool | None = True,
+    keepdim: bool | None = False,
+) -> ir.Value:
+    """var(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor"""
+
+    return _aten_var_dim_onnx(
+        self, dims=dim, correction=float(unbiased), keepdim=keepdim
+    )
+
+
+def aten_var_correction(
+    self: ir.Value,
+    # FIXME(justinchuby): Make dim Optional[Sequence[int]]
+    dim: int | None = None,
+    correction: float | None = None,
+    keepdim: bool = False,
+) -> ir.Value:
+    """var.correction(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False) -> Tensor"""
+
+    if correction is None:
+        correction = 1.0
+
+    if dim is None:
+        var = _aten_var_onnx(self, correction=correction, keepdim=keepdim)
+    else:
+        var = _aten_var_dim_onnx(self, dims=dim, correction=correction, keepdim=keepdim)
+    return var
+
+
+def _aten_var_onnx(
+    self: ir.Value, correction: float, keepdim: bool = False
+) -> ir.Value:
+    builder = current_builder()
+    mean = builder.call("ReduceMean", self, keepdims=keepdim)[0]
+    sub_mean = builder.call("Sub", self, mean)[0]
+    sqr_mean = builder.call("Mul", sub_mean, sub_mean)[0]
+    var = builder.call("ReduceMean", sqr_mean, keepdims=keepdim)[0]
+    # Adjust var according to correction value
+    if correction > 0.0:
+        self_shape = builder.call("Shape", self)[0]
+        numel_float = builder.call(
+            "CastLike", builder.call("ReduceProd", self_shape, keepdims=False)[0], self
+        )[0]
+        mul = builder.call("Mul", var, numel_float)[0]
+        sub = builder.call(
+            "Sub", numel_float, builder.call("CastLike", correction, self)[0]
+        )[0]
+        var = builder.call("Div", mul, sub)[0]
+
+    return var
+
+
+def _aten_var_dim_onnx(
+    self: ir.Value, dims: Sequence[int], correction: float, keepdim: bool = False
+) -> ir.Value:
+    builder = current_builder()
+    dims = builder.call(
+        "Reshape",
+        common_ops.merge_dims(dims),
+        builder.constant([-1], dtype=ir.DataType.INT64),
+    )[0]
+    # Computer mean and var
+    sub_mean = builder.call(
+        "Sub", self, builder.call("ReduceMean", self, dims, keepdims=True)[0]
+    )[0]
+    sqr_mean = builder.call("Mul", sub_mean, sub_mean)[0]
+    var = builder.call("ReduceMean", sqr_mean, dims, keepdims=keepdim)[0]
+    # Adjust var according to correction value
+    if correction > 0.0:
+        self_shape = builder.call("Shape", self)[0]
+        dim_size = builder.call("Gather", self_shape, dims, axis=0)[0]
+        numel_float = builder.call(
+            "CastLike", builder.call("ReduceProd", dim_size, keepdims=False)[0], self
+        )[0]
+        mul = builder.call("Mul", var, numel_float)[0]
+        sub = builder.call(
+            "Sub", numel_float, builder.call("CastLike", correction, self)[0]
+        )[0]
+        var = builder.call("Div", mul, sub)[0]
+
+    return var
+
+
+def aten_var_mean(self: ir.Value, unbiased: bool = True) -> tuple[ir.Value, ir.Value]:
+    """var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)"""
+
+    # Assume bool(True) and int(1) are same in ONNX, so pass "unbiased" directly as "correction"
+    # If not this case, should be explicitly set correction value according to unbiased value
+    return _aten_var_mean_onnx(self, correction=float(unbiased), keepdim=False)
+
+
+def aten_var_mean_dim(
+    self: ir.Value, dim: Sequence[int], unbiased: bool = True, keepdim: bool = False
+) -> tuple[ir.Value, ir.Value]:
+    """var_mean.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)"""
+
+    # Although dim is Optional in signature, but we assume it must have value for this overload
+    # Assert(dim is not None)
+    return _aten_var_mean_dim_onnx(
+        self, dims=dim, correction=float(unbiased), keepdim=keepdim
+    )
+
+
+def aten_var_mean_correction(
+    self: ir.Value,
+    # FIXME(justinchuby): Make dim Optional[Sequence[int]]
+    dim: int | None = None,
+    correction: float | None = None,
+    keepdim: bool = False,
+) -> tuple[ir.Value, ir.Value]:
+    """var_mean.correction(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False) -> (Tensor, Tensor)"""
+
+    if correction is None:
+        correction = 1.0
+
+    if dim is None:
+        var, mean = _aten_var_mean_onnx(self, correction=correction, keepdim=keepdim)
+    else:
+        var, mean = _aten_var_mean_dim_onnx(
+            self, dims=dim, correction=correction, keepdim=keepdim
+        )
+    return var, mean
+
+
+def _aten_var_mean_onnx(
+    self: ir.Value, correction: float = 1.0, keepdim: bool = False
+) -> tuple[ir.Value, ir.Value]:
+    builder = current_builder()
+    # Compute mean and var
+    mean = builder.call("ReduceMean", self, keepdims=keepdim)[0]
+    sub_mean = builder.call("Sub", self, mean)[0]
+    sqr_mean = builder.call("Mul", sub_mean, sub_mean)[0]
+    var = builder.call("ReduceMean", sqr_mean, keepdims=keepdim)[0]
+    # Adjust var according to correction value
+    if correction > 0.0:
+        self_shape = builder.call("Shape", self)[0]
+        numel_float = builder.call(
+            "CastLike", builder.call("ReduceProd", self_shape, keepdims=False)[0], self
+        )[0]
+        mul = builder.call("Mul", var, numel_float)[0]
+        sub = builder.call(
+            "Sub", numel_float, builder.call("CastLike", correction, self)[0]
+        )[0]
+        var = builder.call("Div", mul, sub)[0]
+
+    return var, mean
+
+
+def _aten_var_mean_dim_onnx(
+    self: ir.Value, dims: Sequence[int], correction: float, keepdim: bool = False
+) -> tuple[ir.Value, ir.Value]:
+    builder = current_builder()
+    dims = builder.call(
+        "Reshape",
+        common_ops.merge_dims(dims),
+        builder.constant([-1], dtype=ir.DataType.INT64),
+    )[0]
+    # Computer mean and var
+    mean = builder.call("ReduceMean", self, dims, keepdims=keepdim)[0]
+    sub_mean = builder.call(
+        "Sub", self, builder.call("ReduceMean", self, dims, keepdims=True)[0]
+    )[0]
+    sqr_mean = builder.call("Mul", sub_mean, sub_mean)[0]
+    var = builder.call("ReduceMean", sqr_mean, dims, keepdims=keepdim)[0]
+    # Adjust var according to correction value
+    if correction > 0.0:
+        self_shape = builder.call("Shape", self)[0]
+        dim_size = builder.call("Gather", self_shape, dims, axis=0)[0]
+        numel_float = builder.call(
+            "CastLike", builder.call("ReduceProd", dim_size, keepdims=False)[0], self
+        )[0]
+        mul = builder.call("Mul", var, numel_float)[0]
+        sub = builder.call(
+            "Sub", numel_float, builder.call("CastLike", correction, self)[0]
+        )[0]
+        var = builder.call("Div", mul, sub)[0]
+
+    return var, mean

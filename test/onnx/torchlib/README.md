@@ -89,8 +89,26 @@ and attention alternatives to the newer implementations in `nn.py`. Grouped-quer
 attention requires static head counts; batch and sequence sizes may be dynamic.
 `test_native_neural_ops.py` checks native-only dynamic FX exports with optimization
 off/on. Source OpInfo mappings retain numerical tolerances and known limitations.
-The two CUDA-only experimental flash/efficient-attention wrappers remain on the
-legacy fallback for the final migration layer.
+The experimental flash/efficient-attention wrappers are native as well. Like
+the source translations, their auxiliary outputs are zero placeholders, not
+usable log-sum-exp statistics, sequence offsets, debug masks, or RNG state.
+
+FFT, prims, special, determinant/vector norm, optional vision, and decomposed
+dequantization translations complete the native registry. Built-in population
+does not consult ONNX Script's torch_lib. Construction uses plain `onnx_ir.Value`
+objects and `GraphBuilder`; ONNX Script remains available for optimization and
+the isolated legacy `custom_translation_table` adapter. Global native
+registrations are snapshotted per export; local translations override globals,
+which override built-ins. Built-ins select the highest eligible opset separately
+for real and complex inputs without dtype/signature overload searches.
+
+`test_native_final_ops.py` checks real/complex FFT, prims, special functions,
+quantization boundaries, attention auxiliary shapes, and direct vision graphs.
+Vision registration uses qualified names without importing torchvision; optional
+operators become executable FX targets only when their namespace is loaded.
+Unavailable/version-specific source aliases remain qualified-name registrations.
+DeformConv requires opset19; DFT uses the axis input starting at opset20.
+The source's 622 unsupported placeholder bodies do not add operator support.
 
 See _usage_ in [`ops_test_data.py`](./ops_test_data.py)
 

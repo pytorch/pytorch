@@ -303,13 +303,8 @@ if any(n == 'onnxscript' or n.startswith('onnxscript.') or 'torch_lib' in n for 
     def test_snapshot_is_independent_of_concurrent_updates(self):
         torch.onnx.register_custom_translation(self.target, native_add)
         old = _custom_translation.snapshot()
-        with (
-            mock.patch.object(
-                _registration.onnxscript_apis, "get_torchlib_ops", return_value=[]
-            ),
-            mock.patch.object(
-                _registration._torchlib_registry, "get_torchlib_ops", return_value=[]
-            ),
+        with mock.patch.object(
+            _registration._torchlib_registry, "get_torchlib_ops", return_value=[]
         ):
             registry = _registration.ONNXRegistry.from_torchlib(custom_translations=old)
         thread = threading.Thread(

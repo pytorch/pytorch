@@ -6,8 +6,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import onnx_ir as ir
+
 import torch
-from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.onnx._internal.exporter._ir_builder import current_builder
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 from torch.onnx._internal.exporter._torchlib.ops import (
@@ -1842,3 +1843,181 @@ def aten_upsample_trilinear3d_vec(
             coordinate_transformation_mode=coordinate_transformation_mode,
         )
     return result
+
+
+def _aten__scaled_dot_product_flash_attention_fillin_empty_outputs(
+    query: ir.Value,
+) -> tuple[ir.Value, ir.Value, ir.Value, ir.Value]:
+    builder = current_builder()
+    query_first_three_dims = builder.call(
+        "Slice",
+        builder.call("Shape", query)[0],
+        builder.constant([0], dtype=ir.DataType.INT64),
+        builder.constant([3], dtype=ir.DataType.INT64),
+    )[0]
+    logsumexp = builder.call("Expand", 0.0, query_first_three_dims)[0]
+    empty_tensor_int = builder.call(
+        "ConstantOfShape",
+        builder.call("Constant", value=ir.tensor([], dtype=ir.DataType.INT64))[0],
+    )[0]
+    # ConstantOfShape requires an INT64 shape even for a FLOAT dummy output.
+    empty_tensor_float = builder.call(
+        "ConstantOfShape",
+        builder.call("Constant", value=ir.tensor([], dtype=ir.DataType.INT64))[0],
+    )[0]
+    empty_int = builder.constant(0, dtype=ir.DataType.INT64)
+
+    return logsumexp, empty_tensor_int, empty_int, empty_tensor_float
+
+
+@onnx_impl(aten._scaled_dot_product_flash_attention.default, opset_introduced=18)
+def aten__scaled_dot_product_flash_attention(
+    query: ir.Value,
+    key: ir.Value,
+    value: ir.Value,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    scale: float | None = None,
+) -> tuple[
+    ir.Value,
+    ir.Value,
+    ir.Value,
+    ir.Value,
+    ir.Value,
+    ir.Value,
+    ir.Value,
+    ir.Value,
+    ir.Value,
+]:
+    """_scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+
+    One of the implementations of scaled_dot_product_attention.
+    Reference: https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
+
+    NOTE: Currently, there are three implementations of nn.scaled_dot_product_attention in PyTorch due to optimization.
+    However, it's the same implementation from ONNX perspective.
+
+    """
+    result = aten_scaled_dot_product_attention(
+        query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale
+    )
+
+    # The followings are not consumed by the graph.
+    (
+        logsumexp,
+        empty_tensor_int,
+        empty_int,
+        empty_tensor_float,
+    ) = _aten__scaled_dot_product_flash_attention_fillin_empty_outputs(query)
+
+    return (
+        result,
+        logsumexp,
+        empty_tensor_int,
+        empty_tensor_int,
+        empty_int,
+        empty_int,
+        empty_tensor_int,
+        empty_tensor_int,
+        empty_tensor_float,
+    )
+
+
+def _aten_scaled_dot_product_efficient_attention_fillin_empty_outputs(
+    query: ir.Value,
+    compute_log_sumexp: bool,
+) -> tuple[ir.Value, ir.Value]:
+    """_scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)"""
+    builder = current_builder()
+
+    query = builder.call("Transpose", query, perm=[0, 2, 1, 3])[0]
+    query_shape = builder.call("Shape", query)[0]
+    query_first_dims = builder.call(
+        "Slice",
+        query_shape,
+        builder.constant([_INT64_MIN], dtype=ir.DataType.INT64),
+        [1],
+    )[0]
+    query_second_dims = builder.call("Slice", query_shape, [1], [2])[0]
+    num_heads = builder.call("Slice", query_shape, [-2], [-1])[0]
+
+    if compute_log_sumexp:
+        logsumexp_dim = builder.call(
+            "Cast",
+            builder.call(
+                "Mul",
+                builder.call(
+                    "Ceil",
+                    builder.call(
+                        "Div",
+                        builder.call("Cast", query_second_dims, to=ir.DataType.FLOAT)[
+                            0
+                        ],
+                        32.0,
+                    )[0],
+                )[0],
+                32.0,
+            )[0],
+            to=ir.DataType.INT64,
+        )[0]
+        logsum_exp = builder.call(
+            "Expand",
+            0.0,
+            builder.call("Concat", query_first_dims, num_heads, logsumexp_dim, axis=0)[
+                0
+            ],
+        )[0]
+    else:
+        logsum_exp = builder.call(
+            "Expand",
+            0.0,
+            builder.call("Concat", query_first_dims, num_heads, [0], axis=0)[0],
+        )[0]
+
+    # See Note [Seed and Offset]:
+    empty_tensor_int = builder.call(
+        "ConstantOfShape",
+        builder.call("Constant", value=ir.tensor([], dtype=ir.DataType.INT64))[0],
+    )[0]
+
+    return logsum_exp, empty_tensor_int
+
+
+@onnx_impl(aten._scaled_dot_product_efficient_attention.default, opset_introduced=18)
+def aten__scaled_dot_product_efficient_attention(
+    query: ir.Value,
+    key: ir.Value,
+    value: ir.Value,
+    attn_bias: ir.Value | None,
+    compute_log_sumexp: bool,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    scale: float | None = None,
+) -> tuple[ir.Value, ir.Value, ir.Value, ir.Value]:
+    """_scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)"""
+
+    result = aten_scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        attn_bias,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        scale=scale,
+    )
+
+    # The followings are not consumed by the graph.
+    (
+        logsumexp,
+        empty_tensor_int,
+    ) = _aten_scaled_dot_product_efficient_attention_fillin_empty_outputs(
+        query, compute_log_sumexp
+    )
+
+    return (
+        result,
+        logsumexp,
+        empty_tensor_int,
+        empty_tensor_int,
+    )

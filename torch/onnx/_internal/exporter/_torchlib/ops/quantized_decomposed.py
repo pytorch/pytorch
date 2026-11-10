@@ -5,11 +5,13 @@
 
 from __future__ import annotations
 
+import onnx_ir as ir
+
 import torch
 import torch.ao.quantization.fx._decomposed  # registers the quantized_decomposed ops
-from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.onnx._internal.exporter._ir_builder import current_builder
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
+from torch.onnx._internal.exporter._torchlib.ops import common
 
 
 quantized_decomposed = torch.ops.quantized_decomposed
@@ -110,7 +112,13 @@ def quantized_decomposed_quantize_per_tensor(
     return quantized
 
 
-@onnx_impl(quantized_decomposed.quantize_per_channel.default)
+@onnx_impl(
+    (
+        quantized_decomposed.quantize_per_channel.default,
+        "quantized_decomposed::quantize_per_channel.tensor",
+        "quantized_decomposed::quantize_per_channel.tensor2",
+    )
+)
 def quantized_decomposed_quantize_per_channel(
     input: ir.Value,
     scales: ir.Value,
@@ -120,7 +128,13 @@ def quantized_decomposed_quantize_per_channel(
     quant_max: int,
     dtype: int,
 ) -> ir.Value:
-    """quantize_per_channel(Tensor input, Tensor scales, Tensor zero_points, int axis, int quant_min, int quant_max, ScalarType dtype) -> Tensor"""
+    """Affine per channel quantization for the Tensor using the same quantization
+    parameters for each channel/axis to map from floating point to quantized values.
+
+    Reference:
+    https://github.com/pytorch/pytorch/blob/main/torch/ao/quantization/fx/_decomposed.py
+    ``res = clamp(round(input / scales) + zero_points, quant_min, quant_max)``
+    """
     builder = current_builder()
 
     if dtype == ir.DataType.INT32:
@@ -173,6 +187,9 @@ def quantized_decomposed_quantize_per_channel(
         # even at the full int32 range.
         return builder.call("Cast", _clip(quantized, quant_min, quant_max), to=dtype)[0]
 
+    # ONNX QuantizeLinear requires the scale to share the input element type and the
+    # zero_point to share the (quantized) output element type. PyTorch passes scales as
+    # float64 and zero_points as int64, so cast both to the expected ONNX types.
     quantized = builder.call(
         "QuantizeLinear",
         input,
@@ -184,6 +201,86 @@ def quantized_decomposed_quantize_per_channel(
         dtype not in _FLOAT8_DTYPES
         and (quant_min, quant_max) != _FULL_QUANTIZATION_RANGE[dtype]
     ):
-        # QuantizeLinear saturates to the full dtype range; narrower ranges need a Clip.
+        # QuantizeLinear saturates to the full range of ``dtype``. PyTorch clamps to the
+        # explicit ``quant_min``/``quant_max`` instead, so clamp to match its semantics.
         quantized = _clip(quantized, quant_min, quant_max)
     return quantized
+
+
+@onnx_impl(
+    (
+        "quantized_decomposed::dequantize_per_tensor",
+        "quantized_decomposed::dequantize_per_tensor.tensor",
+        "quantized_decomposed::dequantize_per_tensor.tensor2",
+    ),
+    opset_introduced=18,
+)
+def quantized_decomposed_dequantize_per_tensor(
+    input: ir.Value,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: int,
+    out_dtype: int = -1,
+) -> ir.Value:
+    builder = current_builder()
+    # TODO(justinchuby): Use dtype when we use opset 21
+    if isinstance(zero_point, ir.Value):
+        zero_point = builder.call("Cast", zero_point, to=dtype)[0]
+    else:
+        zero_point = common.constant(zero_point, dtype=dtype)
+    if isinstance(scale, ir.Value):
+        scale = builder.call("Cast", scale, to=ir.DataType.FLOAT)[0]
+    dequantized = builder.call("DequantizeLinear", input, scale, zero_point)[0]
+    if out_dtype in (-1, None):
+        # out_dtype can be None as well
+        return dequantized
+    if not (out_dtype > 0):
+        raise ValueError(f"out_dtype must be -1 or > 0 not {out_dtype}")
+    return builder.call("Cast", dequantized, to=out_dtype)[0]
+
+
+@onnx_impl(
+    (
+        "quantized_decomposed::dequantize_per_channel",
+        "quantized_decomposed::dequantize_per_channel.tensor",
+        "quantized_decomposed::dequantize_per_channel.tensor2",
+    ),
+    opset_introduced=18,
+)
+def quantized_decomposed_dequantize_per_channel(
+    input: ir.Value,
+    scales: ir.Value,
+    zero_points: ir.Value | None,
+    axis: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: int,
+    out_dtype: int = -1,
+) -> ir.Value:
+    """Affine per channel dequantization for the Tensor using the same quantization
+    parameters for each channel/axis to map from quantized values to floating point values.
+
+    Reference:
+    https://github.com/pytorch/pytorch/blob/main/torch/ao/quantization/fx/_decomposed.py
+    ``res = (input - zero_points) * scales`` cast to ``out_dtype`` (float32 by default).
+    ``quant_min``/``quant_max``/``dtype`` are metadata only and unused in the computation.
+    """
+    builder = current_builder()
+    # ONNX DequantizeLinear requires a floating point scale and a zero_point that shares
+    # the (quantized) input element type. PyTorch passes scales as float64 and zero_points
+    # as int64, so cast scales to float32 (the PyTorch default output type) and zero_points
+    # to the quantized input type.
+    scales = builder.call("Cast", scales, to=ir.DataType.FLOAT)[0]
+    if zero_points is not None:
+        zero_points = builder.call("Cast", zero_points, to=dtype)[0]
+    dequantized = builder.call(
+        "DequantizeLinear", input, scales, zero_points, axis=axis
+    )[0]
+    if out_dtype in (-1, None):
+        # PyTorch defaults to float32, which DequantizeLinear already produces.
+        return dequantized
+    if not (out_dtype > 0):
+        raise ValueError(f"out_dtype must be -1 or > 0 not {out_dtype}")
+    return builder.call("Cast", dequantized, to=out_dtype)[0]

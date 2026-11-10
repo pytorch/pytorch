@@ -7,11 +7,16 @@ from __future__ import annotations
 
 import functools
 import itertools
+import unittest
 from typing import Any
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal import common_dtype, common_methods_invocations
+from torch.testing._internal import (
+    common_device_type,
+    common_dtype,
+    common_methods_invocations,
+)
 from torch.testing._internal.opinfo import core as opinfo_core
 
 
@@ -2458,6 +2463,458 @@ OPS_DB.extend(
             aten_name="max_pool3d_with_indices",
             dtypes=common_dtype.floating_types_and(torch.bfloat16),
             sample_inputs_func=sample_inputs_max_pool3d_with_indices,
+            supports_out=False,
+        ),
+    ]
+)
+
+
+def sample_inputs_broadcast_in_dim(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info
+    del kwargs
+
+    # cases: (input_shape, target_shape, broadcast_dimensions)
+    # broadcast_dimensions maps each input dim to an axis in target_shape
+    cases = (
+        # scalar -> 1-D tensor
+        ((), (3,), ()),
+        # identity (no-op broadcast)
+        ((3,), (3,), (0,)),
+        # rank-preserving broadcast where singleton dims expand
+        ((1, 3, 1), (2, 3, 4), (0, 1, 2)),
+        # input rank 2 -> output rank 3, input dims map to trailing axes
+        ((3, 1), (2, 3, 4), (1, 2)),
+        # add leading broadcast axis
+        ((3, 4), (1, 3, 4), (1, 2)),
+        # insert broadcasting in middle axis
+        ((3,), (2, 3, 1), (1,)),
+    )
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+
+    for shape, target_shape, broadcast_dimensions in cases:
+        tensor = make_arg(shape)
+        yield opinfo_core.SampleInput(tensor, args=(target_shape, broadcast_dimensions))
+
+
+def _prepare_data_for_fft_ops(device, dtype, requires_grad=False):
+    # Adapted from https://github.com/pytorch/pytorch/blob/01069ad4be449f376cf88a56d842b8eb50f6e9b6/torch/testing/_internal/opinfo/core.py#L2448C1-L2541C79
+    is_fp16_or_chalf = dtype in (torch.complex32, torch.half)
+    if not is_fp16_or_chalf:
+        oned_tensor = functools.partial(
+            opinfo_core.make_tensor,
+            (31,),
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+        nd_tensor = functools.partial(
+            opinfo_core.make_tensor,
+            (S, S + 1, S + 2),
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+    else:
+        low = None
+        high = None
+        shapes = ((2, 8, 9), (33,))
+
+        oned_tensor = functools.partial(
+            opinfo_core.make_tensor,
+            shapes[1],
+            device=device,
+            low=low,
+            high=high,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+        nd_tensor = functools.partial(
+            opinfo_core.make_tensor,
+            shapes[0],
+            device=device,
+            low=low,
+            high=high,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+
+    return oned_tensor, nd_tensor
+
+
+def sample_inputs__fft_c2c(self, device, dtype, requires_grad=False, **_):
+    del self  # Unused
+    oned_tensor, nd_tensor = _prepare_data_for_fft_ops(device, dtype, requires_grad)
+
+    for normalization, forward in itertools.product((0, 1, 2), (True, False)):
+        # 1-D
+        yield opinfo_core.SampleInput(
+            oned_tensor(), dim=(0,), normalization=normalization, forward=forward
+        )
+        # N-D
+        for dim in [
+            (0,),
+            (1,),
+            (2,),
+            (1, 2),
+            (0, 1),
+            (0, 1, 2),
+        ]:
+            yield opinfo_core.SampleInput(
+                nd_tensor(), dim=dim, normalization=normalization, forward=forward
+            )
+
+
+def sample_inputs__fft_r2c(self, device, dtype, requires_grad=False, **_):
+    del self  # Unused
+    oned_tensor, nd_tensor = _prepare_data_for_fft_ops(device, dtype, requires_grad)
+
+    for normalization, one_sided in itertools.product((0, 1, 2), (True, True)):
+        # 1-D
+        yield opinfo_core.SampleInput(
+            oned_tensor(), dim=(0,), normalization=normalization, onesided=one_sided
+        )
+        # N-D
+        for dim in [
+            (0,),
+            (1,),
+            (2,),
+            (1, 2),
+            (0, 1),
+            (0, 1, 2),
+        ]:
+            yield opinfo_core.SampleInput(
+                nd_tensor(), dim=dim, normalization=normalization, onesided=one_sided
+            )
+
+
+def sample_inputs__fft_c2r(self, device, dtype, requires_grad=False, **_):
+    del self  # Unused
+    real_dtype = torch.float
+    if dtype == torch.complex128:
+        real_dtype = torch.double
+    oned_tensor, nd_tensor = _prepare_data_for_fft_ops(
+        device, real_dtype, requires_grad
+    )
+    oned_tensor_result = oned_tensor()
+    nd_tensor_result = nd_tensor()
+    complex_oned_tensor = torch.ops.aten._fft_r2c.default(  # pylint: disable=protected-access
+        oned_tensor_result, [0], normalization=0, onesided=False
+    )
+    # for normalization in (0, 1, 2):
+    for normalization in (0, 1, 2):
+        # 1-D
+        yield opinfo_core.SampleInput(
+            complex_oned_tensor,
+            dim=(0,),
+            normalization=normalization,
+            last_dim_size=31,
+        )
+        # N-D
+        for dim in [
+            (0,),
+            (1,),
+            (2,),
+        ]:
+            complex_nd_tensor = torch.ops.aten._fft_r2c.default(  # pylint: disable=protected-access
+                nd_tensor_result, dim, normalization=0, onesided=False
+            )
+            yield opinfo_core.SampleInput(
+                complex_nd_tensor,
+                dim=dim,
+                normalization=normalization,
+                last_dim_size=complex_nd_tensor.shape[dim[-1]],
+            )
+
+
+def sample_inputs_non_max_suppression(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info
+    del kwargs
+    boxes = torch.tensor(
+        [
+            [0.0, 0.0, 10.0, 10.0],
+            [10.0, 10.0, 20.0, 20.0],
+            [32.0, 32.0, 40.0, 52.0],
+        ],
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+    )
+    scores = torch.tensor(
+        [0.8, 0.4, 0.6], device=device, dtype=dtype, requires_grad=requires_grad
+    )
+
+    for iou_threshold in (0.3, 0.5, 0.7, 0.9):
+        yield opinfo_core.SampleInput(boxes, args=(scores, iou_threshold))
+
+
+def sample_inputs_roi_align(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info, kwargs
+
+    def make_x():
+        return torch.rand(
+            1, 1, 10, 10, dtype=dtype, device=device, requires_grad=requires_grad
+        )
+
+    # rois is [K, 5] = [batch_idx, x1, y1, x2, y2]
+    roi_a = torch.tensor([[0, 1.5, 1.5, 3.0, 3.0]], dtype=dtype, device=device)
+    roi_b = torch.tensor([[0, 0.2, 0.3, 4.5, 3.5]], dtype=dtype, device=device)
+    roi_int = torch.tensor([[0, 0.0, 0.0, 4.0, 4.0]], dtype=dtype, device=device)
+    roi_malformed = torch.tensor(
+        [[0, 2.0, 0.3, 1.5, 1.5]], dtype=dtype, device=device
+    )  # x1 > x2-ish
+
+    # (rois, spatial_scale, pooled_h, pooled_w, sampling_ratio, aligned)
+    cases = [
+        (roi_a, 1.0, 5, 5, 2, True),
+        (roi_b, 0.5, 5, 5, 3, True),
+        (roi_b, 1.8, 5, 5, 2, True),
+        (roi_b, 2.5, 2, 2, 0, True),
+        (roi_b, 2.5, 2, 2, -1, True),
+        (roi_malformed, 1.0, 5, 5, 1, True),
+        (roi_int, 1.0, 5, 5, 2, False),
+        (roi_int, 1.0, 5, 5, -1, False),
+    ]
+
+    for rois, spatial_scale, ph, pw, sr, aligned in cases:
+        yield opinfo_core.SampleInput(
+            make_x(),
+            args=(rois, float(spatial_scale), int(ph), int(pw), int(sr), bool(aligned)),
+        )
+
+
+def sample_inputs_roi_pool(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info
+    del kwargs
+    # roi_pool signature: (input, boxes, output_size, spatial_scale=1.0)
+
+    x = torch.rand(
+        1, 1, 10, 10, dtype=dtype, device=device, requires_grad=requires_grad
+    )
+    rois = torch.tensor([[0, 0, 0, 4, 4]], dtype=dtype, device=device)
+    yield opinfo_core.SampleInput(
+        x,
+        args=(rois, (5, 5)),
+        kwargs={"spatial_scale": 2.0},
+    )
+
+
+def sample_inputs__scaled_dot_product_flash_attention(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    del op_info
+    del kwargs
+
+    make = opinfo_core.partial(
+        opinfo_core.make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    batch, seq_q, seq_kv, num_heads, head_dim = 4, 3, 6, 4, 8
+
+    dim_4_q_shape = (batch, num_heads, seq_q, head_dim)
+    dim_4_kv_shape = (batch, num_heads, seq_kv, head_dim)
+
+    qkv_shapes = [(dim_4_q_shape, dim_4_kv_shape)]
+    samples = []
+    for qkv_shape, is_causal, dropout_p in opinfo_core.product(
+        qkv_shapes, [True, False], [0.0]
+    ):
+        shape_q, shape_kv = qkv_shape
+        samples.append(
+            opinfo_core.SampleInput(
+                make(shape_q),
+                make(shape_kv),
+                make(shape_kv),
+                is_causal=is_causal,
+                dropout_p=dropout_p,
+            )
+        )
+
+    # Add an attn_mask
+    samples.append(
+        opinfo_core.SampleInput(
+            make((batch, num_heads, seq_q, head_dim)),
+            make((batch, num_heads, seq_kv, head_dim)),
+            make((batch, num_heads, seq_kv, head_dim)),
+            is_causal=False,
+            dropout_p=0.0,
+        )
+    )
+
+    yield from samples
+
+
+def sample_inputs__scaled_dot_product_efficient_attention(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    del op_info
+    del kwargs
+
+    make = opinfo_core.partial(
+        opinfo_core.make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    batch, seq_q, seq_kv, num_heads, head_dim = 2, 3, 6, 4, 8
+
+    dim_4_q_shape = (batch, num_heads, seq_q, head_dim)
+    dim_4_kv_shape = (batch, num_heads, seq_kv, head_dim)
+
+    qkv_shapes = [(dim_4_q_shape, dim_4_kv_shape)]
+
+    samples = []
+    for qkv_shape, is_causal, dropout_p, compute_log_sumexp in opinfo_core.product(
+        qkv_shapes, [True, False], [0.0], [True, False]
+    ):
+        shape_q, shape_kv = qkv_shape
+        samples.append(
+            opinfo_core.SampleInput(
+                make(shape_q),
+                make(shape_kv),
+                make(shape_kv),
+                attn_bias=None,  # TODO: Add attn_bias
+                is_causal=is_causal,
+                dropout_p=dropout_p,
+                compute_log_sumexp=compute_log_sumexp,
+            )
+        )
+
+    yield from samples
+
+
+def sample_inputs_prims_std_var(op_info, device, dtype, requires_grad, **kwargs):
+    del op_info  # Unused
+    del kwargs  # Unused
+    tensor_nd = functools.partial(
+        opinfo_core.make_tensor,
+        (S, S, S),
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+    )
+    tensor_1d = functools.partial(
+        opinfo_core.make_tensor,
+        (S,),
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+    )
+
+    yield opinfo_core.SampleInput(tensor_nd(), dims=(1,), correction=0)
+    yield opinfo_core.SampleInput(tensor_1d(), dims=(0,), correction=0)
+    yield opinfo_core.SampleInput(tensor_1d(), dims=(0,), correction=1)
+
+    yield opinfo_core.SampleInput(tensor_nd(), dims=(1,), correction=1)
+    yield opinfo_core.SampleInput(tensor_nd(), dims=(1,), correction=S // 2)
+    yield opinfo_core.SampleInput(tensor_nd(), dims=(), correction=0)
+
+
+OPS_DB.extend(
+    [
+        opinfo_core.OpInfo(
+            "ops.aten._fft_c2c",
+            aten_name="_fft_c2c",
+            dtypes=common_dtype.complex_types(),
+            sample_inputs_func=sample_inputs__fft_c2c,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten._fft_c2r",
+            aten_name="_fft_c2r",
+            dtypes=common_dtype.complex_types(),
+            sample_inputs_func=sample_inputs__fft_c2r,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten._fft_r2c",
+            aten_name="_fft_r2c",
+            dtypes=common_dtype.floating_types(),
+            sample_inputs_func=sample_inputs__fft_r2c,
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten._scaled_dot_product_flash_attention",
+            aten_name="_scaled_dot_product_flash_attention",
+            dtypes=common_dtype.floating_types_and(torch.bfloat16),
+            # NOTE: Different from aten::scaled_dot_product_attention, this op doesn't support
+            #       dim<=3 input.
+            sample_inputs_func=sample_inputs__scaled_dot_product_flash_attention,
+            supports_out=False,
+            supports_forward_ad=False,
+            supports_fwgrad_bwgrad=True,
+            check_batched_forward_grad=False,
+        ),
+        opinfo_core.OpInfo(
+            "ops.aten._scaled_dot_product_efficient_attention",
+            aten_name="_scaled_dot_product_efficient_attention",
+            # only support CUDA
+            dtypes=common_dtype.empty_types(),
+            dtypesIfCUDA=common_dtype.floating_types_and(torch.bfloat16),
+            # NOTE: Different from aten::scaled_dot_product_attention, this op doesn't support
+            #       dim<=3 input.
+            sample_inputs_func=sample_inputs__scaled_dot_product_efficient_attention,
+            supports_out=False,
+            supports_forward_ad=False,
+            supports_fwgrad_bwgrad=True,
+            check_batched_forward_grad=False,
+            decorators=[common_device_type.onlyCUDA],
+        ),
+        opinfo_core.ReductionOpInfo(
+            "ops.prims.broadcast_in_dim.default",
+            op=torch.ops.prims.broadcast_in_dim.default,
+            dtypes=common_dtype.all_types(),
+            sample_inputs_func=sample_inputs_broadcast_in_dim,
+            supports_out=False,
+        ),
+        opinfo_core.ReductionOpInfo(
+            "ops.prims.var.default",
+            nan_policy="propagate",
+            supports_out=True,
+            promotes_int_to_float=True,
+            complex_to_real=True,
+            supports_forward_ad=True,
+            supports_fwgrad_bwgrad=True,
+            check_batched_forward_grad=False,
+            dtypes=common_dtype.floating_and_complex_types_and(
+                torch.half, torch.bfloat16
+            ),
+            sample_inputs_func=sample_inputs_prims_std_var,
+        ),
+        opinfo_core.OpInfo(
+            "torchvision.ops.nms",
+            op=lambda *args, **kwargs: torch.ops.torchvision.nms(*args, **kwargs),
+            dtypes=common_dtype.floating_types(),
+            sample_inputs_func=sample_inputs_non_max_suppression,
+            decorators=[
+                unittest.skipIf(
+                    not hasattr(torch.ops.torchvision, "nms"),
+                    "Optional torchvision::nms is not loaded",
+                )
+            ],
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "torchvision.ops.roi_align",
+            op=lambda *args, **kwargs: torch.ops.torchvision.roi_align(*args, **kwargs),
+            dtypes=common_dtype.floating_types(),
+            sample_inputs_func=sample_inputs_roi_align,
+            decorators=[
+                unittest.skipIf(
+                    not hasattr(torch.ops.torchvision, "roi_align"),
+                    "Optional torchvision::roi_align is not loaded",
+                )
+            ],
+            supports_out=False,
+        ),
+        opinfo_core.OpInfo(
+            "torchvision.ops.roi_pool",
+            op=lambda *args, **kwargs: torch.ops.torchvision.roi_pool(*args, **kwargs),
+            dtypes=common_dtype.floating_types(),
+            sample_inputs_func=sample_inputs_roi_pool,
+            decorators=[
+                unittest.skipIf(
+                    not hasattr(torch.ops.torchvision, "roi_pool"),
+                    "Optional torchvision::roi_pool is not loaded",
+                )
+            ],
             supports_out=False,
         ),
     ]

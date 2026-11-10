@@ -22,7 +22,7 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 
 @dataclasses.dataclass(frozen=True)
 class NativeTranslation:
-    target: Callable
+    target: Callable | str
     function: Callable
     is_complex: bool
     opset_introduced: int

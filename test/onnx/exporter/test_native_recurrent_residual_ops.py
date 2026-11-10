@@ -14,6 +14,7 @@ from test_native_factory_sequence_ops import _evaluate
 from test_native_torchlib import no_script
 
 import torch
+from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.exporter import _registration
 from torch.onnx._internal.exporter._torchlib.ops import embedding, recurrent, residual
 from torch.testing._internal import common_utils
@@ -477,7 +478,9 @@ class TestNativeRecurrentResidualOps(common_utils.TestCase):
         )
         with (
             mock.patch.object(
-                _registration.onnxscript_apis, "get_torchlib_ops", return_value=[]
+                onnxscript_apis,
+                "get_torchlib_ops",
+                side_effect=AssertionError("legacy fallback"),
             ),
             no_script(),
         ):

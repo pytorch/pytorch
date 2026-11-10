@@ -14,6 +14,7 @@ from test_native_factory_sequence_ops import _evaluate
 from test_native_torchlib import no_script
 
 import torch
+from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.exporter import _registration
 from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 from torch.onnx._internal.exporter._torchlib.ops import neural, nn, normalization
@@ -258,7 +259,9 @@ class TestNativeNeuralOps(common_utils.TestCase):
         )
         with (
             mock.patch.object(
-                _registration.onnxscript_apis, "get_torchlib_ops", return_value=[]
+                onnxscript_apis,
+                "get_torchlib_ops",
+                side_effect=AssertionError("legacy fallback"),
             ),
             no_script(),
         ):
@@ -296,7 +299,7 @@ class TestNativeNeuralOps(common_utils.TestCase):
             if meta.onnx_function.function.__module__
             in (neural.__name__, normalization.__name__)
         ]
-        self.assertEqual(len(entries), 73)
+        self.assertEqual(len(entries), 75)
         newer = {
             torch.ops.aten.gelu.default: (20, nn.aten_gelu_opset20),
             torch.ops.aten.group_norm.default: (21, nn.aten_group_norm),

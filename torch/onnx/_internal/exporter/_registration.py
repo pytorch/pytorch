@@ -13,22 +13,24 @@ https://github.com/pytorch/pytorch/blob/6aa5bb1a76dee8112f1a9e7c194c790b5cdc6462
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 import logging
 import math
 import operator
 import types
 from collections.abc import Callable
-from typing import Literal, TypeAlias
+from typing import Literal, TYPE_CHECKING, TypeAlias
 
 import torch
 import torch._ops
-from torch.onnx._internal._lazy_import import onnx_ir as ir, onnxscript, onnxscript_apis
-from torch.onnx._internal.exporter import _constants, _custom_translation, _schemas
+from torch.onnx._internal.exporter import _constants, _custom_translation
 from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 
 
-TorchOp: TypeAlias = torch._ops.OpOverload | types.BuiltinFunctionType | Callable
+if TYPE_CHECKING:
+    import onnx_ir as ir
+
+
+TorchOp: TypeAlias = torch._ops.OpOverload | types.BuiltinFunctionType | Callable | str
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,10 @@ class OnnxDecompMeta:
 
     def __post_init__(self) -> None:
         if self.signature is None and not self.skip_signature_inference:
+            import onnxscript
+
+            from torch.onnx._internal.exporter import _schemas
+
             try:
                 if isinstance(self.onnx_function, onnxscript.OnnxFunction):
                     signature = _schemas.op_signature_from_function(
@@ -102,10 +108,6 @@ def _get_overload(qualified_name: str) -> torch._ops.OpOverload | None:
         return getattr(operator, op_name)
     if namespace == "math":
         return getattr(math, op_name)
-    if namespace == "torchvision":
-        if importlib.util.find_spec("torchvision") is None:
-            logger.warning("torchvision is not installed. Skipping %s", qualified_name)
-            return None
     try:
         op_packet = getattr(getattr(torch.ops, namespace), op_name)
         if maybe_overload:
@@ -171,41 +173,13 @@ class ONNXRegistry:
         registry = cls()
         registry._opset_version = opset_version
         for meta in _torchlib_registry.get_torchlib_ops():
-            registry._register(meta.fx_target, meta)
-
-        # TODO(justinchuby): Remove this once torchlib is migrated to PyTorch
-        torchlib_ops = onnxscript_apis.get_torchlib_ops()
-
-        for torchlib_meta in torchlib_ops:
-            qualified_name = torchlib_meta.qualified_name
-            overload_func = torchlib_meta.function
-            try:
-                # NOTE: This is heavily guarded with try-except because we don't want
-                # to fail the entire registry population if one function fails.
-                target = _get_overload(qualified_name)
-                if target is None:
-                    continue
-                if any(
-                    meta.is_complex == torchlib_meta.is_complex
-                    and meta.opset_introduced <= opset_version
-                    for meta in registry.get_decomps(target)
-                    if isinstance(
-                        meta.onnx_function, _custom_translation.NativeTranslation
-                    )
-                ):
-                    continue
-
-                meta = OnnxDecompMeta(
-                    onnx_function=overload_func,
-                    fx_target=target,
-                    signature=None,
-                    is_custom=False,
-                    is_complex=torchlib_meta.is_complex,
-                )
-                registry._register(target, meta)
-            except Exception:
-                logger.exception("Failed to register '%s'. Skipped", qualified_name)
-                continue
+            target = meta.fx_target
+            if isinstance(target, str):
+                # Resolve optional operators only if their namespace is already loaded.
+                # Keep unavailable/version-specific aliases discoverable by qualified name.
+                target = _get_overload(target) or target
+                meta = dataclasses.replace(meta, fx_target=target)
+            registry._register(target, meta)
 
         registry._cleanup_registry_based_on_opset_version()
         # Insert ascending versions at the front so the highest compatible

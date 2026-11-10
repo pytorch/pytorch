@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import onnx_ir as ir
+
 import torch
-from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.onnx._internal.exporter._ir_builder import current_builder
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 from torch.onnx.ops import _symbolic_impl

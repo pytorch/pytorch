@@ -599,12 +599,19 @@ def graph_executor(
         except (onnx.checker.ValidationError, onnx.shape_inference.InferenceError) as e:
             raise AssertionError(f"ONNX model is invalid. Model:\n{onnx_model}") from e
         model_proto = onnx.shape_inference.infer_shapes(model_proto, data_prop=True)
-        if native and any(
-            node.op_type == "SplitToSequence"
-            and node.inputs[0].dtype == ir.DataType.BOOL
-            for node in graph
+        if native and (
+            any(
+                imp.domain == "" and imp.version > 21
+                for imp in model_proto.opset_import
+            )
+            or any(
+                node.op_type == "SplitToSequence"
+                and node.inputs[0].dtype == ir.DataType.BOOL
+                for node in graph
+            )
         ):
-            # ORT 1.20 lacks boolean sequence splitting; retain numerical coverage.
+            # ORT 1.20 supports neither opset23 nor boolean sequence splitting.
+            # Keep numerical coverage using the reference implementation.
             from onnx.reference import ReferenceEvaluator
 
             return ReferenceEvaluator(model_proto).run(None, ort_inputs), model_proto

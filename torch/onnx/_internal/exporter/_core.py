@@ -16,10 +16,8 @@ import typing
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Literal
 
-import onnxscript
-import onnxscript.evaluator
-from onnxscript import ir
-from onnxscript.ir import convenience as ir_convenience
+import onnx_ir as ir
+from onnx_ir import convenience as ir_convenience
 
 import torch
 import torch.fx
@@ -27,7 +25,6 @@ from torch.export import graph_signature
 from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.exporter import (
     _analysis,
-    _building,
     _capture_strategies,
     _constants,
     _custom_translation,
@@ -40,7 +37,6 @@ from torch.onnx._internal.exporter import (
     _onnx_program,
     _registration,
     _reporting,
-    _tensors,
     _type_casting,
     _verification,
 )
@@ -495,10 +491,6 @@ def _convert_fx_arg_to_onnx_arg(
     return arg
 
 
-def _get_onnxscript_opset(opset_version: int) -> onnxscript.values.Opset:
-    return onnxscript.values.Opset("", opset_version)
-
-
 def _is_onnx_op(op: Any) -> bool:
     """Whether the op overload is an ONNX custom op implemented with PyTorch."""
     if not isinstance(op, torch._ops.OpOverload):
@@ -521,7 +513,7 @@ def _handle_call_function_node_with_lowering(
     graph_like: ir.Graph | ir.Function,
     constant_farm: dict[Any, ir.Value],
     registry: _registration.ONNXRegistry,
-    opset: onnxscript.values.Opset,
+    opset: int,
     node_name_to_local_functions: dict[str, ir.Function],
 ) -> None:
     """Translate a call_function node to an ONNX node.
@@ -534,7 +526,7 @@ def _handle_call_function_node_with_lowering(
             Must add nodes to this graph because it can be a subgraph that is currently being constructed.
         constant_farm: A mapping of constant values to existing ONNX ``Value``s.
         registry: The registry of all aten to ONNX decomposition functions.
-        opset: The ONNX Script opset object for constructing ONNX nodes.
+        opset: The target ONNX opset version.
         node_name_to_local_functions: A mapping of subgraph names to the corresponding ONNX functions.
     """
     if node.target is operator.getitem:
@@ -711,6 +703,12 @@ def _call_legacy_translation(
     onnx_function, onnx_args, onnx_kwargs, opset, constant_farm, model
 ):
     """Keep legacy evaluator state out of native translation invocation."""
+    import onnxscript
+    import onnxscript.evaluator
+
+    from torch.onnx._internal.exporter import _building, _tensors
+
+    opset = onnxscript.values.Opset("", opset)
     with onnxscript.evaluator.default_as(
         tracer := _building.OpRecorder(opset, constant_farm)
     ):
@@ -763,13 +761,13 @@ def _handle_placeholder_node(
     *,
     graph_like: ir.Graph | ir.Function,
     lower: str,
-    opset: onnxscript.values.Opset,
+    opset: int,
 ) -> None:
     # Placeholder nodes are user inputs
     # We need to create a new tensor for each user input
     # and add it to the graph's inputs
     name = node.name
-    input_ = _tensors.SymbolicTensor(opset, name=name)
+    input_ = ir.Value(name=name)
     input_.meta["node"] = node
     _set_shape_type(input_, node.meta["val"], complex_to_float=lower != "none")
     node_name_to_values[name] = input_
@@ -890,7 +888,7 @@ def _translate_fx_graph(
     # to the subgraph. This is not typical but is valid Python.
     node_name_to_local_functions: dict[str, ir.Function] = {}
     constant_farm: dict[Any, ir.Value] = {}
-    opset = _get_onnxscript_opset(registry.opset_version)
+    opset = registry.opset_version
 
     for node in fx_graph.nodes:
         logger.debug(

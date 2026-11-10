@@ -4,10 +4,12 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
+import onnx_ir as ir
+
 import torch
-from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.onnx._internal.exporter._ir_builder import current_builder
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 
@@ -294,3 +296,64 @@ def aten_resolve_neg(self: ir.Value) -> ir.Value:
     builder = current_builder()
 
     return builder.call("Identity", self)[0]
+
+
+@onnx_impl(
+    (aten._linalg_det.default, aten.linalg_det.default, aten.det.default),
+    opset_introduced=18,
+)
+def aten_linalg_det(A: ir.Value) -> ir.Value:
+    """linalg_det(Tensor A) -> Tensor"""
+    builder = current_builder()
+
+    return builder.call("Det", A)[0]
+
+
+@onnx_impl(aten.linalg_vector_norm.default, opset_introduced=18)
+def aten_linalg_vector_norm(
+    self: ir.Value,
+    ord: float = 2.0,
+    dim: int | None = None,
+    keepdim: bool = False,
+    dtype: int = -1,
+) -> ir.Value:
+    """linalg_vector_norm(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"""
+    builder = current_builder()
+
+    if dtype != -1:
+        self = builder.call("Cast", self, to=dtype)[0]
+    if dim is None:
+        self = builder.call(
+            "Reshape", self, builder.constant([-1], dtype=ir.DataType.INT64)
+        )[0]
+        keepdim = False
+    else:
+        if not isinstance(dim, ir.Value):
+            dim = builder.constant(dim, dtype=ir.DataType.INT64)
+        dim = builder.call(
+            "Reshape", dim, builder.constant([-1], dtype=ir.DataType.INT64)
+        )[0]
+
+    if math.isinf(ord):
+        self = builder.call("Abs", self)[0]
+        if ord > 0:
+            return builder.call("ReduceMax", self, dim, keepdims=keepdim)[0]
+        else:
+            return builder.call("ReduceMin", self, dim, keepdims=keepdim)[0]
+    elif ord == 0.0:  # sum(x!=0) means count non-zero elements
+        self_bool = builder.call("Cast", self, to=ir.DataType.BOOL)[0]
+        self_0_1 = builder.call("CastLike", self_bool, self)[0]
+        return builder.call("ReduceSum", self_0_1, dim, keepdims=keepdim)[0]
+    elif ord == 1.0:
+        return builder.call("ReduceL1", self, dim, keepdims=keepdim)[0]
+    elif ord == 2.0:
+        return builder.call("ReduceL2", self, dim, keepdims=keepdim)[0]
+    else:
+        if ord < 0 or ord % 2 != 0:
+            # Not an even integer (could be odd, fractional or negative), use Abs
+            self = builder.call("Abs", self)[0]
+        self_pow = builder.call("Pow", self, ord)[0]
+        exp = builder.call("CastLike", 1 / ord, self)[0]
+        return builder.call(
+            "Pow", builder.call("ReduceSum", self_pow, dim, keepdims=keepdim)[0], exp
+        )[0]

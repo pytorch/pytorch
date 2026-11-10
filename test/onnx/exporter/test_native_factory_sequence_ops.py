@@ -21,9 +21,9 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import HardwareClassification
 
 
-def _evaluate(function, tensors, expected, *, dynamic=True, runtime=False):
-    graph = ir.Graph([], [], nodes=[], name="factories", opset_imports={"": 18})
-    builder = _ir_builder.GraphBuilder(graph)
+def _evaluate(function, tensors, expected, *, dynamic=True, runtime=False, opset=18):
+    graph = ir.Graph([], [], nodes=[], name="factories", opset_imports={"": opset})
+    builder = _ir_builder.GraphBuilder(graph, opset=opset)
     values = [
         ir.Value(
             name=f"input_{index}",
