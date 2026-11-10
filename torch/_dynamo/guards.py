@@ -213,7 +213,6 @@ from .utils import (
     dataclass_fields,
     dict_keys,
     enumerate_items_with_dict_position,
-    find_type_attribute_name,
     get_current_stream,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
@@ -4955,12 +4954,64 @@ def _is_shared_constant(value: Any) -> bool:
 
 
 def _can_prune_dict_values(value: object) -> bool:
-    if type(value) is dict:
+    cls = type(value)
+    if cls is dict:
         return True
-    return (
-        type(value) is collections.OrderedDict
-        and collections.OrderedDict not in copyreg.dispatch_table
-        and not vars(value)
+    if cls is collections.defaultdict:
+        return cls not in copyreg.dispatch_table
+    # getattr_static cannot recover real namespaces when these are customized.
+    if type(cls) is not type:
+        return False
+    for base_cls in cls.__mro__:
+        namespace = get_type_dict_no_user_code(base_cls)
+        if "__dict__" in namespace:
+            descriptor = namespace["__dict__"]
+            if (
+                type(descriptor) is not types.GetSetDescriptorType
+                or descriptor.__name__ != "__dict__"
+                or descriptor.__objclass__ is not object
+                and descriptor.__objclass__ is not base_cls
+            ):
+                return False
+    getter = inspect.getattr_static(cls, "__getattribute__")
+    if (
+        not issubclass(cls, dict)
+        or cls in copyreg.dispatch_table
+        or getter is not object.__getattribute__
+        and getter is not dict.__getattribute__
+        or inspect.getattr_static(cls, "__getattr__", None) is not None
+        or inspect.getattr_static(cls, "__slots__", None) is not None
+    ):
+        return False
+    ordered = issubclass(cls, collections.OrderedDict)
+    base = collections.OrderedDict if ordered else dict
+    # Dynamic class reads can be spoofed by metaclass properties or descriptors.
+    protocols = (
+        (
+            "__reduce__",
+            collections.OrderedDict.__reduce__ if ordered else object.__reduce__,
+        ),
+        ("__reduce_ex__", object.__reduce_ex__),
+        ("__getstate__", getattr(object, "__getstate__", None)),
+        ("__setstate__", None),
+        ("__getnewargs__", None),
+        ("__getnewargs_ex__", None),
+        ("items", dict.items if not ordered else collections.OrderedDict.items),
+    )
+    if any(
+        inspect.getattr_static(value, name, None) is not expected
+        for name, expected in protocols
+    ):
+        return False
+    # Default dict reduction bypasses __init__; OrderedDict's reducer calls it.
+    methods = (
+        ("__new__", "__init__", "__setitem__")
+        if ordered
+        else ("__new__", "__setitem__")
+    )
+    return all(
+        inspect.getattr_static(cls, name) is inspect.getattr_static(base, name)
+        for name in methods
     )
 
 
@@ -5020,6 +5071,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         # fail the guard after load. Held, not just ids, since
         # __tensor_flatten__ may build the ctx afresh.
         self._whole_compared_values: dict[int, Any] = {}
+        self._pruned_dictionary_ids: set[int] = set()
         self._collect_whole_compared_values()
 
     def _collect_whole_compared_values(self) -> None:
@@ -5030,19 +5082,7 @@ class GuardsStatePickler(FunctionPicklerBase):
             for value in self.guard_tree_values.values()
             if pytree.is_constant_class(type(value))
             or is_opaque_constant_type(type(value))
-            or (
-                issubclass(type(value), dict)
-                and not _can_prune_dict_values(value)
-                and (
-                    not _pickles_from_dict(type(value))
-                    or inspect.getattr_static(type(value), "__getattribute__")
-                    is not object.__getattribute__
-                    or inspect.getattr_static(type(value), "__getattr__", None)
-                    is not None
-                    or inspect.getattr_static(type(value), "__slots__", None)
-                    is not None
-                )
-            )
+            or (issubclass(type(value), dict) and not _can_prune_dict_values(value))
         ]
         subclasses = [
             value
@@ -5308,6 +5348,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         for value in dictionaries:
             if not _can_prune_dict_values(value):
                 continue
+            self._pruned_dictionary_ids.add(id(value))
             for item in dict.values(value):
                 if (
                     not self._keep(item)
@@ -5560,6 +5601,17 @@ class GuardsStatePickler(FunctionPicklerBase):
             reduced = obj.__reduce__()
             state = vars(obj) if type(obj) is collections.OrderedDict else reduced[2]
             actual_attrs = vars(obj)
+            if (
+                id(obj) in self._pruned_dictionary_ids
+                and id(actual_attrs) not in self.guard_tree_values
+                and state is actual_attrs
+                and (pruned := self._unguarded_attributes(obj))
+            ):
+                missing = self._missing("unguarded attribute")
+                state = {
+                    key: missing if key in pruned else value
+                    for key, value in actual_attrs.items()
+                }
             adopt_attrs = state is actual_attrs or (
                 isinstance(state, tuple)
                 and tuple.__len__(state) == 2
@@ -5602,10 +5654,11 @@ class GuardsStatePickler(FunctionPicklerBase):
                     inner_data,
                 )
 
-            # _dispatch_keys() on a fake reports the Python and
-            # PythonTLSSnapshot keys of the fake itself; the converter may
-            # have recorded the real tensor's keys (from_meta_and_device
-            # always does, from_real_tensor only for an mkldnn source).
+            # _dispatch_keys() on a fake reports the fake's own keys: besides
+            # the fake device's backend, Python and PythonTLSSnapshot for a
+            # Python FakeTensor and Fake for a C++ fake. A fake may instead
+            # have recorded the real tensor's keys, e.g. a fake of an mkldnn
+            # tensor (see Note [C++ fake dispatch keys] for a C++ fake).
             dispatch_keys = maybe_get_fake_dispatch_keys(obj)
             if dispatch_keys is None:
                 dispatch_keys = torch._C._dispatch_keys(obj)
@@ -5734,16 +5787,15 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(
             obj, (types.MethodDescriptorType, types.ClassMethodDescriptorType)
         ):
-            from .variables.object_protocol import type_is_immutable
-
             owner = obj.__objclass__
-            if not type_is_immutable(owner):
+            flags = type.__dict__["__flags__"].__get__(owner, type(owner))
+            if not flags & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
                 raise torch._dynamo.exc.PackageError(
                     f"Cannot serialize {type(obj).__name__} with a mutable owner"
                 )
-            name = find_type_attribute_name(owner, obj)
-            if name is not None:
-                return type(self)._unpickle_type_dict_item, (owner, name)
+            for name, value in get_type_dict_no_user_code(owner).items():
+                if value is obj:
+                    return type(self)._unpickle_type_dict_item, (owner, name)
             raise torch._dynamo.exc.PackageError(
                 f"Cannot locate {obj!r} in {owner!r}.__dict__"
             )
@@ -6017,15 +6069,6 @@ def _resolves_by_reference(value: object) -> bool:
             and isinstance(value.name, str)
             and getattr(owner, value.name, None) is value
         )
-    if isinstance(value, (types.MethodDescriptorType, types.ClassMethodDescriptorType)):
-        from .variables.object_protocol import type_is_immutable
-
-        owner = value.__objclass__
-        return (
-            type_is_immutable(owner)
-            and _resolves_by_reference(owner)
-            and find_type_attribute_name(owner, value) is not None
-        )
     if _is_nested_named_tuple_type(value):
         # GuardsStatePickler.reducer_override rebuilds it as a fresh class.
         return False
@@ -6198,6 +6241,10 @@ def pickle_guards_state(
                     break
                 source = source.base
                 value = builder.get(source)
+        # Kept local inputs need their shape even when only their length is read.
+        for value in state.output_graph.local_scope.values():
+            if issubclass(type(value), dict):
+                required_dicts[id(value)] = cast(dict[Any, Any], value)
         for value in tuple(guard_tree_values.values()):
             if isinstance(
                 value, (torch._dynamo.utils.dict_keys, torch._dynamo.utils.odict_keys)
@@ -7555,8 +7602,17 @@ def update_diff_guard_managers_for_existing_cache_entries(
             cache_entry.guard_manager.collect_diff_guard_sources()
         )
 
-    # On the second pass, set the diff_guard_sources for each cache line to the
-    # accumulated value. And the re-populate the diff guard manager.
+    # A source imported from another cache entry can add relational partners.
+    # Close the shared set before cloning any tree, including transitive groups.
+    while True:
+        previous_size = len(acc_diff_guard_sources)
+        for cache_entry in cache_entries:
+            cache_entry.guard_manager.diff_guard_sources = acc_diff_guard_sources
+            cache_entry.guard_manager.collect_diff_guard_sources()
+        if len(acc_diff_guard_sources) == previous_size:
+            break
+
+    # Rebuild each cache line using the complete shared source set.
     for cache_entry in cache_entries:
         cache_entry.guard_manager.diff_guard_sources = acc_diff_guard_sources
         cache_entry.guard_manager.populate_diff_guard_manager()

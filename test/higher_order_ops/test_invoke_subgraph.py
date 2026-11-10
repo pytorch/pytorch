@@ -3875,6 +3875,35 @@ class TestInvokeSubgraphReuse(TestCase):
             self.assertEqual(compiled(x, holders), fn(x, holders))
         self.assertEqual(counter.frame_count, 1)
 
+    def test_reused_region_dynamic_capture_branch(self):
+        class Holder:
+            def __init__(self, size):
+                self.tensor = torch.arange(size, dtype=torch.float)
+                torch._dynamo.mark_dynamic(self.tensor, 0)
+
+        @nested_compile_region
+        def region(x, holder):
+            if holder.tensor.shape[0] >= 6:
+                return x + holder.tensor.sum() + 17
+            return x + holder.tensor.sum()
+
+        def fn(x, holders):
+            return tuple(region(x, holder) for holder in holders)
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        holders = [Holder(5) for _ in range(2)]
+        with self._count_speculate_calls() as count:
+            self.assertEqual(compiled(x, holders), fn(x, holders))
+            initial_traces = count()
+            holders[-1].tensor.add_(3)
+            self.assertEqual(compiled(x, holders), fn(x, holders))
+            holders[-1] = Holder(7)
+            self.assertEqual(compiled(x, holders), fn(x, holders))
+        self.assertEqual(initial_traces, 2)
+        self.assertEqual(counter.frame_count, 2)
+
     @parametrize("second_capture", ["static", "dynamic", "shared"])
     def test_reused_region_symbolic_first_capture(self, second_capture):
         class Holder:
@@ -3903,6 +3932,53 @@ class TestInvokeSubgraphReuse(TestCase):
                     holders[1].tensor = holders[0].tensor
                 self.assertEqual(compiled(x, holders), fn(x, holders))
         self.assertEqual(count(), 1 if second_capture == "shared" else 2)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_reused_region_captured_storage_offset(self):
+        class Holder:
+            def __init__(self, offset):
+                self.value = torch.arange(4.0)[offset : offset + 2]
+
+        @nested_compile_region
+        def region(x, holder):
+            return x + holder.value.storage_offset()
+
+        def fn(x, holders):
+            return tuple(region(x, holder) for holder in holders)
+
+        holders = [Holder(offset) for offset in (0, 1, 1)]
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=False)
+        x = torch.ones(2)
+        with self._count_speculate_calls() as count:
+            for _ in range(2):
+                self.assertEqual(compiled(x, holders), fn(x, holders))
+        self.assertEqual(count(), 2)
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(install_free_tensors=True)
+    def test_reused_region_graph_attribute_buffer(self):
+        class Holder(torch.nn.Module):
+            def __init__(self, offset):
+                super().__init__()
+                self.register_buffer("value", torch.arange(3.0) + offset)
+
+        @nested_compile_region
+        def region(x, holder):
+            return x + holder.value
+
+        def fn(x, holders):
+            return tuple(region(x, holder) for holder in holders)
+
+        holders = [Holder(offset) for offset in (0, 10, 20)]
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(3)
+        with self._count_speculate_calls() as count:
+            self.assertEqual(compiled(x, holders), fn(x, holders))
+            holders[1].value.add_(2)
+            self.assertEqual(compiled(x, holders), fn(x, holders))
+        self.assertEqual(count(), 1)
         self.assertEqual(counter.frame_count, 1)
 
     @torch._dynamo.config.patch(install_free_tensors=True)

@@ -39,6 +39,7 @@ from ..bytecode_transformation import (
 )
 from ..exc import (
     handle_observed_exception,
+    ObservedException,
     ObservedTypeError,
     raise_observed_exception,
     raise_type_error,
@@ -75,6 +76,8 @@ from ..utils import (
     unpack_iterable,
 )
 from .base import (
+    _check_method_arity,
+    _flags_from_ml_flags,
     AttributeMutationExisting,
     AttributeMutationNew,
     AttrMutationKind,
@@ -98,6 +101,7 @@ from .object_protocol import (
     _is_method_type,
     generic_getattr,
     generic_getitem,
+    generic_getiter,
     generic_is_true,
     generic_richcompare_bool,
     generic_setitem,
@@ -218,7 +222,7 @@ def _iter_detecting_mutation(iterator: Iterator[_T]) -> Iterator[_T]:
                 gb_type="Dictionary mutated during iteration",
                 context=str(error),
                 explanation="Dynamo cannot trace dictionary iteration that changes its keys.",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=["Avoid changing dictionary keys during iteration."],
             )
         # Keep user code outside the handler so its exceptions propagate.
         yield item
@@ -227,6 +231,44 @@ def _iter_detecting_mutation(iterator: Iterator[_T]) -> Iterator[_T]:
 # Mirror PyODict_CheckExact in Include/cpython/odictobject.h.
 def pyodict_checkexact(obj: VariableTracker) -> TypeIs["OrderedDictVariable"]:
     return obj.python_type() is collections.OrderedDict
+
+
+def _unpack_dict_update_pair(
+    tx: "InstructionTranslatorBase", item: VariableTracker, index: int
+) -> list[VariableTracker]:
+    try:
+        item = item.realize()
+        if istype(item, (variables.ListVariable, variables.TupleVariable)):
+            return unpack_iterable(tx, item)
+        try:
+            iterator = generic_getiter(tx, item)
+        except ObservedTypeError:
+            handle_observed_exception(tx)
+            raise_type_error(tx, "object is not iterable")
+        return unpack_iterable(tx, iterator)
+    except ObservedTypeError:
+        error = tx.exn_vt_stack.get_raised_exception()
+        handle_observed_exception(tx)
+        context = f"dictionary update sequence element #{index} to a sequence"
+        if sys.version_info < (3, 14):
+            raise_type_error(tx, f"cannot convert {context}")
+        # CPython 3.14+ preserves the iterator error and appends its context as a note.
+        try:
+            notes = generic_getattr(tx, error, "__notes__", variables.DeletedVariable())
+            if isinstance(notes, variables.DeletedVariable):
+                notes = variables.ListVariable([], mutation_type=ValueMutationNew())
+                error.call_method(
+                    tx, "__setattr__", [ConstantVariable.create("__notes__"), notes], {}
+                )
+            if not isinstance(notes, variables.ListVariable):
+                raise_type_error(tx, "Cannot add note: __notes__ is not a list")
+            variables.ListVariable.list_append(
+                notes, tx, [ConstantVariable.create(f"Cannot convert {context}")], {}
+            )
+        except ObservedException:
+            tx.exn_vt_stack.get_raised_exception().set_context(error)
+            raise
+        tx.do_raise(error, None)
 
 
 def _is_set_or_dictview(obj: VariableTracker) -> bool:
@@ -551,7 +593,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> None:
         # Build a dictionary that contains the keys and values.
         num_args = 0
-        guard_order = False
+        guard_order = self.should_reconstruct_all and isinstance(
+            self.mutation_type, (ValueMutationExisting, AttributeMutationExisting)
+        )
         items = dict.items(self.items) if use_dict_storage else self.items.items()
         for key, value in items:
             item = self.original_items.get(key.vt)
@@ -788,6 +832,18 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker:
         return self.dict_update_common(tx, args, kwargs, method_name="dict")
 
+    def check_base_dict_mutation(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> None:
+        if issubclass(self.python_type(), collections.OrderedDict):
+            unimplemented(
+                gb_type="dict storage mutation on OrderedDict",
+                context=f"dict.{name}",
+                explanation="Base dict writes bypass OrderedDict's linked storage.",
+                hints=["Use OrderedDict methods to preserve its linked storage."],
+                skip_frame=True,
+            )
+
     # NB - Both key and value are LazyVariableTrackers in the beginning. So,
     # we have to insert guards when a dict method is accessed. For this to be
     # simple, we are conservative and overguard. We skip the guard only for
@@ -795,6 +851,33 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     # corresponding value VT. For __contains__, we add a DICT_CONTAINS guard.
     # But for all the other methods, we insert the DICT_KEYS_MATCH guard to be
     # conservative.
+
+    def call_method_descriptor(
+        self,
+        tx: "InstructionTranslatorBase",
+        descriptor: types.MethodDescriptorType,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # A dict-family descriptor selects its declaring type, even on an OrderedDict.
+        name = descriptor.__name__
+        if descriptor.__objclass__ is dict and name == "update":
+            self.check_base_dict_mutation(tx, name)
+        if name not in ("keys", "values", "items", "__reversed__", "copy", "popitem"):
+            return None
+        owner = descriptor.__objclass__
+        if owner is dict:
+            cls = ConstDictVariable
+        elif owner is collections.OrderedDict:
+            cls = OrderedDictVariable
+        else:
+            return None
+        method = cls.tp_methods.get(name, ConstDictVariable.tp_methods.get(name))
+        if method is not None:
+            flags = _flags_from_ml_flags(owner, name)
+            _check_method_arity(self, tx, name, flags, args, kwargs)
+            return method.handler(self, tx, args, kwargs)
+        return None
 
     def dict_items(
         self,
@@ -981,8 +1064,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         *,
         method_name: str = "update",
     ) -> VariableTracker:
-        # CPython's dict_update_common validates args, updates from the positional
-        # source, then merges keywords only if that update succeeded.
+        # dict_update_common applies the positional update before merging keywords.
         check_positional(tx, method_name, len(args), 0, 1)
         self.install_dict_keys_match_guard()
         if args or kwargs:
@@ -1001,8 +1083,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     def dict_update_arg(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> None:
-        # dict_update_arg probes keys even for dict subclasses; dict_merge alone
-        # decides whether their iteration slot permits copying dictionary storage.
+        # Probe subclass keys before dict_merge considers its raw-storage fast path.
         if (
             pydict_checkexact(other)
             or other.call_obj_hasattr(tx, "keys").as_python_constant()
@@ -1014,7 +1095,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 tx, other, allow_fast_path=self._can_fast_merge(other)
             )
             for idx, item in enumerate(pairs):
-                pair = unpack_iterable(tx, item)
+                pair = _unpack_dict_update_pair(tx, item, idx)
                 if len(pair) != 2:
                     raise_observed_exception(
                         ValueError,
@@ -1042,8 +1123,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 if not _is_fast_dict_key(pair.items[0]):
                     return False
             return True
-        # These exact scalar types have no user hash/equality hooks. Exact
-        # containers alone are insufficient: OrderedDict rehashes its keys.
+        # Exact containers can rehash keys; this shortcut requires scalar keys.
         return (
             (pydict_checkexact(self) or pyodict_checkexact(self))
             and isinstance(other, ConstDictVariable)
@@ -1054,9 +1134,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     def dict_merge(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> None:
-        # Mirrors dict_merge(..., override=1): storage when tp_iter is dict_iter,
-        # otherwise PyMapping_Keys followed by subscription. The scalar-key
-        # shortcut also avoids tracing OrderedDict's per-key Python operations.
+        # dict_merge copies dict_iter storage; other mappings dispatch keys/getitem.
         if isinstance(other, ConstDictVariable):
             side_effects = tx.output.side_effects
             if any(
@@ -1700,8 +1778,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c#L896-L923
         if not pydict_check(other):
             return ConstantVariable.create(NotImplemented)
-        # CPython's odict_or calls the subclass constructor, then merges via
-        # its internal helper without calling overridden copy/update methods.
+        # odict_or calls the subclass constructor, then bypasses copy/update overrides.
         left, right = (other, self) if reverse else (self, other)
         owner = (
             left if issubclass(left.python_type(), collections.OrderedDict) else self
@@ -1891,14 +1968,12 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
 
 class NNModuleHooksDictVariable(ConstDictVariable):
     # Defer local hook-ID guards so equivalent modules can reuse hook dispatch.
-    def is_python_constant(self) -> bool:
-        return not self.items
-
-    def python_type(self) -> type:
-        # Ordinary empty-hook dispatch need not specialize the exact mapping type.
+    def _guard_type(self) -> None:
         if self.source:
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
-        return super().python_type()
+
+    def is_python_constant(self) -> bool:
+        return not self.items
 
     def install_dict_keys_match_guard(self) -> None:
         if self.source and not is_constant_source(self.source):
@@ -1909,12 +1984,19 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         return super()._hashable_key(key)
 
     def _store_item(self, key: HashableTracker, value: VariableTracker) -> None:
+        self._guard_type()
         self.materialize_keys()
         super()._store_item(key, value)
 
     def _update_items(self, items: dict[HashableTracker, VariableTracker]) -> None:
+        self._guard_type()
         self.materialize_keys()
         super()._update_items(items)
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._guard_type()
+        self.materialize_keys()
+        return super().tp_repr_impl(tx)
 
     def materialize_keys(self) -> dict[HashableTracker, VariableTracker]:
         # Key lookups, mutations and detached copies can observe IDs without
@@ -1925,12 +2007,14 @@ class NNModuleHooksDictVariable(ConstDictVariable):
 
     def clone(self, **kwargs: Any) -> VariableTracker:
         if self.source is not None and kwargs.get("source", self.source) is None:
+            self._guard_type()
             self.materialize_keys()
         return super().clone(**kwargs)
 
     def _new_dict(
         self, items: dict[HashableTracker, VariableTracker]
     ) -> "ConstDictVariable":
+        self._guard_type()
         self.materialize_keys()
         cls = (
             OrderedDictVariable
