@@ -81,17 +81,22 @@ base_type_to_callsite_expr = {
 
 
 # convert args to C types, names in declarations, and expressions in function bodies
+#
+# resolve_dispatch_flags: whether to manually materialize conj/neg input tensors
+# before the call. Device-specific shims call kernels directly and need this.
+# Device-generic (aten) shims go through the dispatcher, which already handles these
+# flags, so one must pass tensors through as-is so that view ops called on complex
+# Tensors keep aliasing their inputs instead of operating on a temporary copy.
 def convert_arg_type_and_name(
     typ: Type,
     name: str,
     is_write: bool = False,
+    resolve_dispatch_flags: bool = True,
 ) -> tuple[list[str], list[str], list[str], list[str]]:
+    materialize = resolve_dispatch_flags and not is_write
     if isinstance(typ, BaseType):
         if typ.name in base_type_to_c_type:
-            if typ.name == BaseTy.Tensor and is_write:
-                # For output tensors, our normal call to resolve_tensor_dispatch_flags
-                # results in an rvalue tensor, which can't be passed to at::Tensor&.
-                # Override this case specifically.
+            if typ.name == BaseTy.Tensor and not materialize:
                 callsite_expr = [f"*tensor_handle_to_tensor_pointer({name})"]
             else:
                 callsite_expr = [
@@ -119,7 +124,7 @@ def convert_arg_type_and_name(
             raise NotImplementedError(f"TODO: add support for arg type {repr(typ)}")
     elif isinstance(typ, OptionalType):
         c_types, names, aten_types, callsite_exprs = convert_arg_type_and_name(
-            typ.elem, name
+            typ.elem, name, resolve_dispatch_flags=materialize
         )
         j = 0  # index for names
         new_aten_types = []
@@ -142,7 +147,7 @@ def convert_arg_type_and_name(
                     f"pointer_to_optional_device({names[j]}, {names[j + 1]})"
                 )
                 j += 2
-            elif aten_type == "at::Tensor":
+            elif aten_type == "at::Tensor" and materialize:
                 new_aten_types.append(f"::std::optional<{aten_type}>")
                 new_callsite_exprs.append(f"resolve_tensor_dispatch_flags({names[j]})")
                 j += 1
@@ -161,7 +166,9 @@ def convert_arg_type_and_name(
         )
     elif isinstance(typ, ListType):
         # Need to explicitly pass the list as pointer + length
-        c_types, names, aten_types, _ = convert_arg_type_and_name(typ.elem, name)
+        c_types, names, aten_types, _ = convert_arg_type_and_name(
+            typ.elem, name, resolve_dispatch_flags=materialize
+        )
         if len(c_types) != 1:
             raise AssertionError(f"ListType with unsupported element type {repr(typ)}")
 
@@ -179,14 +186,19 @@ def convert_arg_type_and_name(
             if typ.size is None:
                 raise AssertionError("bool ListType must have a size")
             callsite_exprs.append(f"pointer_to_list<{typ.size}>({name})")
-        elif atype == "at::Tensor" and not is_write:
+        elif atype == "at::Tensor" and materialize:
             callsite_exprs.append(
                 f"resolve_tensor_list_dispatch_flags({name}, {name}_len_)"
             )
         elif atype == "::std::optional<at::Tensor>":
             # convert from std::vector<::std::optional<at::Tensor>> to c10::List<::std::optional<at::Tensor>>
+            to_vector = (
+                f"resolve_tensor_list_dispatch_flags({name}, {name}_len_)"
+                if materialize
+                else f"pointer_to_list<{atype}>({name}, {name}_len_)"
+            )
             callsite_exprs.append(
-                f"c10::List<{atype}>(c10::ArrayRef<{atype}>(resolve_tensor_list_dispatch_flags({name}, {name}_len_)))"
+                f"c10::List<{atype}>(c10::ArrayRef<{atype}>({to_vector}))"
             )
         else:
             callsite_exprs.append(f"pointer_to_list<{atype}>({name}, {name}_len_)")
@@ -207,7 +219,9 @@ def zip_type_and_name(types: list[str], names: list[str]) -> list[str]:
 
 # Generate argument declarations and callsite expressions
 def gen_arguments(
-    flat_arguments: Sequence[Argument], skipped_args: set[str]
+    flat_arguments: Sequence[Argument],
+    skipped_args: set[str],
+    resolve_dispatch_flags: bool = True,
 ) -> tuple[list[str], list[str]]:
     types: list[str] = []
     new_names: list[str] = []
@@ -226,7 +240,7 @@ def gen_arguments(
                 callsite_exprs.append("std::nullopt")
             continue
         new_types, names, _, new_callsite_exprs = convert_arg_type_and_name(
-            arg.type, arg.name, arg.is_write
+            arg.type, arg.name, arg.is_write, resolve_dispatch_flags
         )
         types.extend(new_types)
         new_names.extend(names)
@@ -293,7 +307,7 @@ def gen_returns(schema: FunctionSchema) -> tuple[list[str], list[str]]:
 
 
 # gen.py generates header first and then src, so caching the result here to avoid duplicate work
-declaration_definition_cache: dict[tuple[str, str, str], tuple[str, str]] = {}
+declaration_definition_cache: dict[tuple[str, str, str, bool], tuple[str, str]] = {}
 
 
 _TORCH_VERSION_PATTERN = re.compile(r"^TORCH_VERSION_\d+_\d+_\d+$")
@@ -333,12 +347,14 @@ def gen_declaration_and_definition(
     device: str,
     backend_call: str,
     op_metadata: dict[str, str | dict[str, list[str] | str]],
+    resolve_dispatch_flags: bool = True,
 ) -> tuple[str, str]:
     base_name = schema.name.unambiguous_name()
 
     global declaration_definition_cache
-    if (base_name, device, backend_call) in declaration_definition_cache:
-        return declaration_definition_cache[(base_name, device, backend_call)]
+    cache_key = (base_name, device, backend_call, resolve_dispatch_flags)
+    if cache_key in declaration_definition_cache:
+        return declaration_definition_cache[cache_key]
 
     # Check the validity of op_metadata. Each "vN" entry is a dict
     # {"new_args": [...], "since": "TORCH_VERSION_X_Y_Z"} where "since" is optional;
@@ -386,12 +402,14 @@ def gen_declaration_and_definition(
             # out_variant has out arguments in the front, and it's ok to ignore return values
             # because C shim functions only return AOTITorchError
             args, callsite_exprs = gen_arguments(
-                [*schema.arguments.out, *schema.arguments.flat_non_out], skipped_args
+                [*schema.arguments.out, *schema.arguments.flat_non_out],
+                skipped_args,
+                resolve_dispatch_flags,
             )
             ret_assignments: list[str] = []
         else:
             args, callsite_exprs = gen_arguments(
-                schema.arguments.flat_all, skipped_args
+                schema.arguments.flat_all, skipped_args, resolve_dispatch_flags
             )
             # ignore return values for inplace ops
             ret_declarations, ret_assignments = (
@@ -434,11 +452,11 @@ def gen_declaration_and_definition(
         declarations.append(decl)
         definitions.append(definition)
 
-    declaration_definition_cache[(base_name, device, backend_call)] = (
+    declaration_definition_cache[cache_key] = (
         "\n".join(declarations),
         "\n".join(definitions),
     )
-    return declaration_definition_cache[(base_name, device, backend_call)]
+    return declaration_definition_cache[cache_key]
 
 
 def gen_static_dispatch_backend_call_signature(f: NativeFunction) -> CppSignature:
@@ -571,16 +589,17 @@ def gen_c_shim(
         func,
         backend_index,
     )
+    resolve_dispatch_flags = backend_index is not None
 
     try:
         if header:
             declaration, _ = gen_declaration_and_definition(
-                schema, device, backend_call, version_info
+                schema, device, backend_call, version_info, resolve_dispatch_flags
             )
             return declaration
         else:
             _, definition = gen_declaration_and_definition(
-                schema, device, backend_call, version_info
+                schema, device, backend_call, version_info, resolve_dispatch_flags
             )
             return definition
 

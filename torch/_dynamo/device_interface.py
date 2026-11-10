@@ -44,6 +44,18 @@ class DeviceInterface:
     """
 
     @staticmethod
+    def supports_pad_mm(device: torch.types.Device = None) -> bool:
+        """Whether Inductor's pad_mm pass may benchmark shapes for this device.
+
+        Opt in once the pass is benchmarked on that hardware; its Triton
+        probes must answer for the operand device. device_count and Worker
+        properties are optional -- without them the probes fall through and
+        the pad cache scopes by device type alone. Autoheuristic plans read
+        process-wide CUDA state: capability (0, 0) where no CUDA is visible.
+        """
+        return False
+
+    @staticmethod
     def get_cpp_device_options(
         aot_mode: bool, compile_only: bool
     ) -> (
@@ -363,6 +375,10 @@ class CudaInterface(DeviceInterface):
     Stream = torch.cuda.Stream  # type: ignore[assignment]
 
     @staticmethod
+    def supports_pad_mm(device: torch.types.Device = None) -> bool:
+        return True
+
+    @staticmethod
     def is_gpu() -> bool:
         return True
 
@@ -624,6 +640,10 @@ class XpuInterface(DeviceInterface):
     device = torch.xpu.device  # type: ignore[assignment]
     Event = torch.xpu.Event  # type: ignore[assignment]
     Stream = torch.xpu.Stream  # type: ignore[assignment]
+
+    @staticmethod
+    def supports_pad_mm(device: torch.types.Device = None) -> bool:
+        return True
 
     @staticmethod
     def is_gpu() -> bool:
@@ -914,6 +934,18 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
     if not _device_initialized:
         init_device_reg()
     return device_interfaces.items()
+
+
+def get_device_type_for_current_stream(current_stream_fn: Any) -> str | None:
+    """Reverse lookup in the interface registry: the device type that a
+    current_stream function belongs to (None for torch.accelerator's).
+    Backends may register one interface under several keys (torch_npu uses
+    "npu" plus "npu:<i>" per device), so strip anything after the first
+    ":" (tests also key fake backends as "<type>:fake")."""
+    for device, interface in device_interfaces.items():
+        if getattr(interface, "current_stream", None) is current_stream_fn:
+            return device.split(":")[0]
+    return None
 
 
 def init_device_reg() -> None:

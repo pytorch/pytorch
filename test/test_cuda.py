@@ -8,7 +8,6 @@ import gc
 import importlib.util
 import json
 import os
-import pickle
 import random
 import subprocess
 import sys
@@ -140,6 +139,9 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (
     torch.cuda.get_allocator_backend() == "cudaMallocAsync"
+)
+TEST_CUDA_NATIVE_ALLOCATOR = TEST_CUDA and (
+    torch.cuda.get_allocator_backend() == "native"
 )
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
@@ -608,6 +610,7 @@ class TestCuda(TestCase):
         torch._C._host_emptyCache()
         torch.cuda.reset_peak_host_memory_stats()
         torch.cuda.reset_accumulated_host_memory_stats()
+        baseline = torch.cuda.host_memory_stats()
 
         for _ in range(2):
             t = torch.empty(1024 * 1024, dtype=torch.float32, pin_memory=True)
@@ -617,15 +620,15 @@ class TestCuda(TestCase):
             stats = torch.cuda.host_memory_stats()
             self.assertEqual(
                 stats["active_bytes.current"],
-                0,
-                "active_bytes.current should be 0 after a pin-and-drop cycle "
-                "with no async copy: the block is returned to the cache, so "
-                "the active counter must drop back to zero.",
+                baseline["active_bytes.current"],
+                "active_bytes.current should return to its baseline after a "
+                "pin-and-drop cycle.",
             )
             self.assertEqual(
                 stats["active_requests.current"],
-                0,
-                "active_requests.current should be 0 after a pin-and-drop cycle.",
+                baseline["active_requests.current"],
+                "active_requests.current should return to its baseline after a "
+                "pin-and-drop cycle.",
             )
 
     @serialTest()
@@ -646,27 +649,30 @@ class TestCuda(TestCase):
         torch._C._host_emptyCache()
         torch.cuda.reset_peak_host_memory_stats()
         torch.cuda.reset_accumulated_host_memory_stats()
+        baseline = torch.cuda.host_memory_stats()
 
         for _ in range(2):
             t = torch.empty(1024 * 1024, dtype=torch.float32, pin_memory=True)
             t.cuda(non_blocking=True)
-            torch.cuda.synchronize()
             del t
             gc.collect()
+            # free() records the reuse-safety event when t is destroyed.
+            # Synchronize after destruction so the event is complete before draining it.
+            torch.cuda.synchronize()
             # Drain via process_events_for_specific_size(-1, ...).
             torch._C._host_emptyCache()
 
             stats = torch.cuda.host_memory_stats()
             self.assertEqual(
                 stats["active_bytes.current"],
-                0,
-                "active_bytes.current should be 0 after empty_cache drains "
-                "the events queue.",
+                baseline["active_bytes.current"],
+                "active_bytes.current should return to its baseline after "
+                "empty_cache drains the events queue.",
             )
             self.assertEqual(
                 stats["active_requests.current"],
-                0,
-                "active_requests.current should be 0 after drain.",
+                baseline["active_requests.current"],
+                "active_requests.current should return to its baseline after drain.",
             )
             self.assertGreaterEqual(
                 stats["active_bytes.freed"],
@@ -935,39 +941,44 @@ print(t.is_pinned())
     # not reliably OOM past the free memory, Jetson segfaults on this pattern.
     @unittest.skipIf(IS_WINDOWS and SM89OrLater, "Fails on windows with SM89+")
     @unittest.skipIf(IS_JETSON, "Segmentation fault (core dumped)")
-    @skipIfRocmArch(MI350_ARCH)
     @serialTest()
     def test_oom_retry_message_logged_at_info(self):
         # Regression test for #193195: the alloc_block OOM message fires on
-        # every failed cudaMalloc attempt (each one flags a costly
-        # release-and-retry cycle) but at INFO level, so recoverable retries
-        # are silent at the default WARNING log level and visible with
-        # TORCH_CPP_LOG_LEVEL=INFO. The message is written by C++ straight to
-        # stderr, so run the scenario in a subprocess and inspect its stderr.
+        # every failed cudaMalloc attempt, including the one before the
+        # release-and-retry, but at INFO level, so it is silent at the default
+        # WARNING log level and visible with TORCH_CPP_LOG_LEVEL=INFO. The
+        # message is written by C++ straight to stderr, so run the scenario in
+        # a subprocess and inspect its stderr. Requesting twice the device's
+        # memory makes cudaMalloc fail on the first attempt and on the retry
+        # without filling the GPU, so the test does not depend on how much
+        # memory the driver will actually hand out.
         marker = "memory allocation failed with OOM"
-        recoverable_script = """\
+        retry_script = """\
 import torch
-free, total = torch.cuda.mem_get_info()
-block = free // 32
-blocks = [torch.empty(block, dtype=torch.uint8, device="cuda") for _ in range(27)]
-del blocks  # freed but cached: the driver still sees the memory as used
-big = torch.empty(int(free * 0.7), dtype=torch.uint8, device="cuda")
+total = torch.cuda.get_device_properties(0).total_memory
+try:
+    torch.empty(2 * total, dtype=torch.uint8, device="cuda")
+except torch.OutOfMemoryError:
+    pass
+else:
+    raise AssertionError("allocating twice the device memory did not fail")
 if torch.cuda.memory_stats()["num_alloc_retries"] < 1:
     raise AssertionError("allocation did not exercise the release-and-retry path")
-print("RECOVERED")
+print("RETRIED")
 """
         for level, expect_message in (("WARNING", False), ("INFO", True)):
             proc = subprocess.run(
-                [sys.executable, "-c", recoverable_script],
+                [sys.executable, "-c", retry_script],
                 capture_output=True,
                 text=True,
                 timeout=120,
                 env={**os.environ, "TORCH_CPP_LOG_LEVEL": level},
             )
             self.assertEqual(proc.returncode, 0, msg=proc.stderr)
-            self.assertIn("RECOVERED", proc.stdout)
+            self.assertIn("RETRIED", proc.stdout)
             if expect_message:
-                self.assertIn(marker, proc.stderr)
+                # Once for the first attempt and once for the retry.
+                self.assertGreaterEqual(proc.stderr.count(marker), 2, proc.stderr)
             else:
                 self.assertNotIn(marker, proc.stderr)
 
@@ -1094,13 +1105,16 @@ print("RECOVERED")
             stop = threading.Event()
 
             def heartbeat():
-                while not stop.wait(0.001):
+                while not stop.is_set():
                     beats.append(time.perf_counter())
+                    time.sleep(0.001)
 
             thread = threading.Thread(target=heartbeat)
             thread.start()
             try:
-                torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+                # Long enough for 12+ heartbeats even where time.sleep rounds
+                # up to the 15.6 ms Windows timer tick (Python < 3.11).
+                torch.cuda._sleep(int(200 * get_cycles_per_ms()))
                 start = time.perf_counter()
                 copy_fn()
                 end = time.perf_counter()
@@ -1113,9 +1127,9 @@ print("RECOVERED")
             lambda: dst.untyped_storage().copy_(src.untyped_storage(), False)
         )
         self.assertEqual(dst, src.cpu())
-        # With the GIL held, the issue repro saw ~1 heartbeat during the wait;
-        # with the GIL released, Tensor.copy_ saw ~18. Require several
-        # heartbeats so a regression to holding the GIL fails the test.
+        # With the GIL held, ~1 heartbeat lands during the wait; with the GIL
+        # released, Tensor.copy_ gets 40 or more. Require several heartbeats
+        # so a regression to holding the GIL fails the test.
         self.assertGreaterEqual(storage_beats, 5)
 
     def test_copy_non_blocking_type_conversion(self):
@@ -1200,6 +1214,8 @@ print("RECOVERED")
                     archs.append("gfx950")
                 if ROCM_VERSION >= (7, 13):
                     archs.extend(["gfx1100", "gfx1101", "gfx1151"])
+                if ROCM_VERSION >= (10, 3):
+                    archs.extend(["gfx1170", "gfx1171"])
                 archs.append("gfx1250")
                 # blasDefaultBackend() only prefers hipblaslt when every visible
                 # device matches, so device 0 alone is not enough.
@@ -1398,6 +1414,53 @@ print(public_active, active, allocated)
         self.assertGreater(cached_public, 0)
         self.assertGreater(cached_active, 0)
         self.assertGreater(cached_allocated, 0)
+
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm keys ATen's rocBLAS handles by stream")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
+    @serialTest()
+    def test_cublas_workspace_cache_env_handles_rocm(self):
+        # With workspace caching, current_blas_handle() returns ATen's own
+        # handles: one for each stream outside capture, and inside a capture the
+        # thread's handle for the device, for every stream in the capture, even
+        # a stream that has its own handle outside capture.
+        test_script = """
+import torch
+torch.backends.cuda.preferred_blas_library("cublas")
+a = torch.randn(64, 64, device="cuda")
+expected = a @ a
+first = torch.cuda.Stream()
+second = torch.cuda.Stream()
+with torch.cuda.stream(first):
+    first_handle = torch.cuda.current_blas_handle()
+with torch.cuda.stream(second):
+    second_handle = torch.cuda.current_blas_handle()
+assert first_handle != second_handle, "two streams share a handle"
+graph = torch.cuda.CUDAGraph()
+with torch.cuda.graph(graph, stream=first):
+    captured_handle = torch.cuda.current_blas_handle()
+    captured = a @ a
+    second.wait_stream(first)
+    with torch.cuda.stream(second):
+        side_handle = torch.cuda.current_blas_handle()
+        side_captured = a @ a
+    first.wait_stream(second)
+assert captured_handle != first_handle, "the capture uses its stream's handle"
+assert side_handle == captured_handle, "a forked stream uses another handle"
+assert side_handle != second_handle, "a forked stream uses its own handle"
+graph.replay()
+torch.cuda.synchronize()
+torch.testing.assert_close(captured, expected)
+torch.testing.assert_close(side_captured, expected)
+"""
+        env = os.environ.copy()
+        env["TORCH_CUBLAS_WORKSPACE_CACHE"] = "1"
+        proc = subprocess.run(
+            [sys.executable, "-c", test_script], env=env, capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @serialTest()
@@ -2969,6 +3032,36 @@ raise RuntimeError("device assert did not fire")
                 y = torch.randn(2, 1, device="cuda")
                 x + y
 
+    def test_mixed_dtype_binary_remainder_sizes(self):
+        # Sizes around the 2048 / 16384 boundaries of the remainder block of the
+        # mixed-dtype vectorized kernel, alone and after full blocks.
+        sizes = [1, 512, 2047, 2048, 2049, 16383, 16384, 16385]
+        sizes += [16384 + 512, 16384 + 2048, 3 * 16384 + 17]
+        f32 = torch.float32
+        for out_dtype, a_dtype, b_dtype in [
+            (f32, f32, torch.bfloat16),
+            (f32, torch.bfloat16, f32),
+            (torch.bfloat16, torch.bfloat16, f32),
+            (f32, f32, torch.half),
+            (f32, torch.half, f32),
+            (torch.half, torch.half, f32),
+        ]:
+            for n in sizes:
+                a = torch.randn(n, device="cuda").to(a_dtype)
+                b = torch.randn(n, device="cuda").to(b_dtype)
+                out = torch.full((n + 64,), 7, device="cuda", dtype=out_dtype)
+                torch.add(a, b, out=out[:n])
+                self.assertEqual(out[:n], (a.double() + b.double()).to(out_dtype))
+                self.assertEqual(
+                    out[n:], torch.full((64,), 7, device="cuda", dtype=out_dtype)
+                )
+        for n in sizes:
+            # Same values through the strided kernel must give identical results.
+            x = torch.randn(n, device="cuda")
+            y = torch.randn(n, device="cuda").bfloat16()
+            x_nc = torch.empty(2 * n, device="cuda")[::2].copy_(x)
+            self.assertEqual(torch.atan2(x, y), torch.atan2(x_nc, y), atol=0, rtol=0)
+
     @unittest.skipIf(not TEST_MEDIUM_TENSOR, "not enough memory")
     @serialTest()
     def test_cuda_kernel_loop_overflow(self):
@@ -2980,13 +3073,40 @@ raise RuntimeError("device assert did not fire")
         torch.cuda.synchronize()
         self.assertEqual(y[0, 0, 0, 2**30], expected)
 
+    def test_mixed_dtype_binary_low_precision_out(self):
+        # The float input must not be rounded to the output dtype before the op.
+        for dtype in (torch.bfloat16, torch.half):
+            for n in (1, 16383, 16384, 65537):
+                a = torch.randn(n, device="cuda").to(dtype)
+                b = torch.randn(n, device="cuda")
+                out = torch.empty(n, device="cuda", dtype=dtype)
+                torch.add(a, b, out=out)
+                out, a, b = out.cpu(), a.cpu(), b.cpu()
+                expected = (a.float() + b).to(dtype)
+                if TEST_WITH_ROCM:
+                    # RDNA fuses the add and the conversion (v_fma_mix*), rounding the
+                    # exact sum once instead of through float. Accept that more accurate
+                    # result too. Rounding the double sum to float with round-to-odd
+                    # makes the final .to(dtype) a correct single rounding; a plain
+                    # double .to(dtype) would round through float again.
+                    s = a.double() + b.double()
+                    f = s.float()
+                    trunc = f.view(torch.int32) - (f.double().abs() > s.abs()).int()
+                    odd = torch.where(f.double() == s, f.view(torch.int32), trunc | 1)
+                    once = odd.view(torch.float32).to(dtype)
+                    expected = torch.where(out == once, once, expected)
+                self.assertEqual(out, expected, atol=0, rtol=0)
+
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     @gcIfJetson
     @serialTest()
     def test_cuda_kernel_loop_overflow_large(self):
         # Make sure input.numel() > INT_MAX is handled:
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
-        with self.assertRaisesRegex(RuntimeError, "value cannot be converted to type"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"value cannot be converted to type int32_t without overflow",
+        ):
             y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
 
         # Issue #24309: In extreme cases, the loop variable could overflow and continue
@@ -2996,6 +3116,33 @@ raise RuntimeError("device assert did not fire")
         y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
         torch.cuda.synchronize()
         self.assertEqual(y[0, 0, 0, 2**31 - 2], expected)
+
+    def test_vectorized_elementwise_remainder_sizes(self):
+        # Sizes around the 256 / 1024 / 4096 boundaries of the vectorized kernel's
+        # remainder block, alone and after full blocks.
+        sizes = [1, 255, 256, 257, 1023, 1024, 1025, 2047, 4095, 4096, 4097]
+        sizes += [4096 + 256, 4096 + 1024, 3 * 4096 + 17, 65537]
+        for dtype in (torch.float32, torch.bfloat16, torch.float16, torch.uint8):
+            for n in sizes:
+                a, b, c = (
+                    torch.randint(0, 100, (n,), device="cuda").to(dtype)
+                    for _ in range(3)
+                )
+                a_cpu, b_cpu, c_cpu = a.cpu(), b.cpu(), c.cpu()
+                out = torch.full((n + 64,), 7, device="cuda", dtype=dtype)
+                torch.add(a, b, out=out[:n])
+                self.assertEqual(out[:n], a_cpu + b_cpu)
+                self.assertEqual(out[n:], torch.full((64,), 7, dtype=dtype))
+                self.assertEqual(
+                    torch.addcmul(a, b, c), torch.addcmul(a_cpu, b_cpu, c_cpu)
+                )
+                self.assertEqual(torch.square(a), torch.square(a_cpu))
+                self.assertEqual(a.float(), a_cpu.float())
+        for n in sizes:
+            # Same values through the strided kernel must give identical results.
+            x, y = torch.randn(2, n, device="cuda")
+            x_nc = torch.empty(2 * n, device="cuda")[::2].copy_(x)
+            self.assertEqual(torch.atan2(x, y), torch.atan2(x_nc, y), atol=0, rtol=0)
 
     # this might create a reference cycle on self...
     def _make_multiply_in_stream(self):
@@ -3457,6 +3604,19 @@ torch.cuda.synchronize()
                 self.assertTrue(torch.cuda.is_current_stream_capturing())
                 self.assertTrue(s.is_capturing())
                 g.capture_end()
+
+    def _allocate_graph_temporary(self, state, value):
+        temporary = torch.empty(LARGE_BUFFER // 4, device="cuda")
+        temporary.fill_(value)
+        state.add_(temporary[0])
+        return temporary.data_ptr()
+
+    def _replay_conditional_graph(self, graph, pred, state, value, expected):
+        state.zero_()
+        pred.fill_(value)
+        graph.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(state.item(), expected)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -6622,6 +6782,572 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_cuda_graph_conditional_reuse_parent_prefix_to_body(self):
+        torch.cuda.empty_cache()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        state = torch.zeros((), device="cuda")
+        g = torch.cuda.CUDAGraph()
+        stream = torch.cuda.Stream()
+
+        with torch.cuda.stream(stream):
+            g.capture_begin()
+            parent_ptr = self._allocate_graph_temporary(state, 1)
+
+            g.begin_capture_to_if_node(pred)
+            child_ptr = self._allocate_graph_temporary(state, 2)
+            g.end_capture_to_conditional_node()
+            g.capture_end()
+
+        self.assertEqual(parent_ptr, child_ptr)
+        self._replay_conditional_graph(g, pred, state, True, 3)
+        self._replay_conditional_graph(g, pred, state, False, 1)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_cuda_graph_conditional_reuse_body_to_parent_suffix(self):
+        torch.cuda.empty_cache()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        state = torch.zeros((), device="cuda")
+        g = torch.cuda.CUDAGraph()
+        stream = torch.cuda.Stream()
+
+        with torch.cuda.stream(stream):
+            g.capture_begin()
+            g.begin_capture_to_if_node(pred)
+            child_ptr = self._allocate_graph_temporary(state, 2)
+            g.end_capture_to_conditional_node()
+
+            suffix_ptr = self._allocate_graph_temporary(state, 4)
+            g.capture_end()
+
+        self.assertEqual(child_ptr, suffix_ptr)
+        self._replay_conditional_graph(g, pred, state, True, 6)
+        self._replay_conditional_graph(g, pred, state, False, 4)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_cuda_graph_conditional_reuse_body_to_sibling(self):
+        torch.cuda.empty_cache()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        state = torch.zeros((), device="cuda")
+        g = torch.cuda.CUDAGraph()
+        stream = torch.cuda.Stream()
+
+        with torch.cuda.stream(stream):
+            g.capture_begin()
+            g.begin_capture_to_if_node(pred)
+            first_ptr = self._allocate_graph_temporary(state, 1)
+            g.end_capture_to_conditional_node()
+
+            false_pred = torch.logical_not(pred)
+            g.begin_capture_to_if_node(false_pred)
+            second_ptr = self._allocate_graph_temporary(state, 2)
+            g.end_capture_to_conditional_node()
+            g.capture_end()
+
+        self.assertEqual(first_ptr, second_ptr)
+        self._replay_conditional_graph(g, pred, state, True, 1)
+        self._replay_conditional_graph(g, pred, state, False, 2)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_cuda_graph_conditional_reuse_across_nested_bodies(self):
+        torch.cuda.empty_cache()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        state = torch.zeros((), device="cuda")
+        g = torch.cuda.CUDAGraph()
+        stream = torch.cuda.Stream()
+
+        with torch.cuda.stream(stream):
+            g.capture_begin()
+            g.begin_capture_to_if_node(pred)
+            outer_prefix_ptr = self._allocate_graph_temporary(state, 1)
+            g.begin_capture_to_if_node(pred)
+            inner_ptr = self._allocate_graph_temporary(state, 2)
+            g.end_capture_to_conditional_node()
+            outer_suffix_ptr = self._allocate_graph_temporary(state, 4)
+            g.end_capture_to_conditional_node()
+            parent_suffix_ptr = self._allocate_graph_temporary(state, 8)
+            g.capture_end()
+
+        self.assertEqual(
+            len(
+                {
+                    outer_prefix_ptr,
+                    inner_ptr,
+                    outer_suffix_ptr,
+                    parent_suffix_ptr,
+                }
+            ),
+            1,
+        )
+        self._replay_conditional_graph(g, pred, state, True, 15)
+        self._replay_conditional_graph(g, pred, state, False, 8)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_cuda_graph_conditional_does_not_reuse_live_body_allocation(self):
+        torch.cuda.empty_cache()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        state = torch.zeros((), device="cuda")
+        g = torch.cuda.CUDAGraph()
+        stream = torch.cuda.Stream()
+
+        with torch.cuda.stream(stream):
+            g.capture_begin()
+            g.begin_capture_to_if_node(pred)
+            child = torch.empty(LARGE_BUFFER // 4, device="cuda")
+            child.fill_(2)
+            child.record_stream(torch.cuda.current_stream())
+            state.add_(child[0])
+            child_ptr = child.data_ptr()
+            g.end_capture_to_conditional_node()
+
+            suffix_ptr = self._allocate_graph_temporary(state, 4)
+            g.capture_end()
+
+        self.assertNotEqual(child_ptr, suffix_ptr)
+        self._replay_conditional_graph(g, pred, state, True, 6)
+        self._replay_conditional_graph(g, pred, state, False, 4)
+        self.assertEqual(child[0].item(), 2)
+        del child
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_cuda_graph_conditional_uses_parent_dependency_reuse_stream(self):
+        torch.cuda.empty_cache()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        root_state = torch.zeros((), device="cuda")
+        child_state = torch.zeros((), device="cuda")
+        g = torch.cuda.CUDAGraph()
+        root_stream = torch.cuda.Stream()
+        dependency_stream = torch.cuda.Stream()
+
+        with torch.cuda.stream(root_stream):
+            g.capture_begin()
+            dependency_stream.wait_stream(root_stream)
+            root_ptr = self._allocate_graph_temporary(root_state, 1)
+            with torch.cuda.stream(dependency_stream):
+                g.begin_capture_to_if_node(pred)
+                child_ptr = self._allocate_graph_temporary(child_state, 2)
+                g.end_capture_to_conditional_node()
+            root_stream.wait_stream(dependency_stream)
+            g.capture_end()
+
+        self.assertNotEqual(root_ptr, child_ptr)
+        for pred_value, expected_child in ((True, 2), (False, 0)):
+            child_state.zero_()
+            self._replay_conditional_graph(g, pred, root_state, pred_value, 1)
+            self.assertEqual(child_state.item(), expected_child)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_cuda_graph_conditional_keeps_auxiliary_reuse_stream_separate(self):
+        torch.cuda.empty_cache()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        primary_state = torch.zeros((), device="cuda")
+        auxiliary_state = torch.zeros((), device="cuda")
+        g = torch.cuda.CUDAGraph()
+        root_stream = torch.cuda.Stream()
+        auxiliary_stream = torch.cuda.Stream()
+
+        with torch.cuda.stream(root_stream):
+            g.capture_begin()
+            g.begin_capture_to_if_node(pred)
+            child_stream = torch.cuda.current_stream()
+            primary_ptr = self._allocate_graph_temporary(primary_state, 1)
+            auxiliary_stream.wait_stream(child_stream)
+            with torch.cuda.stream(auxiliary_stream):
+                temporary = torch.empty(LARGE_BUFFER // 4, device="cuda")
+                temporary.fill_(2)
+                auxiliary_state.add_(temporary[0])
+                auxiliary_ptr = temporary.data_ptr()
+            child_stream.wait_stream(auxiliary_stream)
+            primary_state.add_(temporary[0])
+            temporary.record_stream(child_stream)
+            del temporary
+            # The auxiliary stream has not waited for the primary's use.
+            with torch.cuda.stream(auxiliary_stream):
+                next_auxiliary_ptr = self._allocate_graph_temporary(auxiliary_state, 4)
+            child_stream.wait_stream(auxiliary_stream)
+            g.end_capture_to_conditional_node()
+            g.capture_end()
+
+        self.assertNotEqual(primary_ptr, auxiliary_ptr)
+        self.assertNotEqual(auxiliary_ptr, next_auxiliary_ptr)
+        primary_state.zero_()
+        auxiliary_state.zero_()
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(primary_state.item(), 3)
+        self.assertEqual(auxiliary_state.item(), 6)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_cuda_graph_conditional_allows_nested_body_free_in_ancestor(self):
+        torch.cuda.empty_cache()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        inner_pred = torch.ones((), device="cuda", dtype=torch.bool)
+        state = torch.zeros(64, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        pool = torch.cuda.graph_pool_handle()
+        stream = torch.cuda.Stream()
+
+        torch.cuda.synchronize()
+        with torch.cuda.stream(stream):
+            g.capture_begin(pool=pool)
+            g.begin_capture_to_if_node(pred)
+            g.begin_capture_to_if_node(inner_pred)
+            freed_in_parent = torch.ones(64, device="cuda")
+            freed_in_root = torch.ones(64, device="cuda")
+            state.add_(freed_in_parent)
+            state.add_(freed_in_root)
+            g.end_capture_to_conditional_node()
+            # Both immediate and more distant ancestors may free child storage.
+            self.assertEqual(live_blocks(pool), 2)
+            del freed_in_parent
+            self.assertEqual(live_blocks(pool), 1)
+            g.end_capture_to_conditional_node()
+            del freed_in_root
+            self.assertEqual(live_blocks(pool), 0)
+            output = state + 1
+            g.capture_end()
+
+        # Only state escapes the body; it is initialized even if the body is skipped.
+        for outer, inner in product((False, True), repeat=2):
+            pred.fill_(outer)
+            inner_pred.fill_(inner)
+            state.zero_()
+            g.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(
+                output, torch.full_like(output, 3 if outer and inner else 1)
+            )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_cuda_graph_conditional_rejects_parent_free_in_body(self):
+        torch.cuda.empty_cache()
+        pred = torch.zeros((), device="cuda", dtype=torch.bool)
+        g = torch.cuda.CUDAGraph()
+        pool = torch.cuda.graph_pool_handle()
+        stream = torch.cuda.Stream()
+
+        with torch.cuda.stream(stream):
+            g.capture_begin(pool=pool)
+            parent = torch.empty(1024 * 1024, device="cuda")
+            g.begin_capture_to_if_node(pred)
+            self.assertEqual(live_blocks(pool), 1)
+            del parent
+            self.assertEqual(live_blocks(pool), 0)
+            with self.assertRaisesRegex(
+                RuntimeError, "invalid conditional capture scope"
+            ):
+                g.end_capture_to_conditional_node()
+            with self.assertRaisesRegex(
+                RuntimeError, "invalid conditional capture scope"
+            ):
+                g.capture_end()
+            with self.assertRaisesRegex(
+                RuntimeError, r"capture_end\(\) must have been called"
+            ):
+                g.instantiate()
+        g.reset()
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        self.assertEqual(live_blocks(pool), 0)
+
+        # A new capture on the same stream must also succeed after cleanup.
+        recovery = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(recovery, stream=stream):
+            recovered = torch.ones(1, device="cuda") + 1
+        recovery.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(recovered, torch.full_like(recovered, 2))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_cuda_graph_conditional_tracks_auxiliary_stream_allocations(self):
+        torch.cuda.empty_cache()
+        pred = torch.ones((), device="cuda", dtype=torch.bool)
+        g = torch.cuda.CUDAGraph()
+        pool = torch.cuda.graph_pool_handle()
+        stream = torch.cuda.Stream()
+        auxiliary_stream = torch.cuda.Stream()
+
+        with torch.cuda.stream(stream):
+            g.capture_begin(pool=pool)
+            g.begin_capture_to_if_node(pred)
+            child_stream = torch.cuda.current_stream()
+            auxiliary_stream.wait_stream(child_stream)
+            with torch.cuda.stream(auxiliary_stream):
+                parent_value = torch.ones(64, device="cuda")
+                sibling_value = torch.ones(64, device="cuda")
+            child_stream.wait_stream(auxiliary_stream)
+            g.end_capture_to_conditional_node()
+
+            output = parent_value + 1
+            self.assertEqual(live_blocks(pool), 3)
+            del parent_value
+            self.assertEqual(live_blocks(pool), 2)
+            g.begin_capture_to_if_node(pred)
+            del sibling_value
+            self.assertEqual(live_blocks(pool), 1)
+            with self.assertRaisesRegex(
+                RuntimeError, "invalid conditional capture scope"
+            ):
+                g.end_capture_to_conditional_node()
+            with self.assertRaisesRegex(
+                RuntimeError, "invalid conditional capture scope"
+            ):
+                g.capture_end()
+        del output
+        self.assertEqual(live_blocks(pool), 0)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    @parametrize("allocation_capture_ended", [False, True])
+    def test_graph_allocator_free_in_unrelated_capture(self, allocation_capture_ended):
+        torch.cuda.empty_cache()
+        allocation_graph = torch.cuda.CUDAGraph()
+        free_graph = torch.cuda.CUDAGraph()
+        allocation_stream = torch.cuda.Stream()
+        free_stream = torch.cuda.Stream()
+
+        # Warm per-stream HIP BLAS handles before the captures overlap.
+        if TEST_WITH_ROCM:
+            for stream in (allocation_stream, free_stream):
+                with torch.cuda.graph(torch.cuda.CUDAGraph(), stream=stream):
+                    torch.ones(1, device="cuda")
+
+        torch.cuda.synchronize()
+        with torch.cuda.stream(allocation_stream):
+            allocation_graph.capture_begin(capture_error_mode="relaxed")
+            temporary = torch.ones(64, device="cuda")
+            allocation_output = temporary + 1
+            if allocation_capture_ended:
+                allocation_graph.capture_end()
+
+        with torch.cuda.stream(free_stream):
+            free_graph.capture_begin(capture_error_mode="relaxed")
+            # Free in a different root, either while the allocation's capture
+            # is still active or after its tracking metadata has been removed.
+            del temporary
+            free_output = torch.full((64,), 3, device="cuda")
+            free_graph.capture_end()
+
+        if not allocation_capture_ended:
+            with torch.cuda.stream(allocation_stream):
+                allocation_graph.capture_end()
+
+        allocation_graph.replay()
+        free_graph.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(allocation_output, torch.full_like(allocation_output, 2))
+        self.assertEqual(free_output, torch.full_like(free_output, 3))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_graph_allocator_explicit_stream_preserves_deferred_free(self):
+        torch.cuda.empty_cache()
+        capture_stream = torch.cuda.Stream()
+        auxiliary_stream = torch.cuda.Stream()
+        allocation_stream = torch.cuda.Stream()
+        g = torch.cuda.CUDAGraph()
+
+        # Warm the unrelated stream's cache to avoid cudaMalloc during capture.
+        raw_ptr = torch.cuda.caching_allocator_alloc(256, stream=allocation_stream)
+        torch.cuda.caching_allocator_delete(raw_ptr)
+
+        with torch.cuda.stream(capture_stream):
+            g.capture_begin()
+            temporary = torch.ones(64, device="cuda")
+            temporary_ptr = temporary.data_ptr()
+            auxiliary_stream.wait_stream(capture_stream)
+            with torch.cuda.stream(auxiliary_stream):
+                output = temporary + 1
+            temporary.record_stream(auxiliary_stream)
+            del temporary
+
+            # This request must not drain frees from the ongoing capture.
+            raw_ptr = torch.cuda.caching_allocator_alloc(256, stream=allocation_stream)
+            self.addCleanup(torch.cuda.caching_allocator_delete, raw_ptr)
+            replacement = torch.full((64,), 3, device="cuda")
+            capture_stream.wait_stream(auxiliary_stream)
+            g.capture_end()
+
+        self.assertNotEqual(temporary_ptr, replacement.data_ptr())
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(output, torch.full_like(output, 2))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @skipIfRocmVersionLessThan((7, 14))
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_graph_allocator_free_after_auxiliary_capture_invalidation(self):
+        torch.cuda.empty_cache()
+        g = torch.cuda.CUDAGraph()
+        pool = torch.cuda.graph_pool_handle()
+        capture_stream = torch.cuda.Stream()
+        auxiliary_stream = torch.cuda.Stream()
+
+        torch.cuda.synchronize()
+        with torch.cuda.stream(capture_stream):
+            g.capture_begin(pool=pool)
+            root = torch.ones((), device="cuda")
+            auxiliary_stream.wait_stream(capture_stream)
+            with torch.cuda.stream(auxiliary_stream):
+                temporary = root + 1
+                self.assertEqual(live_blocks(pool), 2)
+                with self.assertRaises(RuntimeError):
+                    temporary.item()
+                # Destruction on an invalidated captured stream must not throw.
+                del temporary
+                self.assertEqual(live_blocks(pool), 1)
+            # Older HIP may invalidate only the auxiliary stream, not the origin.
+            with self.assertRaises(RuntimeError):
+                capture_stream.synchronize()
+            with self.assertRaisesRegex(RuntimeError, "previous error during capture"):
+                g.capture_end()
+        del root
+        self.assertEqual(live_blocks(pool), 0)
+        g.reset()
+
+        # Invalidated capture metadata must not poison the next capture.
+        recovery = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(recovery, stream=capture_stream):
+            recovered = torch.ones(1, device="cuda") + 1
+        recovery.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(recovered, torch.full_like(recovered, 2))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_cuda_graph_tensor_item_not_allowed(self):
         test_script = """\
 import torch
@@ -7772,6 +8498,7 @@ class TestCudaAllocator(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
+    @unittest.skipIf(not torch.profiler.kineto_available(), "Kineto is required")
     def test_memory_profiler_viz(self):
         with torch.profiler.profile(
             with_stack=True, profile_memory=True, record_shapes=True
@@ -8086,33 +8813,6 @@ class TestCudaAllocator(TestCase):
             torch.cuda.synchronize()
             with self.assertRaisesRegex(RuntimeError, "no live allocation"):
                 torch._C._cuda_annotateMemory(ptr, "should fail")
-        finally:
-            torch.cuda.memory._record_memory_history(None)
-
-    @unittest.skipIf(
-        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
-    )
-    def test_memory_snapshot_script(self):
-        try:
-            torch._C._cuda_clearCublasWorkspaces()
-            torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history("state", stacks="python")
-
-            @torch.jit.script
-            def foo():
-                return torch.rand(311, 411, device="cuda")
-
-            x = foo()
-
-            ss = torch.cuda.memory._snapshot()["segments"]
-            found_it = False
-            for seg in ss:
-                for b in seg["blocks"]:
-                    if b["requested_size"] == 311 * 411 * 4:
-                        self.assertEqual(b["frames"][0]["name"], "foo")
-                        found_it = True
-            self.assertTrue(found_it)
-
         finally:
             torch.cuda.memory._record_memory_history(None)
 
@@ -8742,62 +9442,6 @@ print(value, end="")
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device="cuda")
 
-    @unittest.skipIf(
-        not ((IS_X86 or IS_ARM64) and IS_LINUX), "cpp traces are linux x86/aarch64 only"
-    )
-    @unittest.skipIf(
-        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
-    )
-    def test_cpp_memory_snapshot_pickle(self):
-        from torch.utils.cpp_extension import load_inline
-
-        source = """
-        #include <torch/csrc/cuda/memory_snapshot.h>
-        py::object do_snapshot() {
-            std::string data = torch::cuda::_memory_snapshot_pickled();
-            return py::bytes(data);
-        }
-        void record(bool e, bool ctx) {
-            torch::cuda::_record_memory_history(e, ctx, 10, ctx, ctx);
-        }
-        """
-        m = load_inline(
-            name="snapshot", cpp_sources=[source], functions=["do_snapshot", "record"]
-        )
-        for ctx in (False, True):
-            try:
-                m.record(True, ctx)
-
-                @torch.jit.script
-                def the_script_fn():
-                    return torch.rand(311, 411, device="cuda")
-
-                def run():
-                    t = the_script_fn()
-                    return pickle.loads(m.do_snapshot())
-
-                mem = run()
-                found = False
-                for s in mem["segments"]:
-                    for b in s["blocks"]:
-                        if b["state"] == "active_allocated":
-                            if b["requested_size"] == 311 * 411 * 4:
-                                if ctx:
-                                    frame_text = str(b["frames"])
-                                    # C++ frame
-                                    self.assertTrue("::rand" in frame_text)
-                                    # script frame
-                                    self.assertTrue("the_script_fn" in frame_text)
-                                    # python frame
-                                    self.assertTrue("case.py" in frame_text)
-                                found = True
-                last_action = mem["device_traces"][0][-1]
-                self.assertEqual(last_action["action"], "alloc")
-                self.assertEqual(last_action["size"], 311 * 411 * 4)
-                self.assertTrue(found)
-            finally:
-                m.record(False, False)
-
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
     @unittest.skipIf(
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
@@ -8936,7 +9580,6 @@ print(value, end="")
         )
         self.assertEqual(torch.cuda._raw_device_count_amdsmi(), raw_device_cnt)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180227")
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_raw_amdsmi_device_uuids(self):
@@ -8953,7 +9596,6 @@ print(value, end="")
         matching = all(any(uuid in raw_id for raw_id in raw_uuids) for uuid in uuids)
         self.assertEqual(True, matching)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180123")
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_uuid_visible_devices(self):
@@ -12876,12 +13518,26 @@ class TestGDS(TestCase):
         return root_type
 
     def _require_gds(self):
-        # GDS needs the cuFile/hipFile bindings built in, plus an O_DIRECT-capable
-        # local filesystem (ext4/xfs) for the temp file the transfer targets.
+        # GDS needs the cuFile/hipFile bindings built in. Filesystems other than
+        # ext4/xfs also need compat mode, which falls back to POSIX I/O.
         if not torch.cuda.gds.is_available():
             self.skipTest("GDS (cuFile/hipFile) not built into this install")
-        if self._get_tmp_dir_fs_type() not in ("ext4", "xfs"):
-            self.skipTest("GPUDirect Storage requires ext4/xfs for local filesystem")
+        if self._get_tmp_dir_fs_type() in ("ext4", "xfs"):
+            return
+        # hipFile registers any file and only fails the I/O without compat mode.
+        allow_compat = os.getenv("HIPFILE_ALLOW_COMPAT_MODE", "").lower()
+        if TEST_WITH_ROCM and allow_compat == "false":
+            self.skipTest("hipFile requires compat mode on this filesystem")
+        # cuFile refuses to register the file without compat mode.
+        with TemporaryFileName() as f:
+            try:
+                file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            except RuntimeError as e:
+                if "HandleRegister failed" not in str(e):
+                    raise
+                self.skipTest(f"cuFile requires compat mode on this filesystem: {e}")
+            src = torch.empty(1, device="cuda")
+            self.assertEqual(file.save_storage(src.untyped_storage()), src.nbytes)
 
     def test_gds_is_available(self):
         # is_available() must be callable and return a bool even when GDS is off.
@@ -12892,22 +13548,24 @@ class TestGDS(TestCase):
         self._require_gds()
         src1 = torch.randn(1024, device="cuda")
         src2 = torch.randn(2, 1024, device="cuda")
-        torch.cuda.gds.gds_register_buffer(src1.untyped_storage())
-        torch.cuda.gds.gds_register_buffer(src2.untyped_storage())
+        s1, s2 = src1.untyped_storage(), src2.untyped_storage()
+        torch.cuda.gds.gds_register_buffer(s1)
+        torch.cuda.gds.gds_register_buffer(s2)
         dest1 = torch.empty(1024, device="cuda")
         dest2 = torch.empty(2, 1024, device="cuda")
+        d1, d2 = dest1.untyped_storage(), dest2.untyped_storage()
         try:
             with TemporaryFileName() as f:
                 file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
-                file.save_storage(src1.untyped_storage(), offset=0)
-                file.save_storage(src2.untyped_storage(), offset=src1.nbytes)
-                file.load_storage(dest1.untyped_storage(), offset=0)
-                file.load_storage(dest2.untyped_storage(), offset=src1.nbytes)
+                self.assertEqual(file.save_storage(s1, offset=0), s1.nbytes())
+                self.assertEqual(file.save_storage(s2, offset=s1.nbytes()), s2.nbytes())
+                self.assertEqual(file.load_storage(d1, offset=0), d1.nbytes())
+                self.assertEqual(file.load_storage(d2, offset=s1.nbytes()), d2.nbytes())
             self.assertEqual(src1, dest1)
             self.assertEqual(src2, dest2)
         finally:
-            torch.cuda.gds.gds_deregister_buffer(src1.untyped_storage())
-            torch.cuda.gds.gds_deregister_buffer(src2.untyped_storage())
+            torch.cuda.gds.gds_deregister_buffer(s1)
+            torch.cuda.gds.gds_deregister_buffer(s2)
 
     def test_gds_read_write_without_register_buffer(self):
         # gds_register_buffer is a performance optimization, not required for I/O.
@@ -12916,9 +13574,56 @@ class TestGDS(TestCase):
         dest = torch.empty_like(src)
         with TemporaryFileName() as f:
             file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
-            file.save_storage(src.untyped_storage())
-            file.load_storage(dest.untyped_storage())
+            self.assertEqual(file.save_storage(src.untyped_storage()), src.nbytes)
+            self.assertEqual(file.load_storage(dest.untyped_storage()), dest.nbytes)
         self.assertEqual(src, dest)
+
+    def test_gds_stream_ordered(self):
+        # The blocking transfers wait for the kernels already enqueued on the
+        # current (side) stream before transferring.
+        self._require_gds()
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream), TemporaryFileName() as f:
+            src = torch.empty(4096, device="cuda")
+            dest = torch.empty_like(src)
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            # Each kernel is enqueued while the device sleeps, so a transfer
+            # that does not wait for it would save stale data from src, or have
+            # its loaded data overwritten by dest.zero_().
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            src.normal_()
+            self.assertEqual(file.save_storage(src.untyped_storage()), src.nbytes)
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            dest.zero_()
+            self.assertEqual(file.load_storage(dest.untyped_storage()), dest.nbytes)
+            self.assertEqual(src, dest)
+
+    def test_gds_graph_capture_unsupported(self):
+        # Waiting for the stream would invalidate the capture, and the stream
+        # APIs do not support CUDA graphs. Each call is rejected before touching
+        # the stream, so the capture remains usable.
+        self._require_gds()
+        storage = torch.empty(1024, device="cuda").untyped_storage()
+        x = torch.zeros(1, device="cuda")
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            transfers = (
+                file.save_storage,
+                file.load_storage,
+                file.save_storage_async,
+                file.load_storage_async,
+            )
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g):
+                for transfer in transfers:
+                    with self.assertRaisesRegex(
+                        RuntimeError, "not supported during CUDA graph capture"
+                    ):
+                        transfer(storage)
+                # Continue recording work within the CUDA graph.
+                x.add_(1)
+        g.replay()
+        self.assertEqual(x.item(), 1)
 
     @parametrize("dtype", [torch.float32, torch.float64, torch.int64, torch.uint8])
     def test_gds_dtypes(self, dtype):
@@ -12933,8 +13638,8 @@ class TestGDS(TestCase):
         try:
             with TemporaryFileName() as f:
                 file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
-                file.save_storage(src.untyped_storage())
-                file.load_storage(dest.untyped_storage())
+                self.assertEqual(file.save_storage(src.untyped_storage()), src.nbytes)
+                self.assertEqual(file.load_storage(dest.untyped_storage()), dest.nbytes)
             self.assertEqual(src, dest)
         finally:
             torch.cuda.gds.gds_deregister_buffer(src.untyped_storage())
@@ -12966,10 +13671,148 @@ class TestGDS(TestCase):
                 AssertionError, "Cannot load data from a file that is not registered"
             ):
                 file.load_storage(storage)
+            with self.assertRaisesRegex(
+                AssertionError, "Cannot save data to a file that is not registered"
+            ):
+                file.save_storage_async(storage)
+            with self.assertRaisesRegex(
+                AssertionError, "Cannot load data from a file that is not registered"
+            ):
+                file.load_storage_async(storage)
             # Re-registering restores usability.
             file.register_handle()
             self.assertIsNotNone(file.handle)
-            file.save_storage(storage)
+            self.assertEqual(file.save_storage(storage), storage.nbytes())
+
+    @unittest.skipIf(not TEST_WITH_ROCM, "hipFile transfer size limit")
+    @largeTensorTest("3GB", "cuda")
+    def test_gds_hipfile_transfer_size_limit(self):
+        # hipFile silently truncates transfers to MAX_RW_COUNT, so GdsFile
+        # rejects larger storages.
+        self._require_gds()
+        storage = torch.UntypedStorage(2**31, device="cuda")
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            transfers = (
+                file.save_storage,
+                file.load_storage,
+                file.save_storage_async,
+                file.load_storage_async,
+            )
+            for transfer in transfers:
+                with self.assertRaisesRegex(RuntimeError, "transfers at most"):
+                    transfer(storage)
+
+    def test_gds_async_stream_ordered(self):
+        # The transfers run on the current (side) stream after the kernels that
+        # produce src.
+        self._require_gds()
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream), TemporaryFileName() as f:
+            src = torch.empty(4096, device="cuda")
+            dest = torch.zeros_like(src)
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            # The work to modify src will be enqueued while the device sleeps,
+            # and the data will be stale until the sleep finishes.
+            # If the save_storage/load_storage calls are not stream ordered,
+            # they will read stale data from src.
+            src.normal_()
+            bytes_written = file.save_storage_async(src.untyped_storage())
+            bytes_read = file.load_storage_async(dest.untyped_storage())
+            stream.synchronize()
+            self.assertEqual(src, dest)
+        self.assertEqual(bytes_written.item(), src.nbytes)
+        self.assertEqual(bytes_read.item(), src.nbytes)
+
+    def test_gds_async_deregister_waits(self):
+        # Deregistering the handle waits for pending async I/O on it, and the
+        # I/O does not depend on the caller keeping the returned count alive.
+        self._require_gds()
+        src = torch.empty(4096, device="cuda")
+        dest = torch.empty_like(src)
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            src.normal_()
+            file.save_storage_async(src.untyped_storage())
+            file.deregister_handle()
+            # Deregistering the handle should wait for pending async I/O.
+            self.assertTrue(torch.cuda.current_stream().query())
+            file.register_handle()
+            self.assertEqual(file.load_storage(dest.untyped_storage()), dest.nbytes)
+            self.assertEqual(src, dest)
+            # Deleting the file deregisters the handle, so it waits too.
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            file.save_storage_async(src.untyped_storage())
+            del file
+            self.assertTrue(torch.cuda.current_stream().query())
+
+    def test_gds_async_deregister_waits_after_error(self):
+        # An async call that raises may still have enqueued work on the handle,
+        # so deregistering must wait for it too.
+        self._require_gds()
+        save_async = torch._C._gds_save_storage_async
+
+        def failing_save(*args):
+            save_async(*args)
+            raise RuntimeError("injected failure")
+
+        storage = torch.empty(4096, device="cuda").untyped_storage()
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            with patch.object(torch._C, "_gds_save_storage_async", failing_save):
+                with self.assertRaisesRegex(RuntimeError, "injected failure"):
+                    file.save_storage_async(storage)
+            file.deregister_handle()
+            self.assertTrue(torch.cuda.current_stream().query())
+
+    def test_gds_async_deregister_buffer_waits(self):
+        # Deregistering a buffer waits for pending async I/O on it. hipFile
+        # rejects deregistering a buffer with operations outstanding.
+        self._require_gds()
+        src = torch.empty(4096, device="cuda")
+        torch.cuda.gds.gds_register_buffer(src.untyped_storage())
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            src.normal_()
+            file.save_storage_async(src.untyped_storage())
+            torch.cuda.gds.gds_deregister_buffer(src.untyped_storage())
+            self.assertTrue(torch.cuda.current_stream().query())
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_gds_async_deregister_waits_multi_gpu(self):
+        # Each device's default stream has the same file handle, so the pending
+        # I/O on both must still be waited for.
+        self._require_gds()
+        storages = [
+            torch.empty(4096, device=f"cuda:{i}").untyped_storage() for i in range(2)
+        ]
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            with torch.cuda.device(0):
+                torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            file.save_storage_async(storages[0])
+            file.save_storage_async(storages[1], offset=storages[0].nbytes())
+            file.deregister_handle()
+            for i in range(2):
+                self.assertTrue(torch.cuda.current_stream(i).query())
+
+    def test_gds_async_failure_reported(self):
+        # Writing through a read-only fd must not report success: the error
+        # is raised at enqueue or reported as a negative byte count.
+        self._require_gds()
+        storage = torch.empty(4096, device="cuda").untyped_storage()
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_RDONLY)
+            try:
+                written = file.save_storage_async(storage)
+            except RuntimeError:
+                return
+            torch.cuda.current_stream().synchronize()
+            self.assertLess(written.item(), 0)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
@@ -13308,25 +14151,18 @@ class TestCudaAutocast(TestAutocast):
             loss = output.sum()
         loss.backward()
 
-    def test_autocast_cat_jit(self):
-        # Reported at https://github.com/pytorch/pytorch/issues/38958
-
-        class Model(torch.nn.Module):
-            def forward(self):
-                a = torch.randn(1)
-                b = torch.randn(1)
-                c = torch.cat((a, b), 0)
-                d = torch.stack([c, c], 0)
-                return d
-
-        # The JIT here doesn't really matter, we just need to call
-        # cat via the boxed API
-        model = Model()
-        model_jit_script = torch.jit.script(model)
-
+    def test_autocast_boxed_cpu_cat_stack(self):
+        unit = torch.jit.CompilationUnit(
+            "def boxed_cat_stack(a: Tensor, b: Tensor) -> Tensor:\n"
+            "    c = torch.cat([a, b], 0)\n"
+            "    return torch.stack([c, c], 0)\n"
+        )
+        a = torch.randn(1, device="cpu")
+        b = torch.randn(1, device="cpu")
         with torch.autocast("cuda", enabled=True):
-            model()
-            model_jit_script()
+            result = unit.boxed_cat_stack(a, b)
+        c = torch.cat([a, b], 0)
+        self.assertEqual(result, torch.stack([c, c], 0))
 
     # cudnn RNNs require special backend handling (weights are cast to FP16 and reflattened)
     # so they get a dedicated test.

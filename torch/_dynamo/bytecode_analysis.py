@@ -15,7 +15,6 @@ for better performance while maintaining correct semantics.
 import bisect
 import dataclasses
 import dis
-import itertools
 import sys
 from typing import Any, TYPE_CHECKING
 
@@ -32,11 +31,8 @@ TERMINAL_OPCODES = {
     # TODO(jansel): double check exception handling
 }
 TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
-if sys.version_info >= (3, 11):
-    TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD"])
-    TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
-else:
-    TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
+TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD"])
+TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
 
 if (3, 12) <= sys.version_info < (3, 14):
     TERMINAL_OPCODES.add(dis.opmap["RETURN_CONST"])
@@ -94,45 +90,30 @@ def remove_dead_code(instructions: list["Instruction"]) -> list["Instruction"]:
     # assumes that exception table entries have been propagated,
     # e.g. with bytecode_transformation.propagate_inst_exn_table_entries,
     # and that instructions with an exn_tab_entry lies within its start/end.
-    if sys.version_info >= (3, 11):
-        live_idx = sorted(live_code)
-        for i, inst in enumerate(instructions):
-            if i in live_code and inst.exn_tab_entry:
-                # find leftmost live instruction >= start
-                start_idx = bisect.bisect_left(
-                    live_idx, indexof[inst.exn_tab_entry.start]
+    live_idx = sorted(live_code)
+    for i, inst in enumerate(instructions):
+        if i in live_code and inst.exn_tab_entry:
+            # find leftmost live instruction >= start
+            start_idx = bisect.bisect_left(live_idx, indexof[inst.exn_tab_entry.start])
+            if start_idx >= len(live_idx):
+                raise AssertionError(
+                    "no live instruction found at or after exn_tab_entry start"
                 )
-                if start_idx >= len(live_idx):
-                    raise AssertionError(
-                        "no live instruction found at or after exn_tab_entry start"
-                    )
-                # find rightmost live instruction <= end
-                end_idx = (
-                    bisect.bisect_right(live_idx, indexof[inst.exn_tab_entry.end]) - 1
+            # find rightmost live instruction <= end
+            end_idx = bisect.bisect_right(live_idx, indexof[inst.exn_tab_entry.end]) - 1
+            if end_idx < 0:
+                raise AssertionError(
+                    "no live instruction found at or before exn_tab_entry end"
                 )
-                if end_idx < 0:
-                    raise AssertionError(
-                        "no live instruction found at or before exn_tab_entry end"
-                    )
-                if not (live_idx[start_idx] <= i <= live_idx[end_idx]):
-                    raise AssertionError(
-                        f"instruction {i} not within live range "
-                        f"[{live_idx[start_idx]}, {live_idx[end_idx]}]"
-                    )
-                inst.exn_tab_entry.start = instructions[live_idx[start_idx]]
-                inst.exn_tab_entry.end = instructions[live_idx[end_idx]]
+            if not (live_idx[start_idx] <= i <= live_idx[end_idx]):
+                raise AssertionError(
+                    f"instruction {i} not within live range "
+                    f"[{live_idx[start_idx]}, {live_idx[end_idx]}]"
+                )
+            inst.exn_tab_entry.start = instructions[live_idx[start_idx]]
+            inst.exn_tab_entry.end = instructions[live_idx[end_idx]]
 
     return [inst for i, inst in enumerate(instructions) if i in live_code]
-
-
-def remove_pointless_jumps(instructions: list["Instruction"]) -> list["Instruction"]:
-    """Eliminate jumps to the next instruction"""
-    pointless_jumps = {
-        id(a)
-        for a, b in itertools.pairwise(instructions)
-        if a.opname == "JUMP_ABSOLUTE" and a.target is b
-    }
-    return [inst for inst in instructions if id(inst) not in pointless_jumps]
 
 
 def propagate_line_nums(instructions: list["Instruction"]) -> None:
