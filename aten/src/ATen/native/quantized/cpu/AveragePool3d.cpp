@@ -1,10 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/Pool.h>
-#include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
+#include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -27,13 +27,11 @@ inline std::tuple<int, int, int> get_kernel(IntArrayRef kernel_size) {
   TORCH_CHECK(
       kernel_size.size() == 1 || kernel_size.size() == 3,
       "avg_pool3d: kernel_size must either be a single int, or a tuple of three ints");
-  const int kD = c10::safe_conv<int>(kernel_size[0], "kernel_size");
-  const int kH = kernel_size.size() == 1
-      ? kD
-      : c10::safe_conv<int>(kernel_size[1], "kernel_size");
-  const int kW = kernel_size.size() == 1
-      ? kD
-      : c10::safe_conv<int>(kernel_size[2], "kernel_size");
+  const int kD = c10::safe_conv<int>(kernel_size[0], "int");
+  const int kH =
+      kernel_size.size() == 1 ? kD : c10::safe_conv<int>(kernel_size[1], "int");
+  const int kW =
+      kernel_size.size() == 1 ? kD : c10::safe_conv<int>(kernel_size[2], "int");
   return std::make_tuple(kW, kH, kD);
 }
 
@@ -41,13 +39,13 @@ inline std::tuple<int, int, int> get_stride(IntArrayRef stride, int kW, int kH, 
   TORCH_CHECK(
       stride.empty() || stride.size() == 1 || stride.size() == 3,
       "avg_pool3d: stride must either be omitted, a single int, or a tuple of three ints");
-  const int dD = stride.empty() ? kD : c10::safe_conv<int>(stride[0], "stride");
-  const int dH = stride.empty()
-      ? kH
-      : stride.size() == 1 ? dD : c10::safe_conv<int>(stride[1], "stride");
-  const int dW = stride.empty()
-      ? kW
-      : stride.size() == 1 ? dD : c10::safe_conv<int>(stride[2], "stride");
+  const int dD = stride.empty() ? kD : c10::safe_conv<int>(stride[0], "int");
+  const int dH = stride.empty() ? kH
+      : stride.size() == 1      ? dD
+                                : c10::safe_conv<int>(stride[1], "int");
+  const int dW = stride.empty() ? kW
+      : stride.size() == 1      ? dD
+                                : c10::safe_conv<int>(stride[2], "int");
   return std::make_tuple(dW, dH, dD);
 }
 
@@ -55,11 +53,11 @@ inline std::tuple<int, int, int> get_padding(IntArrayRef padding) {
   TORCH_CHECK(
       padding.size() == 1 || padding.size() == 3,
       "avg_pool3d: padding must either be a single int, or a tuple of three ints");
-  const int padD = c10::safe_conv<int>(padding[0], "padding");
+  const int padD = c10::safe_conv<int>(padding[0], "int");
   const int padH =
-      padding.size() == 1 ? padD : c10::safe_conv<int>(padding[1], "padding");
+      padding.size() == 1 ? padD : c10::safe_conv<int>(padding[1], "int");
   const int padW =
-      padding.size() == 1 ? padD : c10::safe_conv<int>(padding[2], "padding");
+      padding.size() == 1 ? padD : c10::safe_conv<int>(padding[2], "int");
   return std::make_tuple(padW, padH, padD);
 }
 
