@@ -136,6 +136,7 @@ jobs:
         inductor/test_cpu_select_algorithm
         test_modules
         functorch/test_aotdispatch_moduleinfo
+        test_decomp
       python-version: "3.11"
       compiler: gcc11
     secrets: inherit
@@ -260,6 +261,7 @@ jobs:
         inductor/test_cpu_select_algorithm
         test_modules
         functorch/test_aotdispatch_moduleinfo
+        test_decomp
       python-version: "3.14t"
       compiler: clang21
     secrets: inherit
@@ -479,6 +481,7 @@ jobs:
         inductor/test_cpu_select_algorithm
         test_modules
         functorch/test_aotdispatch_moduleinfo
+        test_decomp
       python-version: "3.14"
       compiler: clang21
     secrets: inherit
