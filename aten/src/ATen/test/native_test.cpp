@@ -354,7 +354,9 @@ TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
 
   ASSERT_TRUE(fake_device.has_value());
   EXPECT_EQ(*fake_device, c10::Device(c10::kCPU));
-  EXPECT_EQ(result_impl->fake_tensor_mode(), mode);
+  auto handle = result_impl->fake_tensor_mode();
+  ASSERT_NE(handle, nullptr);
+  EXPECT_EQ(handle->mode, mode->mode);
 }
 
 TEST(TestNative, InitCppFake) {
@@ -362,7 +364,8 @@ TEST(TestNative, InitCppFake) {
   auto make_fake = [&]() {
     auto t = at::empty({2}, at::device(at::kMeta));
     at::init_cpp_fake(t.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode);
-    EXPECT_EQ(t.unsafeGetTensorImpl()->fake_tensor_mode(), mode);
+    auto handle = t.unsafeGetTensorImpl()->fake_tensor_mode();
+    EXPECT_EQ(handle ? handle->mode : nullptr, mode->mode);
     EXPECT_EQ(t.device(), c10::Device(c10::kCPU));
     return t;
   };
@@ -445,6 +448,33 @@ TEST(TestNative, InitCppFake) {
   expect_rejected(at::empty({2}), cpu, mode, "expects a meta tensor");
   expect_rejected(
       at::empty({2}, at::device(at::kMeta)), meta, strict_mode, "allow_meta");
+}
+
+TEST(TestNative, ConcurrentInitCppFake) {
+  auto mode = make_cpp_fake_mode();
+  auto base = at::empty({4}, at::device(at::kMeta));
+  auto* storage = base.storage().unsafeGetStorageImpl();
+  for (bool allow_unsafe : {true, false}) {
+    mode->mode->allow_unsafe_data_ptr_access_ = allow_unsafe;
+    std::vector<at::Tensor> views(8);
+    for (auto& view : views) {
+      view = at::native::as_strided_tensorimpl(base, {2}, {1});
+    }
+    std::vector<std::thread> workers;
+    for (auto& view : views) {
+      workers.emplace_back([&, view] {
+        at::init_cpp_fake(
+            view.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode);
+        auto alias = at::alias(view);
+        EXPECT_EQ(alias.storage().unsafeGetStorageImpl(), storage);
+        EXPECT_EQ(alias.device(), c10::Device(c10::kCPU));
+      });
+    }
+    for (auto& worker : workers) {
+      worker.join();
+    }
+    EXPECT_EQ(storage->throw_on_mutable_data_ptr(), !allow_unsafe);
+  }
 }
 
 TEST(TestNative, InKernelInvocationReportsMetaDevice) {
