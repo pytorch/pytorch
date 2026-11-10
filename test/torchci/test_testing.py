@@ -600,6 +600,162 @@ class TestReportEnablement(TestCase):
                 self.assertEqual(default(), expected)
 
 
+@skipIfTorchDynamo("tests run_test.py's scheduling, not the tests it runs")
+class TestSerialFileXdistWorkers(TestCase):
+    """run_test.py runs the non-@serial tests of XDIST_SERIAL_FILES under xdist
+    only where each worker keeps the per-process isolation it needs, and
+    XDIST_SERIAL_CPU_LIST files only on CPU-only jobs."""
+
+    def workers(
+        self,
+        file="inductor/test_flex_attention",
+        *,
+        cuda=True,
+        accelerator=None,
+        hip=None,
+        gib=24,
+        env=None,
+        rerun_disabled=False,
+    ):
+        run_test_module = importlib.import_module("run_test")
+        options = types.SimpleNamespace(pytest_xdist_workers=None)
+        properties = types.SimpleNamespace(total_memory=gib * 2**30)
+        has_accelerator = cuda if accelerator is None else accelerator
+        with contextlib.ExitStack() as stack:
+            patch = functools.partial(unittest.mock.patch.object, run_test_module)
+            stack.enter_context(patch("TEST_CUDA", cuda))
+            stack.enter_context(patch("RERUN_DISABLED_TESTS", rerun_disabled))
+            stack.enter_context(
+                unittest.mock.patch.object(
+                    torch.accelerator, "is_available", lambda: has_accelerator
+                )
+            )
+            stack.enter_context(unittest.mock.patch.object(torch.version, "hip", hip))
+            stack.enter_context(
+                unittest.mock.patch.object(
+                    torch.cuda, "get_device_properties", lambda _: properties
+                )
+            )
+            stack.enter_context(unittest.mock.patch.dict(os.environ, env or {}))
+            return run_test_module.serial_file_xdist_workers(file, options, 3)
+
+    def test_listed_file_on_cuda_and_cpu(self) -> None:
+        self.assertEqual(self.workers(), 3)
+        self.assertEqual(self.workers(cuda=False), 3)
+
+    def test_unlisted_file(self) -> None:
+        self.assertEqual(self.workers("test_ops"), 1)
+
+    def test_cpu_only_file(self) -> None:
+        self.assertEqual(self.workers("test_nn", cuda=False), 3)
+        self.assertEqual(self.workers("test_nn"), 1)
+
+    def test_backends_without_per_worker_isolation(self) -> None:
+        self.assertEqual(self.workers(hip="6.4"), 1)
+        # e.g. XPU: an accelerator without CUDA's per-process memory cap.
+        self.assertEqual(self.workers(cuda=False, accelerator=True), 1)
+
+    def test_serial_modes(self) -> None:
+        self.assertEqual(self.workers(rerun_disabled=True), 1)
+        self.assertEqual(
+            self.workers(env={"PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL": "1"}), 1
+        )
+
+    def test_workers_shrink_to_fit_gpu_memory(self) -> None:
+        self.assertEqual(self.workers(gib=16), 3)
+        self.assertEqual(self.workers(gib=10), 2)
+        self.assertEqual(self.workers(gib=8), 1)
+
+    def run_xdist_pass(
+        self, xdist_exit_code: int, lastfailed: list[str] | None = None
+    ) -> tuple[list, list]:
+        """Runs run_test.run_test on flex under xdist with retry_shell exiting
+        with xdist_exit_code and pytest's lastfailed cache holding lastfailed;
+        returns the xdist commands and the retried (command, keep-going, env,
+        node ids) calls."""
+        if lastfailed is None:
+            lastfailed = [
+                "test/inductor/test_flex_attention.py::TestFlexAttentionCUDA::test_a",
+                "test/test_nn.py::TestNN::test_b",
+            ]
+        run_test_module = importlib.import_module("run_test")
+        with unittest.mock.patch.object(sys, "argv", ["run_test.py"]):
+            options = run_test_module.parse_args()
+        options.pytest = True
+        options.pipe_logs = False
+        options.pytest_xdist_workers = 3
+        options.continue_through_error = True
+        options.additional_args = ["-m", "(not serial)"]
+        xdist_commands, retried = [], []
+
+        def retry_shell(command, *args, **kwargs):
+            xdist_commands.append(command)
+            return xdist_exit_code, False
+
+        def run_test_retries(
+            command,
+            test_directory,
+            env,
+            timeout,
+            key,
+            output,
+            continue_through_error,
+            *args,
+        ):
+            (path,) = [
+                arg.split("=", 1)[1]
+                for arg in command
+                if arg.startswith("--nodeid-file=")
+            ]
+            with open(path) as f:
+                nodeids = f.read().splitlines()
+            retried.append((command, continue_through_error, env, nodeids))
+            return 0, False
+
+        test = run_test_module.ShardedTest("inductor/test_flex_attention", 1, 1, 600)
+        with (
+            unittest.mock.patch.object(run_test_module, "retry_shell", retry_shell),
+            unittest.mock.patch.object(
+                run_test_module, "run_test_retries", run_test_retries
+            ),
+            unittest.mock.patch.object(
+                run_test_module, "read_lastfailed", lambda: lastfailed
+            ),
+            unittest.mock.patch.object(
+                run_test_module, "drop_lastfailed", lambda prefix: None
+            ),
+            unittest.mock.patch.dict(os.environ, {"NUM_PARALLEL_PROCS": "3"}),
+        ):
+            ret_code = run_test_module.run_test(test, "test", options)
+        self.assertEqual(ret_code, 0 if retried else xdist_exit_code)
+        return xdist_commands, retried
+
+    def test_xdist_failures_rerun_without_xdist(self) -> None:
+        (xdist_command,), [(command, continue_through_error, env, nodeids)] = (
+            self.run_xdist_pass(xdist_exit_code=1)
+        )
+        # The xdist pass runs every test, so the rerun covers all its failures,
+        # and only this file's.
+        self.assertIn("-n", xdist_command)
+        self.assertNotIn("-x", xdist_command)
+        self.assertNotIn("-n", command)
+        self.assertEqual(
+            nodeids,
+            ["test/inductor/test_flex_attention.py::TestFlexAttentionCUDA::test_a"],
+        )
+        # Keep-going still classifies every failure.
+        self.assertTrue(continue_through_error)
+        self.assertNotIn("NUM_PARALLEL_PROCS", env)
+
+    def test_xdist_timeout_crash_or_unrecorded_failure_is_not_rerun(self) -> None:
+        for exit_code in (124, -11, 2):
+            _, retried = self.run_xdist_pass(xdist_exit_code=exit_code)
+            self.assertEqual(retried, [])
+        # Without recorded failures to rerun, the xdist failure stands.
+        _, retried = self.run_xdist_pass(xdist_exit_code=1, lastfailed=[])
+        self.assertEqual(retried, [])
+
+
 # gtest's JSON test list (--gtest_list_tests --gtest_output=json:<file>), with the
 # fields gtest_identities reads.
 _GTEST_LISTING = {
@@ -1257,6 +1413,41 @@ class TestEnvVarValues(TestCase):
             values,
             {"FOO_EV_ALLOC_CONF": conf, "FOO_EV_DSL": "triton", "FOO_EV_INT": "08"},
         )
+        # The repro command gets the same strings, which are what the shell needs.
+        repro = {
+            k: v
+            for k, v in TestEnvironment.repro_env_vars.items()
+            if k.startswith("FOO_EV_")
+        }
+        self.assertEqual(
+            repro,
+            {"FOO_EV_ALLOC_CONF": conf, "FOO_EV_DSL": "triton", "FOO_EV_INT": "08"},
+        )
+
+    def test_include_in_report_separate_from_repro(self):
+        env = {"FOO_EV_REPORT_ONLY": "x", "FOO_EV_REPRO_ONLY": "y"}
+        with unittest.mock.patch.dict(os.environ, env):
+            self._def_setting(
+                "FOO_EV_REPORT_ONLY",
+                env_var="FOO_EV_REPORT_ONLY",
+                include_in_repro=False,
+                include_in_report=True,
+            )
+            self._def_setting(
+                "FOO_EV_REPRO_ONLY",
+                env_var="FOO_EV_REPRO_ONLY",
+                include_in_repro=True,
+                include_in_report=False,
+            )
+        self.assertEqual(TestEnvironment.env_var_values["FOO_EV_REPORT_ONLY"], "x")
+        self.assertNotIn("FOO_EV_REPORT_ONLY", TestEnvironment.repro_env_vars)
+        self.assertNotIn("FOO_EV_REPRO_ONLY", TestEnvironment.env_var_values)
+        self.assertEqual(TestEnvironment.repro_env_vars["FOO_EV_REPRO_ONLY"], "y")
+
+    def test_repro_env_var_prefix_quotes_values(self):
+        with unittest.mock.patch.dict(os.environ, {"FOO_EV_SPACE": "a b"}):
+            self._def_setting("FOO_EV_SPACE", env_var="FOO_EV_SPACE")
+        self.assertIn("FOO_EV_SPACE='a b'", TestEnvironment.repro_env_var_prefix())
 
 
 if __name__ == "__main__":
