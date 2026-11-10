@@ -47,11 +47,34 @@ from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispat
 invoke_subgraph_counter = 0
 
 
-# Keep this list limited to configs with established region-local semantics.
+# Keep this list limited to configs with established region-local semantics: a
+# key qualifies only if the decisions it drives (which kernels are generated
+# and how they are tuned) are made while the region is compiled under its patch
+# (graph passes, lowering, codegen), or are baked into the region's kernels'
+# inductor_meta at codegen. Each entry notes where its value is consumed and
+# any read outside the region's patch; check new keys the same way.
 _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS = frozenset(
     {
+        # Read by the region's own scheduler. It only switches combo kernels on
+        # or off: all other combo_kernel* and benchmark_combo_kernel settings,
+        # e.g. combo_kernels_autotune, combo_kernel_max_distance and
+        # combo_kernel_peak_memory_*, are not patchable per region and always
+        # come from the enclosing compile.
+        "combo_kernels",
+        # Read per node while the region is lowered (GraphLowering).
         "fallback_by_default",
+        # Read during lowering for GEMM autotuning choices, and baked into the
+        # region's kernels' inductor_meta at codegen. Exception: when a kernel
+        # is first autotuned, runtime/benchmarking.py reads the global value to
+        # choose CUDA-graph timing (only with autotune_cudagraph_benchmarking).
         "max_autotune",
+        # Baked into the region's kernels' inductor_meta at codegen. The runtime
+        # heuristics read max_autotune or this key to widen the configs tried
+        # for pointwise, reduction, persistent and split reduction, and
+        # foreach/combo kernels, so True costs compile and runtime for all of
+        # them. False cannot turn off tuning that max_autotune enables, or
+        # pointwise multi-config tuning that triton.autotune_pointwise enables.
+        "max_autotune_pointwise",
     }
 )
 
