@@ -9,6 +9,7 @@ from pathlib import Path
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
+from torch.testing._internal.common_xpu import _pti_version_at_least
 
 
 Verbose = False
@@ -108,12 +109,6 @@ class XpuScopeProfilerTest(TestCase):
             self.check_metrics(count_x_metrics)
             self.check_metrics(count_c_metrics)
 
-    def required_env_setting(self):
-        zet_enable_metrics = os.environ.get("ZET_ENABLE_METRICS", "unset")
-        if Verbose:
-            print(f"ZET_ENABLE_METRICS={zet_enable_metrics}")
-        return zet_enable_metrics == "1"
-
     def required_paranoid_setting(self, paranoid_path):
         try:
             paranoid_content = Path(paranoid_path).read_text().strip()
@@ -136,10 +131,13 @@ class XpuScopeProfilerTest(TestCase):
         )
 
     @unittest.skipIf(not TEST_XPU, "test requires XPU")
+    @unittest.skipIf(
+        TEST_XPU
+        and os.environ.get("ZET_ENABLE_METRICS") != "1"
+        and not _pti_version_at_least(1, 2, 0),
+        "ZET_ENABLE_METRICS=1 required for PTI version < 1.2.0",
+    )
     def test_scope_profiler(self):
-        if not self.required_env_setting():
-            self.skipTest("ZET_ENABLE_METRICS not set")
-
         if not self.required_paranoid_settings():
             self.skipTest("paranoid settings missing")
 
