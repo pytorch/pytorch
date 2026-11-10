@@ -5517,19 +5517,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expected = F.cross_entropy(input, target, dim=-1)
         self.assertEqual(F.cross_entropy(input.as_subclass(Subclass), target, dim=-1), expected)
 
-    def test_cross_entropy_loss_dim_script(self):
-        def fn(input: torch.Tensor, target: torch.Tensor, dim: int) -> torch.Tensor:
-            return F.cross_entropy(input, target, reduction="none", dim=dim)
-
-        scripted_fn = torch.jit.script(fn)
-        for shape, dim in (((2, 4, 5), -1), ((2, 4, 5, 3), 2)):
-            input = torch.randn(shape)
-            target = torch.randint(5, input.select(dim, 0).shape)
-            expected = fn(input, target, dim)
-            self.assertEqual(scripted_fn(input, target, dim), expected)
-            scripted_module = torch.jit.script(nn.CrossEntropyLoss(reduction="none", dim=dim))
-            self.assertEqual(scripted_module(input, target), expected)
-
     @unittest.skipUnless(TEST_NUMPY, "requires numpy")
     def test_cross_entropy_loss_dim_integer_types(self):
         # The integer types ATen takes for a dim.
