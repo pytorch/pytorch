@@ -452,7 +452,7 @@ class TORCH_API ProcessGroupXCCL : public ::c10d::Backend {
   RedOpRAII getXcclReduceOp(
       const ::c10d::ReduceOp& op,
       onecclComm_t comm,
-      const onecclDataType_t dataType);
+      const at::Tensor& tensor);
   void timeoutWatchdog() noexcept;
   void checkInitialized() const;
   void checkAndAbortIfTimedOutOrError();
