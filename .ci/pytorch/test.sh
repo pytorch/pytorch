@@ -482,6 +482,15 @@ test_cuspy() {
     # The Cuspy tests skip below CUDA 13.5 + libcupti 13.5 (the CUDA 13.5 image preinstalls
     # libcupti 13.5); fail instead of passing vacuously.
     (cd test && env LD_LIBRARY_PATH="$CUDA_COMPAT_LIBRARY_PATH" python -c "from torch.testing._internal.common_cuda import TEST_CUPTI_V13_5; assert TEST_CUPTI_V13_5, 'Cuspy tests need a CUDA >= 13.5 build and libcupti >= 13.5'")
+    # TEMPORARY HES diagnostics; remove before landing.
+    grep -i profiling /proc/driver/nvidia/params || true
+    local hes_probe='import torch
+from torch.profiler._cuspy import core
+print("libcupti:", sorted({l.split()[-1] for l in open("/proc/self/maps") if "libcupti" in l}))
+core.enable_hes_early()
+print("HES enabled")'
+    (cd test && env LD_LIBRARY_PATH="$CUDA_COMPAT_LIBRARY_PATH" python -c "$hes_probe") || true
+    (cd test && sudo env PATH="$PATH" LD_LIBRARY_PATH="$CUDA_COMPAT_LIBRARY_PATH" "$(command -v python)" -c "$hes_probe") || true
     time env LD_LIBRARY_PATH="$CUDA_COMPAT_LIBRARY_PATH" python test/run_test.py --include \
       profiler/test_cuspy \
       profiler/test_cuspy_decoder \
