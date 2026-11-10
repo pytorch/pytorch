@@ -46,7 +46,11 @@ from torch.fx.passes import graph_manipulation
 from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx._lazy_graph_module import _use_lazy_graph_module
-from torch.fx.passes.split_module import split_module, split_module_simple
+from torch.fx.passes.split_module import (
+    _split_module,
+    split_module,
+    split_module_simple,
+)
 from torch.fx.passes.annotate_getitem_nodes import annotate_getitem_nodes
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -59,6 +63,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
     TEST_Z3,
     TestCase,
@@ -1159,6 +1164,38 @@ terrible spacing
                         f"in submodule '{name}'",
                     )
 
+    @parametrize("keep_original_order", [True, False])
+    @parametrize("read_specs", [True, False])
+    def test_split_module_reads_treespec_get_attr_in_partition(
+        self, keep_original_order, read_specs
+    ):
+        # By default a partition takes a pytree spec as an input, as with the
+        # public split_module. When asked, it reads the spec with get_attr.
+        root = torch.nn.Module()
+        root.spec = pytree.tree_flatten((0, 0))[1]
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        spec = graph.get_attr("spec")
+        graph.output(graph.call_function(pytree.tree_unflatten, ([x, x], spec)))
+        gm = torch.fx.GraphModule(root, graph)
+        split_gm = _split_module(
+            gm,
+            None,
+            lambda node: 0,
+            keep_original_order=keep_original_order,
+            read_pytree_specs_in_partition=read_specs,
+        )
+        (submod,) = split_gm.children()
+        inputs = [n.op for n in submod.graph.nodes if n.op != "call_function"]
+        spec_input = "get_attr" if read_specs else "placeholder"
+        self.assertEqual(inputs, ["placeholder", spec_input, "output"])
+        # Without keep_original_order, the split module keeps reading the spec
+        # even when the partition reads it too.
+        root_reads = [n.target for n in split_gm.graph.find_nodes(op="get_attr")]
+        reads_spec = not (read_specs and keep_original_order)
+        self.assertEqual(root_reads, ["spec"] if reads_spec else [])
+        self.assertEqual(split_gm(torch.ones(1)), gm(torch.ones(1)))
+
     @staticmethod
     def _build_partition_map(graph, ops_per_partition=1):
         """Build a node-to-partition dict assigning ops_per_partition ops per partition."""
@@ -2098,6 +2135,7 @@ class {test_classname}(torch.nn.Module):
 
     @skipIfNoTorchVision
     @skipIfNoMkldnn
+    @skipIfTorchDynamo("traces 8 full torchvision models (~6 min); this tests an FX pass")
     def test_optimize_for_inference_cpu_torchvision(self):
         models = [
             torchvision.models.resnet18,
