@@ -165,6 +165,15 @@ class TunableNearestTest : public ::testing::Test {
 // involved.
 // ---------------------------------------------------------------------------
 
+// ROCm only. Subclassing TunableOp<> instantiates FindFastestAmong and
+// operator(), which reach StreamTimer, StreamTimerNoSync and
+// operator<<(ostream&, const ResultEntry&) -- all defined out of line in
+// libtorch_cuda and none of them exported, so a CUDA build of this binary
+// cannot link them. Nothing is lost by scoping it: TunableOp only tunes on
+// ROCm, and the tests below this block exercise the manager directly and
+// still cover both builds.
+#ifdef USE_ROCM
+
 // No device work: these params exist to carry signatures through the resolve.
 struct FakeParams : OpParams {
   FakeParams(std::string sig, std::string blas) :
@@ -227,18 +236,6 @@ class FakeOp : public TunableOp<FakeParams> {
     }
   }
   std::string Signature() override { return kOp; }
-
-#ifndef USE_ROCM
-  // DonorIsUsable asks this before GetOp on non-ROCm builds, and the base
-  // returns false, so without it every fake donor is rejected: the three
-  // tests below that need a usable donor fail, and the one that needs an
-  // unusable donor passes for the wrong reason. Registration here is static,
-  // so "can this build run it" is exactly "is it registered".
-  bool RegisterOpForResult(
-      const ResultEntry& result, const FakeParams* /*params*/) override {
-    return HasOp(result.GetKey());
-  }
-#endif
 
   FakeCallable* default_op() const { return default_; }
   FakeCallable* donor_op() const { return donor_; }
@@ -372,6 +369,8 @@ TEST_F(TunableNearestTest, ADonorThatFailsMidBenchmarkIsCaught) {
   EXPECT_EQ(Key(mgr.Lookup(kOp, kQSig)), Key(ResultEntry::Null()))
       << "a borrow that threw was measured nothing and must record nothing";
 }
+
+#endif  // USE_ROCM
 
 TEST_F(TunableNearestTest, LookupNearestIgnoresPolicyFlags) {
   // Calling LookupNearest is itself the opt-in: ResolveWithoutExactHit checks
