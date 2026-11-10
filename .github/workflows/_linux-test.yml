@@ -144,7 +144,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     container:
       image: ${{ inputs.docker-image }}
-      options: ${{ startsWith(matrix.runner, 'linux.dgx.b200') && '--gpus all --cap-add=SYS_PTRACE' || '--gpus all' }}
+      options: ${{ startsWith(matrix.runner, 'linux.dgx.b200') && '--gpus all --cap-add=SYS_ADMIN' || '--gpus all' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       id-token: write

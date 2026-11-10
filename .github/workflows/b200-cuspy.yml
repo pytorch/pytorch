@@ -1,0 +1,75 @@
+# Owner(s): ["oncall: profiler"]
+name: Limited CI for Cuspy/CUPTI profiler tests on B200
+
+# The Cuspy tests need a CUDA >= 13.5 build and libcupti >= 13.5 (TEST_CUPTI_V13_5); the
+# HES and sm_100 kernel-launch tests also need Blackwell. Runs on PRs that touch Cuspy.
+on:
+  pull_request:
+    paths:
+      - .github/workflows/b200-cuspy.yml
+      - .ci/docker/common/install_cupti_python.sh
+      - test/profiler/test_cupti*.py
+      - test/profiler/test_cuspy*.py
+      - tools/gen_cupti_stubs.py
+      - tools/setup_helpers/cupti.py
+      - torch/csrc/profiler/cuspy/**
+      - torch/profiler/_cuspy/**
+  workflow_dispatch:
+  push:
+    tags:
+      - ciflow/b200-cuspy/*
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  linux-jammy-cuda13_5-py3_11-gcc11-sm100-build-cuspy:
+    name: linux-jammy-cuda13.5-py3.11-gcc11-sm100-cuspy
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      build-environment: linux-jammy-cuda13.5-py3.11-gcc11-sm100-cuspy
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.5-cudnn9-py3-gcc11
+      cuda-arch-list: '10.0'
+      test-matrix: |
+        { include: [
+          { config: "cuspy", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+        ]}
+      # config: "cuspy" maps to test_cuspy() in .ci/pytorch/test.sh
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: "13.5"
+    secrets: inherit
+
+  linux-jammy-cuda13_5-py3_11-gcc11-sm100-test-cuspy:
+    name: linux-jammy-cuda13.5-py3.11-gcc11-sm100-cuspy
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-cuda13_5-py3_11-gcc11-sm100-build-cuspy
+    with:
+      build-environment: ${{ needs.linux-jammy-cuda13_5-py3_11-gcc11-sm100-build-cuspy.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda13_5-py3_11-gcc11-sm100-build-cuspy.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_5-py3_11-gcc11-sm100-build-cuspy.outputs.test-matrix }}
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: "13.5"
+    secrets: inherit
