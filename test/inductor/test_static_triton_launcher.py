@@ -1106,7 +1106,7 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
                 cubin_file, "no_such_kernel", 0, device_interface.current_device()
             )
 
-    @skipIfXpu(msg="Only testing CUDA OOM behavior")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6064")
     def test_too_high_shared_mem(self):
         @triton.jit
         def simple_kernel(arg0, arg1):
