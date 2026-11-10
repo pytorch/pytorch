@@ -426,45 +426,49 @@ def _check_for_gradient_edge(var: VariableTracker, arg_name: str) -> None:
             _check_for_gradient_edge(item, f"{arg_name}[{key_repr!r}]")
 
 
-def _inplace_view_op_on_input(tx, op, tensor_var) -> bool:
+def _inplace_view_op_on_input(tx, op, tensor_var) -> None:
     """Graph-break when an inplace view op is applied to a graph input.
 
     A traced inplace view mutates the graph input's fake tensor, and guard
     creation later indexes the input's original rank and raises IndexError.
-    Shared by the tensor-method path (``x.unsqueeze_(0)``) and the ``torch.ops``
-    path (``torch.ops.aten.unsqueeze_(x, 0)``).
+    Shared by the tensor-method path (``torch.Tensor.unsqueeze_(x, 0)``) and
+    the ``torch.ops`` path (``torch.ops.aten.unsqueeze_(x, 0)``).
     """
     from .tensor import TensorVariable
 
     if not isinstance(tensor_var, TensorVariable):
-        return False
-    if isinstance(op, torch._ops.OpOverloadPacket):
-        packet = op
-    elif isinstance(op, torch._ops.OpOverload):
-        packet = op.overloadpacket
+        return
+    if isinstance(op, torch._ops.OpOverload):
+        if torch.Tag.inplace_view not in op.tags:
+            return
+    elif isinstance(op, torch._ops.OpOverloadPacket):
+        if not op.__name__.endswith("_"):
+            return
+        # Every overload of an inplace-view packet carries the tag; check the
+        # packet so the OpOverloadPacket form is covered without resolving it.
+        if not any(
+            torch.Tag.inplace_view in getattr(op, overload_name).tags
+            for overload_name in op.overloads()
+        ):
+            return
     else:
-        return False
-    if not packet.__name__.endswith("_"):
-        return False
-    # Every overload of an inplace-view packet carries the tag; check the
-    # packet so the OpOverloadPacket form is covered without resolving it.
-    if not any(
-        torch.Tag.inplace_view in getattr(packet, overload_name).tags
-        for overload_name in packet.overloads()
-    ):
-        return False
+        return
     if tensor_var.graph_input_source(tx) is None:
-        return False
+        return
     unimplemented(
         gb_type="Inplace op on input tensor",
-        context=str(packet),
-        explanation="Attempted to trace an inplace view op on an input tensor.",
+        context=str(op),
+        explanation="Attempted to trace an inplace view op on input tensor.",
         hints=[
             *graph_break_hints.SUPPORTABLE,
-            "Ensure you do not modify input tensor in place.",
+            "Avoid mutating a graph input's tensor metadata with in-place view ops. "
+            "If the mutation is only needed inside the compiled region, replace the "
+            "in-place call with an out-of-place view, for example `x = x.transpose(1, 2)` "
+            "instead of `x.transpose_(1, 2)`.",
+            "If you need to mutate the input tensor's metadata, move the in-place view "
+            "call outside `torch.compile`.",
         ],
     )
-    return True
 
 
 def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node]:
@@ -4072,15 +4076,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
         if self.is_tensor_method():
-            from .tensor import TensorVariable
-
             name = self.value.__name__
             # Guard against inplace view op on input tensor (not supported)
-            if args and isinstance(args[0], TensorVariable):
-                if name.endswith("_") and hasattr(torch.ops.aten, name):
-                    _inplace_view_op_on_input(
-                        tx, getattr(torch.ops.aten, name), args[0]
-                    )
+            if args and name.endswith("_") and hasattr(torch.ops.aten, name):
+                _inplace_view_op_on_input(
+                    tx, getattr(torch.ops.aten, name), args[0]
+                )
             # call_tensor_method records `x.<name>(...)`, which resolves on
             # type(x) when the graph runs. If a tensor subclass overrides the
             # method, fall through so the graph calls the descriptor itself.
@@ -4092,24 +4093,22 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ):
                 return self.call_tensor_method(tx, list(args), kwargs)
 
-        # `is_tensor_method()` above covers `x.unsqueeze_(0)` and
-        # `torch.Tensor.unsqueeze_(x, 0)`. Calls made through the ops API,
-        # `torch.ops.aten.unsqueeze_(x, 0)` (OpOverloadPacket) and
-        # `torch.ops.aten.unsqueeze_.default(x, 0)` (OpOverload), do not go
-        # through it. Guard them the same way: otherwise the inplace view is
-        # traced into the graph, mutating the graph input's fake tensor shape,
-        # and guard creation later raises IndexError while indexing the size
-        # list of the input with its original rank.
+        # `is_tensor_method()` covers the `torch.Tensor.unsqueeze_(x, 0)` form;
+        # `x.unsqueeze_(0)` is handled by `TensorVariable.call_method`. Calls
+        # made through the ops API, `torch.ops.aten.unsqueeze_(x, 0)`
+        # (OpOverloadPacket) and `torch.ops.aten.unsqueeze_.default(x, 0)`
+        # (OpOverload), do not go through either. Guard them the same way:
+        # otherwise the inplace view is traced into the graph, mutating the
+        # graph input's fake tensor shape, and guard creation later raises
+        # IndexError while indexing the size list of the input with its
+        # original rank.
         if (
             args
             and isinstance(
                 self.value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
             )
         ):
-            from .tensor import TensorVariable
-
-            if isinstance(args[0], TensorVariable):
-                _inplace_view_op_on_input(tx, self.value, args[0])
+            _inplace_view_op_on_input(tx, self.value, args[0])
 
         special_handler = self._get_handlers().get(self.value)
         if special_handler:

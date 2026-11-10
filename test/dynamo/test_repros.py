@@ -3872,8 +3872,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_inplace_view_on_input_via_ops_api(self, call, op):
         # `torch.ops.aten.*` does not go through the is_tensor_method() path, so
         # an inplace view op on a graph input needs the same guard here.
-        # squeeze_ has multiple overloads, so its packet form exercises the
-        # packet-level check rather than a single-overload shortcut.
+        # squeeze_ has multiple overloads, so it is included alongside the
+        # single-overload unsqueeze_ to cover the packet form with a dim arg.
         def fn(x):
             if call == "overload":
                 if op == "unsqueeze_":
@@ -3884,7 +3884,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 getattr(torch.ops.aten, op)(x, 0)
             return x
 
-        x = torch.arange(24).reshape(4, 6)
+        x = torch.arange(24).reshape(1, 4, 6)
         # fullgraph first: a failed compile caches nothing, so the next call traces again.
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "inplace view"):
             torch.compile(fn, backend="eager", fullgraph=True)(x.clone())
