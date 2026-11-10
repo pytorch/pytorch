@@ -544,17 +544,20 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
     The ``wrap_triton`` API wraps a triton kernel into a callable that
     can actually be traced into a graph.
 
-    Use ``wrap_triton`` together with :func:`torch.library.triton_op` when
-    defining a custom Triton operator. If no custom operator is needed,
-    call the Triton kernel directly without either API. Using
-    ``wrap_triton`` on its own works but is not recommended.
-
+    Use ``wrap_triton`` with :func:`torch.library.triton_op` when
+    defining a custom operator backed by triton kernels. For eager
+    execution or ``torch.compile``, call triton kernels directly
+    when no custom operator is needed. For ``make_fx`` or non-strict
+    ``torch.export``, use ``triton_op`` with ``wrap_triton`` to make
+    kernel calls traceable. Standalone ``wrap_triton`` is supported,
+    but adds dispatch overhead to eager kernel calls.
     Examples:
 
         >>> # xdoctest: +SKIP
         >>> import torch
         >>> import triton
         >>> from triton import language as tl
+        >>> from torch.fx.experimental.proxy_tensor import make_fx
         >>> from torch.library import triton_op, wrap_triton
         >>>
         >>> @triton.jit
@@ -585,13 +588,10 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
         >>>     wrap_triton(add_kernel)[grid_fn](x, y, output, n_elements, 16)
         >>>     return output
         >>>
-        >>> @torch.compile
-        >>> def f(x, y):
-        >>>     return add(x, y)
-        >>>
         >>> x = torch.randn(3, device="cuda")
         >>> y = torch.randn(3, device="cuda")
-        >>> result = f(x, y)
+        >>> gm = make_fx(add)(x, y)
+        >>> result = gm(x, y)
         >>> assert torch.allclose(result, x + y)
 
     """
