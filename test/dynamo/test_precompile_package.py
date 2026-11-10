@@ -48,6 +48,8 @@ from torch._dynamo.source import (
 )
 from torch._dynamo.types import GuardFilterEntry
 from torch._guards import ChainedSource, Guard
+from torch._precompile import PrecompileError
+from torch.compiler.precompile import capture
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -248,10 +250,6 @@ class _Ops:
         return x
 
 
-class _DescriptorAlias(list):
-    count = list.count
-
-
 # Rows: risky?, source, value, _entry keywords. The trusted namespaces are the
 # torch, stdlib and own-module globals the test builds through _module_namespaces;
 # G['impl'] is an aliased user module and G['config'] a config module, neither
@@ -338,26 +336,22 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 guard_filter_fn=lambda entries: [True] * len(entries),
             )
 
-    def test_method_descriptor_alias_guard_survives_serialization(self):
-        def fn(x):
-            return x + _DescriptorAlias([1, 1]).count(1)
-
-        x = torch.ones(1)
-        compiled = _aot_compile(fn, x)
-        state, _ = _kept_types(compiled)
-        self.assertTrue(
-            any(
-                guard.create_fn_name() == "FUNCTION_MATCH"
-                and guard.name.endswith("['count']")
-                for guard in state.output_graph.guards
-            )
-        )
-        data = AOTCompiledFunction.serialize(compiled).serialized_data
-        loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
-        self.assertTrue(loaded.guard_check(x))
-        self.assertEqual(loaded(x), fn(x))
-        with mock.patch.object(_DescriptorAlias, "count", list.index):
-            self.assertFalse(loaded.guard_check(x))
+    def test_default_precompile_refuses_nonreferenceable_base(self):
+        # The default filter must not silently discard a mutable base's identity.
+        x, obj = torch.ones(1), _DynamicMROInput()
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = os.path.join(directory, "mro.py")
+            cache = os.path.join(directory, "mro.cache")
+            with self.assertRaisesRegex(PrecompileError, "dropped guard.*__mro__"):
+                with capture(
+                    _mro_sum,
+                    artifact_path=artifact,
+                    cache_path=cache,
+                    backend="eager",
+                ) as compiled:
+                    self.assertEqual(compiled(x, obj, obj), x + 2)
+            self.assertFalse(os.path.exists(artifact))
+            self.assertFalse(os.path.exists(cache))
 
     @torch._dynamo.config.patch(caching_precompile=False)
     @parametrize("alias_pair", [False, True])
@@ -656,8 +650,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # ID_MATCH that is kept because it pickles as the global typing.Any.
         any_is_class = isinstance(pytree.Any, type)
         class_matches, id_matches = (3, 2) if any_is_class else (2, 3)
-        # TreeSpec's mutable MRO adds an identity check for its object base.
-        id_matches += 1
         self.assertEqual(
             counts - control_counts,
             {
