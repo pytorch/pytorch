@@ -377,6 +377,7 @@ class TestKernelGeneral(TestCase):
             (4095, 64, torch.bfloat16, 2, 0, False, False),
             (4096, 64, torch.float32, 1, 0, True, False),
             (1024, 128, torch.float32, 1, 0, False, True),
+            (4095, 64, torch.float32, 2, 1, True, True),
         ],
     )
     def test_uniform_welford_tree(
@@ -424,7 +425,8 @@ class TestKernelGeneral(TestCase):
     def test_uniform_welford_tree_counts_share_kernels(self):
         # A tail kernel serves every count strictly between nloads * block and
         # (nloads + 1) * block, so 300 and 383 (2 * 128 < count < 3 * 128) share one;
-        # 256 = 2 * 128 loads as often but takes a tail-free kernel, as does 384 = 3 * 128.
+        # 256 = 2 * 128 has the same whole-load count but takes a tail-free kernel, as does
+        # 384 = 3 * 128.
         trait = T.WelfordOps(correction=1, acc=cutlass.Float32)
         for count in (256, 300, 383, 384):
             x = torch.randn(17, count, device="cuda")
@@ -545,25 +547,34 @@ class TestKernelGeneral(TestCase):
             uniform_tree=True,
         )
         self.assertEqual(kg.ReduceBlock(**tree).tile.uniform_tree_loads, 1024 // 128)
-        msg = "the uniform Welford tree needs"
-        long = 128 * tile.UNIFORM_TREE_MAX_LOADS + 1
-        long64 = 64 * tile.UNIFORM_TREE_MAX_LOADS + 1
-        for bad in (
-            dict(trait=trait),
-            dict(count=0, red_pairs=((0, 1),)),
-            dict(count=64, red_pairs=((64, 1),)),
-            dict(count=long, red_pairs=((long, 1),)),
-            dict(block=64, count=long64, red_pairs=((long64, 1),)),
-            dict(red_pairs=((32, 1), (32, 64))),
-            dict(from_partials=True),
-            dict(gidx_from="chunk"),
-            dict(order="inner_tree"),
-            dict(flat_tail=True),
-            dict(ragged_chunk=True),
+        cap = 128 * tile.UNIFORM_TREE_MAX_LOADS
+        cap64 = 64 * tile.UNIFORM_TREE_MAX_LOADS
+        span = f"128 to {cap} values per output for 128 threads, got"
+        fold, clamp = "a linear general-axis fold, got axis=", "an unclamped run, got"
+        for bad, reason in (
+            (dict(trait=trait), "a trait with combine_equal, got SumOps"),
+            (dict(count=0, red_pairs=((0, 1),)), "a nonempty reduction"),
+            (dict(count=64, red_pairs=((64, 1),)), f"{span} 64"),
+            (dict(count=cap + 1, red_pairs=((cap + 1, 1),)), f"{span} {cap + 1}"),
+            (
+                dict(block=64, count=cap64 + 1, red_pairs=((cap64 + 1, 1),)),
+                f"64 to {cap64} values per output for 64 threads, got {cap64 + 1}",
+            ),
+            (dict(red_pairs=((32, 1), (32, 64))), "one reduced run, got 2"),
+            (dict(red_pairs=()), "one reduced run, got 0"),
+            (dict(from_partials=True), "a fold of inputs, not partials"),
+            (dict(gidx_from="chunk"), "indices from r, got gidx_from='chunk'"),
+            (dict(order="inner_tree"), f"{fold}'general' order='inner_tree'"),
+            (dict(flat_tail=True), f"{clamp} flat_tail=True ragged_chunk=False"),
+            (dict(ragged_chunk=True), f"{clamp} flat_tail=False ragged_chunk=True"),
         ):
             with self.subTest(bad=bad):
+                msg = re.escape(f"the uniform Welford tree needs {reason}") + "$"
                 with self.assertRaisesRegex(ValueError, msg):
                     kg.ReduceBlock(**(tree | bad))
+        # ReduceBlock always folds the general axis.
+        with self.assertRaisesRegex(ValueError, re.escape(f"{fold}'row' ")):
+            tile.TileReduce(tree["trait"], None, "row", 1024, uniform_tree_count=1024)
         # The reshaping cross-CTA path also requires contiguous CUDA input.
         with self.assertRaisesRegex(AssertionError, "CUDA"):
             xc.reduce_row_xcta(trait, "inv_xcta", xt, torch.float32)
