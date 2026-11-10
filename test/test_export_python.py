@@ -343,6 +343,18 @@ class TestExportPython(_ExportPythonTestCase):
         with self.assertRaisesRegex(PrecompileError, r"scaled, not .*\.matmul"):
             self._export("matmul", path)(x, y)
 
+    def test_a_file_saved_with_crlf_line_endings_serves(self):
+        # As a Windows editor, or git's core.autocrlf, would save it.
+        path = os.path.join(self.dir, "scaled.py")
+        x = torch.randn(8)
+        self._export("scaled", path)(x)
+        with open(path, "rb") as f:
+            text = f.read()
+        with open(path, "wb") as f:
+            f.write(text.replace(b"\n", b"\r\n"))
+        with no_compilation():
+            self.assertEqual(self._export("scaled", path)(x), (x * 2.0).relu())
+
     def test_deleting_the_file_recaptures(self):
         path = os.path.join(self.dir, "scaled.py")
         x = torch.randn(8)
