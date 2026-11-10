@@ -572,12 +572,6 @@ Tensor& multinomial_out(const Tensor& self,
   int64_t n_categories = self.size(-1);
   TORCH_CHECK(with_replacement || (n_sample <= n_categories),
       "cannot sample n_sample > prob_dist.size(-1) samples without replacement");
-  // Since the index tensor is float, numCategories cannot exceed max
-  // float integer precision
-  TORCH_CHECK(
-      n_categories <= FLOAT32_MAX_CONSECUTIVE_INT,
-      "number of categories cannot exceed 2^24");
-
   if (self.dim() == 1) {
     result.resize_({n_sample});
   } else {
@@ -627,6 +621,12 @@ Tensor& multinomial_out(const Tensor& self,
     return result;
   }
 
+  // The CPU and CUDA kernels search a double CDF past 2^24 categories; other
+  // backends (e.g. MPS) may search a float CDF, which cannot resolve that many.
+  TORCH_CHECK(
+      self.is_cpu() || self.is_cuda() || n_categories <= FLOAT32_MAX_CONSECUTIVE_INT,
+      "number of categories cannot exceed 2^24 when sampling with replacement on ",
+      self.device().type());
   multinomial_with_replacement_stub(
       result.device().type(), result, self, n_sample, gen);
   return result;

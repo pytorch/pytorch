@@ -4591,7 +4591,7 @@ class TestCompileSyncPgCrossRanks(MultiProcessTestCase):
         self._init_process_group()
 
         with mock.patch.object(c10d, "is_gloo_available", return_value=False):
-            with self.assertRaisesRegex(RuntimeError, "requires the gloo backend"):
+            with self.assertRaisesRegex(RuntimeError, "a build of PyTorch with gloo"):
                 get_compile_sync_pg()
 
     def test_compile_sync_pg_inherits_default_timeout(self):

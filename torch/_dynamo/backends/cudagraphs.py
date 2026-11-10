@@ -157,7 +157,7 @@ def get_stack_traces(gm: torch.fx.GraphModule) -> list[str | None]:
 
 
 def cudagraphs(dynamo_model: torch.fx.GraphModule, dynamo_inputs: Sequence[Any]) -> Any:
-    from torch._inductor.cudagraph_trees import cudagraphify_impl
+    from torch._inductor.cudagraph_trees import cudagraphify_impl, mark_running_backward
 
     do_cudagraphs = BoxedBool(True)
     boxed_device_index = BoxedDeviceIndex(None)
@@ -204,19 +204,15 @@ def cudagraphs(dynamo_model: torch.fx.GraphModule, dynamo_inputs: Sequence[Any])
                 f"skipping cudagraphs due to {skip_msg}"
             )
 
-            # See [Backward Generation Handling]
+            # See [Backward Generation Handling]. The forward compiled first and set
+            # the index; the manager is looked up when the backward runs (see
+            # mark_running_backward).
             device_idx = boxed_device_index.value
             if device_idx is None:
-                device_idx = 0  # Default to device 0 if not set
-            manager = torch._inductor.cudagraph_trees.get_manager(
-                device_idx, create_if_none_exists=False
-            )
-            if manager is None:
-                raise AssertionError("cudagraph manager must exist for backward")
+                raise AssertionError("boxed_device_index.value must not be None")
 
             def fn(inputs: list[Any]) -> Any:
-                # pyrefly: ignore [missing-attribute]
-                manager.set_to_running_backward()
+                mark_running_backward(device_idx)
                 return aot_model(inputs)
 
             fn._boxed_call = True  # type: ignore[attr-defined]
