@@ -43,12 +43,15 @@ from torch._higher_order_ops.cutedsl_kernel_wrap import (
     cutedsl_kernel_side_table,
     cutedsl_kernel_wrapper_mutation,
     CuteDSLHOPifier,
-    is_dsl_runtime_object,
     MutatesArgs,
     RAW_CALL_MUTATES_ARGS,
     TraceableCuteDSLKernelWrapper,
 )
-from torch._higher_order_ops.user_kernel_hop import constant_contents, constant_key
+from torch._higher_order_ops.user_kernel_hop import (
+    _subclass_error,
+    constant_contents,
+    constant_key,
+)
 
 from .. import config, graph_break_hints
 from ..exc import unimplemented
@@ -86,17 +89,14 @@ def _is_dict(val: VariableTracker) -> "TypeIs[ConstDictVariable]":
 
 
 def _held_error(cls: type, is_tensor: bool, where: str) -> TypeError | None:
-    """The TypeError of the side table's walk (see constant_key) for a tensor at
-    ``where`` inside a constant argument, or its like for a DSL runtime object of
-    type ``cls`` there; None for another value."""
+    """The TypeError of the side table's walk (see constant_key) for a tensor, or a
+    value of type ``cls`` that the DSL refuses (ConstantRules.refusal), at ``where``
+    inside a constant argument; None for another value."""
+    fix = CUTEDSL_CONSTANT_RULES.refusal(cls)
     if is_tensor:
         held, fix = "a tensor", "pass each tensor as its own argument"
-    elif is_dsl_runtime_object(cls):
+    elif fix is not None:
         held = f"a {cls.__name__}"
-        fix = (
-            "a cute tensor, pointer or stream cannot be nested inside a constant "
-            "argument"
-        )
     else:
         return None
     return TypeError(f"a constant kernel argument holds {held} at {where}: {fix}")
@@ -226,6 +226,10 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
             val: VariableTracker, where: str, containers: dict[int, str]
         ) -> list[VariableTracker]:
             realized = val.realize()
+            cls = realized.python_type()
+            subclass = _subclass_error(cls, issubclass(cls, (tuple, list, dict)))
+            if subclass is not None:
+                raise subclass
             if isinstance(realized, BaseListVariable):
                 steps = [(f"[{i!r}]", item) for i, item in enumerate(realized.items)]
             elif _is_dict(realized):
@@ -264,7 +268,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         if isinstance(val, BaseListVariable):
             items = [self.specialize_nested(variable, item) for item in val.items]
             if isinstance(val, UserDefinedObjectVariable):
-                # A namedtuple or a list subclass, whose variable clone() cannot copy.
+                # A namedtuple or a deque subclass, whose variable clone() cannot copy.
                 return type(val)(val.value, items=items, source=val.source)
             return val.clone(items=items)
         if _is_dict(val):
@@ -343,6 +347,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         val: VariableTracker,
         tx: "InstructionTranslatorBase",
         writes: _RegionWrites,
+        keyed: bool = True,
     ) -> Any:
         """The value of a constant argument, which the side table snapshots: a
         Python literal; a value from outside the region, guarded so that the graph
@@ -358,7 +363,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         from .tensor import NumpyNdarrayVariable
 
         def constant(item: VariableTracker) -> Any:
-            return self.constant_object(variable, key, item, tx, writes)
+            return self.constant_object(variable, key, item, tx, writes, keyed)
 
         val = val.realize()
         if isinstance(val, BaseListVariable) and val.python_type() in (tuple, list):
@@ -383,7 +388,11 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
                 def guard_sourced(item: VariableTracker) -> None:
                     if item.source is None:
                         return
-                    constant(item)
+                    # What holds it may be keyed whole, without the side table's
+                    # walk reaching it (a functools.partial, a frozenset): not
+                    # refused here (keyed=False), but by call_HOP's constant_key of
+                    # the argument if the walk reaches it (a namedtuple).
+                    self.constant_object(variable, key, item, tx, writes, keyed=False)
                     # That guarded what it holds too: marking its fields visited
                     # keeps visit out of them.
                     item = item.unwrap()
@@ -412,7 +421,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         modified = writes.under(val.source)
         if modified is not None:
             self.raise_modified(name, key, modified.name)
-        self.guard_contents(val.source, obj, tx, variable, key, "", {}, writes)
+        self.guard_contents(val.source, obj, tx, variable, key, "", {}, writes, keyed)
         return obj
 
     def numpy_scalar(
@@ -463,6 +472,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         where: str,
         containers: dict[int, str],
         writes: _RegionWrites,
+        keyed: bool = True,
     ) -> None:
         """Guard ``value``, read from ``source``, on what the side table keys and
         snapshots it by, walking it as constant_key does (see constant_contents): a
@@ -475,7 +485,11 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         Graph-breaks on what the snapshot cannot stand for: a value that the region
         modified earlier, or whose class it modified, through whatever path; and,
         with the errors of the side table's walk, a tensor or a DSL object in it,
-        which would be baked into the side table, and a value that holds itself.
+        which would be baked into the side table, and a value that holds itself;
+        and, if ``keyed``, what else the walk refuses (an unhashable value, a list,
+        tuple or dict subclass), in its order. ``keyed`` is False for a value inside
+        a constant made in the region (see constant_object), which the side table
+        may key whole without walking to it.
         ``variable`` is the wrapper called (wrap_raw's for a raw call) and ``key`` the
         parameter, ``where`` is the walk's path to ``value`` from the argument, and
         ``containers`` maps the id of each container on that path to the path it was
@@ -490,6 +504,14 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
                 self.raise_modified(name, key, f"class {cls.__name__} of {source.name}")
         contents = constant_contents(value, CUTEDSL_CONSTANT_RULES)
         if contents is None:
+            if keyed:
+                # The walk's other refusals (an unhashable value, a list, tuple or
+                # dict subclass it does not walk), in its order: before a later
+                # item's tensor.
+                try:
+                    constant_key(value, CUTEDSL_CONSTANT_RULES)
+                except (TypeError, ValueError) as e:
+                    self.raise_constant_error(variable, key, e)
             self.guard_value(source, value, tx)
             return
         if id(value) in containers:
@@ -503,7 +525,15 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
             if held is not None:
                 self.raise_constant_error(variable, key, held)
             self.guard_contents(
-                item_source, item, tx, variable, key, item_where, containers, writes
+                item_source,
+                item,
+                tx,
+                variable,
+                key,
+                item_where,
+                containers,
+                writes,
+                keyed,
             )
 
     def content_sources(
@@ -523,32 +553,16 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         object with the same attributes set in another order reuses the graph, which
         launches a snapshot equal to it); and return the source of each of
         ``contents.steps``. Dynamo's guards read a list, tuple or dict through its
-        storage, so a class that overrides a method the walk reads it through
-        (__iter__ or items(), say) graph-breaks."""
+        storage, which is what the walk reads of the containers it walks (see
+        _keyed_by_items), except an OrderedDict's own order, guarded below."""
         from ..guards import GuardBuilder, install_guard
 
-        cls = type(value)
-
-        def check_reads(base: type, methods: tuple[str, ...]) -> None:
-            overridden = [m for m in methods if getattr(cls, m) is not getattr(base, m)]
-            if overridden:
-                self.raise_unsupported(
-                    f"CuTeDSL kernel {name}: parameter {key!r}: cannot guard "
-                    f"{source.name}: its class {cls.__name__} overrides "
-                    f"{', '.join(overridden)}, which the side table reads it through; "
-                    f"pass a plain {base.__name__}"
-                )
-
         if isinstance(value, (tuple, list)):
-            base = tuple if isinstance(value, tuple) else list
-            check_reads(base, ("__iter__", "__len__"))
             # Its type too.
             install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             return [GetItemSource(source, i) for _, i, _ in contents.steps]
         if isinstance(value, dict):
             ordered = isinstance(value, collections.OrderedDict)
-            base = collections.OrderedDict if ordered else dict
-            check_reads(base, ("__iter__", "items"))
             tx.output.guard_on_key_order.add(source)
             install_guard(
                 source.make_guard(GuardBuilder.TYPE_MATCH),
@@ -603,15 +617,17 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
     ) -> None:
         """Guard ``value``, a constant that constant_key keys without walking it, on
         what constant_key keys it by: a cutlass Numeric, such as
-        cutlass.Float32(2.0), on its type and value, and a numpy bool, integer,
-        floating or complex scalar whose .item() is a Python one on its type and
+        cutlass.Float32(2.0), on its type and value, and a numpy bool, integer or
+        floating scalar whose .item() is a Python one on its type and
         .item(); a Python literal, a subclass of int, str or bytes (an enum member
         aside), a frozenset, a range or a slice on its value, which EQUALS_MATCH
         checks with the exact type, comparing an exact float or complex bitwise
-        (-0.0 is not 0.0, as for constant_key) and another value with ==; anything
+        (-0.0 is not 0.0, as for constant_key; for a complex, whose key takes -0.0 for
+        0.0, the guard is the stricter) and another value with ==; anything
         else on its identity, kept alive with the compiled code if it cannot be
         weakly referenced: a function, a class, an enum member, another cutlass
-        value, or a float or complex subclass that numpy does not define, which
+        value, a numpy complex scalar (complex constants are not supported for
+        now), or a float or complex subclass that numpy does not define, which
         EQUALS_MATCH would compare with ==, taking -0.0 for 0.0. Limitation: such a
         subclass, and another value that constant_key keys by equality (a Fraction, a
         Decimal, an attrs class instance), recompile for an equal new one, such as
@@ -620,21 +636,15 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         from ..guards import GuardBuilder, install_guard
         from .constant import ConstantVariable
 
-        np = sys.modules.get("numpy")  # imported if value is a numpy scalar
         if CUTEDSL_CONSTANT_RULES.scalar_value(value) is not None:
             # A cutlass Numeric, which constant_key keys by its type and its value.
             install_guard(
                 source.make_guard(GuardBuilder.TYPE_MATCH),
                 AttrSource(source, "value").make_guard(GuardBuilder.CONSTANT_MATCH),
             )
-        elif _numpy_scalar_item(value) is not None or (
-            np is not None
-            and isinstance(value, np.complexfloating)
-            and type(value.item()) is complex
-        ):
-            # Its .item() is an exact bool, int, float or complex: np.float64 and
-            # np.complex128 subclass float and complex, which EQUALS_MATCH compares
-            # with ==.
+        elif _numpy_scalar_item(value) is not None:
+            # Its .item() is an exact bool, int or float: np.float64 subclasses
+            # float, which EQUALS_MATCH compares with ==.
             install_guard(
                 source.make_guard(GuardBuilder.TYPE_MATCH),
                 CallMethodItemSource(source).make_guard(GuardBuilder.CONSTANT_MATCH),
