@@ -156,8 +156,8 @@ jobs:
           MATRIX_RUNNER: ${{ matrix.runner }}
         run: |
           source /etc/rocm_env.sh || true
-          amd-smi monitor -ptumv || true
-          amd-smi process || true
+          timeout 30 amd-smi monitor -ptumv || true
+          timeout 30 amd-smi process || true
           bash .github/scripts/rocm_gpu_partition.sh || true
           ls -l /dev/kfd /dev/dri || true
           grep -H . /sys/fs/cgroup/memory.{current,max} /sys/fs/cgroup/memory/memory.{usage,limit}_in_bytes 2>/dev/null || true
@@ -326,8 +326,8 @@ jobs:
           MATRIX_RUNNER: ${{ matrix.runner }}
         run: |
           source /etc/rocm_env.sh || true
-          amd-smi monitor -ptumv || true
-          amd-smi process || true
+          timeout 30 amd-smi monitor -ptumv || true
+          timeout 30 amd-smi process || true
           bash .github/scripts/rocm_gpu_partition.sh || true
           grep -H . /sys/fs/cgroup/memory.{current,max} /sys/fs/cgroup/memory/memory.{usage,limit}_in_bytes 2>/dev/null || true
           ps -eo pid,etime,rss,comm --sort=-rss | head -30 || true
