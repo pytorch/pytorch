@@ -3685,7 +3685,6 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
     @skipIfRocm
     @parametrize("recipe", ["mxfp4", "nvfp4"])
     @parametrize("side", ["a", "b"])
-    @prefer_cublaslt_grouped_gemm(False)
     @parametrize("trailing", [False, True])
     def test_scaled_grouped_mm_rejects_unsupported_mnk4_swizzle(self, device, recipe, side, trailing):
         value = torch.ones(128, 128, device=device, dtype=torch.bfloat16)
