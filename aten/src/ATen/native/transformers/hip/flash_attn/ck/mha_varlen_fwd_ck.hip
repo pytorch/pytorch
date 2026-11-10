@@ -6,6 +6,11 @@
 #include <fmha_fwd.hpp>
 #include <mask.hpp>
 
+#if defined(FBCODE_CAFFE2)
+#include <c10/core/InferenceMode.h>
+#include <c10/util/env.h>
+#endif
+
 namespace pytorch_flash {
 
 // SFINAE trait to detect block-scale quantization fields in fmha_fwd_args.
@@ -317,11 +322,25 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
 
     auto opts = q.options();
     bool has_lse = true;
+#if defined(FBCODE_CAFFE2)
+    // Only fbcode builds generate CK forward instances without LSE. There,
+    // TORCH_ROCM_FA_COMPUTE_LSE=0 skips the softmax LSE in this varlen forward under
+    // InferenceMode, where no backward pass can need it, and returns it as
+    // {num_heads, 0} rather than the meta shape. It applies to the whole process, so
+    // only set it when nothing in the process reads the LSE.
+    static const bool lse_opt_out =
+        c10::utils::check_env("TORCH_ROCM_FA_COMPUTE_LSE") == false;
+    if (lse_opt_out && c10::InferenceMode::is_enabled()) {
+        has_lse = false;
+        TORCH_WARN_ONCE(
+            "TORCH_ROCM_FA_COMPUTE_LSE=0: CK varlen flash attention skips the softmax LSE "
+            "under InferenceMode and returns it with shape (num_heads, 0).");
+    }
+#endif
     bool has_dropout = p_dropout > 0.0f;
 
     at::Tensor softmax_lse;
-    // TODO - check gradient, only training require lse
-    softmax_lse = at::empty({num_heads, total_q}, opts.dtype(at::kFloat));
+    softmax_lse = at::empty({num_heads, has_lse ? total_q : 0}, opts.dtype(at::kFloat));
 
     at::Tensor p;
     if (return_dropout_randval) {
@@ -337,8 +356,12 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
     }
 
     int64_t counter_offset = batch_size * num_heads * ck_tile::get_warp_size();
-    auto rng_state = at::empty({2}, opts.dtype(at::kLong));
-    auto rng_state_ptr = reinterpret_cast<uint64_t*>(rng_state.data_ptr());
+    at::Tensor rng_state;
+    uint64_t* rng_state_ptr = nullptr;
+    if (has_dropout) {
+        rng_state = at::empty({2}, opts.dtype(at::kLong));
+        rng_state_ptr = reinterpret_cast<uint64_t*>(rng_state.data_ptr());
+    }
 
     if (p_dropout > 0.0)  {
         auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
@@ -361,7 +384,8 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
     // An empty batch or key sequence has no work: the tensors allocated above are
     // already the correct empty result, so skip the launch rather than reject it.
     if (batch_size > 0 && max_seqlen_k > 0) {
-        auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
+        auto drop_seed_offset = std::make_pair(
+            rng_state_ptr, rng_state_ptr == nullptr ? nullptr : rng_state_ptr + 1);
         auto stream = at::cuda::getCurrentCUDAStream().stream();
         ck_tile::stream_config stream_config{stream};
 
