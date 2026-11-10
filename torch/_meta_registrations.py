@@ -9144,22 +9144,43 @@ def meta_scaled_grouped_mm_v2(
         _out_dtype in (torch.bfloat16, torch.float16, torch.float32),
         lambda: "Only bf16, fp16, and fp32 high precision output types are supported for grouped gemm",
     )
-    from torch.nn.functional import ScalingType
+    from torch.nn.functional import ScalingType, SwizzleType
 
     rowwise = scale_recipe_a == scale_recipe_b == [ScalingType.RowWise.value]
     tensorwise = [ScalingType.TensorWise.value]
-    block_recipes = (
-        ScalingType.BlockWise1x128.value,
-        ScalingType.BlockWise128x128.value,
+    vec32 = ScalingType.BlockWise1x32.value
+    vec128 = ScalingType.BlockWise1x128.value
+    block128 = ScalingType.BlockWise128x128.value
+    mnk4 = SwizzleType.SWIZZLE_MN_K4.value
+    has_mnk4 = (
+        (scale_recipe_a != tensorwise or scale_recipe_b != tensorwise)
+        and not rowwise
+        and (mnk4 in swizzle_a or mnk4 in swizzle_b)
+    )
+    fp8_types = (torch.float8_e4m3fn, torch.float8_e5m2)
+    torch._check_value(
+        not has_mnk4
+        or (
+            scale_recipe_a == scale_recipe_b
+            and scale_recipe_a in ([vec32], [vec128])
+            and swizzle_a == swizzle_b == [mnk4]
+            and mat_a.dtype in fp8_types
+            and mat_b.dtype in fp8_types
+            and torch.float8_e4m3fn in (mat_a.dtype, mat_b.dtype)
+        ),
+        lambda: "Invalid scaling configuration for grouped GEMM: packed MNxK4 requires matching "
+        "BlockWise1x32 or BlockWise1x128 recipes, SWIZZLE_MN_K4 on both inputs, and a valid float8 input pair",
     )
     fp32_block = (
         len(scale_recipe_a) == len(scale_recipe_b) == 1
-        and scale_recipe_a[0] in block_recipes
-        and scale_recipe_b[0] in block_recipes
-        and ScalingType.BlockWise1x128.value in (scale_recipe_a[0], scale_recipe_b[0])
+        and scale_recipe_a[0] in (vec128, block128)
+        and scale_recipe_b[0] in (vec128, block128)
+        and vec128 in (scale_recipe_a[0], scale_recipe_b[0])
     )
-    bf16_only = not fp32_block and (
-        scale_recipe_a != tensorwise or scale_recipe_b != tensorwise
+    bf16_only = (
+        not fp32_block
+        and not has_mnk4
+        and (scale_recipe_a != tensorwise or scale_recipe_b != tensorwise)
     )
     message = "Grouped scaling configuration requires BFloat16 output"
     if rowwise:

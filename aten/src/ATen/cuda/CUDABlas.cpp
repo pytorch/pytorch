@@ -2361,6 +2361,18 @@ int grouped_scale_mode(CublasGroupedScaleLayout layout, bool use_fast_accum) {
     case CublasGroupedScaleLayout::Block128x128F32:
       TORCH_CHECK(!use_fast_accum, "scaled_gemm doesn't support fast accum with FP32 block scales");
       return CUBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F;
+    case CublasGroupedScaleLayout::Vec32MnK4UE8M0:
+#if CUBLAS_VERSION >= 130801
+      return CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_MN_K4_UE8M0;
+#else
+      TORCH_CHECK_NOT_IMPLEMENTED(false, "packed MNxK4 scaling requires a build with cuBLASLt >= 13.8.1 headers");
+#endif
+    case CublasGroupedScaleLayout::Vec128MnK4UE8M0:
+#if CUBLAS_VERSION >= 130801
+      return CUBLASLT_MATMUL_MATRIX_SCALE_VEC128_MN_K4_UE8M0;
+#else
+      TORCH_CHECK_NOT_IMPLEMENTED(false, "packed MNxK4 scaling requires a build with cuBLASLt >= 13.8.1 headers");
+#endif
   }
   TORCH_INTERNAL_ASSERT(false, "unsupported grouped GEMM scale layout");
 }

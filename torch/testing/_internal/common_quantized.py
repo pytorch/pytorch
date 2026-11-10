@@ -756,3 +756,10 @@ def generate_jagged_offs(E, M, multiple_of=16, dtype=torch.int32, device="cuda")
     selected_values, _ = torch.sort(selected_values)
 
     return selected_values.to(dtype).to(device)
+
+
+def to_mnk4(scales):
+    outer, inner = scales.shape
+    padded = torch.nn.functional.pad(scales, (0, -inner % 4, 0, -outer % 4))
+    packed = padded.reshape(padded.shape[0], padded.shape[1] // 4, 4).permute(1, 0, 2)
+    return packed.contiguous().flatten().to(torch.float8_e8m0fnu)
