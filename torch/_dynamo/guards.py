@@ -5267,10 +5267,11 @@ class GuardsStatePickler(FunctionPicklerBase):
                     inner_data,
                 )
 
-            # _dispatch_keys() on a fake reports the Python and
-            # PythonTLSSnapshot keys of the fake itself; the converter may
-            # have recorded the real tensor's keys (from_meta_and_device
-            # always does, from_real_tensor only for an mkldnn source).
+            # _dispatch_keys() on a fake reports the fake's own keys: besides
+            # the fake device's backend, Python and PythonTLSSnapshot for a
+            # Python FakeTensor and Fake for a C++ fake. A fake may instead
+            # have recorded the real tensor's keys, e.g. a fake of an mkldnn
+            # tensor (see Note [C++ fake dispatch keys] for a C++ fake).
             dispatch_keys = maybe_get_fake_dispatch_keys(obj)
             if dispatch_keys is None:
                 dispatch_keys = torch._C._dispatch_keys(obj)
