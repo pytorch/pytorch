@@ -4,7 +4,6 @@ import ast
 import base64
 import contextlib
 import functools
-import logging
 import os
 import re
 import textwrap
@@ -17,7 +16,6 @@ from typing_extensions import ParamSpec
 import torch
 import torch.utils._pytree as pytree
 from torch._precompile import (
-    _matching_cache,
     _parse_artifact_metadata,
     _runnable_from_pair,
     _source_literal,
@@ -26,10 +24,7 @@ from torch._precompile import (
     PrecompiledRunnable,
     PrecompileError,
 )
-from torch.compiler._no_compile import is_compilation_forbidden
 
-
-log = logging.getLogger(__name__)
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -73,12 +68,7 @@ def export_python(
 
     ``path`` is the graph's Inductor code, and that code is what runs; the rest of
     what Dynamo captured (the guards, the frame's bytecode and AOTAutograd's wrapper)
-    is one compressed line at its end. An edited file is served without its cache,
-    which was built for the captured code, so its edited kernels compile;
-    :func:`~torch.compiler.precompile.no_compilation` refuses that. The stale cache
-    stays until a recapture replaces it. A process serves one version of the file:
-    run a new process to pick up an edit, since loading an edited file where an
-    earlier version of it is loaded raises.
+    is one compressed line at its end.
 
     The file is trusted executable Python, locked to the PyTorch build and Python
     version that produced it. Decorate a function defined in an importable module:
@@ -150,8 +140,8 @@ def _exported_file(artifact: str) -> str:
         )
     if sources:
         lines += ["#"] + _comment(
-            "The graph code below is Inductor's output and is what runs: edit it, then "
-            "rerun in a new process. Running this file benchmarks it on random inputs."
+            "The graph code below is Inductor's output and is what runs. Running this "
+            "file benchmarks it on random inputs."
         )
         segment = ast.get_source_segment(artifact, sources[0])
         if segment is None or artifact.count(segment) != 1:
@@ -224,27 +214,14 @@ class _ExportedPython:
     def _load(self, *, trusted: bool = False) -> PrecompiledRunnable:
         with open(self._path, "rb") as f:
             python_code = _captured_artifact(f.read().decode(), self._path)
-        cache = _matching_cache(python_code, self._cache_path)
-        if cache is None:
-            if os.path.exists(self._cache_path):
-                stale = (
-                    f"{self._path} was edited after capture, so its cache "
-                    f"{self._cache_path} does not match it"
-                )
-            else:
-                stale = f"{self._path} has no cache at {self._cache_path}"
-            # The artifact's own backend: the decorator's may have changed since.
-            if is_compilation_forbidden() and (
-                _parse_artifact_metadata(python_code)["BACKEND"] == "inductor"
-            ):
-                raise PrecompileError(
-                    f"export_python: {stale}, and no_compilation() serves an inductor "
-                    "artifact only with its own cache. Serve it outside "
-                    f"no_compilation(), or delete {self._path} to recapture."
-                )
-            # An edit (or a missing cache) leaves nothing to accelerate: the edited
-            # graph compiles the kernels its code defines.
-            log.info("export_python: %s; serving it without the cache", stale)
+        try:
+            with open(self._cache_path, "rb") as f:
+                cache = f.read()
+        except OSError as e:
+            raise PrecompileError(
+                f"export_python: could not read {self._cache_path}, the cache of "
+                f"{self._path} ({e}). Delete {self._path} to recapture."
+            ) from e
         return _runnable_from_pair(python_code, cache, _trusted=trusted)
 
     def _capture(self, *args: object, **kwargs: object) -> object:
