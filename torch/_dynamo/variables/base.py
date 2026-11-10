@@ -2694,9 +2694,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and self.is_python_constant()
         ):
             protocol = args[0].as_python_constant()
-            return VariableTracker.build(
-                tx, self.as_python_constant().__reduce_ex__(protocol)
-            )
+            reduced = self.as_python_constant().__reduce_ex__(protocol)
+            if type(self) is variables.OrderedDictVariable:
+                from .iter import OrderedDictItemsIterator
+
+                # The reduction's last item iterates over the original mapping.
+                # Keep it linked to the tracked mapping instead of consuming the
+                # iterator returned by the temporary Python constant.
+                return variables.TupleVariable(
+                    [VariableTracker.build(tx, item) for item in reduced[:-1]]
+                    + [OrderedDictItemsIterator.create(self.items)]
+                )
+            return VariableTracker.build(tx, reduced)
 
         hints = [
             f"Avoid calling `{self.python_type_name()}.{name}` in your code.",

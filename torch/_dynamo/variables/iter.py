@@ -13,6 +13,7 @@ These classes integrate with Dynamo's variable tracking system to enable proper
 handling of iterator operations during code transformation and optimization.
 """
 
+import collections
 import inspect
 import itertools
 import operator
@@ -1037,6 +1038,17 @@ class DictValuesIterator(DictViewIterator):
 class DictItemsIterator(DictViewIterator):
     _cpython_type = type(iter({}.items()))
     view_type = "items"
+
+
+_ORDERED_DICT_ITERATOR_TYPE = type(iter(collections.OrderedDict().items()))
+
+
+class OrderedDictItemsIterator(DictViewIterator):
+    _cpython_type = _ORDERED_DICT_ITERATOR_TYPE
+    view_type = "items"
+
+    def python_type(self) -> type:
+        return _ORDERED_DICT_ITERATOR_TYPE
 
 
 class SetIterator(DictViewIterator):
