@@ -1845,6 +1845,10 @@ def _linalg_svd_meta(
 ):
     checkIsMatrix(A, "linalg.svd")
     checkFloatingOrComplex(A, "linalg.svd")
+    torch._check(
+        driver is None or driver in ("gesvd", "gesvdj", "gesvda"),
+        lambda: f"torch.linalg.svd: unknown svd driver {driver}. Expected one of gesvd, gesvdj, or gesvda.",
+    )
 
     batch_dims = list(A.shape[:-2])
     m = A.shape[-2]
@@ -3719,7 +3723,7 @@ def meta_avg_pool3d_backward(
 
 @register_meta(aten._adaptive_avg_pool2d.default)
 def meta_adaptive_avg_pool2d(self, output_size):
-    torch._check(
+    torch._check_value(
         self.ndim == 3 or self.ndim == 4,
         lambda: f"Expected 3D or 4D tensor, but got {self.shape}",
     )
@@ -3737,7 +3741,7 @@ def meta_adaptive_avg_pool2d(self, output_size):
 
 @register_meta(aten._adaptive_avg_pool3d.default)
 def meta_adaptive_avg_pool3d(self, output_size):
-    torch._check(
+    torch._check_value(
         self.ndim == 4 or self.ndim == 5,
         lambda: f"Expected 4D or 5D tensor, but got {self.shape}",
     )
@@ -3753,11 +3757,22 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
             lambda: f"adaptive_avg_pool2d_backward(): Expected grad_output to have non-zero \
                       size for non-batch dimensions, {grad_out.shape} with dimension {i} being empty",
         )
-    torch._check(
+    torch._check_value(
+        self.ndim == ndim,
+        lambda: f"adaptive_avg_pool2d_backward(): Expected dimensions {self.ndim} "
+        f"for `grad_output` but got dimensions {ndim}",
+    )
+    torch._check_value(
         ndim == 3 or ndim == 4,
         lambda: f"adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got {self.shape}",
     )
-    torch._check(
+    for i in range(ndim - 2):
+        torch._check_value(
+            self.size(i) == grad_out.size(i),
+            lambda: f"adaptive_avg_pool2d_backward(): input and grad_output must have the same size at dim {i}, "
+            f"but got {self.size(i)} and {grad_out.size(i)}",
+        )
+    torch._check_value(
         self.dtype == grad_out.dtype,
         lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}",
     )
@@ -3771,6 +3786,17 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
 @out_wrapper("grad_input")
 def meta__adaptive_avg_pool3d_backward(grad_output, self):
     _adaptive_pool_empty_output_check(grad_output, "adaptive_avg_pool3d_backward")
+    torch._check_value(
+        self.ndim == grad_output.ndim,
+        lambda: f"adaptive_avg_pool3d_backward(): Expected dimensions {self.ndim} "
+        f"for `grad_output` but got dimensions {grad_output.ndim}",
+    )
+    for i in range(grad_output.ndim - 3):
+        torch._check_value(
+            self.size(i) == grad_output.size(i),
+            lambda: f"adaptive_avg_pool3d_backward(): input and grad_output must have the same size at dim {i}, "
+            f"but got {self.size(i)} and {grad_output.size(i)}",
+        )
     return torch.empty_like(self, memory_format=torch.legacy_contiguous_format)
 
 
@@ -3961,19 +3987,27 @@ def nonzero(self):
     )
 
 
+def _check_index_tensor_types(indices):
+    # Mirrors checkIndexTensorTypes(allow_int=true) in
+    # aten/src/ATen/native/IndexingUtils.h
+    for index in indices:
+        if index is not None:
+            torch._check_index(
+                index.dtype in [torch.long, torch.int, torch.uint8, torch.bool],
+                lambda: "tensors used as indices must be long, int, byte or bool tensors",
+            )
+
+
 @register_meta([aten.index.Tensor, aten._unsafe_index.Tensor])
 def meta_index_Tensor(self, indices):
     torch._check(bool(indices), lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
     # checkIndexTensorTypes and expandTensors
+    _check_index_tensor_types(indices)
     result: list[Tensor | None] = []
     for i, index in enumerate(indices):
         if index is not None:
-            torch._check(
-                index.dtype in [torch.long, torch.int, torch.int8, torch.bool],
-                lambda: "tensors used as indices must be long, int, byte or bool tensors",
-            )
-            if index.dtype in [torch.int8, torch.bool]:
+            if index.dtype in [torch.uint8, torch.bool]:
                 nonzero = index.nonzero()
                 k = len(result)
                 torch._check_index(
@@ -5038,6 +5072,7 @@ def meta_rrelu_with_noise_(
 
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
+    _check_index_tensor_types(indices)
     return torch.empty_like(self)
 
 
@@ -5058,12 +5093,13 @@ def meta__masked_scale(self, mask, scale):
 @register_meta(aten.masked_scatter_)
 def meta_masked_scatter_(self, mask, source):
     torch._check(
-        mask.dtype in (torch.bool, torch.uint8), lambda: "Mask must be bool or uint8"
-    )
-    torch._check(
         self.dtype == source.dtype,
         lambda: "masked_scatter: expected self and source to have same "
         f"dtypes but got {self.dtype} and {source.dtype}",
+    )
+    torch._check(
+        mask.dtype == torch.bool,
+        lambda: f"masked_scatter_ only supports boolean masks, but got mask with dtype {mask.dtype}",
     )
     return self
 
@@ -5083,6 +5119,7 @@ def meta_masked_scatter_backward(self, mask, sizes):
 
 @register_meta(aten.index_put_.default)
 def meta_index_put_(self, indices, values, accumulate=False):
+    _check_index_tensor_types(indices)
     return self
 
 

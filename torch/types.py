@@ -12,8 +12,7 @@ from builtins import (  # noqa: F401
     str as _str,
 )
 from collections.abc import Sequence
-from typing import Any, IO, TYPE_CHECKING, TypeAlias, Union
-from typing_extensions import Self
+from typing import Any, IO, Self, TYPE_CHECKING, TypeAlias, Union
 
 # `as` imports have better static analysis support than assignment `ExposedType: TypeAlias = HiddenType`
 from torch import (  # noqa: F401
