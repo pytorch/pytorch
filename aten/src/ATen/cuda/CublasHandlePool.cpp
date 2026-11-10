@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <regex>
 #include <shared_mutex>
 #include <string>
@@ -40,8 +41,73 @@
  * whereas for ROCm builds, it is a distinct function.
  *
  * Additionally, hipblaslt cannot share a single handle across multiple streams.
- * On ROCm, getCurrentCUDABlasLtHandle returns a handle unique to each (device, stream)
- * pair, rather than just per-device like the cublas handle pool.
+ * On ROCm, getCurrentCUDABlasLtHandle returns a handle unique to each (thread, device,
+ * stream), rather than one per (thread, device) like the CUDA cublas handle pool.
+ *
+ * The reason is device state each handle owns: the synchronizer flags that
+ * hipblaslt's single-kernel split-K solutions signal and spin on. Two launches
+ * on one handle that overlap on different streams can leave a workgroup
+ * spinning forever or corrupt the output. A thread that exits returns its
+ * handles to the pool while work it queued may still be running, so each
+ * handle goes back to the list of the stream it ran on, and only a thread
+ * asking for a handle for that stream takes it again, so its launches follow
+ * that work in stream order. A handle never moves to another stream, though a
+ * new stream created at a destroyed stream's address counts as the same stream
+ * (see DeviceThreadHandlePool). For the same reason, eager ATen operations get
+ * their internal rocBLAS handle per (thread, device, stream): on gfx950, gfx1200
+ * and gfx1201, ROCm 7.0's rocBLAS runs GEMMs through a hipblaslt handle
+ * embedded in each rocBLAS handle. This applies on every GPU, because which GPUs
+ * rocBLAS does this on depends on the rocBLAS version, and rocBLAS offers no way
+ * to ask.
+ *
+ * Not covered: a captured GEMM keeps using the handle it was captured with
+ * whenever the graph is replayed, so a replay can overlap other work on that
+ * handle. Captures use one internal rocBLAS handle per (thread, device) for all
+ * their streams. Tracked in https://github.com/pytorch/pytorch/issues/203474,
+ * which covers both graph-owned handles and the fix in hipBLASLt
+ * (https://github.com/ROCm/rocm-libraries/issues/13316).
+ *
+ * Also not covered: the cuSOLVER handle, which rocSOLVER uses as a rocBLAS
+ * handle, is one per (thread, device), moves between streams and passes to any
+ * thread, so if rocSOLVER's GEMMs run through rocBLAS's hipblaslt backend, it
+ * can overlap in the same way.
+ *
+ * Creating a handle allocates device memory, and creating a rocBLAS handle also
+ * frees the arena rocBLAS allocated, which synchronizes the device. A pool's
+ * lock is shared by threads on every device, so stream-keyed handles, and the
+ * spares created before a capture, are created without it; a thread's own
+ * per-(thread, device) handles are still created under it, once each.
+ * Stream-keyed handles are not created while the current stream is capturing,
+ * but other streams are not checked: a thread's first eager GEMM on a stream new
+ * to it can create one while another thread captures in global mode, or while
+ * this thread captures on a stream the current stream has not joined, and
+ * global mode prohibits those calls. Before the capture begins, from each such
+ * thread on each stream it will use, run a GEMM with each BLAS backend it will
+ * use; for the rocBLAS handles, getCurrentCUDABlasHandle() also works. A thread
+ * whose first rocBLAS operation runs inside a capture, such as an autograd
+ * worker, still creates its per-(thread, device) internal handle there.
+ *
+ * hipblasLtCreate zeroes the new handle's synchronizer with hipMemset, which
+ * returns before the zeroing runs: it is queued on the legacy stream, and no
+ * other stream is ordered after it. If it lands while a split-K kernel runs on
+ * the handle, that kernel can spin forever, or leave flags set that hang a
+ * later one. So creating a hipblaslt handle waits for the legacy stream, and
+ * so for everything queued on it before. Creating a rocBLAS handle synchronizes
+ * the device after creating its embedded hipblaslt handle, which covers that
+ * handle the same way.
+ *
+ * A stream-keyed handle passes only to the next thread on its stream, whose
+ * work is ordered after work queued on that stream alone, so outside capture,
+ * callers must run work on a handle only on the stream it was returned for.
+ * Requesting a rocBLAS handle again on that stream with setup points it back at
+ * the stream without waiting for other streams. A caller that moves a handle to
+ * another stream with rocblas_set_stream must synchronize its stream first, as
+ * rocBLAS requires, and synchronize the other stream before requesting the
+ * handle again or letting the thread exit. With workspace caching enabled, the
+ * public handle is the one ATen's own rocBLAS operations use on that stream, and
+ * each of them points it back the same way, so the caller must also synchronize
+ * the other stream before running them on the original stream.
+ * docs/source/notes/hip.rst states the same rule for users.
  *
  * The workspace pools are separate for ROCm. When workspace caching is enabled on CUDA,
  * TORCH_CUBLASLT_UNIFIED_WORKSPACE can be used to unify the workspace pools.
@@ -70,6 +136,16 @@ void createCublasLtHandle(cublasLtHandle_t *handle) {
       "captured. hipBLASLt handles are created per (thread, stream) on first "
       "use; run a hipBLASLt op on this thread and stream before capture begins.");
   TORCH_CUDABLAS_CHECK(cublasLtCreate(handle));
+  // It also zeroes the handle's synchronizer with a hipMemset still queued on
+  // the legacy stream; see Note [hipblaslt handles]. The raw call keeps this
+  // internal wait out of torch.cuda.set_sync_debug_mode.
+  const cudaError_t status =
+      C10_CUDA_ERROR_HANDLED(cudaStreamSynchronize(nullptr));
+  if (status != cudaSuccess) {
+    cublasLtDestroy(*handle);
+    *handle = nullptr;
+    AT_CUDA_CHECK(status);
+  }
 }
 
 void destroyCublasLtHandle(cublasLtHandle_t handle) {
@@ -234,6 +310,20 @@ void createCaptureCublasHandle(cublasHandle_t *handle) {
   createInternalCublasHandle(handle);
 }
 using CuBlasCapturePoolType = DeviceThreadHandlePool<cublasHandle_t, createCaptureCublasHandle, destroyCublasHandle>;
+
+// Eager ATen operations get an internal handle per (device, stream), held in
+// this pool: with rocBLAS's hipBLASLt backend, a rocBLAS handle owns the
+// split-K synchronizer of an embedded hipBLASLt handle (see Note [hipblaslt
+// handles]). Captures keep using the thread's CuBlasPoolType handle, because a
+// stream first used mid-capture cannot create a handle.
+// The distinct create function makes this pool a separate type, and so a
+// separate singleton, from CuBlasPoolType. A shared singleton would also share
+// CuBlasPoolType's available_handles, which holds handles exited threads used
+// on any stream, and hand them to a stream.
+void createStreamInternalCublasHandle(cublasHandle_t *handle) {
+  createInternalCublasHandle(handle);
+}
+using CuBlasStreamPoolType = DeviceThreadHandlePool<cublasHandle_t, createStreamInternalCublasHandle, destroyCublasHandle>;
 
 // Workspaces bound to capture handles, keyed by (capture id, handle, stream),
 // and hipBLASLt workspaces handed out by getCUDABlasLtWorkspace under capture,
@@ -694,7 +784,29 @@ static typename PoolType::PoolWindow& getCuBlasPoolWindow() {
   return *myPoolWindow;
 }
 
+#ifdef USE_ROCM
+static cublasHandle_t reserveInternalCublasHandle(
+    c10::DeviceIndex device,
+    cudaStream_t stream) {
+  // Reserved on every call, so that it exists before any capture this thread
+  // joins, including one begun with hipStreamBeginCapture rather than
+  // CUDAGraph::capture_begin(). Outside captures it sits idle: one more handle
+  // per (thread, device), which embeds a hipBLASLt handle where rocBLAS uses
+  // that backend.
+  cublasHandle_t thread_handle =
+      getCuBlasPoolWindow<CuBlasPoolType>().reserve(device);
+  if (c10::cuda::captureStatusMayInitCtx(stream) !=
+      c10::cuda::CaptureStatus::None) {
+    return thread_handle;
+  }
+  return getCuBlasPoolWindow<CuBlasStreamPoolType>().reserve(
+      device, static_cast<void*>(stream));
+}
+#endif
+
+// `stream` is the current stream, if the caller already has it.
 static cublasHandle_t getCurrentCUDABlasHandleImpl(
+    std::optional<c10::cuda::CUDAStream> stream,
     void* workspace,
     size_t workspace_size,
     WorkspaceMode workspace_mode,
@@ -712,7 +824,14 @@ static cublasHandle_t getCurrentCUDABlasHandleImpl(
   }
 #endif
 
+#ifdef USE_ROCM
+  if (!stream) {
+    stream = c10::cuda::getCurrentCUDAStream();
+  }
+  cublasHandle_t handle = reserveInternalCublasHandle(device, *stream);
+#else
   cublasHandle_t handle = getCuBlasPoolWindow<CuBlasPoolType>().reserve(device);
+#endif
 
   if (!setup) {
     return handle;
@@ -720,7 +839,7 @@ static cublasHandle_t getCurrentCUDABlasHandleImpl(
 
   setupCUDABlasHandle(
       handle,
-      c10::cuda::getCurrentCUDAStream(),
+      stream ? *stream : c10::cuda::getCurrentCUDAStream(),
       workspace,
       workspace_size,
       workspace_mode);
@@ -803,7 +922,7 @@ static cublasHandle_t getCaptureCublasHandle(
 cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
   if (isCUDABlasWorkspaceCachingEnabled()) {
     return getCurrentCUDABlasHandleImpl(
-        nullptr, 0, WorkspaceMode::Cached, setup);
+        std::nullopt, nullptr, 0, WorkspaceMode::Cached, setup);
   }
 #ifdef USE_ROCM
   c10::DeviceIndex device = 0;
@@ -818,10 +937,12 @@ cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
     handle = getCaptureCublasHandle(device, raw_stream, *capture_id);
   } else {
     // Callers request the public handle to keep handle creation out of stream
-    // capture, so create this thread's internal handle too. Under capture the
-    // spare capture handle serves a new thread; creating an internal handle
-    // there would allocate and free its arena on a capturing device.
-    (void)getCuBlasPoolWindow<CuBlasPoolType>().reserve(device);
+    // capture, so create the internal handles that ATen operations on this
+    // thread use too: the stream's, for eager work, and the thread's, for
+    // captures. Under capture the spare capture handle serves a new thread;
+    // creating an internal handle there would allocate and free its arena on a
+    // capturing device.
+    (void)reserveInternalCublasHandle(device, raw_stream);
     // A rocBLAS workspace must not be used by two streams at once, and
     // rocblas_set_stream does not wait for the old stream, so each stream gets
     // its own public handle.
@@ -834,7 +955,7 @@ cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
   return handle;
 #else
   return getCurrentCUDABlasHandleImpl(
-      nullptr, 0, WorkspaceMode::Default, setup);
+      std::nullopt, nullptr, 0, WorkspaceMode::Default, setup);
 #endif
 }
 
@@ -889,7 +1010,7 @@ CUDABlasHandleWithWorkspace getCurrentCUDABlasHandleWithWorkspace() {
   auto workspace = allocateCUDABlasWorkspace(workspace_size);
   void* workspace_ptr = workspace.get();
   auto handle = getCurrentCUDABlasHandleImpl(
-      nullptr, 0, WorkspaceMode::Default, false);
+      stream, nullptr, 0, WorkspaceMode::Default, false);
   CUDABlasHandleWithWorkspace scoped_handle(
       handle, stream, std::move(workspace), true);
   setupCUDABlasHandle(
@@ -922,13 +1043,7 @@ void ensureCublasLtHandlesAvailable(size_t n) {
   // handle for that (device, stream) key yet.
   c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
-  auto pool = getCuBlasLtPool();
-  std::lock_guard<std::mutex> guard(pool->mutex);
-  while (pool->available_handles[device].size() < n) {
-    pool->created_handles[device].emplace_back(true /*create*/);
-    pool->available_handles[device].push_back(
-        pool->created_handles[device].back().handle);
-  }
+  getCuBlasLtPool()->ensureAvailable(device, n);
 }
 
 void prepareCaptureCublasHandles() {
@@ -945,13 +1060,7 @@ void prepareCaptureCublasHandles() {
   }
   (void)getCuBlasPoolWindow<CuBlasCapturePoolType>().reserve(device);
   // For another thread (e.g. an autograd worker) in the capture.
-  auto pool = getCuBlasPool<CuBlasCapturePoolType>();
-  std::lock_guard<std::mutex> guard(pool->mutex);
-  if (pool->available_handles[device].empty()) {
-    pool->created_handles[device].emplace_back(true /*create*/);
-    pool->available_handles[device].push_back(
-        pool->created_handles[device].back().handle);
-  }
+  getCuBlasPool<CuBlasCapturePoolType>()->ensureAvailable(device, 1);
 }
 
 void releaseCaptureCublasWorkspaces(c10::CaptureId_t capture_id) {

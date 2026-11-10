@@ -24,6 +24,11 @@ on:
         required: true
         type: string
         description: Desired CUDA version
+      UPLOAD_SUBFOLDER:
+        required: false
+        type: string
+        default: ""
+        description: Upload subfolder override; defaults to DESIRED_CUDA
       GPU_ARCH_VERSION:
         required: false
         type: string
@@ -144,7 +149,7 @@ jobs:
         shell: bash
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
-          UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
+          UPLOAD_SUBFOLDER: "${{ inputs.UPLOAD_SUBFOLDER || inputs.DESIRED_CUDA }}"
           BUILD_NAME: ${{ inputs.build_name }}
           R2_UPLOAD: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/nightly') && 'true' || '' }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
