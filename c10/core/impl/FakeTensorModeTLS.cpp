@@ -62,7 +62,7 @@ void FakeTensorModeTLS::reset_state() {
     return;
   }
   // Released once the slot and key are updated, as releasing the last
-  // reference to a handle releases its mode's Python object, running Python
+  // reference to a mode can release its converter, running Python
   auto state = std::move(fakeTensorModeState.state);
   tls_set_dispatch_key_included(DispatchKey::Fake, false);
 }
