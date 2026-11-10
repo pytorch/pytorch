@@ -408,9 +408,9 @@ _ORDERED_COL_GENERAL_NORM_MIN_OUTPUTS = 16384
 # 32768-262144; sum, amax, all, any and count_nonzero won 4.4-39x at R 512K-4M (C
 # 128-4096), and all, any and count_nonzero 1.4-16x at R 32768-1M. At B * C = 32 views
 # ran 0.37-2.6x. Below 192 columns, low R loses: at C = 128, R 24577-28000 ran sum at
-# 1.07-1.21x but all at 0.82-0.96x and bf16 count_nonzero at 0.94-0.97x, while from
-# R = 32769 every trait won 1.30-2.11x; C = 192 and 256 won 1.19-3.3x at every R from
-# 24577.
+# 1.07-1.21x but all at 0.82-0.96x and bf16 count_nonzero at 0.94-0.97x, while all and
+# any won 1.43-1.49x at R = 32768 and every trait 1.30-2.11x from R = 32769, so narrow
+# views route from R = 32768; C = 192 and 256 won 1.19-3.3x at every R from 24577.
 # General-p norms (an exp/log leaf; p = 3 and 0.5 measured) run 0.34-0.36x at C = 128
 # and R = 32768 but 1.0-2.1x from C = 1024. Routed views compile one stage-one kernel
 # per R, ragged last partitions included: C = 128 split views compiled in about 9.5 s on
