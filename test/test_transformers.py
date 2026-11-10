@@ -5797,9 +5797,7 @@ class TestSDPAAccelerator(NNTestCase):
                                           torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward())
 
     @onlyCUDA
-    # The AOTriton fp32 attn_fwd kernel (BLOCK_M=256, BLOCK_N=64) is not
-    # run-to-run deterministic on gfx950, so repeated forward passes differ
-    # before the backward even runs. The backward itself is deterministic.
+    # AOTriton's fp32 forward is not run-to-run deterministic on gfx950.
     @skipIfRocmArch(MI350_ARCH)
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
     def test_mem_eff_backwards_determinism(self, device):
