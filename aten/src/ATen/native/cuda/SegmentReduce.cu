@@ -277,7 +277,6 @@ Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
   int64_t segment_count = is_offsets_like ?
                           lengths_or_offsets_contig.size(axis) - 1 :
                           lengths_or_offsets_contig.size(axis);
-  int64_t lengths_stride_axis = lengths_or_offsets_contig.stride(axis);
   auto grad_input = at::zeros({data_contig.sizes()}, grad_contig.options());
 
   auto offsets = lengths_or_offsets_contig;
@@ -306,11 +305,14 @@ Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
 
   num_blocks = std::max(num_blocks, (int64_t)1);
 
-  auto data_stride_axis = data_contig.stride(axis);
+  // Strides of the dense row-major buffers, from sizes: a contiguous tensor's
+  // size-1 dims can carry any stride. axis is the last dim of lengths/offsets.
+  int64_t data_stride_axis = inner_offset;
   auto data_size_axis = data_contig.size(axis);
-  auto output_stride_axis = output_contig.stride(axis);
+  int64_t output_stride_axis = inner_offset;
   auto output_size_axis = output_contig.size(axis);
-  auto offsets_stride_axis = offsets.stride(axis);
+  int64_t lengths_stride_axis = 1;
+  int64_t offsets_stride_axis = 1;
 
   AT_DISPATCH_INDEX_TYPES(
       lengths_or_offsets_contig.scalar_type(), "_segment_reduce_cuda_lengths_offsets_backward_kernel1", ([&] {
@@ -402,7 +404,6 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
   TORCH_CHECK(lengths_or_offsets.is_contiguous());
   axis = lengths_or_offsets.dim() - 1;
   int64_t segment_count = is_offsets_like ? lengths_or_offsets.size(axis) - 1 : lengths_or_offsets.size(axis);
-  int64_t lengths_stride_axis = lengths_or_offsets.stride(axis);
   auto output_shape = data.sizes().vec();
   output_shape[axis] = segment_count;
   auto output = at::empty(output_shape, data.options());
@@ -435,11 +436,14 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
 
   num_blocks = std::max(num_blocks, (int64_t)1);
 
-  auto data_stride_axis = data.stride(axis);
+  // Strides of the dense row-major buffers, from sizes: a contiguous tensor's
+  // size-1 dims can carry any stride. axis is the last dim of lengths/offsets.
+  int64_t data_stride_axis = inner_offset;
   auto data_size_axis = data.size(axis);
-  auto output_stride_axis = output.stride(axis);
+  int64_t output_stride_axis = inner_offset;
   auto output_size_axis = output.size(axis);
-  auto offsets_stride_axis = offsets.stride(axis);
+  int64_t lengths_stride_axis = 1;
+  int64_t offsets_stride_axis = 1;
 
   AT_DISPATCH_INDEX_TYPES(
       lengths_or_offsets.scalar_type(), "_segment_reduce_cuda_kernel1", ([&] {
