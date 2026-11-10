@@ -182,12 +182,18 @@ def _exported_file(artifact: str) -> str:
         lines += _comment(
             f"Served only with the captured values of: {', '.join(pinned)}."
         )
-    groups = ("DROPPED_GUARDS", "RISKY_DROPPED_GUARDS", "POLICY_DROPPED_GUARDS")
-    unchecked = [
-        n for group in groups for _, n in cast(list[list[str]], meta.get(group, []))
-    ]
-    if unchecked:
-        lines += _comment(f"Guards not checked when served: {', '.join(unchecked)}.")
+
+    def guards(group: str) -> list[str]:
+        return [f"{t} {n}" for t, n in cast(list[list[str]], meta.get(group, []))]
+
+    dropped = guards("DROPPED_GUARDS") + guards("POLICY_DROPPED_GUARDS")
+    if unchecked := ", ".join(dict.fromkeys(dropped)):
+        lines += _comment(f"Guards not checked when served: {unchecked}.")
+    # The risky drops are a subset of the dropped ones.
+    if risky := ", ".join(guards("RISKY_DROPPED_GUARDS")):
+        lines += _comment(
+            f"Of those, these can change what runs if they differ when served: {risky}."
+        )
     if sources:
         segment = ast.get_source_segment(artifact, sources[0])
         if segment is None or artifact.count(segment) != 1:

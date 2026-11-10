@@ -50,6 +50,11 @@ def breaks(x):
     print("graph break")
     return y.cos()
 
+FACTOR = 3
+
+def factored(x):
+    return x * FACTOR
+
 def matmul(x, y):
     return x @ y
 
@@ -193,6 +198,25 @@ class TestExportPythonFile(_ExportPythonTestCase):
         text = _exported_file(artifact)
         self.assertNotIn(_CODE_BEGIN, text)
         self.assertEqual(_captured_artifact(text, "scaled.py"), artifact)
+
+    def test_the_header_names_the_guards_the_file_is_served_without(self):
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+
+        def drop_factor(entries):
+            keep = default_guard_filter_fn(entries)
+            return [k and "FACTOR" not in e.name for k, e in zip(keep, entries)]
+
+        tracer = DynamoTracer(
+            fullgraph=True, guard_filter_fn=drop_factor, require_no_risky_drops=False
+        )
+        artifact, _ = self._artifact("factored", torch.randn(4), tracer=tracer)
+        header = _exported_file(artifact).partition(_CODE_BEGIN)[0]
+        header = " ".join(line.removeprefix("# ") for line in header.splitlines())
+        # Each dropped guard once, with its type, and the risky ones again on their own.
+        guards = "CONSTANT_MATCH G['FACTOR'], EQUALS_MATCH G['FACTOR']"
+        self.assertIn(f"Guards not checked when served: {guards}.", header)
+        risky = "Of those, these can change what runs if they differ when served"
+        self.assertIn(f"{risky}: {guards}.", header)
 
     def test_a_capture_that_is_not_one_graph_is_refused(self):
         x = torch.randn(4)
