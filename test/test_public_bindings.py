@@ -12,6 +12,7 @@ from collections.abc import Callable
 import torch
 from torch._utils_internal import get_file_path_2  # @manual
 from torch.testing._internal.common_utils import (
+    IS_FBCODE,
     IS_JETSON,
     IS_MACOS,
     IS_WINDOWS,
@@ -25,6 +26,27 @@ log = logging.getLogger(__name__)
 
 
 class TestPublicBindings(TestCase):
+    def test_retired_torchscript_exports(self):
+        for name in (
+            "fork",
+            "freeze",
+            "interface",
+            "load",
+            "optimize_for_inference",
+            "save",
+            "script",
+            "script_method",
+            "set_fusion_strategy",
+            "trace",
+            "trace_module",
+            "wait",
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    name in torch.jit.__all__, IS_FBCODE and name != "script_method"
+                )
+                self.assertEqual(hasattr(torch.jit, name), IS_FBCODE)
+
     def test_no_new_reexport_callables(self):
         """
         This test aims to stop the introduction of new re-exported callables into
@@ -347,9 +369,6 @@ class TestPublicBindings(TestCase):
             "torch.testing._internal.distributed.rpc.examples.reinforcement_learning_rpc_test",
             "torch.testing._internal.distributed.rpc.faulty_agent_rpc_test",
             "torch.testing._internal.distributed.rpc.faulty_rpc_agent_test_fixture",
-            "torch.testing._internal.distributed.rpc.jit.dist_autograd_test",
-            "torch.testing._internal.distributed.rpc.jit.rpc_test",
-            "torch.testing._internal.distributed.rpc.jit.rpc_test_faulty",
             "torch.testing._internal.distributed.rpc.rpc_agent_test_fixture",
             "torch.testing._internal.distributed.rpc.rpc_test",
             "torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture",
@@ -381,6 +400,7 @@ class TestPublicBindings(TestCase):
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_buffer_ops",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_gemm_utils",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_grouped_gemm_gfx950",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_wgrad_gfx950",  # depends on flydsl
             "torch._inductor.runtime.triton_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",

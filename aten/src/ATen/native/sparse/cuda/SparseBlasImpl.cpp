@@ -818,13 +818,9 @@ void addmm_out_sparse_csr(
     addmm_out_sparse_csr(AB, mat1, mat2, static_cast<Scalar>(0), alpha, AB);
 
     // Handling accumulation into result.
-    // No add for reduced dtypes, so we try to deploy add on values.
-    // Of course, that only works when the sparsity patterns do match,
-    // which we check under the assumption that it is unlikely that
-    // sp(mat1 @ mat2) == sp(result). This path introduces a host-device sync,
-    // but spgemm syncs anyway, since the result's shape is data-dependent.
-    // When sp(mat1 @ mat2) != sp(result), then, alas, (mat1 @ mat2) and result
-    // will need an upcast with reduced dtypes.
+    // No add for reduced dtypes, so we try to deploy add on values,
+    // and that only possible when sp(mat1 @ mat2) == sp(result), which we check.
+    // When sp do no match, we use float32 add instead.
     const auto [AB_compressed, AB_plain] = at::sparse_csr::getCompressedPlainIndices(AB);
     const auto [C_compressed, C_plain] = at::sparse_csr::getCompressedPlainIndices(result);
     if (
