@@ -97,13 +97,30 @@ class TestScatterGather(TestCase):
         helper([50, 8, 7], 100)
         helper([50, 3, 4, 5], 100)
 
-    def test_scatter_expanded_index_smaller_than_self(self):
-        # index may be smaller than self on the non-scatter dims
-        self_ = torch.zeros(4, 32)
-        idx = torch.tensor([0, 2, 3]).unsqueeze(1).expand(3, 16)
-        src = torch.randn(3, 16)
-        expected = self_.scatter_add(0, idx.contiguous(), src)
-        self.assertEqual(self_.scatter_add(0, idx, src), expected)
+    # index may be smaller than self and src on the non-scatter dims. The last
+    # case has a gap inside each row, which the expanded-index kernel cannot walk.
+    @parametrize("self_size,index_size,src_size", [
+        ((4, 32), (3, 16), (3, 16)),
+        ((4, 16), (3, 16), (5, 24)),
+        ((4, 3, 16), (3, 2, 16), (3, 2, 16)),
+        ((4, 3, 32), (3, 1, 16), (3, 2, 32)),
+        ((4, 2, 32), (3, 2, 16), (3, 2, 16)),
+    ])
+    def test_scatter_gather_expanded_index_smaller_than_self(self, self_size, index_size, src_size):
+        input = torch.randn(self_size)
+        src = torch.randn(src_size)
+        # The index repeats along every dim but 0; its size-1 dims get an arbitrary stride
+        strides = (1, *[71 if n == 1 else 0 for n in index_size[1:]])
+        for index_dtype in (torch.long, torch.int32):
+            idx = torch.tensor([0, 2, 3], dtype=index_dtype).as_strided(index_size, strides)
+            self.assertEqual(input.scatter_add(0, idx, src), input.scatter_add(0, idx.contiguous(), src))
+            self.assertEqual(torch.gather(input, 0, idx), torch.gather(input, 0, idx.contiguous()))
+        idx = torch.tensor([0, 2, 3]).as_strided(index_size, strides)
+        for reduce in ["sum", "prod", "mean", "amax", "amin"]:
+            for include_self in [True, False]:
+                out = input.scatter_reduce(0, idx, src, reduce=reduce, include_self=include_self)
+                expected = input.scatter_reduce(0, idx.contiguous(), src, reduce=reduce, include_self=include_self)
+                self.assertEqual(out, expected)
 
     @parametrize("dtype", [torch.float32, torch.float64, torch.bfloat16])
     def test_gather_expanded_index(self, dtype):
