@@ -479,7 +479,6 @@ skip_guards_on_constant_func_defaults = False
 #     • __code__        • __closure__
 #     • __defaults__    • __kwdefaults__
 #     • __annotations__ • __mro__
-# Class __getattribute__ rebinding is covered by the same assumption.
 #
 # It is fine to mutate the objects they already point to (e.g. tweak an element
 # inside __defaults__), but assignments like
