@@ -138,11 +138,21 @@ _DSL_RUNTIME_OBJECT_FIX = (
 
 class _CuteDSLConstantRules(ConstantRules):
     def is_dsl_value(self, value: object) -> bool:
+        # Keyed by its own equality, never by its attributes: host code makes only
+        # cutlass values that are singletons or compare by value (dtype classes, enum
+        # members, op dataclasses); layouts and atoms exist only in a @cute.jit trace.
         return _is_cutlass_type(type(value))
 
     def scalar_value(self, value: object) -> bool | int | float | None:
-        # A cutlass Numeric, such as cutlass.Float32(2.0), is keyed by its value.
-        inner = getattr(value, "value", None) if self.is_dsl_value(value) else None
+        # A cutlass Numeric, such as cutlass.Float32(2.0), is keyed by its value; other
+        # cutlass values with a .value (a cute.ScaledBasis also has a mode, an enum
+        # member is a singleton) are not. Matched by name: cutlass need not be imported.
+        if not any(
+            c.__name__ == "Numeric" and c.__module__ == "cutlass.base_dsl.typing"
+            for c in type(value).__mro__
+        ):
+            return None
+        inner = getattr(value, "value", None)
         return inner if isinstance(inner, (bool, int, float)) else None
 
     def refusal(self, cls: type) -> str | None:

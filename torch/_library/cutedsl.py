@@ -73,7 +73,8 @@ def wrap_cutedsl(
     the side table that holds them for make_fx and export: a list, tuple, dict,
     dataclass instance or plain object by its type and contents, which must not hold
     a tensor or a DSL tensor, pointer or stream, and must be hashable values or such
-    containers.
+    containers. A list, tuple or dict subclass other than an OrderedDict, a namedtuple
+    or a torch.Size is refused.
 
     Examples:
 
