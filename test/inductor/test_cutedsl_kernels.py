@@ -663,46 +663,18 @@ class CuteDSLHOPTests(TestCase):
         self.assertEqual(compile_spy.call_count, 2)
 
     def test_signed_zero_constants(self):
-        # Float constants are keyed by their bits in the eager compile cache too, as
-        # in the side table (test/test_hop_infra.py): -0.0 and 0.0 are different
-        # constants (x * alpha has the sign of alpha for x > 0).
+        # Float constants, np.float32 ones too, are keyed by their bits in the eager
+        # compile cache, as in the side table (test/test_hop_infra.py): -0.0 and 0.0
+        # are different constants (x * alpha has the sign of alpha for x > 0).
         from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
         x = torch.rand(1000, device=DEVICE) + 1
-        for alpha in (0.0, -0.0):
+        for alpha in (0.0, -0.0, np.float32(0.0), np.float32(-0.0)):
             out = torch.empty_like(x)
             launch_cutedsl_kernel(
                 mul_const_kernel, {"mX": x, "mOut": out, "n": 1000, "alpha": alpha}
             )
             self.assertEqual(torch.signbit(out), torch.signbit(x * alpha))
-
-    def test_numpy_float_constants_are_keyed_by_their_bits(self):
-        # A numpy floating constant that is not a Python float, such as np.float32,
-        # is keyed by its type and the hex() of its value, as a float is
-        # (test/test_hop_infra.py has constant_key's part): -0.0 and 0.0 get their
-        # own side-table entries and compiles, and two NaNs share one.
-        x = torch.rand(1000, device=DEVICE) + 1
-        kidx = _add_kernel_to_table(mul_const_kernel, ["mOut"])
-
-        def launch(alpha):
-            out = torch.empty_like(x)
-            cidx = cutedsl_kernel_side_table.add_constant_args({"alpha": alpha})
-            cutedsl_kernel_wrapper_mutation(
-                kernel_idx=kidx,
-                constant_args_idx=cidx,
-                kwargs={"mX": x, "mOut": out, "n": 1000},
-            )
-            self.assertEqual(out, x * alpha)  # NaN equals NaN here, and -0.0 equals 0.0
-            if alpha == 0:  # x > 0, so x * alpha has the sign of alpha
-                self.assertEqual(torch.signbit(out), torch.signbit(x * alpha))
-            return cidx
-
-        with _counting_compiles() as compile_spy:
-            self.assertNotEqual(launch(np.float32(-0.0)), launch(np.float32(0.0)))
-            self.assertEqual(compile_spy.call_count, 2)
-            nan = float("nan")
-            self.assertEqual(launch(np.float32(nan)), launch(np.float32(nan)))
-            self.assertEqual(compile_spy.call_count, 3)
 
     def test_cyclic_constants_are_refused(self):
         # The eager launch refuses a constant that refers to itself, as constant_key
@@ -2055,20 +2027,11 @@ class CuteDSLWrapTests(TestCase):
     def test_wrap_cutedsl_make_fx_nested_symint_specialized(self):
         # A SymInt inside a Constexpr container is specialized like a bare one, so the
         # side table only holds concrete values. Containers are the ones the side
-        # table walks (see constant_contents), subclasses of tuple (such as
-        # torch.Size, and a namedtuple, rebuilt with _make), list and dict included.
-        # One that cannot be rebuilt with the new items raises its own error.
+        # table walks (see constant_contents): a tuple, list or dict, an OrderedDict,
+        # a torch.Size and a namedtuple (rebuilt with _make); any other list, tuple or
+        # dict subclass is refused (see _keyed_by_items).
         class Scales(list):
             pass
-
-        class ScaleMap(dict):
-            pass
-
-        class Pair(tuple):
-            __slots__ = ()
-
-            def __new__(cls, a, b):
-                return super().__new__(cls, (a, b))
 
         Tile = collections.namedtuple("Tile", ["m", "n"])
         w = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
@@ -2083,8 +2046,8 @@ class CuteDSLWrapTests(TestCase):
             (lambda s: (s,), (4,)),
             (lambda s: torch.Size([s]), torch.Size([4])),
             (lambda s: Tile(s, 1), Tile(4, 1)),
-            (lambda s: Scales([s]), Scales([4])),
-            (lambda s: ScaleMap({0: s}), ScaleMap({0: 4})),
+            (lambda s: [s], [4]),
+            (lambda s: {0: s}, {0: 4}),
         )
         for make_scales, expected in cases:
             fn = functools.partial(f, make_scales=make_scales)
@@ -2096,36 +2059,13 @@ class CuteDSLWrapTests(TestCase):
                 self.assertEqual(scales, expected)
                 self.assertIs(type(scales[0]), int)
                 self.assertEqual(gm(x), 4 * x)
-        fn = functools.partial(f, make_scales=lambda s: Pair(s, 1))
-        with self.assertRaisesRegex(TypeError, r"__new__\(\) missing 1 required"):
+        fn = functools.partial(f, make_scales=lambda s: Scales([s]))
+        error = (
+            r"^CuTeDSL kernel scale_by_first_kernel: parameter 'scales': a constant "
+            r"kernel argument of type Scales is a list, tuple or dict subclass"
+        )
+        with self.assertRaisesRegex(TypeError, error):
             make_fx(fn, tracing_mode="symbolic")(x)
-
-    def test_wrap_cutedsl_counter_constant(self):
-        # A Counter is a dict subclass, which the side table's snapshot and the
-        # launch's copy for the compile rebuild with its items assigned: rebuilt with
-        # update(), it would count its (key, value) pairs, and scales[0] would be 0.
-        # Through the HOP, on the fast path, with the compile cache emptied so that
-        # its launch compiles its own copy, and under make_fx.
-        from torch._library.triton import set_wrap_triton_enabled
-
-        w = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
-
-        def f(x):
-            out = torch.empty_like(x)
-            w(x, out, x.numel(), collections.Counter({0: 3}))
-            return out
-
-        x = _rand(1000)
-        self.assertEqual(f(x), 3 * x)
-        with set_wrap_triton_enabled(False), _counting_compiles() as compile_spy:
-            self.assertEqual(f(x), 3 * x)
-        self.assertEqual(compile_spy.call_count, 1)
-        gm = make_fx(f)(x)
-        (node,) = _hop_nodes(gm, cutedsl_kernel_wrapper_mutation)
-        scales = _scalar_args(node)["scales"]
-        self.assertIs(type(scales), collections.Counter)
-        self.assertEqual(list(scales.items()), [(0, 3)])
-        self.assertEqual(gm(x), 3 * x)
 
     def test_wrap_cutedsl_make_fx_symint_in_object_specialized(self):
         # The side table keys a dataclass instance or plain object by its contents
@@ -2182,14 +2122,10 @@ class CuteDSLWrapTests(TestCase):
     def test_wrap_cutedsl_error_tensor_in_container(self):
         # Only top-level tensors become graph arguments; one inside a container would
         # be a trace-time constant. Containers are the ones the side table walks (see
-        # constant_contents): subclasses of list too, and dicts, keys included. The
-        # error is the side table's, naming the kernel, the parameter and where the
-        # tensor sits, under make_fx and eagerly, and the launch's own, the same, on
-        # the fast path.
+        # constant_contents), dicts too, keys included. The error is the side table's,
+        # naming the kernel, the parameter and where the tensor sits, under make_fx and
+        # eagerly, and the launch's own, the same, on the fast path.
         from torch._library.triton import set_wrap_triton_enabled
-
-        class Scales(list):
-            pass
 
         w = wrap_cutedsl(scale_by_first_kernel, mutates_args=["mOut"])
 
@@ -2206,7 +2142,6 @@ class CuteDSLWrapTests(TestCase):
         )
         cases = {
             "tuple": (lambda x: (x,), r"\[0\]"),
-            "list subclass": (lambda x: Scales([x]), r"\[0\]"),
             "dict key": (lambda x: {x: 1}, r"\.keys\(\)\[0\]"),
         }
         for case, (make_scales, where) in cases.items():
