@@ -175,6 +175,10 @@ If a maintainer requests changes and your PR returns to `in progress`, please ad
 
 With the `no automated review` label, your PR skips these checks and moves directly to `ready for review`. Adding the label withdraws any change requests from the automated review; a maintainer still needs to approve the PR. A maintainer requesting changes does not move it back to `in progress`; you still need to address the maintainer's feedback until the PR is accepted.
 
+**Address the automated review first**: maintainers are not expected to start reviewing your PR until it is `ready for review`. Put in the time to address the automated review's feedback before then.
+
+**Passing the automated review does not guarantee your PR lands**: a reviewer can still reject a PR that is moving in the wrong direction, for example because it needs a design discussion first or does not solve an important problem. If a PR requires a longer discussion, that discussion should happen on the associated issue before the PR is opened.
+
 **Pre-conditions**:
 
 - the PR is linked to an issue labeled `actionable` OR
@@ -182,8 +186,6 @@ With the `no automated review` label, your PR skips these checks and moves direc
 - the author names the maintainer who pre-approved the change (see the "Supported by" line of the [PR template](.github/PULL_REQUEST_TEMPLATE.md))
 
 The PR must follow the [AI policy](AI_POLICY.md).
-
-If the PR requires a longer discussion, that discussion should happen on the associated issue before the PR is opened.
 
 **GreenLight**: PRs from authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml) can also be approved directly by [GreenLight](#greenlight).
 
