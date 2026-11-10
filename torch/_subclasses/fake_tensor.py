@@ -492,12 +492,23 @@ def maybe_clear_fake_constant(x: object) -> None:
         torch._C._set_fake_constant(x, None)
 
 
+def maybe_set_fake_dispatch_keys(x: object, keys: torch.DispatchKeySet | None) -> None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        x.dispatch_keys = keys
+
+
 def maybe_get_fake_dispatch_keys(x: object) -> torch.DispatchKeySet | None:
     # The real tensor's dispatch keys recorded on a Python or C++ fake.
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.dispatch_keys
     if isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         return torch._C._get_fake_dispatch_keys(x)
+    return None
+
+
+def maybe_get_fake_pytype(x: object) -> type[Tensor] | None:
+    if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+        return x.pytype
     return None
 
 
@@ -1065,7 +1076,7 @@ class FakeTensorConverter:
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             if t.is_mkldnn and not maybe_memo.is_mkldnn:
-                maybe_memo.dispatch_keys = torch._C._dispatch_keys(t)
+                maybe_set_fake_dispatch_keys(maybe_memo, torch._C._dispatch_keys(t))
             return maybe_memo
         # not yet supported in metatensors
         if t.is_quantized:
@@ -1112,7 +1123,7 @@ class FakeTensorConverter:
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
         if t.is_mkldnn:
-            out.dispatch_keys = torch._C._dispatch_keys(t)
+            maybe_set_fake_dispatch_keys(out, torch._C._dispatch_keys(t))
 
         # Propagate grad_dtype here rather than in meta_converter because
         # meta tensors don't carry autograd metadata.
