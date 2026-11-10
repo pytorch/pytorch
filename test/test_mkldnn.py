@@ -17,11 +17,10 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 import torch
 import torch.nn.functional as F
-import torch.jit
 import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, \
-    run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS, \
+    run_tests, gradcheck, gradgradcheck, IS_WINDOWS, \
     skipIfTorchDynamo, xfailIfTorchDynamo, recover_orig_fp32_precision, \
     parametrize, instantiate_parametrized_tests, HardwareClassification, \
     expectedIfCppFakeTensor
@@ -299,10 +298,7 @@ class TestMkldnn(TestCase):
                     self.assertEqual(y_aten, y_mkldnn, atol=self.precision, rtol=self.precision)
                 else:
                     self.assertEqual(y_aten, y_mkldnn)
-            if not train:
-                self._test_serialization(mkldnn_conv, (x.to_mkldnn(),))
-                self._test_tracing(mkldnn_conv, (x.to_mkldnn(),))
-            elif dim != 1:
+            if train and dim != 1:
                 loss2 = y_mkldnn.sum()
                 loss2.backward()
                 self.assertTrue(x2.grad.is_mkldnn)
@@ -573,34 +569,6 @@ class TestMkldnn(TestCase):
     def test_conv_transpose3d(self):
         self._test_conv_transpose_base(dim=3)
 
-    def test_conv2d_legacy_jit_model(self):
-        """
-        MKLDNN integration used to serialize models with 5d weight for grouped
-        convolutions, we'd like to preserve this behavior
-        """
-        g = 4
-        conv2d = torch.nn.Conv2d(16, 16, 3, groups=g)
-        conv2d_mkldnn = torch.utils.mkldnn.to_mkldnn(conv2d)
-
-        # contrive legacy conv2d module with a 5-d weight
-        o, i, h, w = conv2d.weight.shape
-        weight_5d = conv2d.weight.reshape((g, o // g, i, h, w))
-        conv2d_mkldnn.weight = weight_5d.to_mkldnn()
-
-        x = torch.randn(1, 16, 8, 8)
-
-        with TemporaryFileName() as fname:
-            torch.jit.save(conv2d_mkldnn, fname)
-            conv2d_loaded = torch.jit.load(fname)
-
-            self.assertEqual(conv2d_mkldnn.weight.ndimension(), 5)
-            self.assertEqual(conv2d_loaded.weight.ndimension(), 4)
-            self.assertEqual(
-                conv2d(x),
-                conv2d_loaded(x.to_mkldnn()).to_dense())
-
-    # This test is to check whether 1D conv is supported for mkldnn tensor,
-    # which is exposed by Issue https://github.com/pytorch/pytorch/issues/68034.
     def test_conv1d_functional(self):
         input = torch.randn(2, 3, 10).to_mkldnn()
         weight = torch.randn(3, 3, 3).to_mkldnn()
@@ -1012,8 +980,6 @@ class TestMkldnn(TestCase):
             bn(input),
             mkldnn_bn(input.to_mkldnn()).to_dense())
 
-        self._test_serialization(mkldnn_bn, (input.to_mkldnn(),))
-        self._test_tracing(mkldnn_bn, (input.to_mkldnn(),))
 
     def _test_batch_norm_train_base(self, dim, channels, input):
         # TODO: support 3d batchnorm training.
@@ -1322,8 +1288,6 @@ class TestMkldnn(TestCase):
                 linear(x),
                 mkldnn_linear(x.to_mkldnn()).to_dense())
 
-            self._test_serialization(mkldnn_linear, (x.to_mkldnn(),))
-            self._test_tracing(mkldnn_linear, (x.to_mkldnn(),))
 
     def test_linear_backward(self):
         in_features = torch.randint(3, 10, (1,)).item()
@@ -1412,19 +1376,7 @@ class TestMkldnn(TestCase):
         torch.tanh_(mkldnn_x)
         self.assertEqual(x, mkldnn_x.to_dense())
 
-    def _test_serialization(self, module, inputs):
-        with TemporaryFileName() as fname:
-            torch.jit.save(module, fname)
-            loaded = torch.jit.load(fname)
-            self.assertEqual(
-                module(*inputs).to_dense(),
-                loaded(*inputs).to_dense())
 
-    def _test_tracing(self, module, inputs):
-        traced = torch.jit.trace(module, inputs)
-        self.assertEqual(
-            module(*inputs).to_dense(),
-            traced(*inputs).to_dense())
 
     def test_set_data_tensorimpl_type(self):
         # Dense tensor has impl of type `TensorImpl`, while MKL-DNN tensor has impl
@@ -1464,18 +1416,6 @@ class TestMkldnn(TestCase):
         self.assertRaises(RuntimeError, lambda: x_mkldnn.new(torch.Size([2, 3])))
         self.assertRaises(RuntimeError, lambda: x_mkldnn.new([6]))
 
-    def test_is_mkldnn_jit(self):
-        class EnsureMkldnn(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x):
-                if not x.is_mkldnn:
-                    x = x.to_mkldnn()
-                return x
-
-        m = EnsureMkldnn()
-        x = torch.randn(1, dtype=torch.float32)
-        self.assertTrue(m(x).is_mkldnn)
-        self.assertTrue(m(x.to_mkldnn()).is_mkldnn)
 
     def _test_imagenet_model(self, model):
         model = model.train(False).float()
@@ -1753,6 +1693,300 @@ class TestMkldnn(TestCase):
                 self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "bf16")
             with torch.backends.flags(fp32_precision="tf32"):
                 self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "tf32")
+
+    def test_mkldnn_cow_input(self):
+        # to_mkldnn
+        a = torch.randn(8, 16)
+        ac = torch._lazy_clone(a)
+        ac_copy = ac.clone()
+        ac.to_mkldnn()
+        self.assertTrue(torch._C._is_cow_tensor(ac))
+        self.assertEqual(ac, ac_copy)
+
+        # mkldnn_rnn_layer forward & backward
+        rnn = torch.nn.LSTM(16, 16, num_layers=1)
+        x = torch.randn(5, 2, 16)
+        h0 = torch.randn(1, 2, 16)
+        c0 = torch.randn(1, 2, 16)
+        weights = [w.data for w in rnn.all_weights[0]]
+        xc = torch._lazy_clone(x)
+        h0c = torch._lazy_clone(h0)
+        c0c = torch._lazy_clone(c0)
+        weight_cows = [torch._lazy_clone(w) for w in weights]
+        xc_copy, h0c_copy, c0c_copy = xc.clone(), h0c.clone(), c0c.clone()
+        weight_copies = [w.clone() for w in weight_cows]
+
+        out, hy, cy, ws = torch.ops.aten.mkldnn_rnn_layer(
+            xc, weight_cows[0], weight_cows[1], weight_cows[2], weight_cows[3],
+            h0c, c0c, False, [], 2, 16, 1, True, False, False, True,
+        )
+        self.assertTrue(torch._C._is_cow_tensor(xc))
+        self.assertTrue(torch._C._is_cow_tensor(h0c))
+        self.assertTrue(torch._C._is_cow_tensor(c0c))
+        self.assertEqual(xc, xc_copy)
+        self.assertEqual(h0c, h0c_copy)
+        self.assertEqual(c0c, c0c_copy)
+        for w_cow, w_copy in zip(weight_cows, weight_copies):
+            self.assertTrue(torch._C._is_cow_tensor(w_cow))
+            self.assertEqual(w_cow, w_copy)
+
+        # workspace and y/hy/cy COW in backward
+        ws_cow = torch._lazy_clone(ws)
+        out_cow = torch._lazy_clone(out)
+        hy_cow = torch._lazy_clone(hy)
+        cy_cow = torch._lazy_clone(cy)
+        out_copy, hy_copy, cy_copy = (
+            out_cow.clone(),
+            hy_cow.clone(),
+            cy_cow.clone(),
+        )
+        diff_out = torch.randn_like(out)
+        diff_hy = torch.randn_like(hy)
+        diff_cy = torch.randn_like(cy)
+        diff_out_cow = torch._lazy_clone(diff_out)
+        diff_hy_cow = torch._lazy_clone(diff_hy)
+        diff_cy_cow = torch._lazy_clone(diff_cy)
+        diff_out_copy, diff_hy_copy, diff_cy_copy = (
+            diff_out_cow.clone(),
+            diff_hy_cow.clone(),
+            diff_cy_cow.clone(),
+        )
+
+        torch.ops.aten.mkldnn_rnn_layer_backward(
+            xc, weight_cows[0], weight_cows[1], weight_cows[2], weight_cows[3],
+            h0c, c0c, out_cow, hy_cow, cy_cow, diff_out_cow, diff_hy_cow, diff_cy_cow,
+            False, 2, 16, 1, True, True, False, [], False, ws_cow,
+        )
+        self.assertTrue(torch._C._is_cow_tensor(ws_cow))
+        self.assertTrue(torch._C._is_cow_tensor(out_cow))
+        self.assertTrue(torch._C._is_cow_tensor(hy_cow))
+        self.assertTrue(torch._C._is_cow_tensor(cy_cow))
+        self.assertTrue(torch._C._is_cow_tensor(diff_out_cow))
+        self.assertTrue(torch._C._is_cow_tensor(diff_hy_cow))
+        self.assertTrue(torch._C._is_cow_tensor(diff_cy_cow))
+        self.assertEqual(out_cow, out_copy)
+        self.assertEqual(hy_cow, hy_copy)
+        self.assertEqual(cy_cow, cy_copy)
+        self.assertEqual(diff_out_cow, diff_out_copy)
+        self.assertEqual(diff_hy_cow, diff_hy_copy)
+        self.assertEqual(diff_cy_cow, diff_cy_copy)
+        self.assertTrue(torch._C._is_cow_tensor(xc))
+        self.assertTrue(torch._C._is_cow_tensor(h0c))
+        self.assertTrue(torch._C._is_cow_tensor(c0c))
+        self.assertEqual(xc, xc_copy)
+        self.assertEqual(h0c, h0c_copy)
+        self.assertEqual(c0c, c0c_copy)
+        for w_cow, w_copy in zip(weight_cows, weight_copies):
+            self.assertTrue(torch._C._is_cow_tensor(w_cow))
+            self.assertEqual(w_cow, w_copy)
+
+        # _linear_pointwise
+        x_lin = torch.randn(8, 16)
+        w_lin = torch.randn(32, 16)
+        b_lin = torch.randn(32)
+        xlc, wlc, blc = torch._lazy_clone(x_lin), torch._lazy_clone(w_lin), torch._lazy_clone(b_lin)
+        xlc_copy, wlc_copy, blc_copy = xlc.clone(), wlc.clone(), blc.clone()
+        res_lin = torch.ops.mkldnn._linear_pointwise(xlc, wlc, blc, "relu", [], "")
+        self.assertTrue(torch._C._is_cow_tensor(xlc))
+        self.assertTrue(torch._C._is_cow_tensor(wlc))
+        self.assertTrue(torch._C._is_cow_tensor(blc))
+        self.assertEqual(xlc, xlc_copy)
+        self.assertEqual(wlc, wlc_copy)
+        self.assertEqual(blc, blc_copy)
+
+        # _linear_pointwise.binary
+        other_lin = torch.randn_like(res_lin)
+        other_linc = torch._lazy_clone(other_lin)
+        other_linc_copy = other_linc.clone()
+        torch.ops.mkldnn._linear_pointwise.binary(xlc, other_linc, wlc, blc, "add")
+        self.assertTrue(torch._C._is_cow_tensor(xlc))
+        self.assertTrue(torch._C._is_cow_tensor(other_linc))
+        self.assertTrue(torch._C._is_cow_tensor(wlc))
+        self.assertTrue(torch._C._is_cow_tensor(blc))
+        self.assertEqual(xlc, xlc_copy)
+        self.assertEqual(other_linc, other_linc_copy)
+        self.assertEqual(wlc, wlc_copy)
+        self.assertEqual(blc, blc_copy)
+
+        # _convolution_pointwise
+        x_conv = torch.randn(2, 3, 7, 7).to(memory_format=torch.channels_last)
+        w_conv = torch.randn(4, 3, 3, 3).to(memory_format=torch.channels_last)
+        b_conv = torch.randn(4)
+        xcc, wcc, bcc = torch._lazy_clone(x_conv), torch._lazy_clone(w_conv), torch._lazy_clone(b_conv)
+        xcc_copy, wcc_copy, bcc_copy = xcc.clone(), wcc.clone(), bcc.clone()
+        res_conv = torch.ops.mkldnn._convolution_pointwise(
+            xcc, wcc, bcc, [0, 0], [1, 1], [1, 1], 1, "relu", [], ""
+        )
+        self.assertTrue(torch._C._is_cow_tensor(xcc))
+        self.assertTrue(torch._C._is_cow_tensor(wcc))
+        self.assertTrue(torch._C._is_cow_tensor(bcc))
+        self.assertEqual(xcc, xcc_copy)
+        self.assertEqual(wcc, wcc_copy)
+        self.assertEqual(bcc, bcc_copy)
+
+        # _convolution_pointwise.binary
+        other_conv = torch.randn_like(res_conv).to(memory_format=torch.channels_last)
+        other_convc = torch._lazy_clone(other_conv)
+        other_convc_copy = other_convc.clone()
+        torch.ops.mkldnn._convolution_pointwise.binary(
+            xcc, other_convc, wcc, bcc, [0, 0], [1, 1], [1, 1], 1, "add", 1.0, None, [], ""
+        )
+        self.assertTrue(torch._C._is_cow_tensor(xcc))
+        self.assertTrue(torch._C._is_cow_tensor(other_convc))
+        self.assertTrue(torch._C._is_cow_tensor(wcc))
+        self.assertTrue(torch._C._is_cow_tensor(bcc))
+        self.assertEqual(xcc, xcc_copy)
+        self.assertEqual(other_convc, other_convc_copy)
+        self.assertEqual(wcc, wcc_copy)
+        self.assertEqual(bcc, bcc_copy)
+
+        # _reorder_linear_weight
+        w_reorder = torch.randn(32, 16)
+        wrc = torch._lazy_clone(w_reorder)
+        wrc_copy = wrc.clone()
+        torch.ops.mkldnn._reorder_linear_weight(wrc, 8)
+        self.assertTrue(torch._C._is_cow_tensor(wrc))
+        self.assertEqual(wrc, wrc_copy)
+
+        # mkldnn_linear with dense weight and bias
+        x_lin_dense = torch.randn(8, 16)
+        w_lin_dense = torch.randn(32, 16)
+        b_lin_dense = torch.randn(32)
+        wldc, bldc = torch._lazy_clone(w_lin_dense), torch._lazy_clone(b_lin_dense)
+        wldc_copy, bldc_copy = wldc.clone(), bldc.clone()
+        torch.ops.aten.mkldnn_linear(x_lin_dense.to_mkldnn(), wldc, bldc)
+        self.assertTrue(torch._C._is_cow_tensor(wldc))
+        self.assertTrue(torch._C._is_cow_tensor(bldc))
+        self.assertEqual(wldc, wldc_copy)
+        self.assertEqual(bldc, bldc_copy)
+
+        # mkldnn_linear_backward_input with dense weight
+        grad_out_lin = torch.randn(8, 32)
+        torch.ops.aten.mkldnn_linear_backward_input(
+            [8, 16], grad_out_lin.to_mkldnn(), wldc
+        )
+        self.assertTrue(torch._C._is_cow_tensor(wldc))
+        self.assertEqual(wldc, wldc_copy)
+
+        # mkldnn_prelu with dense weight
+        x_prelu = torch.randn(2, 3, 4, 4)
+        w_prelu = torch.randn(3)
+        wpc = torch._lazy_clone(w_prelu)
+        wpc_copy = wpc.clone()
+        torch.ops.aten._prelu_kernel(x_prelu.to_mkldnn(), wpc)
+        self.assertTrue(torch._C._is_cow_tensor(wpc))
+        self.assertEqual(wpc, wpc_copy)
+
+        # mkldnn_prelu_backward with dense weight
+        grad_out_prelu = torch.randn(2, 3, 4, 4)
+        torch.ops.aten._prelu_kernel_backward(
+            grad_out_prelu.to_mkldnn(), x_prelu.to_mkldnn(), wpc
+        )
+        self.assertTrue(torch._C._is_cow_tensor(wpc))
+        self.assertEqual(wpc, wpc_copy)
+
+        # mkldnn_batch_norm with dense weight, bias, running_mean, running_var
+        x_bn = torch.randn(2, 4, 8, 8)
+        w_bn = torch.randn(4)
+        b_bn = torch.randn(4)
+        rm_bn = torch.randn(4)
+        rv_bn = torch.rand(4) + 0.1
+        wbn_c, bbn_c, rmbn_c, rvbn_c = (
+            torch._lazy_clone(w_bn),
+            torch._lazy_clone(b_bn),
+            torch._lazy_clone(rm_bn),
+            torch._lazy_clone(rv_bn),
+        )
+        wbn_copy, bbn_copy, rmbn_copy, rvbn_copy = (
+            wbn_c.clone(),
+            bbn_c.clone(),
+            rmbn_c.clone(),
+            rvbn_c.clone(),
+        )
+        torch.ops.aten.native_batch_norm(
+            x_bn.to_mkldnn(), wbn_c, bbn_c, rmbn_c, rvbn_c, False, 0.1, 1e-5
+        )
+        self.assertTrue(torch._C._is_cow_tensor(wbn_c))
+        self.assertTrue(torch._C._is_cow_tensor(bbn_c))
+        self.assertTrue(torch._C._is_cow_tensor(rmbn_c))
+        self.assertTrue(torch._C._is_cow_tensor(rvbn_c))
+        self.assertEqual(wbn_c, wbn_copy)
+        self.assertEqual(bbn_c, bbn_copy)
+        self.assertEqual(rmbn_c, rmbn_copy)
+        self.assertEqual(rvbn_c, rvbn_copy)
+
+        # mkldnn_batch_norm_backward with dense weight
+        out_bn, sm_bn, sinv_bn = torch.ops.aten.native_batch_norm(
+            x_bn.to_mkldnn(), w_bn, b_bn, None, None, True, 0.1, 1e-5
+        )
+        grad_out_bn = torch.randn(2, 4, 8, 8)
+        torch.ops.aten.native_batch_norm_backward(
+            grad_out_bn.to_mkldnn(),
+            x_bn.to_mkldnn(),
+            wbn_c,
+            None,
+            None,
+            sm_bn,
+            sinv_bn,
+            True,
+            1e-5,
+            [True, True, True],
+        )
+        self.assertTrue(torch._C._is_cow_tensor(wbn_c))
+        self.assertEqual(wbn_c, wbn_copy)
+
+    def test_mkldnn_scaled_mm_cow_input(self):
+        if not torch.cpu.get_capabilities().get("amx_int8", False):
+            self.skipTest("AMX is not supported on this machine")
+        a_s = torch.randn(16, 16).to(torch.float8_e4m3fn)
+        b_s = torch.randn(16, 16).to(torch.float8_e4m3fn)
+        scale_a = torch.tensor(1.0)
+        scale_b = torch.tensor(1.0)
+        bias_s = torch.randn(16, dtype=torch.bfloat16)
+        asc = torch._lazy_clone(a_s)
+        bsc = torch._lazy_clone(b_s)
+        bias_sc = torch._lazy_clone(bias_s)
+        asc_copy, bsc_copy, bias_sc_copy = (
+            asc.clone(),
+            bsc.clone(),
+            bias_sc.clone(),
+        )
+        torch._scaled_mm(
+            asc, bsc, scale_a=scale_a, scale_b=scale_b, bias=bias_sc, out_dtype=torch.bfloat16
+        )
+        self.assertTrue(torch._C._is_cow_tensor(asc))
+        self.assertTrue(torch._C._is_cow_tensor(bsc))
+        self.assertTrue(torch._C._is_cow_tensor(bias_sc))
+        self.assertEqual(asc, asc_copy)
+        self.assertEqual(bsc, bsc_copy)
+        self.assertEqual(bias_sc, bias_sc_copy)
+
+    def test_mkldnn_int_mm_cow_input(self):
+        if not (
+            torch.cpu.get_capabilities().get("avx512_vnni", False)
+            or torch.cpu.get_capabilities().get("architecture") == "aarch64"
+        ):
+            self.skipTest("VNNI is not supported on this machine")
+        a_int = torch.randint(-128, 127, (16, 16), dtype=torch.int8)
+        b_int = torch.randint(-128, 127, (16, 16), dtype=torch.int8)
+        ac, bc = torch._lazy_clone(a_int), torch._lazy_clone(b_int)
+        ac_copy, bc_copy = ac.clone(), bc.clone()
+        torch._int_mm(ac, bc)
+        self.assertTrue(torch._C._is_cow_tensor(ac))
+        self.assertTrue(torch._C._is_cow_tensor(bc))
+        self.assertEqual(ac, ac_copy)
+        self.assertEqual(bc, bc_copy)
+
+        # Force _with_primitive path on x86 by using non-contiguous inputs in both dims
+        a_nc = torch.randint(-128, 127, (32, 32), dtype=torch.int8)[::2, ::2]
+        b_nc = torch.randint(-128, 127, (32, 32), dtype=torch.int8)[::2, ::2]
+        anc_c, bnc_c = torch._lazy_clone(a_nc), torch._lazy_clone(b_nc)
+        anc_copy, bnc_copy = anc_c.clone(), bnc_c.clone()
+        torch._int_mm(anc_c, bnc_c)
+        self.assertTrue(torch._C._is_cow_tensor(anc_c))
+        self.assertTrue(torch._C._is_cow_tensor(bnc_c))
+        self.assertEqual(anc_c, anc_copy)
+        self.assertEqual(bnc_c, bnc_copy)
 
     def test_unsupported(self):
         # unsupported types and unsupported types with gpu

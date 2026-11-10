@@ -2,12 +2,24 @@
 
 #include <ATen/ATen.h>
 #include <ATen/FakeTensor.h>
+#include <ATen/ThreadLocalState.h>
+#include <ATen/native/Pool.h>
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/as_strided_native.h>
+#include <ATen/ops/avg_pool2d.h>
+#include <ATen/ops/avg_pool3d.h>
+#include <ATen/ops/quantize_per_tensor.h>
 #endif
+#include <c10/core/impl/FakeTensorModeTLS.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/irange.h>
+
+#include <cstdint>
+#include <limits>
+#include <stdexcept>
+#include <thread>
 
 using namespace at;
 
@@ -268,6 +280,56 @@ TEST(TestNative, NativeTestCPU) {
        at::device(kCPU).dtype(kDouble));
 }
 
+TEST(TestNative, PoolingConversionOverflow2d) {
+  const auto input = at::ones({1, 1, 4, 4}, at::kFloat);
+  try {
+    (void)at::avg_pool2d(input, {std::numeric_limits<int64_t>::max(), 1});
+    FAIL() << "Expected pooling conversion overflow";
+  } catch (const std::runtime_error& error) {
+    EXPECT_STREQ(
+        error.what(), "value cannot be converted to type int without overflow");
+  }
+}
+
+TEST(TestNative, PoolingConversionOverflow3d) {
+  const auto input = at::ones({1, 1, 4, 4, 4}, at::kFloat);
+  try {
+    (void)at::avg_pool3d(input, {std::numeric_limits<int64_t>::max(), 1, 1});
+    FAIL() << "Expected pooling conversion overflow";
+  } catch (const std::runtime_error& error) {
+    EXPECT_STREQ(
+        error.what(), "value cannot be converted to type int without overflow");
+  }
+}
+
+TEST(TestNative, PoolingConversionOverflowQuantized2d) {
+  const auto input = at::quantize_per_tensor(
+      at::ones({1, 1, 4, 4}, at::kFloat), 0.5, 0, at::kQUInt8);
+  try {
+    (void)at::avg_pool2d(input, {std::numeric_limits<int64_t>::max(), 1});
+    FAIL() << "Expected pooling conversion overflow";
+  } catch (const std::runtime_error& error) {
+    EXPECT_STREQ(
+        error.what(), "value cannot be converted to type int without overflow");
+  }
+}
+
+TEST(TestNative, PoolDowncastCompatibility) {
+  EXPECT_EQ(at::native::safe_downcast<int32_t>(3.9), 3);
+  EXPECT_EQ(
+      at::native::safe_downcast<int32_t>(c10::complex<double>{3.9, 0}), 3);
+  EXPECT_EQ(at::native::safe_downcast<uint8_t>(true), 1);
+  EXPECT_TRUE(at::native::safe_downcast<bool>(42));
+  try {
+    (void)at::native::safe_downcast<uint8_t>(int64_t{-1});
+    FAIL() << "Expected strict integer conversion overflow";
+  } catch (const std::runtime_error& error) {
+    EXPECT_STREQ(
+        error.what(),
+        "value cannot be converted to type dest_t without overflow");
+  }
+}
+
 TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
   auto input = at::empty({4}, at::device(at::kMeta));
   auto mode = std::make_shared<c10::FakeTensorMode>(nullptr, nullptr);
@@ -282,6 +344,132 @@ TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
   ASSERT_TRUE(fake_device.has_value());
   EXPECT_EQ(*fake_device, c10::Device(c10::kCPU));
   EXPECT_EQ(result_impl->fake_tensor_mode(), mode);
+}
+
+TEST(TestNative, InitCppFake) {
+  auto mode = std::make_shared<c10::FakeTensorMode>(nullptr, nullptr);
+  auto make_fake = [&]() {
+    auto t = at::empty({2}, at::device(at::kMeta));
+    at::init_cpp_fake(t.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode);
+    EXPECT_EQ(t.unsafeGetTensorImpl()->fake_tensor_mode(), mode);
+    EXPECT_EQ(t.device(), c10::Device(c10::kCPU));
+    return t;
+  };
+  auto expect_throws = [](const at::Tensor& t) {
+    try {
+      t.mutable_data_ptr();
+      ADD_FAILURE() << "expected mutable_data_ptr() to throw";
+    } catch (const c10::Error& e) {
+      EXPECT_NE(
+          std::string(e.what()).find(
+              "Cannot access data pointer of Tensor (e.g. FakeTensor"),
+          std::string::npos);
+    }
+  };
+  struct CaptureWarnings : c10::WarningHandler {
+    std::vector<std::string> messages;
+    void process(const c10::Warning& warning) override {
+      messages.push_back(warning.msg());
+    }
+  };
+  CaptureWarnings handler;
+  c10::WarningUtils::WarningHandlerGuard handler_guard(&handler);
+  c10::WarningUtils::WarnAlways warn_always;
+
+  auto expect_warns = [&](const at::Tensor& t) {
+    auto count = handler.messages.size();
+    t.mutable_data_ptr();
+    ASSERT_EQ(handler.messages.size(), count + 1);
+    const auto& msg = handler.messages.back();
+    EXPECT_NE(
+        msg.find("Accessing the data pointer of FakeTensor"),
+        std::string::npos);
+  };
+
+  // Reading the data pointer of a fake of a default mode warns
+  auto fake = make_fake();
+  expect_warns(fake);
+
+  // Disallowing unsafe access makes fakes made afterwards throw. A view made
+  // within a kernel does not mark the shared storage again, but a new fake of
+  // it, as the fake fallback makes inside a kernel for a view op's output,
+  // does; its fake device is replaced.
+  mode->allow_unsafe_data_ptr_access_ = false;
+  expect_throws(make_fake());
+  expect_warns(fake);
+  auto view = at::native::as_strided_tensorimpl(fake, {1}, {1});
+  expect_warns(view);
+  auto cpu = c10::Device(c10::kCPU);
+  auto meta = c10::Device(c10::kMeta);
+  {
+    c10::impl::InKernelInvocationGuard in_kernel;
+    EXPECT_TRUE(view.is_meta());
+    at::init_cpp_fake(view.unsafeGetTensorImpl(), meta, mode);
+  }
+  EXPECT_EQ(view.device(), meta);
+  expect_throws(fake);
+
+  // A rejected tensor is left unchanged
+  auto expect_rejected = [&](const at::Tensor& t,
+                             c10::Device device,
+                             const std::shared_ptr<c10::FakeTensorMode>& m,
+                             const std::string& msg) {
+    auto* impl = t.unsafeGetTensorImpl();
+    try {
+      at::init_cpp_fake(impl, device, m);
+      ADD_FAILURE() << "expected init_cpp_fake to throw";
+    } catch (const c10::Error& e) {
+      EXPECT_NE(std::string(e.what()).find(msg), std::string::npos) << e.what();
+    }
+    EXPECT_FALSE(impl->is_fake());
+    EXPECT_EQ(impl->fake_tensor_mode(), nullptr);
+    EXPECT_FALSE(impl->fake_device().has_value());
+    EXPECT_FALSE(impl->storage().unsafeGetStorageImpl()->throw_on_mutable_data_ptr());
+    auto count = handler.messages.size();
+    t.mutable_data_ptr();
+    EXPECT_EQ(handler.messages.size(), count);
+  };
+  auto strict_mode = std::make_shared<c10::FakeTensorMode>(
+      nullptr,
+      nullptr,
+      /*allow_meta=*/false,
+      /*allow_unsafe_data_ptr_access=*/false);
+  expect_rejected(at::empty({2}), cpu, mode, "expects a meta tensor");
+  expect_rejected(
+      at::empty({2}, at::device(at::kMeta)), meta, strict_mode, "allow_meta");
+}
+
+TEST(TestNative, InKernelInvocationReportsMetaDevice) {
+  auto t = at::empty({2}, at::device(at::kMeta));
+  at::set_and_normalize_fake_device(
+      t.unsafeGetTensorImpl(), c10::Device(c10::kCPU));
+  EXPECT_EQ(t.device(), c10::Device(c10::kCPU));
+  {
+    // Suspending fake dispatch does not change the reported device.
+    c10::impl::ExcludeDispatchKeyGuard no_fake(c10::DispatchKey::Fake);
+    EXPECT_EQ(t.device(), c10::Device(c10::kCPU));
+  }
+  {
+    c10::impl::InKernelInvocationGuard in_kernel;
+    EXPECT_EQ(t.device(), c10::Device(c10::kMeta));
+    at::ThreadLocalState state;
+    std::thread worker([&] {
+      at::ThreadLocalStateGuard guard(state);
+      EXPECT_TRUE(c10::impl::FakeTensorModeTLS::in_kernel_invocation());
+      EXPECT_EQ(t.device(), c10::Device(c10::kMeta));
+    });
+    worker.join();
+  }
+  EXPECT_FALSE(c10::impl::FakeTensorModeTLS::in_kernel_invocation());
+  EXPECT_EQ(t.device(), c10::Device(c10::kCPU));
+
+  EXPECT_THROW(
+      {
+        c10::impl::InKernelInvocationGuard in_kernel;
+        TORCH_CHECK(false, "meta kernel failed");
+      },
+      c10::Error);
+  EXPECT_FALSE(c10::impl::FakeTensorModeTLS::in_kernel_invocation());
 }
 
 TEST(TestNative, NativeTestGPU) {
