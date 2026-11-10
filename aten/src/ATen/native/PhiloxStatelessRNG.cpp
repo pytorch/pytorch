@@ -6,12 +6,15 @@
 #include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/TransformationHelper.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/PhiloxStatelessRNG.h>
+#include <ATen/native/cpu/Loops.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_philox_dropout_native.h>
 #include <ATen/ops/_philox_key_fold_in_native.h>
 #include <ATen/ops/_philox_key_split_native.h>
 #include <ATen/ops/_philox_normal_native.h>
@@ -70,6 +73,19 @@ inline std::array<double, 2> box_muller_double(std::array<uint32_t, 4> r) {
 
   double radius = std::sqrt(-2.0 * std::log(u1));
   return {radius * std::cos(TWO_PI * u2), radius * std::sin(TWO_PI * u2)};
+}
+
+// double packs the four uint32 Philox outputs into two 64-bit values.
+template <typename scalar_t>
+inline auto uniform_sample(uint64_t seed, uint64_t offset) {
+  auto r = philox_4x32(seed, offset);
+  if constexpr (std::is_same_v<scalar_t, double>) {
+    return std::array<uint64_t, 2>{
+        (static_cast<uint64_t>(r[0]) << 32) | r[1],
+        (static_cast<uint64_t>(r[2]) << 32) | r[3]};
+  } else {
+    return r;
+  }
 }
 
 // Distribution dispatch for uniform/normal.
@@ -234,16 +250,8 @@ Tensor& _philox_uniform_cpu_(Tensor& self, const Tensor& key, double low, double
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_", [&] {
     auto sample_func = [](uint64_t seed, uint64_t offset) {
-      auto r = philox_4x32(seed, offset);
-      if constexpr (std::is_same_v<scalar_t, double>) {
-        return std::array<uint64_t, 2>{
-            (static_cast<uint64_t>(r[0]) << 32) | r[1],
-            (static_cast<uint64_t>(r[2]) << 32) | r[3]};
-      } else {
-        return r;
-      }
+      return uniform_sample<scalar_t>(seed, offset);
     };
-
     auto lo = static_cast<scalar_t>(low);
     auto hi = static_cast<scalar_t>(high);
     auto param_func = [lo, hi](auto rand) {
@@ -255,6 +263,65 @@ Tensor& _philox_uniform_cpu_(Tensor& self, const Tensor& key, double low, double
         "_philox_uniform_", self, key, sample_func, param_func);
   });
   return self;
+}
+
+Tensor& _philox_uniform_tensor_cpu_(
+    Tensor& self, const Tensor& key, const Tensor& low, const Tensor& high) {
+  philox_check_bound("_philox_uniform_", "low", low, self);
+  philox_check_bound("_philox_uniform_", "high", high, self);
+  auto iter = TensorIteratorConfig()
+      .add_output(self)
+      .add_const_input(self)
+      .add_owned_const_input(low.to(self.scalar_type()))
+      .add_owned_const_input(high.to(self.scalar_type()))
+      .build();
+  // Sample with the default [0, 1) bounds, then rescale in a second pass.
+  _philox_uniform_cpu_(self, key, 0.0, 1.0);
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_", [&] {
+    cpu_kernel(iter, [](scalar_t x, scalar_t lo, scalar_t hi) -> scalar_t {
+      return static_cast<scalar_t>(static_cast<dist_acctype<scalar_t>>(x) * (hi - lo) + lo);
+    });
+  });
+  return self;
+}
+
+Tensor _philox_dropout_cpu(const Tensor& self, const Tensor& key, double p) {
+  TORCH_CHECK(self.is_floating_point(),
+      "_philox_dropout: self must be a floating point tensor, got ",
+      self.scalar_type());
+  TORCH_CHECK(p >= 0 && p <= 1, "_philox_dropout: p must be in [0, 1], got ", p);
+  auto samples = at::empty(self.sizes(), self.options().dtype(
+      self.scalar_type() == kDouble ? kDouble : kFloat));
+  auto result = at::empty_like(self);
+  auto iter = TensorIteratorConfig()
+      .add_output(result)
+      .add_const_input(self)
+      .add_const_input(samples)
+      .check_all_same_dtype(false)
+      .build();
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_dropout", [&] {
+    using compute_t = dist_acctype<scalar_t>;
+    // The mask comes from uniform samples in the compute dtype, so it is the
+    // same for every input dtype that shares one.
+    auto sample_func = [](uint64_t seed, uint64_t offset) {
+      return uniform_sample<compute_t>(seed, offset);
+    };
+    auto param_func = [](auto rand) {
+      return at::transformation::uniform_real(rand, compute_t(0), compute_t(1));
+    };
+    philox_distribution_kernel<compute_t>(
+        "_philox_dropout", samples, key, sample_func, param_func);
+    auto threshold = static_cast<compute_t>(p);
+    auto scale = static_cast<compute_t>(p == 1 ? 0.0 : 1.0 / (1.0 - p));
+    // Multiply rather than select so NaN and inf propagate, like native dropout.
+    cpu_kernel(iter, [threshold, scale](scalar_t x, compute_t u) -> scalar_t {
+      return static_cast<scalar_t>(
+          static_cast<compute_t>(x) * (u >= threshold ? scale : compute_t(0)));
+    });
+  });
+  return result;
 }
 
 Tensor& _philox_normal_cpu_(Tensor& self, const Tensor& key, double mean, double stddev) {

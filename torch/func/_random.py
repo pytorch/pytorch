@@ -227,8 +227,8 @@ def uniform_(
     key: torch.Tensor,
     result: torch.Tensor,
     *,
-    low: float = 0.0,
-    high: float = 1.0,
+    low: float | torch.Tensor = 0.0,
+    high: float | torch.Tensor = 1.0,
 ) -> torch.Tensor:
     r"""Fill ``result`` in-place with uniform random values from a PRNG key.
 
@@ -240,12 +240,19 @@ def uniform_(
     dimensions of ``result`` must be broadcastable with ``*batch`` and each key
     independently generates its slice of the output.
 
+    Gradients flow to tensor ``low`` / ``high`` as for a reparameterized sample
+    (like :meth:`torch.distributions.Distribution.rsample`).
+
     Args:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
             :func:`fold_in`.
         result (Tensor): The output tensor to fill in-place.
-        low (float): Lower bound (inclusive) of the uniform distribution. Default: ``0.0``.
-        high (float): Upper bound (exclusive) of the uniform distribution. Default: ``1.0``.
+        low (float or Tensor): Lower bound (inclusive) of the uniform
+            distribution. A floating-point tensor must broadcast to ``result``
+            and gives a bound per element. Default: ``0.0``.
+        high (float or Tensor): Upper bound (exclusive) of the uniform
+            distribution. A floating-point tensor must broadcast to ``result``
+            and gives a bound per element. Default: ``1.0``.
 
     Returns:
         ``result``, filled with uniform random values.
@@ -256,14 +263,24 @@ def uniform_(
         >>> result = torch.empty(1000, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.uniform_(key, result)  # doctest: +SKIP
     """
-    return torch.ops.aten._philox_uniform_(result, key, low, high)
+    if not isinstance(low, torch.Tensor) and not isinstance(high, torch.Tensor):
+        return torch.ops.aten._philox_uniform_(result, key, low, high)
+
+    def wrap_scalar(bound):
+        # float64 matches the scalar overload's double rounding.
+        if isinstance(bound, torch.Tensor):
+            return bound
+        return torch.tensor(bound, dtype=torch.float64, device=result.device)
+
+    low, high = wrap_scalar(low), wrap_scalar(high)
+    return torch.ops.aten._philox_uniform_.Tensor(result, key, low, high)
 
 
 def uniform(
     key: torch.Tensor,
     *shape: tuple[int, ...],
-    low: float = 0.0,
-    high: float = 1.0,
+    low: float | torch.Tensor = 0.0,
+    high: float | torch.Tensor = 1.0,
     dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
     r"""Generate uniformly distributed random values from a PRNG key.
@@ -277,12 +294,19 @@ def uniform(
     dimensions of ``shape`` must be broadcastable with ``*batch`` and each key
     independently generates its slice of the output.
 
+    Gradients flow to tensor ``low`` / ``high`` as for a reparameterized sample
+    (like :meth:`torch.distributions.Distribution.rsample`).
+
     Args:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
             :func:`fold_in`.
         *shape (int): The desired output shape.
-        low (float): Lower bound (inclusive) of the uniform distribution. Default: ``0.0``.
-        high (float): Upper bound (exclusive) of the uniform distribution. Default: ``1.0``.
+        low (float or Tensor): Lower bound (inclusive) of the uniform
+            distribution. A floating-point tensor must broadcast to ``shape``
+            and gives a bound per element. Default: ``0.0``.
+        high (float or Tensor): Upper bound (exclusive) of the uniform
+            distribution. A floating-point tensor must broadcast to ``shape``
+            and gives a bound per element. Default: ``1.0``.
         dtype (:class:`torch.dtype`, optional): The desired dtype. Default: ``torch.float32``.
 
     Returns:
@@ -604,3 +628,45 @@ def bits(
     if dtype is None:
         dtype = torch.int32
     return randint(key, *shape, low=None, high=None, dtype=dtype)
+
+
+def dropout(
+    key: torch.Tensor, input: torch.Tensor, p: float = 0.5, training: bool = True
+) -> torch.Tensor:
+    r"""Randomly zero elements of ``input`` with probability ``p`` using a PRNG key.
+
+    Surviving elements are scaled by ``1 / (1 - p)``, as in
+    :func:`torch.nn.functional.dropout`. The mask is fully
+    determined by the key and the shape of ``input``: an element is kept iff
+    the matching element of ``uniform(key, input.shape, dtype=dtype)`` is
+    ``>= p``, where ``dtype`` is ``torch.float64`` for float64 inputs and
+    ``torch.float32`` otherwise. Inputs of the same shape thus share a mask
+    regardless of dtype, apart from float64.
+
+    Supports batched keys: if ``key`` has shape ``(*batch, K)``, the leading
+    dimensions of ``input`` must be broadcastable with ``*batch`` and each key
+    independently generates the mask for its slice.
+
+    Args:
+        key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
+            :func:`fold_in`.
+        input (Tensor): The floating point input tensor.
+        p (float): Probability of an element being zeroed. Default: ``0.5``.
+        training (bool): Apply dropout if ``True``; otherwise return ``input``
+            unchanged. Default: ``True``.
+
+    Returns:
+        A new tensor with the same shape, dtype and device as ``input``, or
+        ``input`` itself if ``training`` is ``False``.
+
+    Example::
+
+        >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
+        >>> x = torch.randn(8, 1024, device="cuda")  # doctest: +SKIP
+        >>> torch.func._random.dropout(key, x, p=0.1)  # doctest: +SKIP
+    """
+    if p < 0.0 or p > 1.0:
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+    if not training:
+        return input
+    return torch.ops.aten._philox_dropout(input, key, p)

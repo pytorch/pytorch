@@ -25,6 +25,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
+    is_expandable_to,
     make_channels_last_strides_for,
     make_contiguous_strides_for,
     Number,
@@ -730,6 +731,42 @@ def meta_philox_randint_(self, key, low=None, high=None):
         )
     _check_philox_gen_args("_philox_randint_", self, key)
     return self
+
+
+def _check_philox_bound(op_name, name, bound, self):
+    torch._check(
+        bound.device == self.device,
+        lambda: (
+            f"{op_name}: {name} must be on the same device as self, "
+            f"got {bound.device} and {self.device}"
+        ),
+    )
+    torch._check(
+        bound.dtype.is_floating_point,
+        lambda: f"{op_name}: {name} must be a floating point tensor, got {bound.dtype}",
+    )
+    torch._check(
+        is_expandable_to(bound.shape, self.shape),
+        lambda: (
+            f"{op_name}: {name} shape {list(bound.shape)} is not broadcastable "
+            f"to the output shape {list(self.shape)}"
+        ),
+    )
+
+
+@register_meta(aten._philox_uniform_.Tensor)
+def meta_philox_uniform_tensor_(self, key, low, high):
+    _check_philox_distribution_args("_philox_uniform_", self, key)
+    _check_philox_bound("_philox_uniform_", "low", low, self)
+    _check_philox_bound("_philox_uniform_", "high", high, self)
+    return self
+
+
+@register_meta(aten._philox_dropout.default)
+def meta_philox_dropout(self, key, p):
+    _check_philox_distribution_args("_philox_dropout", self, key)
+    torch._check(0 <= p <= 1, lambda: f"_philox_dropout: p must be in [0, 1], got {p}")
+    return torch.empty_like(self)
 
 
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
