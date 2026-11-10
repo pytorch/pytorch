@@ -822,6 +822,57 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    @parametrize("source", ["mm", "shared"])
+    @parametrize("p2p", ["irecv", "batch_p2p_ops"])
+    @parametrize("into", ["copy", "source"])
+    # reorder_for_locality would move add_t, whose result only the output uses, after
+    # the receive.
+    @torch._inductor.config.patch(reorder_for_locality=False, force_disable_caches=True)
+    def test_receive_keeps_a_copy_apart(self, source, p2p, into):
+        # The receive writes buf in place although its schema is functional, and buf
+        # is either w, a copy of z, or z itself, which w must keep a copy of. With
+        # source="shared", add_t reads z twice, so z is realized before the receive
+        # (Note [Constrain shared storage inputs first]).
+        with (
+            _dynamo_dist_per_rank_init(
+                self.rank, self.world_size, rdvz_file=self.file_name
+            ),
+            torch.library._scoped_library("mylib", "FRAGMENT") as lib,
+        ):
+            lib.define(
+                "add_t(Tensor a, Tensor b) -> Tensor",
+                tags=(torch.Tag.needs_fixed_stride_order,),
+            )
+            lib.impl("add_t", lambda a, b: a + b.T, "CompositeExplicitAutograd")
+            group = c10d.group.WORLD.group_name
+            peer = 1 - self.rank
+            funcol = torch.ops._c10d_functional
+
+            def f(x, y):
+                z = torch.mm(x, y) if source == "mm" else (x * 2).relu()
+                a = torch.ops.mylib.add_t(z, z.T)
+                w = z.clone()
+                buf, kept = (w, z) if into == "copy" else (z, w)
+                send = torch.full_like(z, 100.0 + self.rank)
+                if p2p == "batch_p2p_ops":
+                    out = funcol.batch_p2p_ops(
+                        ["isend", "irecv"], [peer] * 2, [0, 0], [send, buf], group
+                    )
+                    received = funcol.wait_tensor(out[1])
+                elif self.rank == 0:
+                    funcol.wait_tensor(funcol.isend(send, peer, 0, group))
+                    received = send
+                else:
+                    received = funcol.wait_tensor(funcol.irecv(buf, peer, 0, group))
+                return a, received + kept
+
+            x = torch.randn(8, 8, device=self.device)
+            y = torch.randn(8, 8, device=self.device)
+            expected = f(x, y)
+            self.assertEqual(torch.compile(f, fullgraph=True)(x, y), expected)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
     def test_allreduce_inductor(self):
         """
         This is matmul/cat/allreduce is a pattern we aim to optimize.
@@ -4591,7 +4642,7 @@ class TestCompileSyncPgCrossRanks(MultiProcessTestCase):
         self._init_process_group()
 
         with mock.patch.object(c10d, "is_gloo_available", return_value=False):
-            with self.assertRaisesRegex(RuntimeError, "requires the gloo backend"):
+            with self.assertRaisesRegex(RuntimeError, "a build of PyTorch with gloo"):
                 get_compile_sync_pg()
 
     def test_compile_sync_pg_inherits_default_timeout(self):
