@@ -23,7 +23,7 @@ bool is_tensor_constructor(const c10::FunctionSchema& schema) {
                return contains_tensor_types(a.type());
              }) &&
       schema.returns().size() == 1 &&
-      schema.returns()[0].type()->kind() == c10::TypeKind::TensorType;
+      schema.returns()[0].type() == c10::TensorType::get();
 }
 
 // See fakeHasPythonFakeImpl; categories is the op's fakeDispatchTableCategories
