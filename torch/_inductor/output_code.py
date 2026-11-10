@@ -194,14 +194,17 @@ def maybe_handle_backward_generation(
             raise AssertionError("boxed_forward_device_index must not be None")
         if boxed_forward_device_index.value is None:
             raise AssertionError("boxed_forward_device_index.value must not be None")
-        from torch._inductor.cudagraph_trees import mark_running_backward
-
         compiled_graph_callable = compiled_graph.current_callable
-        device_index = boxed_forward_device_index.value
 
-        # The manager is looked up when the backward runs (see mark_running_backward).
+        manager = torch._inductor.cudagraph_trees.get_manager(
+            boxed_forward_device_index.value, create_if_none_exists=False
+        )
+        # should already exist from forward
+        if manager is None:
+            raise AssertionError("CUDAGraph manager must not be None")
+
         def compiled_artifact(new_inputs: Sequence[InputType]) -> object:
-            mark_running_backward(device_index)
+            manager.set_to_running_backward()  # type: ignore[union-attr]
             return compiled_graph_callable(new_inputs)
 
         compiled_graph.current_callable = compiled_artifact
