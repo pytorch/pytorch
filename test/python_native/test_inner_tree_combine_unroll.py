@@ -350,8 +350,9 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         self.assertEqual(general, {combine.sig})
         if col_combine is not None:
             # Split columns fold their partials through the general genitree2 combine.
-            col_tile = max(col_combine.combine_tile, 1)
-            self.assertGreater(col_combine.split[0] // col_tile, 1)
+            self.assertEqual(col_combine.combine_tile, 128)
+            self.assertEqual(col_combine.combine_unroll, unroll)
+            self.assertGreater(col_combine.split[0] // col_combine.combine_tile, 1)
             self.assertEqual(bool(col_combine.combine_count), uniform != "off")
             self.assertEqual(col_combine.combine_weights, uniform == "weights")
             col_key = ("genitree2", f"{key}_col")
@@ -414,7 +415,7 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
                 order="inner_tree",
                 itree=selected,
             )
-            key = ("test_uniform_count",) + block.cache_sig
+            key = ("test_uniform_count", "var_mean") + block.cache_sig
             kg._launch(block, key, fields, outs)
             return block.cache_sig
 

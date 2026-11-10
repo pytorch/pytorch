@@ -402,10 +402,24 @@ _SM107_SIZES = (_SM107_MIN_SIZE, _SM107_MID_SIZE, _SM107_LARGE_SIZE, _SM107_MAX_
 _SM107_LARGE_SIZES = _SM107_SIZES[2:]
 _SM107_ONE_FIELD_NAMES = {SumOps: "sum", MeanOps: "mean", AMaxOps: "amax"}
 _SM107_ONE_FIELD = tuple(_SM107_ONE_FIELD_NAMES)
+
+
+def _sm107_outputs(
+    dtype: torch.dtype, trait_type: type, nfields: int, nouts: int
+) -> tuple[torch.dtype, ...]:
+    """The outputs SM107's policies were measured with: int64 indices, the input dtype
+    for amax and Welford, and fp32 otherwise."""
+    natural = torch.int64 if nfields == 2 else torch.float32
+    if nfields == 3 or trait_type is AMaxOps:
+        natural = dtype
+    return (natural,) * nouts
+
+
 _ORDERED_COL_DTYPES = _B200_DTYPES
 # Routing ccs, deliberately separate from the launch-policy _B200_CCS: the route and the
 # policies are measured and extended independently. kernel_coltile._ORDERED_COL_CONFIGS
-# entries for other architectures are reached only through select_col_config hand-offs.
+# (10, 7) entries are reached through select_col_config hand-offs; other architectures'
+# entries serve direct reduce_ordered_col calls only.
 _ORDERED_COL_CCS = ((10, 0),)
 _ORDERED_COL_MIN_R = 128
 _ORDERED_COL_MAX_R = 8192
@@ -418,9 +432,9 @@ _ORDERED_COL_GENERAL_NORM_MIN_OUTPUTS = 16384
 # 32768-262144; sum, amax, all, any and count_nonzero won 4.4-39x at R 512K-4M (C
 # 128-4096), and all, any and count_nonzero 1.4-16x at R 32768-1M. At B * C = 32 views
 # ran 0.37-2.6x. Below 192 columns, low R loses: at C = 128, R 24577-28000 ran sum at
-# 1.07-1.21x but all at 0.82-0.96x and bf16 count_nonzero at 0.94-0.97x, while from
-# R = 32769 every trait won 1.30-2.11x; C = 192 and 256 won 1.19-3.3x at every R from
-# 24577.
+# 1.07-1.21x but all at 0.82-0.96x and bf16 count_nonzero at 0.94-0.97x, while all and
+# any won 1.43-1.49x at R = 32768 and every trait 1.30-2.11x from R = 32769, so narrow
+# views route from R = 32768; C = 192 and 256 won 1.19-3.3x at every R from 24577.
 # General-p norms (an exp/log leaf; p = 3 and 0.5 measured) run 0.34-0.36x at C = 128
 # and R = 32768 but 1.0-2.1x from C = 1024. Routed views compile one stage-one kernel
 # per R, ragged last partitions included: C = 128 split views compiled in about 9.5 s on
@@ -520,8 +534,8 @@ def select_general_config(
     nfields: int,
     nouts: int,
     welford_outs: int,
-    acc_bits: int = 32,
-    alignment: int = 16,
+    acc_bits: int,
+    alignment: int,
 ) -> _GeneralConfig:
     # One-output strided reductions on B200 at 512 MiB: 128 threads ran 0.87x (fp32) and
     # 0.65x (bf16) of 256; 1-16 MiB were within 12% either way.

@@ -1499,7 +1499,15 @@ class TestOrderedColDevice(TestCase):
             if cc not in kg._ORDERED_COL_CCS:
                 self.assertIsNone(got)
             else:
-                plan = ct.trait_itree_plan(mean, rows, cols, 4, stage=False)
+                reference = kg._try_indexed_itree(
+                    mean, "select_mean_ref", x, shapes, strides, cols, rows, f32, 1
+                )
+                self.assertIsNotNone(reference)
+                want = reference[0].view(torch.uint8)
+                self.assertEqual(got[0].view(torch.uint8), want)
+                plan = ct.trait_itree_plan(
+                    mean, rows, cols, 4, stage=False, device=device
+                )
                 fallback = ct.select_ordered_col_config(
                     cc,
                     x.dtype,
