@@ -7611,7 +7611,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         layer = Layer()
 
         def hash_fn(mod, x):
-            return mod.weight.shape[0]
+            return mod.weight.ndim
 
         @torch.compiler.nested_compile_region(reuse_hash_fn=hash_fn)
         def region(mod, x):
