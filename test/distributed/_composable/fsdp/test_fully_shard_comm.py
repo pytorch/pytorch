@@ -123,8 +123,8 @@ class TestFSDPCommContext(TestCase):
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_comm_streams_high_priority(self):
         comm_ctx = FSDPCommContext()
-        comm_ctx.lazy_init(torch.device("cuda"))
-        high_priority = torch.cuda.Stream(priority=-1).priority
+        comm_ctx.lazy_init(device)
+        high_priority = device_module.Stream(priority=-1).priority
         for stream in (
             comm_ctx.all_gather_copy_in_stream,
             comm_ctx.all_gather_stream,
