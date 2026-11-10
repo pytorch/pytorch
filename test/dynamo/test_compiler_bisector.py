@@ -239,28 +239,6 @@ class TestCompilerBisector(TestCase):
             out = CompilerBisector.do_bisect(test_fn)
             self.assertEqual(out.backend, "aot_eager_decomp_partition_crossref")
 
-    def test_emulate_precision_casts(self):
-        def test_fn():
-            torch._dynamo.reset()
-
-            def calculate_scale(inp):
-                amax = torch.abs(torch.max(inp))
-                scale = 448.0 / torch.clamp(amax, min=1e-12)
-                scale = scale.to(torch.float32)
-                return scale
-
-            dtype = torch.bfloat16
-            torch.manual_seed(0)
-            inp = torch.randn(16, 16, 768, dtype=dtype, device=GPU_TYPE)
-            eager_scale = calculate_scale(inp)
-            compile_scale = torch.compile(calculate_scale)(inp)  # noqa: UNSPECIFIED_BACKEND
-
-            return torch.equal(eager_scale, compile_scale)
-
-        out = CompilerBisector.do_bisect(test_fn)
-        self.assertEqual(out.backend, "inductor")
-        self.assertEqual(out.subsystem, "inductor_emulate_precision_casts")
-
     def test_eager_backend(self):
         # should indicate problem with first backend
         def test_fn():
@@ -365,10 +343,10 @@ class TestCompilerBisector(TestCase):
                 get_env_val.cache_clear()
 
 
+@unittest.skipIf(not has_triton(), "requires Triton")
 class TestCompilerBisectorDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skipIf(not has_triton(), "requires Triton")
     def test_bisect_run_debuginfo(self, device):
         import os
         import subprocess
@@ -405,7 +383,6 @@ class TestCompilerBisectorDevice(TestCase):
         )
         self.assertIn(expected_result, output.stdout)
 
-    @unittest.skipIf(not has_triton(), "requires Triton")
     def test_bad_lowering(self, device):
         def test_fn():
             torch._dynamo.reset()
@@ -423,6 +400,28 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.subsystem, "lowerings")
         self.assertEqual(out.bisect_number, 2)
         self.assertTrue("relu" in out.debug_info)
+
+    def test_emulate_precision_casts(self, device):
+        def test_fn():
+            torch._dynamo.reset()
+
+            def calculate_scale(inp):
+                amax = torch.abs(torch.max(inp))
+                scale = 448.0 / torch.clamp(amax, min=1e-12)
+                scale = scale.to(torch.float32)
+                return scale
+
+            dtype = torch.bfloat16
+            torch.manual_seed(0)
+            inp = torch.randn(16, 16, 768, dtype=dtype, device=device)
+            eager_scale = calculate_scale(inp)
+            compile_scale = torch.compile(calculate_scale)(inp)  # noqa: UNSPECIFIED_BACKEND
+
+            return torch.equal(eager_scale, compile_scale)
+
+        out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "inductor_emulate_precision_casts")
 
 
 instantiate_device_type_tests(
