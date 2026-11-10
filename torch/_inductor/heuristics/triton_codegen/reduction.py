@@ -176,6 +176,15 @@ def _outer_config_opt(
     )
 
 
+def _register_intensive(
+    size_hints: dict[str, int], inductor_meta: dict[str, Any]
+) -> bool:
+    loads_and_red = inductor_meta.get("num_load", 0) + inductor_meta.get(
+        "num_reduction", 0
+    )
+    return size_hints["x"] >= 1024 and loads_and_red >= 10
+
+
 # ------------------------------------------------------------------
 # Default (CUDA) reduction heuristic
 # ------------------------------------------------------------------
@@ -210,7 +219,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             "max_autotune_pointwise"
         )
 
-        register_intensive = False
+        register_intensive = _register_intensive(size_hints, inductor_meta)
         loads_and_red = inductor_meta.get("num_load", 0) + inductor_meta.get(
             "num_reduction", 0
         )
@@ -223,9 +232,8 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             "autotune_hints", ()
         )
         MAX_R0_BLOCK = self._max_r0_block(device_major)
-        if size_hints["x"] >= 1024 and loads_and_red >= 10:
+        if register_intensive:
             MAX_R0_BLOCK = 1024
-            register_intensive = True
 
         if triton_meta.get("native_matmul"):
             if len(size_hints) == 3:

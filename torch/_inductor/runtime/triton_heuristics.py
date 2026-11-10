@@ -4976,6 +4976,76 @@ def _maybe_filter_configs_for_tma_restrictions(
     return configs
 
 
+def _make_reduction_config(
+    size_hints, *blocks, reduction_hint, inductor_meta, warp_size, **knobs
+):
+    """Build a reduction candidate with the arguments get_configs passes."""
+    from torch._inductor.heuristics.triton_codegen.reduction import _register_intensive
+
+    register_intensive = _register_intensive(size_hints, inductor_meta)
+    if "y" in size_hints:
+        return triton_config_tiled_reduction(
+            size_hints,
+            *blocks,
+            register_intensive=register_intensive,
+            warp_size=warp_size,
+            **knobs,
+        )
+    return triton_config_reduction(
+        size_hints,
+        *blocks,
+        register_intensive=register_intensive,
+        reduction_hint=reduction_hint,
+        warp_size=warp_size,
+        **knobs,
+    )
+
+
+def _make_persistent_reduction_config(
+    size_hints, *blocks, reduction_hint, warp_size, **knobs
+):
+    """Build a persistent reduction candidate the way get_persistent_configs does."""
+    rnumel = get_total_reduction_numel(size_hints)
+    if "y" in size_hints:
+        config = triton_config_tiled_reduction(
+            size_hints, *blocks, rnumel, warp_size=warp_size, **knobs
+        )
+    else:
+        config = triton_config_reduction(
+            size_hints,
+            *blocks,
+            rnumel,
+            register_intensive=True,
+            reduction_hint=reduction_hint,
+            warp_size=warp_size,
+            **knobs,
+        )
+    for prefix in size_hints:
+        if prefix_is_reduction(prefix):
+            config.kwargs.pop(f"{prefix.upper()}BLOCK", None)
+    return config
+
+
+def _apply_tuning_list(category, size_hints, configs, make_config, inductor_meta):
+    """Fold caller-supplied candidates in. Not gated on max-autotune, by design.
+
+    Called after the heuristic returns, so it also reaches kernels given one candidate.
+    """
+    entry = inductor_meta.get("tuning_list")
+    if entry is None:
+        return configs
+    if inductor_meta.get("strict_reduction_rblock") is not None:
+        # reduction() raises on any candidate that disagrees with the planned block.
+        return configs
+    if "r1_" in size_hints:
+        # Same arity as a kernel tiled on y, so it shares that key's block names.
+        return configs
+
+    from torch._inductor import tuning_list
+
+    return tuning_list.apply(category, size_hints, configs, make_config, entry)
+
+
 def pointwise(
     size_hints,
     triton_meta: TritonMeta,
@@ -5036,6 +5106,10 @@ def pointwise(
         hinted_configs,
         tile_hint=tile_hint,
         inductor_meta=inductor_meta,
+    )
+
+    configs = _apply_tuning_list(
+        "pointwise", size_hints, configs, triton_config_with_settings, inductor_meta
     )
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
@@ -5293,6 +5367,16 @@ def reduction(
         num_dynamic=num_dynamic,
     )
 
+    make_config = functools.partial(
+        _make_reduction_config,
+        reduction_hint=reduction_hint,
+        inductor_meta=inductor_meta,
+        warp_size=triton_meta["device"].warp_size_or_default,
+    )
+    configs = _apply_tuning_list(
+        "reduction", size_hints, configs, make_config, inductor_meta
+    )
+
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     strict_rblock = inductor_meta.get("strict_reduction_rblock")
@@ -5403,6 +5487,15 @@ def persistent_reduction(
 
     configs = _persistent_reduction_configs(
         size_hints, reduction_hint, inductor_meta, triton_meta
+    )
+
+    make_config = functools.partial(
+        _make_persistent_reduction_config,
+        reduction_hint=reduction_hint,
+        warp_size=triton_meta["device"].warp_size_or_default,
+    )
+    configs = _apply_tuning_list(
+        "persistent_reduction", size_hints, configs, make_config, inductor_meta
     )
 
     # This key is not added to the inductor meta as its clear from the heuristic

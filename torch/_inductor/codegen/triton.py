@@ -47,7 +47,7 @@ from torch.utils._triton import (
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
-from .. import config, dependencies, ir, metrics, utils
+from .. import config, dependencies, ir, metrics, tuning_list, utils
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
 from ..debug import set_kernel_post_grad_provenance_tracing
@@ -8367,6 +8367,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             **self.inductor_meta_per_kernel(),
             **self.inductor_meta_common(),
         }
+        # Carried in the source, so compile workers and source-keyed caches see it.
+        if entry := tuning_list.lookup(
+            self._get_heuristic(), size_hints, triton_meta["device"]
+        ):
+            inductor_meta["tuning_list"] = entry
 
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
