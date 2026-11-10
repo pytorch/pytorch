@@ -3530,7 +3530,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     and op.namespace != "_c10d_functional"
                 )
             if isinstance(t, torch.OptionalType):
-                return isinstance(t.getElementType(), torch.TensorType)
+                elem = t.getElementType()
+                if isinstance(elem, torch.ListType):
+                    return return_supported(elem)
+                return isinstance(elem, torch.TensorType)
             return isinstance(t, (torch.NoneType, torch.TensorType))
 
         return all(arg_supported(a.real_type) for a in op._schema.arguments) and all(
@@ -4245,9 +4248,16 @@ if (!custom_op_wrapper) {
             )
             dispatch_lines.writeline(f"op.callBoxed(&{stack_var});")
 
+            def is_list_return(t: torch.JitType) -> bool:
+                if isinstance(t, torch.OptionalType):
+                    t = t.getElementType()
+                return isinstance(t, torch.ListType)
+
             returns = op_overload._schema.returns
-            if len(returns) == 1 and isinstance(returns[0].real_type, torch.ListType):
-                outputs_by_return = [(output_args, raw_outputs)]
+            if len(returns) == 1 and is_list_return(returns[0].real_type):
+                # A lone Tensor[]? return that was None when traced has outputs [None].
+                single_output = None if output_args == [None] else output_args
+                outputs_by_return = [(single_output, raw_outputs)]
             else:
                 outputs_by_return = zip(output_args, raw_outputs)
 
@@ -4256,7 +4266,12 @@ if (!custom_op_wrapper) {
             ):
                 if isinstance(raw_output_arg, ir.MutationOutput):
                     continue
-                if isinstance(schema_return.real_type, torch.ListType):
+                return_type = schema_return.real_type
+                if is_list_return(return_type):
+                    is_optional = isinstance(return_type, torch.OptionalType)
+                    if output_arg is None and is_optional:
+                        # A Tensor[]? that was None when traced: nothing to unpack.
+                        continue
                     if not isinstance(output_arg, list):
                         raise AssertionError(
                             f"Expected tensor-list outputs, got {output_arg}"
