@@ -4,16 +4,16 @@
 #include <memory>
 
 namespace c10 {
-struct FakeTensorMode;
+struct FakeTensorModeHandle;
 } // namespace c10
 
 namespace c10::impl {
 
 class C10_API FakeTensorModeTLS {
  public:
-  static void set_state(std::shared_ptr<FakeTensorMode> state);
-  static void create_state(std::shared_ptr<FakeTensorMode> state);
-  static std::shared_ptr<FakeTensorMode> get_state();
+  static void set_state(std::shared_ptr<FakeTensorModeHandle> state);
+  static void create_state(std::shared_ptr<FakeTensorModeHandle> state);
+  static std::shared_ptr<FakeTensorModeHandle> get_state();
   static void reset_state();
 
   // Note [C++ in_kernel_invocation]

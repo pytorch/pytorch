@@ -1916,7 +1916,7 @@ class TestQuantizedOps(TestCase):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: kernel_size",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ao.nn.quantized.functional.avg_pool2d(
                 qx2d, kernel_size=2**63 - 1
@@ -1927,7 +1927,7 @@ class TestQuantizedOps(TestCase):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: kernel_size",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ao.nn.quantized.functional.avg_pool3d(
                 qx3d, kernel_size=2**63 - 1
