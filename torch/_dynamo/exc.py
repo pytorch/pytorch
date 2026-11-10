@@ -613,14 +613,14 @@ def raise_value_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
     raise_observed_exception(ValueError, tx, args=[msg])
 
 
-def raise_name_error(tx: InstructionTranslatorBase, name: str) -> NoReturn:
+def raise_name_error(tx: InstructionTranslatorBase, msg: str, *, name: str) -> NoReturn:
     """Raise a NameError as an observed exception during tracing."""
     from .variables import ConstantVariable
 
     raise_observed_exception(
         NameError,
         tx,
-        args=[f"name '{name}' is not defined"],
+        args=[msg],
         kwargs={"name": ConstantVariable.create(name)},
     )
 

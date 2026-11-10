@@ -2897,6 +2897,16 @@
       ]
     }
   ],
+  "GB4682": [
+    {
+      "Gb_type": "Delete of an unmodeled C member",
+      "Context": "del {obj}.{name}",
+      "Explanation": "Dynamo does not model deleting the C struct member '{name}'.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB7637": [
     {
       "Gb_type": "non-string key in object __dict__",
@@ -3389,6 +3399,26 @@
       "Gb_type": "Reconstruct user defined class without a source",
       "Context": "Class: {var.python_type().__name__}",
       "Explanation": "Cannot reconstruct an instance of {var.python_type().__name__} that escapes the compiled region. This happens when the class is defined dynamically (e.g., inside the compiled function) and the class object itself has no source that can be reconstructed. To fix this, move the class definition outside the compiled function or prevent the object from escaping the compiled region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1811": [
+    {
+      "Gb_type": "DELETE_GLOBAL in unregistered module globals",
+      "Context": "module_name: {self.f_globals.get('__name__')}",
+      "Explanation": "Dynamo cannot safely replay global deletes for a frame whose globals dict is not the registered module __dict__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8630": [
+    {
+      "Gb_type": "DELETE_GLOBAL in module with __getattr__",
+      "Context": "name",
+      "Explanation": "Dynamo cannot safely replay global deletes for a module that defines __getattr__.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -7116,6 +7146,17 @@
       "Hints": [
         "Clone one of the aliased inputs before the call, or stop mutating it.",
         "Please open an issue."
+      ]
+    }
+  ],
+  "GB8811": [
+    {
+      "Gb_type": "OrderedDict storage differs from linked keys",
+      "Context": "OrderedDict input snapshot",
+      "Explanation": "Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
+      "Hints": [
+        "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
       ]
     }
   ],

@@ -573,16 +573,22 @@ class SideEffects:
         self.attr_mutation_kinds[item][name] = mutation_kind
         # Capture user stack for this mutation
         self._capture_user_stack(item)
-        if mutated_source is None:
-            mutated_source = self._store_attr_mutation_source(item, name)
         if mutated_source is not None:
             self.mutated_sources.add(mutated_source)
+        else:
+            item_source = getattr(item, "source", None)
+            if item_source is not None:
+                self.mutated_sources.add(AttrSource(item_source, name))
 
-    @staticmethod
-    def _store_attr_mutation_source(item: VariableTracker, name: str) -> Source | None:
-        """The source `store_attr` records for a mutation that passes none."""
-        item_source = getattr(item, "source", None)
-        return None if item_source is None else AttrSource(item_source, name)
+    def discard_attr_mutation(self, item: VariableTracker, name: str) -> None:
+        """Drop a recorded mutation that eager never leaves behind."""
+        self.store_attr_mutations.get(item, {}).pop(name, None)
+        self.attr_mutation_kinds.get(item, {}).pop(name, None)
+        if item in self.store_attr_mutations and (
+            not self.store_attr_mutations[item] and not self.attr_mutation_kinds[item]
+        ):
+            self.store_attr_mutations.pop(item, None)
+            self.attr_mutation_kinds.pop(item, None)
 
     def store_instance_dict_attr(
         self, item: VariableTracker, name: str, value: VariableTracker
@@ -2035,9 +2041,11 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                     f"got {type(var.source)}"  # type: ignore[attr-defined]
                 )
             if isinstance(value, variables.DeletedVariable):
-                # TODO(3.16): CPython compiles `del name` to PUSH_NULL;
-                # STORE_GLOBAL, so emit that pair once 3.16 is supported. Before
-                # 3.16, STORE_GLOBAL stores the null sentinel instead.
+                # TODO(3.16): CPython 3.16 compiles `del name` to PUSH_NULL;
+                # STORE_GLOBAL, so emit that pair once 3.16 is supported.
+                # Through 3.15, STORE_GLOBAL would write the null as an
+                # ordinary value into the dict, so DELETE_GLOBAL must be
+                # emitted.
                 if name in cg.tx.output.global_scope:
                     cg.tx.output.update_co_names(name)
                     ctx.suffixes.append(

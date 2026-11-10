@@ -33,6 +33,7 @@ from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     handle_observed_exception,
     ObservedTypeError,
+    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     UnhandledDescriptorError,
@@ -2318,6 +2319,36 @@ def mro_attr_source(
     return None
 
 
+def _is_skipped_constant_property(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: str,
+) -> bool:
+    if type(name) is not str:
+        return False
+    obj = obj.realize()
+    if (
+        type(obj) is not variables.ConstantVariable
+        or tx.output.side_effects.has_pending_mutation_of_attr(obj, name)
+        or obj.lookup_tp_getset_member(name) is not None
+    ):
+        return False
+    type_attr = mro_lookup(obj.python_type(), name)
+    if type(type_attr) is not property:
+        return False
+    # Python getters can have specialized SkipFunctionVariable handlers.
+    if isinstance(type_attr.fget, types.FunctionType):
+        return False
+    prop_source = (
+        mro_attr_source(tx, obj.python_type(), TypeSource(obj.source), name)
+        if obj.source
+        else None
+    )
+    prop_vt = variables.PropertyVariable.create(type_attr, prop_source)
+    fget_vt = prop_vt.tp_getattro_impl(tx, "fget").realize()
+    return isinstance(fget_vt, variables.SkipFunctionVariable)
+
+
 def _resolve_descriptor_get(
     tx: "InstructionTranslatorBase",
     type_attr: object,
@@ -2520,7 +2551,13 @@ def generic_getattr(
     # Side effects: check for pending attribute mutations.
     if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
         if not isinstance(obj, variables.UserDefinedObjectVariable):
-            value = tx.output.side_effects.load_attr(obj, name)
+            value = tx.output.side_effects.load_attr(obj, name, deleted_ok=True)
+            if isinstance(value, variables.DeletedVariable):
+                # Reading an attribute that a pending replay deletes must
+                # raise what eager raises, not fall back to the stale
+                # real-object value (the delete has not run yet at trace
+                # time).
+                raise_attribute_error(tx, f"object has no attribute '{name}'")
             # A pending store of a descriptor onto a class lands in cls.__dict__,
             # so reading it back has to run tp_descr_get the way type_getattro
             # does -- otherwise `C.h = staticmethod(f); type(C.h)` reports

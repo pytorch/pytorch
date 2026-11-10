@@ -213,6 +213,7 @@ from .variables.lists import (
 from .variables.misc import CellVariable, NullVariable, UnknownVariable
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
+    _is_skipped_constant_property,
     generic_delitem,
     generic_getattr,
     generic_getiter,
@@ -2538,17 +2539,14 @@ class InstructionTranslatorBase(
     def LOAD_CONST(self, inst: Instruction) -> None:
         self.push(self._load_const(inst))
 
-    def _load_builtin_if_global_deleted(
-        self, variable: VariableTracker, name: str, inst: Instruction
-    ) -> bool:
+    def _global_deleted_in_trace(self, item: VariableTracker, name: str) -> bool:
         side_effects = self.output.side_effects
-        if not side_effects.has_pending_mutation_of_attr(variable, name):
+        if not side_effects.has_pending_mutation_of_attr(item, name):
             return False
-        pending = side_effects.load_attr(variable, name, deleted_ok=True)
-        if not isinstance(pending, variables.DeletedVariable):
-            return False
-        self.load_builtin(inst)
-        return True
+        return isinstance(
+            side_effects.load_attr(item, name, deleted_ok=True),
+            variables.DeletedVariable,
+        )
 
     def _load_global(self, inst: Instruction) -> None:
         name = inst.argval
@@ -2566,8 +2564,8 @@ class InstructionTranslatorBase(
 
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
-            if self._load_builtin_if_global_deleted(variable, name, inst):
-                return
+            if self._global_deleted_in_trace(variable, name):
+                return self.load_builtin(inst)
             self.push(self.output.side_effects.load_global(variable, name))
             return
 
@@ -2611,71 +2609,85 @@ class InstructionTranslatorBase(
         self.output.side_effects.store_global(variable, name, value)
 
     def DELETE_GLOBAL(self, inst: Instruction) -> None:
-        self._delete_global(inst, self._global_variable(inst.argval))
-
-    def _delete_global(self, inst: Instruction, target: VariableTracker) -> None:
         name = inst.argval
-        present = name in self.f_globals
-        self._install_globals_membership_guard(name, present)
-        self._check_global_delete(name, target, present)
-        if isinstance(target, variables.NewGlobalVariable):
-            self.output.side_effects.store_global(
-                target, name, variables.DeletedVariable()
-            )
-        else:
-            self.output.side_effects.store_attr(
-                target, name, variables.DeletedVariable()
-            )
+        target = self._global_variable(name)
+        self._delete_global(name, target)
+        self.output.side_effects.store_global(target, name, variables.DeletedVariable())
 
-    def _check_global_delete(
-        self,
-        name: str,
-        item: VariableTracker,
-        present: bool,
-    ) -> None:
-        """Raise what eager raises, and keep a dropped tensor's dealloc sync."""
+    def _delete_global(self, name: str, target: VariableTracker) -> None:
+        """Raise what eager raises for `del name`, and clean up the dict."""
         side_effects = self.output.side_effects
-        if side_effects.has_pending_mutation_of_attr(item, name):
-            pending = side_effects.load_attr(item, name, deleted_ok=True)
-            if isinstance(pending, variables.DeletedVariable):
-                # An earlier delete in this trace already removed the name.
-                raise_name_error(self, name)
-        elif not present:
-            # Nothing ever bound the name.
-            raise_name_error(self, name)
-        # A pre-existing global's tensor is not covered: syncing its dealloc
-        # would need a guard on the tensor identity, which is not tracked.
-        self._maybe_sync_dealloc_attr(item, name)
-
-    @functools.cached_property
-    def _globals_dict_source(self) -> Source:
-        # Whether a DELETE_GLOBAL replays depends on membership, and
-        # GlobalSource(name) raises for an absent name, so membership is guarded
-        # on the dict itself. Root that guard at the module (as
-        # get_globals_source_and_value does) when the dict is a registered
-        # module's, so a loaded artifact can bind it again; a dict that is no
-        # module's has no import source, so fall back to an unnamed-scope key.
-        registered_module = _registered_module_for_globals(
-            self.f_globals.get("__name__"), self.f_globals
-        )
-        if registered_module is not None:
-            module_name, _ = registered_module
-            return AttrSource(self.import_source(module_name), "__dict__")
-        return GlobalSource(
-            self.output.install_global_by_id(UNNAMED_SCOPE_PREFIX, self.f_globals)
-        )
-
-    def _install_globals_membership_guard(self, name: str, present: bool) -> None:
-        # The trace-time membership is baked into the generated code; if it
-        # flips, the replayed delete no longer matches the globals.
+        # The membership guard tracks the live dict; `present` below is what
+        # eager would answer, which a pending write to the same dict through
+        # its module VT also decides.
         guard_builder = (
-            GuardBuilder.DICT_CONTAINS if present else GuardBuilder.DICT_NOT_CONTAINS
+            GuardBuilder.DICT_CONTAINS
+            if name in self.f_globals
+            else GuardBuilder.DICT_NOT_CONTAINS
         )
         install_guard(
             self._globals_dict_source.make_guard(
                 functools.partial(guard_builder, key=name)
             )
         )
+        present = name in self.f_globals
+        msg = f"name '{name}' is not defined"
+        siblings_to_cancel = []
+        for item in list(side_effects.store_attr_mutations):
+            value = getattr(item, "value", None)
+            # Target global variables only.
+            if not (
+                (
+                    isinstance(value, types.ModuleType)
+                    and value.__dict__ is self.f_globals
+                )
+                or (not isinstance(value, types.ModuleType) and value is self.f_globals)
+            ):
+                continue
+            # Duplicate Deletion
+            if self._global_deleted_in_trace(item, name):
+                raise_name_error(self, msg, name=name)
+            if side_effects.has_pending_mutation_of_attr(item, name):
+                present = True
+                if item is not target:
+                    siblings_to_cancel.append(item)
+        pending_on_target = side_effects.has_pending_mutation_of_attr(target, name)
+        if pending_on_target:
+            if self._global_deleted_in_trace(target, name):
+                # An earlier delete in this trace already removed the name.
+                raise_name_error(self, msg, name=name)
+        elif not present:
+            # Nothing ever bound the name.
+            raise_name_error(self, msg, name=name)
+        # A pre-existing global's tensor is not covered: syncing its dealloc
+        # would need a guard on the tensor identity, which is not tracked.
+        self._maybe_sync_dealloc_attr(target, name)
+        for item in siblings_to_cancel:
+            side_effects.discard_attr_mutation(item, name)
+
+    @functools.cached_property
+    def _globals_dict_source(self) -> Source:
+        # Whether a DELETE_GLOBAL replays depends on membership, and
+        # GlobalSource(name) raises for an absent name, so membership is guarded
+        # on the dict itself. Root the guard at the module's __dict__ so a
+        # loaded artifact can bind it again; a dict that is no module's has no
+        # import source to root at, so the delete breaks, the way the inlined
+        # handler does.
+        registered_module = _registered_module_for_globals(
+            self.f_globals.get("__name__"), self.f_globals
+        )
+        if registered_module is None:
+            unimplemented(
+                gb_type="DELETE_GLOBAL in unregistered module globals",
+                context=f"module_name: {self.f_globals.get('__name__')!r}",
+                explanation=(
+                    "Dynamo cannot safely replay global deletes for a frame "
+                    "whose globals dict is not the registered module __dict__."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        module_name, _ = registered_module
+        return AttrSource(self.import_source(module_name), "__dict__")
 
     # Keyed by module_name alone, not the whole argument tuple as @cache_method
     # would key it, so a later argument cannot silently split the memo. Per
@@ -2837,7 +2849,7 @@ class InstructionTranslatorBase(
     def load_builtin_from_argval(self, argval: Any) -> VariableTracker:
         if argval not in self.f_builtins:
             # Name is neither a global nor a builtin.
-            raise_name_error(self, argval)
+            raise_name_error(self, f"name '{argval}' is not defined", name=argval)
         val = self.f_builtins[argval]
 
         if callable(val):
@@ -3473,7 +3485,10 @@ class InstructionTranslatorBase(
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop().realize()
         try:
-            result = generic_getattr(self, obj, attr)
+            if not _is_skipped_constant_property(self, obj, attr):
+                result = generic_getattr(self, obj, attr)
+                self.push(result)
+                return
         except Unsupported:
             if not obj.is_python_constant():
                 raise
@@ -3481,10 +3496,10 @@ class InstructionTranslatorBase(
                 obj, variables.UserDefinedClassVariable
             ) and obj.getattr_needs_tracing(self, attr):
                 raise
-            source = AttrSource(obj.source, attr) if obj.source else None
-            result = VariableTracker.build(
-                self, getattr(obj.as_python_constant(), attr), source=source
-            )
+        source = AttrSource(obj.source, attr) if obj.source else None
+        result = VariableTracker.build(
+            self, getattr(obj.as_python_constant(), attr), source=source
+        )
         self.push(result)
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
@@ -6520,9 +6535,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             super()._load_global(inst)
         else:
             _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
+            if self._global_deleted_in_trace(fglobals_vt, name):
+                return self.load_builtin(inst)
             if self.output.side_effects.has_pending_mutation_of_attr(fglobals_vt, name):
-                if self._load_builtin_if_global_deleted(fglobals_vt, name, inst):
-                    return
                 self.push(self.output.side_effects.load_attr(fglobals_vt, name))
             else:
                 value = self.f_globals[name]
@@ -6562,13 +6577,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def DELETE_GLOBAL(self, inst: Instruction) -> None:
         if self.output.global_scope is self.f_globals:
             super().DELETE_GLOBAL(inst)
-        else:
-            self._delete_global_other_module(inst)
-
-    def _delete_global_other_module(self, inst: Instruction) -> None:
+            return
         name = inst.argval
-        _, value, source = self.get_globals_source_and_value(name)
-        if isinstance(source, DictGetItemSource):
+        _fglobals_value, fglobals_vt, global_source = self.get_globals_source_and_value(
+            name
+        )
+        if isinstance(global_source, DictGetItemSource):
             unimplemented(
                 gb_type="DELETE_GLOBAL in non-module globals",
                 context=name,
@@ -6579,7 +6593,27 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 ),
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        self._delete_global(inst, value)
+        if (
+            getattr(getattr(fglobals_vt, "value", None), "__getattr__", None)
+            is not None
+        ):
+            # The replay of this delete is gated on hasattr(module, name), and
+            # a module with __getattr__ answers it for names the module does
+            # not hold, so the emitted DELETE_ATTR may fail where eager does
+            # not.
+            unimplemented(
+                gb_type="DELETE_GLOBAL in module with __getattr__",
+                context=name,
+                explanation=(
+                    "Dynamo cannot safely replay global deletes for a module "
+                    "that defines __getattr__."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        self._delete_global(name, fglobals_vt)
+        self.output.side_effects.store_attr(
+            fglobals_vt, name, variables.DeletedVariable()
+        )
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
