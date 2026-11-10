@@ -769,7 +769,9 @@ void validate_scaled_grouped_mm_v2_inputs(
       mat_b.scalar_type() == ScalarType::Float4_e2m1fn_x2 && recipe_a.equals(recipe_b) &&
       ((recipe_a.size() == 1 && recipe_a[0] == vec16) ||
        (recipe_a.size() == 2 && recipe_a[0] == vec16 && recipe_a[1] == static_cast<int64_t>(ScalingType::TensorWise)));
-  const bool bf16_only = !tensorwise && !fp32_block && !has_mnk4 && !nvfp4;
+  const bool mxfp8 = same_recipe && recipe_a[0] == vec32 &&
+      is_valid_cublaslt_input_pair(mat_a.scalar_type(), mat_b.scalar_type());
+  const bool bf16_only = !tensorwise && !fp32_block && !has_mnk4 && !nvfp4 && !mxfp8;
   TORCH_CHECK_VALUE(
       !bf16_only || out_dtype_ == ScalarType::BFloat16,
       rowwise ? "Rowwise grouped GEMM requires BFloat16 output"
