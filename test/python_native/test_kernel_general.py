@@ -756,7 +756,8 @@ class TestKernelGeneral(TestCase):
         make = lambda: view.get(case, lambda t: t)(torch.randn(shape, device="cuda"))  # noqa: E731
         key = f"replay_{case}"
         self._assert_replays(key, make, dims, tags)
-        # The ragged-row route is measured on B200 only; elsewhere these rows take rowtile.
+        # The ragged-row route is measured on B200 only; elsewhere these rows take the
+        # non-ragged rowtile kernel.
         if case == "ragged_row" and cc in kg._B200_CCS:
             # Row keys carry ragged_vector, so an explicit ragged launch reuses the plan.
             plans = lambda: {k for k in rt._CACHE if k[:2] == ("rowtile", key)}  # noqa: E731

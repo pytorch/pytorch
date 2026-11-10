@@ -292,6 +292,109 @@ class TestReductionConfig(TestCase):
         self.assertEqual(rt.select_row_order(**args), "inner_tree")
         self.assertEqual(rt.select_row_order(**(args | updates)), "linear")
 
+    @parametrize(
+        "dtype,mib,trait_type,fields,nouts,unroll",
+        [
+            (torch.float32, 256, T.SumOps, 1, 1, 128),
+            (torch.bfloat16, 2048, T.ArgMaxOps, 2, 1, 128),
+            (torch.float32, 256, T.WelfordOps, 3, 1, 64),
+            (torch.bfloat16, 2048, T.VarMeanOps, 3, 2, 64),
+        ],
+        name_fn=lambda dtype, mib, trait_type, *_: f"{trait_type.__name__}_{mib}mib",
+    )
+    def test_sm107_full_profiles(self, dtype, mib, trait_type, fields, nouts, unroll):
+        """Pin each distinct SM107 full-reduction policy branch."""
+        natural = {T.SumOps: torch.float32, T.ArgMaxOps: torch.int64}
+        output = natural.get(trait_type, dtype)
+        arch = rt.select_full_itree_arch(
+            (10, 7),
+            dtype,
+            (mib << 20) // dtype.itemsize,
+            1,
+            trait_type=trait_type,
+            field_bits=(32,) * fields,
+            out_dtypes=(output,) * nouts,
+            welford_outs=nouts if fields == 3 else 0,
+            alignment=16,
+            contiguous=True,
+        )
+        welford = fields == 3
+        want = rt._ItreeArch(
+            split_stage_rows=4,
+            combine_rpb=32,
+            combine_group_bytes=16,
+            stage_rows=False,
+            combine_async=32,
+            combine_max=2048,
+            combine_unroll=unroll,
+            lowp_thread_elems=32,
+            uniform_count=welford,
+            combine_weights=welford,
+        )
+        self.assertEqual(arch, want)
+
+    @parametrize(
+        "updates",
+        [
+            {"cc": (10, 0)},
+            {"N": (256 << 20) // 4 - 1},
+            {"trait_type": T.MeanOps},
+            {"trait_type": T.NanSumOps},
+            {"dtype": torch.float16, "N": (256 << 20) // 2},
+            # Only fp32 sums were measured, not bf16 sums into fp32.
+            {"dtype": torch.bfloat16, "N": (256 << 20) // 2},
+            {"M": 2},
+            {"contiguous": False},
+            {"alignment": 8},
+            {"out_dtypes": (torch.bfloat16,)},
+        ],
+    )
+    def test_sm107_full_guards(self, updates):
+        """Keep calls outside the SM107 policy contract on the generic path."""
+        args = dict(
+            cc=(10, 7),
+            dtype=torch.float32,
+            trait_type=T.SumOps,
+            N=(256 << 20) // 4,
+            M=1,
+            field_bits=(32,),
+            out_dtypes=(torch.float32,),
+            welford_outs=0,
+            alignment=16,
+            contiguous=True,
+        )
+        self.assertIsNotNone(rt.select_full_itree_arch(**args))
+        args.update(updates)
+        self.assertIsNone(rt.select_full_itree_arch(**args))
+
+    @parametrize(
+        "updates",
+        [
+            {"field_bits": (64,) * 3},
+            {"dtype": torch.float16, "N": 128 << 20, "out_dtypes": (torch.float16,)},
+            {"welford_outs": 0},
+            {"out_dtypes": (torch.bfloat16,)},
+            {"out_dtypes": (torch.float32,) * 2},
+        ],
+    )
+    def test_sm107_full_welford_guards(self, updates):
+        """Keep Welford calls outside the SM107 Welford contract on the generic path."""
+        args = dict(
+            cc=(10, 7),
+            dtype=torch.float32,
+            trait_type=T.WelfordOps,
+            N=(256 << 20) // 4,
+            M=1,
+            field_bits=(32,) * 3,
+            out_dtypes=(torch.float32,),
+            welford_outs=1,
+            alignment=16,
+            contiguous=True,
+        )
+        self.assertIsNotNone(rt.select_full_itree_arch(**args))
+        args.update(updates)
+        self.assertIsNone(rt.select_full_itree_arch(**args))
+
     def test_fallback_warns_once_per_reason(self):
         """Report each distinct reason a gated inner-tree request fell back."""
         with (
@@ -421,7 +524,8 @@ class TestReductionConfig(TestCase):
             contract = _contract(trait)
             nfields = contract.pop("nfields")
             args = ((10, 0), torch.float32, rows, 4095, 1, nfields)
-            kw = dict(itemsize=4, acc_bits=32, alignment=16)
+            outs = kg._sm107_outputs(torch.float32, type(trait), nfields, 1)
+            kw = dict(itemsize=4, acc_bits=32, alignment=16, out_dtypes=outs)
             cfg = ct.select_col_config(*args, **kw, **contract)
             self.assertEqual(cfg.rule, rule, type(trait).__name__)
 
@@ -458,6 +562,8 @@ class TestReductionConfig(TestCase):
             )
             self.assertTrue(cfg.uniform_tree)
             self.assertTrue(tile.uniform_tree_ok(T.WelfordOps(), count, cfg.block, 1))
+        # TileReduce rejects general-axis blocks of a non-power-of-two warp count.
+        self.assertFalse(tile.uniform_tree_ok(T.WelfordOps(), 4096, 96, 1))
 
     @parametrize(
         "dtype,count,updates,expected",
@@ -529,7 +635,9 @@ class TestReductionConfig(TestCase):
         contract = _contract(_TRAITS[trait])
         nfields = contract.pop("nfields")
         args = ((10, 0), dtype, rows, columns, 1, nfields)
-        kw = dict(itemsize=itemsize, acc_bits=32, alignment=16)
+        nouts = contract["nouts"]
+        outs = kg._sm107_outputs(dtype, type(_TRAITS[trait]), nfields, nouts)
+        kw = dict(itemsize=itemsize, acc_bits=32, alignment=16, out_dtypes=outs)
         cfg = ct.select_col_config(*args, **kw, **contract)
         self.assertEqual(cfg.rule, expected_rule)
 
@@ -589,13 +697,15 @@ class TestReductionConfig(TestCase):
         name_fn=lambda dtype, trait, size, cfg: f"{cfg.rule}_{size >> 20}mib",
     )
     def test_b200_ragged_column_values(self, dtype, trait, size, expected):
-        """Pin every field of the B200 ragged column rules, not just their names."""
+        """Pin every field of the B200 C = 4095 ragged column rules, not just names."""
         itemsize = dtype.itemsize
         rows = size // (4095 * itemsize)
         contract = _contract(_TRAITS[trait])
         nfields = contract.pop("nfields")
         args = ((10, 0), dtype, rows, 4095, 1, nfields)
-        kw = dict(itemsize=itemsize, acc_bits=32, alignment=16)
+        nouts = contract["nouts"]
+        outs = kg._sm107_outputs(dtype, type(_TRAITS[trait]), nfields, nouts)
+        kw = dict(itemsize=itemsize, acc_bits=32, alignment=16, out_dtypes=outs)
         cfg = ct.select_col_config(*args, **kw, **contract)
         self.assertEqual(cfg, expected)
 
@@ -633,6 +743,7 @@ class TestReductionConfig(TestCase):
             nouts=1,
             welford_outs=0,
             alignment=16,
+            out_dtypes=(torch.float32,),
         )
         cfg = ct.select_col_config(**(args | updates))
         self.assertEqual(cfg.rule, expected_rule)
@@ -761,7 +872,7 @@ class TestReductionConfigDevice(TestCase):
         """Serve unordered odd rows inside the B200 band with the ragged-vector plan."""
         import cutlass
 
-        if torch.cuda.get_device_capability(device) != (10, 0):
+        if torch.cuda.get_device_capability(device) not in kg._B200_CCS:
             self.skipTest("the ragged-row route is measured on B200 only")
         x = torch.randn(64, N, device=device, dtype=dtype)
         key = f"ragged_route_{op}_{str(dtype)[6:]}_{N}"
@@ -788,7 +899,7 @@ class TestReductionConfigDevice(TestCase):
         the indexed tree."""
         import cutlass
 
-        if torch.cuda.get_device_capability(device) != (10, 0):
+        if torch.cuda.get_device_capability(device) not in kg._B200_CCS:
             self.skipTest("the strided rules are measured on B200 only")
         x = torch.randn(8, 512, device=device)[:, ::2]
         key = f"{op}_strided_c256"
@@ -806,7 +917,7 @@ class TestReductionConfigDevice(TestCase):
         """Run b200_strided_index's fp32 64-thread blocks at its smallest anchor."""
         import cutlass
 
-        if torch.cuda.get_device_capability(device) != (10, 0):
+        if torch.cuda.get_device_capability(device) not in kg._B200_CCS:
             self.skipTest("the strided rules are measured on B200 only")
         count, num_o = 1024, 2048
         x = torch.randn(num_o, 2 * count, device=device)[:, ::2]
@@ -825,7 +936,7 @@ class TestReductionConfigDevice(TestCase):
         """Fold b200_strided_welford's smallest anchor with the uniform Welford tree."""
         import cutlass
 
-        if torch.cuda.get_device_capability(device) != (10, 0):
+        if torch.cuda.get_device_capability(device) not in kg._B200_CCS:
             self.skipTest("the strided rules are measured on B200 only")
         count, num_o = 1024, 2048
         x = torch.randn(num_o, 2 * count, device=device)[:, ::2]

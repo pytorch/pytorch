@@ -10,6 +10,8 @@ _K_MULTIROW_MAX_LOADS = 8
 _K_TWO_KERNEL_THRESHOLD = 3
 _K_TARGET_WARPS_PER_BLOCK = 8  # kTargetWarpsPerBlock
 _MAX_WARPS = 16  # warps per row
+# Requests the inner-tree order (kernel_rowtile.reduction_order).
+_INNER_TREE_ENV = "PYTORCH_NATIVE_INNER_TREE"
 
 
 def _previous_power_of_2(n: int) -> int:
