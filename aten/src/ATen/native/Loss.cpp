@@ -56,6 +56,7 @@
 #include <ATen/ops/triplet_margin_loss_native.h>
 #include <ATen/ops/where.h>
 #include <ATen/ops/xlogy.h>
+#include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #endif
 
@@ -196,7 +197,7 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
   auto denom = (mag_square1 * mag_square2).sqrt_();
   auto cos = prod_sum / denom;
 
-  auto zeros = at::zeros_like(cos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto zeros = cos.new_zeros({});
   auto pos = 1 - cos;
   auto neg = (cos - margin).clamp_min_(0);
   auto output_pos = at::where(target == 1, pos, zeros);
@@ -206,7 +207,7 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
 }
 
 Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double margin, int64_t reduction) {
-  auto zeros = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto zeros = self.new_zeros({});
   auto margin_diff = (margin - self);
   // For Composite Compliance,
   // In Forward AD, if `margin_diff` is a CCT but its tangent isn't,
