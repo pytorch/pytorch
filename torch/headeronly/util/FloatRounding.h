@@ -27,7 +27,6 @@
 #include <torch/headeronly/util/Float8_e5m3fnu.h>
 #include <torch/headeronly/util/Float8_e8m0fnu.h>
 #include <torch/headeronly/util/Half.h>
-#include <torch/headeronly/util/floating_point_utils.h>
 
 #include <cstdint>
 #include <cstring>
@@ -39,11 +38,12 @@
 
 HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 
+// The values are part of the ABI (e.g. of compiled extensions): do not reorder.
 enum class RoundingMode : uint8_t {
-  ToNearestEven,
-  TowardZero,
-  TowardPositive,
-  TowardNegative,
+  ToNearestEven = 0,
+  TowardZero = 1,
+  TowardPositive = 2,
+  TowardNegative = 3,
 };
 
 namespace detail {
@@ -139,7 +139,9 @@ C10_HOST_DEVICE Dst convert_with_rounding(Src x, RoundingMode mode) {
   using detail::Bits;
   using SrcL = std::numeric_limits<Src>;
   using DstL = std::numeric_limits<Dst>;
-  static_assert(SrcL::is_iec559, "the source must be an IEEE 754 format");
+  static_assert(
+      std::is_same_v<Src, float> || std::is_same_v<Src, double>,
+      "the source must be float or double");
   static_assert(
       DstL::is_specialized && !DstL::is_integer && DstL::radix == 2,
       "the destination must be a binary floating-point format");

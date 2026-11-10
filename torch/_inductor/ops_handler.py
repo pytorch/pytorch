@@ -212,7 +212,7 @@ class OpsHandler(Generic[T]):
         self, x: T, dtype: torch.dtype, src_dtype: torch.dtype, rounding: str
     ) -> T:
         """
-        Convert x to the narrower floating-point dtype with an IEEE 754 rounding
+        Convert x to another floating-point dtype with an IEEE 754 rounding
         direction; see Tensor.to(..., round=...). rounding is one of
         "to_nearest_even", "toward_zero", "toward_positive" and
         "toward_negative". src_dtype is the dtype of the input buffer or

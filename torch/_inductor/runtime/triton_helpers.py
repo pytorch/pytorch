@@ -209,13 +209,64 @@ def round_float64_to_odd_float32(x):
 
 
 @triton.jit
-def float32_to_float8_bits(x, MODE: tl.constexpr, E4M3: tl.constexpr):
+def round_float64_to_float32(x, MODE: tl.constexpr):
+    """
+    Rounds float64 x to float32 in MODE (as in round_float32_to_bits, or 4 for
+    round to odd, as in round_float64_to_odd_float32) without PTX, for other
+    backends than CUDA: rounds to nearest, then steps one ulp toward x where
+    that is on the wrong side of x. Comparisons with NaN are false, so NaN is
+    left alone; the encodings of float32 magnitudes are consecutive, so
+    stepping from infinity or to it needs nothing else.
+    """
+    f = x.to(tl.float32)
+    back = f.to(tl.float64)
+    bits = f.to(tl.int32, bitcast=True)
+    smaller = tl.abs(back) < tl.abs(x)
+    larger = tl.abs(back) > tl.abs(x)
+    up = tl.where(smaller, 1, 0)
+    down = tl.where(larger, -1, 0)
+    neg = x < 0
+    if MODE == 0:
+        step = 0
+    elif MODE == 1:
+        step = down
+    elif MODE == 2:
+        step = tl.where(neg, down, up)
+    elif MODE == 3:
+        step = tl.where(neg, up, down)
+    else:
+        step = tl.where((bits & 1) == 0, up + down, 0)
+    return (bits + step).to(tl.float32, bitcast=True)
+
+
+@triton.jit
+def float32_to_float8_bits(x, MODE: tl.constexpr, E4M3: tl.constexpr, RZ: tl.constexpr):
     """
     Converts float32 x to float8_e4m3fn (E4M3) or float8_e5m2 bits, as uint8,
-    with the cvt.rn.satfinite instruction of sm_89+, like the eager CUDA kernel.
-    MODE is as in round_float32_to_bits.
+    with the cvt.rn.satfinite instruction of sm_89+, like the eager CUDA kernel,
+    or, for the directed modes on sm_107 (RZ), cvt.rz.satfinite, from which
+    they can only step away from zero. MODE is as in round_float32_to_bits.
     """
-    if E4M3:
+    if RZ and MODE != 0:
+        if E4M3:
+            bits = tl.inline_asm_elementwise(
+                "cvt.rz.satfinite.e4m3x2.f32 $0, 0.0, $1;",
+                "=h,f",
+                [x],
+                dtype=tl.uint16,
+                is_pure=True,
+                pack=1,
+            ).to(tl.uint8)
+        else:
+            bits = tl.inline_asm_elementwise(
+                "cvt.rz.satfinite.e5m2x2.f32 $0, 0.0, $1;",
+                "=h,f",
+                [x],
+                dtype=tl.uint16,
+                is_pure=True,
+                pack=1,
+            ).to(tl.uint8)
+    elif E4M3:
         bits = tl.inline_asm_elementwise(
             "cvt.rn.satfinite.e4m3x2.f32 $0, 0.0, $1;",
             "=h,f",

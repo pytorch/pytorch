@@ -5246,7 +5246,9 @@ Here are the ways to call ``to``:
     A device change, if any, is a separate transfer, and the result is never
     ``self``. Like a plain dtype conversion, its gradient is the identity (cast
     back to the original dtype), unlike that of :func:`torch.round`, which is
-    zero.
+    zero. On a DTensor with a ``Partial`` sum or average placement, the input
+    is reduced before it is rounded, whereas a conversion without
+    :attr:`round` keeps the placement, so their results can differ.
 
 Example::
 

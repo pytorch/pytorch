@@ -13,13 +13,14 @@
 
 namespace at::native {
 
-// The float8_e8m0fnu and float8_e5m3fnu destinations, whose instructions need
-// arch-specific targets, are in separate files that are also built for them
-// (see cmake/Codegen.cmake).
+// Destinations with instructions that need arch-specific or family-specific
+// targets are in separate files that are also built for them (see
+// cmake/Codegen.cmake): float8_e8m0fnu, and the float8_e4m3fn, float8_e5m2 and
+// float8_e5m3fnu destinations of sm_107f's instructions.
 void to_dtype_rounded_kernel_cuda_e8m0(
     TensorIteratorBase& iter,
     c10::RoundingMode mode);
-void to_dtype_rounded_kernel_cuda_e5m3(
+void to_dtype_rounded_kernel_cuda_sm107f(
     TensorIteratorBase& iter,
     c10::RoundingMode mode);
 
@@ -31,10 +32,15 @@ namespace {
 // (src, dst, mode) combination and the target architecture. Otherwise it uses
 // NVIDIA's emulation of the instruction where noted, or the portable software
 // conversion. All produce the same values, but NaN may be encoded differently.
+#if CUDA_VERSION >= 13040 && defined(__CUDA_ARCH_FAMILY_SPECIFIC__) && \
+    __CUDA_ARCH_FAMILY_SPECIFIC__ >= 1070 && __CUDA_ARCH_FAMILY_SPECIFIC__ < 1100
+#define TORCH_ROUNDED_CONVERSION_SM107F
+#endif
+
 template <typename dst_t>
 C10_HOST_DEVICE inline dst_t
 convert_rounded_from_float(float x, c10::RoundingMode mode) {
-#if defined(__CUDA_ARCH__) && !defined(USE_ROCM)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   using c10::RoundingMode;
   if constexpr (std::is_same_v<dst_t, Half>) {
     switch (mode) {
@@ -47,20 +53,29 @@ convert_rounded_from_float(float x, c10::RoundingMode mode) {
       case RoundingMode::TowardNegative:
         return __float2half_rd(x);
     }
+#if !defined(USE_ROCM) || TORCH_HIP_VERSION >= 702
   } else if constexpr (std::is_same_v<dst_t, BFloat16>) {
     // These use cvt.rn/rz.bf16.f32 on sm_80+ and cvt.rp/rm.bf16.f32 on
-    // sm_90+, and emulate them otherwise.
+    // sm_90+, and emulate them otherwise. (c10::BFloat16 has no constructor
+    // from HIP's bfloat16, hence the bits.)
+    unsigned short bits = 0;
     switch (mode) {
       case RoundingMode::ToNearestEven:
-        return __float2bfloat16_rn(x);
+        bits = __bfloat16_as_ushort(__float2bfloat16_rn(x));
+        break;
       case RoundingMode::TowardZero:
-        return __float2bfloat16_rz(x);
+        bits = __bfloat16_as_ushort(__float2bfloat16_rz(x));
+        break;
       case RoundingMode::TowardPositive:
-        return __float2bfloat16_ru(x);
+        bits = __bfloat16_as_ushort(__float2bfloat16_ru(x));
+        break;
       case RoundingMode::TowardNegative:
-        return __float2bfloat16_rd(x);
+        bits = __bfloat16_as_ushort(__float2bfloat16_rd(x));
+        break;
     }
-#if __CUDA_ARCH__ >= 890
+    return BFloat16(bits, BFloat16::from_bits());
+#endif
+#if !defined(USE_ROCM) && __CUDA_ARCH__ >= 890
   } else if constexpr (
       std::is_same_v<dst_t, Float8_e4m3fn> ||
       std::is_same_v<dst_t, Float8_e5m2>) {
@@ -73,9 +88,26 @@ convert_rounded_from_float(float x, c10::RoundingMode mode) {
         torch::headeronly::detail::Saturates<dst_t>::value,
         "the default conversion must saturate like the hardware");
     const float kDstMaxFinite = L::max();
-    // The hardware only rounds to nearest, saturating. The other modes step
-    // the result by one encoding toward x when it is on the wrong side of x.
+    // The hardware rounds to nearest, saturating, and on sm_107f also toward
+    // zero. The other modes step the result by one encoding toward x when it
+    // is on the wrong side of x (which, from a result rounded toward zero, can
+    // only be away from zero).
     nv_t y(x);
+#if defined(TORCH_ROUNDED_CONVERSION_SM107F)
+    if (mode != RoundingMode::ToNearestEven) {
+      unsigned short pair;
+      if constexpr (std::is_same_v<dst_t, Float8_e4m3fn>) {
+        asm("cvt.rz.satfinite.e4m3x2.f32 %0, %1, %2;"
+            : "=h"(pair)
+            : "f"(0.0f), "f"(x));
+      } else {
+        asm("cvt.rz.satfinite.e5m2x2.f32 %0, %1, %2;"
+            : "=h"(pair)
+            : "f"(0.0f), "f"(x));
+      }
+      y.__x = static_cast<__nv_fp8_storage_t>(pair & 0xFF);
+    }
+#endif
     if (mode != RoundingMode::ToNearestEven) {
       const bool neg = signbit(x);
       const bool to_zero = mode == RoundingMode::TowardZero ||
@@ -92,7 +124,7 @@ convert_rounded_from_float(float x, c10::RoundingMode mode) {
     }
     return dst_t(y.__x, dst_t::from_bits());
 #endif
-#if CUDA_VERSION >= 12080
+#if !defined(USE_ROCM) && CUDA_VERSION >= 12080
   } else if constexpr (std::is_same_v<dst_t, Float8_e8m0fnu>) {
     // Uses cvt.rz/rp.ue8m0x2.f32 when built for sm_100a and similar targets
     // (RoundedConversionE8m0.cu), and NVIDIA's emulation otherwise.
@@ -107,8 +139,7 @@ convert_rounded_from_float(float x, c10::RoundingMode mode) {
       return Float8_e8m0fnu(bits, Float8_e8m0fnu::from_bits());
     }
 #endif
-#if CUDA_VERSION >= 13040 && defined(__CUDA_ARCH_FAMILY_SPECIFIC__) && \
-    __CUDA_ARCH_FAMILY_SPECIFIC__ >= 1070 && __CUDA_ARCH_FAMILY_SPECIFIC__ < 1100
+#if defined(TORCH_ROUNDED_CONVERSION_SM107F)
   } else if constexpr (std::is_same_v<dst_t, Float8_e5m3fnu>) {
     // cvt.rn/rz/rp.satfinite.ue5m3x2.f32, which only sm_107f and similar
     // targets have (elsewhere the intrinsic is emulated, and our conversion is
@@ -131,7 +162,7 @@ convert_rounded_from_float(float x, c10::RoundingMode mode) {
 template <typename dst_t>
 C10_HOST_DEVICE inline dst_t
 convert_rounded_from_double(double x, c10::RoundingMode mode) {
-#if defined(__CUDA_ARCH__) && !defined(USE_ROCM)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   using c10::RoundingMode;
   if constexpr (std::is_same_v<dst_t, float>) {
     switch (mode) {
@@ -144,6 +175,7 @@ convert_rounded_from_double(double x, c10::RoundingMode mode) {
       case RoundingMode::TowardNegative:
         return __double2float_rd(x);
     }
+#if !defined(USE_ROCM)
   } else if constexpr (std::is_same_v<dst_t, Half>) {
     unsigned short bits;
     switch (mode) {
@@ -179,6 +211,7 @@ convert_rounded_from_double(double x, c10::RoundingMode mode) {
         break;
     }
     return BFloat16(bits, BFloat16::from_bits());
+#endif
 #endif
   } else {
     return convert_rounded_from_float<dst_t>(
@@ -225,3 +258,5 @@ void to_dtype_rounded_kernel_cuda_to(
 
 } // namespace
 } // namespace at::native
+
+#undef TORCH_ROUNDED_CONVERSION_SM107F

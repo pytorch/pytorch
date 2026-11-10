@@ -38,6 +38,8 @@ FLOAT8_DTYPES = (
 )
 # These only represent magnitudes: the conversions round |x|.
 UNSIGNED_DTYPES = (torch.float8_e8m0fnu, torch.float8_e5m3fnu)
+# Powers of two only: ties round up, as there are no mantissa bits to be even.
+NO_MANTISSA_DTYPES = (torch.float8_e8m0fnu,)
 NARROWING = {
     torch.float64: (torch.float32, torch.float16, torch.bfloat16, *FLOAT8_DTYPES),
     torch.float32: (torch.float16, torch.bfloat16, *FLOAT8_DTYPES),
@@ -78,6 +80,14 @@ def _overflow_value(dtype):
     return math.inf
 
 
+def _virtual_next(mags, dst):
+    """The value after the largest magnitude mags[-1], were the exponent range
+    wider."""
+    if dst in NO_MANTISSA_DTYPES:
+        return mags[-1] * 2
+    return 2 * mags[-1] - mags[-2]
+
+
 def _expected_narrow(x, dst, mode):
     """Reference rounding of the float64 values x (exact source values) to dst,
     computed from a table of all of dst's finite values."""
@@ -85,9 +95,9 @@ def _expected_narrow(x, dst, mode):
     n = len(mags)
     signed = dst not in UNSIGNED_DTYPES
     has_neg_zero = signed and dst not in (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
-    no_mantissa = dst is torch.float8_e8m0fnu
+    no_mantissa = dst in NO_MANTISSA_DTYPES
     overflow_value = _overflow_value(dst)
-    virtual_next = mags[-1] * 2 if no_mantissa else 2 * mags[-1] - mags[-2]
+    virtual_next = _virtual_next(mags, dst)
 
     neg = torch.signbit(x) & signed
     a = torch.where(x.isfinite(), x.abs(), torch.zeros_like(x))
@@ -177,10 +187,7 @@ def _boundary_inputs(src, dst):
         mags = torch.cat([mags, next_mags]).sort().values
     else:
         mags = _finite_magnitudes(dst)
-        no_mantissa = dst is torch.float8_e8m0fnu
-        top = torch.stack(
-            [mags[-1], mags[-1] * 2 if no_mantissa else 2 * mags[-1] - mags[-2]]
-        )
+        top = torch.stack([mags[-1], _virtual_next(mags, dst)])
     # Includes the midpoint between the largest value and the next one, were
     # the exponent range wider.
     centers = torch.cat(
@@ -420,6 +427,11 @@ class TestRoundedConversion(TestCase):
         for n in (1, 2):
             y = torch.full((n,), v, dtype=dtype, device=device)
             self.assertEqual(y.tolist(), [1 + eps] * n)
+        if dtype is torch.bfloat16:
+            # Integer Scalars still round through float, on every fill path.
+            big = 2**24 + 2**16 + 1
+            ys = [torch.full((n,), big, dtype=dtype, device=device) for n in (1, 2)]
+            self.assertEqual([y[0].item() for y in ys], [2.0**24] * 2)
         out = torch.zeros(1, dtype=dtype, device=device)
         self.assertEqual(torch.add(x, 0, out=out).item(), 1 + eps)
         out.zero_()
@@ -439,6 +451,9 @@ class TestRoundedConversion(TestCase):
         for n in (1, 2):
             w = torch.full((n,), complex(v, -v), dtype=torch.complex32, device=device)
             self.assertEqual(w.to(torch.complex128).tolist(), [expected] * n)
+            # Like float16 fills, every complex32 fill checks for overflow.
+            with self.assertRaisesRegex(RuntimeError, "without overflow"):
+                torch.full((n,), complex(1e5, 0), dtype=torch.complex32, device=device)
 
     def test_signatures(self, device):
         x = torch.randn(4, 5, device=device)
@@ -592,7 +607,8 @@ class TestRoundedConversion(TestCase):
         # Every float32 input, comparing the accelerator (which uses hardware
         # instructions where available, and NVIDIA's emulations of some of
         # them, e.g. for e8m0 before sm_100) with the CPU's software conversion.
-        # On ROCm, this compares the software conversion on both.
+        # On ROCm, the float16 and bfloat16 destinations use HIP's intrinsics,
+        # and the others the software conversion.
         chunk = 1 << 28
         for start in range(-(1 << 31), 1 << 31, chunk):
             x = torch.arange(chunk, dtype=torch.int32).add_(start).view(torch.float32)
@@ -607,12 +623,14 @@ class TestRoundedConversion(TestCase):
             ):
                 for mode in MODES:
                     with self.subTest(dst=dst, mode=mode):
+                        # The inputs as bits, which also tell NaNs apart.
                         self.assertSameValues(
                             x_dev.to(dst, round=mode),
                             x.to(dst, round=mode),
-                            x,
+                            x.view(torch.int32),
                             dtype=torch.float32,
                         )
+            del x_dev
 
     @onlyAccelerator
     def test_cross_device(self, device):

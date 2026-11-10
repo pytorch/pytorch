@@ -13,8 +13,9 @@ void to_dtype_rounded_kernel_cuda(
     to_dtype_rounded_kernel_cuda_e8m0(iter, mode);
     return;
   }
-  if (iter.dtype() == kFloat8_e5m3fnu) {
-    to_dtype_rounded_kernel_cuda_e5m3(iter, mode);
+  if (iter.dtype() == kFloat8_e4m3fn || iter.dtype() == kFloat8_e5m2 ||
+      iter.dtype() == kFloat8_e5m3fnu) {
+    to_dtype_rounded_kernel_cuda_sm107f(iter, mode);
     return;
   }
   AT_DISPATCH_V2(
@@ -30,8 +31,6 @@ void to_dtype_rounded_kernel_cuda(
             kHalf,
             kBFloat16,
             // AT_FLOAT8_TYPES, except the ones dispatched above.
-            kFloat8_e4m3fn,
-            kFloat8_e5m2,
             kFloat8_e4m3fnuz,
             kFloat8_e5m2fnuz);
       }),
