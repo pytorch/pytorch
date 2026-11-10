@@ -7785,10 +7785,10 @@ class ExternKernel(InputsKernel):
             and consumer.meta.get("dislike_padding_only_for_output", False)
             and isinstance(consumer.target, torch._ops.OpOverload)
             and not any(r.alias_info for r in consumer.target._schema.returns)
-            and buf.get_origins()
+            and buf.origins
             and all(
                 isinstance(node, torch.fx.Node) and exclusively_used_by_consumer(node)
-                for node in (x_unwrap_view_fx_node, *buf.get_origins())
+                for node in (x_unwrap_view_fx_node, *buf.origins)
             )
         ):
             padding_fx_node = x_unwrap_view_fx_node
