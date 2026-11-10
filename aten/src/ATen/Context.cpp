@@ -935,7 +935,7 @@ bool Context::isXNNPACKAvailable() {
   return xnnpack_backend_available.load(std::memory_order_acquire);
 }
 
-// This thread's own setting; see ThreadLocalSparseTensorInvariantChecks
+// This thread's own setting; see impl::SparseTensorInvariantChecksGuard
 thread_local static std::optional<std::optional<bool>> thread_sparse_tensor_invariant_checks;
 
 void Context::setCheckSparseTensorInvariants(std::optional<bool> e = std::nullopt) {
@@ -963,13 +963,13 @@ std::optional<bool> Context::checkSparseTensorInvariants(bool warn_when_uninitia
   return enable_sparse_tensor_invariant_checks;
 }
 
-ThreadLocalSparseTensorInvariantChecks::ThreadLocalSparseTensorInvariantChecks(
-    std::optional<bool> enabled)
+impl::SparseTensorInvariantChecksGuard::SparseTensorInvariantChecksGuard(
+    bool enabled)
     : prev_(thread_sparse_tensor_invariant_checks) {
   thread_sparse_tensor_invariant_checks.emplace(enabled);
 }
 
-ThreadLocalSparseTensorInvariantChecks::~ThreadLocalSparseTensorInvariantChecks() {
+impl::SparseTensorInvariantChecksGuard::~SparseTensorInvariantChecksGuard() {
   thread_sparse_tensor_invariant_checks = prev_;
 }
 
