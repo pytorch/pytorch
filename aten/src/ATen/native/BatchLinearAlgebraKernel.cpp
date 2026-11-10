@@ -77,7 +77,7 @@ void apply_reflect_conj_tri_single(scalar_t* self, int64_t n, int64_t stride, bo
   if (upper) {
     loop = [&](int64_t start, int64_t end) {
       for (const auto i : c10::irange(start, end)) {
-        for (int64_t j = i + 1; j < n; j++) {
+        for (const auto j : c10::irange(i + 1, n)) {
           self[i * stride + j] = conj_impl(self[j * stride + i]);
         }
       }

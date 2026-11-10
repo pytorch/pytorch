@@ -70,6 +70,11 @@ If eager and traced results diverge numerically for a specific op, suspect a bad
 - The bug is in FakeTensor implementation
 - The bug is in custom operator registration/dispatch
 
+When one of these applies, add `module: pt2-dispatcher` **together with** the specific
+label for that layer (`module: aotdispatch`, `module: functionalization`,
+`module: fakeTensor`, or `module: custom-operators`). The specific label alone is not
+enough: `module: pt2-dispatcher` is the umbrella the PT2 dispatcher owners filter on.
+
 **Don't add pt2-dispatcher when:**
 - AOT autograd just happens to be on the stack trace
 - The actual bug is in functorch transforms (use `module: functorch` instead)
@@ -92,7 +97,7 @@ If eager and traced results diverge numerically for a specific op, suspect a bad
 | DTensor has a bad error message under compile | Bug is in PT2's error handling → PT2 owns UX |
 | Distributed training fails, but stack trace shows inductor issue | Bug is in inductor → PT2 owns it |
 
-For PT2-D issues, you may also add `oncall: distributed` but DO NOT hand this off fully - keep the `oncall: pt2` label.
+For PT2-D issues, choose a distributed sub-queue using SKILL.md Step 3.1 and keep the `oncall: pt2` label.
 
 **Examples - DO redirect:**
 
@@ -100,11 +105,11 @@ For PT2-D issues, you may also add `oncall: distributed` but DO NOT hand this of
 |-----------|--------------|
 | MKLDNN-specific codegen bug | `oncall: cpu inductor` owns MKLDNN |
 | Export-only issue with no compile involvement | `oncall: export` owns it |
-| Bug in DTensor's tensor subclass implementation | `oncall: distributed` owns DTensor internals |
+| Bug in DTensor's tensor subclass implementation | Choose the distributed sub-queue using SKILL.md Step 3.1 |
 
 **The test:** Ask "where would the fix need to be made?" If the fix is in PT2 code, PT2 owns it.
 
-**Adding labels for visibility:** You CAN add domain labels (e.g., `module: dtensor`) so domain experts see the issue, but don't ADD the oncall redirect label unless you're actually handing it off.
+**Adding labels for visibility:** You CAN add domain labels (e.g., `module: dtensor`) so domain experts see the issue. Plain oncall redirects hand off ownership; shared PT2-D routing follows SKILL.md Step 3.1 instead.
 
 **This is critical** when you have identified an issue as inductor, and the failing device is "cpu" ONLY, then this is a CPU inductor issue, and should be redirected to `oncall: cpu inductor`
 
@@ -229,7 +234,7 @@ For `topic: fuzzer` issues:
 ### Redirects
 - `oncall: cpu inductor` - CPU/MKLDNN issues
 - `oncall: export` - Export-specific issues
-- `oncall: distributed` - Distributed training issues
+- Distributed training issues - choose the sub-queue using SKILL.md Step 3.1
 
 ### CPU Inductor Routing
 
