@@ -1894,8 +1894,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         st_16 = st.to(torch.float16)
         self.assertFalse(st_16 is st)
         self.assertEqual(st_16.dtype, torch.float16)
-        # round is forwarded to the local shards, after checking it on every
-        # rank (including those without local shards)
+        # round is forwarded to the local shards
         st_rand = sharded_tensor.rand(spec, h, w)
         st_16 = st_rand.to(torch.float16, round="toward_zero")
         self.assertEqual(st_16.dtype, torch.float16)
