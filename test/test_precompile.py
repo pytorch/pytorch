@@ -5561,11 +5561,14 @@ class TestPrecompileDynamoCapture(TestCase):
             "torch._precompile._build_multigraph_artifact",
             wraps=torch._precompile._build_multigraph_artifact,
         )
-        # NGB would inline Child.forward and change installed capture to standalone.
-        # Pin standalone on to exercise the NGB path, and installed off to keep
-        # Child.forward a separate frame.
+        # NGB can inline Child.forward; installed capture needs it as a separate frame.
+        ngb = (
+            torch._dynamo.config.patch(nested_graph_breaks=False)
+            if installed
+            else contextlib.nullcontext()
+        )
         with (
-            torch._dynamo.config.patch(nested_graph_breaks=not installed),
+            ngb,
             build as built,
             self._capture(step, backend="eager") as cap,
         ):
