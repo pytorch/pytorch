@@ -5519,14 +5519,6 @@ class TestFakeTensorViewCopy(TestCase):
 _CPP_FAKE_DYNAMO_SKIP = "Dynamo does not support C++ fakes as inputs yet"
 
 
-def _aten_ops():
-    from torch._library.utils import lookup_op
-
-    for name in torch._C._dispatch_get_all_op_names():
-        if name.startswith("aten::"):
-            yield lookup_op(name)
-
-
 @instantiate_parametrized_tests
 class TestCppFakeTensorModeBindings(TestCase):
     def _installed(self):
@@ -6431,28 +6423,22 @@ if __name__ == "__main__":
             self.assertFalse(query(name, ""))
 
     def test_fake_fallback_static_shape_decomps(self):
-        # StaticShapeDecomp records the ops FakeTensorMode decomposes under
-        # static shapes
+        from torch._library.utils import lookup_op
         from torch._meta_registrations import decomposes_under_static_shapes
 
-        self.assertTrue(
-            torch._C._fake_dispatch_contains_static_shape_decomp(
-                "aten::log_sigmoid_forward", ""
-            )
-        )
-        self.assertFalse(
-            torch._C._fake_dispatch_contains_static_shape_decomp(
-                "aten::arange", "start"
-            )
-        )
+        contains = torch._C._fake_dispatch_contains_static_shape_decomp
+        self.assertTrue(contains("aten::log_sigmoid_forward", ""))
+        self.assertFalse(contains("aten::arange", "start"))
 
         mismatched = set()
-        for op in _aten_ops():
+        for name in torch._C._dispatch_get_all_op_names():
+            if not name.startswith("aten::"):
+                continue
+            op = lookup_op(name)
+            schema = op._schema
             decomposes = decomposes_under_static_shapes(op)
-            names = (op._schema.name, op._schema.overload_name)
-            contains = torch._C._fake_dispatch_contains_static_shape_decomp(*names)
-            if contains != decomposes:
-                mismatched.add(op.name())
+            if contains(schema.name, schema.overload_name) != decomposes:
+                mismatched.add(name)
         self.assertEqual(mismatched, set())
 
     def test_require_python_fake_mode(self):
