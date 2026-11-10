@@ -17,7 +17,7 @@ import time
 import traceback
 import urllib.parse
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any, TYPE_CHECKING
 
 from github_utils import gh_fetch_url
@@ -82,8 +82,8 @@ def parse_utc_timestamp(raw: str) -> datetime:
         text = f"{text[:-1]}+00:00"
     parsed = datetime.fromisoformat(text)
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _authority(state: LedgerState) -> tuple[datetime, int, bool]:
