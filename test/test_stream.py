@@ -81,16 +81,19 @@ class TestStream(TestCase):
             self.assertEqual(s0, m.current_stream())
         self.assertEqual(s2, m.current_stream())
 
+    def test_stream_repr(self, device):
+        m = torch.get_device_module(device)
+        s = m.current_stream()
+        self.assertTrue(f"torch.{self.device_type}.Stream" in str(s))
+
     # torch.mps.Event.__repr__ does not produce the correct output
     @expectedFailureMPS
     def test_stream_event_repr(self, device):
         m = torch.get_device_module(device)
-        s = m.current_stream()
-        self.assertTrue(f"torch.{self.device_type}.Stream" in str(s))
         e = m.Event()
         self.assertTrue(f"torch.{self.device_type}.Event" in str(e))
         self.assertTrue("uninitialized" in str(e))
-        s.record_event(e)
+        m.current_stream().record_event(e)
         self.assertTrue(f"torch.{self.device_type}.Event" in str(e))
         self.assertFalse("uninitialized" in str(e))
 
