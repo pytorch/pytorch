@@ -188,8 +188,8 @@ class InductorChoices:
         one-config path.
         ``append_flex_attention_choices`` still receives the unrefined pool.
         Only the stock pool is refined: when the active handler overrides
-        ``get_flex_attention_fwd_configs``, it keeps its pool unless it also
-        overrides this method.
+        ``get_flex_attention_fwd_configs``, this base implementation returns the
+        pool unchanged, including when an override of this method delegates here.
         """
         # The pool comes from the active handler. With composed choices that is
         # not necessarily the contributor this hook is bound to.
@@ -231,7 +231,8 @@ class InductorChoices:
         """Append backend-specific forward flex-attention template choices.
 
         Default is a no-op. Subclasses may override to inject additional
-        autotuning candidates (e.g. TLX templates in fbcode).
+        autotuning candidates (e.g. TLX templates in fbcode). ``configs`` is the
+        unrefined pool; the Triton ``choices`` were built from the refined one.
         """
         return choices
 
@@ -356,9 +357,9 @@ class InductorChoices:
         # Origami requires fixed layouts (grid/workgroup mappings depend on exact
         # strides). Gate on IS_ROCM so a stray TORCHINDUCTOR_ORIGAMI=1 on CUDA
         # doesn't disable flexible layouts unnecessarily. Also gate on max-autotune:
-        # origami only contributes Triton GEMM configs under autotuning, so with it
-        # off there is nothing that needs fixed strides and flexible layouts should
-        # be preserved (matches non-origami behavior).
+        # origami only contributes configs under autotuning, so with it off there is
+        # nothing that needs fixed strides and flexible layouts should be preserved
+        # (matches non-origami behavior).
         if (
             _origami_enabled()
             and IS_ROCM

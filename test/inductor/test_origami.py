@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import statistics
+import sys
 import unittest
 from collections.abc import Callable
 from types import SimpleNamespace
@@ -90,9 +91,6 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
         self.heuristic.flex_attn_fwd_autotune_configs = [
             ROCmFlexConfig(128, 64, 1, 4, kpack=2)
         ]
-        self.heuristic._constructed_flex_attn_fwd_autotune_configs = (
-            self.heuristic.flex_attn_fwd_autotune_configs
-        )
         stock_default = ROCmFlexConfig(128, 64, 2, 4, kpack=2)
         self.stock: list[FlexConfig] = [stock_default]
         self.heuristic.gfx950_default_flex_config = {
@@ -134,7 +132,7 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
         context,
         *,
         heuristic=None,
-        arch="gfx950",
+        arch="gfx950:sramecc+:xnack-",
         search_space="DEFAULT",
         enabled=True,
         origami_module=object(),
@@ -159,7 +157,7 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
                 "_origami_flex_attention_tiles",
                 return_value=selected_tiles,
                 side_effect=tile_error,
-            ),
+            ) as tiles,
             mock.patch.object(
                 torch.cuda,
                 "get_device_properties",
@@ -170,6 +168,7 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
                 triton_heuristics, "get_default_kpack", return_value=default_kpack
             ),
         ):
+            self.last_tiles = tiles
             return heuristic.refine_flex_attn_fwd_configs(self.stock, context)
 
     def test_selects_subgemm_tiles_and_keeps_unmodeled_backend_axes(self):
@@ -251,10 +250,32 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
         self._select(self._context(device=torch.device("cuda", 3)))
         self.last_get_device_properties.assert_called_once_with(3)
 
+    def test_models_the_query_heads_and_both_lengths(self):
+        self._select(
+            self._context(
+                batch_size=2,
+                kv_batch_size=2,
+                num_kv_heads=4,
+                seq_len_q=2048,
+                seq_len_kv=4096,
+            )
+        )
+        candidate_tiles = tuple(
+            dict.fromkeys(
+                (config.block_m, config.block_n)
+                for config in self.heuristic.exhaustive_flex_attn_fwd_configs
+            )
+        )
+        # B * Hq, not B * Hkv: every query head runs both sub-GEMMs.
+        self.last_tiles.assert_called_once_with(
+            32, 2048, 4096, 64, 64, torch.float16, 0, candidate_tiles, 1, 2
+        )
+
     def test_falls_back_outside_measured_domain(self):
         cases = {
             "block_mask": self._context(is_noop_block_mask=False),
             "short_sequence": self._context(seq_len_q=512),
+            "short_kv_sequence": self._context(seq_len_kv=512),
             "d128_transition": self._context(
                 seq_len_q=1024,
                 seq_len_kv=1024,
@@ -284,6 +305,7 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
             "mixed_dtypes": self._context(
                 key_dtype=torch.float8_e4m3fn, value_dtype=torch.float8_e4m3fn
             ),
+            "mixed_value_dtype": self._context(value_dtype=torch.bfloat16),
             "dynamic_sequence": self._context(seq_len_q=sympy.Symbol("s")),
             "noncontiguous_inputs": self._context(inputs_contiguous=False),
             "user_tile": self._context(kernel_options={"BLOCK_M": 64}),
@@ -295,12 +317,11 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
             with self.subTest(name=name):
                 self.assertIs(self._select(context), self.stock)
         select_options = {
-            "non_gfx950": {"arch": "gfx942"},
+            "non_gfx950": {"arch": "gfx942:sramecc+:xnack-"},
             "unmeasured_target": {"arch": "gfx1250"},
             "exhaustive_search": {"search_space": "EXHAUSTIVE"},
             "origami_unavailable": {"origami_module": None},
             "origami_disabled": {"enabled": False},
-            "no_selected_tiles": {"selected_tiles": ()},
         }
         for name, options in select_options.items():
             with self.subTest(name=name):
@@ -323,15 +344,6 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
         table.flex_attn_fwd_autotune_configs = []
         with self.subTest(name="subclass_table"):
             self.assertIs(self._select(self._context(), heuristic=table), self.stock)
-        reassigned = object.__new__(ROCmConfigHeuristic)
-        reassigned.__dict__.update(self.heuristic.__dict__)
-        reassigned.flex_attn_fwd_autotune_configs = list(
-            self.heuristic.flex_attn_fwd_autotune_configs
-        )
-        with self.subTest(name="reassigned_default_list"):
-            self.assertIs(
-                self._select(self._context(), heuristic=reassigned), self.stock
-            )
 
     def _refine(self, choices, context=None):
         from torch._inductor.virtualized import V
@@ -420,13 +432,20 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
                 self._refine(_ComposedInductorChoices([InductorChoices()])), refined
             )
 
-    def test_origami_errors_fall_back_to_the_stock_pool(self):
-        with mock.patch.object(triton_heuristics, "_origami_fallback_warned", set()):
-            for error in (ValueError("bad"), TypeError("bad"), RuntimeError("bad")):
-                with self.subTest(error=type(error).__name__):
-                    self.assertIs(
-                        self._select(self._context(), tile_error=error), self.stock
-                    )
+    def test_origami_failures_fall_back_to_the_stock_pool(self):
+        failures = {
+            "ValueError": {"tile_error": ValueError("bad")},
+            "TypeError": {"tile_error": TypeError("bad")},
+            "RuntimeError": {"tile_error": RuntimeError("bad")},
+            "no_selected_tiles": {"selected_tiles": ()},
+        }
+        for name, options in failures.items():
+            with self.subTest(name=name):
+                fallbacks = counters["inductor"]["origami_fallback"]
+                self.assertIs(self._select(self._context(), **options), self.stock)
+                self.assertEqual(
+                    counters["inductor"]["origami_fallback"], fallbacks + 1
+                )
         # Other errors, such as an Origami API mismatch, are not hidden.
         with self.assertRaises(AttributeError):
             self._select(self._context(), tile_error=AttributeError("missing"))
@@ -478,6 +497,7 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
     def _run_model(self, latencies, candidate_tiles):
         fake_origami = self._fake_origami(latencies)
         triton_heuristics._origami_flex_attention_tiles.cache_clear()
+        self.addCleanup(triton_heuristics._origami_flex_attention_tiles.cache_clear)
         with mock.patch.object(triton_heuristics, "origami", fake_origami):
             # Distinct Q/KV lengths, an unrounded head dim and non-square tiles
             # expose swapped axes.
@@ -520,14 +540,17 @@ class TestOrigamiFlexAttentionConfigSelection(TestCase):
         selected, _ = self._run_model((1.0, 1.0, 2.0, 3.0, 3.0, 2.0), tiles)
         self.assertEqual(selected, (tiles[0], tiles[2]))
 
-    def test_ranks_only_tiles_finite_for_both_subgemms(self):
+    def test_ranks_only_tiles_both_subgemms_accept(self):
         tiles = ((64, 64), (128, 128))
+        # Origami reports a config it rejects as the largest double.
+        rejected = sys.float_info.max
         # Calls alternate QK/PV per tile.
         cases = {
-            "qk_nonfinite": ((math.inf, 1.0, math.inf, 2.0), ()),
-            "pv_nonfinite": ((1.0, math.inf, 2.0, math.inf), ()),
-            # QK prefers the first tile, but PV cannot run it.
-            "one_tile_rejected": ((1.0, math.inf, 2.0, 1.0), (tiles[1],)),
+            "qk_rejected": ((rejected, 1.0, rejected, 2.0), ()),
+            "pv_rejected": ((1.0, rejected, 2.0, rejected), ()),
+            "nonfinite": ((math.inf, 1.0, 2.0, math.nan), ()),
+            # QK prefers the first tile, but PV rejects it.
+            "one_tile_rejected": ((1.0, rejected, 2.0, 1.0), (tiles[1],)),
         }
         for name, (values, expected) in cases.items():
             with self.subTest(name=name):

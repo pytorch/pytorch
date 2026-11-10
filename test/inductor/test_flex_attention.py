@@ -6976,11 +6976,27 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(len(choices.contexts), 1)
             return choices.contexts[0]
 
-        shape = (1, 2, 256, 64)
-        query, key, value = (
-            torch.randn(shape, device=device, dtype=torch.float16) for _ in range(3)
+        # Distinct sizes so that swapped context fields fail.
+        dense = lowering_context(
+            torch.randn(3, 4, 128, 64, device=device, dtype=torch.float16),
+            torch.randn(3, 2, 256, 64, device=device, dtype=torch.float16),
+            torch.randn(3, 2, 256, 32, device=device, dtype=torch.float16),
+            enable_gqa=True,
         )
-        dense = lowering_context(query, key, value)
+        self.assertEqual(
+            (
+                dense.batch_size,
+                dense.num_heads,
+                dense.num_kv_heads,
+                dense.seq_len_q,
+                dense.seq_len_kv,
+                dense.qk_head_dim,
+                dense.v_head_dim,
+                dense.qk_head_dim_rounded,
+                dense.v_head_dim_rounded,
+            ),
+            (3, 4, 2, 128, 256, 64, 32, 64, 32),
+        )
         self.assertTrue(dense.is_noop_block_mask)
         self.assertTrue(dense.inputs_contiguous)
         self.assertFalse(dense.score_mod_reads_buffers)
@@ -6988,15 +7004,24 @@ class GraphModule(torch.nn.Module):
             (dense.dtype, dense.key_dtype, dense.value_dtype), (torch.float16,) * 3
         )
 
+        query, key, value = (
+            torch.randn(1, 2, 256, 64, device=device, dtype=torch.float16)
+            for _ in range(3)
+        )
+
         def causal(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask = create_block_mask(causal, 1, 1, 256, 256, device=device)
-        self.assertFalse(
-            lowering_context(
-                query, key, value, block_mask=block_mask
-            ).is_noop_block_mask
+        # A block mask with the query's batch also allows broadcasting K/V.
+        block_mask = create_block_mask(causal, 2, 1, 256, 256, device=device)
+        masked = lowering_context(
+            torch.randn(2, 2, 256, 64, device=device, dtype=torch.float16),
+            key,
+            value,
+            block_mask=block_mask,
         )
+        self.assertFalse(masked.is_noop_block_mask)
+        self.assertEqual((masked.batch_size, masked.kv_batch_size), (2, 1))
 
         bias = torch.randn(256, device=device, dtype=torch.float16)
 

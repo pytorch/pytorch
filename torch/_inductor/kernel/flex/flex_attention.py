@@ -520,7 +520,10 @@ def flex_attention(
     )
     configs = V.choices.refine_flex_attention_fwd_configs(unrefined_configs, context)
     if unrefined_configs and not configs:
-        raise RuntimeError("refine_flex_attention_fwd_configs returned no configs")
+        raise RuntimeError(
+            f"{type(V.choices).__name__}.refine_flex_attention_fwd_configs returned "
+            "no configs for a non-empty pool"
+        )
 
     original_kernel_options = kernel_options.copy()
     # Default config for warp specialization

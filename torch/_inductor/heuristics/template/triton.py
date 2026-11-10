@@ -6,6 +6,7 @@ import itertools
 import logging
 import math
 import os
+import sys
 from functools import cache, partial
 from threading import Lock
 from typing import Any, cast, TYPE_CHECKING
@@ -14,6 +15,7 @@ import sympy
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.utils import counters
 from torch._inductor.heuristics.registry import register_template_heuristic
 from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.utils._ordered_set import OrderedSet
@@ -104,21 +106,17 @@ def _origami_package_supported(
 
 
 _ORIGAMI_ERRORS = (ValueError, TypeError, RuntimeError)
-_origami_fallback_warned: OrderedSet[type] = OrderedSet()
 
 
 def _log_origami_fallback(err: Exception) -> None:
-    """Warn once per exception type; later occurrences are logged at debug."""
-    if type(err) not in _origami_fallback_warned:
-        _origami_fallback_warned.add(type(err))
-        log.warning(
-            "Origami could not select configs (%s: %s); using the regular "
-            "config generator for this problem.",
-            type(err).__name__,
-            err,
-        )
-    else:
-        log.debug("Origami selection failed, using regular generator: %s", err)
+    """Warn once per error type; the error text is logged at debug."""
+    torch._logging.warning_once(
+        log,
+        "Origami could not select configs (%s); using the regular config "
+        "generator. Run with TORCH_LOGS=+inductor for details.",
+        type(err).__name__,
+    )
+    log.debug("Origami selection error: %s", err)
 
 
 def _tdm_descriptor_orientation(kwargs: dict[str, Any]) -> tuple[bool, bool]:
@@ -322,8 +320,8 @@ def _origami_flex_config(
     cfg = origami_module.config_t()
     cfg.mt = origami_module.dim3_t(block_m, block_n, block_k)
     cfg.mi = hardware.get_recommended_matrix_instruction(dtype)
-    # Match the retained compiler variants: waves_per_eu=0 leaves occupancy
-    # unconstrained rather than imposing Origami's standalone-GEMM estimate.
+    # Mirrors the retained variants' waves_per_eu=0; Origami's latency model
+    # evaluates occupancy below 1 as 1.
     cfg.occupancy = 0
     return cfg
 
@@ -383,7 +381,8 @@ def _origami_flex_attention_tiles(
         b_transpose=origami_module.transpose_t.N,
     )
 
-    # Only tiles both sub-GEMMs can run are ranked.
+    # Only tiles both sub-GEMMs can run are ranked. Origami reports a config it
+    # rejects as the largest double; the comparison also drops inf and NaN.
     qk_scores: dict[tuple[int, int], float] = {}
     pv_scores: dict[tuple[int, int], float] = {}
     for block_m, block_n in candidate_tiles:
@@ -409,7 +408,7 @@ def _origami_flex_attention_tiles(
         pv_latency = origami_module.compute_total_latency(
             pv_problem, hardware, pv_config, hardware.N_CU
         )
-        if math.isfinite(qk_latency) and math.isfinite(pv_latency):
+        if qk_latency < sys.float_info.max and pv_latency < sys.float_info.max:
             qk_scores[block_m, block_n] = qk_latency
             pv_scores[block_m, block_n] = pv_latency
 
@@ -645,11 +644,6 @@ class BaseHeuristicSingleton(type):
         with cls._lock:
             if cls not in cls._instances:
                 instance = super().__call__()
-                # Remember the list __init__ chose so a later reassignment
-                # (e.g. inst.flex_attn_fwd_autotune_configs = [...]) can be detected.
-                instance._constructed_flex_attn_fwd_autotune_configs = getattr(
-                    instance, "flex_attn_fwd_autotune_configs", None
-                )
                 cls._instances[cls] = instance
             return cls._instances[cls]
 
@@ -1967,9 +1961,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
     Child class for ROCm specific gemm/flex attention/conv/ configs.
     """
 
-    # Set by BaseHeuristicSingleton once __init__ returns.
-    _constructed_flex_attn_fwd_autotune_configs: list[FlexConfig] | None
-
     def __init__(self) -> None:
         super().__init__()
 
@@ -2474,15 +2465,12 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         return ROCmFlexConfig(128, 64, 1, 4, kpack=get_default_kpack())
 
     def _origami_may_select_flex_attn(self) -> bool:
-        """Origami picks from exhaustive_flex_attn_fwd_configs, not the DEFAULT
-        pool, so use it only for in-tree heuristics whose
-        flex_attn_fwd_autotune_configs was not replaced after construction.
-        Overrides must reassign the list; in-place edits are not detected."""
-        return (
-            type(self).__module__ == __name__
-            and self.flex_attn_fwd_autotune_configs
-            is self._constructed_flex_attn_fwd_autotune_configs
-        )
+        """Origami replaces the DEFAULT pool, so use it only for in-tree
+        heuristics. Customize configs by subclassing; changing
+        flex_attn_fwd_autotune_configs or get_flex_attn_fwd_configs on an in-tree
+        heuristic has no effect on problems Origami refines (patch rocm.origami
+        to False instead)."""
+        return type(self).__module__ == __name__
 
     def refine_flex_attn_fwd_configs(
         self,
@@ -2584,8 +2572,14 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             )
         except _ORIGAMI_ERRORS as err:
             _log_origami_fallback(err)
+            counters["inductor"]["origami_fallback"] += 1
             return configs
         if not selected_tiles:
+            counters["inductor"]["origami_fallback"] += 1
+            log.warning(
+                "No valid Origami FlexAttention tiles remain, falling back to the "
+                "stock configs"
+            )
             return configs
 
         # Build the safety config from the target's default table instead of
