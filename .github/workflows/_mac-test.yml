@@ -25,6 +25,11 @@ on:
         default: "3.12"
         description: |
           The python version to be used. Will be 3.9 by default
+      tests-to-exclude:
+        required: false
+        type: string
+        default: ""
+        description: Space-separated tests to exclude (empty string implies none)
       timeout-minutes:
         required: false
         type: number
@@ -197,6 +202,7 @@ jobs:
           JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+          TESTS_TO_EXCLUDE: ${{ inputs.tests-to-exclude }}
         run: |
           # shellcheck disable=SC1090
           set -ex

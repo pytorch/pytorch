@@ -16,6 +16,12 @@ popd
 # enable debug asserts in serialization
 export TORCH_SERIALIZATION_DEBUG=1
 
+# Exclude tests from run_test.py in the default shards (as in test.sh).
+EXCLUDE_CLAUSE=""
+if [[ -n "$TESTS_TO_EXCLUDE" ]]; then
+  EXCLUDE_CLAUSE="--exclude $TESTS_TO_EXCLUDE"
+fi
+
 setup_test_python() {
   # The CircleCI worker hostname doesn't resolve to an address.
   # This environment variable makes ProcessGroupGloo default to
@@ -32,7 +38,8 @@ setup_test_python() {
 test_python_all() {
   setup_test_python
 
-  time python test/run_test.py --verbose
+  # shellcheck disable=SC2086
+  time python test/run_test.py --verbose $EXCLUDE_CLAUSE
 
   assert_git_not_dirty
 }
@@ -64,7 +71,8 @@ test_python_shard() {
 
   setup_test_python
 
-  time python test/run_test.py --verbose --exclude-distributed-tests --exclude-quantization-tests --shard "$1" "$NUM_TEST_SHARDS"
+  # shellcheck disable=SC2086
+  time python test/run_test.py --verbose --exclude-distributed-tests --exclude-quantization-tests $EXCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS"
 
   assert_git_not_dirty
 }
