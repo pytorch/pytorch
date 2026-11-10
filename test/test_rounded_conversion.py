@@ -22,10 +22,11 @@ FLOAT8_DTYPES = (
     torch.float8_e5m2,
     torch.float8_e4m3fnuz,
     torch.float8_e5m2fnuz,
+    torch.float8_e8m0fnu,
     torch.float8_e5m3fnu,
 )
 # These only represent magnitudes: the conversions round |x|.
-UNSIGNED_DTYPES = (torch.float8_e5m3fnu,)
+UNSIGNED_DTYPES = (torch.float8_e8m0fnu, torch.float8_e5m3fnu)
 NARROWING = {
     torch.float64: (torch.float32, torch.float16, torch.bfloat16, *FLOAT8_DTYPES),
     torch.float32: (torch.float16, torch.bfloat16, *FLOAT8_DTYPES),
@@ -61,7 +62,7 @@ def _overflow_value(dtype):
     """The default conversion's result past the largest finite magnitude."""
     if dtype in (torch.float8_e4m3fn, torch.float8_e5m3fnu):
         return torch.finfo(dtype).max
-    if dtype in (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz):
+    if dtype in (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz, torch.float8_e8m0fnu):
         return math.nan
     return math.inf
 
@@ -73,16 +74,19 @@ def _expected_narrow(x, dst):
     n = len(mags)
     signed = dst not in UNSIGNED_DTYPES
     has_neg_zero = signed and dst not in (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
+    no_mantissa = dst is torch.float8_e8m0fnu
     overflow_value = _overflow_value(dst)
-    virtual_next = 2 * mags[-1] - mags[-2]
+    virtual_next = mags[-1] * 2 if no_mantissa else 2 * mags[-1] - mags[-2]
 
     neg = torch.signbit(x) & signed
     a = torch.where(x.isfinite(), x.abs(), torch.zeros_like(x))
     down = torch.searchsorted(mags, a, right=True) - 1
-    up = torch.where(mags[down] == a, down, down + 1)
+    below = down < 0  # only for dtypes without zero
+    down = down.clamp(min=0)
+    up = torch.where((mags[down] == a) | below, down, down + 1)
     up_value = torch.where(up < n, mags[up.clamp(max=n - 1)], virtual_next)
     mid = (mags[down] + up_value) / 2
-    tie = torch.where(down % 2 == 0, down, up)
+    tie = up if no_mantissa else torch.where(down % 2 == 0, down, up)
     r = torch.where(a < mid, down, torch.where(a > mid, up, tie))
 
     value = mags[r.clamp(max=n - 1)]
@@ -118,7 +122,10 @@ def _boundary_inputs(src, dst):
         mags = torch.cat([mags, next_mags]).sort().values
     else:
         mags = _finite_magnitudes(dst)
-        top = torch.stack([mags[-1], 2 * mags[-1] - mags[-2]])
+        no_mantissa = dst is torch.float8_e8m0fnu
+        top = torch.stack(
+            [mags[-1], mags[-1] * 2 if no_mantissa else 2 * mags[-1] - mags[-2]]
+        )
     # Includes the midpoint between the largest value and the next one, were
     # the exponent range wider.
     centers = torch.cat(

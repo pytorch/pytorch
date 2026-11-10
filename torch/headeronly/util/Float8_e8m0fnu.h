@@ -87,8 +87,12 @@ inline C10_HOST_DEVICE uint8_t fp8e8m0fnu_from_fp32_value(float f) {
   // implement the RNE logic
   bool round_up = false;
 
-  // if g == 0, round down (no-op)
-  if (g == 1) {
+  if (exponent == 0) {
+    // float32 subnormals lie between the two smallest e8m0 values, 2^-127
+    // (g set) and 2^-126: round up from their midpoint (g and r set), with
+    // ties going up as they do for normals
+    round_up = g == 1 && r == 1;
+  } else if (g == 1) {
     if ((r == 1) || (s == 1)) {
       // round up
       round_up = true;
