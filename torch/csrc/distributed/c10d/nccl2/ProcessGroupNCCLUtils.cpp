@@ -7,6 +7,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
 #include <nccl.h>
@@ -23,6 +24,9 @@
 namespace c10d::nccl2 {
 
 namespace {
+
+thread_local const ProcessGroupNCCL* admissionProcessGroup = nullptr;
+thread_local uint64_t admissionEpoch = 0;
 
 // Scaling factor for a PREMUL_SUM reduction: either a per-element device tensor
 // or a host scalar.
@@ -419,10 +423,15 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
 }
 
 void ProcessGroupNCCL::checkInitialized() {
+  if (admissionProcessGroup == this) {
+    admissionProcessGroup = nullptr;
+    admissionEpoch = 0;
+  }
+  const auto boundDeviceId = getBoundDeviceId();
   if (options_c10d_->lazy_init &&
       init_state_ == InitializationState::UNINITIALIZED &&
-      getBoundDeviceId().has_value()) {
-    ensureInitialized(*getBoundDeviceId());
+      boundDeviceId.has_value()) {
+    ensureInitialized(*boundDeviceId);
   }
   TORCH_CHECK(
       init_state_ == InitializationState::INITIALIZED,
@@ -430,6 +439,12 @@ void ProcessGroupNCCL::checkInitialized() {
           ? "ProcessGroupNCCL has not been initialized. Call reconfigure() "
             "before issuing operations when enable_reconfigure=True."
           : "ProcessGroupNCCL not initialized");
+  TORCH_CHECK(
+      !reconfiguring_.load(std::memory_order_acquire),
+      "ProcessGroupNCCL is being reconfigured; collective submissions are "
+      "not accepted during the communicator transition");
+  admissionProcessGroup = this;
+  admissionEpoch = reconfigure_epoch_.load(std::memory_order_acquire);
 }
 
 void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
@@ -487,10 +502,29 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::createWork(
     cudaStream_t stream,
     std::chrono::milliseconds timeout,
     const std::vector<at::Tensor>& inputTensors) {
-  // Only create the work object without enqueuing it
+  std::shared_lock<std::shared_mutex> admissionLock(
+      collective_admission_mutex_);
+  const auto currentEpoch = reconfigure_epoch_.load(std::memory_order_acquire);
+  const bool crossedReconfigure =
+      admissionProcessGroup == this && admissionEpoch != currentEpoch;
+  if (admissionProcessGroup == this) {
+    admissionProcessGroup = nullptr;
+    admissionEpoch = 0;
+  }
+  TORCH_CHECK(
+      !reconfiguring_.load(std::memory_order_acquire),
+      "ProcessGroupNCCL is being reconfigured; collective submissions are "
+      "not accepted during the communicator transition");
+  TORCH_CHECK(
+      !crossedReconfigure,
+      "Collective submission raced with ProcessGroupNCCL reconfiguration; "
+      "retry it on the new communicator generation");
+  // Only create the work object without enqueuing it. The admission lock is
+  // transferred to Work and held until enqueueWork() inserts it in the queue.
   auto [workTimeout, ownedTimeout] = applyEphemeralTimeout(timeout);
   auto work =
       c10::make_intrusive<WorkNCCL>(this, stream, workTimeout, inputTensors);
+  work->submissionLock_ = std::move(admissionLock);
   work->setOwnedEphemeralTimeout(ownedTimeout);
   work->setSequenceNumber(sequence_number_);
   return work;
@@ -500,10 +534,28 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::createWork(
     cudaStream_t stream,
     std::chrono::milliseconds timeout,
     const at::Tensor& inputTensor) {
-  // Single-tensor overload to avoid vector allocation
+  std::shared_lock<std::shared_mutex> admissionLock(
+      collective_admission_mutex_);
+  const auto currentEpoch = reconfigure_epoch_.load(std::memory_order_acquire);
+  const bool crossedReconfigure =
+      admissionProcessGroup == this && admissionEpoch != currentEpoch;
+  if (admissionProcessGroup == this) {
+    admissionProcessGroup = nullptr;
+    admissionEpoch = 0;
+  }
+  TORCH_CHECK(
+      !reconfiguring_.load(std::memory_order_acquire),
+      "ProcessGroupNCCL is being reconfigured; collective submissions are "
+      "not accepted during the communicator transition");
+  TORCH_CHECK(
+      !crossedReconfigure,
+      "Collective submission raced with ProcessGroupNCCL reconfiguration; "
+      "retry it on the new communicator generation");
+  // Single-tensor overload to avoid vector allocation.
   auto [workTimeout, ownedTimeout] = applyEphemeralTimeout(timeout);
   auto work =
       c10::make_intrusive<WorkNCCL>(this, stream, workTimeout, inputTensor);
+  work->submissionLock_ = std::move(admissionLock);
   work->setOwnedEphemeralTimeout(ownedTimeout);
   work->setSequenceNumber(sequence_number_);
   return work;
@@ -534,34 +586,70 @@ void ProcessGroupNCCL::addEphemeralTimeout(
 void ProcessGroupNCCL::enqueueWork(
     const c10::intrusive_ptr<WorkNCCL>& work,
     cudaStream_t stream) {
-  if (coalescing_batch_) {
-    coalescing_works_.push_back(work);
+  const auto releaseAdmission = [&work] {
+    if (work->submissionLock_.owns_lock()) {
+      work->submissionLock_.unlock();
+    }
+  };
+  try {
+    if (coalescing_batch_) {
+      coalescing_works_.push_back(work);
+    }
+    // In graph capture mode, keep the completion state and events alive until
+    // the graph gets destroyed, organized per graph.
+    if (getGraphCaptureMode()) {
+      auto capture_info = c10::cuda::captureInfoMayInitCtx(stream);
+      if (capture_info.status == c10::cuda::CaptureStatus::Active) {
+        std::lock_guard<std::mutex> lock(graph_capture_work_mutex_);
+
+        // Check if this is the first work object for this graph
+        bool is_first_work = graph_capture_work_refs_[capture_info.id].empty();
+
+        graph_capture_work_refs_[capture_info.id].push_back(work->state_);
+
+        // If this is the first work object for this graph, set up automatic
+        // cleanup
+        if (is_first_work) {
+          c10::cuda::retainGraphUserObject(
+              capture_info.graph,
+              std::make_unique<GraphCleanupData>(this, capture_info.id),
+              graphCleanupCallback);
+        }
+      }
+    } else {
+      // Add work to stream's queue after events have been recorded
+      workq_.enqueueWork(work, stream);
+    }
+  } catch (...) {
+    releaseAdmission();
+    throw;
   }
+  releaseAdmission();
+}
 
-  // In graph capture mode, keep the completion state and events alive until
-  // the graph gets destroyed, organized per graph.
-  if (getGraphCaptureMode()) {
-    auto capture_info = c10::cuda::captureInfoMayInitCtx(stream);
-    if (capture_info.status == c10::cuda::CaptureStatus::Active) {
-      std::lock_guard<std::mutex> lock(graph_capture_work_mutex_);
+void ProcessGroupNCCL::failPendingGeneration(int64_t reconfigure_uuid) {
+  auto exception = std::make_exception_ptr(C10_BUILD_ERROR(
+      DistBackendError,
+      "NCCL operation was cancelled because its communicator is being "
+      "reconfigured"));
+  workq_.failPendingGeneration(reconfigure_uuid, exception);
 
-      // Check if this is the first work object for this graph
-      bool is_first_work = graph_capture_work_refs_[capture_info.id].empty();
-
-      graph_capture_work_refs_[capture_info.id].push_back(work->state_);
-
-      // If this is the first work object for this graph, set up automatic
-      // cleanup
-      if (is_first_work) {
-        c10::cuda::retainGraphUserObject(
-            capture_info.graph,
-            std::make_unique<GraphCleanupData>(this, capture_info.id),
-            graphCleanupCallback);
+  std::vector<std::shared_ptr<WorkNCCL::State>> capturedWorks;
+  {
+    std::lock_guard<std::mutex> lock(graph_capture_work_mutex_);
+    for (const auto& [graphId, states] : graph_capture_work_refs_) {
+      (void)graphId;
+      for (const auto& state : states) {
+        if (state->reconfigureUuid == reconfigure_uuid) {
+          capturedWorks.push_back(state);
+        }
       }
     }
-  } else {
-    // Add work to stream's queue after events have been recorded
-    workq_.enqueueWork(work, stream);
+  }
+  // Future callbacks may re-enter c10d, so never complete them while holding
+  // graph_capture_work_mutex_ (or the work queue's mutex).
+  for (const auto& state : capturedWorks) {
+    state->setTerminalStatus(WorkNCCL::WorkStatus::ERROR, exception);
   }
 }
 
