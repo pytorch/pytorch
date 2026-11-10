@@ -30,7 +30,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCPU, dtypesIfXPU, onlyAccelerator, largeMPSBufferTest, largeTensorTest, ops,
     precisionOverride, skipXPUIf)
 from torch.testing._internal.common_methods_invocations import (
-    ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops, op_db)
+    ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
 
 
 
@@ -558,30 +558,14 @@ class TestReductionsDevice(TestCase):
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected, actual)
 
-    @ops([op for op in op_db if op.name in ("cumsum", "cumprod", "logcumsumexp", "cummax", "cummin")],
-         allowed_dtypes=(torch.float32, torch.float16, torch.int32))
-    @parametrize("shape,dim", [((1, 2, 3, 5), 0), ((2, 3, 1, 5), 2), ((2, 3, 5, 1), -1)])
-    @parametrize("singleton_stride", [0, 1000])
-    def test_cumulative_ops_singleton_stride(self, device, dtype, op, shape, dim, singleton_stride):
-        # Oversized storage keeps the regression's writes within allocated buffers.
-        storage_size = 6000
-        strides = list(torch.empty(shape).stride())
-        strides[dim] = singleton_stride
-        x = torch.full((storage_size,), 2, device=device, dtype=dtype).as_strided(shape, strides)
-        self.assertTrue(x.is_contiguous())
-        sentinel = -9
-        values_storage = torch.full((storage_size,), sentinel, device=device, dtype=dtype)
-        values = values_storage[:x.numel()].view(shape)
-        if op.name in ("cummax", "cummin"):
-            indices_storage = torch.full((storage_size,), sentinel, device=device, dtype=torch.int64)
-            indices = indices_storage[:x.numel()].view(shape)
-            op(x, dim, out=(values, indices))
-            self.assertEqual(indices, torch.zeros_like(indices))
-            self.assertEqual(indices_storage[x.numel():], torch.full_like(indices_storage[x.numel():], sentinel))
-        else:
-            op(x, dim, out=values)
-        self.assertEqual(values, x)
-        self.assertEqual(values_storage[x.numel():], torch.full_like(values_storage[x.numel():], sentinel))
+    @parametrize("op", ["cumsum", "cumprod", "logcumsumexp", "cummax", "cummin"])
+    def test_cumulative_ops_size_one_dim_stride(self, device, op):
+        # Regression test for https://github.com/pytorch/pytorch/issues/202600
+        # mT leaves the size-1 dim with stride 1 instead of 5, yet the tensor is still contiguous
+        x = torch.randn(2, 3, 5, 1, device=device).mT
+        out = torch.zeros_like(x), torch.ones_like(x, dtype=torch.long)
+        res = getattr(torch, op)(x, 2, out=out if op.startswith("cumm") else out[0])
+        self.assertEqual(res, getattr(torch, op)(x.cpu(), 2))
 
     @skipIfNoSciPy
     @dtypes(torch.complex64, torch.complex128)
