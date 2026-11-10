@@ -2765,7 +2765,7 @@ class TestCvtE8M0Rceil(TestCase):
 
     def test_pattern_match(self):
         """Test that the log2+ceil pattern gets matched and replaced."""
-        _misc_patterns_init()
+        _misc_patterns_init("cuda")
 
         E8M0_BIAS = 127
 
@@ -2805,7 +2805,7 @@ class TestCvtE8M0Rceil(TestCase):
         so ceil(log2(x)) would incorrectly return e instead of e+1.
         The PTX/bit-manipulation replacement must always return the correct value.
         """
-        _misc_patterns_init()
+        _misc_patterns_init("cuda")
         E8M0_BIAS = 127
 
         def fn(inp):
@@ -2847,7 +2847,7 @@ class TestE8M0Log2PatternBitManip(TestCase):
 
     def test_pattern_fires_and_is_correct(self):
         """The log2+ceil pattern should be matched and produce correct uint8."""
-        _misc_patterns_init()
+        _misc_patterns_init("cuda")
         E8M0_BIAS = 127
 
         def fn(inp):
