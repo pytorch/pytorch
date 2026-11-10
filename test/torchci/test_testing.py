@@ -74,6 +74,7 @@ _REPORT_CHILD_ENV = {
 _RUN_TYPES = {
     "type": str,
     "schema_version": str,
+    "id": str,
     "file": str,
     "suite": str,
     "case_name": str,
@@ -103,8 +104,9 @@ def _assert_run_line(
 ) -> None:
     test.assertEqual([(k, type(v)) for k, v in run.items()], list(_RUN_TYPES.items()))
     test.assertEqual(
-        (run["type"], run["schema_version"], run["properties"]), ("run", "0.1", {})
+        (run["type"], run["schema_version"], run["properties"]), ("run", "1.0", {})
     )
+    test.assertEqual(str(uuid.UUID(run["id"])), run["id"])
     test.assertIn(run["language"], ("python", "cpp"))
     test.assertIn(run["outcome"], _RUN_OUTCOMES)
     test.assertTrue(t0_ms <= run["started_at"] <= run["ended_at"] <= t1_ms, run)
@@ -247,7 +249,7 @@ test_no_rerun_needed      | 0            | passed  |""",
             ],
         )
         self.assertEqual(report["type"], "report")
-        self.assertEqual(report["schema_version"], "0.1")
+        self.assertEqual(report["schema_version"], "1.0")
         self.assertEqual(report["repo"], "pytorch/pytorch")
         self.assertEqual(report["github_workflow_job_id"], 123456789)
         self.assertEqual(str(uuid.UUID(report["report_uuid"])), report["report_uuid"])
@@ -267,6 +269,8 @@ test_no_rerun_needed      | 0            | passed  |""",
         for run in runs:
             _assert_run_line(self, run, self.t0_ms, self.t1_ms)
             self.assertEqual(run["language"], "python")
+        # A new uuid per line, not one per report or per test.
+        self.assertEqual(len({run["id"] for run in runs}), len(runs))
 
     def test_identities(self) -> None:
         rendered = {}
@@ -374,6 +378,62 @@ TestUnittest    | test_unittest            | test_unittest""",
         self.assertTrue(
             all(run["ended_at"] - run["started_at"] >= 300 for run in runs), runs
         )
+
+    def test_xdist_maxfail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # -x, as run_test.py passes for C++ tests, stops xdist after the last
+            # test's final failure, before its teardown report.
+            args = ["xdist_report.py", "-n", "1", "--reruns", "1", "-x"]
+            proc, report = _run_plugin(str(_REPORT_TESTDATA), args, Path(tmp) / "xdist")
+            runs = _runs(report)
+        # 2: xdist reports a session stopped by -x as interrupted.
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        # test_crash killed its worker. pytest-rerunfailures sends a test's reports
+        # only after each attempt, so the controller never got its identity, and
+        # the crash is left to junit and the log.
+        self.assertEqual(
+            [(run["case_name"], run["outcome"], run["rerun_number"]) for run in runs],
+            [
+                ("test_before", "passed", 0),
+                ("test_after", "passed", 0),
+                ("test_fail_last", "failed", 0),
+                ("test_fail_last", "failed", 1),
+            ],
+        )
+
+    def test_session_without_tests_leaves_no_report(self) -> None:
+        # Like run_test.py's serial pass over a file without serial tests. A session
+        # interrupted after its test started keeps its report for run_test.py
+        # (TestReportCrashes.test_interrupt_leaves_the_run_in_flight).
+        with tempfile.TemporaryDirectory() as tmp:
+            for args in ([], ["-n", "1"]):
+                prefix = Path(tmp) / f"empty{len(args)}"
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "pytest",
+                        "xdist_report.py",
+                        "-k",
+                        "no_such_test",
+                        *args,
+                        "-p",
+                        "torch.testing._internal.torchci.plugin",
+                        f"--torchci-report-prefix={prefix}",
+                        "-p",
+                        "no:cacheprovider",
+                        "-q",
+                    ],
+                    cwd=_REPORT_TESTDATA,
+                    env=_REPORT_CHILD_ENV,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                # 5: no tests ran.
+                self.assertEqual(proc.returncode, 5, proc.stdout + proc.stderr)
+                self.assertNotIn("torchci:", proc.stderr)
+                self.assertEqual(_report_files(prefix), [])
 
 
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
@@ -502,10 +562,224 @@ class TestReportEnablement(TestCase):
         run_test_module = importlib.import_module("run_test")
         args = run_test_module._torchci_report_args
         with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", True):
-            self.assertEqual(args("/reports"), ["--save-torchci-reports=/reports"])
-            self.assertEqual(args(None), [])
+            self.assertEqual(
+                args("test_type_info", False, "/reports"),
+                ["--save-torchci-reports=/reports"],
+            )
+            # C++ tests don't go through run_tests, so they get the plugin itself.
+            self.assertEqual(
+                args("cpp/test_api", True, "/reports"),
+                [
+                    "-p",
+                    "torch.testing._internal.torchci.plugin",
+                    "--torchci-report-prefix=/reports/cpp.test_api",
+                ],
+            )
+            self.assertEqual(args("test_type_info", False, None), [])
+            self.assertEqual(args("cpp/test_api", True, None), [])
         with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", False):
-            self.assertEqual(args("/reports"), [])
+            self.assertEqual(args("test_type_info", False, "/reports"), [])
+
+    def test_run_test_default_reports_dir(self) -> None:
+        run_test_module = importlib.import_module("run_test")
+        default = run_test_module._torchci_reports_default
+        ci_dir = str(run_test_module.REPO_ROOT / "test/torchci-reports")
+        for is_ci, repo, xpu, expected in (
+            (False, "pytorch/pytorch", None, None),
+            # Other repos' CI, such as forks' and out-of-tree backends', writes none.
+            (True, "someone/pytorch", None, None),
+            (True, "pytorch/pytorch", None, ci_dir),
+            # XPU builds write none.
+            (True, "pytorch/pytorch", "20250101", None),
+        ):
+            with (
+                unittest.mock.patch.object(run_test_module, "IS_CI", is_ci),
+                unittest.mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": repo}),
+                unittest.mock.patch.object(torch.version, "xpu", xpu),
+            ):
+                self.assertEqual(default(), expected)
+
+
+@skipIfTorchDynamo("tests run_test.py's scheduling, not the tests it runs")
+class TestSerialFileXdistWorkers(TestCase):
+    """run_test.py runs the non-@serial tests of XDIST_SERIAL_FILES under xdist
+    only where each worker keeps the per-process isolation it needs, and
+    XDIST_SERIAL_CPU_LIST files only on CPU-only jobs."""
+
+    def workers(
+        self,
+        file="inductor/test_flex_attention",
+        *,
+        cuda=True,
+        accelerator=None,
+        hip=None,
+        gib=24,
+        env=None,
+        rerun_disabled=False,
+    ):
+        run_test_module = importlib.import_module("run_test")
+        options = types.SimpleNamespace(pytest_xdist_workers=None)
+        properties = types.SimpleNamespace(total_memory=gib * 2**30)
+        has_accelerator = cuda if accelerator is None else accelerator
+        with contextlib.ExitStack() as stack:
+            patch = functools.partial(unittest.mock.patch.object, run_test_module)
+            stack.enter_context(patch("TEST_CUDA", cuda))
+            stack.enter_context(patch("RERUN_DISABLED_TESTS", rerun_disabled))
+            stack.enter_context(
+                unittest.mock.patch.object(
+                    torch.accelerator, "is_available", lambda: has_accelerator
+                )
+            )
+            stack.enter_context(unittest.mock.patch.object(torch.version, "hip", hip))
+            stack.enter_context(
+                unittest.mock.patch.object(
+                    torch.cuda, "get_device_properties", lambda _: properties
+                )
+            )
+            stack.enter_context(unittest.mock.patch.dict(os.environ, env or {}))
+            return run_test_module.serial_file_xdist_workers(file, options, 3)
+
+    def test_listed_file_on_cuda_and_cpu(self) -> None:
+        self.assertEqual(self.workers(), 3)
+        self.assertEqual(self.workers(cuda=False), 3)
+
+    def test_unlisted_file(self) -> None:
+        self.assertEqual(self.workers("test_ops"), 1)
+
+    def test_cpu_only_file(self) -> None:
+        self.assertEqual(self.workers("test_nn", cuda=False), 3)
+        self.assertEqual(self.workers("test_nn"), 1)
+
+    def test_backends_without_per_worker_isolation(self) -> None:
+        self.assertEqual(self.workers(hip="6.4"), 1)
+        # e.g. XPU: an accelerator without CUDA's per-process memory cap.
+        self.assertEqual(self.workers(cuda=False, accelerator=True), 1)
+
+    def test_serial_modes(self) -> None:
+        self.assertEqual(self.workers(rerun_disabled=True), 1)
+        self.assertEqual(
+            self.workers(env={"PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL": "1"}), 1
+        )
+
+    def test_workers_shrink_to_fit_gpu_memory(self) -> None:
+        self.assertEqual(self.workers(gib=16), 3)
+        self.assertEqual(self.workers(gib=10), 2)
+        self.assertEqual(self.workers(gib=8), 1)
+
+    def run_xdist_pass(
+        self, xdist_exit_code: int, lastfailed: list[str] | None = None
+    ) -> tuple[list, list]:
+        """Runs run_test.run_test on flex under xdist with retry_shell exiting
+        with xdist_exit_code and pytest's lastfailed cache holding lastfailed;
+        returns the xdist commands and the retried (command, keep-going, env,
+        node ids) calls."""
+        if lastfailed is None:
+            lastfailed = [
+                "test/inductor/test_flex_attention.py::TestFlexAttentionCUDA::test_a",
+                "test/test_nn.py::TestNN::test_b",
+            ]
+        run_test_module = importlib.import_module("run_test")
+        with unittest.mock.patch.object(sys, "argv", ["run_test.py"]):
+            options = run_test_module.parse_args()
+        options.pytest = True
+        options.pipe_logs = False
+        options.pytest_xdist_workers = 3
+        options.continue_through_error = True
+        options.additional_args = ["-m", "(not serial)"]
+        xdist_commands, retried = [], []
+
+        def retry_shell(command, *args, **kwargs):
+            xdist_commands.append(command)
+            return xdist_exit_code, False
+
+        def run_test_retries(
+            command,
+            test_directory,
+            env,
+            timeout,
+            key,
+            output,
+            continue_through_error,
+            *args,
+        ):
+            (path,) = [
+                arg.split("=", 1)[1]
+                for arg in command
+                if arg.startswith("--nodeid-file=")
+            ]
+            with open(path) as f:
+                nodeids = f.read().splitlines()
+            retried.append((command, continue_through_error, env, nodeids))
+            return 0, False
+
+        test = run_test_module.ShardedTest("inductor/test_flex_attention", 1, 1, 600)
+        with (
+            unittest.mock.patch.object(run_test_module, "retry_shell", retry_shell),
+            unittest.mock.patch.object(
+                run_test_module, "run_test_retries", run_test_retries
+            ),
+            unittest.mock.patch.object(
+                run_test_module, "read_lastfailed", lambda: lastfailed
+            ),
+            unittest.mock.patch.object(
+                run_test_module, "drop_lastfailed", lambda prefix: None
+            ),
+            unittest.mock.patch.dict(os.environ, {"NUM_PARALLEL_PROCS": "3"}),
+        ):
+            ret_code = run_test_module.run_test(test, "test", options)
+        self.assertEqual(ret_code, 0 if retried else xdist_exit_code)
+        return xdist_commands, retried
+
+    def test_xdist_failures_rerun_without_xdist(self) -> None:
+        (xdist_command,), [(command, continue_through_error, env, nodeids)] = (
+            self.run_xdist_pass(xdist_exit_code=1)
+        )
+        # The xdist pass runs every test, so the rerun covers all its failures,
+        # and only this file's.
+        self.assertIn("-n", xdist_command)
+        self.assertNotIn("-x", xdist_command)
+        self.assertNotIn("-n", command)
+        self.assertEqual(
+            nodeids,
+            ["test/inductor/test_flex_attention.py::TestFlexAttentionCUDA::test_a"],
+        )
+        # Keep-going still classifies every failure.
+        self.assertTrue(continue_through_error)
+        self.assertNotIn("NUM_PARALLEL_PROCS", env)
+
+    def test_xdist_timeout_crash_or_unrecorded_failure_is_not_rerun(self) -> None:
+        for exit_code in (124, -11, 2):
+            _, retried = self.run_xdist_pass(xdist_exit_code=exit_code)
+            self.assertEqual(retried, [])
+        # Without recorded failures to rerun, the xdist failure stands.
+        _, retried = self.run_xdist_pass(xdist_exit_code=1, lastfailed=[])
+        self.assertEqual(retried, [])
+
+
+# gtest's JSON test list (--gtest_list_tests --gtest_output=json:<file>), with the
+# fields gtest_identities reads.
+_GTEST_LISTING = {
+    "testsuites": [
+        {"name": "ModulesTest", "testsuite": [{"name": "Linear"}]},
+        {"name": "TypedTest/0", "testsuite": [{"name": "Add", "type_param": "int"}]},
+        {
+            "name": "Inst/TypedPTest/1",
+            "testsuite": [{"name": "Add", "type_param": "float"}],
+        },
+        # gtest doesn't check a custom type name generator's names.
+        {
+            "name": "TypedTest/c10.Half",
+            "testsuite": [{"name": "Add", "type_param": "Half"}],
+        },
+        {
+            "name": "Inst/PrimeTest",
+            "testsuite": [
+                {"name": "Returns/0", "value_param": "2"},
+                {"name": "Returns/Small", "value_param": "3"},
+            ],
+        },
+    ]
+}
 
 
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
@@ -811,6 +1085,61 @@ instantiate_parametrized_tests(TestReportCrashes)
 
 
 class TestReportHelpers(TestCase):
+    def test_gtest_identities(self) -> None:
+        def cpp(suite: str, case_name: str, declared_case_name: str) -> tuple:
+            return ("cpp/test_api", suite, case_name, "cpp", declared_case_name)
+
+        self.assertEqual(
+            torchci_report.gtest_identities("build/bin/test_api.exe", _GTEST_LISTING),
+            {
+                "ModulesTest.Linear": cpp("ModulesTest", "Linear", "Linear"),
+                "TypedTest/0.Add": cpp("TypedTest/0", "Add", "Add"),
+                "Inst/TypedPTest/1.Add": cpp("Inst/TypedPTest/1", "Add", "Add"),
+                "TypedTest/c10.Half.Add": cpp("TypedTest/c10.Half", "Add", "Add"),
+                "Inst/PrimeTest.Returns/0": cpp(
+                    "Inst/PrimeTest", "Returns/0", "Returns"
+                ),
+                "Inst/PrimeTest.Returns/Small": cpp(
+                    "Inst/PrimeTest", "Returns/Small", "Returns"
+                ),
+            },
+        )
+
+    @unittest.skipIf(
+        importlib.util.find_spec("pytest_cpp") is None, "pytest-cpp isn't installed"
+    )
+    def test_gtest_item_identity(self) -> None:
+        from pytest_cpp.boost import BoostTestFacade
+        from pytest_cpp.catch2 import Catch2Facade
+        from pytest_cpp.google import GoogleTestFacade
+        from pytest_cpp.plugin import CppItem
+
+        plugin = importlib.import_module("torch.testing._internal.torchci.plugin")
+
+        def list_tests(args: list[str], **kwargs: Any) -> None:
+            listing = Path(args[-1].removeprefix("--gtest_output=json:"))
+            listing.write_text(json.dumps(_GTEST_LISTING))
+
+        # identity reads only the item's binary, name and framework.
+        item = object.__new__(CppItem)
+        item.path, item.facade = Path("build/bin/test_api"), GoogleTestFacade()
+        plugin._gtest_identities.cache_clear()
+        self.addCleanup(plugin._gtest_identities.cache_clear)
+        with unittest.mock.patch("subprocess.run", side_effect=list_tests) as run:
+            item.name = "TypedTest/c10.Half.Add"
+            self.assertEqual(
+                plugin.identity(item),
+                ("cpp/test_api", "TypedTest/c10.Half", "Add", "cpp", "Add"),
+            )
+            item.name = "Unlisted.Test"
+            self.assertIsNone(plugin.identity(item))
+            # pytest-cpp's other frameworks don't have gtest's test list.
+            for facade in (BoostTestFacade(), Catch2Facade()):
+                item.facade = facade
+                self.assertIsNone(plugin.identity(item))
+        # Once per binary.
+        run.assert_called_once()
+
     def test_identity_survives_unwrap_errors(self):
         import pytest
 
@@ -1084,6 +1413,41 @@ class TestEnvVarValues(TestCase):
             values,
             {"FOO_EV_ALLOC_CONF": conf, "FOO_EV_DSL": "triton", "FOO_EV_INT": "08"},
         )
+        # The repro command gets the same strings, which are what the shell needs.
+        repro = {
+            k: v
+            for k, v in TestEnvironment.repro_env_vars.items()
+            if k.startswith("FOO_EV_")
+        }
+        self.assertEqual(
+            repro,
+            {"FOO_EV_ALLOC_CONF": conf, "FOO_EV_DSL": "triton", "FOO_EV_INT": "08"},
+        )
+
+    def test_include_in_report_separate_from_repro(self):
+        env = {"FOO_EV_REPORT_ONLY": "x", "FOO_EV_REPRO_ONLY": "y"}
+        with unittest.mock.patch.dict(os.environ, env):
+            self._def_setting(
+                "FOO_EV_REPORT_ONLY",
+                env_var="FOO_EV_REPORT_ONLY",
+                include_in_repro=False,
+                include_in_report=True,
+            )
+            self._def_setting(
+                "FOO_EV_REPRO_ONLY",
+                env_var="FOO_EV_REPRO_ONLY",
+                include_in_repro=True,
+                include_in_report=False,
+            )
+        self.assertEqual(TestEnvironment.env_var_values["FOO_EV_REPORT_ONLY"], "x")
+        self.assertNotIn("FOO_EV_REPORT_ONLY", TestEnvironment.repro_env_vars)
+        self.assertNotIn("FOO_EV_REPRO_ONLY", TestEnvironment.env_var_values)
+        self.assertEqual(TestEnvironment.repro_env_vars["FOO_EV_REPRO_ONLY"], "y")
+
+    def test_repro_env_var_prefix_quotes_values(self):
+        with unittest.mock.patch.dict(os.environ, {"FOO_EV_SPACE": "a b"}):
+            self._def_setting("FOO_EV_SPACE", env_var="FOO_EV_SPACE")
+        self.assertIn("FOO_EV_SPACE='a b'", TestEnvironment.repro_env_var_prefix())
 
 
 if __name__ == "__main__":

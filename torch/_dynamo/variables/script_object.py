@@ -107,7 +107,7 @@ class CustomClassVariable(UserDefinedVariable):
         # allowing for proper validation and error handling
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CustomClassVariable wraps the CLASS, not an instance.
         # Classes are always hashable in CPython (type.__hash__ = object.__hash__).
         return hash(self.value), False
@@ -341,17 +341,16 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
         op: str,
     ) -> "VariableTracker":
         from .constant import ConstantVariable
-        from .object_protocol import object_richcompare
 
         # Try value-based comparison first. CustomClassObjectVariable wraps
         # pybind11 objects (e.g. Placement subclasses) whose C++ operator==
-        # does value comparison. Falling through to object_richcompare would
+        # does value comparison. Falling through to object's tp_richcompare would
         # use identity, returning wrong results (e.g. Shard(0) == Shard(0)
         # would be False instead of True).
         try:
             self_val = self.as_python_constant()
         except NotImplementedError:
-            return object_richcompare(self, tx, other, op)
+            return VariableTracker.tp_richcompare_impl(self, tx, other, op)
         try:
             other_val = other.as_python_constant()
         except NotImplementedError:
@@ -574,7 +573,7 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
             return self.value
         return super().as_python_constant()
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         from ..exc import raise_type_error
 
         real_obj = self.as_python_constant()

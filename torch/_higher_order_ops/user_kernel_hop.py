@@ -1,0 +1,529 @@
+"""DSL-agnostic pieces of the user-kernel HOPs.
+
+A user-defined kernel (e.g. a ``@triton.jit`` kernel) is captured as a pair of HOPs:
+a mutation HOP that launches the kernel and writes its arguments in place, and a
+functional HOP that functionalization rewrites it into (clones of the written
+arguments, then the launch on the clones). Everything here is shared by every DSL's
+pair; each DSL's module (e.g. triton_kernel_wrap.py) adds the parts that depend on
+the kernel object: how to launch it, how to find its write set, and how to capture a
+call to it (the HOPifier).
+"""
+
+import dataclasses
+import threading
+from collections.abc import Callable, Mapping
+from typing import Any, Generic, Literal, Never, TYPE_CHECKING, TypeVar
+
+import torch.fx as fx
+import torch.utils._pytree as pytree
+from torch import Tensor
+from torch._C import _dispatch_keys, DispatchKey
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger, TRIGGER_DSLS
+from torch._higher_order_ops.utils import redirect_to_mode
+from torch._ops import HigherOrderOperator
+from torch._prims_common import (
+    clone_preserve_strides,
+    is_non_overlapping_and_dense_or_false,
+)
+from torch.fx.experimental.proxy_tensor import (
+    disable_proxy_modes_tracing,
+    ProxyTorchDispatchMode,
+    track_tensor_tree,
+)
+from torch.fx.experimental.symbolic_shapes import guard_or_false
+from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
+
+
+if TYPE_CHECKING:
+    from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
+
+
+KernelT = TypeVar("KernelT")
+
+
+###############################################################################
+# Kernel Side Table
+
+
+# We cannot put user kernels into the FX graph as the graph nodes
+# do not support arbitrary functions.
+# Use a side table.
+# We use two dicts so that fetching both the kernel and id are O(1)
+class KernelSideTable(Generic[KernelT]):
+    def __init__(self) -> None:
+        # Per instance, so that each DSL's table has its own index space.
+        self.id_to_kernel: dict[int, KernelT] = {}
+        self.kernel_to_id: dict[KernelT, int] = {}
+        self.constant_args: dict[int, dict[str, object]] = {}
+        self.lock = threading.Lock()
+
+    # Returns index on the table
+    def add_kernel(self, kernel: KernelT) -> int:
+        with self.lock:
+            if kernel in self.kernel_to_id:
+                return self.kernel_to_id[kernel]
+
+            idx = len(self.id_to_kernel)
+            self.id_to_kernel[idx] = kernel
+            self.kernel_to_id[kernel] = idx
+            return idx
+
+    # Returns the kernel at the given index
+    def get_kernel(self, idx: int) -> KernelT:
+        # No need to lock here as fetching from dict is atomic
+        if idx not in self.id_to_kernel:
+            raise AssertionError(f"Kernel index {idx} not found in id_to_kernel")
+        return self.id_to_kernel[idx]
+
+    # Not every constant arg can be added to the graph. Use this side table
+    # for constant args.
+    def add_constant_args(self, args: dict[str, object]) -> int:
+        with self.lock:
+            idx = len(self.constant_args)
+            self.constant_args[idx] = args
+            return idx
+
+    # Returns the constant args
+    def get_constant_args(self, idx: int) -> dict[str, object]:
+        # No need to lock here as fetching from dict is atomic
+        if idx not in self.constant_args:
+            raise AssertionError(
+                f"Constant args index {idx} not found in constant_args"
+            )
+        return self.constant_args[idx]
+
+    # Resets the table (only meant to be used in unit tests)
+    # This is only safe assuming single threaded execution
+    def reset_table(self) -> None:
+        self.id_to_kernel = {}
+        self.kernel_to_id = {}
+        self.constant_args = {}
+
+
+def store_non_graphable_args(
+    side_table: KernelSideTable[Any], combined_args: dict[str, Any]
+) -> tuple[dict[str, Any], int]:
+    """
+    Some args cannot be stored in the FX graph.
+    Put them in the side table.
+    """
+
+    def is_graphable(val: object) -> bool:
+        return isinstance(val, (fx.node.base_types, fx.Node))
+
+    non_graphable_args = {k: v for k, v in combined_args.items() if not is_graphable(v)}
+    graphable_args = {k: v for k, v in combined_args.items() if is_graphable(v)}
+
+    constant_args_idx = side_table.add_constant_args(non_graphable_args)
+
+    return graphable_args, constant_args_idx
+
+
+###############################################################################
+# HOP base class and the dispatch rules shared by every user-kernel HOP pair
+
+
+class UserKernelWrapperHOP(HigherOrderOperator):
+    """Base class of the user-kernel mutation and functional HOPs.
+
+    Their tensors live inside the ``kwargs`` (and ``tensor_bases``) dicts, which the
+    default overloaded-args scan does not look into.
+    """
+
+    def _get_overloaded_args(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[Tensor, ...]:
+        overloaded_args = list(super()._get_overloaded_args(args, kwargs))
+        for tensor_dict_name in ("kwargs", "tensor_bases"):
+            tensor_dict = kwargs.get(tensor_dict_name)
+            if isinstance(tensor_dict, dict):
+                overloaded_args.extend(
+                    arg
+                    for arg in tensor_dict.values()
+                    if isinstance(arg, Tensor) and _dispatch_keys(arg).has("Python")
+                )
+        return tuple(overloaded_args)
+
+
+def trace_user_kernel_wrapper(
+    proxy_mode: ProxyTorchDispatchMode,
+    func_overload: Callable[..., Any],
+    node_args: dict[str, Any],
+) -> dict[str, Any] | None:
+    with disable_proxy_modes_tracing():
+        out = func_overload(**node_args)
+
+    proxy_args = pytree.tree_map(
+        proxy_mode.tracer.unwrap_proxy,  # type: ignore[union-attr]
+        node_args,
+    )
+    out_proxy = proxy_mode.tracer.create_proxy(
+        "call_function",
+        func_overload,
+        (),
+        proxy_args,
+        name=func_overload.__name__ + "_proxy",
+    )
+
+    ret = track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
+    return ret
+
+
+def clone_mutated_arg(
+    key: str, val: Tensor, tensor_bases: dict[str, Tensor] | None
+) -> Tensor:
+    """Clone a mutated pointer arg.
+
+    clone_preserve_strides allocates storage_offset + span elements and reads them
+    out of val's storage. Whenever that is more than val's own numel -- a non-zero
+    storage_offset, or gaps between val's elements -- part of the read lies outside
+    val, which a backend that realizes val as a buffer sized to val cannot supply.
+    """
+    if is_non_overlapping_and_dense_or_false(val):
+        if guard_or_false(val.storage_offset() == 0):
+            # storage_offset + span is exactly val's numel, so nothing outside val
+            # is read and this stays the cheapest thing that works.
+            return clone_preserve_strides(val)
+        # clone() reproduces the strides of a dense tensor and lands it at offset 0,
+        # so the clone spans exactly val's own elements. That is all a user kernel
+        # needs: it only ever sees a data pointer plus the strides passed to it.
+        return val.clone()
+    # Gaps have to be materialized as well, so the storage val sits in gets copied.
+    return clone_preserve_strides(
+        val, base=tensor_bases.get(key) if tensor_bases else None
+    )
+
+
+def functionalize_mutation_hop(
+    ctx: "BaseFunctionalizeAPI",
+    functional_hop: HigherOrderOperator,
+    get_mutated_tensors: Callable[[dict[str, Any]], list[str]],
+    *,
+    hop_kwargs: dict[str, Any],
+    kwargs: dict[str, Any],
+) -> None:
+    """Functionalize rule of a mutation HOP: call the functional HOP on clones of the
+    written arguments (``get_mutated_tensors`` names them, given the unwrapped kwargs),
+    then write its outputs back into the functional wrappers of the inputs.
+
+    ``hop_kwargs`` holds the HOP's arguments other than ``kwargs``; they are passed
+    to the functional HOP unchanged.
+    """
+    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
+    tensors_to_clone = get_mutated_tensors(unwrapped_kwargs)
+    # A mutated arg that is a view has to be cloned through its base, and the base is
+    # only a tracked value out here -- reading _base inside the functional impl yields
+    # an untracked tensor that the tracer would lift to a constant. See
+    # clone_preserve_strides for why cloning the view itself is not graph-safe.
+    tensor_bases = {}
+    for key in tensors_to_clone:
+        tensor = kwargs[key]
+        base = tensor._base if isinstance(tensor, Tensor) else None
+        if base is not None:
+            tensor_bases[key] = ctx.unwrap_tensors(base)
+    with ctx.redispatch_to_next():
+        functional_kwargs: dict[str, Any] = {
+            **hop_kwargs,
+            "kwargs": unwrapped_kwargs,
+            "tensors_to_clone": tensors_to_clone,
+        }
+        if tensor_bases:
+            functional_kwargs["tensor_bases"] = tensor_bases
+        unwrapped_outputs = functional_hop(**functional_kwargs)
+
+    if not set(unwrapped_outputs.keys()).issubset(set(kwargs.keys())):
+        raise AssertionError(
+            f"Output keys {set(unwrapped_outputs.keys())} not subset of input keys {set(kwargs.keys())}"
+        )
+    for key, output_arg in unwrapped_outputs.items():
+        if not isinstance(output_arg, Tensor):
+            continue
+        input_arg = kwargs[key]
+        if not isinstance(input_arg, Tensor):
+            raise AssertionError(
+                f"Expected input_arg for key {key} to be a Tensor, got {type(input_arg)}"
+            )
+
+        ctx.replace(input_arg, output_arg)
+        # indicate that above replace is hidden from autograd
+        ctx.mark_mutation_hidden_from_autograd(input_arg)
+        ctx.commit_update(input_arg)
+        ctx.sync(input_arg)
+
+
+def functional_hop_dense(
+    mutation_hop: HigherOrderOperator,
+    *,
+    hop_kwargs: dict[str, Any],
+    kwargs: dict[str, Any],
+    tensors_to_clone: list[str],
+    tensor_bases: dict[str, Tensor] | None,
+) -> dict[str, Any]:
+    """Dense impl of a functional HOP: launch the mutation HOP on clones of the
+    arguments in ``tensors_to_clone`` and return those clones."""
+    # TODO(oulgen): For performance reasons, we want to ensure that these
+    # `clone_preserve_strides` calls are never executed at runtime
+    # (inductor should always optimize them away).
+    # Requires https://github.com/pytorch/pytorch/issues/109240
+    kwargs = {
+        key: (
+            clone_mutated_arg(key, val, tensor_bases)
+            if key in tensors_to_clone
+            else val
+        )
+        for key, val in kwargs.items()
+    }
+    mutation_hop(**hop_kwargs, kwargs=kwargs)
+    return {key: val for key, val in kwargs.items() if key in tensors_to_clone}
+
+
+def functional_hop_fake(
+    *,
+    kwargs: dict[str, Any],
+    tensors_to_clone: list[str],
+    tensor_bases: dict[str, Tensor] | None,
+) -> dict[str, Any]:
+    # TODO(oulgen): For performance reasons, we want to ensure that these
+    # `clone_preserve_strides` calls are never executed at runtime
+    # (inductor should always optimize them away).
+    # Requires https://github.com/pytorch/pytorch/issues/109240
+    return {
+        key: clone_mutated_arg(key, val, tensor_bases)
+        for key, val in kwargs.items()
+        if key in tensors_to_clone
+    }
+
+
+def functionalize_functional_hop(
+    ctx: "BaseFunctionalizeAPI",
+    functional_hop: HigherOrderOperator,
+    *,
+    hop_kwargs: dict[str, Any],
+    kwargs: dict[str, Any],
+    tensors_to_clone: list[str],
+    tensor_bases: dict[str, Tensor] | None,
+) -> dict[str, Any]:
+    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
+    unwrapped_tensor_bases = ctx.unwrap_tensors(tensor_bases)  # type: ignore[arg-type]
+    with ctx.redispatch_to_next():
+        functional_kwargs: dict[str, Any] = {
+            **hop_kwargs,
+            "kwargs": unwrapped_kwargs,
+            "tensors_to_clone": tensors_to_clone,
+        }
+        if unwrapped_tensor_bases:
+            functional_kwargs["tensor_bases"] = unwrapped_tensor_bases
+        outputs = functional_hop(**functional_kwargs)
+        return ctx.wrap_tensors(outputs)  # type: ignore[return-value,arg-type]
+
+
+def register_user_kernel_hop_dispatch(
+    mutation_hop: HigherOrderOperator, functional_hop: HigherOrderOperator
+) -> None:
+    """Dispatch keys a user-kernel HOP pair falls through, plus SAC support."""
+    for hop in (mutation_hop, functional_hop):
+        hop.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
+        hop.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
+        hop.fallthrough(DispatchKey.ADInplaceOrView)
+        hop.fallthrough(DispatchKey.BackendSelect)
+        hop.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
+        hop.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
+        hop.fallthrough(DispatchKey.AutogradCUDA)
+        hop.fallthrough(DispatchKey.AutogradCPU)
+
+    # Adds SAC support for user kernels
+    redirect_to_mode(mutation_hop, _CachingTorchDispatchMode)
+    redirect_to_mode(mutation_hop, _CachedTorchDispatchMode)
+
+
+###############################################################################
+# Registry: what the DSL-agnostic passes need to know about each DSL's HOP pair
+
+
+UserKernelLayoutConstraint = Literal["needs_fixed_stride_order", "flexible_layout"]
+
+
+# eq=False: infos compare and hash by identity, as register_user_kernel_hop compares
+# them, so a DSL's callables need not be hashable.
+@dataclasses.dataclass(frozen=True, eq=False)
+class UserKernelHOPInfo:
+    """One DSL's user-kernel HOP pair, as seen by the passes that handle every DSL
+    the same way (reinplacing, the functional decomposition, Inductor's layout
+    constraint and mutation propagation, CSE, partitioning, ...).
+
+    Each DSL module registers one at import time; a pass looks a node's target up
+    with get_user_kernel_hop_info instead of comparing it with a DSL's HOP.
+
+    Those passes read the HOP nodes' kwargs by name, so a registered pair must be
+    traced with keyword arguments only, in this form:
+
+    - ``kwargs``: the kernel's arguments by parameter name. The mutation HOP writes
+      the tensors among them that ``get_mutated_tensors`` names.
+    - The functional HOP takes the mutation HOP's arguments plus
+      ``tensors_to_clone``, the names in ``kwargs`` whose tensors it clones and
+      writes instead, and, if any of those is a view, ``tensor_bases``: their
+      bases by name. It returns ``{name: written clone}`` for each name in
+      ``tensors_to_clone``. Reinplacing removes the names whose tensors the kernel
+      may write in place.
+    - Any other argument is the DSL's own; the passes only hand it on.
+
+    The functional HOP's CompositeExplicitAutograd py_impl, which eager runs, must
+    call the mutation HOP once, on clones of the tensors named in
+    ``tensors_to_clone`` (functional_hop_dense does this). The post-grad
+    decomposition traces that impl, so a pair without one cannot be registered.
+
+    The FX graph cache keys user kernels by source for Triton only
+    (FxGraphHashDetails, and the has_user_defined_triton_kernels flag computed from
+    it), so a DSL whose HOPs are cacheable must extend the cache key first. HOPs are
+    not cacheable by default, and the cache bypasses every graph that contains an
+    uncacheable HOP.
+    """
+
+    dsl: str
+    mutation: UserKernelWrapperHOP
+    functional: UserKernelWrapperHOP
+    # (hop_kwargs, kernel_kwargs) -> names of the kernel kwargs the kernel writes.
+    # It may name a kwarg that the kernel only reads, but must not omit one that it
+    # writes: Inductor's layout constraints would let that kwarg share a buffer with
+    # another argument. Inductor (propagate_mutation and the layout constraints)
+    # passes the mutation HOP's kwargs as lowered (each FX node replaced by its
+    # lowered value, e.g. an IR node for a tensor, in "kwargs" too) and that node's
+    # "kwargs" with each FX node replaced by its fake value (from its meta value, or
+    # its eager_input_vals). Read only the DSL's own arguments (e.g. kernel_idx) from
+    # hop_kwargs, and the kernel's arguments from kernel_kwargs.
+    get_mutated_tensors: Callable[[Mapping[str, Any], dict[str, Any]], list[str]]
+    # HOP kwargs -> kernel name, for the reinplacing pass's log.
+    get_kernel_name: Callable[[Mapping[str, Any]], str]
+    # () -> the layout constraint Inductor gives the mutation HOP's tensor arguments:
+    # "needs_fixed_stride_order" (the strides they had when the graph was traced) or
+    # "flexible_layout" (Inductor picks them). Inductor calls it each time it lowers
+    # one of this DSL's mutation HOP nodes.
+    get_layout_constraint: Callable[[], UserKernelLayoutConstraint]
+    # Only keys this DSL's reinplacing counters: ReInplaceTrigger.USER_KERNEL_OPS,
+    # which DSLs share, or a member of the DSL's own, the one TRIGGER_DSLS names for
+    # it, which register_user_kernel_hop refuses to a DSL of another name.
+    # auto_functionalize's AUTO_FUNC_V1 and AUTO_FUNC_V2 are refused too; the
+    # reinplacing pass also reads AUTO_FUNC_V2 as a switch that stops it from
+    # rewriting getitem users.
+    reinplace_trigger: ReInplaceTrigger
+    # torch.export's serializer can write this DSL's nodes.
+    serializable: bool
+
+
+_user_kernel_hops: dict[UserKernelWrapperHOP, UserKernelHOPInfo] = {}
+# DSL modules may register from different threads (import locks only serialize the
+# imports of one module), so a registration holds this lock across its ownership
+# checks and both writes, and every read of the registry takes it too: no reader
+# sees half of a pair, and two conflicting registrations cannot both pass the checks.
+_user_kernel_hops_lock = threading.Lock()
+
+
+def register_user_kernel_hop(info: UserKernelHOPInfo) -> None:
+    """Register a DSL's HOP pair with the passes that handle every DSL. Each DSL
+    module calls it once, at import time.
+
+    Everything is checked before the registry is written, so a refused registration
+    leaves it as it was. Raises:
+
+    - TypeError if the trigger is not a ReInplaceTrigger member (its name, for
+      example), if either HOP is not a UserKernelWrapperHOP, or if the functional HOP
+      has no CompositeExplicitAutograd py_impl for the decomposition to trace.
+    - ValueError if the trigger is auto_functionalize's AUTO_FUNC_V1 or AUTO_FUNC_V2,
+      or a member other than USER_KERNEL_OPS that TRIGGER_DSLS does not name for this
+      DSL (another DSL's member, whether or not that DSL has registered yet, or a
+      member without an entry), or if the mutation and functional HOPs are the same
+      HOP.
+    - RuntimeError if either HOP is registered already, with another info. Infos
+      compare by identity: registering the same object again is accepted and changes
+      nothing, but an equal copy of it is refused.
+    """
+    trigger = info.reinplace_trigger
+    if not isinstance(trigger, ReInplaceTrigger):
+        raise TypeError(f"{trigger!r} is not a ReInplaceTrigger")
+    if trigger in (ReInplaceTrigger.AUTO_FUNC_V1, ReInplaceTrigger.AUTO_FUNC_V2):
+        raise ValueError(
+            f"{trigger} belongs to auto_functionalize; register the {info.dsl} DSL "
+            "with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
+        )
+    trigger_dsl = TRIGGER_DSLS.get(trigger)
+    if trigger is not ReInplaceTrigger.USER_KERNEL_OPS and trigger_dsl != info.dsl:
+        if trigger_dsl is None:
+            raise ValueError(
+                f"{trigger} has no entry in TRIGGER_DSLS; add one naming the DSL it "
+                "belongs to"
+            )
+        raise ValueError(
+            f"{trigger} belongs to the {trigger_dsl} DSL; register the {info.dsl} DSL "
+            "with ReInplaceTrigger.USER_KERNEL_OPS or a member of its own"
+        )
+    if info.mutation is info.functional:
+        raise ValueError(
+            f"{info.mutation} cannot be both the mutation and the functional HOP of "
+            f"the {info.dsl} DSL"
+        )
+    hops = (info.mutation, info.functional)
+    with _user_kernel_hops_lock:
+        for hop in hops:
+            if not isinstance(hop, UserKernelWrapperHOP):
+                raise TypeError(f"{hop} is not a UserKernelWrapperHOP")
+            owner = _user_kernel_hops.get(hop, info)
+            if owner is not info:
+                raise RuntimeError(
+                    f"{hop} is already registered by the {owner.dsl} DSL with another "
+                    "UserKernelHOPInfo object; only that object can be registered again"
+                )
+        if DispatchKey.CompositeExplicitAutograd not in info.functional.py_kernels:
+            raise TypeError(
+                f"{info.functional} has no CompositeExplicitAutograd py_impl"
+            )
+        for hop in hops:
+            _user_kernel_hops[hop] = info
+
+
+def get_user_kernel_hop_info(
+    target: object, role: Literal["mutation", "functional"] | None = None
+) -> UserKernelHOPInfo | None:
+    """The registry entry whose mutation or functional HOP is ``target``; given a
+    ``role``, only if ``target`` is the HOP of its pair with that role."""
+    if not isinstance(target, UserKernelWrapperHOP):
+        return None
+    with _user_kernel_hops_lock:
+        info = _user_kernel_hops.get(target)
+    if info is None or role is None:
+        return info
+    hop = info.mutation if role == "mutation" else info.functional
+    return info if target is hop else None
+
+
+def is_user_kernel_mutation_hop(target: object) -> bool:
+    return get_user_kernel_hop_info(target, "mutation") is not None
+
+
+def is_user_kernel_functional_hop(target: object) -> bool:
+    return get_user_kernel_hop_info(target, "functional") is not None
+
+
+def user_kernel_hop_infos() -> list[UserKernelHOPInfo]:
+    """Every registered DSL, in registration order."""
+    with _user_kernel_hops_lock:
+        return list(dict.fromkeys(_user_kernel_hops.values()))
+
+
+###############################################################################
+# The HOPifier contract
+
+
+class UserKernelHOPifier:
+    """Base of each DSL's HOPifier (e.g. TritonHOPifier), which turns a call to a user
+    kernel into a call to the DSL's mutation HOP.
+
+    Each DSL has one subclass per capture environment: Dynamo, which works on
+    VariableTrackers and reports unsupported features as graph breaks, and tracing
+    (make_fx, non-strict export), which works on real or fake values.
+    """
+
+    def raise_unsupported(self, msg: str) -> Never:
+        raise NotImplementedError("abstract method")
+
+    def get_value(self, val: Any) -> Any:
+        raise NotImplementedError("abstract method")

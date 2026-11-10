@@ -261,7 +261,7 @@ std::string get_nvml_fabric_info([[maybe_unused]] c10::DeviceIndex dev) {
   }
 
   char uuid_hex[33];
-  for (int i = 0; i < 16; ++i) {
+  for (const auto i : c10::irange(16)) {
     snprintf(uuid_hex + i * 2, 3, "%02x", info.clusterUuid[i]);
   }
 

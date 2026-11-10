@@ -3,6 +3,7 @@
 import builtins
 import cmath
 import collections
+import copyreg
 import dataclasses
 import enum
 import functools
@@ -32,6 +33,7 @@ import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.bytecode_transformation import transform_code_object
+from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import (
     _Missing,
@@ -64,7 +66,12 @@ from torch._dynamo.utils import (
 )
 from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
@@ -73,7 +80,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils import _pytree as pytree
 
 
@@ -255,7 +261,124 @@ class _NameClash(enum.Enum):
 
 
 _MODE = _Mode.FAST
+_ALIAS = typing.List  # noqa: UP006
+
+
+class _Sentinel:
+    def __reduce__(self):
+        return "_SENTINEL"
+
+
+_SENTINEL = _Sentinel()
+
+
+# Pickled through the copyreg.dispatch_table entries the test registers.
+class _CopyregToItself:
+    pass
+
+
+class _CopyregToAnotherGlobal:
+    pass
+
+
+_COPYREG_TO_ITSELF = _CopyregToItself()
+_COPYREG_TO_ANOTHER_GLOBAL = _CopyregToAnotherGlobal()
+
+
+class _ReducesToAnotherGlobal:
+    def __reduce__(self):
+        return "_ALIAS"
+
+
+class _ReducesToAMissingName:
+    def __reduce__(self):
+        return "_EnumOwner.Missing"
+
+
+class _ReducesToACall:
+    def __reduce__(self):
+        return (_ReducesToACall, ())
+
+
+class _ReducesFromAMissingModule:
+    __module__ = "_not_imported"
+
+    def __reduce__(self):
+        return "_ReducesFromAMissingModule"
+
+
+# Module globals, so the identity check gets past its module-globals scan; the
+# last one is refused there anyway, since its __module__ is not imported.
+_REDUCES_TO_ANOTHER_GLOBAL = _ReducesToAnotherGlobal()
+_REDUCES_TO_A_MISSING_NAME = _ReducesToAMissingName()
+_REDUCES_TO_A_CALL = _ReducesToACall()
+_REDUCES_FROM_A_MISSING_MODULE = _ReducesFromAMissingModule()
+
+
+class _ModuleRaises:
+    def __reduce__(self):
+        return "_MODULE_RAISES"
+
+    @property
+    def __module__(self):
+        raise RuntimeError("no module")
+
+
+class _UnhashableModule:
+    __module__ = ["typing"]  # type: ignore[assignment]
+
+    def __reduce__(self):
+        return "_UNHASHABLE_MODULE"
+
+
+class _ReduceExByValue:
+    # Pickle calls __reduce_ex__, which here bypasses the __reduce__ name.
+    def __reduce__(self):
+        return "_REDUCE_EX_BY_VALUE"
+
+    def __reduce_ex__(self, protocol):
+        return (_ReduceExByValue, ())
+
+
+_REDUCE_EX_BY_VALUE = _ReduceExByValue()
+
+
+class _SentinelOwner:
+    class Sentinel:
+        def __reduce__(self):
+            return "_NESTED_SENTINEL"
+
+
+_NESTED_SENTINEL = _SentinelOwner.Sentinel()
+
+
+class _CountsReduces:
+    calls = 0
+
+    def __reduce__(self):
+        type(self).calls += 1
+        return "_CountsReduces"
+
+
+_MODULE_RAISES = _ModuleRaises()
+_UNHASHABLE_MODULE = _UnhashableModule()
 _torch_add = torch.add
+
+
+@torch.library.custom_op("guard_serialization_test::triple", mutates_args=())
+def _custom_triple(x: torch.Tensor) -> torch.Tensor:
+    return x * 3
+
+
+_custom_triple.register_fake(torch.empty_like)
+
+
+@torch.library.custom_op("guard_serialization_test::halve", mutates_args=())
+def _custom_halve(x: torch.Tensor) -> torch.Tensor:
+    return x / 2
+
+
+_custom_halve.register_fake(torch.empty_like)
 
 
 class _TupleOwner:
@@ -1217,6 +1340,8 @@ torch._library.opaque_object.register_custom_class(CustomConstantType, typ="cons
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         DynamoCache.clear()
@@ -1440,8 +1565,248 @@ if isinstance(_generic_class_getitem, types.ClassMethodDescriptorType):
     _RAW_DESCRIPTORS.append(_generic_class_getitem)
 
 
+class _ODictSubclass(collections.OrderedDict):
+    __slots__ = ("slot",)
+
+    def __setattr__(self, name, value):
+        if name == "__dict__":
+            raise AssertionError("State restoration must bypass __setattr__")
+        super().__setattr__(name, value)
+
+
+class _NormalizingODict(collections.OrderedDict):
+    def __setitem__(self, key, value):
+        super().__setitem__(key.lower() if isinstance(key, str) else key, value)
+
+
+class _ODictGetState(collections.OrderedDict):
+    def __init__(self):
+        super().__init__(constructor=0)
+        self.__dict__ = _DictState(recreated="constructor", saved=0)
+
+    def __getstate__(self):
+        return {"saved": self.saved} if self.saved is not None else None
+
+
+class _ODictTupleState(tuple):
+    __slots__ = ()
+
+    def __len__(self):
+        raise AssertionError("State inspection must bypass tuple overrides")
+
+    def __getitem__(self, index):
+        raise AssertionError("State inspection must bypass tuple overrides")
+
+
+class _ODictCustomState(_ODictGetState):
+    def __getstate__(self):
+        return self.saved
+
+
+class _ODictSetState(_ODictGetState):
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.state_restored = tuple(self)
+        self.move_to_end("b")
+
+
+class _ODictMeta(type):
+    def __call__(cls):
+        result = super().__call__()
+        result["constructor"] = 0
+        result.recreated, result.saved = "constructor", 0
+        return result
+
+
+class _ODictWithMeta(collections.OrderedDict, metaclass=_ODictMeta):
+    __getstate__ = _ODictGetState.__getstate__
+
+
+class _DictState(dict):
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value * 2 if isinstance(value, int) else value)
+
+    def setdefault(self, *args):
+        raise AssertionError("State restoration must bypass dictionary overrides")
+
+
+class _ODictStateHooks(collections.OrderedDict):
+    def __getstate__(self):
+        return self.saved
+
+    def __setstate__(self, state):
+        self.saved = state
+        self.state_restored = (tuple(dict.keys(self)), tuple(self))
+
+
+class _ODictSlotsState(_ODictSubclass):
+    def __getstate__(self):
+        return {"saved": self.saved}, {"slot": self.slot}
+
+
 @instantiate_parametrized_tests
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    class NestedOrderedDict(collections.OrderedDict):
+        pass
+
+    def _roundtrip_ordered_dict(self, value, *tracked):
+        buf = io.BytesIO()
+        objects = {id(obj): obj for obj in tracked}
+        GuardsStatePickler(objects, {}, {}, {}, buf).dump(value)
+        return load_guards_state(buf.getvalue())
+
+    @parametrize(
+        "state",
+        [
+            None,
+            0,
+            "",
+            (),
+            {},
+            {"saved": 3},
+            ({}, {}),
+            ({"saved": 3}, {}),
+            _ODictTupleState(({"saved": 3}, {})),
+        ],
+    )
+    def test_ordered_dict_custom_state_matches_pickle(self, state):
+        mapping = _ODictCustomState()
+        mapping.saved = state
+        try:
+            expected = pickle.loads(pickle.dumps(mapping))
+        except pickle.UnpicklingError as error:
+            with self.assertRaisesRegex(type(error), str(error)):
+                self._roundtrip_ordered_dict(mapping, mapping)
+            return
+        loaded, saved = self._roundtrip_ordered_dict((mapping, state), mapping, state)
+        self.assertEqual(vars(loaded), vars(expected))
+        if isinstance(state, _ODictTupleState):
+            self.assertIs(type(saved), _ODictTupleState)
+            self.assertEqual(tuple(iter(saved)), tuple(iter(state)))
+        else:
+            self.assertEqual(saved, state)
+        if type(state) is dict:
+            self.assertIsNot(vars(loaded), saved)
+
+    @parametrize("mapping_type", [collections.OrderedDict, _ODictCustomState])
+    def test_ordered_dict_instance_state_preserves_alias(self, mapping_type):
+        mapping = mapping_type()
+        if mapping_type is _ODictCustomState:
+            mapping.__dict__ = _DictState()
+            mapping.saved = vars(mapping)
+        loaded, attrs = self._roundtrip_ordered_dict((mapping, vars(mapping)), mapping)
+        self.assertIs(vars(loaded), attrs)
+
+    def test_ordered_dict_unlinked_storage_uses_native_pickle(self):
+        mapping = collections.OrderedDict(a=1)
+        dict.__setitem__(mapping, "unlinked", 2)
+        expected = pickle.loads(pickle.dumps(mapping))
+        self.assertEqual(self._roundtrip_ordered_dict(mapping), expected)
+
+    @parametrize("local", [False, True])
+    def test_ordered_dict_requires_global_class(self, local):
+        class LocalOrderedDict(collections.OrderedDict):
+            pass
+
+        mapping_type = LocalOrderedDict if local else self.NestedOrderedDict
+        mapping = mapping_type(a=1)
+        with self.assertRaisesRegex(
+            PackageError, "Please define the class at global scope"
+        ):
+            self._roundtrip_ordered_dict(mapping, mapping)
+
+    @parametrize(
+        "mapping_type",
+        [collections.OrderedDict, _ODictSubclass, _ODictStateHooks, _ODictSlotsState],
+    )
+    @parametrize("nan_key", [False, True])
+    def test_ordered_dict_storage_order_and_aliases(self, mapping_type, nan_key):
+        shared = []
+        key = float("nan") if nan_key else "A"
+        mapping = mapping_type()
+        collections.OrderedDict.__setitem__(mapping, key, shared)
+        mapping["b"] = shared
+        mapping.saved = mapping.slot = shared
+        mapping["self"] = mapping
+        mapping.alias = mapping
+        mapping.move_to_end(key)
+        loaded, attrs = self._roundtrip_ordered_dict((mapping, vars(mapping)), mapping)
+        self.assertIs(type(loaded), mapping_type)
+        loaded_key = list(loaded)[-1]
+        if nan_key:
+            self.assertTrue(math.isnan(loaded_key))
+        else:
+            self.assertEqual(loaded_key, "A")
+        raw_order, linked_order = [loaded_key, "b", "self"], ["b", "self", loaded_key]
+        self.assertEqual(list(loaded), linked_order)
+        self.assertEqual(list(dict.keys(loaded)), raw_order)
+        self.assertIs(loaded.saved, loaded[loaded_key])
+        self.assertIs(loaded.saved, loaded["b"])
+        self.assertIs(loaded["self"], loaded)
+        if mapping_type is _ODictStateHooks:
+            self.assertEqual(
+                loaded.state_restored, (tuple(raw_order), tuple(linked_order))
+            )
+        else:
+            self.assertIs(loaded.slot, loaded.saved)
+        if mapping_type in (collections.OrderedDict, _ODictSubclass):
+            self.assertIs(loaded.alias, loaded)
+            self.assertIs(loaded.__dict__, attrs)
+
+    @parametrize("mapping_type", [_ODictGetState, _ODictSetState, _ODictWithMeta])
+    @parametrize("saved", [None, 3])
+    def test_ordered_dict_state_hooks(self, mapping_type, saved):
+        mapping = mapping_type()
+        mapping.clear()
+        mapping.update(a=1, b=2)
+        mapping.saved = saved
+        mapping.recreated = "overwritten"
+        expected = pickle.loads(pickle.dumps(mapping))
+        loaded = self._roundtrip_ordered_dict(mapping, mapping)
+        self.assertEqual(list(loaded), list(expected))
+        self.assertEqual(list(dict.keys(loaded)), list(dict.keys(expected)))
+        self.assertEqual(vars(loaded), vars(expected))
+        self.assertEqual(loaded.recreated, "constructor")
+
+    @parametrize(
+        "mapping_type",
+        [_ODictGetState, _NormalizingODict, _ODictWithMeta],
+    )
+    @parametrize("tracked", [False, True])
+    def test_reordered_ordered_dict_overrides(self, mapping_type, tracked):
+        mapping = mapping_type()
+        mapping.clear()
+        mapping.update(a=1, b=2)
+        mapping.move_to_end("a")
+        if tracked:
+            with self.assertRaisesRegex(
+                PackageError, "Cannot preserve OrderedDict storage order"
+            ):
+                self._roundtrip_ordered_dict(mapping, mapping)
+        else:
+            expected = pickle.loads(pickle.dumps(mapping))
+            loaded = self._roundtrip_ordered_dict(mapping)
+            self.assertIs(type(loaded), mapping_type)
+            self.assertEqual(list(loaded.items()), list(expected.items()))
+            self.assertEqual(vars(loaded), vars(expected))
+
+    @parametrize("reducer", ["registered", "__reduce__", "__reduce_ex__"])
+    def test_ordered_dict_registered_reducer(self, reducer):
+        mapping = _ODictSubclass(a=1)
+        if reducer != "registered":
+            setattr(mapping, reducer, lambda *args: (dict, ()))
+        with mock.patch.dict(
+            copyreg.dispatch_table,
+            {_ODictSubclass: lambda value: (dict, ())}
+            if reducer == "registered"
+            else {},
+        ):
+            loaded = self._roundtrip_ordered_dict(mapping, mapping)
+        self.assertIs(type(loaded), dict)
+        self.assertEqual(loaded, {})
+
     # Pickler-level: these drive GuardsStatePickler, or the loader it feeds,
     # directly rather than through a capture, so none of
     # TestGuardSerialization's setup applies.
@@ -1649,6 +2014,26 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             self.assertFalse(is_portable_identity_guard("ID_MATCH", (), member))
             GuardsStatePickler({}, {}, {}, {}, buf).dump({"perms": member})
         self.assertIs(load_guards_state(buf.getvalue())["perms"], member)
+
+    def test_a_custom_op_def_pickles_by_its_registered_name(self):
+        from torch._library.custom_ops import OPDEFS
+
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"op": _custom_triple})
+        self.assertIs(load_guards_state(buf.getvalue())["op"], _custom_triple)
+        self.assertTrue(is_portable_identity_guard("ID_MATCH", (), _custom_triple))
+        # Redefining the op under the same name replaces it in the registry.
+        with mock.patch.dict(OPDEFS, {_custom_triple._qualname: _custom_halve}):
+            self.assertFalse(is_portable_identity_guard("ID_MATCH", (), _custom_triple))
+            with self.assertRaisesRegex(TypeError, "cannot pickle"):
+                GuardsStatePickler({}, {}, {}, {}, io.BytesIO()).dump(
+                    {"op": _custom_triple}
+                )
+        # A serving process that never imported the module defining the op.
+        with mock.patch.dict(OPDEFS):
+            del OPDEFS[_custom_triple._qualname]
+            with self.assertRaisesRegex(RuntimeError, "import the module"):
+                load_guards_state(buf.getvalue())
 
     def test_a_main_class_resolves_against_the_loading_main(self):
         main = sys.modules["__main__"]
@@ -1974,13 +2359,20 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # the rebuilt guard compares against the sentinel forever: it
         # is refused by name, and pickle_guards_state re-raises that
         # PackageError unchanged as the bypass reason.
-        from torch._C._distributed_c10d import Backend, FakeProcessGroup, ProcessGroup
+        from torch._C._distributed_c10d import Backend, ProcessGroup
+        from torch.distributed._backends.fake import FakeProcessGroup
 
         pg = FakeProcessGroup._create_internal(0, world_size=2)
         self.assertIsInstance(pg, Backend)
         self.assertNotIsInstance(pg, ProcessGroup)
         referent = _ModuleWithDtypeAttr()
-        objs = (pg, _PyBackend(), ProcessGroup(0, 1), torch.Stream(device="cpu"))
+        objs = (
+            pg,
+            Backend(0, 1),
+            _PyBackend(),
+            ProcessGroup(0, 1),
+            torch.Stream(device="cpu"),
+        )
         for obj in (*objs, weakref.ref(referent)):
             with self.subTest(type(obj).__name__):
                 buf = io.BytesIO()
@@ -2843,6 +3235,33 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
 class TestGuardSerialization(TestGuardSerializationBase):
+    @parametrize("reordered", [False, True])
+    def test_native_ordered_dict_order(self, reordered):
+        def install_order_guard(ctx):
+            from torch._dynamo.guards import GuardBuilder, install_guard
+
+            mapping = ctx.get_local(
+                "mapping"
+            )._i_will_not_complain_if_bc_breaks_VariableTracker()
+            install_guard(mapping.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
+
+        def fn(x, mapping):
+            comptime(install_order_guard)
+            return x + len(mapping)
+
+        mapping = collections.OrderedDict(a=1, b=2)
+        if reordered:
+            mapping.move_to_end("a")
+        x = torch.ones(1)
+        ref, loaded = self._test_serialization(
+            "ORDERED_DICT_ORDER_MATCH", fn, x, mapping
+        )
+        self._test_check_fn(ref, loaded, {"x": x, "mapping": mapping}, True)
+        mapping.move_to_end("b" if reordered else "a")
+        self._test_check_fn(ref, loaded, {"x": x, "mapping": mapping}, False)
+
+    hw_classification = HardwareClassification.GENERIC
+
     def test_function_locals(self):
         def foo(x):
             return x + 1
@@ -3307,71 +3726,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    @torch.compiler.config.patch(compile_on_one_rank=True)
-    def test_tensor_match_current_device(self):
-        # The relative-device decision must survive a load on a rank whose current
-        # device differs from the saving one. The derivation ignores the saved
-        # tensor's index -- the one piece of the artifact that is rank-specific --
-        # and reads compile_on_one_rank off the saved graph state rather than the
-        # loading process's config, so the guard that is rebuilt is the one that
-        # was saved.
-        from torch._dynamo.package import load_guard_manager, load_guards_state
-
-        def f(x: torch.Tensor):
-            return x + 1
-
-        with torch.cuda.device(0):
-            ref, _ = self._test_serialization(
-                "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
-            )
-
-        with mock.patch("torch.accelerator.current_device_index", return_value=1):
-            state = load_guards_state(self._cached_guards_state)
-            loaded = load_guard_manager(state, self._cached_f_code, f.__globals__)
-
-        self.assertIn("device=current", "\n".join(loaded.code_parts))
-
-        with torch.cuda.device(0):
-            inputs = {"x": torch.randn(4, device="cuda:0")}
-            self._test_check_fn(ref, loaded, inputs, True)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_tensor_match_current_device_survives_config_change_on_load(self):
-        # Whether the index is pinned or relative belongs to the saved guard, not to
-        # the loading process. Rebuilding from the loader's own compile_on_one_rank
-        # would flip the guard either way: a relaxed one reloaded without CooR would
-        # be rebuilt pinned and reject the device it was saved to accept, and a
-        # pinned one reloaded with CooR on would be rebuilt relaxed and accept one it
-        # was saved to reject.
-        from torch._dynamo.package import load_guard_manager, load_guards_state
-
-        def f(x: torch.Tensor):
-            return x + 1
-
-        for saved_with_coor in (True, False):
-            with (
-                torch.compiler.config.patch(compile_on_one_rank=saved_with_coor),
-                torch.cuda.device(0),
-            ):
-                torch._dynamo.reset()
-                self._test_serialization(
-                    "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
-                )
-                saved_state = self._cached_guards_state
-                saved_code = self._cached_f_code
-
-            # Load under the opposite setting.
-            with torch.compiler.config.patch(compile_on_one_rank=not saved_with_coor):
-                state = load_guards_state(saved_state)
-                loaded = load_guard_manager(state, saved_code, f.__globals__)
-
-            code = "\n".join(loaded.code_parts)
-            if saved_with_coor:
-                self.assertIn("device=current", code)
-            else:
-                self.assertNotIn("device=current", code)
-
     def test_not_present_in_generic_dict(self):
         class Module(torch.nn.Module):
             def forward(self, x: torch.Tensor):
@@ -3827,6 +4181,21 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with mock.patch.dict(globals(), {"_MODE": _Mode.SLOW}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
+    def test_id_match_on_a_typing_alias(self):
+        def fn(x):
+            if _ALIAS is typing.List:  # noqa: UP006
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+
+        # typing.List pickles as a reference to the typing.List global, so the
+        # guard survives serialization instead of being dropped.
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_ALIAS": typing.Dict}):  # noqa: UP006
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
     def test_id_match_on_a_member_of_a_nested_enum(self):
         def fn(x):
             if _LEVEL is _EnumOwner.Level.LOW:
@@ -3864,6 +4233,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with mock.patch.dict(globals(), {"_torch_add": torch.sub}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
+    def test_id_match_on_a_custom_op_def(self):
+        def fn(x):
+            return _custom_triple(x) + 1
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_custom_triple": _custom_halve}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
     def test_portable_identity_guard_values(self):
         class Local:
             pass
@@ -3876,6 +4256,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
             (_EnumOwner.Level.LOW, True),
             (_Perm.R | _Perm.W, False),
             (_NameClash["name"], True),
+            # Its __reduce__ names the typing global it is.
+            (typing.List, True),  # noqa: UP006
+            (typing.Optional, True),
+            # A subscripted alias is not a global of typing.
+            (typing.List[int], False),  # noqa: UP006
+            (_REDUCES_TO_A_CALL, False),
+            (_SENTINEL, True),
+            (_COPYREG_TO_ITSELF, True),
+            # Each reduction names something other than the object itself.
+            (_COPYREG_TO_ANOTHER_GLOBAL, False),
+            (_REDUCES_TO_ANOTHER_GLOBAL, False),
+            (_REDUCES_TO_A_MISSING_NAME, False),
+            (_REDUCES_FROM_A_MISSING_MODULE, False),
+            (_MODULE_RAISES, False),
+            (_UNHASHABLE_MODULE, False),
+            (_REDUCE_EX_BY_VALUE, False),
+            # The guard-state pickler refuses an instance of a nested class.
+            (_NESTED_SENTINEL, False),
             (types.ModuleType("_unregistered"), False),
             (Local, False),
             # Its __qualname__ leads to _wrapped_target instead.
@@ -3889,13 +4287,28 @@ class TestGuardSerialization(TestGuardSerializationBase):
             # instance's type and leads to a different object.
             (torch._C._get_tracing_state, False),
         ]
+        dispatch = {
+            _CopyregToItself: lambda _: "_COPYREG_TO_ITSELF",
+            _CopyregToAnotherGlobal: lambda _: "_ALIAS",
+        }
         for value, expected in cases:
-            with self.subTest(value=value):
+            with (
+                self.subTest(value=value),
+                mock.patch.dict(copyreg.dispatch_table, dispatch),
+            ):
                 self.assertEqual(
                     is_portable_identity_guard("ID_MATCH", (), value), expected
                 )
                 if expected and not isinstance(value, types.ModuleType):
-                    self.assertIs(pickle.loads(pickle.dumps(value)), value)
+                    buf = io.BytesIO()
+                    GuardsStatePickler({id(value): value}, {}, {}, {}, buf).dump(value)
+                    self.assertIs(load_guards_state(buf.getvalue()), value)
+
+    def test_identity_check_reduces_only_a_module_global(self):
+        # Reducing runs user code, so an instance that is not one of its
+        # module's globals is refused without it.
+        self.assertFalse(is_portable_identity_guard("ID_MATCH", (), _CountsReduces()))
+        self.assertEqual(_CountsReduces.calls, 0)
 
     def test_class_match_on_a_named_tuple_nested_in_a_class(self):
         def fn(x):
@@ -4796,7 +5209,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             with LocalTorchFunctionMode():
                 ref, loaded = self._test_serialization("TORCH_FUNCTION_STATE", fn, x)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not torch.distributed.is_available(), "requires torch.distributed")
     def test_fsdp_training_state(self):
         from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
         from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
@@ -5279,26 +5692,90 @@ class TestGuardSerialization(TestGuardSerializationBase):
             backend="gloo", rank=0, world_size=1, init_method=f"file://{tmpfile.name}"
         )
         try:
-            ddp_model = DDP(GlobalNestedModule())
+            unsupported = frozenset(
+                torch._dynamo.guards.CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            )
 
             def foo(ddp, x):
                 return ddp(x)
 
-            unsupported = frozenset(
-                torch._dynamo.guards.CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
-            )
-            x = torch.randn(10)
-            package = CompilePackage(foo)
-            torch._dynamo.optimize(
-                package=package,
-                guard_filter_fn=lambda gs: [
-                    x.guard_type not in unsupported for x in gs
-                ],
-            )(foo)(ddp_model, x)
-            self.assertEqual(len(package._codes[foo.__code__].guarded_codes), 1)
-            torch._dynamo.package.load_guards_state(
-                package._codes[foo.__code__].guarded_codes[0].guards_state
-            )
+            def guards_state(ddp_model, x, fn=foo):
+                package = CompilePackage(fn)
+                torch._dynamo.optimize(
+                    package=package,
+                    guard_filter_fn=lambda gs: [
+                        g.guard_type not in unsupported for g in gs
+                    ],
+                )(fn)(ddp_model, x)
+                self.assertEqual(len(package._codes[fn.__code__].guarded_codes), 1)
+                return torch._dynamo.package.load_guards_state(
+                    package._codes[fn.__code__].guarded_codes[0].guards_state
+                )
+
+            # DDP itself pickles only on the default process group. BatchNorm1d
+            # gives the module buffers, which DDP.forward syncs.
+            for process_group in (None, dist.new_group([0])):
+                for module in (
+                    GlobalNestedModule(),
+                    torch.nn.Sequential(
+                        torch.nn.Linear(10, 10), torch.nn.BatchNorm1d(10)
+                    ),
+                ):
+                    with self.subTest(
+                        default_group=process_group is None, module=type(module)
+                    ):
+                        torch._dynamo.reset()
+                        ddp_model = DDP(module, process_group=process_group)
+                        x = torch.randn(4, 10)
+                        with torch._dynamo.config.patch(nested_graph_breaks=False):
+                            state = guards_state(ddp_model, x)
+                        loaded = torch._dynamo.package.load_guard_manager(
+                            state, foo.__code__, foo.__globals__
+                        )
+                        self.assertTrue(loaded.check({"ddp": ddp_model, "x": x}))
+                        y = torch.randn(4, 11)
+                        self.assertFalse(loaded.check({"ddp": ddp_model, "x": y}))
+
+                        # A frame resuming inside DDP.forward guards the type of
+                        # its C++ logger, which the state cannot carry: refused
+                        # at save (a bypass), not a load that fails.
+                        torch._dynamo.reset()
+                        with (
+                            torch._dynamo.config.patch(nested_graph_breaks=True),
+                            self.assertRaisesRegex(
+                                PackageError, "DistributedDataParallel.logger"
+                            ),
+                        ):
+                            guards_state(ddp_model, x)
+
+            # Delaying every parameter that needs a gradient returns from
+            # DDP.__init__ before the reducer and logger are built (and leaves
+            # DDP.forward unusable, so the frame calls the wrapped module). The
+            # frozen bias is what DDP's device check reads.
+            def bar(ddp, x):
+                return ddp.module(x)
+
+            for pg in (None, dist.new_group([0])):
+                with self.subTest(all_delayed=True, default_group=pg is None):
+                    torch._dynamo.reset()
+                    module = torch.nn.Sequential(torch.nn.Linear(10, 10))
+                    module[0].bias.requires_grad_(False)
+                    ddp_model = DDP(
+                        module,
+                        process_group=pg,
+                        delay_all_reduce_named_params=[("0.weight", module[0].weight)],
+                        param_to_hook_all_reduce=module[0].weight,
+                    )
+                    self.assertFalse(hasattr(ddp_model, "reducer"))
+                    # DDP's own pickling still refuses it, at dump not at load.
+                    with self.assertRaisesRegex(RuntimeError, "parameter is delayed"):
+                        pickle.dumps(ddp_model)
+                    x = torch.randn(4, 10)
+                    state = guards_state(ddp_model, x, bar)
+                    loaded = torch._dynamo.package.load_guard_manager(
+                        state, bar.__code__, bar.__globals__
+                    )
+                    self.assertTrue(loaded.check({"ddp": ddp_model, "x": x}))
         finally:
             dist.destroy_process_group()
             tmpfile.close()
@@ -5422,19 +5899,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             "TENSOR_MATCH", foo, Inputs(x, weakref.ref(x))
         )
         self._test_check_fn(ref, loaded, {"inputs": Inputs(x, weakref.ref(x))}, True)
-
-    def test_unused_stream(self):
-        if not torch.accelerator.is_available():
-            self.skipTest("Accelerator is not available")
-
-        def foo(inputs):
-            return inputs.x + 1
-
-        x = torch.randn(3, 2)
-        ref, loaded = self._test_serialization(
-            "TENSOR_MATCH", foo, Inputs(x, torch.Stream())
-        )
-        self._test_check_fn(ref, loaded, {"inputs": Inputs(x, torch.Stream())}, True)
 
     def test_unused_process_group(self):
         import torch.distributed as dist
@@ -5627,6 +6091,102 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # Round-trip through pickle should work even with init=False fields
         restored = pickle.loads(pickle.dumps(source))
         self.assertEqual(source, restored)
+
+
+@torch._dynamo.config.patch({"strict_precompile": True})
+class TestGuardSerializationCUDA(TestGuardSerializationBase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    def test_tensor_match_current_device(self):
+        # The relative-device decision must survive a load on a rank whose current
+        # device differs from the saving one. The derivation ignores the saved
+        # tensor's index -- the one piece of the artifact that is rank-specific --
+        # and reads compile_on_one_rank off the saved graph state rather than the
+        # loading process's config, so the guard that is rebuilt is the one that
+        # was saved.
+        from torch._dynamo.package import load_guard_manager, load_guards_state
+
+        def f(x: torch.Tensor):
+            return x + 1
+
+        with torch.cuda.device(0):
+            ref, _ = self._test_serialization(
+                "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
+            )
+
+        with mock.patch("torch.accelerator.current_device_index", return_value=1):
+            state = load_guards_state(self._cached_guards_state)
+            loaded = load_guard_manager(state, self._cached_f_code, f.__globals__)
+
+        self.assertIn("device=current", "\n".join(loaded.code_parts))
+
+        with torch.cuda.device(0):
+            inputs = {"x": torch.randn(4, device="cuda:0")}
+            self._test_check_fn(ref, loaded, inputs, True)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_tensor_match_current_device_survives_config_change_on_load(self):
+        # Whether the index is pinned or relative belongs to the saved guard, not to
+        # the loading process. Rebuilding from the loader's own compile_on_one_rank
+        # would flip the guard either way: a relaxed one reloaded without CooR would
+        # be rebuilt pinned and reject the device it was saved to accept, and a
+        # pinned one reloaded with CooR on would be rebuilt relaxed and accept one it
+        # was saved to reject.
+        from torch._dynamo.package import load_guard_manager, load_guards_state
+
+        def f(x: torch.Tensor):
+            return x + 1
+
+        for saved_with_coor in (True, False):
+            with (
+                torch.compiler.config.patch(compile_on_one_rank=saved_with_coor),
+                torch.cuda.device(0),
+            ):
+                torch._dynamo.reset()
+                self._test_serialization(
+                    "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
+                )
+                saved_state = self._cached_guards_state
+                saved_code = self._cached_f_code
+
+            # Load under the opposite setting.
+            with torch.compiler.config.patch(compile_on_one_rank=not saved_with_coor):
+                state = load_guards_state(saved_state)
+                loaded = load_guard_manager(state, saved_code, f.__globals__)
+
+            code = "\n".join(loaded.code_parts)
+            if saved_with_coor:
+                self.assertIn("device=current", code)
+            else:
+                self.assertNotIn("device=current", code)
+
+
+class TestGuardSerializationAccelerator(TestGuardSerializationBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    @torch._dynamo.config.patch({"strict_precompile": True})
+    def test_unused_stream(self, device):
+        def foo(inputs):
+            return inputs.x + 1
+
+        x = torch.randn(3, 2)
+        ref, loaded = self._test_serialization(
+            "TENSOR_MATCH", foo, Inputs(x, torch.Stream(device=device))
+        )
+        self._test_check_fn(
+            ref, loaded, {"inputs": Inputs(x, torch.Stream(device=device))}, True
+        )
+
+
+instantiate_device_type_tests(
+    TestGuardSerializationAccelerator,
+    globals(),
+    allow_xpu=True,
+    allow_mps=True,
+)
 
 
 class SimpleModule(torch.nn.Module):

@@ -82,7 +82,7 @@ def test_rnns(
     assertEqual(experim_grads, control_grads)
 
     if verbose:
-        print(experiment.forward.graph_for(*experiment.inputs))
+        print(experiment.forward)
     print()
 
 
@@ -148,7 +148,7 @@ def test_vl_py(**test_args):
         assertEqual(experim_grads, control_grads)
 
         if test_args["verbose"]:
-            print(experiment.forward.graph_for(*experiment.inputs))
+            print(experiment.forward)
         print()
 
 
@@ -165,10 +165,10 @@ if __name__ == "__main__":
     parser.add_argument("--variable-lstms", "--variable_lstms", action="store_true")
     parser.add_argument("--seed", default="17", type=int)
     parser.add_argument("--verbose", action="store_true")
-    parser.add_argument("--rnns", nargs="*", help="What to run. jit_premul, jit, etc")
+    parser.add_argument("--rnns", nargs="*", help="What to run. cudnn, aten, py")
     args = parser.parse_args()
     if args.rnns is None:
-        args.rnns = ["jit_premul", "jit"]
+        args.rnns = ["py"]
     print(args)
 
     if "cuda" in args.device:
