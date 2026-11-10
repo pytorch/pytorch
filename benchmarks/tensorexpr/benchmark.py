@@ -1,4 +1,3 @@
-import contextlib
 import json
 import os
 import time
@@ -17,8 +16,6 @@ class Benchmark:
         self.device = device
         self.dtype = dtype
         self.output_type = "stdout"
-        self.print_ir = False
-        self.print_kernel = False
         if mode == "both":
             self.requires_grad = True
         elif mode == "fwd":
@@ -110,40 +107,12 @@ class Benchmark:
         return v
 
     def compute(self):
-        if self.bm_jit:
-            return self.bm_jit(*self.inputs)
-        else:
-            return self.forward(*self.inputs)
+        return self.forward(*self.inputs)
 
     def run(self, args):
-        self.print_ir = args.print_ir
-        if args.cuda_fuser == "old":
-            torch._C._jit_override_can_fuse_on_gpu(True)
-            if args.print_kernel:
-                os.environ["PYTORCH_FUSION_DEBUG"] = "1"
-            return self.run_impl(True)
-        elif args.cuda_fuser == "te":
-            torch._C._jit_set_texpr_fuser_enabled(True)
-            with cuda_pointwise_context(
-                args.cuda_pointwise_loop_levels,
-                args.cuda_pointwise_block_count,
-                args.cuda_pointwise_block_size,
-            ):
-                return self.run_impl(True)
-        elif args.cuda_fuser == "nvf":
-            torch._C._jit_set_nvfuser_enabled(True)
-            torch._C._jit_set_profiling_executor(True)
-            torch._C._jit_set_profiling_mode(True)
-            torch._C._jit_override_can_fuse_on_cpu(False)
-            torch._C._jit_override_can_fuse_on_gpu(False)
-            torch._C._jit_set_bailout_depth(20)
-            if args.print_kernel:
-                os.environ["PYTORCH_CUDA_FUSER_DEBUG"] = "1"
-            return self.run_impl(True)
-        else:
-            return self.run_impl(False)
+        return self.run_impl()
 
-    def run_impl(self, use_fuser):
+    def run_impl(self):
         warmups = 10
         if self.device == "cuda":
             iters = 1000
@@ -151,7 +120,6 @@ class Benchmark:
             iters = 10
         engine = tensor_engine.get_engine()
 
-        self.bm_jit = None
         for i in range(warmups + iters):
             if i == warmups:
                 if self.device == "cuda":
@@ -159,18 +127,10 @@ class Benchmark:
                 time_start = time.time()
 
             if i == 0:
-                if self.jit_mode == "trace" and use_fuser:
-                    self.bm_jit = torch.jit.trace(
-                        self.forward, example_inputs=self.inputs, check_trace=False
-                    )
                 if callable(getattr(self, "reference", None)):
                     self.check()
                 else:
                     print("Warning: no reference result for ", self.module())
-            elif i == 1:
-                # The fusion graph is visible after the first iter is executed
-                if self.jit_mode == "trace" and use_fuser and self.print_ir:
-                    print(self.bm_jit.graph_for(*self.inputs))
             z = self.compute()
             if self.mode == "both":
                 if self.result_grad is None:
@@ -215,29 +175,6 @@ class Benchmark:
             raise Exception("Unknown output_type " + self.output_type)  # noqa: TRY002
 
 
-@contextlib.contextmanager
-def cuda_pointwise_context(loop_levels, block_count, block_size):
-    if loop_levels:
-        old_loop_levels = torch._C._jit_get_te_cuda_pointwise_loop_levels()
-        torch._C._jit_set_te_cuda_pointwise_loop_levels(loop_levels)
-    if block_count:
-        old_block_count = torch._C._jit_get_te_cuda_pointwise_block_count()
-        torch._C._jit_set_te_cuda_pointwise_block_count(block_count)
-    if block_size:
-        old_block_size = torch._C._jit_get_te_cuda_pointwise_block_size()
-        torch._C._jit_set_te_cuda_pointwise_block_size(block_size)
-
-    try:
-        yield
-    finally:
-        if loop_levels:
-            torch._C._jit_set_te_cuda_pointwise_loop_levels(old_loop_levels)
-        if block_count:
-            torch._C._jit_set_te_cuda_pointwise_block_count(old_block_count)
-        if block_size:
-            torch._C._jit_set_te_cuda_pointwise_block_size(old_block_size)
-
-
 # Auxiliary class to facilitate dynamic input shape
 class DynamicShape:
     r"""
@@ -245,7 +182,7 @@ class DynamicShape:
 
     Pre-computes input with random shapes and also
     modifies the compute method so in each call the
-    fuser sees a different input tensor shape
+    benchmark sees a different input tensor shape
     """
 
     # Number of random inputs in an instance
