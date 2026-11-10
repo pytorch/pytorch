@@ -605,8 +605,8 @@ Vectorized<BFloat16> inline fmadd(
     const Vectorized<BFloat16>& a,
     const Vectorized<BFloat16>& b,
     const Vectorized<BFloat16>& c) {
-  // Compute in float, where the product is exact: a * b + c would round it to
-  // BFloat16 before adding.
+  // Compute in float, where the product is exact (unless it overflows or
+  // underflows): a * b + c would round it to BFloat16 before adding.
   const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
   const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
   const auto [c_float_low, c_float_high] = convert_bfloat16_float(c);
