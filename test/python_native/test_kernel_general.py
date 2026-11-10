@@ -631,7 +631,7 @@ class TestKernelGeneral(TestCase):
         span = f"128 to {cap} values per output for 128 threads, got"
         fold, clamp = "a linear general-axis fold, got axis=", "an unclamped run, got"
         for bad, reason in (
-            (dict(trait=trait), "a trait with combine_equal, got SumOps"),
+            (dict(trait=trait), "a trait with has_combine_equal, got SumOps"),
             (dict(count=0, red_pairs=((0, 1),)), f"{span} 0"),
             (dict(count=64, red_pairs=((64, 1),)), f"{span} 64"),
             (dict(count=cap + 1, red_pairs=((cap + 1, 1),)), f"{span} {cap + 1}"),
