@@ -2303,7 +2303,37 @@ def _canonicalize_to_arguments(a: Tensor, to_kwargs: dict):
                 to_kwargs.pop(kw)
 
 
+def _check_to_dtype_rounded(a: TensorLikeType, dtype: torch.dtype, rounding: str):
+    """The checks of aten._to_dtype_rounded, in the same order as its kernel
+    (check_to_dtype_rounded in aten/src/ATen/native/RoundedConversion.cpp)."""
+    torch._check(
+        a.layout == torch.strided,
+        lambda: f"rounding is only supported for strided tensors, but got {a.layout}",
+    )
+    narrower = {
+        torch.float64: (torch.float32, torch.float16, torch.bfloat16),
+        torch.float32: (torch.float16, torch.bfloat16),
+        torch.float16: (torch.bfloat16,),
+        torch.bfloat16: (torch.float16,),
+    }
+    torch._check(
+        a.dtype in narrower
+        and (dtype in narrower[a.dtype] or str(dtype).startswith("torch.float8_")),
+        lambda: "rounding is only supported when converting a float64, float32, "
+        "float16 or bfloat16 tensor to a narrower floating-point dtype (one that "
+        "cannot represent all its values exactly), but got a conversion from "
+        f"{a.dtype} to {dtype}",
+    )
+    modes = ("to_nearest_even", "toward_zero", "toward_positive", "toward_negative")
+    torch._check_value(
+        rounding in modes,
+        lambda: "the rounding mode must be one of 'to_nearest_even', 'toward_zero', "
+        f"'toward_positive' or 'toward_negative', but got '{rounding}'",
+    )
+
+
 def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
+    rounding = kwargs.pop("round", None)
     # handled dispatch via positional arguments
     if len(args) != 0:
         kwargs = _to_dispatch(*args, **kwargs)
@@ -2312,6 +2342,34 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
     # https://github.com/pytorch/pytorch/issues/84925
     if "pin_memory" in kwargs:
         raise AssertionError("pin_memory is not supported in refs")
+
+    if rounding is not None:
+        dtype = kwargs.pop("dtype", None) or a.dtype
+        memory_format = kwargs.pop("memory_format", None)
+        kwargs.pop("copy", None)
+
+        def convert(t):
+            return torch._to_dtype_rounded(
+                t, dtype, rounding, memory_format=memory_format
+            )
+
+        def has_kernel(device):
+            key = torch._C._dispatch_key_for_device(device.type)
+            return torch._C._dispatch_has_kernel_for_dispatch_key(
+                "aten::_to_dtype_rounded.out", key
+            )
+
+        # Like Tensor.to: fail before any transfer, and convert on a device
+        # with a kernel, preferring an accelerator and, between two, the source.
+        _check_to_dtype_rounded(a, dtype, rounding)
+        device = kwargs.get("device")
+        if device is None:
+            return to(convert(a), **kwargs)
+        device = torch.device(device)
+        if has_kernel(a.device) and (a.device.type != "cpu" or not has_kernel(device)):
+            return to(convert(a), **kwargs)
+        return convert(to(a, **kwargs))
+
     _canonicalize_to_arguments(a, kwargs)
 
     if _to_will_alias(a, **kwargs):

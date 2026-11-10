@@ -62,6 +62,20 @@ static inline __m256i cvtfp32_bf16(const __m512& src) {
   return _mm512_cvtusepi32_epi16(t_value);
 }
 
+// Converts doubles to floats rounding to odd (truncate, then set the last bit
+// if inexact), so that converting the result to Half or BFloat16 rounds the
+// doubles once: float has enough extra precision and range.
+static inline __m256 cvtpd_ps_round_to_odd(const __m512d& x) {
+  const __m256 f =
+      _mm512_cvt_roundpd_ps(x, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+  // Ordered comparison, so NaN lanes are not inexact.
+  const __mmask8 inexact =
+      _mm512_cmp_pd_mask(_mm512_cvtps_pd(f), x, _CMP_NEQ_OQ);
+  const __m256i bits = _mm256_castps_si256(f);
+  return _mm256_castsi256_ps(
+      _mm256_mask_or_epi32(bits, inexact, bits, _mm256_set1_epi32(1)));
+}
+
 static inline __m512i cvtfp32_bf16(const __m512& a, const __m512& b) {
   __m512i lo = _mm512_castps_si512(a);
   __m512i hi = _mm512_castps_si512(b);
@@ -1055,8 +1069,8 @@ template <>
 inline void convert(const double* src, BFloat16* dst, int64_t n) {
   auto load_float = [](const double* src) -> __m512 {
     // Load one float vector from an array of doubles
-    __m256 a = _mm512_cvtpd_ps(_mm512_loadu_pd(src));
-    __m256 b = _mm512_cvtpd_ps(_mm512_loadu_pd(src + 8));
+    __m256 a = cvtpd_ps_round_to_odd(_mm512_loadu_pd(src));
+    __m256 b = cvtpd_ps_round_to_odd(_mm512_loadu_pd(src + 8));
     return _mm512_insertf32x8(_mm512_castps256_ps512(a), b, 1);
   };
 
@@ -1815,8 +1829,8 @@ template <>
 inline void convert(const double* src, Half* dst, int64_t n) {
   auto load_float = [](const double* src) -> __m512 {
     // Load one float vector from an array of doubles
-    __m256 a = _mm512_cvtpd_ps(_mm512_loadu_pd(src));
-    __m256 b = _mm512_cvtpd_ps(_mm512_loadu_pd(src + 8));
+    __m256 a = cvtpd_ps_round_to_odd(_mm512_loadu_pd(src));
+    __m256 b = cvtpd_ps_round_to_odd(_mm512_loadu_pd(src + 8));
     return _mm512_insertf32x8(_mm512_castps256_ps512(a), b, 1);
   };
 

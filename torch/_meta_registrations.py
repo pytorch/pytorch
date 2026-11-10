@@ -40,7 +40,7 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch._refs import _broadcast_shapes, _maybe_broadcast
+from torch._refs import _broadcast_shapes, _check_to_dtype_rounded, _maybe_broadcast
 from torch.fx.experimental import _config as exp_config
 from torch.utils import _pytree as pytree
 
@@ -193,6 +193,17 @@ def meta_take(self, index):
 @out_wrapper()
 def meta__standard_gamma(self, generator=None):
     return torch.empty_like(self)
+
+
+# The C++ meta kernel uses TensorIterator, which does not support symbolic
+# shapes.
+@register_meta([aten._to_dtype_rounded.default, aten._to_dtype_rounded.out])
+@out_wrapper(exact_dtype=True)
+def meta__to_dtype_rounded(self, dtype, round, *, memory_format=None):
+    _check_to_dtype_rounded(self, dtype, round)
+    return torch.empty_like(
+        self, dtype=dtype, memory_format=memory_format or torch.preserve_format
+    )
 
 
 @register_meta(

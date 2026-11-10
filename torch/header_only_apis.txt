@@ -42,6 +42,10 @@ Float8_e5m3fnu
 # torch/headeronly/util/Float8_e8m0fnu.h
 Float8_e8m0fnu
 
+# torch/headeronly/util/FloatRounding.h
+RoundingMode
+convert_with_rounding
+
 # torch/headeronly/util/Half.h
 Half
 fp16_ieee_from_fp32_value
@@ -50,6 +54,7 @@ fp16_ieee_to_fp32_value
 # torch/headeronly/util/floating_point_utils.h
 # fp32_from_bits called from fp16_ieee_to_fp32_value
 # fp32_to_bits called from fp16_ieee_from_fp32_value
+# round_to_odd_float called from convert
 
 # torch/headeronly/util/HeaderOnlyArrayRef.h
 HeaderOnlyArrayRef

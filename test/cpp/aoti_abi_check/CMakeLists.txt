@@ -17,6 +17,7 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_dispatch_v2.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_dtype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_exception.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_floatrounding.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_headeronlyarrayref.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_irange.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_layout.cpp
@@ -43,6 +44,8 @@ set(AOTI_ABI_CHECK_VEC_TEST_SRCS
 
 if(USE_CUDA)
   list(APPEND AOTI_ABI_CHECK_TEST_SRCS
+    ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_cast.cu
+    ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_floatrounding.cu
     ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_kernel_utils.cu
   )
 endif()

@@ -2431,12 +2431,24 @@ test_vec256() {
   # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing vec256 instructions"
-    mkdir -p test/test-reports/vec256
+    TEST_REPORTS_DIR=$(pwd)/test/test-reports/vec256
+    mkdir -p "$TEST_REPORTS_DIR"
     pushd build/bin
-    vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
+    vec256_tests=$(find . -maxdepth 1 -executable \( -name 'vec256_test*' -o -name 'vec_test_all_types_*' \))
+    # SVE builds assume a vector length, so only run the one in use.
+    cpu_capability=$(python -c "import torch; print(torch.backends.cpu.get_cpu_capability())")
     for vec256_exec in $vec256_tests
     do
-      $vec256_exec --gtest_output=xml:test/test-reports/vec256/"$vec256_exec".xml
+      case "$vec256_exec" in
+        *AVX512*) flags="avx512f avx512bw avx512vl avx512dq" ;;
+        *AVX2*) flags="avx2 fma" ;;
+        *SVE*) [[ "$vec256_exec" == *"$cpu_capability" ]] || continue; flags="" ;;
+        *) flags="" ;;
+      esac
+      for flag in $flags; do
+        grep -qw "$flag" /proc/cpuinfo || continue 2
+      done
+      $vec256_exec --gtest_output=xml:"$TEST_REPORTS_DIR/${vec256_exec#./}.xml"
     done
     popd
     assert_git_not_dirty
@@ -2846,6 +2858,7 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 1
   test_aten
+  test_vec256
   test_libtorch 1
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     test_xpu_bin

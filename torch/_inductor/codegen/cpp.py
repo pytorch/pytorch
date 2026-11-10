@@ -739,6 +739,18 @@ class CppOverrides(OpOverrides):
         return f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
+    def to_dtype_rounded(x, dtype, src_dtype, rounding):
+        mode = "".join(word.capitalize() for word in rounding.split("_"))
+        # Half and BFloat16 inputs widen to float exactly. Fused producers of
+        # such values pass their unrounded float result, unless
+        # config.emulate_precision_casts is set.
+        wide = "double" if src_dtype == torch.float64 else "float"
+        return (
+            f"c10::convert_with_rounding<{DTYPE_TO_CPP[dtype]}>("
+            f"static_cast<{wide}>({x}), c10::RoundingMode::{mode})"
+        )
+
+    @staticmethod
     # pyrefly: ignore [bad-override]
     def abs(x):
         if isinstance(x, CppCSEVariable) and x.dtype in (
@@ -2029,6 +2041,9 @@ class CppVecOverrides(CppOverrides):
                 if (scalar_func.__name__ == "to_dtype_bitcast")
                 else octype
             )
+            if scalar_func.__name__ == "to_dtype_rounded":
+                octype = DTYPE_TO_CPP[args[1]]
+                n_vec = kernel._get_num_vectors(args[1])
             with code.indent():
                 for argidx, arg in enumerate(args):
                     if isinstance(arg, CppCSEVariable):
@@ -4444,7 +4459,7 @@ class CppKernelProxy(CppKernel):
                     "value_expr",
                 ]:
                     return node.args[-1]  # type: ignore[return-value]
-                elif node.target == "to_dtype_bitcast":
+                elif node.target in ["to_dtype_bitcast", "to_dtype_rounded"]:
                     return node.args[2]  # type: ignore[return-value]
                 else:
                     return None
@@ -4479,7 +4494,8 @@ class CppKernelProxy(CppKernel):
             to_lowp_fp_legalized_nodes = []
             for _node in sub_graph_nodes:
                 if (
-                    _node.target in ["load", "index_expr", "value_expr"]
+                    _node.target
+                    in ["load", "index_expr", "value_expr", "to_dtype_rounded"]
                     and (dt := get_output_dtype(_node)) in DTYPE_LOWP_FP
                 ):
                     # No need to promote to float if all users are ops that accepts lowp fp input

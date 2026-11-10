@@ -118,6 +118,34 @@ def _to_copy_single_dim_strategy(
 
 
 @register_single_dim_strategy(
+    aten._to_dtype_rounded.default,
+    schema_info=RuntimeSchemaInfo(static_argnum=1),
+    allow_unbacked_sharding=True,
+    allow_uneven_sharding=True,
+)
+def _to_dtype_rounded_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Tensor.to(..., round=...) is elementwise, but rounding the partial values
+    of a Partial sum or average does not round their sum, so those are reduced
+    first. Partial max and min commute with rounding, which is monotonic, but
+    are only kept for float32, float16 and bfloat16 results: float8 types have
+    no max or min kernels to reduce them with (and the unsigned ones round the
+    magnitude, which is not monotonic).
+    """
+    input_meta = cast(TensorMeta, args_schema[0])
+    dtype = cast(torch.dtype, args_schema[1])
+    strategies: list[list[Placement | _ShardingPlaceholder]] = [
+        [_ShardingPlaceholder(dim), _ShardingPlaceholder(dim)]
+        for dim in range(len(input_meta.shape))
+    ]
+    if dtype in (torch.float32, torch.float16, torch.bfloat16):
+        for reduce_op in ("max", "min"):
+            strategies.append([Partial(reduce_op), Partial(reduce_op)])
+    return strategies
+
+
+@register_single_dim_strategy(
     [
         aten.equal.default,
         aten.is_same_size.default,

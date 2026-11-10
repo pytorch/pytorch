@@ -74,6 +74,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(clone, clone_batch_rule);
 
   UNARY_POINTWISE(_to_copy);
+  UNARY_POINTWISE(_to_dtype_rounded);
   UNARY_POINTWISE(alias);
   UNARY_POINTWISE_ALL(abs);
   UNARY_POINTWISE_ALL(acos);
