@@ -2039,11 +2039,11 @@ def generic_hash_impl(
 ) -> tuple[int, bool]:
     """Internal API: compute hash as (value, is_fake).
 
-    Dispatches to the VT's hash_impl.  Called by generic_hash (which wraps
+    Dispatches to the VT's tp_hash_impl.  Called by generic_hash (which wraps
     the result in a VT), container hash_impls (which propagate is_fake),
     and HashableTracker (which just needs the int).
     """
-    return obj.hash_impl(tx)
+    return obj.tp_hash_impl(tx)
 
 
 def generic_hash(
@@ -2316,6 +2316,36 @@ def mro_attr_source(
         return source
 
     return None
+
+
+def _is_skipped_constant_property(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: str,
+) -> bool:
+    if type(name) is not str:
+        return False
+    obj = obj.realize()
+    if (
+        type(obj) is not variables.ConstantVariable
+        or tx.output.side_effects.has_pending_mutation_of_attr(obj, name)
+        or obj.lookup_tp_getset_member(name) is not None
+    ):
+        return False
+    type_attr = mro_lookup(obj.python_type(), name)
+    if type(type_attr) is not property:
+        return False
+    # Python getters can have specialized SkipFunctionVariable handlers.
+    if isinstance(type_attr.fget, types.FunctionType):
+        return False
+    prop_source = (
+        mro_attr_source(tx, obj.python_type(), TypeSource(obj.source), name)
+        if obj.source
+        else None
+    )
+    prop_vt = variables.PropertyVariable.create(type_attr, prop_source)
+    fget_vt = prop_vt.tp_getattro_impl(tx, "fget").realize()
+    return isinstance(fget_vt, variables.SkipFunctionVariable)
 
 
 def _resolve_descriptor_get(
