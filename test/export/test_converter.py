@@ -9,15 +9,19 @@ import torch.utils._pytree as pytree
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, xfailIfS390X
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    xfailIfS390X,
+)
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
 )
 
-
-requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 # prepacked linear requires XNNPACK support.
 requires_prepacked_linear = unittest.skipIf(
@@ -26,20 +30,7 @@ requires_prepacked_linear = unittest.skipIf(
 )
 
 
-class TestConverter(TestCase):
-    def setUp(self):
-        super().setUp()
-        init_torchbind_implementations()
-
-        self.torch_bind_ops = [
-            torch.ops._TorchScriptTesting.queue_pop,
-            torch.ops._TorchScriptTesting.queue_push,
-            torch.ops._TorchScriptTesting.queue_size,
-        ]
-
-    def tearDown(self):
-        return
-
+class _ConverterTestMixin:
     def _check_equal_ts_ep_converter(
         self,
         M,
@@ -63,21 +54,21 @@ class TestConverter(TestCase):
             if opt == "script":
                 # Separate two models for testing non-functional effects
                 if check_persistent:
-                    original_ts_model = torch.jit.script(M())
-                    ts_model = torch.jit.script(M())
+                    original_ts_model = torch.jit._script.script(M())
+                    ts_model = torch.jit._script.script(M())
                     eager_model = M()
                 else:
-                    original_ts_model = torch.jit.script(M)
-                    ts_model = torch.jit.script(M)
+                    original_ts_model = torch.jit._script.script(M)
+                    ts_model = torch.jit._script.script(M)
                     eager_model = M
             elif opt == "trace":
                 if check_persistent:
-                    original_ts_model = torch.jit.trace(M(), tracing_inputs)
-                    ts_model = torch.jit.trace(M(), tracing_inputs)
+                    original_ts_model = torch.jit._trace.trace(M(), tracing_inputs)
+                    ts_model = torch.jit._trace.trace(M(), tracing_inputs)
                     eager_model = M()
                 else:
-                    original_ts_model = torch.jit.trace(M, tracing_inputs)
-                    ts_model = torch.jit.trace(M, tracing_inputs)
+                    original_ts_model = torch.jit._trace.trace(M, tracing_inputs)
+                    ts_model = torch.jit._trace.trace(M, tracing_inputs)
                     eager_model = M
             else:
                 raise RuntimeError(f"Unrecognized mode for torch.jit: {opt}")
@@ -118,6 +109,20 @@ class TestConverter(TestCase):
             else:
                 self.assertEqual(type(x), type(y))
                 self.assertEqual(x, y)
+
+
+class TestConverter(_ConverterTestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+        init_torchbind_implementations()
+
+        self.torch_bind_ops = [
+            torch.ops._TorchScriptTesting.queue_pop,
+            torch.ops._TorchScriptTesting.queue_push,
+            torch.ops._TorchScriptTesting.queue_size,
+        ]
 
     def test_ts2ep_converter_basic(self):
         class MSingle(torch.nn.Module):
@@ -374,25 +379,6 @@ class TestConverter(TestCase):
         inp = (torch.rand((3, 2)),)
         self._check_equal_ts_ep_converter(Module(), inp)
 
-    def test_prim_device(self):
-        class Module(torch.nn.Module):
-            def forward(self, x):
-                device = x.device
-                return torch.ones(2, 3, device=device)
-
-        inp = (torch.rand(3, 4),)
-        self._check_equal_ts_ep_converter(Module(), inp)
-
-    @requires_cuda
-    def test_prim_device_cuda(self):
-        class Module(torch.nn.Module):
-            def forward(self, x):
-                device = x.device
-                return torch.ones(2, 3, device=device)
-
-        inp = (torch.rand((3, 4), device="cuda:0"),)
-        self._check_equal_ts_ep_converter(Module(), inp)
-
     def test_prim_dtype(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -588,7 +574,7 @@ class TestConverter(TestCase):
             def __init__(self, dim: int) -> None:
                 super().__init__()
                 m = LinearM(dim)
-                m = torch.jit.script(m)
+                m = torch.jit._script.script(m)
                 self.mod1 = m
                 self.mod2 = Wrapper(m)
 
@@ -602,7 +588,7 @@ class TestConverter(TestCase):
             def __init__(self, dim: int) -> None:
                 super().__init__()
                 m = M(dim)
-                m = torch.jit.script(m)
+                m = torch.jit._script.script(m)
                 self.mod1 = m
                 self.mod2 = Wrapper(m)
 
@@ -1291,7 +1277,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(M(), inp)
 
     def test_hidden_input_name(self):
-        @torch.jit.script
+        @torch.jit._script.script
         def func1(x):
             return x + 1
 
@@ -1446,8 +1432,8 @@ class TestConverter(TestCase):
             # Use customized checking here, because state_dict of quantization will be
             # modified by the quantization pass.
             inp = (torch.randn(4, 1, 4, 4),)
-            original_ts_model = torch.jit.script(model)
-            ts_model = torch.jit.script(model)
+            original_ts_model = torch.jit._script.script(model)
+            ts_model = torch.jit._script.script(model)
             converter = TS2EPConverter(ts_model, inp)
             ep = converter.convert()
 
@@ -1505,6 +1491,26 @@ class TestConverter(TestCase):
         m = M(linear_op)
         inp = (torch.randn(1, 10),)
         self._check_equal_ts_ep_converter(m, inp, ["script"])
+
+
+class TestConverterDevice(_ConverterTestMixin, TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_prim_device(self, device):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                device = x.device
+                return torch.ones(2, 3, device=device)
+
+        inp = (torch.rand((3, 4), device=device),)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+
+instantiate_device_type_tests(
+    TestConverterDevice,
+    globals(),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

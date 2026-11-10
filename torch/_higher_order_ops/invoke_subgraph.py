@@ -47,11 +47,34 @@ from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispat
 invoke_subgraph_counter = 0
 
 
-# Keep this list limited to configs with established region-local semantics.
+# Keep this list limited to configs with established region-local semantics: a
+# key qualifies only if the decisions it drives (which kernels are generated
+# and how they are tuned) are made while the region is compiled under its patch
+# (graph passes, lowering, codegen), or are baked into the region's kernels'
+# inductor_meta at codegen. Each entry notes where its value is consumed and
+# any read outside the region's patch; check new keys the same way.
 _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS = frozenset(
     {
+        # Read by the region's own scheduler. It only switches combo kernels on
+        # or off: all other combo_kernel* and benchmark_combo_kernel settings,
+        # e.g. combo_kernels_autotune, combo_kernel_max_distance and
+        # combo_kernel_peak_memory_*, are not patchable per region and always
+        # come from the enclosing compile.
+        "combo_kernels",
+        # Read per node while the region is lowered (GraphLowering).
         "fallback_by_default",
+        # Read during lowering for GEMM autotuning choices, and baked into the
+        # region's kernels' inductor_meta at codegen. Exception: when a kernel
+        # is first autotuned, runtime/benchmarking.py reads the global value to
+        # choose CUDA-graph timing (only with autotune_cudagraph_benchmarking).
         "max_autotune",
+        # Baked into the region's kernels' inductor_meta at codegen. The runtime
+        # heuristics read max_autotune or this key to widen the configs tried
+        # for pointwise, reduction, persistent and split reduction, and
+        # foreach/combo kernels, so True costs compile and runtime for all of
+        # them. False cannot turn off tuning that max_autotune enables, or
+        # pointwise multi-config tuning that triton.autotune_pointwise enables.
+        "max_autotune_pointwise",
     }
 )
 
@@ -342,9 +365,19 @@ class InvokeSubgraphHOP(HigherOrderOperator):
                 f"identifier must be None or a string, got {type(identifier)}"
             )
 
+        # Proxy: symbolic re-tracing replays calls with proxies, e.g. when a
+        # cached GraphModule is unpickled (_deserialize_graph_module).
         if not all(
             isinstance(
-                o, (torch.Tensor, int, torch.SymInt, torch.Generator, FakeScriptObject)
+                o,
+                (
+                    torch.Tensor,
+                    int,
+                    torch.SymInt,
+                    torch.Generator,
+                    FakeScriptObject,
+                    torch.fx.Proxy,
+                ),
             )
             or is_custom_class(type(o))
             for o in operands
@@ -693,6 +726,8 @@ def get_output_metadata(subgraph, *operands):
     output_node = next(reversed(subgraph.graph.find_nodes(op="output")))
     output_metadata.num_fw_outs = len(output_node.args[0])
 
+    tensor_out_idxs = []
+
     for idx, output_arg in enumerate(output_node.args[0]):
         if not isinstance(output_arg, torch.fx.Node):
             if isinstance(output_arg, int):
@@ -712,13 +747,22 @@ def get_output_metadata(subgraph, *operands):
             output_metadata.indexes_with_symint.add(idx)
             output_metadata.indexes_with_no_grad.add(idx)
         elif isinstance(val, torch.Tensor):
-            # Check if tensor requires grad from metadata
-            if hasattr(val, "requires_grad") and not val.requires_grad:
-                output_metadata.indexes_with_no_grad.add(idx)
+            tensor_out_idxs.append(idx)
         else:
             # Non-tensor, non-symint (shouldn't happen but be safe)
             output_metadata.indexes_with_no_grad.add(idx)
 
+    # meta["val"] is recorded below autograd, so its requires_grad can't be
+    # trusted (see Note [invariants for node meta 'val']). Which tensor outputs
+    # need a grad is only knowable by execution, and only matters if some
+    # operand requires grad.
+    if tensor_out_idxs and any(
+        isinstance(operand, torch.Tensor) and operand.requires_grad
+        for operand in operands
+    ):
+        return _get_output_metadata_by_execution(subgraph, *operands)
+
+    output_metadata.indexes_with_no_grad.update(tensor_out_idxs)
     return output_metadata
 
 

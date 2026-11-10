@@ -55,6 +55,7 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
+    IS_SM10X,
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FP8,
 )
@@ -880,8 +881,9 @@ def _descriptor_load_pattern(operand):
 
 def _pointer_load_pattern(operand):
     # load_checked_2d is defined unconditionally in every generated kernel, so
-    # only an operand-qualified call establishes the fallback.
-    return rf"\bload_checked_2d\(\s*{operand.upper()}\s*,"
+    # only an operand-qualified call establishes the fallback. A kernel defined at
+    # module level calls it by a name suffixed with the kernel's own.
+    return rf"\bload_checked_2d(?:_\w+)?\(\s*{operand.upper()}\s*,"
 
 
 def _check_int64_decode_narrows_coordinates(
@@ -1309,11 +1311,10 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestFlexAttention(InductorTestCase):
     def setUp(self):
+        # Skip before InductorTestCase.setUp enters state that only tearDown undoes.
+        if self.device_type == "cpu" and LONG_COMPILATION_ON_CPU:
+            self.skipTest("skip UT for CPU due to long compilation time found in CI")
         super().setUp()
-        skipCPUIf(
-            LONG_COMPILATION_ON_CPU,
-            "skip UT for CPU due to long compilation time found in CI",
-        )
 
     def _check_equal(
         self,
@@ -2294,9 +2295,9 @@ class TestFlexAttention(InductorTestCase):
         self.run_test_with_paged_attention(*inputs)
 
     @supported_platform
-    @dtypes(*device_configs["cpu"].dtypes)
-    @dtypesIfCUDA(*device_configs["cuda"].dtypes)
-    @dtypesIfXPU(*device_configs["xpu"].dtypes)
+    @dtypes(*device_configs["cpu"].dtypes_fast)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("BLOCK_SIZE", test_block_size)
     def test_builtin_score_mods_different_block_size(
@@ -2783,6 +2784,115 @@ class TestFlexAttention(InductorTestCase):
 
         self.run_test(all_bias, dtype, device=device)
         self.run_test_with_paged_attention(all_bias, dtype, device=device)
+
+    @supported_platform
+    @skip_on_cpu
+    @common_utils.parametrize(
+        "trailing_shape,trailing_indices",
+        [((1,), (0,)), ((4,), (2,)), ((2, 3), (1, 2))],
+        name_fn=lambda trailing_shape, trailing_indices: (
+            f"shape_{'x'.join(map(str, trailing_shape))}_"
+            f"index_{'x'.join(map(str, trailing_indices))}"
+        ),
+    )
+    @expected_not_implemented_on_mps
+    @temp_float32_matmul_precision("highest")
+    def test_captured_score_mod_nested_index_backward(
+        self, device, trailing_shape, trailing_indices
+    ):
+        max_len = 4
+        embedding_table = nn.Parameter(
+            torch.randn(2 * max_len, *trailing_shape, device=device)
+        )
+        embedding_table_ref = nn.Parameter(embedding_table.detach().clone())
+        query = torch.randn(1, 1, 3, 32, device=device)
+        key = torch.randn(1, 1, 3, 32, device=device)
+        value = torch.randn(1, 1, 3, 32, device=device)
+
+        def rpe(score, _b, _h, q_idx, kv_idx):
+            delta = q_idx - kv_idx
+            delta = torch.clamp(delta, -max_len, max_len - 1)
+            delta += max_len
+            lookup = embedding_table[delta.int()]
+            for index in trailing_indices:
+                lookup = lookup[index]
+            return score + lookup
+
+        def rpe_ref(score, _b, _h, q_idx, kv_idx):
+            delta = q_idx - kv_idx
+            delta = torch.clamp(delta, -max_len, max_len - 1)
+            delta += max_len
+            return score + embedding_table_ref[(delta.int(), *trailing_indices)]
+
+        compiled_flex_attention = torch.compile(flex_attention, fullgraph=True)
+        out = compiled_flex_attention(query, key, value, score_mod=rpe)
+        out_ref = flex_attention(query, key, value, score_mod=rpe_ref)
+
+        self.assertEqual(out, out_ref)
+        out.sum().backward()
+        out_ref.sum().backward()
+        self.assertEqual(embedding_table.grad, embedding_table_ref.grad)
+
+    @supported_platform
+    @skip_on_cpu
+    @expected_not_implemented_on_mps
+    @temp_float32_matmul_precision("highest")
+    def test_captured_score_mod_nested_index_backward_dynamic(self, device):
+        def attention(query, key, value, table):
+            def rpe(score, _b, _h, q_idx, kv_idx):
+                return score + table[q_idx - kv_idx + 2][2]
+
+            return flex_attention(query, key, value, score_mod=rpe)
+
+        def attention_ref(query, key, value, table):
+            def rpe_ref(score, _b, _h, q_idx, kv_idx):
+                return score + table[q_idx - kv_idx + 2, 2]
+
+            return flex_attention(query, key, value, score_mod=rpe_ref)
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled_attention = torch.compile(
+            attention, backend=counter, fullgraph=True, dynamic=True
+        )
+        query = torch.randn(1, 1, 2, 32, device=device)
+        key = torch.randn(1, 1, 2, 32, device=device)
+        value = torch.randn(1, 1, 2, 32, device=device)
+        # A plain tensor rather than an nn.Parameter, which would stay static.
+        for width in (4, 6):
+            table = torch.randn(5, width, device=device, requires_grad=True)
+            table_ref = table.detach().clone().requires_grad_()
+            out = compiled_attention(query, key, value, table)
+            out_ref = attention_ref(query, key, value, table_ref)
+
+            self.assertEqual(out, out_ref)
+            out.sum().backward()
+            out_ref.sum().backward()
+            self.assertEqual(table.grad, table_ref.grad)
+        self.assertEqual(counter.frame_count, 1)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # MPS backward raises NotImplementedError before validation
+    def test_captured_score_mod_nonterminal_index_backward_error(self, device):
+        max_len = 4
+        embedding_table = nn.Parameter(torch.randn(2 * max_len, 4, device=device))
+        query = torch.randn(1, 1, 3, 32, device=device)
+        key = torch.randn(1, 1, 3, 32, device=device)
+        value = torch.randn(1, 1, 3, 32, device=device)
+
+        def rpe(score, _b, _h, q_idx, kv_idx):
+            delta = q_idx - kv_idx
+            delta = torch.clamp(delta, -max_len, max_len - 1)
+            delta += max_len
+            return score + (embedding_table[delta.int()] * 2)[2]
+
+        compiled_flex_attention = torch.compile(flex_attention, fullgraph=True)
+        out = compiled_flex_attention(query, key, value, score_mod=rpe)
+        with self.assertRaisesRegex(
+            torch._inductor.exc.InductorError,
+            "apply all indices in one indexing expression",
+        ):
+            out.sum().backward()
 
     @supported_platform
     @skip_on_cpu
@@ -4580,9 +4690,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @common_utils.parametrize("score_mod", test_score_mods)
-    @dtypes(*device_configs["cpu"].dtypes)
-    @dtypesIfCUDA(*device_configs["cuda"].dtypes)
-    @dtypesIfXPU(*device_configs["xpu"].dtypes)
+    @dtypes(*device_configs["cpu"].dtypes_fast)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
     def test_non_equal_head_dims(self, device, dtype, score_mod, head_dims):
         qk_d, v_d = head_dims
@@ -4590,6 +4700,36 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(
             score_mod, dtype, device, B, H, S, qk_d, B, H, S, V_D=v_d
         )
+
+    @supported_platform
+    @dtypes(*device_configs["cpu"].dtypes)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes)
+    @common_utils.parametrize(
+        "BLOCK_SIZE,head_dims",
+        [
+            (128, (D, D // 2)),
+            (256, (D // 2, D)),
+            ((128, 256), (D, D // 2)),
+            ((256, 128), (D // 2, D)),
+        ],
+    )
+    def test_block_size_and_head_dims_all_dtypes(
+        self,
+        device,
+        dtype: torch.dtype,
+        BLOCK_SIZE: int | tuple[int, int],
+        head_dims: tuple[int, int],
+    ):
+        # The score_mod sweeps over block sizes and head dims use fast dtypes;
+        # keep one score_mod across all dtypes for these config-selection inputs.
+        qk_d, v_d = head_dims
+        block_mask = create_block_mask(
+            noop_mask, B, H, S, S, BLOCK_SIZE=BLOCK_SIZE, device=device
+        )
+        inputs = (_rel_causal, dtype, device, B, H, S, qk_d, B, H, S)
+        self.run_test(*inputs, V_D=v_d, block_mask=block_mask)
+        self.run_test_with_paged_attention(*inputs, V_D=v_d, block_mask=block_mask)
 
     @supported_platform
     @skip_on_cpu
@@ -4680,6 +4820,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
         self.run_test(_rel_bias, dtype, device, B, H, S, head_dim, B, H, S, head_dim)
+
+    @supported_platform
+    @skip_on_cpu
+    @skipUnless(IS_SM10X, "guards an sm_10x Triton miscompile")
+    @common_utils.parametrize("qk_head_dim", [64, 512])
+    def test_head_dim_512_default_configs(self, device, qk_head_dim):
+        # https://github.com/triton-lang/triton/issues/10309
+        self.run_test(_identity, torch.bfloat16, device, B, H, S, qk_head_dim, V_D=512)
 
     @supported_platform
     def test_GQA_causal_mask(self, device):
@@ -7020,12 +7168,15 @@ class GraphModule(torch.nn.Module):
 
         choices = RecordingChoices()
         torch._dynamo.reset()
+        # V.set_choices_handler is thread-local; keep the lazily compiled
+        # backward on this thread instead of the reused autograd device thread.
         with (
             config.patch(
                 force_disable_caches=True,
                 inductor_choices_class=lambda: choices,
             ),
             V.set_choices_handler(choices),
+            torch.autograd.set_multithreading_enabled(False),
         ):
             torch.compile(compiled_attention, fullgraph=True)(
                 query, key, value, score_bias
@@ -9960,11 +10111,10 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestPagedAttention(InductorTestCase):
     def setUp(self):
+        # Skip before InductorTestCase.setUp enters state that only tearDown undoes.
+        if self.device_type == "cpu" and LONG_COMPILATION_ON_CPU:
+            self.skipTest("skip UT for CPU due to long compilation time found in CI")
         super().setUp()
-        skipCPUIf(
-            LONG_COMPILATION_ON_CPU,
-            "skip UT for CPU due to long compilation time found in CI",
-        )
 
     def _check_equal(
         self,
@@ -10475,11 +10625,10 @@ supports_learnable_bias = unittest.skipUnless(
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
+        # Skip before InductorTestCase.setUp enters state that only tearDown undoes.
+        if self.device_type == "cpu" and LONG_COMPILATION_ON_CPU:
+            self.skipTest("skip UT for CPU due to long compilation time found in CI")
         super().setUp()
-        skipCPUIf(
-            LONG_COMPILATION_ON_CPU,
-            "skip UT for CPU due to long compilation time found in CI",
-        )
         self.dtype = torch.float32
         self.atol = 3e-2
         self.rtol = 3e-2

@@ -30,7 +30,6 @@ TimerArgs = WorkerTimerArgs
 
 class RuntimeMode(enum.Enum):
     EAGER = "Eager"
-    JIT = "TorchScript"
     EXPLICIT = ""
 
 
@@ -86,7 +85,6 @@ class GroupedBenchmark:
     There are a variety of dimensions along which one might wish to measure
     PyTorch performance:
       - Python, C++
-      - Eager, TorchScript
       - Single threaded, multi threaded
       - Training, inference
 
@@ -121,16 +119,11 @@ class GroupedBenchmark:
             Then the signature is `f(x, y) -> z`. `signature` is required any
             time we need to generate part of a snippet:
              - When calling an opaque model provided by `init_from_models`
-             - When `torchscript=True`
              - When `autograd=True`
 
             If a return value is not needed (e.g. because of in place mutation)
             then `-> None` is valid, but a non-None return must be provided if
             `autograd=True`
-
-        torchscript:
-            If True, also JIT the stmt or model and generate benchmarks which
-            call the scripted version. Requires that `signature` is defined.
 
         autograd:
             If True, generate both forward and forward + backward benchmarks.
@@ -151,20 +144,14 @@ class GroupedBenchmark:
     py_fwd_stmt: str | None
     cpp_fwd_stmt: str | None
 
-    # Code block used to define a model. `init_from_stmts` will never populate
-    # `cpp_model_setup`, but if TorchScript is requested it will generate
-    # `py_model_setup` using `torch.jit.script`.
+    # Code blocks used to define a model by `init_from_model`.
     py_model_setup: str | None
     cpp_model_setup: str | None
-
-    # True if this benchmark used `init_from_stmts`, otherwise False.
-    inferred_model_setup: bool
 
     # Described above
     setup: GroupedSetup
     signature_args: tuple[str, ...] | None
     signature_output: str | None
-    torchscript: bool
     autograd: bool
     num_threads: tuple[int, ...]
 
@@ -176,7 +163,6 @@ class GroupedBenchmark:
         # Generic constructor arguments
         setup: GroupedSetup = GroupedSetup(),
         signature: str | None = None,
-        torchscript: bool = False,
         autograd: bool = False,
         num_threads: int | tuple[int, ...] = 1,
     ) -> "GroupedBenchmark":
@@ -192,26 +178,15 @@ class GroupedBenchmark:
             cpp_stmt = textwrap.dedent(cpp_stmt)
 
         signature_args, signature_output = cls._parse_signature(signature)
-        py_model_setup = (
-            cls._model_from_py_stmt(
-                py_stmt=py_stmt,
-                signature_args=signature_args,
-                signature_output=signature_output,
-            )
-            if torchscript
-            else None
-        )
 
         return cls(
             py_fwd_stmt=py_stmt,
             cpp_fwd_stmt=cpp_stmt,
-            py_model_setup=py_model_setup,
+            py_model_setup=None,
             cpp_model_setup=None,
-            inferred_model_setup=True,
             setup=setup,
             signature_args=signature_args,
             signature_output=signature_output,
-            torchscript=torchscript,
             autograd=autograd,
             num_threads=(num_threads,) if isinstance(num_threads, int) else num_threads,
         )
@@ -224,7 +199,6 @@ class GroupedBenchmark:
         # Generic constructor arguments
         setup: GroupedSetup = GroupedSetup(),
         signature: str | None = None,
-        torchscript: bool = False,
         autograd: bool = False,
         num_threads: int | tuple[int, ...] = 1,
     ) -> "GroupedBenchmark":
@@ -244,16 +218,12 @@ class GroupedBenchmark:
             )
 
         return cls(
-            *cls._make_model_invocation(
-                signature_args, signature_output, RuntimeMode.EAGER
-            ),
+            *cls._make_model_invocation(signature_args, signature_output),
             py_model_setup=py_model_setup,
             cpp_model_setup=cpp_model_setup,
-            inferred_model_setup=False,
             setup=setup,
             signature_args=signature_args,
             signature_output=signature_output,
-            torchscript=torchscript,
             autograd=autograd,
             num_threads=(num_threads,) if isinstance(num_threads, int) else num_threads,
         )
@@ -361,61 +331,23 @@ class GroupedBenchmark:
         return args, output
 
     @staticmethod
-    def _model_from_py_stmt(
-        py_stmt: str | None,
-        signature_args: tuple[str, ...] | None,
-        signature_output: str | None,
-    ) -> str:
-        if py_stmt is None:
-            raise ValueError("`py_stmt` must be defined in order to derive a model.")
-
-        if signature_args is None:
-            raise ValueError("signature is needed in order to derive a model.")
-
-        return textwrap.dedent(
-            f"""\
-            def model({", ".join(signature_args)}):
-            {{stmt_str}}
-                return {signature_output}
-        """
-        ).format(stmt_str=textwrap.indent(py_stmt, " " * 4))
-
-    @staticmethod
     def _make_model_invocation(
         signature_args: tuple[str, ...],
         signature_output: str | None,
-        runtime: RuntimeMode,
     ) -> tuple[str, str]:
         py_prefix, cpp_prefix = "", ""
         if signature_output is not None:
             py_prefix = f"{signature_output} = "
             cpp_prefix = f"auto {signature_output} = "
 
-        if runtime == RuntimeMode.EAGER:
-            model_name = "model"
-            cpp_invocation = (
-                f"{cpp_prefix}{model_name}->forward({', '.join(signature_args)});"
-            )
-
-        else:
-            if runtime != RuntimeMode.JIT:
-                raise AssertionError(f"Expected RuntimeMode.JIT, but got {runtime}")
-            model_name = "jit_model"
-            cpp_invocation = textwrap.dedent(
-                f"""\
-                std::vector<torch::jit::IValue> ivalue_inputs({{
-                    {", ".join([f"torch::jit::IValue({a})" for a in signature_args])}
-                }});
-                {cpp_prefix}{model_name}.forward(ivalue_inputs);
-            """
-            )
+        cpp_invocation = f"{cpp_prefix}model->forward({', '.join(signature_args)});"
 
         # NB:
         #   In python we invoke __call__, however C++ doesn't have an analogous
         #   method so we invoke `forward` instead. This means that Python
         #   is doing extra work (e.g. checking hooks) compared to C++; however
         #   because this is the default user experience that's acceptable.
-        py_invocation = f"{py_prefix}{model_name}({', '.join(signature_args)})"
+        py_invocation = f"{py_prefix}model({', '.join(signature_args)})"
 
         return py_invocation, cpp_invocation
 
