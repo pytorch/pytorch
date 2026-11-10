@@ -354,7 +354,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         # Handle Python function attributes
         if inspect.isfunction(value):
             try:
-                scripted_fn = torch.jit.script(value)
+                scripted_fn = torch.jit._script.script(value)
                 concrete_type_builder.add_function_attribute(
                     name, torch._C._jit_try_infer_type(scripted_fn).type(), value
                 )
@@ -988,7 +988,7 @@ def try_compile_fn(fn, loc):
     # extract the necessary info from the closed over variables on the function
     # object
     rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
-    return torch.jit.script(fn, _rcb=rcb)
+    return torch.jit._script.script(fn, _rcb=rcb)
 
 
 def wrap_cpp_class(cpp_class):
