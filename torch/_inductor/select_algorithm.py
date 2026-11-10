@@ -2122,6 +2122,8 @@ class TritonTemplateKernel(TritonKernel):
 
         # Use FixedGrid which properly handles grid values passed as arguments
         inductor_meta = FixedGrid.setup_grid_as_args() if additional_call_args else None
+        if self.asserts_need_real_inputs:
+            inductor_meta = {**(inductor_meta or {}), "asserts_need_real_inputs": True}
         wrapper.generate_kernel_call(
             name,
             call_args,
@@ -6622,6 +6624,8 @@ class AlgorithmSelectorCache(PersistentCache):
         pad_after = backing_size - reserve_span
         # preserve rng states to avoid the rand_strided call below changes
         # the rng states for the real model code.
+        # Triton codegen relies on rand_strided filling non-float tensors with
+        # zeros (see TritonKernel._is_zero_in_autotune_block).
         with preserve_rng_state():
             return rand_strided(
                 reserve,
