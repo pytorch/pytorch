@@ -47,8 +47,6 @@ if typing.TYPE_CHECKING:
 
     import numpy.typing as npt
 
-    from torch.onnx._internal.exporter import _building
-
 
 # Define utilities to convert PyTorch data types so users do not need to specify manually
 _TORCH_DTYPE_TO_ONNX: dict[torch.dtype, ir.DataType] = {
@@ -100,9 +98,6 @@ _STEP_THREE_ERROR_MESSAGE = textwrap.dedent(
 )
 
 logger = logging.getLogger(__name__)
-
-# Legacy higher-order built-ins read this only inside the isolated evaluator.
-current_tracer: _building.OpRecorder | None = None
 
 
 def torch_dtype_to_onnx_dtype(dtype: torch.dtype) -> ir.DataType:
@@ -736,9 +731,6 @@ def _call_legacy_translation(
                 return [legacy_arg(value) for value in arg]
             return arg
 
-        global current_tracer
-        previous_tracer = current_tracer
-        current_tracer = tracer
         try:
             outputs = onnx_function(
                 *(legacy_arg(arg) for arg in onnx_args),
@@ -748,8 +740,6 @@ def _call_legacy_translation(
             raise _errors.GraphConstructionError(
                 f"Error when calling function '{onnx_function}' with args '{onnx_args}' and kwargs '{onnx_kwargs}'"
             ) from e
-        finally:
-            current_tracer = previous_tracer
 
     # Add the defined functions to the model
     for identifier, onnxscript_function in tracer.functions.items():

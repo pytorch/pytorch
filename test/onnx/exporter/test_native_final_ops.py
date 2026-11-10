@@ -3,24 +3,36 @@
 
 from __future__ import annotations
 
+import ast
 import builtins
 import contextlib
+from pathlib import Path
 from unittest import mock
 
-import onnx
+import numpy as np
 
+import onnx
 import onnx_ir as ir
+from onnx.reference import ReferenceEvaluator
 from test_native_factory_sequence_ops import _evaluate
 from test_native_torchlib import no_script
 
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_apis
-from torch.onnx._internal.exporter import _core, _ir_builder, _schemas
+from torch.onnx._internal.exporter import (
+    _core,
+    _custom_translation,
+    _ir_builder,
+    _registration,
+    _schemas,
+)
+from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 from torch.onnx._internal.exporter._torchlib.ops import (
     core,
     fft,
     linalg,
     neural,
+    nn,
     prims,
     quantized_decomposed,
     special,
@@ -975,6 +987,140 @@ class TestNativeFinalOps(common_utils.TestCase):
         onnx.checker.check_model(
             ir.to_proto(ir.Model(graph, ir_version=10)), full_check=True
         )
+
+
+@common_utils.instantiate_parametrized_tests
+class TestNativeCutover(common_utils.TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    def test_explicit_context_for_all_native_helpers(self):
+        for path in Path(core.__file__).parent.glob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.FunctionDef, ast.Call)):
+                    continue
+                with self.subTest(module=path.name, line=node.lineno):
+                    if isinstance(node, ast.FunctionDef):
+                        self.assertTrue(node.args.args, node.name)
+                        self.assertEqual(node.args.args[0].arg, "op", node.name)
+                    if isinstance(node, ast.Call):
+                        if isinstance(node.func, ast.Name):
+                            self.assertNotEqual(node.func.id, "current_builder")
+                        elif isinstance(node.func, ast.Attribute):
+                            self.assertNotIn(
+                                node.func.attr, ("activate", "current_builder")
+                            )
+
+    def test_optional_namespace_loaded_after_native_import(self):
+        with (
+            mock.patch.object(
+                _torchlib_registry, "_registry", list(_torchlib_registry._registry)
+            ),
+            torch.library._scoped_library("torchvision", "FRAGMENT") as library,
+        ):
+            library.define("_native_onnx_probe(Tensor input) -> Tensor")
+            with native_only():
+                _torchlib_registry.onnx_impl("torchvision::_native_onnx_probe")(
+                    lambda x: x
+                )
+                registry = _registration.ONNXRegistry.from_torchlib(
+                    custom_translations=()
+                )
+                target = torch.ops.torchvision._native_onnx_probe.default
+                entry = registry.get_decomps(target)[0]
+                self.assertIs(entry.fx_target, target)
+
+    def test_all_supported_source_keys(self):
+        self.assertEqual(sum(map(len, _SOURCE_KEYS.values())), 561)
+        with native_only():
+            registry = _registration.ONNXRegistry.from_torchlib(
+                19, custom_translations=()
+            )
+            for complex_, names in _SOURCE_KEYS.items():
+                for name in names:
+                    with self.subTest(target=name, complex=complex_):
+                        target = _registration._get_overload(name)
+                        entries = registry.get_decomps(
+                            name if target is None else target
+                        )
+                        selected = [
+                            entry for entry in entries if entry.is_complex == complex_
+                        ]
+                        self.assertEqual(len(selected), 1)
+                        self.assertIsInstance(
+                            selected[0].onnx_function,
+                            _custom_translation.NativeTranslation,
+                        )
+
+    def test_registry_is_entirely_native_and_opset_aware(self):
+        with native_only():
+            for opset in (18, 19, 20, 21, 23):
+                registry = _registration.ONNXRegistry.from_torchlib(opset)
+                for entries in registry.functions.values():
+                    self.assertTrue(entries)
+                    for entry in entries:
+                        self.assertIsInstance(
+                            entry.onnx_function, _custom_translation.NativeTranslation
+                        )
+                        self.assertIsNone(entry.signature)
+                        self.assertLessEqual(entry.opset_introduced, opset)
+                target = torch.ops.aten.scaled_dot_product_attention.default
+                expected = (
+                    nn.aten_scaled_dot_product_attention_23
+                    if opset >= 23
+                    else neural.aten_scaled_dot_product_attention
+                )
+                self.assertIs(
+                    registry.get_decomps(target)[0].onnx_function.function, expected
+                )
+                self.assertEqual(
+                    bool(registry.get_decomps("torchvision::deform_conv2d")),
+                    opset >= 19,
+                )
+            self.assertIs(
+                _registration.ONNXRegistry.from_torchlib()
+                .get_decomps("aten::getitem")[0]
+                .onnx_function.function,
+                _registration.ONNXRegistry.from_torchlib()
+                .get_decomps(__import__("operator").getitem)[0]
+                .onnx_function.function,
+            )
+
+    @common_utils.parametrize("optimize", [False, True])
+    def test_native_export_blocks_legacy_construction(self, optimize):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.special.erf(x + y).reshape(-1).sin()
+
+        model = Model().eval()
+        x, y = torch.randn(2, 3), torch.randn(2, 3)
+        with (
+            native_only(),
+            mock.patch.object(
+                onnxscript_apis, "optimize", wraps=onnxscript_apis.optimize
+            ) as optimizer,
+        ):
+            program = torch.onnx.export(
+                model,
+                (x, y),
+                dynamo=True,
+                optimize=optimize,
+                dynamic_shapes=(
+                    {0: torch.export.Dim("batch")},
+                    {0: torch.export.Dim("batch")},
+                ),
+                verbose=False,
+            )
+            self.assertEqual(optimizer.call_count, int(optimize))
+        onnx.checker.check_model(program.model_proto, full_check=True)
+        actual = ReferenceEvaluator(program.model_proto).run(
+            None,
+            {
+                value.name: tensor.numpy()
+                for value, tensor in zip(program.model.graph.inputs, (x, y))
+            },
+        )[0]
+        self.assertEqual(torch.from_numpy(np.asarray(actual).copy()), model(x, y))
 
 
 instantiate_device_type_tests(TestNativeFinalOps, globals(), only_for="cpu")
