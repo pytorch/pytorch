@@ -209,10 +209,16 @@ class WelfordOps:
         elif nb != zero:
             nn = na + nb
             nb_over_n = nb / nn
-            delta = mb - ma
-            mean = ma + delta * nb_over_n
-            m2 = m2a + m2b + delta * delta * na * nb_over_n
+            mean, m2 = self._chan_merge(ma, m2a, na, mb, m2b, nb_over_n)
         return (mean, m2, nn)
+
+    @cute.jit
+    def _chan_merge(self, ma, m2a, na, mb, m2b, w):
+        """Chan's merge of nonempty states, given the weight w = nb / (na + nb)."""
+        delta = mb - ma
+        mean = ma + delta * w
+        m2 = m2a + m2b + delta * delta * na * w
+        return mean, m2
 
     @cute.jit
     def combine_uniform(self, a, b, index, count: cutlass.Constexpr, weight=None):
@@ -230,9 +236,7 @@ class WelfordOps:
         nn = na + nb
         if const_expr(weight is None):
             weight = self.uniform_weight(index, count)
-        delta = mb - ma
-        mean = ma + delta * weight
-        m2 = m2a + m2b + delta * delta * na * weight
+        mean, m2 = self._chan_merge(ma, m2a, na, mb, m2b, weight)
         return (mean, m2, nn)
 
     @cute.jit
