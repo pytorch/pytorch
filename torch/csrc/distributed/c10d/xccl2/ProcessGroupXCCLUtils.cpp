@@ -161,9 +161,9 @@ onecclDataType_t ProcessGroupXCCL::getXcclDataType(const at::Tensor& tensor) {
 ProcessGroupXCCL::RedOpRAII ProcessGroupXCCL::getXcclReduceOp(
     const ::c10d::ReduceOp& op,
     onecclComm_t comm,
-    const onecclDataType_t dataType) {
+    const at::Tensor& tensor) {
   // Bool is sent as uint8, so a plain SUM would add bytes; MAX is logical OR.
-  if (dataType == at::kBool) {
+  if (tensor.scalar_type() == at::kBool) {
     if (op == ::c10d::ReduceOp::SUM) {
       return onecclMax;
     }
@@ -182,7 +182,7 @@ ProcessGroupXCCL::RedOpRAII ProcessGroupXCCL::getXcclReduceOp(
     case ::c10d::ReduceOp::MAX:
       return onecclMax;
     case ::c10d::ReduceOp::PREMUL_SUM:
-      return RedOpRAII(op, comm, dataType, xccl_api_);
+      return RedOpRAII(op, comm, getXcclDataType(tensor), xccl_api_);
     case ::c10d::ReduceOp::AVG:
       return onecclAvg;
     case ::c10d::ReduceOp::BAND:
