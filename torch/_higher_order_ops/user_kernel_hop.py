@@ -178,7 +178,16 @@ def constant_key(value: object, rules: ConstantRules) -> object:
 def _snapshot(value: object, rules: ConstantRules) -> object:
     """``value`` with everything constant_key keys by content copied, so that the
     caller mutating it later changes neither the stored value nor its key. A copy
-    that would be the value itself is refused with a TypeError (see _copy_of)."""
+    that would be the value itself is refused with a TypeError (see _copy_of).
+
+    Constant args are value-only data: the identity of what constant_key keys by
+    content is neither kept here nor keyed. Each reference to such a part is copied
+    on its own, so a part the value holds twice becomes two equal copies, and
+    constant_key keys that value as it keys one holding two equal parts. Host code
+    that depends on such a part's identity is not supported: ``is`` on it, a part
+    that hashes by identity (a plain object) used as a dict key and looked up
+    through another reference, or a part written through one reference and read
+    through another. Supporting it would take copies and keys that track sharing."""
     return _ContentWalk(rules).snapshot(value)
 
 
