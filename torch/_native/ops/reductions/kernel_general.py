@@ -98,9 +98,6 @@ class ReduceBlock:
         self.ragged_chunk = ragged_chunk  # clamp each output's reduced run
         self.from_partials = from_partials
         self.block = block
-        # TileReduce reads a zero count as the tree being off.
-        if uniform_tree and count == 0:
-            raise ValueError("the uniform Welford tree needs a nonempty reduction")
         # Plan one general-axis block per output; the shared body performs mixed-radix folding.
         self.tile = tile.TileReduce(
             trait,
@@ -122,7 +119,7 @@ class ReduceBlock:
             ragged_chunk=ragged_chunk,
             order=order,
             itree=itree,
-            uniform_tree_count=count if uniform_tree else 0,
+            uniform_tree_count=count if uniform_tree else None,
         )
 
     @property
@@ -393,7 +390,9 @@ _B200_STRIDED_ONE_FIELD = (SumOps, ProdOps, MeanOps)
 # The B200 index rules' traits; they also need 32-bit accumulators (int32 indices).
 _B200_INDEX = (ArgMaxOps, ArgMinOps)
 # Input dtypes and view-size anchors of the SM107 launch policies, and the one-field
-# trait types they measured (by rule name). Their rules are named rubin_*.
+# trait types they measured (by rule name). Their rules are named rubin_*. They come from
+# SM107 measurements at the _SM107_SIZES anchors; unlike the B200 rules, the ratios are
+# not recorded here.
 _SM107_DTYPES = (torch.float32, torch.bfloat16)
 _SM107_CCS = ((10, 7),)
 _SM107_MIN_SIZE, _SM107_MID_SIZE = 16 << 20, 64 << 20
