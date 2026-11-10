@@ -4452,6 +4452,26 @@
       ]
     }
   ],
+  "GB3826": [
+    {
+      "Gb_type": "kwargs expansion after iteration slot mutation",
+      "Context": "DICT_MERGE",
+      "Explanation": "Dynamo cannot expand a mapping after changing its type's __iter__.",
+      "Hints": [
+        "Expand the mapping outside the compiled function."
+      ]
+    }
+  ],
+  "GB9653": [
+    {
+      "Gb_type": "Duplicate keyword mapping key",
+      "Context": "DICT_MERGE",
+      "Explanation": "Dynamo cannot trace duplicate keys while expanding a custom mapping.",
+      "Hints": [
+        "Use unique keyword names or expand the mapping outside the compiled function."
+      ]
+    }
+  ],
   "GB0245": [
     {
       "Gb_type": "Attempted to use `nested_tensor` with non-list input",
@@ -7200,6 +7220,16 @@
   "GB8811": [
     {
       "Gb_type": "OrderedDict storage differs from linked keys",
+      "Context": "OrderedDict input snapshot: {error}",
+      "Explanation": "Dynamo cannot safely match this OrderedDict's linked order to its dictionary storage.",
+      "Hints": [
+        "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
+        "On free-threaded builds, use Python 3.14.1 or newer.",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    },
+    {
+      "Gb_type": "OrderedDict storage differs from linked keys",
       "Context": "OrderedDict input snapshot",
       "Explanation": "Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
       "Hints": [
@@ -7233,14 +7263,14 @@
       "Context": "str(error)",
       "Explanation": "Dynamo cannot trace dictionary iteration that changes its keys.",
       "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+        "Avoid changing dictionary keys during iteration."
       ]
     }
   ],
   "GB1160": [
     {
       "Gb_type": "Unsupported dictionary view owner",
-      "Context": "str(type(dict_vt))",
+      "Context": "dict_vt.python_type_name()",
       "Explanation": "Dynamo cannot access this dictionary view's owner storage.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."

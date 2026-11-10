@@ -70,6 +70,8 @@ from ..utils import (
     unpack_iterable,
 )
 from .base import (
+    _check_method_arity,
+    _flags_from_ml_flags,
     AttributeMutationExisting,
     AttributeMutationNew,
     AttrMutationKind,
@@ -167,7 +169,7 @@ def _iter_detecting_mutation(iterator: Iterator[_T]) -> Iterator[_T]:
                 gb_type="Dictionary mutated during iteration",
                 context=str(error),
                 explanation="Dynamo cannot trace dictionary iteration that changes its keys.",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=["Avoid changing dictionary keys during iteration."],
             )
         # Keep user code outside the handler so its exceptions propagate.
         yield item
@@ -741,6 +743,31 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     # corresponding value VT. For __contains__, we add a DICT_CONTAINS guard.
     # But for all the other methods, we insert the DICT_KEYS_MATCH guard to be
     # conservative.
+
+    def call_method_descriptor(
+        self,
+        tx: "InstructionTranslatorBase",
+        descriptor: types.MethodDescriptorType,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # A dict-family descriptor selects its declaring type, even on an OrderedDict.
+        name = descriptor.__name__
+        if name not in ("keys", "values", "items", "__reversed__"):
+            return None
+        owner = descriptor.__objclass__
+        if owner is dict:
+            cls = ConstDictVariable
+        elif owner is collections.OrderedDict:
+            cls = OrderedDictVariable
+        else:
+            return None
+        method = cls.tp_methods.get(name, ConstDictVariable.tp_methods.get(name))
+        if method is not None:
+            flags = _flags_from_ml_flags(owner, name)
+            _check_method_arity(self, tx, name, flags, args, kwargs)
+            return method.handler(self, tx, args, kwargs)
+        return None
 
     def dict_items(
         self,
@@ -1565,14 +1592,12 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
 
 class NNModuleHooksDictVariable(ConstDictVariable):
     # Defer local hook-ID guards so equivalent modules can reuse hook dispatch.
-    def is_python_constant(self) -> bool:
-        return not self.items
-
-    def python_type(self) -> type:
-        # Ordinary empty-hook dispatch need not specialize the exact mapping type.
+    def _guard_type(self) -> None:
         if self.source:
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
-        return super().python_type()
+
+    def is_python_constant(self) -> bool:
+        return not self.items
 
     def install_dict_keys_match_guard(self) -> None:
         if self.source and not is_constant_source(self.source):
@@ -1583,12 +1608,19 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         return super()._hashable_key(key)
 
     def _store_item(self, key: HashableTracker, value: VariableTracker) -> None:
+        self._guard_type()
         self.materialize_keys()
         super()._store_item(key, value)
 
     def _update_items(self, items: dict[HashableTracker, VariableTracker]) -> None:
+        self._guard_type()
         self.materialize_keys()
         super()._update_items(items)
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._guard_type()
+        self.materialize_keys()
+        return super().tp_repr_impl(tx)
 
     def materialize_keys(self) -> dict[HashableTracker, VariableTracker]:
         # Key lookups, mutations and detached copies can observe IDs without
@@ -1599,12 +1631,14 @@ class NNModuleHooksDictVariable(ConstDictVariable):
 
     def clone(self, **kwargs: Any) -> VariableTracker:
         if self.source is not None and kwargs.get("source", self.source) is None:
+            self._guard_type()
             self.materialize_keys()
         return super().clone(**kwargs)
 
     def _new_dict(
         self, items: dict[HashableTracker, VariableTracker]
     ) -> "ConstDictVariable":
+        self._guard_type()
         self.materialize_keys()
         cls = (
             OrderedDictVariable

@@ -951,13 +951,14 @@ def _is_dim_dynamic_from_source_dynamism(
 def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
     try:
         return list(enumerate_items_with_dict_position(value))
-    except InvalidOrderedDict:
+    except InvalidOrderedDict as error:
         unimplemented(
             gb_type="OrderedDict storage differs from linked keys",
-            context="OrderedDict input snapshot",
-            explanation="Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
+            context=f"OrderedDict input snapshot: {error}",
+            explanation="Dynamo cannot safely match this OrderedDict's linked order to its dictionary storage.",
             hints=[
                 "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
+                "On free-threaded builds, use Python 3.14.1 or newer.",
                 *graph_break_hints.FUNDAMENTAL,
             ],
             skip_frame=True,
@@ -2771,7 +2772,7 @@ class VariableBuilder:
                 if not isinstance(dict_vt, ConstDictVariable):
                     unimplemented(
                         gb_type="Unsupported dictionary view owner",
-                        context=str(type(dict_vt)),
+                        context=dict_vt.python_type_name(),
                         explanation="Dynamo cannot access this dictionary view's owner storage.",
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
