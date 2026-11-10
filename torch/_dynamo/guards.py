@@ -210,7 +210,6 @@ from .utils import (
     dataclass_fields,
     dict_keys,
     enumerate_items_with_dict_position,
-    find_type_attribute_name,
     get_current_stream,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
@@ -5396,10 +5395,11 @@ class GuardsStatePickler(FunctionPicklerBase):
                     inner_data,
                 )
 
-            # _dispatch_keys() on a fake reports the Python and
-            # PythonTLSSnapshot keys of the fake itself; the converter may
-            # have recorded the real tensor's keys (from_meta_and_device
-            # always does, from_real_tensor only for an mkldnn source).
+            # _dispatch_keys() on a fake reports the fake's own keys: besides
+            # the fake device's backend, Python and PythonTLSSnapshot for a
+            # Python FakeTensor and Fake for a C++ fake. A fake may instead
+            # have recorded the real tensor's keys, e.g. a fake of an mkldnn
+            # tensor (see Note [C++ fake dispatch keys] for a C++ fake).
             dispatch_keys = maybe_get_fake_dispatch_keys(obj)
             if dispatch_keys is None:
                 dispatch_keys = torch._C._dispatch_keys(obj)
@@ -5528,16 +5528,15 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(
             obj, (types.MethodDescriptorType, types.ClassMethodDescriptorType)
         ):
-            from .variables.object_protocol import type_is_immutable
-
             owner = obj.__objclass__
-            if not type_is_immutable(owner):
+            flags = type.__dict__["__flags__"].__get__(owner, type(owner))
+            if not flags & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
                 raise torch._dynamo.exc.PackageError(
                     f"Cannot serialize {type(obj).__name__} with a mutable owner"
                 )
-            name = find_type_attribute_name(owner, obj)
-            if name is not None:
-                return type(self)._unpickle_type_dict_item, (owner, name)
+            for name, value in get_type_dict_no_user_code(owner).items():
+                if value is obj:
+                    return type(self)._unpickle_type_dict_item, (owner, name)
             raise torch._dynamo.exc.PackageError(
                 f"Cannot locate {obj!r} in {owner!r}.__dict__"
             )
@@ -5807,15 +5806,6 @@ def _resolves_by_reference(value: object) -> bool:
             _resolves_by_reference(owner)
             and isinstance(value.name, str)
             and getattr(owner, value.name, None) is value
-        )
-    if isinstance(value, (types.MethodDescriptorType, types.ClassMethodDescriptorType)):
-        from .variables.object_protocol import type_is_immutable
-
-        owner = value.__objclass__
-        return (
-            type_is_immutable(owner)
-            and _resolves_by_reference(owner)
-            and find_type_attribute_name(owner, value) is not None
         )
     if _is_nested_named_tuple_type(value):
         # GuardsStatePickler.reducer_override rebuilds it as a fresh class.
