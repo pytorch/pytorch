@@ -56,8 +56,7 @@ convert_rounded_from_float(float x, c10::RoundingMode mode) {
 #if !defined(USE_ROCM) || TORCH_HIP_VERSION >= 702
   } else if constexpr (std::is_same_v<dst_t, BFloat16>) {
     // These use cvt.rn/rz.bf16.f32 on sm_80+ and cvt.rp/rm.bf16.f32 on
-    // sm_90+, and emulate them otherwise. (c10::BFloat16 has no constructor
-    // from HIP's bfloat16, hence the bits.)
+    // sm_90+, and emulate them otherwise.
     unsigned short bits = 0;
     switch (mode) {
       case RoundingMode::ToNearestEven:

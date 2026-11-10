@@ -92,7 +92,7 @@ __global__ void round_kernel(const double* x, uint32_t* out, int n) {
 // Device code (round_to_odd_float's __double2float_rz branch, and
 // leading_zeros' __clzll, which normalizes subnormal sources) must give the
 // host's bits.
-TEST(TestCastCuda, ConvertFromDoubleDeviceMatchesHost) {
+TEST(TestCastCuda, ConvertDeviceMatchesHost) {
   SKIP_IF_NO_CUDA();
   std::vector<double> xs = {
       0.0,
@@ -106,6 +106,10 @@ TEST(TestCastCuda, ConvertFromDoubleDeviceMatchesHost) {
       0x1p-149,
       0x1.8p-140,
       -0x1p-130,
+      // float subnormals whose BFloat16 results are subnormal too, the only
+      // ones that tell an undercount of leading_zeros apart.
+      0x1.8p-127,
+      -0x1.4p-127,
       // Subnormal doubles.
       0x1p-1074,
       -0x1.8p-1060,
@@ -154,7 +158,8 @@ TEST(TestCastCuda, ConvertFromDoubleDeviceMatchesHost) {
         continue;
       }
       ASSERT_EQ(device[i * kResults + r], host[r])
-          << "x=" << xs[i] << " result " << r;
+          << "x=" << std::hexfloat << xs[i] << " result " << r
+          << " (see round_all)";
     }
   }
 }

@@ -1468,9 +1468,14 @@ class TritonOverrides(OpOverrides):
             # Rounding to float32 first, which is the compute type of float16
             # and bfloat16, would round twice, unlike eager.
             if torch.version.hip is not None:
-                # Rounding to odd instead, Triton's conversion then rounds once.
-                x = f"triton_helpers.round_float64_to_float32({x}, 4)"
-                src_dtype = torch.float32
+                # Rounding to odd instead, Triton's conversion then rounds
+                # once. Like on CUDA, the result is exact in dtype, also when
+                # it stays in the compute type for fused users.
+                rto = f"triton_helpers.round_float64_to_float32({x}, 4)"
+                rounded = f"{rto}.to({triton_type(dtype)})"
+                if use_compute_types:
+                    return f"{rounded}.to({triton_compute_type(dtype)})"
+                return f"{rounded}.to({triton_store_type(dtype)})"
             else:
                 # The result is exact in dtype, so converting it to the store
                 # type is exact.
@@ -1532,7 +1537,8 @@ class TritonOverrides(OpOverrides):
                 # AOTI also compiles the kernel for this (lower) target.
                 from torch._inductor.codegen.cuda import compile_utils
 
-                cc = min(cc, compile_utils._cuda_arch_number(str(config.cuda.arch)))
+                target = compile_utils._aoti_cuda_target_arch()
+                cc = min(cc, compile_utils._cuda_arch_number(target))
 
         out_type = triton_compute_type(dtype)
         suffix = {

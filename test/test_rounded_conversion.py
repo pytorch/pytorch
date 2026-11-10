@@ -428,10 +428,13 @@ class TestRoundedConversion(TestCase):
             y = torch.full((n,), v, dtype=dtype, device=device)
             self.assertEqual(y.tolist(), [1 + eps] * n)
         if dtype is torch.bfloat16:
-            # Integer Scalars still round through float, on every fill path.
-            big = 2**24 + 2**16 + 1
-            ys = [torch.full((n,), big, dtype=dtype, device=device) for n in (1, 2)]
-            self.assertEqual([y[0].item() for y in ys], [2.0**24] * 2)
+            # All fill paths agree on integer Scalars (which still round
+            # through float) and complex Scalars.
+            for value in (2**24 + 2**16 + 1, complex(v, 0)):
+                ys = [
+                    torch.full((n,), value, dtype=dtype, device=device) for n in (1, 2)
+                ]
+                self.assertEqual(ys[0][0], ys[1][0])
         out = torch.zeros(1, dtype=dtype, device=device)
         self.assertEqual(torch.add(x, 0, out=out).item(), 1 + eps)
         out.zero_()
@@ -451,7 +454,8 @@ class TestRoundedConversion(TestCase):
         for n in (1, 2):
             w = torch.full((n,), complex(v, -v), dtype=torch.complex32, device=device)
             self.assertEqual(w.to(torch.complex128).tolist(), [expected] * n)
-            # Like float16 fills, every complex32 fill checks for overflow.
+            # Every complex32 fill checks for overflow, like float16 fills of
+            # two or more elements and CUDA float16 fills.
             with self.assertRaisesRegex(RuntimeError, "without overflow"):
                 torch.full((n,), complex(1e5, 0), dtype=torch.complex32, device=device)
 
@@ -607,8 +611,8 @@ class TestRoundedConversion(TestCase):
         # Every float32 input, comparing the accelerator (which uses hardware
         # instructions where available, and NVIDIA's emulations of some of
         # them, e.g. for e8m0 before sm_100) with the CPU's software conversion.
-        # On ROCm, the float16 and bfloat16 destinations use HIP's intrinsics,
-        # and the others the software conversion.
+        # On ROCm, the float16 destination uses HIP's intrinsics (and bfloat16
+        # with ROCm 7.2+), and the others the software conversion.
         chunk = 1 << 28
         for start in range(-(1 << 31), 1 << 31, chunk):
             x = torch.arange(chunk, dtype=torch.int32).add_(start).view(torch.float32)

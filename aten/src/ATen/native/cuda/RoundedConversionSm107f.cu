@@ -13,8 +13,11 @@ void to_dtype_rounded_kernel_cuda_sm107f(
     case kFloat8_e5m2:
       to_dtype_rounded_kernel_cuda_to<Float8_e5m2>(iter, mode);
       break;
-    default:
+    case kFloat8_e5m3fnu:
       to_dtype_rounded_kernel_cuda_to<Float8_e5m3fnu>(iter, mode);
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "unexpected dtype ", iter.dtype());
   }
 }
 
