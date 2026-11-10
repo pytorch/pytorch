@@ -118,6 +118,17 @@ def graph_desc(fn):
     return result + ")"
 
 
+def _test_type_conversion_backward(test, t):
+    fvar = Variable(t(torch.randn(5, 5).float()), requires_grad=True)
+    fvar.double().sum().backward()
+    test.assertEqual(fvar.grad, torch.ones_like(fvar))
+    test.assertEqual(type(fvar.grad), type(fvar))
+    dvar = Variable(t(torch.randn(5, 5).double()), requires_grad=True)
+    dvar.float().sum().backward()
+    test.assertEqual(dvar.grad, torch.ones_like(dvar))
+    test.assertEqual(type(dvar.grad), type(dvar))
+
+
 class TestAutograd(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -4876,38 +4887,10 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, "has been modified by an inplace"):
             y.backward()
 
-    def _test_type_conversion_backward(self, t):
-        fvar = Variable(t(torch.randn(5, 5).float()), requires_grad=True)
-        fvar.double().sum().backward()
-        self.assertEqual(fvar.grad, torch.ones_like(fvar))
-        self.assertEqual(type(fvar.grad), type(fvar))
-        dvar = Variable(t(torch.randn(5, 5).double()), requires_grad=True)
-        dvar.float().sum().backward()
-        self.assertEqual(dvar.grad, torch.ones_like(dvar))
-        self.assertEqual(type(dvar.grad), type(dvar))
-
     def test_type_conversions(self):
         x = torch.randn(5, 5)
         self.assertIsInstance(x.float(), torch.FloatTensor)
         self.assertIsInstance(x.int(), torch.IntTensor)
-        if torch.cuda.is_available():
-            self.assertIsInstance(x.float().cuda(), torch.cuda.FloatTensor)
-            self.assertIsInstance(x.int().cuda(), torch.cuda.IntTensor)
-            self.assertIsInstance(x.int().cuda().cpu(), torch.IntTensor)
-            if torch.cuda.device_count() >= 2:
-                x2 = x.float().cuda(1)
-                self.assertIsInstance(x2, torch.cuda.FloatTensor)
-                self.assertIs(x2.get_device(), 1)
-                x2 = x.float().cuda()
-                self.assertIsInstance(x2, torch.cuda.FloatTensor)
-                self.assertIs(x2.get_device(), 0)
-                x2 = x2.cuda(1)
-                self.assertIsInstance(x2, torch.cuda.FloatTensor)
-                self.assertIs(x2.get_device(), 1)
-                y = Variable(torch.randn(5).cuda(1), requires_grad=True)
-                y.cpu().sum().backward()
-                self.assertIs(y.grad.get_device(), 1)
-                self.assertIs(y.long().get_device(), 1)
 
         for t in [
             torch.DoubleTensor,
@@ -4925,27 +4908,8 @@ class TestAutograd(TestCase):
                 self.assertIsInstance(x.type(t_dtype), t)
                 self.assertIs(t_dtype, x.type(t_dtype).dtype)
                 self.assertEqual(y.data_ptr(), y.type(t).data_ptr())
-                if torch.cuda.is_available():
-                    for x_cuda in (True, False):
-                        for y_cuda in (True, False):
-                            x_c = x.cuda() if x_cuda else x
-                            y_c = y.cuda() if y_cuda else y
-                            _, y_type = y_c.type().rsplit(".", 1)
-                            y_typestr = ("torch.cuda." if y_cuda else "torch.") + y_type
-                            self.assertEqual(y_c.type(), x_c.type(y_typestr).type())
-                            self.assertIs(y_c.dtype, x_c.type(y_c.dtype).dtype)
-                            self.assertEqual(
-                                y_c.data_ptr(),
-                                y_c.cuda().data_ptr() if y_cuda else y_c.data_ptr(),
-                            )
 
-        self._test_type_conversion_backward(lambda x: x)
-        if torch.cuda.is_available():
-            self._test_type_conversion_backward(lambda x: x.cuda())
-            if torch.cuda.device_count() >= 2:
-                # one of these has to be the non-default device
-                self._test_type_conversion_backward(lambda x: x.cuda(0))
-                self._test_type_conversion_backward(lambda x: x.cuda(1))
+        _test_type_conversion_backward(self, lambda x: x)
 
     def test_isolated_node(self):
         x = torch.randn(5, 5, requires_grad=True)
@@ -5938,7 +5902,7 @@ Done""",
                 return x * 2
 
         x = torch.rand(3, 4)
-        traced_foo = torch.jit.trace(foo, x)
+        traced_foo = torch.jit._trace.trace(foo, x)
 
         def bar(x):
             with record_function("in_bar") as rf:
@@ -5952,7 +5916,7 @@ Done""",
                     y = y * 2
                 return y
 
-        traced_bar = torch.jit.trace(bar, x)
+        traced_bar = torch.jit._trace.trace(bar, x)
 
         with profile(use_kineto=kineto_available()) as p:
             traced_bar(x)
@@ -7931,36 +7895,6 @@ Done""",
             RuntimeError, "must be floating point or complex dtype"
         ):
             a.data = c
-
-    @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
-    def test_thread_shutdown(self):
-        code = """import torch
-from torch.autograd import Function
-class MyFunction(Function):
-    @staticmethod
-    def forward(ctx, x):
-        return x
-
-    @staticmethod
-    def backward(ctx, grad):
-        return grad
-
-# Run on the accelerator if available to ensure that the worker thread
-# is properly initialized by the time we exit.
-device = torch.accelerator.current_accelerator() if torch.accelerator.is_available() else "cpu"
-
-for shape in [(1,), ()]:
-    v = torch.ones(shape, requires_grad=True, device=device)
-    MyFunction.apply(v).backward()
-"""
-        s = TestCase.runWithPytorchAPIUsageStderr(code)
-        # The autograd engine creates worker threads only when accelerator devices are present.
-        # So make sure that we do shutdown threads when we're testing an accelerator and make
-        # sure that there is no thread to shutdown when we're not using an accelerator.
-        if torch.accelerator.is_available():
-            self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
-        else:
-            self.assertNotRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
 
     @unittest.skipIf(
         IS_MACOS,
@@ -16500,53 +16434,6 @@ class TestMultithreadAutograd(TestCase):
             5 * (4 * x_retain**3 + 6 * (x_retain**2) + 4 * x_retain + 1),
         )
 
-    def test_fork_join_in_middle(self):
-        # multiple backward with jit threads (fork/join primitive)
-        # similar to test_python_thread_in_middle, we test with retain_graph=False/True
-
-        # Case 1: multiple grad() calls with jit threads, retain_graph=False
-        # should throw error in some threads with no retain_graph.
-        @torch.jit.script
-        def train_fn_jit_no_retain(middle, orig_x):
-            y = middle + middle**2
-            return torch.autograd.grad([y.sum()], [orig_x])
-
-        @torch.jit.script
-        def train_fn_fork_join_calls_no_retain(x):
-            y_no_retain = (x + 3) * (x + 4) * 0.5
-
-            fut = torch.jit._fork(train_fn_jit_no_retain, y_no_retain, x)
-            grad_hat = train_fn_jit_no_retain(y_no_retain, x)
-            grad = torch.jit._wait(fut)
-            return grad, grad_hat
-
-        try:
-            train_fn_fork_join_calls_no_retain(torch.randn(5, 5, requires_grad=True))
-        except RuntimeError as error:
-            self.assertRegex(str(error), "Specify retain_graph=True")
-
-        # Case 2: no error with retain_graph=True
-        @torch.jit.script
-        def train_fn_jit_retain(middle, orig_x):
-            y = middle + middle**2
-            return torch.autograd.grad([y.sum()], [orig_x], retain_graph=True)
-
-        @torch.jit.script
-        def train_fn_fork_join_calls_retain(x):
-            y_retain = (x + 3) * (x + 4) * 0.5
-            fut1 = torch.jit._fork(train_fn_jit_retain, y_retain, x)
-            fut2 = torch.jit._fork(train_fn_jit_retain, y_retain, x)
-            grad = train_fn_jit_retain(y_retain, x)
-            grad1 = torch.jit._wait(fut1)
-            grad2 = torch.jit._wait(fut2)
-            return grad, grad1, grad2
-
-        grad, grad1, grad2 = train_fn_fork_join_calls_retain(
-            torch.randn(5, 5, requires_grad=True)
-        )
-        self.assertEqual(grad, grad1)
-        self.assertEqual(grad, grad2)
-
     def test_preserve_backtrace(self):
         class Foo(torch.autograd.Function):
             @staticmethod
@@ -19229,8 +19116,93 @@ Outer.apply(x).backward()
             self.fail(error.output.decode("utf-8"))
 
 
+class TestAutogradThreadShutdown(TestCase):
+    # No hw_classification: it checks the engine's device threads both with and
+    # without an accelerator present, so it isn't GENERIC. The test takes no
+    # device parameter and the class doesn't use instantiate_device_type_tests,
+    # so it isn't ACCELERATOR either. Unlabeled, it runs on every job.
+
+    @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+    def test_thread_shutdown(self):
+        code = """import torch
+from torch.autograd import Function
+class MyFunction(Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad
+
+# Run on the accelerator if available to ensure that the worker thread
+# is properly initialized by the time we exit.
+device = torch.accelerator.current_accelerator() if torch.accelerator.is_available() else "cpu"
+
+for shape in [(1,), ()]:
+    v = torch.ones(shape, requires_grad=True, device=device)
+    MyFunction.apply(v).backward()
+"""
+        s = TestCase.runWithPytorchAPIUsageStderr(code)
+        # The autograd engine creates worker threads only when accelerator devices are present.
+        # So make sure that we do shutdown threads when we're testing an accelerator and make
+        # sure that there is no thread to shutdown when we're not using an accelerator.
+        if torch.accelerator.is_available():
+            self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
+        else:
+            self.assertNotRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
+
+
 class TestAutogradCudaOnly(TestCase):
     hw_classification = HardwareClassification.CUDA
+
+    def test_type_conversions(self, device):
+        x = torch.randn(5, 5)
+        self.assertIsInstance(x.float().cuda(), torch.cuda.FloatTensor)
+        self.assertIsInstance(x.int().cuda(), torch.cuda.IntTensor)
+        self.assertIsInstance(x.int().cuda().cpu(), torch.IntTensor)
+        if torch.cuda.device_count() >= 2:
+            x2 = x.float().cuda(1)
+            self.assertIsInstance(x2, torch.cuda.FloatTensor)
+            self.assertIs(x2.get_device(), 1)
+            x2 = x.float().cuda()
+            self.assertIsInstance(x2, torch.cuda.FloatTensor)
+            self.assertIs(x2.get_device(), 0)
+            x2 = x2.cuda(1)
+            self.assertIsInstance(x2, torch.cuda.FloatTensor)
+            self.assertIs(x2.get_device(), 1)
+            y = Variable(torch.randn(5).cuda(1), requires_grad=True)
+            y.cpu().sum().backward()
+            self.assertIs(y.grad.get_device(), 1)
+            self.assertIs(y.long().get_device(), 1)
+
+        for t in [
+            torch.DoubleTensor,
+            torch.FloatTensor,
+            torch.IntTensor,
+            torch.ByteTensor,
+        ]:
+            for y_var in (True, False):
+                y = torch.randint(5, (5, 5), dtype=t.dtype)
+                y = Variable(y) if y_var else y
+                for x_cuda in (True, False):
+                    for y_cuda in (True, False):
+                        x_c = x.cuda() if x_cuda else x
+                        y_c = y.cuda() if y_cuda else y
+                        _, y_type = y_c.type().rsplit(".", 1)
+                        y_typestr = ("torch.cuda." if y_cuda else "torch.") + y_type
+                        self.assertEqual(y_c.type(), x_c.type(y_typestr).type())
+                        self.assertIs(y_c.dtype, x_c.type(y_c.dtype).dtype)
+                        self.assertEqual(
+                            y_c.data_ptr(),
+                            y_c.cuda().data_ptr() if y_cuda else y_c.data_ptr(),
+                        )
+
+        _test_type_conversion_backward(self, lambda x: x.cuda())
+        if torch.cuda.device_count() >= 2:
+            # one of these has to be the non-default device
+            _test_type_conversion_backward(self, lambda x: x.cuda(0))
+            _test_type_conversion_backward(self, lambda x: x.cuda(1))
 
     def test_profiler_emit_nvtx(self, device):
         # This test is not intended to ensure correctness of nvtx ranges.
