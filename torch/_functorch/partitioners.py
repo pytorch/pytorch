@@ -2165,12 +2165,12 @@ def functionalize_rng_ops(
         if not isinstance(candidates, tuple):
             candidates = (candidates,)
 
-        for candidate in candidates:
-            if isinstance(candidate, torch.Tensor):
-                if supports_graphsafe_rng(candidate.device):
-                    return candidate.device
+        tensor_devices = [c.device for c in candidates if isinstance(c, torch.Tensor)]
+        for device in tensor_devices:
+            if supports_graphsafe_rng(device):
+                return device
 
-        return torch.device("cpu")
+        return tensor_devices[0] if tensor_devices else torch.device("cpu")
 
     def get_sample_rng_state(device: torch.device | None) -> torch.Tensor:
         from torch._guards import detect_fake_mode
@@ -2178,13 +2178,15 @@ def functionalize_rng_ops(
         fake_mode = detect_fake_mode()
         if fake_mode is None:
             raise AssertionError("fake_mode must not be None")
-        # The RNG state has a fixed size; a symbolic size could alias an input dim.
+        # Sample the RNG state of the op's own device, as run_and_save_rng_state
+        # returns it; its size differs per device. The size is fixed, so keep it
+        # static: a symbolic size could alias an input dim.
         with fake_mode:
-            if device is not None and supports_graphsafe_rng(device):
-                return fake_mode.from_tensor(
-                    get_device_rng_state(device), static_shapes=True
-                )
-            return fake_mode.from_tensor(torch.get_rng_state(), static_shapes=True)
+            if device is None:
+                rng_state = torch.get_rng_state()
+            else:
+                rng_state = get_device_rng_state(device)
+            return fake_mode.from_tensor(rng_state, static_shapes=True)
 
     # Step 1 - Construct a mapping of rng node between the fwd and its counterpart in bwd.
     joint_graph_rng_ops = get_rng_ops(joint_module)
@@ -2224,8 +2226,8 @@ def functionalize_rng_ops(
     devices = OrderedSet(
         get_device(node_pair["fwd"]) for node_pair in recomputable_rng_ops_map.values()
     )
-    # pyrefly: ignore [unbound-name]
-    devices.discard(torch.device("cpu"))
+    # Devices without graphsafe RNG, cpu included, don't count towards the check below.
+    devices = OrderedSet(d for d in devices if d is None or supports_graphsafe_rng(d))
     # multiple graphsafe devices won't work with cudagraphs anyway,
     # fallback to non graphsafe rng checkpointing
     multi_graphsafe_devices = len(devices) > 1
