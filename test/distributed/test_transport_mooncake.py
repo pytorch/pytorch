@@ -518,6 +518,43 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         self.assertIsNone(second._watcher)
         self.assertEqual(second.poll_notifications(), [(first.peer_id, b"x")])
 
+    def test_watcher_failure_fails_waits_and_restarts(self):
+        first, second = self.make_transport_pair()
+        real = second._engine.get_notifies
+        failed = []
+
+        def fail_once_in_watcher():
+            if not failed and threading.current_thread() is second._watcher:
+                failed.append(True)
+                raise RuntimeError("transient native error")
+            return real()
+
+        with patch.object(second._engine, "get_notifies", fail_once_in_watcher):
+            with self.assertRaisesRegex(RuntimeError, "transient native error"):
+                second.wait_notifications().wait(timedelta(seconds=30))
+            self.assertIsNone(second._watcher)
+            work = second.wait_notifications()
+            first.send_notification(second.peer_id, b"after").wait()
+            self.assertTrue(work.wait(timedelta(seconds=30)))
+        self.assertEqual(second.poll_notifications(), [(first.peer_id, b"after")])
+
+    def test_send_notification_wait_honors_timeout(self):
+        first, second = self.make_transport_pair()
+        real_sync = first._engine.transfer_sync
+        release = threading.Event()
+
+        def held_sync(*args):
+            release.wait(30)
+            return real_sync(*args)
+
+        with patch.object(first._engine, "transfer_sync", held_sync):
+            work = first.send_notification(second.peer_id, b"x", timeout=0.05)
+            with self.assertRaises(TimeoutError):
+                work.wait()
+            release.set()
+            self.assertTrue(work.wait(timedelta(seconds=30)))
+        self.assertEqual(self._receive(second), [(first.peer_id, b"x")])
+
 
 _RUN_INTEGRATION = os.environ.get("RUN_MOONCAKE_INTEGRATION") == "1"
 

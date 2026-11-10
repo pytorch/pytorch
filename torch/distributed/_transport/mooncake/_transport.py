@@ -223,11 +223,14 @@ class MooncakeTransport(Transport):
         self, peer: PeerId, payload: bytes, *, timeout: float | None = None
     ) -> Work:
         self._check_notification(payload)
+        _validate_timeout(timeout)
+        wait_timeout = self._timeout if timeout is None else timeout
 
         def submit() -> _FutureWork:
             if peer not in self._peers:
                 raise ValueError("peer is not connected")
-            work = _FutureWork(self._send_notify(self._engine, peer, payload), None)
+            future = self._send_notify(self._engine, peer, payload)
+            work = _FutureWork(future, wait_timeout)
 
             def untrack(_: _ThreadFuture[None]) -> None:
                 with self._operation_lock:
@@ -326,20 +329,29 @@ class MooncakeTransport(Transport):
 
     def _watch(self) -> None:
         delay = 1e-6
-        available = None
+        available, error = None, None
         with self._notify_cv:
-            while self._available is not None:
-                self._drain_notifies()
-                if self._received:
-                    available, self._available = self._available, None
-                    break
-                self._notify_cv.wait(delay)
-                delay = min(delay * 2, 1e-3)
-            self._watcher = None
+            try:
+                while self._available is not None:
+                    self._drain_notifies()
+                    if self._received:
+                        available, self._available = self._available, None
+                        break
+                    self._notify_cv.wait(delay)
+                    delay = min(delay * 2, 1e-3)
+            except Exception as failure:
+                # Fail the pending waits; the next wait_notifications restarts
+                # the watcher.
+                available, self._available, error = self._available, None, failure
+            finally:
+                self._watcher = None
         # Outside the lock: completion runs Work callbacks, which may call back
         # into this transport.
         if available is not None:
-            available.set_result(None)
+            if error is None:
+                available.set_result(None)
+            else:
+                available.set_exception(error)
 
     def register_memory(
         self, tensor: torch.Tensor, *, timeout: float | None = None
