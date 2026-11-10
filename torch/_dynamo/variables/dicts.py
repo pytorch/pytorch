@@ -915,7 +915,12 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         # Not a C-level slot, so it lives in tp_methods rather than call_method.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict___reversed___impl)
         self.install_dict_order_guard(tx)
-        return DictKeysVariable.create(self).dict_view_reversed(tx, args, kwargs)
+        reversed_keys: list[VariableTracker] = [
+            k.vt for k in reversed(list(self.items.keys()))
+        ]
+        return variables.ListIteratorVariable(
+            reversed_keys, mutation_type=ValueMutationNew()
+        )
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L5252-L5273
     tp_methods = {
@@ -1369,14 +1374,12 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
 
 class NNModuleHooksDictVariable(ConstDictVariable):
     # Defer local hook-ID guards so equivalent modules can reuse hook dispatch.
-    def is_python_constant(self) -> bool:
-        return not self.items
-
-    def python_type(self) -> type:
-        # Ordinary empty-hook dispatch need not specialize the exact mapping type.
+    def _guard_type(self) -> None:
         if self.source:
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
-        return super().python_type()
+
+    def is_python_constant(self) -> bool:
+        return not self.items
 
     def install_dict_keys_match_guard(self) -> None:
         if self.source and not is_constant_source(self.source):
@@ -1387,12 +1390,19 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         return super()._hashable_key(key)
 
     def _store_item(self, key: HashableTracker, value: VariableTracker) -> None:
+        self._guard_type()
         self.materialize_keys()
         super()._store_item(key, value)
 
     def _update_items(self, items: dict[HashableTracker, VariableTracker]) -> None:
+        self._guard_type()
         self.materialize_keys()
         super()._update_items(items)
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._guard_type()
+        self.materialize_keys()
+        return super().tp_repr_impl(tx)
 
     def materialize_keys(self) -> dict[HashableTracker, VariableTracker]:
         # Key lookups, mutations and detached copies can observe IDs without
@@ -1403,12 +1413,14 @@ class NNModuleHooksDictVariable(ConstDictVariable):
 
     def clone(self, **kwargs: Any) -> VariableTracker:
         if self.source is not None and kwargs.get("source", self.source) is None:
+            self._guard_type()
             self.materialize_keys()
         return super().clone(**kwargs)
 
     def _new_dict(
         self, items: dict[HashableTracker, VariableTracker]
     ) -> "ConstDictVariable":
+        self._guard_type()
         self.materialize_keys()
         cls = (
             OrderedDictVariable
