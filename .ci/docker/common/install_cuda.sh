@@ -24,7 +24,17 @@ function install_cuda {
   runfile="${runfile}.run"
   wget -q https://developer.download.nvidia.com/compute/cuda/${version}/local_installers/${runfile} -O ${runfile}
   chmod +x ${runfile}
-  ./${runfile} --toolkit --silent
+  # The CUDA 13.5+ installer refuses to symlink /usr/local/cuda while /usr/local is writable
+  # by non-root users, which install_user.sh makes it (chown jenkins). Hand it back to root
+  # for the install, then restore its owner and mode.
+  usr_local_owner=$(stat -c '%u:%g' /usr/local)
+  usr_local_mode=$(stat -c '%a' /usr/local)
+  chown root:root /usr/local
+  chmod go-w /usr/local
+  # --silent prints nothing on failure; surface the installer's own log.
+  ./${runfile} --toolkit --silent || { tail -n 100 /var/log/cuda-installer.log; exit 1; }
+  chown "${usr_local_owner}" /usr/local
+  chmod "${usr_local_mode}" /usr/local
   rm -f ${runfile}
   rm -f /usr/local/cuda && ln -s /usr/local/cuda-${major_minor} /usr/local/cuda
 }
