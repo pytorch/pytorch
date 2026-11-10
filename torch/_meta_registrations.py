@@ -762,6 +762,13 @@ def meta_philox_uniform_tensor_(self, key, low, high):
     return self
 
 
+@register_meta(aten._philox_dropout.default)
+def meta_philox_dropout(self, key, p):
+    _check_philox_distribution_args("_philox_dropout", self, key)
+    torch._check(0 <= p <= 1, lambda: f"_philox_dropout: p must be in [0, 1], got {p}")
+    return torch.empty_like(self)
+
+
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
 @out_wrapper()
 def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int):
