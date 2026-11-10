@@ -1,6 +1,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
 #include <c10/util/Exception.h>
+#include <ATen/native/CPUBlas.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
@@ -1002,4 +1003,223 @@ AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace() {
 
 AOTI_TORCH_EXPORT bool torch_is_warn_always_enabled() {
   return c10::WarningUtils::get_warnAlways();
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    int32_t dtype_a,
+    int32_t dtype_b,
+    int32_t dtype_c,
+    int32_t add_C,
+    const void* A,
+    const void* B,
+    void* C,
+    int32_t is_vnni) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    const auto a_type = static_cast<c10::ScalarType>(dtype_a);
+    const auto b_type = static_cast<c10::ScalarType>(dtype_b);
+    const auto c_type = static_cast<c10::ScalarType>(dtype_c);
+    const bool add_c_bool = static_cast<bool>(add_C);
+    const bool is_vnni_bool = static_cast<bool>(is_vnni);
+
+    if (a_type == c10::ScalarType::Half &&
+        b_type == c10::ScalarType::Half &&
+        c_type == c10::ScalarType::Float) {
+      at::native::cpublas::brgemm(
+          M,
+          N,
+          K,
+          ld_a,
+          ld_b,
+          ld_c,
+          add_c_bool,
+          static_cast<const at::Half*>(A),
+          static_cast<const at::Half*>(B),
+          static_cast<float*>(C),
+          is_vnni_bool);
+    } else if (
+        a_type == c10::ScalarType::BFloat16 &&
+        b_type == c10::ScalarType::BFloat16 &&
+        c_type == c10::ScalarType::Float) {
+      at::native::cpublas::brgemm(
+          M,
+          N,
+          K,
+          ld_a,
+          ld_b,
+          ld_c,
+          add_c_bool,
+          static_cast<const at::BFloat16*>(A),
+          static_cast<const at::BFloat16*>(B),
+          static_cast<float*>(C),
+          is_vnni_bool);
+    } else if (
+        a_type == c10::ScalarType::Float &&
+        b_type == c10::ScalarType::Float &&
+        c_type == c10::ScalarType::Float) {
+      at::native::cpublas::brgemm(
+          M,
+          N,
+          K,
+          ld_a,
+          ld_b,
+          ld_c,
+          add_c_bool,
+          static_cast<const float*>(A),
+          static_cast<const float*>(B),
+          static_cast<float*>(C),
+          is_vnni_bool);
+    } else if (
+        a_type == c10::ScalarType::Byte &&
+        b_type == c10::ScalarType::Byte &&
+        c_type == c10::ScalarType::Int) {
+      at::native::cpublas::brgemm(
+          M,
+          N,
+          K,
+          ld_a,
+          ld_b,
+          ld_c,
+          add_c_bool,
+          static_cast<const unsigned char*>(A),
+          static_cast<const unsigned char*>(B),
+          static_cast<int32_t*>(C),
+          is_vnni_bool);
+    } else if (
+        a_type == c10::ScalarType::Byte &&
+        b_type == c10::ScalarType::Char &&
+        c_type == c10::ScalarType::Int) {
+      at::native::cpublas::brgemm(
+          M,
+          N,
+          K,
+          ld_a,
+          ld_b,
+          ld_c,
+          add_c_bool,
+          static_cast<const unsigned char*>(A),
+          static_cast<const signed char*>(B),
+          static_cast<int32_t*>(C),
+          is_vnni_bool);
+    } else if (
+        a_type == c10::ScalarType::Char &&
+        b_type == c10::ScalarType::Char &&
+        c_type == c10::ScalarType::Int) {
+      at::native::cpublas::brgemm(
+          M,
+          N,
+          K,
+          ld_a,
+          ld_b,
+          ld_c,
+          add_c_bool,
+          static_cast<const signed char*>(A),
+          static_cast<const signed char*>(B),
+          static_cast<int32_t*>(C),
+          is_vnni_bool);
+    } else if (
+        a_type == c10::ScalarType::Float8_e4m3fn &&
+        b_type == c10::ScalarType::Float8_e4m3fn &&
+        c_type == c10::ScalarType::Float) {
+      at::native::cpublas::brgemm(
+          M,
+          N,
+          K,
+          ld_a,
+          ld_b,
+          ld_c,
+          add_c_bool,
+          static_cast<const at::Float8_e4m3fn*>(A),
+          static_cast<const at::Float8_e4m3fn*>(B),
+          static_cast<float*>(C),
+          is_vnni_bool);
+    } else if (
+        a_type == c10::ScalarType::Float8_e5m2 &&
+        b_type == c10::ScalarType::Float8_e5m2 &&
+        c_type == c10::ScalarType::Float) {
+      at::native::cpublas::brgemm(
+          M,
+          N,
+          K,
+          ld_a,
+          ld_b,
+          ld_c,
+          add_c_bool,
+          static_cast<const at::Float8_e5m2*>(A),
+          static_cast<const at::Float8_e5m2*>(B),
+          static_cast<float*>(C),
+          is_vnni_bool);
+    } else {
+      TORCH_CHECK(
+          false,
+          "Unsupported cpublas::brgemm dtype combination: ",
+          a_type,
+          ", ",
+          b_type,
+          " -> ",
+          c_type);
+    }
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cpublas_brgemm_release(int32_t is_vnni) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::native::cpublas::brgemm_release(static_cast<bool>(is_vnni));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_default_real(
+    int32_t dtype,
+    int32_t transa,
+    int32_t transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    double alpha,
+    const void* a,
+    int64_t lda,
+    const void* b,
+    int64_t ldb,
+    double beta,
+    void* c,
+    int64_t ldc) {
+  // currently does not support complex types for alpha/beta
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    const auto scalar_type = static_cast<c10::ScalarType>(dtype);
+    const c10::Scalar alpha_scalar(alpha);
+    const c10::Scalar beta_scalar(beta);
+    auto* default_impl = at::native::cpublas::gemm_no_downcast_stub.DEFAULT;
+    TORCH_CHECK(
+        default_impl != nullptr,
+        "cpublas::gemm_no_downcast_stub.DEFAULT is not registered");
+    default_impl(
+        scalar_type,
+        static_cast<at::native::TransposeType>(transa),
+        static_cast<at::native::TransposeType>(transb),
+        m,
+        n,
+        k,
+        alpha_scalar,
+        a,
+        lda,
+        b,
+        ldb,
+        beta_scalar,
+        c,
+        ldc);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cpublas_could_pack(int32_t dtype, bool* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret = at::native::cpublas::could_pack(
+        static_cast<c10::ScalarType>(dtype));
+  });
 }
