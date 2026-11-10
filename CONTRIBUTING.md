@@ -132,10 +132,7 @@ flowchart TD
     ai -- fails pre-conditions --> closed[Closed]
     ai -- success --> triaged["Triaged PR<br/>“triaged”, one reviewer per module"]
     ai -- "fails, or “no automated triage”" --> htriage(Manual triage) --> triaged
-    triaged --> pre(Pre-review)
-    pre -- any assigned reviewer rejects --> closed
-    pre -- needs clarification --> draft
-    pre -- every assigned reviewer accepts --> dev["In development by author<br/>“in progress”"]
+    triaged --> dev["In development by author<br/>“in progress”"]
     dev --> auto(Automated review) -- passes --> rfr["Ready for review by maintainer<br/>“ready for review”"]
     auto -- changes needed --> dev
     dev -- "“no automated review”" --> rfr
@@ -150,7 +147,7 @@ flowchart TD
     classDef humanproc fill:#fef3c7,stroke:#d97706,color:#000
     class draft,ready,closed,triaged,dev,rfr,accepted,merged state
     class ai,auto,gl aiproc
-    class htriage,pre,review humanproc
+    class htriage,review humanproc
 ```
 
 Rectangles are states. Rounded boxes are processes that move an item between states: blue for AI-based processes and orange for human-based ones.
@@ -159,7 +156,7 @@ Rectangles are states. Rounded boxes are processes that move an item between sta
 |---|---|---|---|
 | Draft | (GitHub draft) | Author | Mark the PR as ready for review once the description and code are ready to be looked at. |
 | Ready | | Triage bot, or a maintainer if the bot fails or the PR has `no automated triage` | PRs that do not meet pre-conditions (detailed below) are closed. Otherwise one reviewer per module or team is assigned and `triaged` is added. |
-| Pre-review | `triaged` | Assigned reviewers | Every assigned reviewer must accept the pre-review, by reacting with a thumbs-up to the PR description or commenting `@pytorchbot pre-review accept`, for the PR to move to `in progress`. If any rejects it, it is closed or moved back to draft. |
+| Triaged | `triaged` | Bot | The bot adds `in progress`, even if the PR is already approved. This starts the automated review, unless the PR has `no automated review`. |
 | In progress | `in progress` | Author | Iterate until the PR meets the `ready for review` criteria below. With the `no automated review` label, this step is skipped. Adding that label also withdraws the automated review's change requests. |
 | Ready for review | `ready for review` | Assigned reviewers | An assigned reviewer does the full review. If significant changes are needed, they request changes and the PR goes back to `in progress`, unless it has `no automated review`. Opted-out PRs stay `ready for review` while the author addresses the feedback. |
 | Accepted | (approved review) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
@@ -178,6 +175,10 @@ If a maintainer requests changes and your PR returns to `in progress`, please ad
 
 With the `no automated review` label, your PR skips these checks and moves directly to `ready for review`. Adding the label withdraws any change requests from the automated review; a maintainer still needs to approve the PR. A maintainer requesting changes does not move it back to `in progress`; you still need to address the maintainer's feedback until the PR is accepted.
 
+**Address the automated review first**: maintainers are not expected to start reviewing your PR until it is `ready for review`. Put in the time to address the automated review's feedback before then.
+
+**Passing the automated review does not guarantee your PR lands**: a reviewer can still reject a PR that is moving in the wrong direction, for example because it needs a design discussion first or does not solve an important problem. If a PR requires a longer discussion, that discussion should happen on the associated issue before the PR is opened.
+
 **Pre-conditions**:
 
 - the PR is linked to an issue labeled `actionable` OR
@@ -185,24 +186,6 @@ With the `no automated review` label, your PR skips these checks and moves direc
 - the author names the maintainer who pre-approved the change (see the "Supported by" line of the [PR template](.github/PULL_REQUEST_TEMPLATE.md))
 
 The PR must follow the [AI policy](AI_POLICY.md).
-
-**Pre-review** is a quick review of the direction of the PR, to ensure it is worth the author's time to get it through automated review and finalize it.
-It is the author's responsibility to give the reviewers all the information they'd need to make a quick (<1m) decision for faster turnaround.
-It is always ok for a reviewer to reject a PR at pre-review, including on the basis that the description is not clear enough and the assessment would be too time consuming.
-If the PR requires a longer discussion, that discussion should happen on the associated issue before the PR is opened.
-
-To assess a PR:
-
-- Is the PR description clear, concise and reflective of the change?
-- Is this PR solving a problem that is important?
-- Is the approach of the PR clear and in line with the discussion on the issue and the PR description?
-- Is this PR modular and simple enough to review, or does it need a design discussion first?
-
-Based on that:
-
-- If a design discussion is needed: the PR is closed and the discussion moves to the issue.
-- If the description lacks the justification needed for a quick decision: the PR is closed or moved back to draft.
-- If only a minor clarification is needed: the PR is moved back to draft.
 
 **GreenLight**: PRs from authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml) can also be approved directly by [GreenLight](#greenlight).
 
