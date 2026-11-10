@@ -9910,16 +9910,14 @@ def prepare_softmax_online(x, dim):
 
 @register_lowering(aten._to_dtype_rounded, type_promotion_kind=None)
 def _to_dtype_rounded(
-    x: TensorBox, dtype: torch.dtype, rounding: str, *, memory_format=None
+    x: TensorBox, dtype: torch.dtype, round: str, *, memory_format=None
 ):
     src_dtype = x.get_dtype()
     device = x.get_device()
     if device is not None and is_triton(device):
-        # The Triton codegen reduces float64 to float32 with PTX, which is
-        # only available on CUDA.
-        supported = (
-            device.type == "cuda" and torch.version.hip is None
-        ) or src_dtype != torch.float64
+        # The Triton codegen reduces float64 to float32 with PTX on CUDA, and
+        # with integer arithmetic on ROCm.
+        supported = device.type == "cuda" or src_dtype != torch.float64
         supported = supported and is_triton_fp8_dtype_supported(dtype, device)
     else:
         supported = ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
@@ -9928,10 +9926,10 @@ def _to_dtype_rounded(
     if not supported:
         return fallback_handler(
             aten._to_dtype_rounded.default, add_to_fallback_set=False
-        )(x, dtype, rounding, memory_format=memory_format)
+        )(x, dtype, round, memory_format=memory_format)
 
     def fn(value):
-        return ops.to_dtype_rounded(value, dtype, src_dtype, rounding)
+        return ops.to_dtype_rounded(value, dtype, src_dtype, round)
 
     # Like clone, leave the layout to the scheduler rather than materializing
     # memory_format here.

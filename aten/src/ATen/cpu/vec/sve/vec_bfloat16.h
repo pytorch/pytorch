@@ -605,7 +605,14 @@ Vectorized<BFloat16> inline fmadd(
     const Vectorized<BFloat16>& a,
     const Vectorized<BFloat16>& b,
     const Vectorized<BFloat16>& c) {
-  return a * b + c;
+  // Compute in float, where the product is exact: a * b + c would round it to
+  // BFloat16 before adding.
+  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
+  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
+  const auto [c_float_low, c_float_high] = convert_bfloat16_float(c);
+  return convert_float_bfloat16(
+      fmadd(a_float_low, b_float_low, c_float_low),
+      fmadd(a_float_high, b_float_high, c_float_high));
 }
 
 template <>
