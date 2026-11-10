@@ -81,6 +81,57 @@ env.CXX = "cl"
 # -- all BUILD_*/USE_* env vars and additional passthrough variables are
 # forwarded by cmake/EnvVarForwarding.cmake so there is a single source of truth.
 
+# One build variant token. PYTORCH_VARIANT (or -C torch.variant=...) names the
+# accelerator build in the same spelling CD uses for DESIRED_CUDA, and keys the
+# build tree and the editable install tree on it, so two toolkits built from one
+# checkout never share build/ or build/install/<wheel tag>/. Unset means today's
+# layout. The environment variable wins over -C, like every declared setting.
+# SKBUILD_BUILD_DIR still overrides build-dir; set SKBUILD_EDITABLE_REBUILD_DIR
+# with it. One block per value until scikit-build-core ships declared settings
+# as template keys (scikit-build/scikit-build-core#1607); the test in
+# tools/test/test_build_config_settings.py keeps the blocks and the regex below
+# in step with each other.
+[tool.scikit-build.config-setting."torch.variant"]
+type = "str"
+env = "PYTORCH_VARIANT"
+help = "Build variant, keys build/<variant>/: cpu, cu132, cu134, rocm10.0, rocm10.1, xpu."
+
+[[tool.scikit-build.overrides]]
+if.config-setting."torch.variant" = "cpu"
+build-dir = "build/cpu"
+editable.rebuild-dir = "build/cpu/install/{wheel_tag}"
+
+[[tool.scikit-build.overrides]]
+if.config-setting."torch.variant" = "cu132"
+build-dir = "build/cu132"
+editable.rebuild-dir = "build/cu132/install/{wheel_tag}"
+
+[[tool.scikit-build.overrides]]
+if.config-setting."torch.variant" = "cu134"
+build-dir = "build/cu134"
+editable.rebuild-dir = "build/cu134/install/{wheel_tag}"
+
+[[tool.scikit-build.overrides]]
+if.config-setting."torch.variant" = "rocm10.0"
+build-dir = "build/rocm10.0"
+editable.rebuild-dir = "build/rocm10.0/install/{wheel_tag}"
+
+[[tool.scikit-build.overrides]]
+if.config-setting."torch.variant" = "rocm10.1"
+build-dir = "build/rocm10.1"
+editable.rebuild-dir = "build/rocm10.1/install/{wheel_tag}"
+
+[[tool.scikit-build.overrides]]
+if.config-setting."torch.variant" = "xpu"
+build-dir = "build/xpu"
+editable.rebuild-dir = "build/xpu/install/{wheel_tag}"
+
+[[tool.scikit-build.overrides]]
+# Any other value is a typo, not a request to build into build/.
+if.config-setting."torch.variant" = "^(?!(cpu|cu132|cu134|rocm10\\.0|rocm10\\.1|xpu)$).+"
+fail = true
+messages.after-failure = "Unknown torch.variant / PYTORCH_VARIANT value; expected one of cpu, cu132, cu134, rocm10.0, rocm10.1, xpu."
+
 [[tool.dynamic-metadata]]
 # Delegates to tools/generate_torch_version.py which resolves the version from
 # PYTORCH_BUILD_VERSION (release/nightly), PKG-INFO (sdist), or version.txt.
