@@ -91,7 +91,8 @@ unpadded prompts:
   --batch-size=1 --only=Qwen/Qwen3-0.6B --output=prefill_performance.csv
 ```
 
-Prefill requires Transformers 5.14.1 or newer.
+Prefill requires exactly Transformers 5.14.1 because cache preallocation uses
+private APIs from that release. Other versions are rejected before loading models.
 
 Prefill measures one forward over the prompt, returning last-position logits and
 populating a reusable static cache. The cache holds `prompt_length + 1999`
