@@ -3188,3 +3188,1069 @@ def aten_sum_dim_IntList(
         result = op.Cast(result, to=dtype)
 
     return result
+
+
+@onnx_impl(aten.sum.dim_IntList, complex=True)
+def aten_sum_dim_IntList_complex(
+    op: TranslationContext,
+    self: ir.Value,
+    dim: int | None = None,
+    keepdim: bool = False,
+    dtype: int = -1,
+) -> ir.Value:
+    """sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"""
+    builder = op.builder
+    if len(self.shape) == 1:
+        result = op.Identity(self)
+    elif dim is None or isinstance(dim, Sequence) and len(dim) == 0:
+        rank = len(self.shape) - 1
+        dim = builder.constant(list(range(rank)), dtype=ir.DataType.INT64)
+        result = op.ReduceSum(self, dim, keepdims=keepdim)
+    else:
+        if isinstance(dim, int):
+            dim = [dim]
+        dim = [d - 1 if d < 0 else d for d in dim]
+        result = op.ReduceSum(self, dim, keepdims=keepdim)
+
+    if dtype != -1 and dtype is not None:
+        raise NotImplementedError
+
+    return result
+
+
+@onnx_impl(aten.sym_size.int)
+def aten_sym_size(op: TranslationContext, self: ir.Value, dim: int = 0) -> ir.Value:
+    """sym_size.int(Tensor self, int dim) -> SymInt"""
+    return op.Gather(op.Shape(self), dim, axis=0)
+
+
+@onnx_impl(aten.sym_storage_offset.default)
+def aten_sym_storage_offset(
+    op: TranslationContext, self: ir.Value, dim: int = 0
+) -> ir.Value:
+    """sym_storage_offset(Tensor self, int dim) -> SymInt"""
+    builder = op.builder
+    # storage offset is not used in onnx world.
+    # the output of this function is not used.
+    return builder.constant(0, dtype=ir.DataType.INT64)
+
+
+@onnx_impl(aten.t.default)
+def aten_t(op: TranslationContext, self: ir.Value) -> ir.Value:
+    """t(Tensor(a) self) -> Tensor(a)"""
+
+    rank = len(self.shape)
+    if rank == 2:
+        result = op.Transpose(self, perm=[1, 0])
+    else:
+        # rank < 2
+        result = self
+    return result
+
+
+@onnx_impl(aten.t.default, complex=True)
+def aten_t_complex(op: TranslationContext, self: ir.Value) -> ir.Value:
+    """t(Tensor(a) self) -> Tensor(a)"""
+
+    rank = len(self.shape) - 1
+    if rank == 2:
+        result = op.Transpose(self, perm=[1, 0, 2])
+    else:
+        # rank < 2
+        result = op.Identity(self)
+    return result
+
+
+@onnx_impl(aten.topk.default)
+def aten_topk(
+    op: TranslationContext,
+    self: ir.Value,
+    k: int,
+    dim: int = -1,
+    largest: bool = True,
+    sorted: bool = True,
+) -> tuple[ir.Value, ir.Value]:
+    """topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)"""
+
+    # We do not handle scalar inputs for topk
+    values, indices = op.TopK(self, [k], axis=dim, largest=largest, sorted=sorted)
+    return values, indices
+
+
+@onnx_impl(aten.transpose.int)
+def aten_transpose(
+    op: TranslationContext, self: ir.Value, dim0: int, dim1: int
+) -> ir.Value:
+    """transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)"""
+
+    # Use trace only to construct the prem attribute in Transpose
+    self_rank = len(self.shape)  # type: ignore[attr-defined]
+
+    if self_rank == 0:
+        result = self
+    else:
+        # Python code, change when onnxscript supports this
+        dims = list(range(self_rank))
+        dims[dim0], dims[dim1] = dims[dim1], dims[dim0]
+        # Python code ends
+
+        result = op.Transpose(self, perm=dims)
+
+    return result
+
+
+@onnx_impl(aten.transpose.int, complex=True)
+def aten_transpose_complex(
+    op: TranslationContext, self: ir.Value, dim0: int, dim1: int
+) -> ir.Value:
+    """transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)"""
+
+    # Use trace only to construct the prem attribute in Transpose
+    self_rank = len(self.shape)  # type: ignore[attr-defined]
+
+    if self_rank == 0:
+        result = self
+    else:
+        # Python code, change when onnxscript supports this
+        # Handle when dim0 or dim1 is negative. ONNX uses the last axis to
+        # represent to complex axis so we need to move the dim one axis toward the start.
+        if dim0 < 0:
+            dim0 = dim0 - 1
+        if dim1 < 0:
+            dim1 = dim1 - 1
+        dims = list(range(self_rank))
+        dims[dim0], dims[dim1] = dims[dim1], dims[dim0]
+        # Python code ends
+
+        result = op.Transpose(self, perm=dims)
+
+    return result
+
+
+@onnx_impl(aten.unflatten.int)
+def aten_unflatten(
+    op: TranslationContext, self: ir.Value, dim: int, sizes: Sequence[int | ir.Value]
+) -> ir.Value:
+    """unflatten(Tensor(a) self, int dim, SymInt[] sizes) -> Tensor(a)"""
+    builder = op.builder
+
+    self_size = op.Shape(self)
+
+    # PyTorch accepts negative dim as reversed counting
+    self_rank = len(self.shape)
+    if dim < 0:
+        dim = self_rank + dim
+
+    head_start_idx = builder.constant([0], dtype=ir.DataType.INT64)
+    head_end_idx = op.Reshape(dim, builder.constant([1], dtype=ir.DataType.INT64))
+    head_part_rank = op.Slice(self_size, head_start_idx, head_end_idx)
+
+    tail_start_idx = op.Reshape(dim + 1, builder.constant([1], dtype=ir.DataType.INT64))
+    tail_end_idx = builder.constant([_INT64_MAX], dtype=ir.DataType.INT64)
+    tail_part_rank = op.Slice(self_size, tail_start_idx, tail_end_idx)
+
+    sizes = [
+        op.Reshape(size, builder.constant([1], dtype=ir.DataType.INT64))
+        for size in sizes
+    ]
+
+    # corner case 1: head part is None
+    if dim == 0:
+        final_shape = op.Concat(*sizes, tail_part_rank, axis=0)
+    # corner case 2: tail part is None
+    elif dim == self_rank - 1:
+        final_shape = op.Concat(head_part_rank, *sizes, axis=0)
+    else:
+        final_shape = op.Concat(head_part_rank, *sizes, tail_part_rank, axis=0)
+    return op.Reshape(self, final_shape, allowzero=True)
+
+
+@onnx_impl(aten.unfold.default)
+def aten_unfold(
+    op: TranslationContext, self: ir.Value, dimension: int, size: int, step: int
+) -> ir.Value:
+    """unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)"""
+    builder = op.builder
+
+    self_rank = len(self.shape)
+    if self_rank == 0:
+        result = op.Unsqueeze(self, [0])
+    else:
+        # Handle negative dimension
+        if dimension < 0:
+            dimension = dimension + self_rank
+
+        input_shape = op.Shape(self)
+        # Range requires rank 0 (scalar) inputs, so squeeze the [1] shaped
+        # Gather result down to a scalar.
+        dim_size = op.Squeeze(
+            op.Gather(
+                input_shape,
+                builder.constant([dimension], dtype=ir.DataType.INT64),
+            ),
+            builder.constant([0], dtype=ir.DataType.INT64),
+        )
+
+        # Create indices for each window
+        window_starts = op.Range(0, op.Sub(dim_size, size - 1), step)
+
+        # Create the base indices for one window
+        window_indices = list(range(size))
+
+        # Broadcast to create all indices
+        starts_expanded = op.Unsqueeze(window_starts, [1])  # [num_windows, 1]
+        indices_expanded = op.Unsqueeze(window_indices, [0])  # [1, size]
+        all_indices = op.Add(starts_expanded, indices_expanded)  # [num_windows, size]
+
+        # Gather along the specified dimension
+        result = op.Gather(self, all_indices, axis=dimension)
+
+        # The result shape is now [..., num_windows, size, ...] with num_windows at position 'dimension'.
+        # We need to move the size dimension to the end:
+        #   Current shape: [..., num_windows, size, ...]
+        #   Target shape:  [..., num_windows, ..., size]
+
+        # Move the size dimension (at position dimension+1) to the end
+        # perm need to be list[int], so have to be generated in trace_only mode
+        perm = list(range(self_rank + 1))
+        perm.append(perm.pop(dimension + 1))
+
+        result = op.Transpose(result, perm=perm)
+
+    return result
+
+
+@onnx_impl(aten.unsqueeze.default)
+def aten_unsqueeze(op: TranslationContext, self: ir.Value, dim: int) -> ir.Value:
+    """unsqueeze(Tensor(a) self, int dim) -> Tensor(a)"""
+
+    return op.Unsqueeze(self, [dim])
+
+
+@onnx_impl(aten.unsqueeze.default, complex=True)
+def aten_unsqueeze_complex(
+    op: TranslationContext, self: ir.Value, dim: int
+) -> ir.Value:
+    """unsqueeze(Tensor(a) self, int dim) -> Tensor(a)"""
+
+    if dim < 0:
+        # Account for the complex dimension in ONNX
+        dim = dim - 1
+    return op.Unsqueeze(self, [dim])
+
+
+@onnx_impl((aten.view.default, aten._unsafe_view.default))
+def aten_view(
+    op: TranslationContext, self: ir.Value, size: Sequence[int | ir.Value]
+) -> ir.Value:
+    """view(Tensor(a) self, SymInt[] size) -> Tensor(a)"""
+
+    size = common_ops.merge_dims(op, size)
+    return op.Reshape(self, size, allowzero=True)
+
+
+@onnx_impl((aten.view.default, aten._unsafe_view.default), complex=True)
+def aten_view_complex(
+    op: TranslationContext, self: ir.Value, size: Sequence[int | ir.Value]
+) -> ir.Value:
+    """view(Tensor(a) self, SymInt[] size) -> Tensor(a)"""
+
+    complex_size = common_ops.merge_dims(op, [*size, 2])
+    return op.Reshape(self, complex_size, allowzero=True)
+
+
+@onnx_impl(aten.view_as.default)
+def aten_view_as(op: TranslationContext, self: ir.Value, other: ir.Value) -> ir.Value:
+    """view_as(Tensor(a) self, Tensor other) -> Tensor(a)"""
+
+    size = op.Shape(other)
+    return op.Reshape(self, size, allowzero=True)
+
+
+@onnx_impl(aten.view_as_complex.default)
+def aten_view_as_complex(op: TranslationContext, self: ir.Value) -> ir.Value:
+    """view_as_complex(Tensor(a) self) -> Tensor(a)"""
+
+    # We always operate on the real representation of a complex number in torchlib
+    # So this is a no-op
+    return op.Identity(self)
+
+
+@onnx_impl(aten.view_as_complex_copy.default)
+def aten_view_as_complex_copy(op: TranslationContext, self: ir.Value) -> ir.Value:
+    """view_as_complex_copy(Tensor self) -> Tensor"""
+
+    # We always operate on the real representation of a complex number in torchlib
+    # So this is a no-op
+    return op.Identity(self)
+
+
+@onnx_impl(aten.view_as_real.default, complex=True)
+def aten_view_as_real(op: TranslationContext, self: ir.Value) -> ir.Value:
+    """view_as_real(Tensor(a) self) -> Tensor(a)"""
+
+    # We always operate on the real representation of a complex number in torchlib
+    # So this is a no-op
+    return op.Identity(self)
+
+
+@onnx_impl(aten.view_as_real_copy.default, complex=True)
+def aten_view_as_real_copy(op: TranslationContext, self: ir.Value) -> ir.Value:
+    """view_as_real_copy(Tensor self) -> Tensor"""
+
+    # We always operate on the real representation of a complex number in torchlib
+    # So this is a no-op
+    return op.Identity(self)
+
+
+@onnx_impl(aten.view_copy.default)
+def aten_view_copy(
+    op: TranslationContext, self: ir.Value, size: Sequence[int | ir.Value]
+) -> ir.Value:
+    """view_copy(Tensor self, SymInt[] size) -> Tensor"""
+
+    size = common_ops.merge_dims(op, size)
+    return op.Reshape(self, size)
+
+
+@onnx_impl(
+    (aten.where.Scalar, aten.where.ScalarSelf, aten.where.ScalarOther, aten.where.self)
+)
+def aten_where(
+    op: TranslationContext, condition: ir.Value, self: ir.Value, other: ir.Value
+) -> ir.Value:
+    """where.self(Tensor condition, Tensor self, Tensor other) -> Tensor"""
+
+    return op.Where(condition, self, other)
+
+
+@onnx_impl(aten.as_strided.default)
+def aten_as_strided(
+    op: TranslationContext,
+    self: ir.Value,
+    size: Sequence[int | ir.Value],
+    stride: Sequence[int | ir.Value],
+    storage_offset: ir.Value | None = None,
+) -> ir.Value:
+    """as_strided(Tensor(a) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a)"""
+    builder = op.builder
+
+    # torch.as_strided produces a view of `self`'s underlying linear storage
+    # with the requested `size` (the output shape) and `stride` (the step, in
+    # elements of storage, taken along each output dimension), starting at
+    # `storage_offset` elements into the storage. For an output element at
+    # position (i_0, ..., i_{n-1}) the element read from storage lives at the flat
+    # index storage_offset + sum_d i_d * stride[d]. So if we flatten `self` to 1-D
+    # and gather it with a tensor of those flat indices shaped like the output, we
+    # reproduce the view as a single Gather. This avoids the hard-to-fold loop of
+    # the previous implementation.
+    rank = len(size)
+    # ONNX exposes logical values, not backing storage. Flattening is correct only
+    # when logical row-major order matches storage order; non-contiguous views remain
+    # unsupported, as they were in the previous lowering.
+    self_flatten = op.Reshape(self, builder.constant([-1], dtype=ir.DataType.INT64))
+
+    # A missing storage_offset means "start at the beginning of the storage".
+    if storage_offset is None:
+        storage_offset = 0
+
+    static_inputs = (
+        all(isinstance(s, int) for s in size)
+        and all(isinstance(s, int) for s in stride)
+        and isinstance(storage_offset, int)
+    )
+    static_index_count = math.prod(size) if static_inputs else None
+    if (
+        static_index_count is not None
+        and static_index_count <= _AS_STRIDED_STATIC_INDEX_SIZE_LIMIT
+    ):
+        # Static fast path: every size/stride/offset is known at trace time, so we
+        # compute the full index tensor with NumPy and emit it as a single
+        # constant that downstream passes can fold trivially.
+        # Start from the storage_offset; the per-dimension contributions are added in.
+        indices = np.array(storage_offset, dtype=np.int64)
+        for dim, (dim_size, dim_stride) in enumerate(zip(size, stride)):
+            # Contribution of dimension `dim`: index i_dim contributes i_dim * stride[dim].
+            add_value = np.arange(dim_size, dtype=np.int64) * dim_stride
+            # Reshape that 1-D contribution so it broadcasts along `dim` only
+            # (length dim_size at position `dim`, length 1 everywhere else), which
+            # lets the running sum build the full n-D index grid.
+            broadcast_shape = [1] * rank
+            broadcast_shape[dim] = dim_size
+            indices = indices + add_value.reshape(broadcast_shape)
+        indices = op.Constant(value=ir.tensor(indices))
+    else:
+        # Build runtime indices when a SymInt is dynamic or a static index tensor
+        # would exceed the optimizer's default folded-output size limit. The loop
+        # is unrolled at trace time because rank is static, so no Loop/Scan is emitted.
+        zero = builder.constant(0, dtype=ir.DataType.INT64)
+        one = builder.constant(1, dtype=ir.DataType.INT64)
+        # `scalar_shape` reshapes a value to a 0-D scalar (shape []).
+        scalar_shape = op.Constant(value=ir.tensor(np.array([], dtype=np.int64)))
+        # Start the running index from storage_offset as an INT64 scalar; SymInt
+        # runtime values are assumed to be INT64.
+        indices = op.Reshape(storage_offset, scalar_shape)
+        for dim in range(rank):
+            # Reshape this dimension's size and stride to INT64 scalars.
+            dim_size = op.Reshape(size[dim], scalar_shape)
+            dim_stride = op.Reshape(stride[dim], scalar_shape)
+            # add_value = arange(dim_size) * dim_stride, a 1-D tensor of length dim_size
+            # holding the storage offsets contributed by index 0..dim_size-1 along `dim`.
+            add_value = op.Mul(op.Range(zero, dim_size, one), dim_stride)
+            # Insert singleton axes everywhere except `dim` so this 1-D contribution
+            # broadcasts along dimension `dim` only when added to the running index,
+            # matching the NumPy `reshape(broadcast_shape)` in the static path.
+            unsqueeze_axes = [axis for axis in range(rank) if axis != dim]
+            if unsqueeze_axes:
+                add_value = op.Unsqueeze(
+                    add_value,
+                    builder.constant(unsqueeze_axes, dtype=ir.DataType.INT64),
+                )
+            indices = op.Add(indices, add_value)
+
+    # `indices` now has shape `size`; gathering yields the strided view.
+    return op.Gather(self_flatten, indices)
+
+
+@onnx_impl((aten.diagonal.default, aten.diagonal_copy.default))
+def aten_diagonal(
+    op: TranslationContext,
+    self: ir.Value,
+    offset: int = 0,
+    dim1: int = 0,
+    dim2: int = 1,
+) -> ir.Value:
+    """diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)"""
+    builder = op.builder
+
+    is_bool = self.dtype == ir.DataType.BOOL
+
+    # perm is used to transpose the tensor to make dim1 and dim2 as the last 2 dims
+    # [0,1,2] -> [2,0,1] when dim1=0 and dim2=1
+    # [0,1,2] -> [1,0,2] when dim1=0 and dim2=2
+    # [0,1,2] -> [0,1,2] when dim1=1 and dim2=2
+    if dim1 < 0:
+        dim1 = dim1 + len(self.shape)
+    if dim2 < 0:
+        dim2 = dim2 + len(self.shape)
+
+    self_rank = len(self.shape)
+    perm = list(range(self_rank))
+    perm.remove(dim1)
+    perm.remove(dim2)
+    perm.append(dim1)
+    perm.append(dim2)
+
+    # If rank=2, then axes=[0]; if rank=3, then axes=[1]
+    # This is because computing diagonal sum is on dim2 after transpose by perm
+    axes = [self_rank - 2]
+
+    neg_1 = builder.constant([-1], dtype=ir.DataType.INT64)
+    dim1_size = op.Reshape(
+        op.Gather(op.Shape(self), dim1),
+        neg_1,
+    )  # row
+    dim2_size = op.Reshape(
+        op.Gather(op.Shape(self), dim2),
+        neg_1,
+    )  # col
+    mask_shape = op.Concat(dim1_size, dim2_size, axis=0)
+    mask = op.EyeLike(
+        op.ConstantOfShape(mask_shape),
+        k=offset,
+        output_types=[ir.TensorType(ir.DataType.FLOAT)],
+    )
+
+    if is_bool:
+        self_int = op.Cast(self, to=ir.DataType.INT64)
+        mask_int = op.Cast(mask, to=ir.DataType.INT64)
+        self_int_t = op.Transpose(self_int, perm=perm)
+        result = op.Mul(self_int_t, mask_int)
+    else:
+        mask = op.CastLike(mask, self)
+        self_t = op.Transpose(self, perm=perm)
+        result = op.Mul(self_t, mask)
+    result = op.ReduceSum(result, axes, keepdims=False)
+    # min(row, col)
+    min_dim_size = op.Min(dim1_size, dim2_size)
+    # take 2 tensors as example:
+    # one is 3x5 in size, min_dim_size = 3, dim1_size = 3
+    # the other is 5x3 in size, min_dim_size = 3, dim1_size = 5
+    # 3 rows x 5 cols     5 rows x 3 cols
+    # offset  diagonal    offset  diagonal
+    # ----------------    ----------------
+    # -4      0           -6      0
+    # -3      0           -5      0
+    # -2      1           -4      1
+    # -1      2           -3      2
+    # 0       3           -2      3
+    # 1       3           -1      3
+    # 2       3           0       3
+    # 3       2           1       2
+    # 4       1           2       1
+    # 5       0           3       0
+    # 6       0           4       0
+
+    # From above table, we can get the logic below
+    offset_val = builder.constant([offset], dtype=ir.DataType.INT64)
+    if offset < 0:
+        # row + offset
+        length = op.Add(dim1_size, offset_val)
+        start = builder.constant([0], dtype=ir.DataType.INT64)
+    else:  # offset >= 0
+        # col - offset
+        length = op.Sub(dim2_size, offset_val)
+        start = offset_val
+
+    # max(min(length, min(row, col)), 0)
+    length = op.Max(
+        op.Min(length, min_dim_size),
+        builder.constant([0], dtype=ir.DataType.INT64),
+    )
+    end = op.Add(start, length)
+    result = op.Slice(result, start, end, axes)
+
+    if is_bool:
+        result = op.Cast(result, to=ir.DataType.BOOL)
+
+    return result
+
+
+@onnx_impl((aten.index_put.default, aten._unsafe_index_put.default))
+def aten_index_put(
+    op: TranslationContext,
+    self: ir.Value,
+    indices: Sequence[ir.Value | None],
+    values: ir.Value,
+    accumulate: bool = False,
+) -> ir.Value:
+    """index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
+
+    See implementation of `torch.onnx.symbolic_opset11.index_put
+    <https://github.com/pytorch/pytorch/blob/main/torch/onnx/symbolic_opset11.py#L212>`_.
+    """
+    builder = op.builder
+    if any(index is not None and index.dtype == ir.DataType.BOOL for index in indices):
+        return _aten_index_put_bool(op, self, indices, values, accumulate)
+
+    # Ensure the number of indices matches the tensor rank by appending trailing Nones.
+    self_rank = len(self.shape)
+    if len(indices) < self_rank:
+        indices = list(indices) + [None] * (self_rank - len(indices))
+
+    # The behavior of the op is dependent on whether there are advanced indices (i.e., non-scalar tensors)
+    # and whether these advanced indices are contiguous.
+
+    # Identify advanced indices.
+    def is_advanced_index(op: TranslationContext, index):
+        # Note: In this function, the index is assumed to be either None or an int64 Tensor.
+        return index is not None
+
+    advanced_indices: list[int] = []
+    none_indices: list[int] = []
+    num_advanced_indices = 0
+    num_none_indices = 0
+
+    for i, index in enumerate(indices):
+        if is_advanced_index(op, index):
+            advanced_indices.append(i)
+            num_advanced_indices += 1
+        elif index is None:
+            none_indices.append(i)
+            num_none_indices += 1
+        else:
+            raise ValueError(f"Unhandled index at position {i}: {index}")
+
+    self_shape = op.Shape(self)
+    if num_advanced_indices == 0:
+        return op.Expand(values, self_shape)
+
+    # More than one advanced index may require broadcasting of index values
+    if num_advanced_indices > 1:
+        # Check for special case where all advanced indices have same shape.
+        # But need to ensure none of the shapes have None as a dimension, which
+        # will invalidate equality-based check.
+        first_shape = indices[advanced_indices[0]].shape
+
+        def same_shape(op: TranslationContext, other_shape: ir.Shape | None) -> bool:
+            return (
+                first_shape is not None
+                and other_shape is not None
+                and not any(d is None for d in first_shape)
+                and not any(d is None for d in other_shape)
+                and other_shape == first_shape
+            )
+
+        all_same_shape = all(same_shape(op, indices[i].shape) for i in advanced_indices)
+        if not all_same_shape:
+            # Broadcast advanced indices to a common shape.
+            advanced_index_rank = max(len(indices[i].shape) for i in advanced_indices)
+            shapes = []
+            for i in advanced_indices:
+                index = indices[i]
+                index_rank = len(index.shape)
+                index_shape = op.Shape(index)
+                if index_rank < advanced_index_rank:
+                    padding = builder.constant(
+                        [1 for _ in range(advanced_index_rank - index_rank)],
+                        dtype=ir.DataType.INT64,
+                    )
+                    index_shape = op.Concat(padding, index_shape, axis=0)
+                shapes.append(index_shape)
+            advanced_indices_shape = op.Max(*shapes)
+            indices = [
+                op.Expand(index, advanced_indices_shape)
+                if is_advanced_index(op, index)
+                else index
+                for index in indices
+            ]
+        else:
+            advanced_indices_shape = op.Shape(indices[advanced_indices[0]])
+            advanced_index_rank = len(indices[advanced_indices[0]].shape)
+    else:
+        advanced_indices_shape = op.Shape(indices[advanced_indices[0]])
+        advanced_index_rank = len(indices[advanced_indices[0]].shape)
+
+    # ONNX ScatterND supports only the case where all advanced indices appear first,
+    # followed by None indices. So, we need to transpose self and values so that the
+    # advanced indices appear first, and then transpose the result back to original
+    # order at the end.
+
+    none_indices_constant = builder.constant(none_indices, dtype=ir.DataType.INT64)
+    none_indices_shape = op.Gather(self_shape, none_indices_constant, axis=0)
+    target_shape = op.Concat(advanced_indices_shape, none_indices_shape, axis=0)
+    target_rank = advanced_index_rank + num_none_indices
+
+    # Generate indices tensor required by ONNX ScatterND by unsqueezing an extra dimension and
+    # concatenating all advanced indices along this new dimension.
+    minus_one = builder.constant([-1], dtype=ir.DataType.INT64)
+    advanced_index_values = [
+        op.Unsqueeze(indices[i], minus_one) for i in advanced_indices
+    ]
+    onnx_index = op.Concat(*advanced_index_values, axis=-1)
+
+    # Check if advanced indices are contiguous:
+    contiguous = True
+    if advanced_indices:
+        if advanced_indices[-1] - advanced_indices[0] + 1 != len(advanced_indices):
+            contiguous = False
+
+    # Bring advanced indices to front:
+    perm = advanced_indices + none_indices
+    transposed = op.Transpose(self, perm=perm)
+
+    # Expand values to match target shape:
+    # First, transpose values if necessary to match advanced indices order!
+    if contiguous:
+        # values may need to be transposed before expanding to target shape
+        num_padded_dims = target_rank - len(values.shape)
+        if num_padded_dims > 0:
+            unsqueezed_dims = builder.constant(
+                list(range(num_padded_dims)), dtype=ir.DataType.INT64
+            )
+            values = op.Unsqueeze(values, unsqueezed_dims)
+        initial_none_index_positions = list(range(advanced_indices[0]))
+        advanced_index_replacement_positions = list(
+            range(advanced_indices[0], advanced_indices[0] + advanced_index_rank)
+        )
+        final_none_index_positions = list(
+            range(advanced_indices[0] + advanced_index_rank, target_rank)
+        )
+        values_perm = (
+            advanced_index_replacement_positions
+            + initial_none_index_positions
+            + final_none_index_positions
+        )
+        values = op.Transpose(values, perm=values_perm)
+
+    expanded_values = op.Expand(values, target_shape)
+
+    updated = op.ScatterND(
+        transposed,
+        onnx_index,
+        expanded_values,
+        reduction="add" if accumulate else None,
+    )
+
+    # Inverse transpose to restore original dimension order:
+
+    inverse_perm = [0] * self_rank
+    for i, p in enumerate(perm):
+        inverse_perm[p] = i
+    result = op.Transpose(updated, perm=inverse_perm)
+    return result
+
+
+def _aten_index_put_bool(
+    op: TranslationContext,
+    self: ir.Value,
+    indices: Sequence[ir.Value | None],
+    values: ir.Value,
+    accumulate: bool = False,
+) -> ir.Value:
+    """index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor"""
+    builder = op.builder
+
+    bool_mask = indices[0]
+    if len(indices) > 1:
+        if any(index is None for index in indices):
+            raise NotImplementedError(
+                "Boolean index_put with multiple indices does not support None indices."
+            )
+
+        advanced_indices = []
+        selected_positions = []
+        minus_one = builder.constant([-1], dtype=ir.DataType.INT64)
+        for index in indices:
+            if index.dtype != ir.DataType.BOOL or len(index.shape) != 1:
+                raise NotImplementedError(
+                    "Boolean index_put with multiple indices supports only 1-D boolean masks."
+                )
+            positions = op.Reshape(
+                op.Transpose(op.NonZero(index), perm=[1, 0]),
+                minus_one,
+            )
+            selected_positions.append(positions)
+            advanced_indices.append(op.Unsqueeze(positions, minus_one))
+        onnx_index = op.Concat(*advanced_indices, axis=-1)
+        target_shape = op.Concat(
+            op.Shape(selected_positions[0]),
+            op.Slice(
+                op.Shape(self),
+                [len(indices)],
+                [len(self.shape)],
+                [0],
+            ),
+            axis=0,
+        )
+        expanded_values = op.Expand(values, target_shape)
+        return op.ScatterND(
+            self,
+            onnx_index,
+            expanded_values,
+            reduction="add" if accumulate else None,
+        )
+
+    if bool_mask is None or bool_mask.dtype != ir.DataType.BOOL:
+        raise NotImplementedError(
+            "Boolean index_put expects a boolean mask as the first index."
+        )
+
+    neg_1 = builder.constant([-1], dtype=ir.DataType.INT64)
+    self_rank = len(self.shape)
+    mask_rank = len(bool_mask.shape)
+
+    # Expand a lower-rank mask (e.g. a row mask) across the trailing dimensions of self
+    # so it selects whole slices, then collect the coordinates of every selected element.
+    # NonZero returns them in row-major order.
+    expanded_mask = bool_mask
+    for _ in range(self_rank - mask_rank):
+        expanded_mask = op.Unsqueeze(expanded_mask, neg_1)
+    expanded_mask = op.Expand(expanded_mask, op.Shape(self))
+    selected_indices = op.Transpose(op.NonZero(expanded_mask), perm=[1, 0])
+
+    # Broadcast ``values`` to the selection shape ``[num_true, *self.shape[mask_rank:]]``
+    # and flatten it to one update per selected element. This keeps scalar and
+    # broadcastable ``values`` working, matching ``self[mask] = values`` semantics.
+    num_true = op.ReduceSum(
+        op.Cast(op.Reshape(bool_mask, neg_1), to=ir.DataType.INT64),
+        keepdims=1,
+    )
+    trailing_shape = op.Slice(op.Shape(self), [mask_rank], [self_rank], [0])
+    selection_shape = op.Concat(num_true, trailing_shape, axis=0)
+    flat_values = op.Reshape(op.Expand(values, selection_shape), neg_1)
+
+    return op.ScatterND(
+        self,
+        selected_indices,
+        flat_values,
+        reduction="add" if accumulate else None,
+    )
+
+
+def aten_std(op: TranslationContext, self: ir.Value, unbiased: bool = True) -> ir.Value:
+    """std(Tensor self, bool unbiased=True) -> Tensor"""
+    var = _aten_var_onnx(op, self, correction=float(unbiased), keepdim=False)
+    return op.Sqrt(var)
+
+
+def aten_std_dim(
+    op: TranslationContext,
+    self: ir.Value,
+    dim: Sequence[int],
+    unbiased: bool | None = True,
+    keepdim: bool | None = False,
+) -> ir.Value:
+    """std.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor"""
+
+    var = _aten_var_dim_onnx(
+        op, self, dims=dim, correction=float(unbiased), keepdim=keepdim
+    )
+    return op.Sqrt(var)
+
+
+def aten_std_correction(
+    op: TranslationContext,
+    self: ir.Value,
+    # FIXME(justinchuby): Make dim Optional[Sequence[int]]
+    dim: int | None = None,
+    correction: float | None = None,
+    keepdim: bool = False,
+) -> ir.Value:
+    """std.correction(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False) -> Tensor"""
+
+    if correction is None:
+        correction = 1.0
+
+    if dim is None:
+        var = _aten_var_onnx(op, self, correction=correction, keepdim=keepdim)
+    else:
+        var = _aten_var_dim_onnx(
+            op, self, dims=dim, correction=correction, keepdim=keepdim
+        )
+    return op.Sqrt(var)
+
+
+def aten_std_mean(
+    op: TranslationContext, self: ir.Value, unbiased: bool = True
+) -> tuple[ir.Value, ir.Value]:
+    """std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)"""
+
+    # Assume bool(True) and int(1) are same in ONNX, so pass "unbiased" directly as "correction"
+    # If not this case, should be explicitly set correction value according to unbiased value
+    var, mean = _aten_var_mean_onnx(op, self, correction=float(unbiased), keepdim=False)
+    return op.Sqrt(var), mean
+
+
+def aten_std_mean_dim(
+    op: TranslationContext,
+    self: ir.Value,
+    dim: Sequence[int],
+    unbiased: bool = True,
+    keepdim: bool = False,
+) -> tuple[ir.Value, ir.Value]:
+    """std_mean.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)"""
+
+    # Although dim is Optional in signature, but we assume it must have value for this overload
+    # Assert(dim is not None)
+    var, mean = _aten_var_mean_dim_onnx(
+        op, self, dims=dim, correction=float(unbiased), keepdim=keepdim
+    )
+    return op.Sqrt(var), mean
+
+
+def aten_std_mean_correction(
+    op: TranslationContext,
+    self: ir.Value,
+    # FIXME(justinchuby): Make dim Optional[Sequence[int]]
+    dim: int | None = None,
+    correction: float | None = None,
+    keepdim: bool = False,
+) -> tuple[ir.Value, ir.Value]:
+    """std_mean.correction(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False) -> (Tensor, Tensor)"""
+
+    if correction is None:
+        correction = 1.0
+
+    if dim is None:
+        var, mean = _aten_var_mean_onnx(
+            op, self, correction=correction, keepdim=keepdim
+        )
+    else:
+        var, mean = _aten_var_mean_dim_onnx(
+            op, self, dims=dim, correction=correction, keepdim=keepdim
+        )
+    return op.Sqrt(var), mean
+
+
+def aten_var(
+    op: TranslationContext, self: ir.Value, unbiased: bool | None = True
+) -> ir.Value:
+    """var(Tensor self, bool unbiased=True) -> Tensor"""
+
+    # Assume bool(True) and int(1) are same in ONNX, so pass "unbiased" directly as "correction"
+    # If not this case, should be explicitly set correction value according to unbiased value
+    return _aten_var_onnx(op, self, correction=float(unbiased), keepdim=False)
+
+
+def aten_var_dim(
+    op: TranslationContext,
+    self: ir.Value,
+    dim: Sequence[int],
+    unbiased: bool | None = True,
+    keepdim: bool | None = False,
+) -> ir.Value:
+    """var(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor"""
+
+    return _aten_var_dim_onnx(
+        op, self, dims=dim, correction=float(unbiased), keepdim=keepdim
+    )
+
+
+def aten_var_correction(
+    op: TranslationContext,
+    self: ir.Value,
+    # FIXME(justinchuby): Make dim Optional[Sequence[int]]
+    dim: int | None = None,
+    correction: float | None = None,
+    keepdim: bool = False,
+) -> ir.Value:
+    """var.correction(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False) -> Tensor"""
+
+    if correction is None:
+        correction = 1.0
+
+    if dim is None:
+        var = _aten_var_onnx(op, self, correction=correction, keepdim=keepdim)
+    else:
+        var = _aten_var_dim_onnx(
+            op, self, dims=dim, correction=correction, keepdim=keepdim
+        )
+    return var
+
+
+def _aten_var_onnx(
+    op: TranslationContext, self: ir.Value, correction: float, keepdim: bool = False
+) -> ir.Value:
+    mean = op.ReduceMean(self, keepdims=keepdim)
+    sub_mean = op.Sub(self, mean)
+    sqr_mean = op.Mul(sub_mean, sub_mean)
+    var = op.ReduceMean(sqr_mean, keepdims=keepdim)
+    # Adjust var according to correction value
+    if correction > 0.0:
+        self_shape = op.Shape(self)
+        numel_float = op.CastLike(op.ReduceProd(self_shape, keepdims=False), self)
+        mul = op.Mul(var, numel_float)
+        sub = op.Sub(numel_float, op.CastLike(correction, self))
+        var = op.Div(mul, sub)
+
+    return var
+
+
+def _aten_var_dim_onnx(
+    op: TranslationContext,
+    self: ir.Value,
+    dims: Sequence[int],
+    correction: float,
+    keepdim: bool = False,
+) -> ir.Value:
+    builder = op.builder
+    dims = op.Reshape(
+        common_ops.merge_dims(op, dims),
+        builder.constant([-1], dtype=ir.DataType.INT64),
+    )
+    # Computer mean and var
+    sub_mean = op.Sub(self, op.ReduceMean(self, dims, keepdims=True))
+    sqr_mean = op.Mul(sub_mean, sub_mean)
+    var = op.ReduceMean(sqr_mean, dims, keepdims=keepdim)
+    # Adjust var according to correction value
+    if correction > 0.0:
+        self_shape = op.Shape(self)
+        dim_size = op.Gather(self_shape, dims, axis=0)
+        numel_float = op.CastLike(op.ReduceProd(dim_size, keepdims=False), self)
+        mul = op.Mul(var, numel_float)
+        sub = op.Sub(numel_float, op.CastLike(correction, self))
+        var = op.Div(mul, sub)
+
+    return var
+
+
+def aten_var_mean(
+    op: TranslationContext, self: ir.Value, unbiased: bool = True
+) -> tuple[ir.Value, ir.Value]:
+    """var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)"""
+
+    # Assume bool(True) and int(1) are same in ONNX, so pass "unbiased" directly as "correction"
+    # If not this case, should be explicitly set correction value according to unbiased value
+    return _aten_var_mean_onnx(op, self, correction=float(unbiased), keepdim=False)
+
+
+def aten_var_mean_dim(
+    op: TranslationContext,
+    self: ir.Value,
+    dim: Sequence[int],
+    unbiased: bool = True,
+    keepdim: bool = False,
+) -> tuple[ir.Value, ir.Value]:
+    """var_mean.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)"""
+
+    # Although dim is Optional in signature, but we assume it must have value for this overload
+    # Assert(dim is not None)
+    return _aten_var_mean_dim_onnx(
+        op, self, dims=dim, correction=float(unbiased), keepdim=keepdim
+    )
+
+
+def aten_var_mean_correction(
+    op: TranslationContext,
+    self: ir.Value,
+    # FIXME(justinchuby): Make dim Optional[Sequence[int]]
+    dim: int | None = None,
+    correction: float | None = None,
+    keepdim: bool = False,
+) -> tuple[ir.Value, ir.Value]:
+    """var_mean.correction(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False) -> (Tensor, Tensor)"""
+
+    if correction is None:
+        correction = 1.0
+
+    if dim is None:
+        var, mean = _aten_var_mean_onnx(
+            op, self, correction=correction, keepdim=keepdim
+        )
+    else:
+        var, mean = _aten_var_mean_dim_onnx(
+            op, self, dims=dim, correction=correction, keepdim=keepdim
+        )
+    return var, mean
+
+
+def _aten_var_mean_onnx(
+    op: TranslationContext,
+    self: ir.Value,
+    correction: float = 1.0,
+    keepdim: bool = False,
+) -> tuple[ir.Value, ir.Value]:
+    # Compute mean and var
+    mean = op.ReduceMean(self, keepdims=keepdim)
+    sub_mean = op.Sub(self, mean)
+    sqr_mean = op.Mul(sub_mean, sub_mean)
+    var = op.ReduceMean(sqr_mean, keepdims=keepdim)
+    # Adjust var according to correction value
+    if correction > 0.0:
+        self_shape = op.Shape(self)
+        numel_float = op.CastLike(op.ReduceProd(self_shape, keepdims=False), self)
+        mul = op.Mul(var, numel_float)
+        sub = op.Sub(numel_float, op.CastLike(correction, self))
+        var = op.Div(mul, sub)
+
+    return var, mean
+
+
+def _aten_var_mean_dim_onnx(
+    op: TranslationContext,
+    self: ir.Value,
+    dims: Sequence[int],
+    correction: float,
+    keepdim: bool = False,
+) -> tuple[ir.Value, ir.Value]:
+    builder = op.builder
+    dims = op.Reshape(
+        common_ops.merge_dims(op, dims),
+        builder.constant([-1], dtype=ir.DataType.INT64),
+    )
+    # Computer mean and var
+    mean = op.ReduceMean(self, dims, keepdims=keepdim)
+    sub_mean = op.Sub(self, op.ReduceMean(self, dims, keepdims=True))
+    sqr_mean = op.Mul(sub_mean, sub_mean)
+    var = op.ReduceMean(sqr_mean, dims, keepdims=keepdim)
+    # Adjust var according to correction value
+    if correction > 0.0:
+        self_shape = op.Shape(self)
+        dim_size = op.Gather(self_shape, dims, axis=0)
+        numel_float = op.CastLike(op.ReduceProd(dim_size, keepdims=False), self)
+        mul = op.Mul(var, numel_float)
+        sub = op.Sub(numel_float, op.CastLike(correction, self))
+        var = op.Div(mul, sub)
+
+    return var, mean
