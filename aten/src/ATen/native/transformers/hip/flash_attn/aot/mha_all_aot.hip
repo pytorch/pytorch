@@ -79,6 +79,26 @@ void check_gpu_arch(hipStream_t stream) {
   }
 }
 
+// Places a numeric window, measured from the bottom-right diagonal of each
+// sequence (d = seqlen_k - seqlen_q), in AOTriton's terms. Dense calls shift it
+// on the host; varlen callers keep it and set principal_diagonal_choice (see
+// with_bottom_right_diagonal), because d differs per sequence. Without that API
+// (AOTriton < 0.15) the window stays measured from the top-left diagonal.
+std::tuple<int, int>
+bottom_right_window(int window_left,
+                    int window_right,
+                    int max_seqlen_q,
+                    int max_seqlen_k,
+                    bool is_varlen) {
+#if AOTRITON_PRINCIPAL_DIAGONAL_API
+  if (!is_varlen) {
+    const int diag = max_seqlen_k - max_seqlen_q;
+    return std::make_tuple(window_left - diag, window_right + diag);
+  }
+#endif
+  return std::make_tuple(window_left, window_right);
+}
+
 std::tuple<bool, int, int>
 calculate_swa(std::optional<int64_t> window_size_left,
               std::optional<int64_t> window_size_right,
@@ -87,19 +107,44 @@ calculate_swa(std::optional<int64_t> window_size_left,
               bool is_causal,
               bool is_varlen) {
 #if AOTRITON_V3_API  // SWA is exposed through V3 API
-  bool needs_swa = false;
   using aotriton::v3::flash::WindowValue;
-  // Default values when std::optional window_size_left/right have no value
 #if AOTRITON_PRINCIPAL_DIAGONAL_API
-  // Varlen callers set principal_diagonal_choice, which shifts numeric windows
-  // (defaults included) per sequence by seqlen_k - seqlen_q, so the defaults
-  // must stay "unbounded" for any shift.
-  int window_left = max_seqlen_q + max_seqlen_k;
-  int window_right = max_seqlen_q + max_seqlen_k;
+  // Normalize the window exactly as the CUDA build does (FA2, flash_api.cpp:
+  // mha_fwd, mha_varlen_fwd, mha_bwd, mha_varlen_bwd and set_params_fprop), so
+  // both mask the same keys. A missing side (parse_window_size maps negative
+  // sizes to none) is unbounded. In varlen, max_seqlen_k is used here, while
+  // the diagonal is placed per sequence.
+  int64_t left = window_size_left.value_or(-1);
+  int64_t right = window_size_right.value_or(-1);
+  if (left >= max_seqlen_k) { left = -1; }
+  if (right >= max_seqlen_k) { right = -1; }
+  if (is_causal) { right = 0; }
+  if (left < 0 && right < 0) {
+    return std::make_tuple(false, 0, 0);
+  }
+  if (left < 0 && right == 0) {
+    // Bottom-right causal; a window only if the caller did not say is_causal.
+    return std::make_tuple(!is_causal,
+                           static_cast<int>(WindowValue::BottomRightAligned),
+                           static_cast<int>(WindowValue::BottomRightAligned));
+  }
+  // FA2 stands in max_seqlen_k for the unbounded side. That is not unbounded on
+  // the right: the first rows of a sequence with seqlen_q > max_seqlen_k + 1
+  // lose keys, and a right side >= max_seqlen_k is dropped above even where it
+  // did exclude keys. The CUDA build behaves so, hence this build too.
+  if (left < 0) { left = max_seqlen_k; }
+  if (right < 0) { right = max_seqlen_k; }
+  auto [window_left, window_right] = bottom_right_window(static_cast<int>(left),
+                                                         static_cast<int>(right),
+                                                         max_seqlen_q,
+                                                         max_seqlen_k,
+                                                         is_varlen);
+  return std::make_tuple(true, window_left, window_right);
 #else
+  bool needs_swa = false;
+  // Default values when std::optional window_size_left/right have no value
   int window_left = max_seqlen_q;
   int window_right = max_seqlen_k;
-#endif
   if (is_causal) {
     window_left = WindowValue::BottomRightAligned;
     window_right = WindowValue::BottomRightAligned;
@@ -108,22 +153,9 @@ calculate_swa(std::optional<int64_t> window_size_left,
     needs_swa = true;
     window_left = window_size_left.value_or(window_left);
     window_right = window_size_right.value_or(window_right);
-#if AOTRITON_PRINCIPAL_DIAGONAL_API
-    if (!is_varlen) {
-      // Dense: measure user-given numeric windows from the bottom-right diagonal
-      // by shifting on the host; the principal_diagonal_choice bit is meant for
-      // varlen where the shift differs per sequence.
-      const int diag = max_seqlen_k - max_seqlen_q;
-      if (window_size_left.has_value()) {
-        window_left -= diag;
-      }
-      if (window_size_right.has_value()) {
-        window_right += diag;
-      }
-    }
-#endif
   }
   return std::make_tuple(needs_swa, window_left, window_right);
+#endif
 #else
   if (window_size_left.has_value() || window_size_right.has_value()) {
     TORCH_WARN_ONCE("Current AOTriton does not support sliding window attention (SWA)."
@@ -170,9 +202,9 @@ prepare_philox_arguments(float p_dropout, int64_t counter_offset) {
 // The mem-efficient API's window_size is a number of keys ending at the causal
 // diagonal: key j is visible to query i iff i + d - window_size < j <= i + d,
 // where d = 0 (top-left) or seqlen_k - seqlen_q (bottom-right). AOTriton windows
-// are inclusive: (window_size - 1, 0) around that diagonal. The bottom-right
-// shift reuses calculate_swa; varlen callers must additionally set
-// with_bottom_right_diagonal on VarlenBits.
+// are inclusive: (window_size - 1, 0) around that diagonal. This is not FA2's
+// window, so it skips calculate_swa's normalization; varlen callers must
+// additionally set with_bottom_right_diagonal on VarlenBits.
 std::tuple<int, int>
 mem_eff_window_aot(int64_t window_size,
                    bool bottom_right,
@@ -185,14 +217,11 @@ mem_eff_window_aot(int64_t window_size,
   if (!bottom_right) {
     return std::make_tuple(window_left, 0);
   }
-  auto [needs_swa, left, right] = calculate_swa(window_left,
-                                                0,
-                                                static_cast<int>(max_seqlen_q),
-                                                static_cast<int>(max_seqlen_k),
-                                                false,
-                                                is_varlen);
-  (void)needs_swa;
-  return std::make_tuple(left, right);
+  return bottom_right_window(window_left,
+                             0,
+                             static_cast<int>(max_seqlen_q),
+                             static_cast<int>(max_seqlen_k),
+                             is_varlen);
 }
 
 #define CHECK_DEVICE(x) TORCH_CHECK(x.is_cuda(), #x " must be on CUDA")
