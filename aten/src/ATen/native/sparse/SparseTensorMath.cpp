@@ -53,6 +53,7 @@
 #include <ATen/ops/floor_divide.h>
 #include <ATen/ops/floor_divide_native.h>
 #include <ATen/ops/hspmm_native.h>
+#include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/mul_native.h>
@@ -355,30 +356,15 @@ Tensor norm_sparse(const SparseTensor& self, const Scalar& p) {
 Tensor norm_sparse(const SparseTensor& self, const std::optional<Scalar>& p, IntArrayRef dim, bool keepdim, std::optional<ScalarType> dtype) {
   AT_ASSERT(self.is_sparse());
   if (!dim.empty()) {
-    // Only full reductions are supported, so check if that is the case
-    int64_t ndim = self.dim();
-    bool passed_full_reduction_check = static_cast<size_t>(ndim) == dim.size();
-    if (passed_full_reduction_check) {
-      auto dim_ = dim.vec();
-      maybe_wrap_dims(dim_, ndim);
-      std::vector<bool> dims_check(ndim, false);
-      // Need to check for duplicates, and fail if any are found
-      for (auto dim_ind : dim_) {
-        if (dims_check[dim_ind]) {
-          passed_full_reduction_check = false;
-          break;
-        }
-        dims_check[dim_ind] = true;
-      }
-    }
-    TORCH_CHECK(passed_full_reduction_check,
-      "norm_sparse currently only supports full reductions, so 'dim' must either be empty or contain all dimensions of the input");
+    const auto ndim = static_cast<size_t>(self.dim());
+    TORCH_CHECK(dim_list_to_bitset(dim, ndim).count() == ndim,
+      "norm on sparse tensors only supports full reductions: 'dim' must either be empty or contain all dimensions of the input");
   }
-  TORCH_CHECK(keepdim == false, "norm_sparse currently does not support keepdim=True");
-  TORCH_CHECK(!dtype.has_value(), "norm_sparse currently does not support 'dtype' argument");
   constexpr auto TWO = 2.0;
   auto p_ = p.value_or(TWO);
-  return self.coalesce()._values().norm(p_);
+  auto result = at::linalg_vector_norm(
+      self.coalesce()._values(), p_, std::nullopt, /*keepdim=*/false, dtype);
+  return keepdim ? result.view(DimVector(self.dim(), 1)) : result;
 }
 
 // --------------------------------------------------------------------
@@ -1496,6 +1482,10 @@ SparseTensor& _sspaddmm_out_cpu(
   TORCH_CHECK(!sparse_.is_cuda(), "sspaddmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
   TORCH_CHECK(!dense.is_cuda(), "sspaddmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
 
+  TORCH_CHECK(t.layout() == kSparse,
+      "sspaddmm: expected 'self' to have sparse layout, got 'self' with layout ", t.layout());
+  TORCH_CHECK(r.layout() == kSparse,
+      "sspaddmm: expected 'out' to have sparse layout, got 'out' with layout ", r.layout());
   TORCH_CHECK(sparse_.layout() == kSparse,
       "sspaddmm: expected 'mat1' to have sparse layout, got 'mat1' with layout ", sparse_.layout());
   TORCH_CHECK(dense.layout() == kStrided,
@@ -1517,6 +1507,11 @@ SparseTensor& _sspaddmm_out_cpu(
   // NB: This has to occur before the checks, because r may alias t.
   // See test_saddmm
   get_sparse_impl(r)->raw_resize_(2, 0, {dim_i, dim_k});
+
+  TORCH_CHECK(t.sparse_dim() == 2,
+      "sspaddmm: Argument #1: matrices expected, got ", t.sparse_dim(), "D tensor");
+  TORCH_CHECK(t.dense_dim() == 0,
+      "sspaddmm: Argument #1: scalar values expected, got ", t.dense_dim(), "D values");
 
   TORCH_CHECK(dense.size(0) == dim_j,
       "sspaddmm: Argument #3: Expected dim 0 size ", dim_j, ", got ", dense.size(0));
