@@ -1,7 +1,7 @@
+#include <ATen/native/CPUBlas.h>
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
 #include <c10/util/Exception.h>
-#include <ATen/native/CPUBlas.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
@@ -1041,8 +1041,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
           is_vnni_bool);
     };
 
-    if (a_type == c10::ScalarType::Half &&
-        b_type == c10::ScalarType::Half &&
+    if (a_type == c10::ScalarType::Half && b_type == c10::ScalarType::Half &&
         c_type == c10::ScalarType::Float) {
       call_brgemm(
           static_cast<const at::Half*>(A),
@@ -1057,32 +1056,28 @@ AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
           static_cast<const at::BFloat16*>(B),
           static_cast<float*>(C));
     } else if (
-        a_type == c10::ScalarType::Float &&
-        b_type == c10::ScalarType::Float &&
+        a_type == c10::ScalarType::Float && b_type == c10::ScalarType::Float &&
         c_type == c10::ScalarType::Float) {
       call_brgemm(
           static_cast<const float*>(A),
           static_cast<const float*>(B),
           static_cast<float*>(C));
     } else if (
-        a_type == c10::ScalarType::Byte &&
-        b_type == c10::ScalarType::Byte &&
+        a_type == c10::ScalarType::Byte && b_type == c10::ScalarType::Byte &&
         c_type == c10::ScalarType::Int) {
       call_brgemm(
           static_cast<const unsigned char*>(A),
           static_cast<const unsigned char*>(B),
           static_cast<int32_t*>(C));
     } else if (
-        a_type == c10::ScalarType::Byte &&
-        b_type == c10::ScalarType::Char &&
+        a_type == c10::ScalarType::Byte && b_type == c10::ScalarType::Char &&
         c_type == c10::ScalarType::Int) {
       call_brgemm(
           static_cast<const unsigned char*>(A),
           static_cast<const signed char*>(B),
           static_cast<int32_t*>(C));
     } else if (
-        a_type == c10::ScalarType::Char &&
-        b_type == c10::ScalarType::Char &&
+        a_type == c10::ScalarType::Char && b_type == c10::ScalarType::Char &&
         c_type == c10::ScalarType::Int) {
       call_brgemm(
           static_cast<const signed char*>(A),
@@ -1117,11 +1112,9 @@ AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError
-torch_cpublas_brgemm_release(int32_t is_vnni) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    at::native::cpublas::brgemm_release(static_cast<bool>(is_vnni));
-  });
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm_release(int32_t is_vnni) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { at::native::cpublas::brgemm_release(static_cast<bool>(is_vnni)); });
 }
 
 AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_default_real(
@@ -1169,7 +1162,6 @@ AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_default_real(
 AOTI_TORCH_EXPORT AOTITorchError
 torch_cpublas_could_pack(int32_t dtype, bool* ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    *ret = at::native::cpublas::could_pack(
-        static_cast<c10::ScalarType>(dtype));
+    *ret = at::native::cpublas::could_pack(static_cast<c10::ScalarType>(dtype));
   });
 }

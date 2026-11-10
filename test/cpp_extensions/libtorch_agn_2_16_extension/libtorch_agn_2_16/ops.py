@@ -48,10 +48,8 @@ def my_cpublas_gemm_no_downcast_default_real(
     a, b, c, alpha=1.0, beta=0.0
 ) -> torch.Tensor:
     """Write float32 CPU GEMM into c through the stable default kernel (2.16+)."""
-    return (
-        torch.ops.libtorch_agn_2_16.my_cpublas_gemm_no_downcast_default_real.default(
-            a, b, c, alpha, beta
-        )
+    return torch.ops.libtorch_agn_2_16.my_cpublas_gemm_no_downcast_default_real.default(
+        a, b, c, alpha, beta
     )
 
 
