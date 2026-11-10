@@ -674,20 +674,18 @@ A merge of a stacked PR, ghstack or GitHub-native, holds every PR it lands to th
 
 ### Continue a GitHub-native stack after part of it lands
 
-The bot lands a PR by pushing its commit to `main` and closing the PR, so GitHub shows the PR as closed, not merged. [`gh stack`](https://github.com/github/gh-stack) skips only branches whose PR GitHub marks as merged, and treats a branch with a closed PR as one with no PR. Once the bottom of your stack has landed, `gh stack submit` pushes the landed branches again and opens new PRs for them, and `gh stack rebase`, `sync` and `push` keep rebasing and force-pushing them.
+The bot lands a PR by pushing its commit to `main` and closing the PR, so GitHub shows the PR as closed, not merged. The landed PRs stay at the bottom of the GitHub stack, and keeping them there matters: when a PR above them lands, its commit lists them as stack dependencies, and that link is what makes `@pytorchbot revert` on a landed PR also revert the PRs that landed on top of it.
 
-Before you run any of those, take the landed branches out of the stack. `<landed>` is the topmost branch that landed (the one you commented `@pytorchbot merge` on), and `<top>` is the top branch of the stack:
+[`gh stack`](https://github.com/github/gh-stack) skips only branches whose PR GitHub marks as merged, so it treats the landed branches as active branches with no PR: `gh stack submit` opens new PRs for them, `gh stack rebase`, `sync` and `push` rebase and force-push them, and `gh stack unstack` takes them out of the GitHub stack. Do not run `gh stack` on a stack until all of it has landed. Keep the rest of it up to date with plain git instead: merge `main` into the topmost landed branch, then merge each branch into the one above it, bottom to top. For a stack `A <- B <- C` whose bottom PR `A` has landed:
 
 ```bash
 git fetch origin
-git checkout <top>
-gh stack unstack  # dissolves the stack on GitHub; open PRs stay open
-git rebase --onto origin/main <landed> <top> --update-refs
-gh stack init <remaining branches, bottom to top>
-gh stack submit   # retargets the lowest remaining PR to main and recreates the stack
+git checkout A && git merge --ff-only origin/A && git merge origin/main && git push origin A
+git checkout B && git merge --ff-only origin/B && git merge A && git push origin B
+git checkout C && git merge --ff-only origin/C && git merge B && git push origin C
 ```
 
-The rebase moves only the commits of the remaining branches onto `main`, and `--update-refs` moves the branches between `<landed>` and `<top>` along with them. None of these commands needs an interactive terminal. In one, you can instead drop the landed branches with `gh stack modify`, then run `gh stack rebase` and `gh stack submit`.
+Every push is a fast-forward, and each open PR still shows only its own changes. You only need this to pick up a newer `main` or to resolve conflicts with it. New work goes the same way: commit on its branch, merge it into the branches above, and `git push`. Never add commits other than merges of `main` to a landed branch: the bot refuses to land the PRs above a closed PR whose branch has commits that never landed.
 
 ## GreenLight
 
