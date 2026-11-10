@@ -909,7 +909,12 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         # Not a C-level slot, so it lives in tp_methods rather than call_method.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict___reversed___impl)
         self.install_dict_order_guard(tx)
-        return DictKeysVariable.create(self).dict_view_reversed(tx, args, kwargs)
+        reversed_keys: list[VariableTracker] = [
+            k.vt for k in reversed(list(self.items.keys()))
+        ]
+        return variables.ListIteratorVariable(
+            reversed_keys, mutation_type=ValueMutationNew()
+        )
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L5252-L5273
     tp_methods = {
