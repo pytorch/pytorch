@@ -784,7 +784,8 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     # The Python object of a C++ FakeTensorMode, which the Python parts of fake
     # dispatch run against. Its fakes and the fake mode slot keep it alive, so
     # it must not hold a fake: GC cannot see the reference back from the fake.
-    # Hence __slots__, and final, as a subclass could add a __dict__. See
+    # Hence __slots__; a subclass could add a __dict__, so it is final, which
+    # getCppFakeTensorModeHandle enforces by accepting only this exact type. See
     # Note [C++ FakeTensorMode handle] in torch/csrc/FakeTensorMode.cpp.
     __slots__ = ("enter_stack", "_creation_traceback")
 
@@ -799,11 +800,10 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         self.enter_stack: list[_FakeModeEnterRecord] = []
         self.allow_non_fake_inputs = allow_non_fake_inputs
 
-    # Where the mode was created: the frames FakeTensorMode.stack shows, in its
-    # format. Unlike FakeTensorMode.stack it is formatted on each access (only
-    # error messages read it), and its source lines are looked up then, without
-    # the module's globals, so they can be missing for a module loaded through
-    # a loader (e.g. from a zip).
+    # Where the mode was created, like FakeTensorMode.stack. Unlike it, this is
+    # formatted on each access (only error messages read it), and its source
+    # lines are looked up then, without the module's globals, so they can be
+    # missing for a module loaded through a loader (e.g. from a zip).
     @property
     def stack(self) -> str:
         return "".join(self._creation_traceback.format())
@@ -829,18 +829,21 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         # shared, so as with FakeTensorMode, a mode entered on two threads at
         # once works only if the later entry exits first, as a worker thread's
         # does.
-        if self.enter_stack and not self.enter_stack[-1][0]:
+        noop = bool(self.enter_stack and not self.enter_stack[-1][0])
+        if noop and exc_type is None:
             _exit_fake_mode(self, self._uninstall)
             return
-        # Otherwise an exit with no matching enter on this thread (the mode was
+        # A live exit with no matching enter on this thread (the mode was
         # never entered, was already exited, or was entered on another thread)
         # would pop this mode's enter state and take this thread's own fake
         # mode out of its FAKE slot
-        if self not in _cpp_fake_mode_tls.entered:
+        entered = _cpp_fake_mode_tls.entered
+        if not noop and self not in entered:
             raise RuntimeError(
                 "CppFakeTensorMode exited without a matching enter on this thread"
             )
-        active = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+        fake_key = torch._C._TorchDispatchModeKey.FAKE
+        active = torch._C._get_dispatch_mode(fake_key)
         if active is not None and active is not self:
             # Raised before _exit_fake_mode pops this mode's enter state, so the
             # mode entered over it can still put it back when that one exits
@@ -853,15 +856,13 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
             # from an exception, take out the modes entered over this one, as
             # FakeTensorMode's exit takes out the active one, rather than mask
             # the exception
-            entered = _cpp_fake_mode_tls.entered
-            # From its last entry, as a mode can be entered over itself
-            last = len(entered) - 1 - entered[::-1].index(self)
-            above = entered[last + 1 :]
-            del entered[last + 1 :]
-            for mode in above:
-                # Drop its records down to and including its live enter
-                while mode.enter_stack and not mode.enter_stack.pop()[0]:
-                    pass
+            while entered and entered[-1] is not self:
+                mode = entered[-1]
+                _exit_fake_mode(mode, mode._uninstall)
+                # An inherited no-op entry has no local live entry.
+                active = torch._C._get_dispatch_mode(fake_key)
+                if active is self:
+                    break
         _exit_fake_mode(self, self._uninstall)
 
     # What TorchDispatchMode.__enter__ and __exit__ do for FakeTensorMode, with
