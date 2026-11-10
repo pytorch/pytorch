@@ -81,6 +81,7 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     e5m2_type,
     skipCUDAIf,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     highest_precision_complex,
@@ -4209,7 +4210,7 @@ class AOTInductorTestsTemplate:
         torch._export.aot_compile(Model(), example_inputs)
 
     @skipCUDAIf(True, "Test for x86 backend")
-    @skipIfXpu(msg="Test for x86 backend")
+    @skipXPUIf(True, "Test for x86 backend")
     @unittest.skipUnless(IS_X86, "Test for x86 backend")
     @unittest.skipIf(sys.platform == "darwin", "Skip MacOS")
     @unittest.skipIf(IS_FBCODE, "Need newer ideep")
