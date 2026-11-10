@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from torch._custom_class_base import CustomClassBase
-    from torch._subclasses.fake_tensor import CppFakeTensorMode
+    from torch._subclasses.fake_tensor import _FakeModeEnterRecord, CppFakeTensorMode
 
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
@@ -45,11 +45,8 @@ _is_in_any_mode_without_ignore_compile_internals = False
 
 class _CppFakeModeTLS(threading.local):
     def __init__(self) -> None:
-        # The CppFakeTensorModes entered through __enter__ on this thread and
-        # not yet exited, which is_in_torch_dispatch_mode() reads and __exit__
-        # checks an exit against. Like the C++ FAKE slot, it is per thread, so
-        # a thread that ends without exiting its mode leaves nothing entered.
-        self.entered: list[CppFakeTensorMode] = []
+        # Every entry, including reentry of an active or inherited mode.
+        self.stack: list[tuple[CppFakeTensorMode, _FakeModeEnterRecord]] = []
         # Whether _disable_current_modes has taken a C++ FakeTensorMode out of
         # this thread's FAKE slot, which it may hold without an entered mode
         # (on a thread that inherited it through ThreadLocalState)
@@ -67,8 +64,11 @@ def _is_cpp_fake_mode_active() -> bool:
     # _disable_current_modes, folds this to a constant guarded on calling it
     # again (constant_fold_functions_need_guards), so the fold and the guard
     # at frame entry agree.
-    tls = _cpp_fake_mode_tls
-    return _is_cpp_fake_mode_set() or tls.suspended or bool(tls.entered)
+    return (
+        _is_cpp_fake_mode_set()
+        or _cpp_fake_mode_tls.suspended
+        or bool(_cpp_fake_mode_tls.stack)
+    )
 
 
 def is_in_torch_dispatch_mode(include_infra_modes: bool = True) -> bool:
