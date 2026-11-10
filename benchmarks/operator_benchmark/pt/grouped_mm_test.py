@@ -19,11 +19,6 @@ and dW against per-group matmuls with Primus-Turbo's tolerances.
 
 On ROCm, the CK-Tile numbers need ROCM_ALLOW_GROUP_GEMM_CK_TILE=1; without it grouped_mm
 runs hipBLASLt.
-
-The timed backward also includes DenseGrad's copy of the full (B * M, N) output gradient,
-which the runner's stride-0 out.mean() gradient needs. The copy is memory-bound and costs
-most at small K (roughly 10% of backward at K = 2048 in bf16 on MI300X), so don't compare
-the backward numbers one-to-one with Primus-Turbo's.
 """
 
 # (n_routed_experts, moe_intermediate_size, hidden_size), in Primus-Turbo's order
@@ -131,15 +126,20 @@ def check_correctness(x, w, offs):
 
 class DenseGrad(torch.autograd.Function):
     """Identity whose backward densifies the gradient: the runner backprops out.mean(), whose
-    stride-0 expanded gradient grouped_mm's backward rejects."""
+    stride-0 expanded gradient grouped_mm's backward rejects. The runner repeats the same
+    backward through one graph, so the copy is made once and reused, keeping it out of the
+    timed backward."""
 
     @staticmethod
     def forward(ctx, out):
+        ctx.dense_grad = None
         return out.view_as(out)
 
     @staticmethod
     def backward(ctx, grad):
-        return grad.contiguous()
+        if ctx.dense_grad is None:
+            ctx.dense_grad = grad.contiguous()
+        return ctx.dense_grad
 
 
 class GroupedMMBenchmark(op_bench.TorchBenchmarkBase):
