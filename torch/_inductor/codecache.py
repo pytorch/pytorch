@@ -491,10 +491,7 @@ class PersistentCache(CacheBase):
                     break
             return hit
 
-        if not config.autotune_local_cache:
-            local_cache = {}
-        else:
-            local_cache = self.get_local_cache()
+        local_cache = self.get_local_cache() if config.autotune_local_cache else {}
         if (not check_cache(local_cache)) and (benchmark is not None):
             # re-benchmark everything to try to get consistent numbers from the same machine
             timings = benchmark(choices)
@@ -508,8 +505,7 @@ class PersistentCache(CacheBase):
             for choice, timing in timings.items():
                 local_cache[op][cache_key][precision][choice.hash_key()] = timing
 
-            if not bypass:
-                self.update_local_cache(local_cache)
+            self.update_local_cache(local_cache)
 
         return timings
 
