@@ -1463,6 +1463,20 @@ class TestTorchFunctionWarning(TestCase):
         self.assertEqual(result1, torch.tensor(99.0))
         self.assertEqual(result2, torch.tensor(99.0))
 
+class TestTestingOverrides(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_signatures_match_docs(self):
+        # See https://github.com/pytorch/pytorch/issues/81323
+        overrides = get_testing_overrides()
+        expected = {
+            torch.Tensor.size: "(self, dim=None)",
+            torch.Tensor.permute: "(self, *dims)",
+            torch.permute: "(input, dims)",
+        }
+        for func, signature in expected.items():
+            self.assertEqual(str(inspect.signature(overrides[func])), signature)
+
 class TestDisabledUserWarnings(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
