@@ -54,6 +54,10 @@ def _ilog2(n: int) -> int:
     return n.bit_length() - 1
 
 
+def _trailing_zeros(n: int) -> int:
+    return (n & -n).bit_length() - 1
+
+
 def _off(base, i: int):
     # Keep a static base static (see TileMap.col_base): int + int stays foldable.
     return base + i if isinstance(base, int) else base + Int32(i)
@@ -220,6 +224,24 @@ def fold_decoded(
 UNIFORM_TREE_MAX_LOADS = 64
 
 
+def _uniform_tree_issue(
+    trait, count, threads_per_block, npairs_red, flat_tail, ragged_chunk
+) -> str | None:
+    # The tree indexes one run with Int32 r, which the load cap keeps in range. It bounds
+    # the tail by the unclamped rb (no flat_tail or ragged_chunk clamp), and masked lanes
+    # read obase rather than in_base, which only overhanging chunks need.
+    max_count = threads_per_block * UNIFORM_TREE_MAX_LOADS
+    if not getattr(trait, "has_combine_equal", False):
+        return f"a trait with combine_equal, got {type(trait).__name__}"
+    if npairs_red != 1:
+        return f"one reduced run, got {npairs_red}"
+    if flat_tail or ragged_chunk:
+        return f"an unclamped run, got {flat_tail=} {ragged_chunk=}"
+    if not threads_per_block <= count <= max_count:
+        return f"{threads_per_block} to {max_count} values per output for {threads_per_block} threads, got {count}"
+    return None
+
+
 def uniform_tree_ok(
     trait,
     count,
@@ -232,16 +254,10 @@ def uniform_tree_ok(
     """Whether general-axis threads can fold count values per output as Welford trees.
 
     TileReduce also needs a linear-order general-axis fold of inputs (not partials) indexed
-    by r, which ReduceBlock's defaults give.
+    by r, which ReduceBlock's defaults give, and a block of a power-of-two warp count.
     """
-    # The tree indexes one run with Int32 r, which the load cap keeps in range, and ignores
-    # the rb and in_base clamps.
-    return (
-        getattr(trait, "has_combine_equal", False)
-        and npairs_red == 1
-        and not (flat_tail or ragged_chunk)
-        and threads_per_block <= count <= threads_per_block * UNIFORM_TREE_MAX_LOADS
-    )
+    args = (trait, count, threads_per_block, npairs_red, flat_tail, ragged_chunk)
+    return _uniform_tree_issue(*args) is None
 
 
 @cute.jit
@@ -266,7 +282,7 @@ def fold_uniform_tree(
         r = tidx + Int32(const_expr(load * threads_per_block))
         carry = trait.leaf(trait.acc(mX[obase + Int64(r) * stride]), r)
         width = 1
-        merges = ((load + 1) & -(load + 1)).bit_length() - 1
+        merges = _trailing_zeros(load + 1)
         # Not _streaming_push: combine_equal takes each level's width.
         for _ in cutlass.range_constexpr(merges):
             carry = trait.combine_equal(tree.pop(), carry, const_expr(width))
@@ -359,9 +375,8 @@ def _reduce_vec(vals, vec, op):
 def _streaming_push(tree, val, load: int, max_depth: int, op) -> None:
     # Match ATen: merge trailing_zeros(load + 1), capped at max_depth, with
     # the existing accumulator on the left.
-    trailing_zeros = ((load + 1) & -(load + 1)).bit_length() - 1
     carry = val
-    for _ in range(min(trailing_zeros, max_depth)):
+    for _ in range(min(_trailing_zeros(load + 1), max_depth)):
         carry = op(tree.pop(), carry)
     tree.append(carry)
 
@@ -730,20 +745,18 @@ class TileReduce:
             raise ValueError(f"axis must be 'row', 'col' or 'general', got {axis!r}")
         if order not in ("linear", "inner_tree"):
             raise ValueError(f"order must be 'linear' or 'inner_tree', got {order!r}")
-        run_flags = dict(flat_tail=flat_tail, ragged_chunk=ragged_chunk)
-        if uniform_tree_count and (
-            axis != "general"
-            or order != "linear"
-            or combine
-            or gidx_from != "r"
-            or not uniform_tree_ok(
-                trait, uniform_tree_count, threads_per_block, npairs_red, **run_flags
-            )
-        ):
-            max_count = threads_per_block * UNIFORM_TREE_MAX_LOADS
-            raise ValueError(
-                f"the uniform Welford tree needs a linear general-axis fold of one unclamped run of {threads_per_block} to {max_count} values with combine_equal, combine=False and gidx_from='r', got {type(trait).__name__} {axis=} {order=} {combine=} {gidx_from=} {npairs_red=} {uniform_tree_count=} {run_flags=}"
-            )
+        if uniform_tree_count:
+            if axis != "general" or order != "linear":
+                issue = f"a linear general-axis fold, got {axis=} {order=}"
+            elif combine:
+                issue = "a fold of inputs, not partials"
+            elif gidx_from != "r":
+                issue = f"indices from r, got {gidx_from=}"
+            else:
+                args = (uniform_tree_count, threads_per_block, npairs_red)
+                issue = _uniform_tree_issue(trait, *args, flat_tail, ragged_chunk)
+            if issue is not None:
+                raise ValueError(f"the uniform Welford tree needs {issue}")
         itemsize = dtype.width // 8 if dtype is not None else 0
         if ragged_vector:
             if axis != "row":
