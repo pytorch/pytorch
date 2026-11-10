@@ -24,7 +24,6 @@ errors.
 
 from __future__ import annotations
 
-import inspect
 import os
 from typing import TYPE_CHECKING
 
@@ -146,15 +145,22 @@ def run_test_output_match(
     )
 
     torchlib_op_info = tested_op_mapping[op.name]
+    if (
+        torchlib_op_info.supported_dtypes is not None
+        and dtype not in torchlib_op_info.supported_dtypes
+    ):
+        test_suite.skipTest(
+            f"dtype '{dtype}' is outside the source-supported numerical coverage "
+            f"for '{op.name}': {torchlib_op_info.supported_dtypes}"
+        )
     # Obtain the input_wrangler that manipulates the OpInfo inputs
     # to match the aten operator signature
     # An example is nn.functional.upsample_nearest2d, which has a different signature
     # than the aten operator upsample_nearest2d
     onnx_function = torchlib_op_info.op
     input_wrangler = torchlib_op_info.input_wrangler
-    native = (
-        onnx_function.__module__.startswith("torch.onnx._internal.exporter._torchlib.")
-        and next(iter(inspect.signature(onnx_function).parameters), None) == "op"
+    native = onnx_function.__module__.startswith(
+        "torch.onnx._internal.exporter._torchlib."
     )
     if (
         not native
