@@ -960,15 +960,9 @@ def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
 # implementation and add additional testing to them
 @functools.cache
 def torch_decomp_decompositions(func: OpOverload) -> bool:
-    from torch._decomp import decomposition_table
+    from torch._decomp import is_torch_decomp_decomposition
 
-    decompositions = torch._decomp.decompositions
-    # Note that the function in the decomposition table might be
-    # different from the one in the module because of the difference
-    # in out handling in aten API and torch public API
-    return decomposition_table[func].__module__.startswith(
-        "torch._decomp"
-    ) and decomposition_table[func].__name__ in dir(decompositions)
+    return is_torch_decomp_decomposition(func)
 
 
 def tree_flatten_only(ty: type[T], tree: PyTree) -> list[T]:
@@ -3992,11 +3986,9 @@ class FakeTensorMode(TorchDispatchMode):
     )
 
     def cpp_meta_supports_symint(self, func: OpOverload) -> bool:
-        from torch._meta_registrations import cpp_meta_supports_symint_ops
+        from torch._meta_registrations import cpp_meta_supports_symint
 
-        if torch.Tag.view_copy in func.tags:
-            return True
-        return func in cpp_meta_supports_symint_ops
+        return cpp_meta_supports_symint(func)
 
     lift_fns = ordered_set(aten.lift_fresh.default, aten.lift_fresh_copy.default)
 
