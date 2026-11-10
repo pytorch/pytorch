@@ -124,7 +124,7 @@ struct LpMaxFunctor {
     __shared__ T s_vals[512];
     T vals[kILP];
     T r_x[kILP];
-    for (int64_t i = 0; i < kILP; i++) {
+    for (const auto i : c10::irange(kILP)) {
       vals[i] = T(std::numeric_limits<T>::lowest());
       r_x[i] = T(std::numeric_limits<T>::lowest());
     }
@@ -327,7 +327,7 @@ struct LpNormFunctor {
     __shared__ out_opmath_t s_vals[512];
     out_opmath_t vals[kILP];
     T r_x[kILP];
-    for (int64_t i = 0; i < kILP; i++) {
+    for (const auto i : c10::irange(kILP)) {
       vals[i] = out_opmath_t(0);
       r_x[i] = T(0);
     }

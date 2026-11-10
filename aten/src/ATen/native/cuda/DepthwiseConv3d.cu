@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <tuple>
 #include <limits>
+#include <c10/util/irange.h>
 
 namespace at::native {
 namespace {
@@ -142,13 +143,13 @@ conv_depthwise3d_cuda_backward_input_kernel(
          ++k_chn) {
       const scalar_t* gout_ptr = grad_output[batch][k_chn].data();
 
-      for (int k_frame = 0; k_frame < kT; ++k_frame) {
+      for (const auto k_frame : c10::irange(kT)) {
         const int out_frame_raw = out_frame_end - k_frame * dilationT;
         const int out_frame = out_frame_raw / strideT;
-        for (int k_row = 0; k_row < kH; ++k_row) {
+        for (const auto k_row : c10::irange(kH)) {
           const int out_row_raw = out_row_end - k_row * dilationH;
           const int out_row = out_row_raw / strideH;
-          for (int k_col = 0; k_col < kW; ++k_col) {
+          for (const auto k_col : c10::irange(kW)) {
             const accscalar_t op1 = *(kernel_ptr++);
             const int out_col_raw = out_col_end - k_col * dilationW;
             const int out_col = out_col_raw / strideW;
@@ -308,7 +309,7 @@ void conv_depthwise_shape_check(
   TORCH_CHECK(weight.size(0) % input.size(-dim - 1) == 0,
               "Depthwise out channels should be a multiple of in channels, got ",
               weight.size(0), " and ", input.size(-dim - 1));
-  for (int i = 0; i < dim; ++i) {
+  for (const auto i : c10::irange(dim)) {
     TORCH_CHECK(weight.size(i + 2) == kernel_size[i],
                 "kernel size and weight size mismatch, got ",
                 kernel_size, " and ", weight.sizes());
@@ -412,7 +413,7 @@ Tensor conv_depthwise3d_cuda(
 
   auto output_size = conv_output_size(input_.sizes(), weight.sizes(),
                                       padding, stride, dilation);
-  for (size_t i = 0; i < output_size.size(); ++i) {
+  for (const auto i : c10::irange(output_size.size())) {
     TORCH_CHECK(output_size[i] > 0,
                 "Output size should be positive, got ", output_size[i], " at dim ", i);
   }
@@ -442,7 +443,7 @@ Tensor conv_depthwise3d_cuda(
                     "Output tensor is too large.");
         TORCH_CHECK(weight_.numel() <= std::numeric_limits<int32_t>::max(),
                     "Weight tensor is too large.");
-        for (int i = 0; i < 3; ++i) {
+        for (const auto i : c10::irange(3)) {
           TORCH_CHECK(padding[i] * 2 + input.size(i + 2) <= std::numeric_limits<int32_t>::max(),
                       "Padded input tensor is too large.");
         }
@@ -568,7 +569,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
                       "Output tensor is too large.");
           TORCH_CHECK(weight_.numel() <= std::numeric_limits<int32_t>::max(),
                       "Weight tensor is too large.");
-          for (int i = 0; i < 3; ++i) {
+          for (const auto i : c10::irange(3)) {
             TORCH_CHECK(padding[i] * 2 + input.size(i + 2) <= std::numeric_limits<int32_t>::max(),
                         "Padded input tensor is too large.");
           }
@@ -605,7 +606,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
                       "Output tensor is too large.");
           TORCH_CHECK(weight.numel() <= int_max,
                       "Weight tensor is too large.");
-          for (int i = 0; i < 3; ++i) {
+          for (const auto i : c10::irange(3)) {
             TORCH_CHECK(padding[i] * 2 + input.size(i + 2) <= int_max,
                         "Padded input tensor is too large.");
           }

@@ -12,6 +12,7 @@
 #include <ATen/core/TransformationHelper.h>
 #include <limits>
 #include <type_traits>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -89,7 +90,7 @@ __global__ void philox_single_key_kernel(
     memory::Vec<vec_bytes> v;
     auto* vals = reinterpret_cast<scalar_t*>(&v);
     #pragma unroll
-    for (int j = 0; j < epc; j++) {
+    for (const auto j : c10::irange(epc)) {
       vals[j] = param_func((&sample.x)[j]);
     }
     memory::st_vec<vec_bytes>(output + chunk * epc, v);
@@ -142,7 +143,7 @@ __global__ void philox_multi_key_kernel(
     memory::Vec<vec_bytes> v;
     auto* vals = reinterpret_cast<scalar_t*>(&v);
     #pragma unroll
-    for (int j = 0; j < epc; j++) {
+    for (const auto j : c10::irange(epc)) {
       vals[j] = param_func((&sample.x)[j]);
     }
     memory::st_vec<vec_bytes>(output + base, v);
@@ -223,7 +224,7 @@ void philox_distribution_kernel(
     // Handle key, self broadcasting via OffsetCalculator.
     c10::SmallVector<int64_t, MAX_DIMS> oc_sizes(key_dims);
     c10::SmallVector<int64_t, MAX_DIMS> oc_strides(key_dims);
-    for (int64_t i = 0; i < key_dims; i++) {
+    for (const auto i : c10::irange(key_dims)) {
       int64_t dim = key_dims - 1 - i;
       oc_sizes[i] = self.size(dim);
       oc_strides[i] = key.size(dim) > 1 ? key.stride(dim) : 0;

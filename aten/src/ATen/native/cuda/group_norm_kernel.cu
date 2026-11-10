@@ -10,6 +10,7 @@
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/cuda/CUDAMathCompat.h>
+#include <c10/util/irange.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/IntegerDivider.cuh>
 #include <ATen/native/cuda/Loops.cuh>
@@ -63,7 +64,7 @@ __global__ void RowwiseMomentsContiguousCUDAKernel(
   for (int64_t j = threadIdx.x; j < N_vec; j += blockDim.x) {
     const LoadT values = X_vec[j];
 #pragma unroll
-    for (int k = 0; k < VecSize; ++k) {
+    for (const auto k : c10::irange(VecSize)) {
       val = welford_op.reduce(
           val, static_cast<T_ACC>(values.val[k]), j * VecSize + k);
     }
@@ -139,9 +140,9 @@ __global__ void RowwiseMomentsChannelsLastSmallDCUDAKernel(
 
   if (threadIdx.x < GroupsPerBlock && first_group + threadIdx.x < G) {
     val = WelfordType(0, 0, 0, 0);
-    for (int64_t i = 0; i < hw_step; ++i) {
+    for (const auto i : c10::irange(hw_step)) {
       const int64_t base = i * channels_per_block + threadIdx.x * D;
-      for (int64_t j = 0; j < D; ++j) {
+      for (const auto j : c10::irange(D)) {
         val = welford_op.combine(val, val_shared_ptr[base + j]);
       }
     }
@@ -334,7 +335,7 @@ __global__ void GammaBeta1dBackwardCUDAKernel1(
     const int64_t D = C / G;
     T_ACC sum1 = 0;
     T_ACC sum2 = 0;
-    for (int64_t n = 0; n < N; ++n) {
+    for (const auto n : c10::irange(N)) {
       const int64_t nc = n * C + c;
       const int64_t ng = n * G + c / D;
       const T_ACC dy_acc = static_cast<T_ACC>(dY[nc]);
@@ -469,7 +470,7 @@ __global__ void ComputeInternalGradientsContiguousCUDAKernel(
     const LoadT dY_values = dY_vec[hw];
     const LoadT X_values = X_vec[hw];
 #pragma unroll
-    for (int i = 0; i < VecSize; ++i) {
+    for (const auto i : c10::irange(VecSize)) {
       const T_ACC dy = static_cast<T_ACC>(dY_values.val[i]);
       sum1 += dy * static_cast<T_ACC>(X_values.val[i]);
       sum2 += dy;
@@ -526,7 +527,7 @@ __global__ void ComputeInternalGradientsChannelsLastCUDAKernel(
   if (threadIdx.x < ChannelsPerBlock && first_channel + threadIdx.x < C) {
     sum1 = 0;
     sum2 = 0;
-    for (int64_t i = 0; i < hw_step; ++i) {
+    for (const auto i : c10::irange(hw_step)) {
       const int64_t index = i * ChannelsPerBlock + threadIdx.x;
       sum1 += ds_shared[index];
       sum2 += db_shared[index];
@@ -637,7 +638,7 @@ __global__ void GammaBetaBackwardCUDAKernel1(
     const int64_t D = C / G;
     T_ACC sum1 = 0;
     T_ACC sum2 = 0;
-    for (int64_t n = 0; n < N; ++n) {
+    for (const auto n : c10::irange(N)) {
       const int64_t nc = n * C + c;
       const int64_t ng = n * G + c / D;
       sum1 += dgamma ? ((ds[nc] - db[nc] * static_cast<T_ACC>(mean[ng])) *

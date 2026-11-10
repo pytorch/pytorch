@@ -25,6 +25,7 @@
 #ifndef USE_ROCM
 #include <mutex>
 #endif
+#include <c10/util/irange.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -190,7 +191,7 @@ class TunableOp {
     static void WarmUp(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
       TuningContext* ctx = getTuningContext();
       bool do_flush = ctx->IsICacheFlushEnabled();
-      for (size_t i = 0; i < num_iter; i++) {
+      for (const auto i : c10::irange(num_iter)) {
         if (do_flush) {
           at::cuda::flush_icache();
         }
@@ -210,7 +211,7 @@ class TunableOp {
       }
 
       timer.Start();
-      for (size_t i = 0; i < num_iter; i++) {
+      for (const auto i : c10::irange(num_iter)) {
         if (do_flush) {
           at::cuda::flush_icache();
         }
@@ -228,11 +229,11 @@ class TunableOp {
       bool do_flush = ctx->IsICacheFlushEnabled();
       std::vector<StreamTimerNoSync> timer(num_iter);
 
-      for (size_t i = 0; i < warmup_iter; i++) {
+      for (const auto i : c10::irange(warmup_iter)) {
         TORCH_CHECK(op->Call(param[(i+offset++)%param.size()]) == OK);
       }
 
-      for (size_t i = 0; i < num_iter; i++) {
+      for (const auto i : c10::irange(num_iter)) {
         timer[i].Start();
         TORCH_CHECK(op->Call(param[(i+offset++)%param.size()]) == OK);
         timer[i].End();
@@ -241,7 +242,7 @@ class TunableOp {
         }
       }
       at::native::tunable::Stats s;
-      for (size_t i = 0; i < num_iter; i++) {
+      for (const auto i : c10::irange(num_iter)) {
         s.sample_value(timer[i].Duration());
       }
       return s;
@@ -304,7 +305,7 @@ class TunableOp {
       TORCH_CHECK(param_count > 0);
 
       std::vector<ParamsT*> reusable_params(param_count);
-      for (size_t i = 0; i < param_count; i++) {
+      for (const auto i : c10::irange(param_count)) {
         reusable_params[i] = params->DeepCopy(use_buffer_rotation);
       }
 
@@ -314,7 +315,7 @@ class TunableOp {
       // reused across candidates; StreamTimer does not free its events
       StreamTimer probe_timer{};
 
-      for (size_t i = 0; i < candidate_names.size(); i++) {
+      for (const auto i : c10::irange(candidate_names.size())) {
         auto* candidate = GetOp(candidate_names[i]); // borrow pointer
         TORCH_CHECK(candidate != nullptr);
 

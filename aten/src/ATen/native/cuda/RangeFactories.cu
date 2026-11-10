@@ -9,6 +9,7 @@
 #include <ATen/native/RangeUtils.h>
 #include <cmath>
 #include <limits>
+#include <c10/util/irange.h>
 #if defined(USE_ROCM)
 #include <algorithm>
 #endif
@@ -44,7 +45,7 @@ template<typename index_t, typename func_t>
 C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void elementwise_kernel_with_index(index_t N, func_t f, typename function_traits<func_t>::result_type *data) {
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
+  for (const auto i : c10::irange(thread_work_size)) {
     // Widen before multiplying: block_work_size * blockIdx.x is otherwise
     // computed in 32-bit unsigned arithmetic and wraps for N >= 2**32,
     // leaving the tail of the output unwritten.

@@ -10,6 +10,7 @@
 #include <fmt/printf.h>
 #include <algorithm>
 #include <cstdint>
+#include <c10/util/irange.h>
 
 #define ROCBLAS_BETA_FEATURES_API
 #include <rocblas/rocblas.h>
@@ -205,7 +206,7 @@ auto GetRocBlasGemmTypeStringAndOps() {
   // (solution_size here) is updated to the number of solution indices filled.
   solutions.resize(std::min(static_cast<size_t>(solution_size), solution_capacity));
   std::vector<std::pair<std::string, std::unique_ptr<Callable<GemmParams<T>>>>> ret;
-  for (size_t i = 0; i < solutions.size(); ++i) {
+  for (const auto i : c10::irange(solutions.size())) {
     auto solution = static_cast<int32_t>(solutions[i]);
     auto callable = std::make_unique<RocblasGemmOp<T>>(solution);
     ret.emplace_back(std::make_pair(fmt::sprintf("Gemm_Rocblas_%d", solution), std::move(callable)));
@@ -286,7 +287,7 @@ auto GetRocBlasGemmStridedBatchedTypeStringAndOps() {
   std::sort(solutions.begin(), solutions.end());
 
   std::vector<std::pair<std::string, std::unique_ptr<Callable<GemmStridedBatchedParams<T>>>>> ret;
-  for (size_t i = 0; i < solutions.size(); ++i) {
+  for (const auto i : c10::irange(solutions.size())) {
     auto solution = static_cast<int32_t>(solutions[i]);
     auto callable = std::make_unique<RocblasGemmStridedBatchedOp<T>>(solution);
     ret.emplace_back(std::make_pair(c10::str("Gemm_Rocblas_", solution), std::move(callable)));

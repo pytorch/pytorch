@@ -47,6 +47,7 @@
 #include <cusparse.h>
 #include <cuda_runtime_api.h>
 #include <memory>
+#include <c10/util/irange.h>
 
 #define I_INFO(tensor) cuda::detail::getTensorInfo<int64_t, uint64_t>(tensor)
 #define V_INFO(tensor) cuda::detail::getTensorInfo<scalar_t, uint64_t>(tensor)
@@ -529,7 +530,7 @@ __global__ void _sparse_sum_backward_cuda_kernel(
     }
   }
   else {
-    for (int64_t out_i = out_start; out_i < out_end; out_i++) {
+    for (const auto out_i : c10::irange(out_start, out_end)) {
       grad_input_values_ti.data[out_i] = scalar_t(0);
     }
   }
@@ -560,7 +561,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
   int64_t sparse_dims_to_sum_size = 0;
   auto sparse_dims_to_keep_v = std::vector<int64_t>();
   auto dense_dims_to_sum_v = std::vector<int64_t>();
-  for (int64_t d = 0; d < input_dim; d++) {
+  for (const auto d : c10::irange(input_dim)) {
     if (dims_to_sum_b[d]) {
       if (d < input_sparse_dim) sparse_dims_to_sum_size ++;
       else dense_dims_to_sum_v.emplace_back(d + 1 - input_sparse_dim);
@@ -851,11 +852,7 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
       auto* values_start_ptr = values.data_ptr<scalar_t>();
       auto* mat2_start_ptr = mat2_contig.data_ptr<scalar_t>();
       auto* result_start_ptr = tmp_result.data_ptr<scalar_t>();
-      for (
-        int64_t cur_mat_num = 0;
-        cur_mat_num < num_matrices;
-        ++cur_mat_num
-      ) {
+      for (const auto cur_mat_num : c10::irange(num_matrices)) {
         int64_t mat_el_end_idx = mat_el_end_indices[cur_mat_num];
 
         // Create variables to view just the current set of matrices

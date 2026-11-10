@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 #include <ATen/native/Resize.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -46,7 +47,7 @@ __global__ void rrelu_with_noise_cuda_kernel(
     static_assert(sizeof(rand)/sizeof(rand.x) == unroll_factor);
 
     #pragma unroll
-    for (int ii = 0; ii < unroll_factor; ii++) {
+    for (const auto ii : c10::irange(unroll_factor)) {
       int li = linear_index + blockDim.x * gridDim.x * ii;
       if (li >= numel) {
         continue;

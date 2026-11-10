@@ -25,6 +25,7 @@
 #endif
 
 #include <algorithm>
+#include <c10/util/irange.h>
 #include <cfloat>
 #include <cmath>
 
@@ -98,7 +99,7 @@ __global__ void fractional_max_pool3d_out_frame(
               }
             }
           } else {
-            for (int64_t i = 0; i < poolSizeW; ++i) {
+            for (const auto i : c10::irange(poolSizeW)) {
               int64_t w = i + poolW;
               scalar_t val = input[batch][plane][t][h][w];
               // for consistency with THNN, favor the first max

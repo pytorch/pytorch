@@ -8,6 +8,7 @@
 
 #include <iostream>
 #include <utility>
+#include <c10/util/irange.h>
 namespace at {
 namespace native {
 
@@ -344,7 +345,7 @@ c10::SmallVector<at::Tensor> CompileAndLaunchKernel(
     .cast_common_dtype_to_outputs(true)
     .enforce_safe_casting_to_output(true)
     .check_all_same_device(true);
-  for (int i = 0; i < num_outputs; ++i) {
+  for (const auto i : c10::irange(num_outputs)) {
     config.add_owned_output(outs[i]);
   }
   for (const auto& t: tensors) {
@@ -359,7 +360,7 @@ c10::SmallVector<at::Tensor> CompileAndLaunchKernel(
   if (num_outputs > 0) {
     outputs.reserve(num_outputs);
   }
-  for (int i = 0; i < num_outputs; ++i) {
+  for (const auto i : c10::irange(num_outputs)) {
     outputs.emplace_back(iter.output(i));
   }
 

@@ -13,6 +13,7 @@
 #include <string>
 #include <variant>
 #include <vector>
+#include <c10/util/irange.h>
 
 namespace at::native {
 
@@ -85,7 +86,7 @@ static std::unique_ptr<OffsetCalculator<N>> make_unique_offset_calculator(
 
   std::array<const int64_t*, array_size> strides;
   int64_t element_sizes[array_size];
-  for (int i = 0; i < N; i++) {
+  for (const auto i : c10::irange(N)) {
     int index = IS_INPUT ? i + iter.noutputs() : i;
     strides[i] = iter.strides(index).data();
     element_sizes[i] = iter.element_size(index);
@@ -146,7 +147,7 @@ struct ArrayVariant {
     }
 
     std::visit([&](auto& a) {
-      for (auto i = 0; i < ntensors; ++i) {
+      for (const auto i : c10::irange(ntensors)) {
         a[i] = (char*)iter.data_ptr(i);
       }
     }, array);
