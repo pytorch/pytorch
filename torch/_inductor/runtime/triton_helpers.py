@@ -472,9 +472,14 @@ def online_softmax_reduce_scalar_combine(
     state, so only one max/sum per output row stays live across the loop.
     """
     rhs = tl.where(rhs_mask, rhs, float("-inf")).to(lhs_max.dtype)
-    rhs_max, rhs_sum = online_softmax_reduce(
-        rhs, tl.where(rhs_mask, 1.0, 0.0), dim, use_fast_math, strict_signed_zero
-    )
+    if strict_signed_zero:
+        rhs_max = max2_strict(rhs, dim)
+    else:
+        rhs_max = max2(rhs, dim)
+    rhs_max_keepdim = tl.expand_dims(rhs_max, dim)
+    delta = tl.where(rhs_max_keepdim == float("-inf"), 0, rhs - rhs_max_keepdim)
+    # Same sum as weighting each exp by a 0/1 mask, without the multiply.
+    rhs_sum = tl.sum(tl.where(rhs_mask, exp(delta, use_fast_math), 0.0), dim)
     return online_softmax_combine_with_sum(
         lhs_max, lhs_sum, rhs_max, rhs_sum, use_fast_math, strict_signed_zero
     )
