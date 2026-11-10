@@ -27,6 +27,7 @@ from torch.testing._internal.common_cuda import (
     BF16X9_API_SUPPORTED,
     BF16X9_SUPPORTED,
     blas_library_context,
+    prefer_cublaslt_grouped_gemm,
     IS_SM90,
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM,
@@ -108,16 +109,6 @@ def rocm_group_gemm_ck_env(value, var="ROCM_ALLOW_GROUP_GEMM_CK"):
             os.environ.pop(var, None)
         else:
             os.environ[var] = old
-
-
-@contextlib.contextmanager
-def prefer_cublaslt_grouped_gemm():
-    old = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
-    try:
-        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = True
-        yield
-    finally:
-        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = old
 
 
 @contextlib.contextmanager
@@ -1306,7 +1297,7 @@ class TestMatmulCuda(InductorTestCase):
     def test_grouped_gemm_cublaslt(self, op, jagged_size, a_row_major, b_row_major, dtype):
         A, B, offs = self.grouped_gemm_cublaslt_common(op, jagged_size, a_row_major, b_row_major, dtype)
         C_ref = self.grouped_gemm_reference(A, B, offs)
-        with prefer_cublaslt_grouped_gemm():
+        with prefer_cublaslt_grouped_gemm(True):
             C = torch._grouped_mm(A, B, offs=offs)
         self.assertEqual(C, C_ref)
 
@@ -1322,7 +1313,7 @@ class TestMatmulCuda(InductorTestCase):
             return torch._grouped_mm(A, B, offs=offs)
 
         A, B, offs = self.grouped_gemm_cublaslt_common(op, jagged_size, a_row_major, b_row_major, dtype)
-        with prefer_cublaslt_grouped_gemm():
+        with prefer_cublaslt_grouped_gemm(True):
             f = torch.compile(f_ref, fullgraph=True, mode=mode)
             C_ref = f_ref(A, B, offs)
             C = f(A, B, offs)
@@ -1404,7 +1395,7 @@ class TestMatmulCuda(InductorTestCase):
         else:
             raise AssertionError(f"Invalid op: {op}")
 
-        with prefer_cublaslt_grouped_gemm():
+        with prefer_cublaslt_grouped_gemm(True):
             C = torch._grouped_mm(A, B, offs=offs)
         self.assertEqual(C, C_ref)
 

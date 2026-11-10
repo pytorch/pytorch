@@ -9177,9 +9177,16 @@ def meta_scaled_grouped_mm_v2(
         and scale_recipe_b[0] in (vec128, block128)
         and vec128 in (scale_recipe_a[0], scale_recipe_b[0])
     )
+    nvfp4_recipe = [ScalingType.BlockWise1x16.value]
+    nvfp4 = (
+        mat_a.dtype == mat_b.dtype == torch.float4_e2m1fn_x2
+        and scale_recipe_a == scale_recipe_b
+        and scale_recipe_a in (nvfp4_recipe, nvfp4_recipe + tensorwise)
+    )
     bf16_only = (
         not fp32_block
         and not has_mnk4
+        and not nvfp4
         and (scale_recipe_a != tensorwise or scale_recipe_b != tensorwise)
     )
     message = "Grouped scaling configuration requires BFloat16 output"

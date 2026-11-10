@@ -35,6 +35,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MX_GEMM,
     PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
+    prefer_cublaslt_grouped_gemm,
     SM100OrLater,
     SM89OrLater,
     SM90OrLater,
@@ -3795,6 +3796,7 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
     @skipIfRocm
     @parametrize("recipe", ["mxfp4", "nvfp4"])
     @parametrize("side", ["a", "b"])
+    @prefer_cublaslt_grouped_gemm(False)
     @parametrize("trailing", [False, True])
     def test_scaled_grouped_mm_rejects_unsupported_mnk4_swizzle(self, device, recipe, side, trailing):
         value = torch.ones(128, 128, device=device, dtype=torch.bfloat16)
@@ -3818,6 +3820,7 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
 
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @prefer_cublaslt_grouped_gemm(False)
     def test_scaled_grouped_mm_mslk_rejects_padded_out(self, device):
         a = torch.ones(128, 128, device=device, dtype=torch.float8_e4m3fn)
         b = a.t().unsqueeze(0)
@@ -3835,6 +3838,7 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("legacy", [False, True])
+    @prefer_cublaslt_grouped_gemm(False)
     def test_scaled_grouped_mm_mslk_rejects_layout(self, device, legacy):
         a = torch.empty(2, 128, 128, device=device, dtype=torch.float8_e4m3fn)
         scale = torch.empty(2, 512, device=device, dtype=torch.float8_e8m0fnu)
@@ -3849,6 +3853,7 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
 
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @prefer_cublaslt_grouped_gemm(False)
     @parametrize("format,legacy", [("mxfp8", False), ("mxfp4", False), ("nvfp4", False), ("mxfp8", True)])
     def test_scaled_grouped_mm_mslk_rejects_group_count(self, device, format, legacy):
         offs = torch.tensor([128], device=device, dtype=torch.int32)
@@ -3864,21 +3869,25 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
             else:
                 scaled_grouped_mm_wrap(a, a.t(), **kwargs)
 
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("format", ["mxfp8", "mxfp4", "nvfp4"])
+    @prefer_cublaslt_grouped_gemm(False)
     @parametrize("out_dtype", [torch.float16, torch.float32])
-    @parametrize("fake", [False, True])
-    def test_scaled_grouped_mm_v2_rejects_blockwise_out_dtype(self, device, format, out_dtype, fake):
-        with FakeTensorMode() if fake else contextlib.nullcontext():
-            offs = torch.tensor([128], device=device, dtype=torch.int32)
-            dtype = torch.float8_e4m3fn if format == "mxfp8" else torch.float4_e2m1fn_x2
-            a = torch.empty(128, 128 if format == "mxfp8" else 64, device=device, dtype=dtype)
-            scale_dtype = torch.float8_e4m3fn if format == "nvfp4" else torch.float8_e8m0fnu
-            block_scale = torch.empty(128, 8 if format == "nvfp4" else 4, device=device, dtype=scale_dtype)
-            scale = [block_scale, torch.ones(1, device=device)] if format == "nvfp4" else block_scale
-            kwargs = _build_scaled_grouped_mm_kwargs(scale, scale, offs, format)
-            kwargs["out_dtype"] = out_dtype
-            with self.assertRaisesRegex(ValueError, "^Grouped scaling configuration requires BFloat16 output$"):
-                scaled_grouped_mm_wrap(a, a.t(), **kwargs)
+    def test_scaled_grouped_mm_v2_rejects_blockwise_out_dtype(self, device, format, out_dtype):
+        offs = torch.tensor([128], device=device, dtype=torch.int32)
+        value = torch.ones(128, 128, device=device, dtype=torch.bfloat16)
+        _, a, block_scale, global_scale = _2d_grouped_tensor_to_blocked_scaled(
+            value, 128, 1, offs, format=format
+        )
+        scale = [block_scale, global_scale] if format == "nvfp4" else block_scale
+        kwargs = _build_scaled_grouped_mm_kwargs(scale, scale, offs, format)
+        kwargs["out_dtype"] = out_dtype
+        message = "Grouped scaling configuration requires BFloat16 output" if format in ("mxfp8", "mxfp4") else (
+            f"MSLK {format.upper()} grouped GEMM requires BFloat16 output"
+        )
+        with self.assertRaisesRegex(ValueError, message):
+            scaled_grouped_mm_wrap(a, a.t(), **kwargs)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
@@ -3907,6 +3916,22 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
             del C
         if mode == "reduce-overhead":
             self.assertEqual(torch._dynamo.utils.counters["inductor"]["cudagraph_skips"], skips_before)
+
+    def scaled_grouped_gemm_cublaslt_nvfp4_helper(self, op, device):
+        ngroups = 3
+        group_sizes = [128] * ngroups
+
+        def make_group(_group, outer, k):
+            value = torch.ones((outer, k), device=device, dtype=torch.bfloat16)
+            scale = torch.ones((outer, k // 16), device=device, dtype=torch.float8_e4m3fn)
+            return _bfloat16_to_float4_e2m1fn_x2(value), to_blocked(scale)
+
+        (A, scale_a), (B_T, scale_b), offs, _, _, _ = (
+            make_grouped_gemm_inputs(
+                op, group_sizes, group_sizes, group_sizes, make_group, make_group, device
+            )
+        )
+        return A, B_T, scale_a, scale_b, offs
 
     def scaled_grouped_gemm_cublaslt_hopper_scale_helper(
         self, op, recipe_a, recipe_b, device, case="regular", out_dtype=torch.bfloat16
@@ -4027,6 +4052,57 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
         expected = combine_grouped_gemm_values(expected_groups, out_cat)
         return A, B_T, scale_a, scale_b, offs, expected
 
+    @skipIfRocm
+    @unittest.skipIf(
+        not (
+            PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM
+            and PLATFORM_SUPPORTS_MX_GEMM
+        ),
+        cublaslt_grouped_mm_skip_msg
+    )
+    @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
+    @parametrize("two_level", [False, True])
+    @parametrize("swizzle_form", ["explicit", "single", "omitted"])
+    @parametrize("use_out", [False, True])
+    @prefer_cublaslt_grouped_gemm(True)
+    def test_scaled_grouped_gemm_cublaslt_nvfp4(self, op, two_level, swizzle_form, use_out, device):
+        A, B_T, block_scale_a, block_scale_b, offs = (
+            self.scaled_grouped_gemm_cublaslt_nvfp4_helper(op, device)
+        )
+        scale_a = block_scale_a
+        scale_b = block_scale_b
+        expected_scale = 1
+        if two_level:
+            scale_a = [block_scale_a, torch.tensor([2.0], device=device)]
+            scale_b = [block_scale_b, torch.tensor([3.0], device=device)]
+            expected_scale = 6
+            kwargs = _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, "nvfp4")
+            if swizzle_form == "explicit":
+                kwargs["swizzle_a"] = kwargs["swizzle_b"] = [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE]
+        else:
+            kwargs = {
+                "scale_a": scale_a,
+                "scale_b": scale_b,
+                "scale_recipe_a": ScalingType.BlockWise1x16,
+                "scale_recipe_b": ScalingType.BlockWise1x16,
+                "swizzle_a": SwizzleType.SWIZZLE_32_4_4,
+                "swizzle_b": SwizzleType.SWIZZLE_32_4_4,
+                "offs": offs,
+            }
+        if swizzle_form == "omitted":
+            kwargs["swizzle_a"] = kwargs["swizzle_b"] = None
+        b = B_T.transpose(-2, -1)
+        if use_out:
+            out_shape = (A.size(-2), B_T.size(-2))
+            if A.dim() == B_T.dim():
+                groups = offs.numel() if offs is not None else A.size(0)
+                out_shape = (groups, *out_shape)
+            kwargs["out"] = torch.empty(out_shape, device=device, dtype=torch.bfloat16)
+        C = scaled_grouped_mm_wrap(A, b, **kwargs)
+        if use_out:
+            self.assertIs(C, kwargs["out"])
+        self.assertEqual(C, torch.full_like(C, 128 * expected_scale))
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
         cublaslt_grouped_mm_skip_msg,
@@ -4082,6 +4158,21 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
             scaled_grouped_mm_wrap(
                 a, b, scale, scale, ScalingType.TensorWise, ScalingType.TensorWise, offs=offs,
             )
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not (PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM and PLATFORM_SUPPORTS_MX_GEMM),
+        cublaslt_grouped_mm_skip_msg,
+    )
+    @prefer_cublaslt_grouped_gemm(True)
+    def test_scaled_grouped_gemm_cublaslt_nvfp4_padded(self, device):
+        a, b_t, scale_a, scale_b, offs = self.scaled_grouped_gemm_cublaslt_nvfp4_helper("2d/3d", device)
+        a = torch.cat((a, torch.zeros_like(a[:128])))
+        global_scale = torch.ones(1, device=device)
+        kwargs = _build_scaled_grouped_mm_kwargs([scale_a, global_scale], [scale_b, global_scale], offs, "nvfp4")
+        kwargs["out_dtype"] = torch.float32
+        result = scaled_grouped_mm_wrap(a, b_t.transpose(-2, -1), **kwargs)
+        self.assertEqual(result[:384], torch.full_like(result[:384], 128))
 
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUBLASLT_FP32_BLOCK_GROUPED_GEMM, cublaslt_fp32_block_skip_msg)
