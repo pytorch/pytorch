@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     NoTest,
     parametrize,
     run_tests,
+    skipCUDANonDefaultStreamIf,
     TEST_ACCELERATOR,
     TestCase,
 )
@@ -157,6 +158,7 @@ class TestStream(TestCase):
 
     # torch.cpu.default_stream is not supported
     @expectedFailureXPU
+    @skipCUDANonDefaultStreamIf(True)
     def test_default_stream(self, device):
         m = torch.get_device_module(device)
         self.assertEqual(m.current_stream(), m.default_stream())
