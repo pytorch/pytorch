@@ -112,7 +112,8 @@ class TestFullInnerTreeConfig(TestCase):
         "updates",
         [
             {"field_bits": (64,) * 3},
-            {"welford_outs": 0},
+            {"dtype": torch.float16, "N": 128 << 20, "out_dtypes": (torch.float16,)},
+            {"welford_outs": 0, "out_dtypes": ()},
             {"out_dtypes": (torch.bfloat16,)},
             {"out_dtypes": (torch.float32,) * 2},
         ],

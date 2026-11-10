@@ -389,6 +389,7 @@ class TestKernelGeneral(TestCase):
             (4095, 64, torch.bfloat16, 2, 0, False, False),
             (4096, 64, torch.float32, 1, 0, True, False),
             (1024, 128, torch.float32, 1, 0, False, True),
+            (4095, 64, torch.float32, 2, 1, True, True),
         ],
     )
     def test_uniform_welford_tree(
@@ -436,7 +437,8 @@ class TestKernelGeneral(TestCase):
     def test_uniform_welford_tree_counts_share_kernels(self):
         # A tail kernel serves every count strictly between nloads * block and
         # (nloads + 1) * block, so 300 and 383 (2 * 128 < count < 3 * 128) share one;
-        # 256 = 2 * 128 loads as often but takes a tail-free kernel, as does 384 = 3 * 128.
+        # 256 = 2 * 128 has the same whole-load count but takes a tail-free kernel, as does
+        # 384 = 3 * 128.
         trait = T.WelfordOps(correction=1, acc=cutlass.Float32)
         for count in (256, 300, 383, 384):
             x = torch.randn(17, count, device="cuda")
@@ -635,25 +637,34 @@ class TestKernelGeneral(TestCase):
             uniform_tree=True,
         )
         self.assertEqual(kg.ReduceBlock(**tree).tile.uniform_tree_loads, 1024 // 128)
-        msg = "the uniform Welford tree needs"
-        long = 128 * tile.UNIFORM_TREE_MAX_LOADS + 1
-        long64 = 64 * tile.UNIFORM_TREE_MAX_LOADS + 1
-        for bad in (
-            dict(trait=trait),
-            dict(count=0, red_pairs=((0, 1),)),
-            dict(count=64, red_pairs=((64, 1),)),
-            dict(count=long, red_pairs=((long, 1),)),
-            dict(block=64, count=long64, red_pairs=((long64, 1),)),
-            dict(red_pairs=((32, 1), (32, 64))),
-            dict(from_partials=True),
-            dict(gidx_from="chunk"),
-            dict(order="inner_tree"),
-            dict(flat_tail=True),
-            dict(ragged_chunk=True),
+        cap = 128 * tile.UNIFORM_TREE_MAX_LOADS
+        cap64 = 64 * tile.UNIFORM_TREE_MAX_LOADS
+        span = f"128 to {cap} values per output for 128 threads, got"
+        fold, clamp = "a linear general-axis fold, got axis=", "an unclamped run, got"
+        for bad, reason in (
+            (dict(trait=trait), "a trait with combine_equal, got SumOps"),
+            (dict(count=0, red_pairs=((0, 1),)), "a nonempty reduction"),
+            (dict(count=64, red_pairs=((64, 1),)), f"{span} 64"),
+            (dict(count=cap + 1, red_pairs=((cap + 1, 1),)), f"{span} {cap + 1}"),
+            (
+                dict(block=64, count=cap64 + 1, red_pairs=((cap64 + 1, 1),)),
+                f"64 to {cap64} values per output for 64 threads, got {cap64 + 1}",
+            ),
+            (dict(red_pairs=((32, 1), (32, 64))), "one reduced run, got 2"),
+            (dict(red_pairs=()), "one reduced run, got 0"),
+            (dict(from_partials=True), "a fold of inputs, not partials"),
+            (dict(gidx_from="chunk"), "indices from r, got gidx_from='chunk'"),
+            (dict(order="inner_tree"), f"{fold}'general' order='inner_tree'"),
+            (dict(flat_tail=True), f"{clamp} flat_tail=True ragged_chunk=False"),
+            (dict(ragged_chunk=True), f"{clamp} flat_tail=False ragged_chunk=True"),
         ):
             with self.subTest(bad=bad):
+                msg = re.escape(f"the uniform Welford tree needs {reason}") + "$"
                 with self.assertRaisesRegex(ValueError, msg):
                     kg.ReduceBlock(**(tree | bad))
+        # ReduceBlock always folds the general axis.
+        with self.assertRaisesRegex(ValueError, re.escape(f"{fold}'row' ")):
+            tile.TileReduce(tree["trait"], None, "row", 1024, uniform_tree_count=1024)
         # The reshaping cross-CTA path also requires contiguous CUDA input.
         with self.assertRaisesRegex(AssertionError, "CUDA"):
             xc.reduce_row_xcta(trait, "inv_xcta", xt, torch.float32)
@@ -738,8 +749,6 @@ class TestKernelGeneral(TestCase):
             "all_strided": ((1 << 21,), None, split),
         }
         cc = torch.cuda.get_device_capability()
-        if case == "ragged_row" and cc not in kg._B200_CCS:
-            self.skipTest("the ragged-row route is measured on B200 only")
         if case == "batched_column" and cc not in kg._BATCHED_COL_CCS:
             self.skipTest("the batched column route is measured on H100 and B200 only")
         shape, dims, tags = shapes[case]
@@ -747,7 +756,8 @@ class TestKernelGeneral(TestCase):
         make = lambda: view.get(case, lambda t: t)(torch.randn(shape, device="cuda"))  # noqa: E731
         key = f"replay_{case}"
         self._assert_replays(key, make, dims, tags)
-        if case == "ragged_row":
+        # The ragged-row route is measured on B200 only; elsewhere these rows take rowtile.
+        if case == "ragged_row" and cc in kg._B200_CCS:
             # Row keys carry ragged_vector, so an explicit ragged launch reuses the plan.
             plans = lambda: {k for k in rt._CACHE if k[:2] == ("rowtile", key)}  # noqa: E731
             routed = plans()
@@ -838,7 +848,9 @@ class TestKernelGeneral(TestCase):
             trait(), "x", aligned, 1, torch.float32, order="inner_tree"
         )
         self.assertEqual(got, want, atol=0, rtol=0)
-        self.assertEqual(len([k for k in kg._REPLAYS if k[0] == "replay_keys"]), 3)
+        entries = [r for k, r in kg._REPLAYS.items() if k[0] == "replay_keys"]
+        self.assertEqual(len(entries), 3)
+        self.assertNotIn(None, entries)
 
     def test_replay_keys_on_normalized_dims(self):
         trait = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
@@ -849,7 +861,9 @@ class TestKernelGeneral(TestCase):
                 want = x.sum(dim=dims)
             self.assertEqual(got, want)
         # -1 and 2 share one entry, and [2, 0] and [0, -1] another.
-        self.assertEqual(len([k for k in kg._REPLAYS if k[0] == "replay_dims"]), 2)
+        entries = [r for k, r in kg._REPLAYS.items() if k[0] == "replay_dims"]
+        self.assertEqual(len(entries), 2)
+        self.assertNotIn(None, entries)
 
     def test_offset_views_share_a_general_plan(self):
         base = torch.randn(3, 8, 16, 16, device="cuda")
