@@ -165,15 +165,21 @@ class TestInnerTreeCombineUnroll(TestCase):
             ({"shape": "split"}, "staged combine plan"),
             ({"combine_tile": 0}, "staged combine plan"),
             ({"split": (1024, 4096, 8192, 512, 512)}, "staged combine plan"),
-            ({"trait": "sum"}, "FP32"),
-            ({"trait": "fp64"}, "FP32"),
+            ({"trait": "sum"}, "combine_uniform, got SumOps"),
+            ({"trait": "fp64"}, "an FP32 accumulator"),
             ({"split": (1024,)}, "staged combine plan"),
             ({"split": (1024, 8192, 8192)}, "staged combine plan"),
-            ({"split": (0, 8192, 8192, 512, 512)}, "FP32"),
-            ({"split": (2**25, 8192, 8192, 512, 512)}, "FP32"),
-            ({"split": (1024, 2**25, 2**25, 512, 512), "combine_count": 2**25}, "FP32"),
-            ({"split": (1024, 6144, 6144, 512, 512), "combine_count": 6144}, "FP32"),
-            ({"split": (1024, 8192, 8191, 512, 512)}, "FP32"),
+            ({"split": (0, 8192, 8192, 512, 512)}, "partials, got 0$"),
+            ({"split": (2**25, 8192, 8192, 512, 512)}, "partials, got 33554432"),
+            (
+                {"split": (1024, 2**25, 2**25, 512, 512), "combine_count": 2**25},
+                "two count up to .*, got 33554432",
+            ),
+            (
+                {"split": (1024, 6144, 6144, 512, 512), "combine_count": 6144},
+                "two count up to .*, got 6144",
+            ),
+            ({"split": (1024, 8192, 8191, 512, 512)}, "one count, got 8192 and 8191"),
             ({"rows_per_block": 64}, "at most 32 threads per block, got 64"),
             ({"wpr": 2}, "at most 32 threads per block, got 64"),
             ({"stage_e": 4, "rows_per_block": 2}, "at most 32 threads per block"),
@@ -338,7 +344,8 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         )
         key = f"multitile_{unroll}_{uniform}_{name}"
         combine, col_combine, got = run(arch, key)
-        self.assertGreater(combine.split[0] // max(combine.combine_tile, 1), 1)
+        self.assertEqual(combine.combine_tile, 128)
+        self.assertGreater(combine.split[0] // combine.combine_tile, 1)
         self.assertEqual(combine.combine_unroll, unroll)
         self.assertEqual(bool(combine.combine_count), uniform != "off")
         self.assertEqual(combine.combine_weights, uniform == "weights")
