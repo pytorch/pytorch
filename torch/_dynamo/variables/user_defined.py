@@ -115,9 +115,7 @@ from .base import (
     AsPythonConstantNotImplementedError,
     attr_getset,
     AttrMutationKind,
-    check_setattr_args,
     GetSet,
-    maybe_get_python_type,
     Member,
     Method,
     MutationType,
@@ -145,14 +143,12 @@ from .object_protocol import (
     is_nb_not_implemented,
     mro_attr_source,
     mro_lookup,
-    pycallable_check,
     pynumber_as_ssize_t,
     pynumber_index,
     repr_guard,
     type_disallows_instantiation,
     type_implements_nb_slot,
     type_implements_sq_inplace_concat,
-    type_is_immutable,
 )
 from .sets import FrozensetVariable, SetVariable
 
@@ -255,9 +251,6 @@ def is_forbidden_context_manager(ctx: object) -> bool:
         f_ctxs.append(WarningsChecker)
     except ImportError:
         pass
-
-    if m := sys.modules.get("torch.testing._internal.jit_utils"):
-        f_ctxs.append(m._AssertRaisesRegexWithHighlightContext)
 
     return ctx in f_ctxs
 
@@ -1624,9 +1617,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
-            return variables.DictBuiltinVariable.call_custom_dict(
-                tx, dict, *args, **kwargs
-            )
+            return variables.DictBuiltinVariable.construct_dict(tx, *args, **kwargs)
         elif self.value is collections.deque:
             maxlen = variables.ConstantVariable.create(None)
 
@@ -3407,8 +3398,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return VariableTracker.tp_init_impl(self, tx, args, kwargs)
 
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
-                check_setattr_args(tx, args, kwargs)
-                return self.method_setattr_standard(tx, *args)
+                return self.method_setattr_standard(tx, *args, **kwargs)
 
             if is_standard_delattr(method):
                 return self.method_setattr_standard(
@@ -3438,19 +3428,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
 
-            if (
-                isinstance(method, types.MethodDescriptorType)
-                and method.__objclass__ is not object
-                and not is_torch_class(method.__objclass__)
-                and name not in self._slotdefs
-                and not trace_rules.is_polyfilled_callable(method)
+            if isinstance(self, ConstDictVariable) and isinstance(
+                method, types.MethodDescriptorType
             ):
-                # Dispatch C descriptors such as `copy = dict.copy` through their defining type.
-                return VariableBuilder.create_internal_method_descriptor(
-                    method, owner=VariableTracker.build(tx, method.__objclass__)
-                ).call_function(tx, [self, *args], kwargs)
-
-            # Keep specialized slot/Torch/polyfill dispatch and Python overrides below.
+                result = self.call_method_descriptor(tx, method, args, kwargs)
+                if result is not None:
+                    return result
             overloaded = (
                 self._base_methods is not None and method not in self._base_methods
             )
@@ -3460,8 +3443,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if result is not None:
                     return result
 
-            # Non-slot methods use the base VT; slots preserve subclass semantics.
-            # Comparisons use subclass slots rather than tracing tensor elements in list_cmp.
+            # Non-overridden base-class methods dispatch to the base VT via super()
+            # (self is-a base VT under multiple inheritance).  Skip comparison ops:
+            # they go through tp_richcompare_impl on the UserDefined*Variable
+            # subclass, which avoids tracing tensor elements via list_cmp.
             if (
                 self._base_methods is not None
                 and method in self._base_methods
@@ -4162,12 +4147,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         from .builder import VariableBuilder
 
-        if not config.assume_dunder_attributes_remain_unchanged and self.cls_source:
-            source = mro_attr_source(
-                tx, type(self.value), self.cls_source, "__getattribute__"
-            )
-            if source is not None:
-                install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         if self._object_has_getattribute:
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
@@ -4178,8 +4157,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             try:
                 return variables.UserMethodVariable(
-                    # Avoid disabling recursive module tags with an instance function guard.
-                    # See `test_nn_module_tag_overridden_getattr_safe`.
+                    # Keep this off VariableTracker.build. The builder installs
+                    # a guard on the accessor eagerly; constructing directly
+                    # records the source and leaves the guard to whoever
+                    # consumes it. This path is generic, but an nn.Module
+                    # reaching it with an eager guard here made the guard
+                    # manager tag-unsafe (test/dynamo/test_guard_manager.py,
+                    # test_nn_module_tag_overridden_getattr_safe).
                     VariableBuilder.create_internal_user_function(
                         getattribute_fn,
                         source=new_source and AttrSource(new_source, "__func__"),
@@ -4309,24 +4293,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             _is_method_type(type_attr)
             or getattr(type_attr, "_torchdynamo_disable", False)
         ):
-            if isinstance(type_attr, types.MethodDescriptorType):
-                method = self.lookup_method_descriptor(type_attr)
-                if self.cls_source:
-                    # Keep shadowing/MRO guards even when the declaring builtin is immutable.
-                    descriptor_source = self.get_source_by_walking_mro(tx, name)
-                    owner = next(
-                        owner
-                        for owner, namespace in iter_mro_static_dicts(type(self.value))
-                        if name in namespace
-                    )
-                    if not type_is_immutable(owner):
-                        install_guard(
-                            descriptor_source.make_guard(GuardBuilder.FUNCTION_MATCH)
-                        )
-                if method is not None:
-                    return variables.BoundBuiltinMethodVariable(
-                        type_attr, self, source=source
-                    )
             return variables.CallMethodVariable(self, name, source=source)
 
         if isinstance(type_attr, staticmethod):
@@ -5439,7 +5405,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
             # subclass override of update() -- self.call_method would
             # dispatch to an override if the subclass defines one, which is
             # wrong here (verified by CPython's test_override_update).
-            result = ConstDictVariable.dict_update(self, tx, args, kwargs)
+            result = ConstDictVariable.tp_init_impl(self, tx, args, kwargs)
             if result is not None:
                 return result
         return super().tp_init_impl(tx, args, kwargs)
@@ -5534,7 +5500,17 @@ class DefaultDictVariable(ConstDictVariable):
         val = arg.get_real_python_backed_value()
         if val is not NO_SUCH_SUBOBJ:
             return val is None or callable(val)
-        return pycallable_check(maybe_get_python_type(arg))
+        # Callables (functions, builtins, classes) are supported
+        return isinstance(
+            arg,
+            (
+                variables.BaseBuiltinVariable,
+                variables.functions.BaseUserFunctionVariable,
+                variables.functions.PolyfilledFunctionVariable,
+                variables.functions._WrappedSkipFunctionMethodDescriptorCommonVariable,
+                variables.UserDefinedClassVariable,
+            ),
+        )
 
     def is_python_constant(self) -> bool:
         if not self.default_factory.is_python_constant():
@@ -5644,15 +5620,25 @@ class DefaultDictVariable(ConstDictVariable):
         if not pydict_check(other_):
             return variables.ConstantVariable.create(NotImplemented)
 
-        cls = VariableTracker.build(tx, type).call_function(tx, [self_], {})
-        new = cls.call_function(tx, [self_.default_factory, left], {})
-        if not isinstance(new, ConstDictVariable):
-            # PyDict_Update rejects a non-dict returned by the subclass constructor.
-            raise_observed_exception(
-                SystemError, tx, args=["bad argument to internal function"]
+        # A UserDefinedDictVariable is now itself a ConstDictVariable (MI), so
+        # `left.items` is the storage in both cases.
+        if not isinstance(left, ConstDictVariable):
+            raise AssertionError(
+                f"Expected ConstDictVariable, got {type(left)}: {left}"
             )
-        tx.output.side_effects.mutation(new)
-        new.dict_merge(tx, right)
+        items = left.materialize_keys()
+
+        new = tx.output.side_effects.track_new_user_defined_object(
+            VariableTracker.build(tx, dict),
+            VariableTracker.build(tx, collections.defaultdict),
+            [],
+            tx=tx,
+        )
+        new.default_factory = self.default_factory  # type: ignore[missing-attribute]
+        new.items.update(items)  # type: ignore[missing-attribute]
+        default_factory = new.default_factory  # type: ignore[missing-attribute]
+        tx.output.side_effects.store_attr(new, "default_factory", default_factory)
+        new.call_method(tx, "update", [right], {})
         return new
 
     def nb_inplace_or_impl(
@@ -5660,7 +5646,7 @@ class DefaultDictVariable(ConstDictVariable):
         tx: "InstructionTranslatorBase",
         other: VariableTracker,
     ) -> VariableTracker:
-        self.call_method(tx, "update", [other], {})
+        ConstDictVariable.dict_update(self, tx, [other], {})
         return self
 
     def tp_init_impl(
@@ -5696,7 +5682,7 @@ class DefaultDictVariable(ConstDictVariable):
     ) -> "VariableTracker":
         if len(args) != 1:
             raise_args_mismatch(tx, "__getitem__", "1 args", f"{len(args)} args")
-        return DefaultDictVariable.mp_subscript_impl(self, tx, args[0])
+        return self.mp_subscript_impl(tx, args[0])
 
     def _missing(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
@@ -6320,8 +6306,6 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
 
     ref: https://github.com/python/cpython/blob/3.13/Objects/namespaceobject.c
     """
-
-    _cpython_type = types.SimpleNamespace
 
     @staticmethod
     def is_matching_cls(cls: type) -> bool:
