@@ -1577,7 +1577,22 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 )
             except Exception as exc:
-                raise_observed_exception(type(exc), tx, args=list(exc.args))
+                exc_type = type(exc)
+                # The observed exception is rebuilt as exc_type(*exc.args). That only
+                # reproduces exc when __init__ keeps its arguments as they are, which a
+                # user-defined __init__ (e.g. raised from Enum._missing_) may not do.
+                if (
+                    exc_type.__module__ != "builtins"
+                    and exc_type.__init__ is not BaseException.__init__
+                ):
+                    unimplemented(
+                        gb_type="Constant-folded class call raised a user-defined exception",
+                        context=f"{self.value} raised {exc_type}",
+                        explanation="Dynamo rebuilds the exception from its args, which only "
+                        "reproduces exceptions whose __init__ keeps its arguments as they are.",
+                        hints=graph_break_hints.SUPPORTABLE,
+                    )
+                raise_observed_exception(exc_type, tx, args=list(exc.args))
             return VariableTracker.build(tx, value)
         elif self.value is torch.nn.CrossEntropyLoss:
             return self._call_cross_entropy_loss(tx, args, kwargs)

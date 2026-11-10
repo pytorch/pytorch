@@ -6313,6 +6313,14 @@
       ]
     }
   ],
+  "GB4358": [
+    {
+      "Gb_type": "Constant-folded class call raised a user-defined exception",
+      "Context": "{self.value} raised {exc_type}",
+      "Explanation": "Dynamo rebuilds the exception from its args, which only reproduces exceptions whose __init__ keeps its arguments as they are.",
+      "Hints": []
+    }
+  ],
   "GB0336": [
     {
       "Gb_type": "out_dtype: unexpected kwargs",
