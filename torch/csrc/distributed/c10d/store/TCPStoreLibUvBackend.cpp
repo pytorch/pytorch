@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <deque>
 #include <exception>
 #include <memory>
@@ -14,6 +15,7 @@
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 #include <torch/csrc/distributed/c10d/socket_fmt.h>
+#include <torch/csrc/distributed/c10d/store/TCPStoreAllowList.hpp>
 #include <torch/csrc/distributed/c10d/store/TCPStoreBackend.hpp>
 
 #ifdef TORCH_USE_LIBUV
@@ -92,6 +94,8 @@ class UvHandle : public c10::intrusive_ptr_target {
 class UvTcpSocket : public UvHandle {
   uv_tcp_t client{};
   std::string address_{"unknown"};
+  // Set for rejected peers: reads are discarded until the peer closes.
+  bool discardReads_{false};
 
   c10::intrusive_ptr<UvTcpSocket> iptr() {
     return c10::intrusive_ptr<UvTcpSocket>::reclaim_copy(this);
@@ -119,7 +123,9 @@ class UvTcpSocket : public UvHandle {
       const uv_buf_t* buf) {
     auto uv_socket = UvTcpSocket::borrow(client);
 
-    if (nread > 0) {
+    if (nread > 0 && uv_socket->discardReads_) {
+      // Rejected peer: drop its data and wait for it to close.
+    } else if (nread > 0) {
       try {
         uv_socket->processBuf(buf, nread);
         return; // We do free inside processBuf.
@@ -154,6 +160,46 @@ class UvTcpSocket : public UvHandle {
 
   const std::string& address() const {
     return address_;
+  }
+
+  // Sends `msg` and then discards reads until the peer closes, so that closing
+  // never resets the connection with unread data, which could discard `msg`.
+  void reject(std::vector<uint8_t> msg) {
+    auto buf = uv_buf_init(
+        reinterpret_cast<char*>(msg.data()), static_cast<unsigned>(msg.size()));
+    // Synchronous so the message does not outlive `msg` or get cancelled by
+    // close(); it fits in an empty send buffer.
+    if (uv_try_write(reinterpret_cast<uv_stream_t*>(&client), &buf, 1) !=
+        static_cast<int>(msg.size())) {
+      close();
+      return;
+    }
+    discardReads_ = true;
+    // Not startRead(): its address lookup may do a reverse DNS query.
+    if (uv_read_start(
+            reinterpret_cast<uv_stream_t*>(&client),
+            alloc_buffer,
+            read_callback)) {
+      close();
+    }
+  }
+
+  // Whether the peer closed the connection, without reading its data.
+  bool peerClosed() {
+    uv_os_fd_t fd{};
+    if (uv_fileno(unsafeGetHandle(), &fd)) {
+      return false;
+    }
+    struct pollfd pfd{};
+#ifdef _WIN32
+    pfd.fd = reinterpret_cast<SOCKET>(fd);
+    pfd.events = kPeerClosedEvents;
+    return WSAPoll(&pfd, 1, 0) > 0;
+#else
+    pfd.fd = fd;
+    pfd.events = kPeerClosedEvents;
+    return ::poll(&pfd, 1, 0) > 0;
+#endif
   }
 
   void startRead() {
@@ -706,6 +752,21 @@ class LibUVStoreDaemon : public BackgroundThread {
  private:
   uv_loop_t loop_{};
   c10::intrusive_ptr<UvTcpServer> tcpServer_;
+  struct PendingClient {
+    c10::intrusive_ptr<UvTcpSocket> client;
+    ::sockaddr_storage peer{};
+    ::sockaddr_storage local{};
+    TCPStoreAllowList::Ticket ticket{};
+  };
+  std::unique_ptr<TCPStoreAllowList> allowList_;
+  // Waiting for an allow list refresh.
+  std::vector<PendingClient> deferredClients_;
+  // Sent the rejection; closed when the peer closes or at the deadline.
+  std::vector<std::pair<
+      c10::intrusive_ptr<UvTcpSocket>,
+      std::chrono::steady_clock::time_point>>
+      rejectedClients_;
+  uv_timer_t refreshTimer_{};
 
   uv_async_t exit_handle_{};
   std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
@@ -734,7 +795,14 @@ class LibUVStoreDaemon : public BackgroundThread {
     from_uv(reinterpret_cast<uv_handle_t*>(handle)).onExitRequest();
   }
 
+  static void on_refresh_timer(uv_timer_t* handle) {
+    from_uv(reinterpret_cast<uv_handle_t*>(handle)).onRefreshTimer();
+  }
+
   void onConnect(int status);
+  void decide(PendingClient&& pending);
+  void onRefreshTimer();
+  void closeHandles();
   void onExitRequest();
   void wakeupWaitingClients(const std::string& key);
   void wakeupOneWaitingClient(const std::string& key);
@@ -1243,20 +1311,101 @@ void LibUVStoreDaemon::onConnect(int status) {
   registerClient(client);
   try {
     tcpServer_->accept(client);
-    client->startRead();
+    if (allowList_ == nullptr) {
+      client->startRead();
+      return;
+    }
+    PendingClient pending{client};
+    auto* handle = reinterpret_cast<uv_tcp_t*>(client->unsafeGetHandle());
+    int peerLen = sizeof(pending.peer);
+    int localLen = sizeof(pending.local);
+    int err = uv_tcp_getpeername(
+        handle, reinterpret_cast<::sockaddr*>(&pending.peer), &peerLen);
+    if (err == 0) {
+      err = uv_tcp_getsockname(
+          handle, reinterpret_cast<::sockaddr*>(&pending.local), &localLen);
+    }
+    if (err) {
+      C10D_WARNING(
+          "The addresses of the client socket cannot be retrieved; closing it. err={}",
+          uv_strerror(err));
+      client->close();
+      return;
+    }
+    decide(std::move(pending));
   } catch (std::exception& e) {
     C10D_WARNING("Failed to accept client due to {}", e.what());
     client->close();
   }
 }
 
+void LibUVStoreDaemon::decide(PendingClient&& pending) {
+  const auto* peer = reinterpret_cast<const ::sockaddr*>(&pending.peer);
+  switch (allowList_->check(
+      peer,
+      reinterpret_cast<const ::sockaddr*>(&pending.local),
+      pending.ticket)) {
+    case TCPStoreAllowList::Decision::kAllow:
+      pending.client->startRead();
+      return;
+    case TCPStoreAllowList::Decision::kDefer:
+      deferredClients_.emplace_back(std::move(pending));
+      break;
+    case TCPStoreAllowList::Decision::kReject:
+      pending.client->reject(TCPStoreAllowList::rejectionMessage(peer));
+      rejectedClients_.emplace_back(
+          std::move(pending.client),
+          std::chrono::steady_clock::now() + TCPStoreAllowList::kRejectTimeout);
+      break;
+  }
+  if (!uv_is_active(reinterpret_cast<uv_handle_t*>(&refreshTimer_))) {
+    auto interval = TCPStoreAllowList::kPollInterval.count();
+    uv_timer_start(&refreshTimer_, on_refresh_timer, interval, interval);
+  }
+}
+
+void LibUVStoreDaemon::onRefreshTimer() {
+  allowList_->poll();
+  for (auto& pending : std::exchange(deferredClients_, {})) {
+    if (uv_is_closing(pending.client->unsafeGetHandle())) {
+      continue;
+    }
+    if (pending.client->peerClosed()) {
+      pending.client->close();
+      continue;
+    }
+    decide(std::move(pending));
+  }
+  auto now = std::chrono::steady_clock::now();
+  std::erase_if(rejectedClients_, [now](const auto& rejected) {
+    const auto& [client, deadline] = rejected;
+    if (uv_is_closing(client->unsafeGetHandle())) {
+      return true;
+    }
+    if (now < deadline) {
+      return false;
+    }
+    client->close();
+    return true;
+  });
+  if (deferredClients_.empty() && rejectedClients_.empty()) {
+    uv_timer_stop(&refreshTimer_);
+  }
+}
+
+void LibUVStoreDaemon::closeHandles() {
+  uv_close(reinterpret_cast<uv_handle_t*>(&refreshTimer_), nullptr);
+  uv_close(reinterpret_cast<uv_handle_t*>(&exit_handle_), nullptr);
+}
+
 void LibUVStoreDaemon::onExitRequest() {
   C10D_DEBUG("Store exit requested\n");
-  uv_close(reinterpret_cast<uv_handle_t*>(&exit_handle_), nullptr);
+  closeHandles();
   uv_stop(&loop_);
 }
 
 void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
+  allowList_ = TCPStoreAllowList::fromEnv(opts.timeout);
   if (opts.masterListenFd.has_value()) {
     tcpServer_ = UvTcpServer::makeWithSocket(&loop_, *opts.masterListenFd);
   } else {
@@ -1294,11 +1443,16 @@ LibUVStoreDaemon::LibUVStoreDaemon(int port) : port_(port) {
           0,
       "Failed to init uv async event");
   uv_handle_set_data(reinterpret_cast<uv_handle_t*>(&exit_handle_), this);
+  TORCH_CHECK_WITH(
+      DistStoreError,
+      uv_timer_init(&loop_, &refreshTimer_) == 0,
+      "Failed to init uv timer");
+  uv_handle_set_data(reinterpret_cast<uv_handle_t*>(&refreshTimer_), this);
 }
 
 LibUVStoreDaemon::~LibUVStoreDaemon() {
   if (!is_running()) {
-    uv_close(reinterpret_cast<uv_handle_t*>(&exit_handle_), nullptr);
+    closeHandles();
     uv_run(&loop_, UV_RUN_NOWAIT);
     if (uv_loop_close(&loop_) != 0) {
       C10D_ERROR("loop cleanup didn't work");

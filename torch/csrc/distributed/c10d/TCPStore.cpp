@@ -108,6 +108,15 @@ class TCPClient {
     }
   }
 
+  void receiveRaw(uint8_t* data, size_t length) {
+    try {
+      tcputil::recvBytes(socket_.handle(), data, length);
+    } catch (const std::exception& e) {
+      C10D_WARNING("recvBytes failed on {}: {}", socket_.repr(), e.what());
+      throw;
+    }
+  }
+
   std::vector<std::uint8_t> receiveBits() {
     try {
       return tcputil::recvVector<std::uint8_t>(socket_.handle());
@@ -423,6 +432,23 @@ void TCPStore::ping() {
   buffer.flush();
 
   uint32_t returnedNonce = client_->receiveValue<std::uint32_t>();
+  if (returnedNonce == detail::rejectedMagicNumber && nonce != returnedNonce) {
+    // Bounded so that a malformed reply cannot cause a huge allocation.
+    constexpr uint64_t kMaxAddrLen = 1024;
+    auto size = client_->receiveValue<uint64_t>();
+    std::string addr = "unknown";
+    if (size <= kMaxAddrLen) {
+      addr.resize(size);
+      client_->receiveRaw(reinterpret_cast<uint8_t*>(addr.data()), size);
+    }
+    C10_THROW_ERROR(
+        DistStoreError,
+        fmt::format(
+            "connection rejected by TCPStore server {}:{}: client address {} was not admitted by the server's TORCH_TCPSTORE_ALLOWED_HOSTS_FILE allow list (not listed, or the server's allow list refresh timed out)",
+            addr_.host,
+            addr_.port,
+            addr));
+  }
   if (nonce != returnedNonce) {
     C10_THROW_ERROR(
         DistNetworkError,

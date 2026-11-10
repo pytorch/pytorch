@@ -6,8 +6,10 @@
 #include <utility>
 #include <vector>
 
+#include <c10/util/error.h>
 #include <c10/util/thread_name.h>
 #include <torch/csrc/distributed/c10d/logging.h>
+#include <torch/csrc/distributed/c10d/store/TCPStoreAllowList.hpp>
 #include <torch/csrc/distributed/c10d/store/TCPStoreBackend.hpp>
 
 #ifdef _WIN32
@@ -44,7 +46,9 @@ void BackgroundThread::start() {
 // Separate thread that is only launched on master
 class TCPStoreMasterDaemon : public BackgroundThread {
  public:
-  explicit TCPStoreMasterDaemon(Socket&& storeListenSocket);
+  explicit TCPStoreMasterDaemon(
+      Socket&& storeListenSocket,
+      std::unique_ptr<TCPStoreAllowList> allowList);
 
   ~TCPStoreMasterDaemon() override;
 
@@ -58,6 +62,22 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   void initStopSignal();
   void closeStopSignal();
 
+  struct PendingClient {
+    Socket socket;
+    ::sockaddr_storage peer{};
+    ::sockaddr_storage local{};
+    TCPStoreAllowList::Ticket ticket{};
+  };
+  struct RejectedClient {
+    Socket socket;
+    std::chrono::steady_clock::time_point deadline;
+  };
+
+  void acceptClient(std::vector<struct pollfd>& fds);
+  void decide(std::vector<struct pollfd>& fds, PendingClient&& client);
+  void serviceAllowList(std::vector<struct pollfd>& fds);
+  bool allowListBusy() const;
+  void addClient(std::vector<struct pollfd>& fds, Socket&& socket);
   void queryFds(std::vector<struct pollfd>& fds);
   void query(int socket);
 
@@ -99,7 +119,12 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   std::unordered_set<int> miscellaneousSockets_;
 
   Socket storeListenSocket_;
+  std::unique_ptr<TCPStoreAllowList> allowList_;
   std::vector<Socket> sockets_;
+  // Waiting for an allow list refresh.
+  std::vector<PendingClient> deferred_;
+  // Sent the rejection; drained until the peer closes or the deadline.
+  std::vector<RejectedClient> rejected_;
 #ifdef _WIN32
   const std::chrono::milliseconds checkTimeout_ = std::chrono::milliseconds{10};
   HANDLE ghStopEvent_{};
@@ -109,8 +134,11 @@ class TCPStoreMasterDaemon : public BackgroundThread {
 };
 
 // Simply start the daemon thread
-TCPStoreMasterDaemon::TCPStoreMasterDaemon(Socket&& storeListenSocket)
-    : storeListenSocket_{std::move(storeListenSocket)} {
+TCPStoreMasterDaemon::TCPStoreMasterDaemon(
+    Socket&& storeListenSocket,
+    std::unique_ptr<TCPStoreAllowList> allowList)
+    : storeListenSocket_{std::move(storeListenSocket)},
+      allowList_{std::move(allowList)} {
   initStopSignal();
 }
 
@@ -187,6 +215,132 @@ void TCPStoreMasterDaemon::stop() {
   }
 }
 #endif
+
+void TCPStoreMasterDaemon::acceptClient(std::vector<struct pollfd>& fds) {
+  Socket socket = storeListenSocket_.accept();
+  if (allowList_ == nullptr) {
+    addClient(fds, std::move(socket));
+    return;
+  }
+  PendingClient client{std::move(socket)};
+  ::socklen_t peerLen = sizeof(client.peer);
+  ::socklen_t localLen = sizeof(client.local);
+  if (::getpeername(
+          client.socket.handle(),
+          reinterpret_cast<::sockaddr*>(&client.peer),
+          &peerLen) != 0 ||
+      ::getsockname(
+          client.socket.handle(),
+          reinterpret_cast<::sockaddr*>(&client.local),
+          &localLen) != 0) {
+#ifdef _WIN32
+    auto err = WSAGetLastError();
+#else
+    auto err = errno;
+#endif
+    C10D_WARNING(
+        "The addresses of the client socket cannot be retrieved; closing it. err={}",
+        c10::utils::str_error(err));
+    return;
+  }
+  decide(fds, std::move(client));
+}
+
+void TCPStoreMasterDaemon::decide(
+    std::vector<struct pollfd>& fds,
+    PendingClient&& client) {
+  const auto* peer = reinterpret_cast<const ::sockaddr*>(&client.peer);
+  switch (allowList_->check(
+      peer,
+      reinterpret_cast<const ::sockaddr*>(&client.local),
+      client.ticket)) {
+    case TCPStoreAllowList::Decision::kAllow:
+      addClient(fds, std::move(client.socket));
+      return;
+    case TCPStoreAllowList::Decision::kDefer:
+      deferred_.emplace_back(std::move(client));
+      return;
+    case TCPStoreAllowList::Decision::kReject:
+      break;
+  }
+  auto msg = TCPStoreAllowList::rejectionMessage(peer);
+  try {
+    tcputil::sendBytes<uint8_t>(client.socket.handle(), msg.data(), msg.size());
+  } catch (const std::exception& e) {
+    C10D_DEBUG("Failed to notify rejected TCPStore client: {}", e.what());
+    return;
+  }
+  rejected_.push_back(
+      {std::move(client.socket),
+       std::chrono::steady_clock::now() + TCPStoreAllowList::kRejectTimeout});
+}
+
+bool TCPStoreMasterDaemon::allowListBusy() const {
+  return !deferred_.empty() || !rejected_.empty();
+}
+
+void TCPStoreMasterDaemon::serviceAllowList(std::vector<struct pollfd>& fds) {
+  if (!allowListBusy()) {
+    return;
+  }
+  allowList_->poll();
+  auto deferred = std::exchange(deferred_, {});
+  auto rejected = std::exchange(rejected_, {});
+
+  // One non-blocking poll for held peers that closed and rejected peers that
+  // sent data or closed. Held peers' data is left unread.
+  std::vector<struct pollfd> pfds;
+  pfds.reserve(deferred.size() + rejected.size());
+  for (const auto& client : deferred) {
+    tcputil::addPollfd(pfds, client.socket.handle(), kPeerClosedEvents);
+  }
+  for (const auto& client : rejected) {
+    tcputil::addPollfd(pfds, client.socket.handle(), POLLIN);
+  }
+#ifdef _WIN32
+  WSAPoll(pfds.data(), pfds.size(), 0);
+#else
+  ::poll(pfds.data(), pfds.size(), 0);
+#endif
+
+  size_t i = 0;
+  for (auto& client : deferred) {
+    if (pfds[i++].revents == 0) {
+      decide(fds, std::move(client));
+    }
+  }
+
+  // Close rejected connections only once the peer has closed (or the deadline
+  // passed): closing with unread data resets the connection, which can
+  // discard the rejection before the peer reads it.
+  auto now = std::chrono::steady_clock::now();
+  for (auto& client : rejected) {
+    auto revents = pfds[i++].revents;
+    if (now >= client.deadline) {
+      continue;
+    }
+    std::array<char, 1024> buf{};
+    if (revents != 0 &&
+        ::recv(
+            client.socket.handle(),
+            buf.data(),
+            static_cast<int>(buf.size()),
+            0) <= 0) {
+      continue;
+    }
+    rejected_.emplace_back(std::move(client));
+  }
+}
+
+void TCPStoreMasterDaemon::addClient(
+    std::vector<struct pollfd>& fds,
+    Socket&& socket) {
+  int rawSocket = socket.handle();
+  sockets_.emplace_back(std::move(socket));
+  tcputil::addPollfd(fds, rawSocket, POLLIN);
+  // all clients are miscellaneous before getting its validation query
+  addMiscellaneousSocket(rawSocket);
+}
 
 void TCPStoreMasterDaemon::queryFds(std::vector<struct pollfd>& fds) {
   // Skipping the fds[0] and fds[1],
@@ -551,6 +705,7 @@ void TCPStoreMasterDaemon::run() {
     int res;
     SYSCHECK_ERR_RETURN_NEG1(
         res = WSAPoll(fds.data(), fds.size(), checkTimeout_.count()))
+    serviceAllowList(fds);
     if (res == 0) {
       auto rv = WaitForSingleObject(ghStopEvent_, 0);
       if (rv != WAIT_TIMEOUT) {
@@ -568,11 +723,7 @@ void TCPStoreMasterDaemon::run() {
             "Unexpected poll revent on the master's listening socket: " +
                 std::to_string(fds[0].revents));
       }
-      Socket socket = storeListenSocket_.accept();
-      int rawSocket = socket.handle();
-      sockets_.emplace_back(std::move(socket));
-      tcputil::addPollfd(fds, rawSocket, POLLIN);
-      addMiscellaneousSocket(rawSocket);
+      acceptClient(fds);
     }
     queryFds(fds);
   }
@@ -601,7 +752,11 @@ void TCPStoreMasterDaemon::run() {
         fds[i].revents = 0;
       }
 
-      SYSCHECK_ERR_RETURN_NEG1(::poll(fds.data(), fds.size(), -1));
+      int timeout = allowListBusy()
+          ? static_cast<int>(TCPStoreAllowList::kPollInterval.count())
+          : -1;
+      SYSCHECK_ERR_RETURN_NEG1(::poll(fds.data(), fds.size(), timeout));
+      serviceAllowList(fds);
 
       // TCPStore's listening socket has an event and it should now be able to
       // accept new connections.
@@ -612,12 +767,7 @@ void TCPStoreMasterDaemon::run() {
               "Unexpected poll revent on the master's listening socket: " +
                   std::to_string(fds[0].revents));
         }
-        Socket socket = storeListenSocket_.accept();
-        int rawSocket = socket.handle();
-        sockets_.emplace_back(std::move(socket));
-        tcputil::addPollfd(fds, rawSocket, POLLIN);
-        // all clients are miscellaneous before getting its validation query
-        addMiscellaneousSocket(rawSocket);
+        acceptClient(fds);
       }
 
       // The pipe receives an event which tells us to shutdown the daemon
@@ -647,11 +797,13 @@ void TCPStoreMasterDaemon::run() {
 
 std::unique_ptr<BackgroundThread> create_tcpstore_backend(
     const TCPStoreOptions& opts) {
+  auto allowList = TCPStoreAllowList::fromEnv(opts.timeout);
   Socket socket = opts.masterListenFd.has_value()
       ? Socket::listenFromFd(*opts.masterListenFd, opts.port)
       : Socket::listen(opts.port);
 
-  return std::make_unique<TCPStoreMasterDaemon>(std::move(socket));
+  return std::make_unique<TCPStoreMasterDaemon>(
+      std::move(socket), std::move(allowList));
 }
 
 } // namespace c10d::detail
