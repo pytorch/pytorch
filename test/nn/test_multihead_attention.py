@@ -919,7 +919,10 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
             mha.in_proj_bias.to(torch.half).to(device)
         )
         query = torch.randn(4, 4, 4, dtype=dtype, device=device)
-        mha(query, query, query)
+        with self.assertRaisesRegex(
+            RuntimeError, "self and mat2 must have the same dtype"
+        ):
+            mha(query, query, query)
 
     @dtypes(torch.double)
     @torch.no_grad()

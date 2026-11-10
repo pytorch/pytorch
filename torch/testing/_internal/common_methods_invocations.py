@@ -5042,6 +5042,15 @@ def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
         yield SampleInput(create_tensor(3, 4, 0), create_tensor(0))
         yield SampleInput(create_tensor(0, 8), create_tensor(8))
 
+def error_inputs_linear(op_info, device, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=torch.float32)
+
+    yield ErrorInput(SampleInput(make_input(8, 16, dtype=torch.float16), args=(make_input(4, 16), make_input(4))),
+                     error_regex='mat1 and mat2 must have the same dtype')
+    yield ErrorInput(SampleInput(make_input(2, 8, 16, noncontiguous=True),
+                                 args=(make_input(4, 16), make_input(4, dtype=torch.float16))),
+                     error_regex='self and mat2 must have the same dtype')
+
 def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4, 5], [8, 8, 8]]
     batch_options: list[list[int]] = [
@@ -17050,6 +17059,7 @@ op_db: list[OpInfo] = [
            supports_autograd=True,
            supports_gradgrad=True,
            sample_inputs_func=sample_inputs_linear,
+           error_inputs_func=error_inputs_linear,
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),

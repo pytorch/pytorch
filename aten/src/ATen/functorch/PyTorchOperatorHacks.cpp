@@ -50,6 +50,8 @@ Tensor linear_hack(const Tensor& input, const Tensor& weight, const std::optiona
     return at::native::xnnpack::linear(input, weight, *bias);
   }
 #endif
+  TORCH_CHECK(!bias->defined() || bias->scalar_type() == weight.scalar_type(),
+              "self and mat2 must have the same dtype, but got ", bias->scalar_type(), " and ", weight.scalar_type());
   if (input.dim() == 2 && bias->defined()) {
     // Fused op is marginally faster.
     return at::addmm(*bias, input, weight.t());

@@ -99,21 +99,23 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   TORCH_CHECK(input.is_mps(), "Tensor for argument input is on ", input.device(), " but expected on mps");
   TORCH_CHECK(supportedFloatingOrComplexType(weight_arg), "MPS device does not support linear for non-float weights");
   TORCH_CHECK(weight_arg.is_mps(), "Tensor for argument weight is on ", weight_arg.device(), " but expected on mps");
-  TORCH_CHECK(input.scalar_type() == weight_arg.scalar_type(),
-              "mat1 and mat2 must have the same dtype, but got ",
-              input.scalar_type(),
-              " and ",
-              weight_arg.scalar_type());
 
   const Tensor& bias = *(at::borrow_from_optional_tensor(bias_opt));
   const bool is_bias_defined = bias.defined();
   if (is_bias_defined) {
     TORCH_CHECK(bias.is_mps(), "Tensor for argument bias is on ", bias.device(), " but expected on mps");
     TORCH_CHECK(supportedFloatingOrComplexType(bias), "MPS device does not support linear for non-float bias");
-    if (bias.scalar_type() != weight_arg.scalar_type()) {
-      return at::native::linear(input, weight_arg, bias_opt);
-    }
+    TORCH_CHECK(bias.scalar_type() == weight_arg.scalar_type(),
+                "self and mat2 must have the same dtype, but got ",
+                bias.scalar_type(),
+                " and ",
+                weight_arg.scalar_type());
   }
+  TORCH_CHECK(input.scalar_type() == weight_arg.scalar_type(),
+              "mat1 and mat2 must have the same dtype, but got ",
+              input.scalar_type(),
+              " and ",
+              weight_arg.scalar_type());
 
   auto weight = (weight_arg.dim() == 1) ? weight_arg.unsqueeze(0) : weight_arg;
 
