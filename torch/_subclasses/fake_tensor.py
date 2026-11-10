@@ -379,9 +379,6 @@ def maybe_set_real_tensor(x: object, real: Tensor | None) -> None:
             torch._C._set_real_tensor(x, real)
 
 
-# The item memo of a fake. A C++ fake keeps it on the C++ tensor, which like
-# SymNumberMemoDescriptor drops it once the tensor is mutated or fake_mode's
-# epoch changes, except that a backed SymFloat is kept across epochs.
 def maybe_get_item_memo(x: object) -> _ItemMemo | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.item_memo
@@ -737,23 +734,6 @@ def _exit_fake_mode(mode: FakeTensorMode, uninstall: Callable[[], object], /) ->
             torch._C._set_dispatch_mode(maybe_prev_fake_mode)
         if maybe_prev_only_lift_cpu_tensors is not None:
             torch._C._set_only_lift_cpu_tensors(maybe_prev_only_lift_cpu_tensors)
-
-
-@typing.final
-class CppFakeTensorMode(torch._C._CppFakeTensorMode):
-    # The Python object of a C++ FakeTensorMode, which the Python parts of fake
-    # dispatch run against. Its fakes and the fake mode slot keep it alive, so
-    # it must not hold a fake: GC cannot see the reference back from the fake.
-    # Hence __slots__; a subclass could add a __dict__, so it is final, which
-    # getCppFakeTensorModeHandle enforces by accepting only this exact type. See
-    # Note [C++ FakeTensorMode handle] in torch/csrc/FakeTensorMode.cpp.
-    __slots__ = ()
-
-    def __init__(self, *, shape_env: ShapeEnv | None = None) -> None:
-        import torch._functorch.config
-
-        copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
-        super().__init__(FakeTensorConverter(copy_data=copy_data), shape_env)
 
 
 @functools.cache
@@ -1947,6 +1927,9 @@ class _DispatchCacheBypassEntry:
 
 if TYPE_CHECKING:
     _DispatchCacheEntry = _DispatchCacheValidEntry | _DispatchCacheBypassEntry
+    # An enter_stack entry of FakeTensorMode: whether the enter installed the
+    # mode, the fake mode it suspended, and the previous only_lift_cpu_tensors
+    _FakeModeEnterRecord = tuple[bool, TorchDispatchMode | None, bool | None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -2078,7 +2061,7 @@ class FakeTensorMode(TorchDispatchMode):
         # in_kernel_invocation
         # If another fake mode was already active when we enter, we also stash it here.
         # That way when we exit, we know to re-enable the previous fake mode.
-        self.enter_stack: list[tuple[bool, TorchDispatchMode | None, bool | None]] = []
+        self.enter_stack: list[_FakeModeEnterRecord] = []
 
         self.shape_env = shape_env
 

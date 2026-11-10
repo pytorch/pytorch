@@ -4,19 +4,16 @@
 #include <memory>
 
 namespace c10 {
-struct FakeTensorModeHandle;
+struct FakeTensorMode;
 } // namespace c10
 
 namespace c10::impl {
 
 class C10_API FakeTensorModeTLS {
  public:
-  static void set_state(std::shared_ptr<FakeTensorModeHandle> state);
-  // Returns the previous state, for the caller to release once it has
-  // restored the dispatch key set (see reset_state)
-  [[nodiscard]] static std::shared_ptr<FakeTensorModeHandle> create_state(
-      std::shared_ptr<FakeTensorModeHandle> state);
-  static std::shared_ptr<FakeTensorModeHandle> get_state();
+  static void set_state(std::shared_ptr<FakeTensorMode> state);
+  static void create_state(std::shared_ptr<FakeTensorMode> state);
+  static std::shared_ptr<FakeTensorMode> get_state();
   static void reset_state();
 
   // Note [C++ in_kernel_invocation]
