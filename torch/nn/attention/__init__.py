@@ -226,7 +226,7 @@ def enable_cudnn_sdp_python(enabled: bool) -> None:
 
     Selects which implementation backs cuDNN scaled dot product attention: the
     cuDNN frontend Python API when True, or the built-in C++ implementation
-    when False. Enabling requires ``nvidia-cudnn-frontend>=1.33``, which is
+    when False. Enabling requires ``nvidia-cudnn-frontend>=1.32.3``, which is
     imported on the first enable and not before.
 
     This chooses an *implementation*, so it is orthogonal to

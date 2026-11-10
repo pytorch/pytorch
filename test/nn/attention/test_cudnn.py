@@ -187,7 +187,7 @@ class TestCuDNNPythonSDPALifecycle(TestCase):
 
     def test_prerelease_of_the_required_version_is_rejected(self):
         # A pre-release may predate the changes the minimum version stands for.
-        version = f"{_cudnn._MIN_FRONTEND_VERSION}.0rc1"
+        version = f"{_cudnn._MIN_FRONTEND_VERSION}rc1"
         _use_provider(self, _fake_install(self.live, "cudnn"), version=version)
         with self.assertRaisesRegex(RuntimeError, "is required"):
             _cudnn.enable()

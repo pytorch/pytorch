@@ -26,7 +26,7 @@ _INSTALL_FN = "install_sdpa_overrides"
 # varlen_attn selected and looks for this switch in torch.nn.attention. Older
 # releases register "CUDNN" in the flash attention registry on import, a second
 # switch, so they must be rejected before cudnn.torch is imported.
-_MIN_FRONTEND_VERSION = "1.33"
+_MIN_FRONTEND_VERSION = "1.32.3"
 
 
 class _OverridesHandle(Protocol):
