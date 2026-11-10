@@ -193,7 +193,7 @@ void multi_margin_loss_backward_cpu_kernel(
         reduction != Reduction::None || grad_output.dim() > 0 ||
         nframe == 1); // check 1d scalar fallback-case
     const auto d = *grad_output.const_data_ptr<scalar_t>();
-    for (int64_t t = 0; t < nframe * dim; t++) {
+    for (const auto t : c10::irange(nframe * dim)) {
       grad_input_data[t] *= d;
     }
   } else {

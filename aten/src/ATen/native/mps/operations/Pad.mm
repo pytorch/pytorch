@@ -5,6 +5,8 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/Pad.h>
 #include <c10/metal/common.h>
+#include <c10/util/safe_conv.h>
+#include <utility>
 
 #include <algorithm>
 #include <limits>
@@ -90,9 +92,9 @@ static Tensor& pad_out_template(Tensor& output,
   const auto width = output.size(-1);
   const auto height = padding_dim >= 2 ? output.size(-2) : 1;
   const auto grid_x = c10::metal::ceil_div(width, static_cast<int64_t>(c10::metal::ILP_PER_THREAD));
-  const auto grid = MTLSizeMake(c10::checked_convert<uint32_t>(grid_x, "uint32_t"),
-                                c10::checked_convert<uint32_t>(height, "uint32_t"),
-                                c10::checked_convert<uint32_t>(output.numel() / (width * height), "uint32_t"));
+  const auto grid = MTLSizeMake(c10::safe_conv<uint32_t>(grid_x, "uint32_t"),
+                                c10::safe_conv<uint32_t>(height, "uint32_t"),
+                                c10::safe_conv<uint32_t>(output.numel() / (width * height), "uint32_t"));
   using namespace std::string_view_literals;
   const auto kernel_name = fmt::format("{}_pad{}d_{}_{}{}",
                                        is_reflection ? "reflection"sv : "replication"sv,
@@ -161,14 +163,14 @@ static void replication_pad1d_kernel_mps(const Tensor& input_, IntArrayRef paddi
   }
   TORCH_INTERNAL_ASSERT(input.dim() == 3 && output_c.dim() == 3);
 
-  const auto nbatch = c10::checked_convert<int32_t>(input.size(0), "int32_t");
-  const auto nplane = c10::checked_convert<int32_t>(input.size(1), "int32_t");
-  const auto input_W = c10::checked_convert<int32_t>(input.size(2), "int32_t");
-  const auto output_W = c10::checked_convert<int32_t>(output_c.size(2), "int32_t");
+  const auto nbatch = c10::safe_conv<int32_t>(input.size(0), "int32_t");
+  const auto nplane = c10::safe_conv<int32_t>(input.size(1), "int32_t");
+  const auto input_W = c10::safe_conv<int32_t>(input.size(2), "int32_t");
+  const auto output_W = c10::safe_conv<int32_t>(output_c.size(2), "int32_t");
   const std::array<int32_t, 4> sizes_pad = {input_W,
                                             output_W,
-                                            c10::checked_convert<int32_t>(padding[0], "int32_t"),
-                                            c10::checked_convert<int32_t>(padding[1], "int32_t")};
+                                            c10::safe_conv<int32_t>(padding[0], "int32_t"),
+                                            c10::safe_conv<int32_t>(padding[1], "int32_t")};
 
   auto pso = lib.getPipelineStateForFunc("replication_pad1d_forward_" + scalarToMetalTypeString(input));
   auto stream = getCurrentMPSStream();
@@ -205,14 +207,14 @@ static void replication_pad1d_backward_kernel_mps(const Tensor& grad_output_,
   }
   TORCH_INTERNAL_ASSERT(grad_output.dim() == 3 && grad_input_c.dim() == 3);
 
-  const auto nbatch = c10::checked_convert<int32_t>(grad_input_c.size(0), "int32_t");
-  const auto nplane = c10::checked_convert<int32_t>(grad_input_c.size(1), "int32_t");
-  const auto input_W = c10::checked_convert<int32_t>(grad_input_c.size(2), "int32_t");
-  const auto output_W = c10::checked_convert<int32_t>(grad_output.size(2), "int32_t");
+  const auto nbatch = c10::safe_conv<int32_t>(grad_input_c.size(0), "int32_t");
+  const auto nplane = c10::safe_conv<int32_t>(grad_input_c.size(1), "int32_t");
+  const auto input_W = c10::safe_conv<int32_t>(grad_input_c.size(2), "int32_t");
+  const auto output_W = c10::safe_conv<int32_t>(grad_output.size(2), "int32_t");
   const std::array<int32_t, 4> sizes_pad = {input_W,
                                             output_W,
-                                            c10::checked_convert<int32_t>(padding[0], "int32_t"),
-                                            c10::checked_convert<int32_t>(padding[1], "int32_t")};
+                                            c10::safe_conv<int32_t>(padding[0], "int32_t"),
+                                            c10::safe_conv<int32_t>(padding[1], "int32_t")};
 
   auto pso = lib.getPipelineStateForFunc("replication_pad1d_backward_" + scalarToMetalTypeString(grad_input_c));
   auto stream = getCurrentMPSStream();
@@ -279,12 +281,12 @@ static bool constant_pad_dense_eligible(const Tensor& input, const Tensor& outpu
   if (padding_dim > 3 || !input.is_contiguous() || !output.is_contiguous()) {
     return false;
   }
-  constexpr auto uint_max = std::numeric_limits<uint32_t>::max();
   const auto out_w = output.size(-1);
   const auto out_h = padding_dim >= 2 ? output.size(-2) : 1;
   const auto out_d = padding_dim >= 3 ? output.size(-3) : 1;
-  const bool sizes_fit = out_w <= uint_max && out_h <= uint_max && out_d <= uint_max;
-  return sizes_fit && output.numel() / (out_w * out_h) <= uint_max;
+  const bool sizes_fit =
+      std::in_range<uint32_t>(out_w) && std::in_range<uint32_t>(out_h) && std::in_range<uint32_t>(out_d);
+  return sizes_fit && std::in_range<uint32_t>(output.numel() / (out_w * out_h));
 }
 
 static void constant_pad_dense_kernel_mps(const Tensor& input,
@@ -491,7 +493,7 @@ Tensor constant_pad_nd_mps(const Tensor& self, IntArrayRef pad, const Scalar& va
   const Scalar fill = all_pads_non_positive ? Scalar(0) : value;
   if (mps::constant_pad_dense_eligible(cropped, output, padding_dim)) {
     mps::constant_pad_dense_kernel_mps(cropped, output, pad, padding_dim, fill);
-  } else if (output.numel() > std::numeric_limits<uint32_t>::max() || ndim > c10::metal::max_ndim) {
+  } else if (!std::in_range<uint32_t>(output.numel()) || ndim > c10::metal::max_ndim) {
     return at::native::constant_pad_nd(self, pad, value);
   } else {
     mps::constant_pad_strided_kernel_mps(cropped, output, pad, padding_dim, fill);
