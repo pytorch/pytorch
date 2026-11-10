@@ -29,10 +29,10 @@ class WrapperModule:
         for _ in range(module_config.num_params):
             self.tensor_inputs.append(torch.randn(1))
         if module_config.graph_mode:
-            self.module = torch.jit.trace(self.module, self.tensor_inputs)
+            self.module = torch.jit._trace.trace(self.module, self.tensor_inputs)
             if save:
                 file_name = self.module_name + "_" + pt_fn.__name__ + ".pt"
-                torch.jit.save(self.module, file_name)
+                torch.jit._serialization.save(self.module, file_name)
                 print(f"Generated graph is saved in {file_name}")
         print(
             f"Benchmarking module {self.module_name} with fn {pt_fn.__name__}: Graph mode:{module_config.graph_mode}"
