@@ -1,16 +1,22 @@
-"""FlyDSL fp32 top-K kernels, picked by K and N in ``flydsl_impl.py``.
+"""FlyDSL top-K kernels, picked by K and N in ``flydsl_impl.py``.
+
+``TopKSpec`` is the compile-time specialization (dtype and ``largest``). It is
+closed over by the builders; it is not a kernel argument. Ordinals are signed
+int32 so the existing ``maxsi`` compares stay put. Narrow values sit in the
+high bits, sign at bit 31. ``largest=False`` complements that int32.
 
 ``topk_radix`` - one CTA per row, ``max(sort_len, _N_HIST_BINS)``
 threads (``sort_len`` = K rounded up to a power of 2; the bin floor lets
 phase 1 zero the histogram one bin per thread).
-  1. Four radix byte passes (MSB to LSB) over an LDS histogram; thread 0
-     scans descending, narrowing ``s_prefix``/``s_mask`` until it holds
-     the K-th largest ordinal and ``s_rem_k`` the ties to keep.
+  1. Radix byte passes (MSB to LSB, one per byte of the ordinal) over an LDS
+     histogram; thread 0 scans descending, narrowing ``s_prefix``/``s_mask``
+     until it holds the K-th ordinal and ``s_rem_k`` the ties to keep.
   2. Gather at-or-above that threshold. Deterministic: prefix-sum slots
      preserve input order, lowest-index ties win. Otherwise LDS atomic
      counters claim slots and ties resolve per run.
-  3. Bitonic sort over ``sort_len`` slots; padding carries ordinal
-     INT32_MIN, which no float maps to. Comparator is always lexicographic
+  3. Bitonic sort over ``sort_len`` slots; padding is the int64 minimum.
+     A real key's low half is ``~idx``, never zero, so the pad stays strictly
+     below every real key. Comparator is always lexicographic
      ``(ord desc, idx asc)``; ``deterministic`` only controls which
      threshold-tied elements phase 2 gathers.
   4. Write K (value, index) pairs.
@@ -20,12 +26,14 @@ phase 1 zero the histogram one bin per thread).
 butterfly partners until lane 0 holds the top-K; only the final K writes
 hit gmem.
 
-``_f32_to_ord`` leaves positives alone and inverts all but the sign bit of
-negatives, so ordinals compare as signed i32 in float order; NaN
-canonicalises to INT32_MAX. Not injective on NaN, so ``decode_key``
-re-reads gmem for that case, but exact aten NaN payload/index selection is
-not guaranteed. Phase 1's xor by ``_RADIX_SIGN_BIT`` is separate: it puts
-the top byte in unsigned bin order for the scan.
+``TopKSpec.to_ord`` leaves positive floats alone and flips every non-sign bit
+of a negative float, so the field compares as a signed integer in value
+order. NaN collapses to the maximum code of that field (fp32 ``0x7FFFFFFF``,
+fp16/bf16 ``0x7FFF``), the signed form of ATen ``TopKTypeConfig``'s all-ones
+NaN. Not injective on NaN, so the caller re-reads gmem for that case.
+Signed integers are already in signed order and are only shifted up. Phase
+1's xor by ``_RADIX_SIGN_BIT`` is separate: it puts the top byte in unsigned
+bin order for the scan.
 
 ``_make_topk_storage`` unions ``s_hist``, the phase-2 counters, ``s_scan``
 and ``s_keys`` - they alias, each live only within its phase. The phase-2
@@ -35,11 +43,25 @@ member, not a union member.
 """
 
 import math
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from functools import partial
 from typing import cast
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
-from flydsl.expr import Array, Float32, gpu, Int32, Int64, range_constexpr
+from flydsl.expr import (
+    Array,
+    BFloat16,
+    Float16,
+    Float32,
+    gpu,
+    Int16,
+    Int32,
+    Int64,
+    Int8,
+    range_constexpr,
+)
 from flydsl.runtime.device import is_rdna_arch
 
 import torch
@@ -53,47 +75,198 @@ from torch._native.instrumentation import instrumented_flydsl_cache
 _RADIX_BITS = 8
 _RADIX_MASK = (1 << _RADIX_BITS) - 1
 _RADIX_SIGN_BIT = 1 << (_RADIX_BITS - 1)
-_FP32_BIT_WIDTH = torch.float32.itemsize * 8
-_NUM_RADIX_PASSES = _FP32_BIT_WIDTH // _RADIX_BITS
 _N_HIST_BINS = 1 << _RADIX_BITS
-_VEC = 4
-_NAN_SENTINEL_ORD = 0x7FFFFFFF
 _REGISTER_ROWS_PER_CTA = 2
+_ORD_BITS = 32
 
 
 def _u32_to_i32(x: int) -> int:
     return x - (1 << 32) if x >= (1 << 31) else x
 
 
-def _f32_to_ord(val):
-    bits = val.bitcast(Int32)
-    ords = bits ^ ((bits >> fx.Int32(31)) & fx.Int32(0x7FFFFFFF))
-    is_nan = (bits & fx.Int32(0x7FFFFFFF)) > fx.Int32(0x7F800000)
-    return is_nan.select(fx.Int32(_NAN_SENTINEL_ORD), ords)
+@dataclass(frozen=True)
+class TopKSpec:
+    """Encode a value as a signed int32 ordinal and decode it.
+
+    The dtype selects an involutive, same-width bit transform. The spec
+    left-aligns its result in an int32, then complements it for
+    ``largest=False`` to reverse the order. NaNs collapse to a sentinel;
+    the caller detects that sentinel and reloads the original value.
+    """
+
+    dtype: torch.dtype
+    elem_ty: type
+    int_ty: type
+    width: int
+    largest: bool
+    # Involutive transform between same-width value bits and narrow ordinal.
+    # A negative float flips every bit below its sign; an integer is the
+    # identity. The dtype spec is already bound in. Not part of equality.
+    val_to_narrow_ord: Callable = field(compare=False, hash=False)
+    nan_sentinel: int | None = None
+    nan_exp: int | None = None
+
+    def cache_token(self) -> str:
+        name = str(self.dtype).removeprefix("torch.")
+        return f"{name} largest={self.largest}"
+
+    @property
+    def vec(self) -> int:
+        # Values carried by one 16-byte buffer load.
+        return (8 * 16) // self.width
+
+    @property
+    def passes(self) -> int:
+        # Radix digits of the ordinal, counted down from bit 31.
+        return self.width // _RADIX_BITS
+
+    @property
+    def left_shift(self) -> int:
+        return _ORD_BITS - self.width
+
+    @property
+    def has_nan(self) -> bool:
+        return self.nan_sentinel is not None
+
+    def to_ord(self, val):
+        # val -> ord(val), one int32.
+        # 0. Reinterpret as same-width signed bits. Collapse a NaN before
+        #    applying the reversible steps; the sentinel has a clear sign
+        #    bit, so the narrow transform leaves it unchanged.
+        raw = val.bitcast(self.int_ty)
+        if self.has_nan:
+            nan_exp = self.int_ty(cast(int, self.nan_exp))
+            nan_sentinel = self.int_ty(cast(int, self.nan_sentinel))
+            low_mask = (1 << (self.width - 1)) - 1
+            is_nan = (raw & self.int_ty(low_mask)) > nan_exp
+            raw = is_nan.select(nan_sentinel, raw)
+        # 1. Apply the dtype's same-width transform.
+        narrow = self.val_to_narrow_ord(raw)
+        # 2. Widen and left-shift the low `width` bits to the top of the
+        #    int32. Their sign lands at bit 31 and the bits below are zero.
+        ord32 = fx.Int32(narrow)
+        if self.left_shift:
+            ord32 = ord32 << fx.Int32(self.left_shift)
+        # 3. Complement when largest=False.
+        if not self.largest:
+            ord32 = ~ord32
+        return ord32
+
+    def from_ord(self, stored):
+        # Inverse of to_ord, last step first. `stored` is that int32.
+        # 3 undone. Complement back when largest=False.
+        ord32 = ~stored if not self.largest else stored
+        # 2 undone. Arithmetic shift fills ones above a negative field.
+        # Truncating to `int_ty` keeps the low `width` bits.
+        bits32 = ord32 if self.left_shift == 0 else ord32 >> fx.Int32(self.left_shift)
+        # 1 undone. The same ordinal, at the field's own width, then bitcast
+        # back to the value type. An integer bitcast to its own type is
+        # removed by canonicalize.
+        narrow = self.val_to_narrow_ord(self.int_ty(bits32))
+        val = narrow.bitcast(self.elem_ty)
+        # 0 cannot be undone: NaN collapse is not injective. The caller
+        # detects `nan_sentinel` in `narrow` and reloads the original value.
+        return val, narrow
 
 
-def _make_key(val, idx):
-    ord64 = fx.Int64(_f32_to_ord(val)) & fx.Int64(0xFFFFFFFF)
-    inv_idx64 = fx.Int64(~idx) & fx.Int64(0xFFFFFFFF)
-    return (ord64 << fx.Int64(32)) | inv_idx64
+def topk_spec(dtype: torch.dtype, largest: bool) -> TopKSpec:
+    # torch dtype: flydsl dtype, same-width signed int, bit width, nan sentinel, nan exponent.
+    # None for the NaN fields means the dtype has no NaN.
+    def int_to_narrow_ord(bits, spec):
+        return bits
+
+    def float_to_narrow_ord(bits, spec):
+        # S sign, E exponent, F fraction.
+        # [S | E | F] -> [0 |  E |  F]  when S = 0
+        #             -> [1 | ~E | ~F]  when S = 1
+        # Constants use the field's integer type, so a 16-bit value stays 16-bit.
+        # `(1 << (width - 1)) - 1` is the bits under the sign at any width.
+        width = spec["width"]
+        int_ty = spec["int_ty"]
+        low_mask = (1 << (width - 1)) - 1
+        sign = (bits >> int_ty(width - 1)) & int_ty(1)
+        mask = (int_ty(0) - sign) & int_ty(low_mask)
+        return bits ^ mask
+
+    specs = {
+        torch.float32: dict(
+            elem_ty=Float32,
+            int_ty=Int32,
+            width=32,
+            nan_sentinel=0x7FFFFFFF,
+            nan_exp=0x7F800000,
+            to_narrow_ord=float_to_narrow_ord,
+        ),
+        torch.float16: dict(
+            elem_ty=Float16,
+            int_ty=Int16,
+            width=16,
+            nan_sentinel=0x7FFF,
+            nan_exp=0x7C00,
+            to_narrow_ord=float_to_narrow_ord,
+        ),
+        torch.bfloat16: dict(
+            elem_ty=BFloat16,
+            int_ty=Int16,
+            width=16,
+            nan_sentinel=0x7FFF,
+            nan_exp=0x7F80,
+            to_narrow_ord=float_to_narrow_ord,
+        ),
+        torch.int32: dict(
+            elem_ty=Int32,
+            int_ty=Int32,
+            width=32,
+            to_narrow_ord=int_to_narrow_ord,
+        ),
+        torch.int16: dict(
+            elem_ty=Int16,
+            int_ty=Int16,
+            width=16,
+            to_narrow_ord=int_to_narrow_ord,
+        ),
+        torch.int8: dict(
+            elem_ty=Int8,
+            int_ty=Int8,
+            width=8,
+            to_narrow_ord=int_to_narrow_ord,
+        ),
+    }
+    if dtype not in specs:
+        raise NotImplementedError(f"FlyDSL topk has no ordinal spec for {dtype}")
+    dtype_spec = specs[dtype]
+    spec = TopKSpec(
+        dtype=dtype,
+        largest=largest,
+        val_to_narrow_ord=partial(dtype_spec["to_narrow_ord"], spec=dtype_spec),
+        **{key: value for key, value in dtype_spec.items() if key != "to_narrow_ord"},
+    )
+    if spec.width > _ORD_BITS or spec.width % _RADIX_BITS:
+        raise NotImplementedError(
+            f"FlyDSL topk ordinal does not fit a {_ORD_BITS}-bit key for {dtype}"
+        )
+    return spec
 
 
-def _decode_key(key):
-    ord32 = fx.Int32(key >> fx.Int64(32))
-    inv_idx = fx.Int32(key & fx.Int64(0xFFFFFFFF))
-    val_bits = ord32 ^ ((ord32 >> fx.Int32(31)) & fx.Int32(0x7FFFFFFF))
-    val = val_bits.bitcast(Float32)
-    idx = ~inv_idx
-    return val, idx, ord32
-
-
-def _load_vec_f32(copy_atom, input_div, idx):
-    r = fx.make_rmem_tensor(_VEC, Float32)
+def _load_vec(spec: TopKSpec, copy_atom, input_div, idx):
+    r = fx.make_rmem_tensor(spec.vec, spec.elem_ty)
     fx.copy_atom_call(copy_atom, fx.slice(input_div, (None, idx)), r)
     return fx.memref_load_vec(r)
 
 
-def _make_topk_storage(sort_len: int, block_threads: int):
+def _make_key(val, idx, spec: TopKSpec):
+    ord64 = fx.Int64(spec.to_ord(val)) & fx.Int64(0xFFFFFFFF)
+    inv_idx64 = fx.Int64(~idx) & fx.Int64(0xFFFFFFFF)
+    return (ord64 << fx.Int64(32)) | inv_idx64
+
+
+def _split_key(key):
+    stored = fx.Int32(key >> fx.Int64(32))
+    idx = ~fx.Int32(key & fx.Int64(0xFFFFFFFF))
+    return stored, idx
+
+
+def _make_topk_storage(sort_len: int, block_threads: int, spec: TopKSpec):
     @fx.struct
     class CounterStorage:
         s_write_ctr: Array[Int32, 1, 4]
@@ -112,19 +285,27 @@ def _make_topk_storage(sort_len: int, block_threads: int):
         s_prefix: Array[Int32, 1, 4]
         s_mask: Array[Int32, 1, 4]
         s_rem_k: Array[Int32, 1, 4]
-        s_vals: Array[Float32, sort_len, 16]
+        s_vals: Array[spec.elem_ty, sort_len, 16]
         s_idxs: Array[Int32, sort_len, 16]
 
     return SharedStorage
 
 
-def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: str):
+def _build_radix_select_topk_module(
+    n: int, k: int, deterministic: bool, arch: str, spec: TopKSpec
+):
     num_stages = (k - 1).bit_length()
     sort_len = 1 << num_stages
     block_threads = max(sort_len, _N_HIST_BINS)
+    max_step_elems = block_threads * spec.vec
+    if max_step_elems >= (1 << 15):
+        raise AssertionError(
+            "packed deterministic scan needs < 32768 elements per step, "
+            f"got {max_step_elems}"
+        )
     warp_size = 32 if is_rdna_arch(arch) else 64
     num_warps = block_threads // warp_size
-    tile = block_threads * _VEC
+    tile = block_threads * spec.vec
     vec_iters = n // tile
     vec_end = vec_iters * tile
     scalar_tail_iters = (n - vec_end + block_threads - 1) // block_threads
@@ -145,10 +326,10 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
         row_in = fx.slice(input_buf, (row, None))
         row_values = fx.slice(values_buf, (row, None))
         row_indices = fx.slice(indices_buf, (row, None))
-        input_div = fx.logical_divide(row_in, fx.make_layout(_VEC, 1))
-        copy_atom_v = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), 32)
+        input_div = fx.logical_divide(row_in, fx.make_layout(spec.vec, 1))
+        copy_atom_v = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), spec.width)
         storage = fx.SharedAllocator().allocate(
-            _make_topk_storage(sort_len, block_threads)
+            _make_topk_storage(sort_len, block_threads, spec)
         )
         s_hist = storage.s_phase.s_hist.peek().view(fx.make_layout(_N_HIST_BINS, 1))
         s_prefix = storage.s_prefix.peek().view(fx.make_layout(1, 1))
@@ -166,9 +347,11 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
         s_idxs = storage.s_idxs.peek().view(fx.make_layout(sort_len, 1))
 
         def decode_topk_key(key):
-            val, idx, ord32 = _decode_key(key)
-            if ord32 == fx.Int32(_NAN_SENTINEL_ORD):
-                val = row_in[idx]
+            stored, idx = _split_key(key)
+            val, narrow = spec.from_ord(stored)
+            if spec.has_nan:
+                if narrow == spec.int_ty(spec.nan_sentinel):
+                    val = row_in[idx]
             return val, idx
 
         def warp_inclusive_prefix_i32(val, lane):
@@ -220,8 +403,11 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
         gpu.barrier()
 
         # Phase 1: radix byte passes, MSB to LSB.
-        for byte_pos in range_constexpr(_NUM_RADIX_PASSES):
-            shift = (_NUM_RADIX_PASSES - 1 - byte_pos) * _RADIX_BITS
+        for byte_pos in range_constexpr(spec.passes):
+            # The ordinal occupies the top spec.width of the int32, so
+            # pass 0 always reads bit 31. spec.passes stops at the bottom
+            # of that field.
+            shift = (_ORD_BITS // _RADIX_BITS - 1 - byte_pos) * _RADIX_BITS
             sign_bit_xor_val = _RADIX_SIGN_BIT if byte_pos == 0 else 0
 
             # Zero the histogram.
@@ -233,12 +419,12 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
             prefix = s_prefix[0]
             decided_mask = s_mask[0]
             for step in range_constexpr(vec_iters):
-                rvals = _load_vec_f32(
-                    copy_atom_v, input_div, step * block_threads + tid
+                rvals = _load_vec(
+                    spec, copy_atom_v, input_div, step * block_threads + tid
                 )
-                for vi in range_constexpr(_VEC):
+                for vi in range_constexpr(spec.vec):
                     accumulate_radix_byte_hist(
-                        _f32_to_ord(rvals[vi]),
+                        spec.to_ord(rvals[vi]),
                         byte_pos,
                         prefix,
                         decided_mask,
@@ -249,7 +435,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
                 col = vec_end + step * block_threads + tid
                 if col < n:
                     accumulate_radix_byte_hist(
-                        _f32_to_ord(row_in[col]),
+                        spec.to_ord(row_in[col]),
                         byte_pos,
                         prefix,
                         decided_mask,
@@ -300,7 +486,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
                     valid, val, _ = elems[elem_i]
                     cls_reg[elem_i] = 0
                     if valid:
-                        ords = _f32_to_ord(val)
+                        ords = spec.to_ord(val)
                         if ords > threshold:
                             cls_reg[elem_i] = 2
                             packed_local = packed_local + fx.Int32(1 << 16)
@@ -335,12 +521,12 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
 
             for step in range_constexpr(vec_iters):
                 tile_base = step * tile
-                base = tile_base + tid * _VEC
-                rvals = _load_vec_f32(
-                    copy_atom_v, input_div, step * block_threads + tid
+                base = tile_base + tid * spec.vec
+                rvals = _load_vec(
+                    spec, copy_atom_v, input_div, step * block_threads + tid
                 )
                 elems = []
-                for vi in range_constexpr(_VEC):
+                for vi in range_constexpr(spec.vec):
                     idx = fx.Int32(base + vi)
                     elems.append((True, rvals[vi], idx))
                 above_base, eq_base = gather_deterministic_step(
@@ -363,7 +549,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
             gpu.barrier()
 
             def gather_candidate(val, idx, vals, idxs):
-                ords = _f32_to_ord(val)
+                ords = spec.to_ord(val)
                 if ords > threshold:
                     pos = atomic_add(fx.get_iter(s_write_ctr), 1)
                     vals[pos] = val
@@ -377,11 +563,11 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
 
             for step in range_constexpr(vec_iters):
                 tile_base = step * tile
-                base = tile_base + tid * _VEC
-                rvals = _load_vec_f32(
-                    copy_atom_v, input_div, step * block_threads + tid
+                base = tile_base + tid * spec.vec
+                rvals = _load_vec(
+                    spec, copy_atom_v, input_div, step * block_threads + tid
                 )
-                for vi in range_constexpr(_VEC):
+                for vi in range_constexpr(spec.vec):
                     idx = fx.Int32(base + vi)
                     gather_candidate(rvals[vi], idx, s_vals, s_idxs)
             for step in range_constexpr(scalar_tail_iters):
@@ -397,7 +583,7 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
         sort_tid = sort_active.select(tid, 0)
         if sort_active:
             if active:
-                s_keys[sort_tid] = _make_key(s_vals[sort_tid], s_idxs[sort_tid])
+                s_keys[sort_tid] = _make_key(s_vals[sort_tid], s_idxs[sort_tid], spec)
             else:
                 s_keys[sort_tid] = fx.Int64(-(1 << 63))
         gpu.barrier()
@@ -461,19 +647,19 @@ def _build_radix_select_topk_module(n: int, k: int, deterministic: bool, arch: s
     return launch_radix_select_topk
 
 
-def _build_register_topk_module(n: int, k: int, arch: str):
+def _build_register_topk_module(n: int, k: int, arch: str, spec: TopKSpec):
     threads_per_row = 32 if is_rdna_arch(arch) else 64
     block_threads = threads_per_row * _REGISTER_ROWS_PER_CTA
     vec = n // threads_per_row
     # Process elements group by group to reduce VGPR usage and preserve occupancy.
-    # Groups are K elements, widened to _VEC for 128-bit loads. N >= 1024 is a
+    # Groups are K elements, widened to the 16-byte load width. N >= 1024 is a
     # power of two, with threads_per_row = 32 or 64.
-    group = max(k, _VEC)
+    group = max(k, spec.vec)
     if vec % group:
         raise AssertionError(f"vec={vec} must be divisible by group={group}")
-    if group % _VEC:
-        raise AssertionError(f"group={group} must be divisible by _VEC={_VEC}")
-    group_loads = group // _VEC
+    if group % spec.vec:
+        raise AssertionError(f"group={group} must be divisible by vec={spec.vec}")
+    group_loads = group // spec.vec
     num_groups = vec // group
     num_stages_group = int(math.log2(group))
     num_stages_k = int(math.log2(k)) if k > 1 else 0
@@ -500,13 +686,15 @@ def _build_register_topk_module(n: int, k: int, arch: str):
         row_input = fx.slice(input_buf, (row_safe, None))
         row_values = fx.slice(values_buf, (row_safe, None))
         row_indices = fx.slice(indices_buf, (row_safe, None))
-        input_div = fx.logical_divide(row_input, fx.make_layout(_VEC, 1))
-        copy_atom_v = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), 32)
+        input_div = fx.logical_divide(row_input, fx.make_layout(spec.vec, 1))
+        copy_atom_v = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), spec.width)
 
         def decode_topk_key(key):
-            val, idx, ord32 = _decode_key(key)
-            if ord32 == fx.Int32(_NAN_SENTINEL_ORD):
-                val = row_input[idx]
+            stored, idx = _split_key(key)
+            val, narrow = spec.from_ord(stored)
+            if spec.has_nan:
+                if narrow == spec.int_ty(spec.nan_sentinel):
+                    val = row_input[idx]
             return val, idx
 
         def compare_and_swap(arr, i: int, j: int, descending: bool):
@@ -548,7 +736,7 @@ def _build_register_topk_module(n: int, k: int, arch: str):
 
         # Build the per-lane top-K one group at a time. A lane takes whole
         # 128-bit chunks and lanes stride the row by one chunk, so each load
-        # step has the wave reading a contiguous _VEC * wave span. Which
+        # step has the wave reading a contiguous vec * wave span. Which
         # columns a lane ends up owning is irrelevant: both the fold below and
         # the butterfly merge after it only ever keep the top-K of a union.
         topk = fx.make_rmem_tensor(k, Int64)
@@ -556,10 +744,12 @@ def _build_register_topk_module(n: int, k: int, arch: str):
         for g in range_constexpr(num_groups):
             for j in range_constexpr(group_loads):
                 chunk = fx.Int32((g * group_loads + j) * threads_per_row) + lane
-                rvals = _load_vec_f32(copy_atom_v, input_div, chunk)
-                base = chunk * fx.Int32(_VEC)
-                for e in range_constexpr(_VEC):
-                    buf[j * _VEC + e] = _make_key(rvals[e], base + fx.Int32(e))
+                rvals = _load_vec(spec, copy_atom_v, input_div, chunk)
+                base = chunk * fx.Int32(spec.vec)
+                for e in range_constexpr(spec.vec):
+                    buf[j * spec.vec + e] = _make_key(
+                        rvals[e], base + fx.Int32(e), spec
+                    )
             bitonic_sort_desc(buf, group, num_stages_group)
             # buf is descending, so its leading K are the group's top-K and
             # topk_merge_desc reads exactly that prefix.
@@ -604,14 +794,16 @@ def _build_register_topk_module(n: int, k: int, arch: str):
 
 @instrumented_flydsl_cache(
     "aten::topk",
-    key_fn=lambda n, k, arch, backend, device_index, *a, **kw: (
-        f"register N={n} K={k} {arch} backend={backend} device={device_index}"
+    key_fn=lambda n, k, arch, spec, backend, device_index, *a, **kw: (
+        f"register N={n} K={k} {spec.cache_token()} {arch} "
+        f"backend={backend} device={device_index}"
     ),
 )
 def _compile_register_topk(
     n: int,
     k: int,
     arch: str,
+    spec: TopKSpec,
     backend: str,
     device_index: int,
     *,
@@ -624,7 +816,7 @@ def _compile_register_topk(
     # be cached per device.
     del backend, device_index
     input_2d, values_2d, indices_2d, rows_m, stream = compile_args
-    launch = _build_register_topk_module(n, k, arch)
+    launch = _build_register_topk_module(n, k, arch, spec)
     return flyc.compile(
         launch,
         make_compile_arg(input_2d, read_only=True),
@@ -640,11 +832,14 @@ def topk_register_out(
     k: int,
     values_2d: torch.Tensor,
     indices_2d: torch.Tensor,
+    *,
+    largest: bool = True,
 ) -> None:
     rows_m = input_2d.shape[0]
     n = input_2d.shape[1]
     device_index = input_2d.device.index
     arch: str = _resolve_rocm_arch(device_index)  # pyrefly: ignore[bad-assignment]
+    spec = topk_spec(input_2d.dtype, largest)
 
     with torch.cuda.device(input_2d.device):
         stream = torch.cuda.current_stream(input_2d.device)
@@ -652,6 +847,7 @@ def topk_register_out(
             n,
             k,
             arch,
+            spec,
             flyc.compile_backend_name(),
             device_index,
             compile_args=(input_2d, values_2d, indices_2d, rows_m, stream),
@@ -659,19 +855,21 @@ def topk_register_out(
         compiled(read_only_tensor(input_2d), values_2d, indices_2d, rows_m, stream)
 
 
-def topk_register(input_2d: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
+def topk_register(
+    input_2d: torch.Tensor, k: int, *, largest: bool = True
+) -> tuple[torch.Tensor, torch.Tensor]:
     rows_m = input_2d.shape[0]
     values_2d = torch.empty((rows_m, k), device=input_2d.device, dtype=input_2d.dtype)
     indices_2d = torch.empty((rows_m, k), device=input_2d.device, dtype=torch.int64)
-    topk_register_out(input_2d, k, values_2d, indices_2d)
+    topk_register_out(input_2d, k, values_2d, indices_2d, largest=largest)
     return values_2d, indices_2d
 
 
 @instrumented_flydsl_cache(
     "aten::topk",
-    key_fn=lambda n, k, deterministic, arch, backend, device_index, *a, **kw: (
-        f"radix N={n} K={k} deterministic={deterministic} {arch} "
-        f"backend={backend} device={device_index}"
+    key_fn=lambda n, k, deterministic, arch, spec, backend, device_index, *a, **kw: (
+        f"radix N={n} K={k} deterministic={deterministic} {spec.cache_token()} "
+        f"{arch} backend={backend} device={device_index}"
     ),
 )
 def _compile_radix_select_topk(
@@ -679,6 +877,7 @@ def _compile_radix_select_topk(
     k: int,
     deterministic: bool,
     arch: str,
+    spec: TopKSpec,
     backend: str,
     device_index: int,
     *,
@@ -686,7 +885,7 @@ def _compile_radix_select_topk(
 ) -> flyc.CompiledFunction:
     del backend, device_index  # cache keys only; see _compile_register_topk
     input_2d, values_2d, indices_2d, rows_m, stream = compile_args
-    launch = _build_radix_select_topk_module(n, k, deterministic, arch)
+    launch = _build_radix_select_topk_module(n, k, deterministic, arch, spec)
     return flyc.compile(
         launch,
         make_compile_arg(input_2d, read_only=True),
@@ -704,11 +903,13 @@ def topk_radix_out(
     indices_2d: torch.Tensor,
     *,
     deterministic: bool = True,
+    largest: bool = True,
 ) -> None:
     rows_m = input_2d.shape[0]
     n = input_2d.shape[1]
     device_index = input_2d.device.index
     arch: str = _resolve_rocm_arch(device_index)  # pyrefly: ignore[bad-assignment]
+    spec = topk_spec(input_2d.dtype, largest)
 
     with torch.cuda.device(input_2d.device):
         stream = torch.cuda.current_stream(input_2d.device)
@@ -717,6 +918,7 @@ def topk_radix_out(
             k,
             deterministic,
             arch,
+            spec,
             flyc.compile_backend_name(),
             device_index,
             compile_args=(input_2d, values_2d, indices_2d, rows_m, stream),
@@ -725,12 +927,23 @@ def topk_radix_out(
 
 
 def topk_radix(
-    input_2d: torch.Tensor, k: int, *, deterministic: bool = True
+    input_2d: torch.Tensor,
+    k: int,
+    *,
+    deterministic: bool = True,
+    largest: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     rows_m = input_2d.shape[0]
     values_2d = torch.empty((rows_m, k), device=input_2d.device, dtype=input_2d.dtype)
     indices_2d = torch.empty((rows_m, k), device=input_2d.device, dtype=torch.int64)
-    topk_radix_out(input_2d, k, values_2d, indices_2d, deterministic=deterministic)
+    topk_radix_out(
+        input_2d,
+        k,
+        values_2d,
+        indices_2d,
+        deterministic=deterministic,
+        largest=largest,
+    )
     return values_2d, indices_2d
 
 
