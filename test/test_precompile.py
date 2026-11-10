@@ -4729,6 +4729,14 @@ def train_step(model, x):
     model(x).sum().backward()
 
 
+def scaled(x):
+    return (x * 7.25).relu()
+
+
+def scaled_backward(x):
+    (x * 7.25).relu().sum().backward()
+
+
 def breaking_helper(y):
     y = y.sin()
     torch._dynamo.graph_break()
@@ -4910,6 +4918,113 @@ class TestPrecompileDynamoCapture(TestCase):
 
     def _capture(self, fn, **kwargs):
         return capture(fn, artifact_path=self.artifact, cache_path=self.cache, **kwargs)
+
+    def test_two_artifacts_of_one_capture_load_side_by_side(self):
+        # A save() checkpoint and the final artifact share compiled graphs, code and
+        # all, so loading both binds the same code under the same names.
+        checkpoint = os.path.join(self.dir, "checkpoint.py")
+        with self._capture(self.mod.scaled) as cap:
+            cap(torch.randn(8))
+            cap.save()
+            shutil.copy(self.artifact, checkpoint)
+            shutil.copy(self.cache, checkpoint + ".cache")
+            cap(torch.randn(3, 3))
+        x = torch.randn(8)
+        self.assertEqual(load(checkpoint, checkpoint + ".cache")(x), (x * 7.25).relu())
+        self.assertEqual(load(self.artifact, self.cache)(x), (x * 7.25).relu())
+
+    def test_graph_code_literal_round_trips_line_for_line(self):
+        from torch._precompile import _source_literal
+
+        for source in (
+            "def k():\n    return 1\n",
+            "a = '''x'''\nb = \"\"\"doc\"\"\"\n",
+            'ends in a quote"',
+            "ends in a backslash\\",
+            "both ''' and \"\"\" and an escaped \\n\n",
+        ):
+            literal = _source_literal(source)
+            self.assertEqual(ast.literal_eval(literal), source)
+            self.assertEqual(literal.count("\n"), source.count("\n"))
+
+    # Served in a fresh process, which lacks the crossref dispatch mode the
+    # capture's guards recorded.
+    @skipIfCrossRef
+    def test_compiled_graph_code_is_editable(self):
+        from torch.compiler.precompile import no_compilation
+
+        x = torch.randn(8)
+        with self._capture(self.mod.scaled) as cap:
+            cap(x)
+        with open(self.artifact) as f:
+            head, marker, code = f.read().partition("GRAPH_SOURCES = {}")
+        # Past the readable summary only the graph code is text: the rest is blobs.
+        self.assertIn("GRAPH_SOURCES[", code)
+        self.assertIn("7.25", code)
+        # The code moved out of _BACKENDS, so the unedited artifact runs it from the
+        # text and still serves its precompiled kernels.
+        with no_compilation():
+            self.assertEqual(load(self.artifact, self.cache)(x), (x * 7.25).relu())
+        with open(self.artifact, "w") as f:
+            f.write(head + marker + code.replace("7.25", "3.5"))
+        with self.assertRaisesRegex(PrecompileError, "cache_path=None"):
+            load(self.artifact, self.cache)
+        # This process serves the captured version; the edited one is another version
+        # of the capture, which binds the same compiled-graph names.
+        with self.assertRaisesRegex(
+            PrecompileError, "other code for the same compiled"
+        ):
+            load(self.artifact, None)
+        script = (
+            f"import sys, torch; sys.path.insert(0, {self.dir!r}); "
+            f"import {self.module_name}; "
+            "from torch.compiler.precompile import load; x = torch.ones(8); "
+            f"out = load({self.artifact!r}, None)(x); "
+            "torch.testing.assert_close(out, (x * 3.5).relu()); print('served')"
+        )
+        out = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=900
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("served", out.stdout)
+
+    def test_a_renamed_graph_source_key_is_refused(self):
+        with self._capture(self.mod.scaled) as cap:
+            cap(torch.randn(8))
+        with open(self.artifact) as f:
+            src = f.read()
+        with open(self.artifact, "w") as f:
+            f.write(src.replace(".fw'] = ", ".fx'] = ", 1))
+        with self.assertRaisesRegex(PrecompileError, r"missing \['.*\.fw'\]"):
+            load(self.artifact, None)
+
+    # Served in a fresh process, which lacks the crossref dispatch mode the
+    # capture's guards recorded.
+    @skipIfCrossRef
+    def test_an_edited_backward_graph_runs(self):
+        x = torch.randn(8, requires_grad=True)
+        with self._capture(self.mod.scaled_backward) as cap:
+            cap(x)
+        with open(self.artifact) as f:
+            src = f.read()
+        start = src.index('.bw\'] = r"""')
+        end = src.index('"""', start + len('.bw\'] = r"""'))
+        self.assertIn("7.25", src[start:end])
+        with open(self.artifact, "w") as f:
+            f.write(src[:start] + src[start:end].replace("7.25", "3.5") + src[end:])
+        script = (
+            f"import sys, torch; sys.path.insert(0, {self.dir!r}); "
+            f"import {self.module_name}; "
+            "from torch.compiler.precompile import load; "
+            "x = torch.randn(8, requires_grad=True); "
+            f"load({self.artifact!r}, None)(x); "
+            "torch.testing.assert_close(x.grad, 3.5 * (x > 0).float()); print('served')"
+        )
+        out = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=900
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("served", out.stdout)
 
     def _serve_in_fresh_process(
         self, calls, grads=None, mode="standalone", eager_miss=None, refused_frame=None
