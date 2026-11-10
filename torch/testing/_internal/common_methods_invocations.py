@@ -17545,8 +17545,8 @@ op_db: list[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
         supports_autograd=True,
         assert_autodiffed=False,
-        supports_gradgrad=False,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_out=False,
         inplace_variant=partial(torch.nn.functional.hardsigmoid, inplace=True),
         decorators=(DecorateInfo(

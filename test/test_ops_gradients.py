@@ -163,7 +163,6 @@ class TestBwdGradients(TestGradients):
         | {
             skip("abs", dtypes=(torch.cdouble,)),
             xfail("as_strided", variant_name="partial_views"),
-            xfail("nn.functional.hardsigmoid"),
         }
     )
     @_gradcheck_ops(op_db)
