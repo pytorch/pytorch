@@ -44,6 +44,16 @@ pre_autograd_decomposition_table = global_decomposition_table["pre_autograd"]
 meta_table = global_decomposition_table["meta"]
 
 
+def is_torch_decomp_decomposition(func: OpOverload) -> bool:
+    decompositions = torch._decomp.decompositions
+    # Note that the function in the decomposition table might be
+    # different from the one in the module because of the difference
+    # in out handling in aten API and torch public API
+    return decomposition_table[func].__module__.startswith(
+        "torch._decomp"
+    ) and decomposition_table[func].__name__ in dir(decompositions)
+
+
 def _should_decompose_because_unsafe_op(op: torch._ops.OperatorBase) -> bool:
     """
     Returns True if the op must always decompose in export/compile tracing system
