@@ -1653,21 +1653,26 @@ static PyObject* get_dispatch_stack_at(
 
 // A C++ FakeTensorMode lives in FakeTensorModeTLS rather than the FAKE infra
 // mode slot, but set/get/unset_dispatch_mode treat it as the FAKE mode (through
-// its Python object, a CppFakeTensorMode) whenever no Python FakeTensorMode is
+// its Python CppFakeTensorMode wrapper) whenever no Python FakeTensorMode is
 // set, so callers that enter, suspend and restore the fake mode through these
-// calls handle either kind the same way; they use that object as the fake mode
+// calls handle either kind the same way; they use the wrapper as the fake mode
 // (e.g. read its shape_env). The mode stack APIs
 // (push/pop_torch_dispatch_stack, _len_torch_dispatch_stack) do not see it, so
 // a C++ mode is installed and removed only through set/unset_dispatch_mode.
-// The slot holds the mode's handle, so get/unset return the Python object it
-// was set with; see Note [C++ FakeTensorMode handle].
+// get/unset return the mode's wrapper, rebuilding it if it was collected, and
+// raise if that fails; see Note [C++ FakeTensorMode Python wrapper lifetime].
+// TODO: the rebuild always fails until CppFakeTensorMode is added.
 static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(!Py_IsNone(mode));
 
-  if (py::isinstance<c10::FakeTensorMode>(mode)) {
-    // Raises for a bare _CppFakeTensorMode or a subclass of CppFakeTensorMode
-    auto handle = torch::fake_tensor::getCppFakeTensorModeHandle(mode);
+  py::object cpp_mode_obj = PyObject_FastGetAttrString(mode, "_cpp_mode");
+  if (cpp_mode_obj) {
+    auto cpp_mode =
+        py::cast<std::shared_ptr<c10::FakeTensorMode>>(cpp_mode_obj);
+    TORCH_CHECK(
+        cpp_mode != nullptr,
+        "set_dispatch_mode() called with a mode whose _cpp_mode is None");
     TORCH_CHECK(
         !c10::impl::TorchDispatchModeTLS::get_mode(
              c10::impl::TorchDispatchModeKey::FAKE)
@@ -1676,14 +1681,14 @@ static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
     TORCH_CHECK(
         c10::impl::FakeTensorModeTLS::get_state() == nullptr,
         "trying to set the current C++ FakeTensorMode, but one already exists");
-    c10::impl::FakeTensorModeTLS::set_state(std::move(handle));
+    c10::impl::FakeTensorModeTLS::set_state(std::move(cpp_mode));
     Py_RETURN_NONE;
   }
 
   py::object maybe_mode_key_obj = PyObject_FastGetAttrString(mode, "_mode_key");
   TORCH_CHECK(
       maybe_mode_key_obj,
-      "set_dispatch_mode() called with a mode that is not a CppFakeTensorMode and has no _mode_key attribute!");
+      "set_dispatch_mode() called with a mode that has no _cpp_mode or _mode_key attribute!");
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj);
   check_no_cpp_fake_mode(mode_key);
 
@@ -1728,9 +1733,7 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
       TORCH_CHECK(
           !c10::impl::TorchDispatchModeTLS::get_mode(mode_key).has_value(),
           "both a Python FakeTensorMode and a C++ FakeTensorMode are set");
-      // Get the Python object first, as the slot's handle may hold the last
-      // reference to it. This raises, leaving the slot as it is, for a mode
-      // made in C++.
+      // Get the wrapper first, so a failed rebuild leaves the mode installed
       auto py_mode = torch::fake_tensor::getCppFakeTensorModePyObj(cpp_mode);
       c10::impl::FakeTensorModeTLS::reset_state();
       return py_mode.release().ptr();

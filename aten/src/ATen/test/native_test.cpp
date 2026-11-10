@@ -330,20 +330,9 @@ TEST(TestNative, PoolDowncastCompatibility) {
   }
 }
 
-// The handle of a mode made in C++, which has no Python object
-static std::shared_ptr<c10::FakeTensorModeHandle> make_cpp_fake_mode(
-    bool allow_meta = true,
-    bool allow_unsafe_data_ptr_access = true) {
-  return std::make_shared<c10::FakeTensorModeHandle>(
-      c10::FakeTensorModeHandle{
-          std::make_shared<c10::FakeTensorMode>(
-              nullptr, nullptr, allow_meta, allow_unsafe_data_ptr_access),
-          nullptr});
-}
-
 TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
   auto input = at::empty({4}, at::device(at::kMeta));
-  auto mode = make_cpp_fake_mode();
+  auto mode = std::make_shared<c10::FakeTensorMode>(nullptr, nullptr);
   auto* input_impl = input.unsafeGetTensorImpl();
   at::set_and_normalize_fake_device(input_impl, c10::Device(c10::kCPU));
   input_impl->set_fake_tensor_mode(mode);
@@ -354,18 +343,15 @@ TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
 
   ASSERT_TRUE(fake_device.has_value());
   EXPECT_EQ(*fake_device, c10::Device(c10::kCPU));
-  auto handle = result_impl->fake_tensor_mode();
-  ASSERT_NE(handle, nullptr);
-  EXPECT_EQ(handle->mode, mode->mode);
+  EXPECT_EQ(result_impl->fake_tensor_mode(), mode);
 }
 
 TEST(TestNative, InitCppFake) {
-  auto mode = make_cpp_fake_mode();
+  auto mode = std::make_shared<c10::FakeTensorMode>(nullptr, nullptr);
   auto make_fake = [&]() {
     auto t = at::empty({2}, at::device(at::kMeta));
     at::init_cpp_fake(t.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode);
-    auto handle = t.unsafeGetTensorImpl()->fake_tensor_mode();
-    EXPECT_EQ(handle ? handle->mode : nullptr, mode->mode);
+    EXPECT_EQ(t.unsafeGetTensorImpl()->fake_tensor_mode(), mode);
     EXPECT_EQ(t.device(), c10::Device(c10::kCPU));
     return t;
   };
@@ -408,7 +394,7 @@ TEST(TestNative, InitCppFake) {
   // within a kernel does not mark the shared storage again, but a new fake of
   // it, as the fake fallback makes inside a kernel for a view op's output,
   // does; its fake device is replaced.
-  mode->mode->allow_unsafe_data_ptr_access_ = false;
+  mode->allow_unsafe_data_ptr_access_ = false;
   expect_throws(make_fake());
   expect_warns(fake);
   auto view = at::native::as_strided_tensorimpl(fake, {1}, {1});
@@ -426,7 +412,7 @@ TEST(TestNative, InitCppFake) {
   // A rejected tensor is left unchanged
   auto expect_rejected = [&](const at::Tensor& t,
                              c10::Device device,
-                             const std::shared_ptr<c10::FakeTensorModeHandle>& m,
+                             const std::shared_ptr<c10::FakeTensorMode>& m,
                              const std::string& msg) {
     auto* impl = t.unsafeGetTensorImpl();
     try {
@@ -443,8 +429,11 @@ TEST(TestNative, InitCppFake) {
     t.mutable_data_ptr();
     EXPECT_EQ(handler.messages.size(), count);
   };
-  auto strict_mode = make_cpp_fake_mode(
-      /*allow_meta=*/false, /*allow_unsafe_data_ptr_access=*/false);
+  auto strict_mode = std::make_shared<c10::FakeTensorMode>(
+      nullptr,
+      nullptr,
+      /*allow_meta=*/false,
+      /*allow_unsafe_data_ptr_access=*/false);
   expect_rejected(at::empty({2}), cpu, mode, "expects a meta tensor");
   expect_rejected(
       at::empty({2}, at::device(at::kMeta)), meta, strict_mode, "allow_meta");
