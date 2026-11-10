@@ -160,7 +160,7 @@ Rectangles are states. Rounded boxes are processes that move an item between sta
 | Draft | (GitHub draft) | Author | Mark the PR as ready for review once the description and code are ready to be looked at. |
 | Ready | | Triage bot, or a maintainer if the bot fails or the PR has `no automated triage` | PRs that do not meet pre-conditions (detailed below) are closed. Otherwise one reviewer per module or team is assigned and `triaged` is added. |
 | Pre-review | `triaged` | Assigned reviewers | Every assigned reviewer must accept the pre-review, by reacting with a thumbs-up to the PR description or commenting `@pytorchbot pre-review accept`, for the PR to move to `in progress`. If any rejects it, it is closed or moved back to draft. |
-| In progress | `in progress` | Author | Iterate until the PR meets the `ready for review` criteria below. With the `no automated review` label, this step is skipped. |
+| In progress | `in progress` | Author | Iterate until the PR meets the `ready for review` criteria below. With the `no automated review` label, this step is skipped. Adding that label also withdraws the automated review's change requests. |
 | Ready for review | `ready for review` | Assigned reviewers | An assigned reviewer does the full review. If significant changes are needed, they request changes and the PR goes back to `in progress`, unless it has `no automated review`. Opted-out PRs stay `ready for review` while the author addresses the feedback. |
 | Accepted | (approved review) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
 
@@ -176,7 +176,7 @@ The labels are the source of truth for where your PR is in the process. For what
 
 If a maintainer requests changes and your PR returns to `in progress`, please address their feedback before the PR returns to maintainer review. A fresh automated review checks that the feedback has been addressed, and the PR must meet all of the readiness criteria above again. The earlier passing review cannot move the PR back to `ready for review`. If you address comments without pushing, comment `@pytorchbot review` to run the automated review again.
 
-With the `no automated review` label, your PR skips these checks and moves directly to `ready for review`. A maintainer requesting changes does not move it back to `in progress`; you still need to address the maintainer's feedback until the PR is accepted.
+With the `no automated review` label, your PR skips these checks and moves directly to `ready for review`. Adding the label withdraws any change requests from the automated review; a maintainer still needs to approve the PR. A maintainer requesting changes does not move it back to `in progress`; you still need to address the maintainer's feedback until the PR is accepted.
 
 **Pre-conditions**:
 
@@ -997,10 +997,13 @@ BUILD_CONFIG USE_CUDA=1 pip install --no-build-isolation -v -e .
 BUILD_CONFIG USE_CUDA=1 USE_DISTRIBUTED=1 pip install --no-build-isolation -v -e .
 ```
 
-For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build
-options passed for the first time will persist; please run `ccmake build/`, run
-`cmake-gui build/`, or directly edit `build/CMakeCache.txt` to adapt build
-options.
+For subsequent builds (i.e., when `build/CMakeCache.txt` exists), an option
+that is no longer in the environment keeps the value the cache remembers from
+the first build, while a variable that is in the environment is re-applied on
+every build. Environment variables win over `-C` flags, `-C` flags win over
+`pyproject.toml`, and all three win over the cache. To change a cached option
+without setting its variable, run `ccmake build/`, run `cmake-gui build/`, or
+directly edit `build/CMakeCache.txt`.
 
 ### Profile build time
 
