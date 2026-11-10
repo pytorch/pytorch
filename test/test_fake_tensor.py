@@ -5761,6 +5761,44 @@ class TestCppFakeTensorModeBindings(TestCase):
         gc.collect()
         self.assertIsNone(ref())
 
+    @skipIfTorchDynamo("Dynamo keeps references that stop the mode being collected")
+    @parametrize("replace_with_fake", [False, True])
+    def test_set_data_releases_mode_after_metadata_copy(self, replace_with_fake):
+        cpu = torch.device("cpu")
+        mode = CppFakeTensorMode()
+        fake = torch._C._from_meta_and_device(torch.empty(2, device="meta"), cpu, mode)
+        real = torch.arange(16, dtype=torch.float64).reshape(4, 4)[1:].t()
+        replacement = real
+        if replace_with_fake:
+            replacement_mode = CppFakeTensorMode()
+            replacement = torch._C._from_meta_and_device(
+                torch.empty_like(real, device="meta"), cpu, replacement_mode
+            )
+
+        def metadata(tensor):
+            return (
+                tensor.shape,
+                tensor.stride(),
+                tensor.storage_offset(),
+                tensor.dtype,
+                tensor.device,
+                str(torch._C._dispatch_keys(tensor)),
+                tensor.untyped_storage().device,
+                torch._C._maybe_get_fake_mode(tensor),
+            )
+
+        observed = []
+        ref = weakref.ref(mode, lambda _: observed.append(metadata(fake)))
+        del mode
+        self.assertIsNotNone(ref())
+        expected = metadata(replacement)
+        fake.data = replacement
+        self.assertIsNone(ref())
+        self.assertEqual(observed, [expected])
+        self.assertEqual(metadata(fake), expected)
+        if not replace_with_fake:
+            self.assertEqual(fake, real)
+
     def test_from_meta_and_device_sparse_mode_installed(self):
         # The placeholder meta indices and values that the sparse impls' copies
         # allocate do not dispatch to the installed mode. With no Fake kernel
@@ -6061,7 +6099,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         fake_key = torch._C._TorchDispatchModeKey.FAKE
         if torch._C._get_dispatch_mode(fake_key) is not None:
             torch._C._unset_dispatch_mode(fake_key)
-        _cpp_fake_mode_tls.entered.clear()
+        _cpp_fake_mode_tls.stack.clear()
 
     @parametrize("entry", ["live", "noop", "inherited"])
     @parametrize("outer_avoid", [False, True])
@@ -6080,27 +6118,21 @@ class TestCppFakeTensorModeBindings(TestCase):
                 mode.__enter__()
         before = self._installed()
         lift = torch._C._only_lift_cpu_tensors()
-        entered = list(_cpp_fake_mode_tls.entered)
-        records = len(mode.enter_stack)
+        entries = list(_cpp_fake_mode_tls.stack)
         with self.assertRaisesRegex(ValueError, "unwind"):
             with patch.object(CppFakeTensorMode, "avoid_device_init", outer_avoid):
                 with mode:
-                    with inner_guard:
-                        inner.__enter__()
-                        inner.__enter__()
-                    raise ValueError("unwind")
+                    with inner_guard, inner, inner:
+                        raise ValueError("unwind")
         self.assertEqual(self._installed(), before)
         self.assertEqual(torch._C._only_lift_cpu_tensors(), lift)
-        self.assertEqual(_cpp_fake_mode_tls.entered, entered)
-        self.assertEqual(len(mode.enter_stack), records)
-        self.assertEqual(inner.enter_stack, [])
+        self.assertEqual(_cpp_fake_mode_tls.stack, entries)
         if entry == "noop":
             mode.__exit__(None, None, None)
         elif entry == "inherited":
             torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
         self.assertEqual(self._installed(), (None, False))
-        self.assertEqual(_cpp_fake_mode_tls.entered, [])
-        self.assertEqual(mode.enter_stack, [])
+        self.assertEqual(_cpp_fake_mode_tls.stack, [])
         self.assertFalse(torch._C._only_lift_cpu_tensors())
 
     def test_cpp_fake_tensor_mode_enter_exit(self):
@@ -6126,9 +6158,7 @@ class TestCppFakeTensorModeBindings(TestCase):
                 # Re-entering the active mode is a no-op
                 with mode:
                     self.assertEqual(self._installed(), (mode, True))
-                    self.assertFalse(mode.enter_stack[-1][0])
-                    tls_modes = _cpp_fake_mode_tls.entered
-                    self.assertEqual(tls_modes.count(mode), 1)
+                    self.assertEqual(len(_cpp_fake_mode_tls.stack), 2)
                 self.assertEqual(self._installed(), (mode, True))
                 # Entering another one suspends it until that one exits
                 with CppFakeTensorMode() as inner:
@@ -6146,9 +6176,10 @@ class TestCppFakeTensorModeBindings(TestCase):
         with patch.object(CppFakeTensorMode, "avoid_device_init", True):
             torch._C._set_dispatch_mode(mode)
             with mode:
-                self.assertFalse(mode.enter_stack[-1][0])
-                self.assertNotIn(mode, _cpp_fake_mode_tls.entered)
+                self.assertEqual(len(_cpp_fake_mode_tls.stack), 1)
                 self.assertTrue(torch._C._only_lift_cpu_tensors())
+                with unset_fake_temporarily():
+                    self.assertTrue(is_in_torch_dispatch_mode())
             torch._C._unset_dispatch_mode(fake_key)
         self.assertFalse(torch._C._only_lift_cpu_tensors())
 
@@ -6161,7 +6192,7 @@ class TestCppFakeTensorModeBindings(TestCase):
                     inner.__enter__()
                 self.assertEqual(self._installed(), (outer, outer is mode))
 
-        # Exiting an entered mode through the FAKE slot finds its enter_stack,
+        # Exiting an entered mode through the FAKE slot finds its entry,
         # and the mode is freed once it exits
         mode = CppFakeTensorMode()
         ref = weakref.ref(mode)
@@ -6194,30 +6225,36 @@ class TestCppFakeTensorModeBindings(TestCase):
         outer, inner = CppFakeTensorMode(), CppFakeTensorMode()
         outer.__enter__()
         inner.__enter__()
-        msg = "exited while another fake mode is installed"
+        msg = "must exit in reverse order of entry on the same thread"
         with self.assertRaisesRegex(RuntimeError, msg):
             outer.__exit__(None, None, None)
         self.assertEqual(self._installed(), (inner, True))
+        entries = list(_cpp_fake_mode_tls.stack)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            outer.__exit__(ValueError, ValueError("unwind"), None)
+        self.assertEqual(self._installed(), (inner, True))
+        self.assertEqual(_cpp_fake_mode_tls.stack, entries)
+        with unset_fake_temporarily():
+            with self.assertRaisesRegex(RuntimeError, msg):
+                outer.__exit__(None, None, None)
+            self.assertEqual(self._installed(), (None, False))
+            self.assertEqual(_cpp_fake_mode_tls.stack, entries)
         inner.__exit__(None, None, None)
         self.assertEqual(self._installed(), (outer, True))
         outer.__exit__(None, None, None)
         self.assertEqual(self._installed(), (None, False))
-        # Unwinding a with statement from an exception takes the modes entered
-        # over it out, and the exception propagates
+        # Nested with statements restore modes in order as an exception unwinds.
         inner2 = CppFakeTensorMode()
         with self.assertRaisesRegex(ValueError, "unwind"):
-            with outer:
-                inner.__enter__()
-                inner2.__enter__()
+            with outer, inner, inner2:
                 raise ValueError("unwind")
         self.assertEqual(self._installed(), (None, False))
-        self.assertEqual(_cpp_fake_mode_tls.entered, [])
-        self.assertEqual((inner.enter_stack, inner2.enter_stack), ([], []))
+        self.assertEqual(_cpp_fake_mode_tls.stack, [])
         self.assertFalse(is_in_torch_dispatch_mode())
 
         # A mode entered over itself is tracked per entry
         def entered_ids():
-            return [id(m) for m in _cpp_fake_mode_tls.entered]
+            return [id(m) for m, _ in _cpp_fake_mode_tls.stack]
 
         a, b, c = CppFakeTensorMode(), CppFakeTensorMode(), CppFakeTensorMode()
         with a:
@@ -6226,8 +6263,7 @@ class TestCppFakeTensorModeBindings(TestCase):
                     pass
                 self.assertEqual(entered_ids(), [id(a), id(b)])
                 with self.assertRaisesRegex(ValueError, "unwind"):
-                    with a:
-                        c.__enter__()
+                    with a, c:
                         raise ValueError("unwind")
                 self.assertEqual(self._installed(), (b, True))
                 self.assertEqual(entered_ids(), [id(a), id(b)])
@@ -6271,7 +6307,8 @@ class TestCppFakeTensorModeBindings(TestCase):
         finally:
             torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
 
-    def test_cpp_fake_tensor_mode_exit_on_another_thread(self):
+    @parametrize("reenter", [False, True])
+    def test_cpp_fake_tensor_mode_exit_on_another_thread(self, reenter):
         # Exiting on a thread that did not enter the mode raises before changing
         # anything, whether or not that thread has a fake mode of its own; a
         # thread that inherited the C++ mode can still re-enter it as a no-op
@@ -6302,8 +6339,7 @@ class TestCppFakeTensorModeBindings(TestCase):
                 torch._C._set_dispatch_mode(mode)
                 with mode:
                     inside = self._installed() == (mode, True)
-                    noop = not mode.enter_stack[-1][0]
-                    noop = noop and mode not in _cpp_fake_mode_tls.entered
+                    noop = len(_cpp_fake_mode_tls.stack) == 1
                 reentered.append((inside, noop, self._installed() == (mode, True)))
             except Exception as e:
                 errors.append(f"{type(e).__name__}: {e}")
@@ -6312,16 +6348,17 @@ class TestCppFakeTensorModeBindings(TestCase):
 
         with patch.object(CppFakeTensorMode, "avoid_device_init", False):
             mode = CppFakeTensorMode()
-            with mode:
+            reentry = mode if reenter else contextlib.nullcontext()
+            with mode, reentry:
                 targets = [(exit_mode, (None,)), (exit_mode, (CppFakeTensorMode(),))]
                 for target, args in [*targets, (reenter_inherited, ())]:
                     thread = threading.Thread(target=target, args=args)
                     thread.start()
                     thread.join()
                 self.assertEqual(self._installed(), (mode, True))
-                self.assertEqual(len(mode.enter_stack), 1)
+                self.assertEqual(len(_cpp_fake_mode_tls.stack), 2 if reenter else 1)
         self.assertEqual(self._installed(), (None, False))
-        msg = "CppFakeTensorMode exited without a matching enter on this thread"
+        msg = "CppFakeTensorMode must exit in reverse order of entry on the same thread"
         self.assertEqual(errors, [f"RuntimeError: {msg}"] * 2)
         self.assertEqual(kept, [True] * 4)
         self.assertEqual(reentered, [(True, True, True)])
@@ -6346,7 +6383,7 @@ class TestCppFakeTensorModeBindings(TestCase):
                 refs.append(weakref.ref(mode))
                 mode.__enter__()
                 installed = self._installed() == (mode, True)
-                tls_modes = _cpp_fake_mode_tls.entered
+                tls_modes = [m for m, _ in _cpp_fake_mode_tls.stack]
                 in_mode = is_in_torch_dispatch_mode()
                 entered.append((installed, mode in tls_modes, in_mode))
             except Exception as e:
