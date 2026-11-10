@@ -468,6 +468,12 @@ setup_cuda_compat_13_5() {
   echo "$compat_sha256  $CUDA_COMPAT_DIR/$compat_package" | sha256sum --check
   dpkg-deb --extract "$CUDA_COMPAT_DIR/$compat_package" "$CUDA_COMPAT_DIR"
   CUDA_COMPAT_LIBRARY_PATH="$CUDA_COMPAT_DIR/usr/local/cuda-13.5/compat${CUDA_COMPAT_LIBRARY_PATH:+:$CUDA_COMPAT_LIBRARY_PATH}"
+  driver_version=$(cd test && env LD_LIBRARY_PATH="$CUDA_COMPAT_LIBRARY_PATH" python -c 'from torch.cuda.green_contexts import _get_driver_version; print(_get_driver_version())')
+  echo "CUDA driver API version with cuda-compat: ${driver_version}"
+  if [[ "$driver_version" -lt 13050 ]]; then
+    echo "cuda-compat 13.5 did not take effect" >&2
+    return 1
+  fi
 }
 
 test_cuspy() {
