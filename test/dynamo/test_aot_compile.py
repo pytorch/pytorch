@@ -9525,6 +9525,27 @@ from user code:
             default_loaded = AOTCompiledFunction.deserialize(f.read())
         self.assertEqual(default_loaded(x), fn(x))
 
+    def test_forward_callable_provides_builtins_without_builtin_guards(self):
+        # C extensions calling PyImport_ImportModule from inside the generated
+        # forward frame (e.g. device_lazy_init via get_current_stream) read
+        # __builtins__ from the calling frame's f_globals even when no
+        # BUILTIN_MATCH guard or builtins-dict snapshot is present.
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 3)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((x,), {})
+        )
+        self.assertIs(compiled_fn.fn.__globals__.get("__builtins__"), builtins.__dict__)
+        compiled_fn.save_compiled_function(self.path())
+
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            loaded = AOTCompiledFunction.deserialize(f.read())
+        self.assertIs(loaded.fn.__globals__.get("__builtins__"), builtins.__dict__)
+        self.assertEqual(loaded(x), fn(x))
+
     @parametrize("keeps_global_guard", (False, True))
     def test_load_seeds_no_name_no_guard_is_rooted_at(self, keeps_global_guard):
         # The seeding writes into a scope that may be a user module's live

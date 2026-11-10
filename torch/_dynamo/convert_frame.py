@@ -23,6 +23,7 @@ which is checked for during the Dynamo cache lookup.
 
 from __future__ import annotations
 
+import builtins
 import collections
 import contextlib
 import cProfile
@@ -1155,6 +1156,7 @@ class GraphRuntimeEnv:
             for alias, module_name in self.import_sources.items()
         }
         f_globals = {
+            "__builtins__": builtins.__dict__,
             **import_sources,
             **self.used_globals,
             **(extra_globals or {}),

@@ -975,8 +975,8 @@ class AOTCompiledFunction:
                 snapshot is None or scope[builtins_key] is not snapshot
             ):
                 continue
-            # forward_callable builds fn.__globals__ as a plain dict, so unlike an
-            # exec'd module namespace it carries no __builtins__ to derive from.
+            # A caller-supplied guard_globals is a plain dict, so unlike an
+            # exec'd module namespace it may carry no __builtins__ to derive from.
             if "__builtins__" not in scope:
                 scope["__builtins__"] = builtins.__dict__
             scope[builtins_key] = get_builtins_dict(scope)
