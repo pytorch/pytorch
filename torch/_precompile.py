@@ -435,7 +435,8 @@ class DynamoTracer:
     whose dropped guards told captured variants apart or hang off a
     configuration-chosen slot (``require_no_risky_drops``). Other dropped guards,
     such as the identity guards every model drops because they cannot be serialized,
-    are listed in the artifact rather than refused.
+    are listed in the artifact rather than refused. ``fullgraph`` makes a graph break
+    an error, as ``torch.compile(fullgraph=True)`` does, so the capture is one graph.
     """
 
     guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
@@ -443,6 +444,7 @@ class DynamoTracer:
     dynamic: bool | None = None
     require_complete: bool = True
     require_no_risky_drops: bool = True
+    fullgraph: bool = False
 
 
 class PrecompiledRunnable:
@@ -3906,6 +3908,7 @@ def capture(
             guard_filter_fn=tracer.guard_filter_fn,
             recompile_limit=tracer.recompile_limit,
             dynamic=tracer.dynamic,
+            fullgraph=tracer.fullgraph,
         )
     except PackageError as e:
         raise PrecompileError(str(e)) from e
