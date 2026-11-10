@@ -31,10 +31,16 @@ namespace at::impl {
 //                static shapes when they are not in Meta and have no sparse
 //                input (decomposes_under_static_shapes), filled by
 //                torch._meta_registrations once the decompositions are
-//                registered (torch._decomp imports them all). Later
-//                registrations and removals are not mirrored;
-//                test_fake_fallback_static_shape_decomps checks the table
-//                against the predicate.
+//                registered. This snapshot assumes eligibility does not grow
+//                after import: stale positives only over-reject, but newly
+//                eligible ops could incorrectly run their Meta kernel.
+//                Later registrations (including _add_op_to_registry), removals
+//                and direct dictionary writes are not mirrored. Export's
+//                lstm/gru replacements currently only leave stale positives.
+//                FakeTensorMode.cpp_meta_supports_symint overrides are also
+//                outside this snapshot's module-level predicate.
+//                test_fake_fallback_static_shape_decomps checks the initial
+//                table, not these later mutations.
 //
 // This does not store the Python callables and is backed by c10::LeftRight
 enum class FakeDispatchCategory {
