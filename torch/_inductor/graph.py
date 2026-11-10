@@ -24,6 +24,10 @@ import torch.fx
 from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
+from torch._higher_order_ops.user_kernel_hop import (
+    get_user_kernel_hop_info,
+    is_user_kernel_mutation_hop,
+)
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     is_custom_class,
@@ -303,10 +307,7 @@ def mark_nodes_dislike_padding(
         )
 
     for cur in reversed(g.nodes):
-        if isinstance(
-            cur.target,
-            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
-        ):
+        if is_user_kernel_mutation_hop(cur.target):
             cur.meta["dislike_padding"] = True
             continue
 
@@ -1850,8 +1851,13 @@ class GraphLowering(torch.fx.Interpreter):
             # TritonTemplateKernel.get_stride_and_maybe_freeze_layout, but only if
             # some consumer actually uses a template. Otherwise forcing the
             # template's layout only adds copies.
-            name = buf.get_name()
-            if name in selected and isinstance(buf.layout, ir.FlexibleLayout):
+            # Some buffers (e.g. CPU flex attention subgraph buffers) are unnamed.
+            name = buf.name
+            if (
+                name is not None
+                and name in selected
+                and isinstance(buf.layout, ir.FlexibleLayout)
+            ):
                 buf.freeze_layout_with_exact_strides(
                     self.buffer_layout_constraints[name].stride
                 )
@@ -1874,7 +1880,10 @@ class GraphLowering(torch.fx.Interpreter):
             if not isinstance(buf, ir.TritonTemplateBuffer):
                 continue
             names = OrderedSet(
-                name for inp in buf.inputs if (name := inp.get_name()) in constraints
+                name
+                for inp in buf.inputs
+                if isinstance(inp, ir.IRNode)
+                and (name := inp.get_name()) in constraints
             )
             if not names or names <= selected:
                 continue
@@ -1941,18 +1950,17 @@ class GraphLowering(torch.fx.Interpreter):
                 return name is not None and name == new_arg.maybe_get_name()
             return False
 
-        if fx_node.target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
+        user_kernel_hop = get_user_kernel_hop_info(fx_node.target, "mutation")
+        if user_kernel_hop is not None:
             kwargs = fx_node.kwargs["kwargs"]
             if not isinstance(kwargs, dict):
                 raise AssertionError(f"Expected dict, got {type(kwargs)}")
-            mutated = torch._higher_order_ops.triton_kernel_wrap.get_mutated_tensors(
-                old_kwargs["kernel_idx"],
-                old_kwargs["constant_args_idx"],
+            mutated = user_kernel_hop.get_mutated_tensors(
+                old_kwargs,
                 {
                     k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
                     for k, v in kwargs.items()
                 },
-                old_kwargs["tma_descriptor_metadata"],
             )
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
@@ -2139,14 +2147,11 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             elif (
                 n.op == "call_function"
-                and n.target is torch.ops.higher_order.triton_kernel_wrapper_mutation
-                and config.triton_kernel_default_layout_constraint != "flexible_layout"
+                and (info := get_user_kernel_hop_info(n.target, "mutation")) is not None
+                and (constraint := info.get_layout_constraint()) != "flexible_layout"
             ):
-                debug("user_defined_triton_kernel_layout_constraints")
-                if (
-                    config.triton_kernel_default_layout_constraint
-                    == "needs_fixed_stride_order"
-                ):
+                debug("user_defined_kernel_layout_constraints")
+                if constraint == "needs_fixed_stride_order":
                     old_args = args  # type: ignore[possibly-undefined]
                     old_kwargs = kwargs  # type: ignore[possibly-undefined]
 
@@ -2167,7 +2172,8 @@ class GraphLowering(torch.fx.Interpreter):
                     self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
                 else:
                     raise RuntimeError(
-                        f"Unknown triton_kernel_default_layout_constraint: {config.triton_kernel_default_layout_constraint}"
+                        f"Unknown layout constraint for {info.dsl} user kernels: "
+                        f"{constraint}"
                     )
             else:
                 debug("")
@@ -2613,6 +2619,8 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> None:
         import copy
 
+        from .compile_fx import clone_preserve_strides
+
         cloned_gm = copy.deepcopy(self.orig_gm)
         example_inputs = copy.deepcopy(example_inputs)
         triton_nodes = []
@@ -2657,7 +2665,10 @@ class GraphLowering(torch.fx.Interpreter):
             with cloned_gm.graph.inserting_before(node):
                 for k, v in kwargs.items():
                     if k in mutated:
-                        new_node = cloned_gm.graph.call_function(torch.clone, args=(v,))
+                        # Kernels keep the original stride arguments when autotuned.
+                        new_node = cloned_gm.graph.call_function(
+                            clone_preserve_strides, args=(v,)
+                        )
                         new_kwargs[k] = len(kwargs_inputs)
                         kwargs_inputs.append(new_node)
                         continue
@@ -3017,7 +3028,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         # The JIT wrapper keeps lazy kernel state in function-local statics.
         # Compile a fresh wrapper for each first pass so autotuning always reruns.
-        cpp_source += f"\n// AOTI lazy autotune first pass: {id(self)}\n"
+        # Not id(self): a later graph can reuse a freed graph's id.
+        cpp_source += f"\n// AOTI lazy autotune first pass: {self.post_grad_graph_id}\n"
         for name in kernel_names:
             CudaKernelParamCache.cache.pop(name, None)
 
@@ -3218,7 +3230,12 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> CompiledModule:
         from .codecache import PyCodeCache
 
-        if config.triton.autotune_at_compile_time:
+        # Under compile-time autotuning the C++ wrapper's main code embeds no Triton
+        # source, so this block is the only place its module shows the kernels. The
+        # python wrapper defines them as code; for it the block is only the
+        # inductor_autotune_at_compile_time_code artifact and, with output_code at
+        # DEBUG, the file whose path generate_and_run_autotune_block logs.
+        if config.triton.autotune_at_compile_time and self.cpp_wrapper:
             # sanitize docstrings in kernel defs (#155006)
             kernel_autotune_defs = self.wrapper_code.kernel_autotune_defs.getvalue()
             kernel_autotune_defs = kernel_autotune_defs.replace('"""', '\\"\\"\\"')
@@ -3245,6 +3262,13 @@ class GraphLowering(torch.fx.Interpreter):
             ]
             key, path = PyCodeCache.write(wrapper_code.value)
             output_code_log.debug("Output code written to: %s", path)
+            kernel_sources = self.wrapper_code.kernel_sources
+            if kernel_sources:
+                # write() keeps a file already at this path, e.g. a hand-edited copy;
+                # its defs must compile themselves.
+                with open(path) as f:
+                    if f.read() != wrapper_code.value:
+                        kernel_sources.clear()
 
             V.debug.output_code(path)
             V.debug.copy(os.path.splitext(path)[0] + ".debug")
@@ -3274,6 +3298,7 @@ class GraphLowering(torch.fx.Interpreter):
                     **self.torchbind_constants,
                     **self.opaque_value_type_classes,
                 },
+                kernel_sources=self.wrapper_code.kernel_sources,
             )
         self.cache_key = key
         self.cache_path = path

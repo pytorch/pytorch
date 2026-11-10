@@ -11,6 +11,7 @@ import textwrap
 import unittest
 import warnings
 from pathlib import Path
+from unittest import mock
 
 import torch
 import torch._logging._internal as log_internal
@@ -196,6 +197,46 @@ class LoggingTest(TestCase):
                 os.environ.pop("TORCH_TRACE", None)
             else:
                 os.environ["TORCH_TRACE"] = old_env
+            log_internal.LOG_TRACE_HANDLER = old_handler
+            _init_logs()
+
+    def test_trace_file_rank_prefix_before_dist_init(self):
+        elastic = {"TORCHELASTIC_RUN_ID": "run"}
+        cases = [
+            ({**elastic, "RANK": "3"}, "rank_3_"),
+            ({}, ""),
+            ({"RANK": "3"}, ""),
+            ({**elastic, "RANK": ""}, ""),
+            ({**elastic, "RANK": "a/b"}, ""),
+        ]
+        old_handler = log_internal.LOG_TRACE_HANDLER
+        try:
+            for env, expected in cases:
+                with (
+                    self.subTest(env=env),
+                    tempfile.TemporaryDirectory() as tmpdir,
+                    mock.patch.dict(os.environ, {"TORCH_TRACE": tmpdir}),
+                ):
+                    os.environ.pop("RANK", None)
+                    os.environ.pop("TORCHELASTIC_RUN_ID", None)
+                    os.environ.update(env)
+                    log_internal.LOG_TRACE_HANDLER = None
+                    _init_logs()
+                    trace_structured(
+                        "rank_env",
+                        metadata_fn=dict,
+                        expect_trace_id=False,
+                        record_logging_overhead=False,
+                    )
+                    handler = log_internal.LOG_TRACE_HANDLER
+                    name = os.path.basename(handler._stream_path)
+                    handler.close()
+                    rest = name.removeprefix(log_internal.LOG_PREFIX)
+                    if expected:
+                        self.assertTrue(rest.startswith(expected), name)
+                    else:
+                        self.assertFalse(rest.startswith("rank_"), name)
+        finally:
             log_internal.LOG_TRACE_HANDLER = old_handler
             _init_logs()
 
@@ -420,6 +461,9 @@ class LoggingTest(TestCase):
     )
     def test_collect_tlparse_output_preserves_multiple_trace_logs(self):
         repo_root = Path(__file__).resolve().parent.parent
+        torch_trace_sh = repo_root / ".ci/pytorch/torch_trace.sh"
+        if not torch_trace_sh.exists():
+            self.skipTest(f"Missing {torch_trace_sh} script")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -485,7 +529,7 @@ class LoggingTest(TestCase):
                     "RUNNER_TEMP": str(runner_temp),
                     "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
                     "TLPARSE_ARGS_LOG": str(args_log),
-                    "TORCH_TRACE_HELPER": str(repo_root / ".ci/pytorch/torch_trace.sh"),
+                    "TORCH_TRACE_HELPER": str(torch_trace_sh),
                 }
             )
 
