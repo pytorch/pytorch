@@ -19,8 +19,7 @@ from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from ...utils import capability as cap
-from ._layout import _layout_config, _OperandLayout, _TmaConfig
-from ._limits import (
+from ._config import (
     _FP16_ELEMENTS_PER_BANK,
     _FP16_LANES_PER_GROUP,
     _FP32_LANES_PER_GROUP,
@@ -32,6 +31,7 @@ from ._limits import (
     _TMA_ALIGNMENT,
     _WARP_SIZE,
 )
+from ._layout import _layout_config, _OperandLayout, _TmaConfig
 
 
 if TYPE_CHECKING:

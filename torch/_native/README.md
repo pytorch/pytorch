@@ -388,9 +388,9 @@ broadcasting, in-place operations, and unsupported layouts or output
 buffers fall back to ATen.
 Outputs retain ATen's dense physical dimension order. TMA eligibility is checked
 relative to that order, rather than requiring a contiguous output.
-Tile size, threads and pipeline depth depend on architecture and operand
-orientation, with a 32-element fallback for smaller layouts. Normal input rows
-remain contiguous in shared memory; transposed inputs use a bank swizzle.
+Tile size, threads and pipeline depth depend on architecture, element size and
+operand orientation, with a 32-element fallback for smaller layouts. Normal input
+rows remain contiguous in shared memory; transposed inputs use a bank swizzle.
 No CuTeDSL vector, conversion, fill/range, or RNG kernel is included.
 The registry scalar-coercion fix is retained so calls with Python-number
 operands can still fall back to ATen correctly.
