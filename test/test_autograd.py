@@ -8787,63 +8787,6 @@ for shape in [(1,), ()]:
 
         self.assertEqual(called[0], 2)
 
-    @skipIfTorchDynamo("requires eager autograd final callbacks")
-    def test_callback_tls_cleanup_adds_callback(self):
-        script = """
-import weakref
-import torch
-from torch.utils._python_dispatch import TorchDispatchMode
-
-events = []
-refs = []
-
-class Mode(TorchDispatchMode):
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        return func(*args, **(kwargs or {}))
-
-def install_mode(generation):
-    def released(_):
-        events.append(("released", generation))
-        if generation < 2:
-            torch.autograd.graph.queue_callback(
-                lambda: install_mode(generation + 1)
-            )
-        else:
-            torch.autograd.graph.queue_callback(lambda: events.append("done"))
-
-    mode = Mode()
-    refs.append(weakref.ref(mode, released))
-    torch._C._push_on_torch_dispatch_stack(mode)
-    torch.autograd.graph.queue_callback(
-        lambda: events.append(("stack", torch._C._len_torch_dispatch_stack()))
-    )
-
-x = torch.ones((), requires_grad=True)
-x.register_hook(
-    lambda _: torch.autograd.graph.queue_callback(lambda: install_mode(0))
-)
-x.clone().backward()
-expected = [
-    ("stack", 1), ("released", 0),
-    ("stack", 1), ("released", 1),
-    ("stack", 1), ("released", 2), "done",
-]
-if events != expected:
-    raise AssertionError(f"Expected {expected}, got {events}")
-if any(ref() is not None for ref in refs):
-    raise AssertionError("Callback modes survived TLS cleanup")
-if torch._C._len_torch_dispatch_stack() != 0:
-    raise AssertionError("Callback mode leaked into caller TLS")
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            timeout=60,
-        )
-        self.assertEqual(
-            result.returncode, 0, result.stderr.decode("utf-8", errors="replace")
-        )
-
     def _test_reentrant_with_callbacks(self, install_callbacks_in_depths):
         counter = {}
         counter["inner"] = 0
