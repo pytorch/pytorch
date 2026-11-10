@@ -119,7 +119,7 @@ def cycle(iterable: Iterable[_T]) -> Iterator[_T]:
     def _cycle(iterator: Iterator[_T]) -> Iterator[_T]:
         # pyrefly: ignore [implicit-any]
         saved = []
-        for element in iterable:
+        for element in iterator:
             yield element
             saved.append(element)
 

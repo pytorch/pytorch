@@ -1,3 +1,7 @@
+# DO NOT MODIFY THIS FILE DIRECTLY!! This file is generated from OWNERSHIP.yaml by
+# scripts/codeowners/generate_codeowners.py. Edit OWNERSHIP.yaml and rerun
+# the script (or `spin fixlint`) instead of editing this file.
+
 # IMPORTANT:
 # This file is ONLY used to subscribe for notifications for PRs
 # related to a specific file path. Approvals from people in this
@@ -18,14 +22,14 @@
 # - A "# label:" line names the GitHub issue/PR labels for the paths below
 #   it, up to the next "# label:" line or the end of the section. Paths
 #   before the first "# label:" line in a section have no single label.
-# - Oncall queues are implied by module labels and are not repeated on label
-#   lines; a label line keeps an oncall only when none of its modules implies
-#   it:
-#     oncall: distributed: c10d, ddp, dtensor, fsdp, tensorpipe
-#     oncall: mobile: android, vulkan
-#     oncall: pt2: ProxyTensor, aotdispatch, compiled autograd, dynamic shapes, dynamo, fakeTensor, higher order operators, inductor
+# - A label list identifies one ownership area, so each label list (compared
+#   as a set) appears on exactly one "# label:" line. When a list extends a
+#   sibling's, the shared labels come first and the distinguishing label last.
+# - A label line leaves out an oncall label when one of its module labels
+#   implies it; .github/label_to_label.yml records which modules imply which
+#   oncall.
 # - Labels planned but not yet created on GitHub (issues can't be routed to
-#   them until they exist): module: tvm
+#   them until they exist): module: tvm, module: operator benchmarks, module: mobile delegates, module: hipify, module: headeronly, module: github automation
 #
 # For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.
 
@@ -34,26 +38,13 @@
 # Every tracked path resolves to one review surface. Every listed pattern must
 # match at least one committed path. The fast lintrunner set enforces these
 # rules, declared sections, valid owners, source order, no duplicate or
-# ineffective patterns, and the "# owner:" rules: every "# label:" line is
-# directly followed by one "# owner:" line, a label list has one owner list,
-# and an active rule's handles appear on its block's owner line.
+# ineffective patterns, and that an active rule's handles appear on its
+# block's owner line.
 #
+# Sections are kept temporarily so scripts/codeowners/owners.py keeps its
+# section-name fallback; ownership is recorded per label block, not per section.
 # Review-surface hierarchy:
-# - Compiler: compiler_dynamo, compiler_inductor, compiler_export_fx, compiler_autograd, functorch
-# - Core operators and runtime: core_aten_native_ops, core_aten_linalg, sparse, core_aten_optimizers, core_aten_runtime, core_c10_dispatch, autograd, core_csrc_misc, core_lazy_runtime, core_tests
-# - Backends and devices: backend_device_runtime, backend_cuda, backend_mps, backend_xpu, backend_rocm, backend_vulkan
-# - Public APIs and extensions: python_core_api, python_nn_api, python_data_api, python_specialized_api, python_api_tests, cpp_api_custom_ops, cpp_runtime_tests, nativert
-# - Distributed: distributed
-# - Serialization and export: jit_torchscript, onnx_export, serialization_package
-# - Quantization: quantization
-# - Profiling: profiler
-# - Mobile: mobile_runtime, mobile_android, mobile_delegates
-# - Build and developer infrastructure: infra_ci, infra_github_automation, infra_build_packaging, infra_linting, infra_codegen, infra_developer_tools, infra_test
-# - Third-party dependencies: third_party_backend_deps, third_party_core_build_deps, third_party_serialization_schema
-# - Benchmarks: benchmark_compiler, benchmark_operator_runtime, benchmark_models
-# - Legacy: caffe2
-# - Repository-wide material: ai_agent_tooling, docs_general
-# - Protected ownership: protected_codeownership
+# - Sections: core_aten_native_ops, functorch, compiler_autograd, core_aten_linalg, sparse, core_aten_optimizers, core_aten_runtime, core_c10_dispatch, autograd, core_csrc_misc, core_lazy_runtime, core_tests, backend_device_runtime, backend_cuda, backend_mps, backend_xpu, backend_rocm, backend_vulkan, python_core_api, python_nn_api, python_data_api, python_specialized_api, python_api_tests, cpp_runtime_tests, jit_torchscript, cpp_api_custom_ops, onnx_export, quantization, profiler, mobile_runtime, mobile_android, mobile_delegates, infra_ci, infra_github_automation, infra_build_packaging, third_party_core_build_deps, third_party_backend_deps, third_party_serialization_schema, benchmark_compiler, distributed, infra_developer_tools, infra_linting, infra_codegen, infra_test, benchmark_operator_runtime, benchmark_models, caffe2, serialization_package, compiler_export_fx, compiler_dynamo, compiler_inductor, nativert, ai_agent_tooling, docs_general, protected_codeownership
 #
 # Grouped review-surface definitions:
 #
@@ -135,11 +126,12 @@
 # /aten/src/ATen/native/SpectralOpsUtils.h
 # /test/test_spectral_ops.py
 # label: module: linear algebra, module: floatx (formerly float8)
-# owner: @drisspg @slayton58
+# owner: @drisspg @slayton58 @vkuzo
 # /aten/src/ATen/native/ScaledBlas.cpp
 # /aten/src/ATen/native/ScaledBlasUtils.cpp
 # /aten/src/ATen/native/ScaledBlasUtils.h
 /test/test_scaled_matmul_cuda.py @drisspg @slayton58
+/test/test_quantize_tensor.py @vkuzo @slayton58
 #
 # [sparse]
 # label: module: sparse
@@ -170,6 +162,8 @@
 # /test/expect/TestSparseMeta.test_print_meta_SparseCOO_float64.expect
 # /test/expect/TestSparseMeta.test_print_meta_SparseCSC_float64.expect
 # /test/expect/TestSparseMeta.test_print_meta_SparseCSR_float64.expect
+# /test/expect/TestSparseXPU.test_print_coalesced_xpu_float64.expect
+# /test/expect/TestSparseXPU.test_print_uncoalesced_xpu_float64.expect
 /test/test_sparse.py @amjames @pearu @nikitaved
 /test/test_sparse_csr.py @amjames @pearu @nikitaved
 # /test/test_sparse_semi_structured.py
@@ -467,7 +461,6 @@
 # /test/backends/
 # /test/bench_mps_ops.py
 # /test/conftest.py
-# /test/create_dummy_torchscript_model.py
 # /test/error_messages/
 # /test/expect/HasDecompTest.test_aten_core_operators.expect
 # /test/expect/HasDecompTest.test_has_decomposition.expect
@@ -475,40 +468,8 @@
 # /test/expect/TestAutograd.test_function-y_grad_desc.expect
 # /test/expect/TestFXAPIBackwardCompatibility.test_class_member_back_compat-fx_backcompat_class_members.expect
 # /test/expect/TestFXAPIBackwardCompatibility.test_function_back_compat-fx_backcompat_function_signatures.expect
-# /test/expect/TestJit.test_cu_escaped_number.expect
-# /test/expect/TestJit.test_import_method.expect
-# /test/expect/TestJit.test_non_ascii_string.expect
-# /test/expect/TestJit.test_pretty_printer-empty_float_list_test.expect
-# /test/expect/TestJit.test_pretty_printer-empty_int_list_test.expect
-# /test/expect/TestJit.test_pretty_printer-if_one.expect
-# /test/expect/TestJit.test_pretty_printer-if_test.expect
-# /test/expect/TestJit.test_pretty_printer-loop_use_test.expect
-# /test/expect/TestJit.test_pretty_printer-print_weird_test.expect
-# /test/expect/TestJit.test_pretty_printer-python_op_name_test.expect
-# /test/expect/TestJit.test_pretty_printer-while_if_test.expect
-# /test/expect/TestJit.test_pretty_printer-while_test.expect
 # /test/expect/TestPytorchExportModes.test_aten_fallback.expect
 # /test/expect/TestPytorchExportModes.test_onnx_aten.expect
-# /test/expect/TestScript.test_annot_ast_mypy_fn.expect
-# /test/expect/TestScript.test_annot_ast_mypy_method.expect
-# /test/expect/TestScript.test_annot_ast_py3_fn.expect
-# /test/expect/TestScript.test_annot_ast_py3_method.expect
-# /test/expect/TestScript.test_annot_string_mypy_fn.expect
-# /test/expect/TestScript.test_annot_string_mypy_method.expect
-# /test/expect/TestScript.test_annot_string_py3_fn.expect
-# /test/expect/TestScript.test_annot_string_py3_method.expect
-# /test/expect/TestScript.test_annotated_script_fn.expect
-# /test/expect/TestScript.test_annotated_script_method.expect
-# /test/expect/TestScript.test_format-stdout.expect
-# /test/expect/TestScript.test_listconstruct_erasure.expect
-# /test/expect/TestScript.test_parser_type_annotations.expect
-# /test/expect/TestScript.test_parser_type_annotations_comment.expect
-# /test/expect/TestScript.test_print-stdout.expect
-# /test/expect/TestScript.test_python_frontend.expect
-# /test/expect/TestScript.test_python_frontend_py2.expect
-# /test/expect/TestScript.test_python_frontend_py3.expect
-# /test/expect/TestScript.test_string_print-stdout.expect
-# /test/expect/TestScript.test_torch_dot_tensor_annotation.expect
 # /test/expect/TestTensorBoard.test_audio.expect
 # /test/expect/TestTensorBoard.test_caffe2_simple_cnnmodel.expect
 # /test/expect/TestTensorBoard.test_caffe2_simple_model.expect
@@ -537,8 +498,6 @@
 # /test/expect/__init__.py
 # /test/forward_backward_compatibility/
 # /test/lazy/
-# /test/linear.py
-# /test/load_torchscript_model.py
 # /test/minioptest_failures_dict.json
 # /test/mkl_verbose.py
 # /test/mkldnn_verbose.py
@@ -556,7 +515,6 @@
 # /test/test_binary_ufuncs.py
 # /test/test_bmm_outer_product.py
 # /test/test_bundled_images.py
-# /test/test_bundled_inputs.py
 # /test/test_ci_sanity_check_fail.py
 # /test/test_comparison_utils.py
 # /test/test_compile_benchmark_util.py
@@ -591,7 +549,6 @@
 # /test/test_meta.py
 # /test/test_mkl_verbose.py
 # /test/test_mkldnn.py
-# /test/test_mkldnn_fusion.py
 # /test/test_mkldnn_verbose.py
 # /test/test_model_exports_to_core_aten.py
 # /test/test_module_tracker.py
@@ -608,7 +565,6 @@
 # /test/test_opaque_obj_v2.py
 # /test/test_openmp.py
 # /test/test_ops.py
-# /test/test_ops_jit.py
 # /test/test_ops_unbacked.py
 # /test/test_out_dtype_op.py
 # /test/test_overrides.py
@@ -626,11 +582,9 @@
 # /test/test_segment_reductions.py
 # /test/test_set_default_mobile_cpu_allocator.py
 # /test/test_shape_ops.py
-# /test/test_show_pickle.py
 # /test/test_sort_and_select.py
 # /test/test_stateless.py
 # /test/test_stateless_rng.py
-# /test/test_static_runtime.py
 # /test/test_subclass.py
 # /test/test_sympy_utils.py
 # /test/test_tensor_creation_ops.py
@@ -646,6 +600,7 @@
 # /test/test_view_ops.py
 # /test/test_weak.py
 /test/forward_backward_compatibility/check_forward_backward_compatibility.py @larryliu0820
+/test/REVIEW.md @fffrog
 #
 # [backend_device_runtime]
 # /test/custom_backend/
@@ -699,11 +654,10 @@
 # /torch/backends/mps/
 # /torch/csrc/mps/
 # /torch/mps/
-# label: oncall: mobile
+# label: oncall: mobile, module: ios
 # owner: none
 # /aten/src/ATen/metal/
 # /test/metal/
-# /test/test_metal.py
 #
 # [backend_xpu]
 # label: module: xpu
@@ -819,11 +773,11 @@
 # owner: @aorenste
 /torch/_subclasses/fake_tensor.py @aorenste
 /torch/_subclasses/fake_utils.py @aorenste
-# label: module: abi
+# label: module: abi, module: headeronly
 # owner: @janeyx99
 /torch/header_only_apis.txt @janeyx99
 /torch/headeronly/ @janeyx99
-# label: module: rocm
+# label: module: rocm, module: hipify
 # owner: @jeffdaily @jithunnair-amd
 /torch/utils/hipify/ @jeffdaily @jithunnair-amd
 # label: module: pytree
@@ -835,7 +789,7 @@
 # label: module: nn
 # owner: @albanD @jbschlosser
 /torch/nn/ @albanD @jbschlosser
-# label: module: dsl-native-ops
+# label: module: dsl-native-ops, module: nn
 # owner: @drisspg @pearu @slayton58
 /torch/nn/modules/linear_cross_entropy*.py @slayton58 @pearu
 # label: module: nn, module: nn.utils.parametrize
@@ -866,7 +820,6 @@
 # /test/nn/
 # /test/test_modules.py
 # /test/test_nn.py
-# /test/test_nnapi.py
 # /test/test_numpy_interop.py
 # /test/test_transformers.py
 # /test/test_type_hints.py
@@ -880,8 +833,6 @@
 #
 # [cpp_runtime_tests]
 # /test/cpp/
-# /test/cpp_api_parity/
-# /test/test_cpp_api_parity.py
 #
 # [jit_torchscript]
 # label: oncall: jit
@@ -889,21 +840,8 @@
 # /test/cpp/jit/test_jit_logging_levels.cpp
 # /test/cpp/jit/test_jit_type.cpp
 # /test/cpp/jit/test_save_load.cpp
-# /test/jit/
 # /test/jit_hooks/
-# /test/test_jit.py
-# /test/test_jit_autocast.py
-# /test/test_jit_disabled.py
-# /test/test_jit_fuser.py
-# /test/test_jit_fuser_legacy.py
-# /test/test_jit_fuser_te.py
-# /test/test_jit_legacy.py
-# /test/test_jit_llga_fuser.py
-# /test/test_jit_profiling.py
-# /test/test_jit_simple.py
-# /test/test_jit_string.py
-# /test/test_tensorexpr.py
-# /test/test_tensorexpr_pybind.py
+# /test/jit/test_hooks_modules.py
 # /torch/csrc/jit/
 # /torch/jit/
 # /torch/csrc/jit/python/init.cpp
@@ -919,7 +857,6 @@
 # /test/cpp/jit/test_custom_operators.cpp
 # /test/cpp_extensions/
 # /test/custom_operator/
-# /test/jit/test_custom_operators.py
 # /test/test_cpp_extensions_aot.py
 # /test/test_cpp_extensions_jit.py
 # /test/test_cpp_extensions_mtia_backend.py
@@ -961,7 +898,6 @@
 # label: oncall: quantization
 # owner: @digantdesai @jerryzh168 @jianyuh @salilsdesai
 /test/ao/ @jerryzh168
-# /test/onnx/test_models_quantized_onnxruntime.py
 /test/quantization/ @jerryzh168
 /test/test_quantization.py @jerryzh168
 # /torch/ao/
@@ -1004,22 +940,18 @@
 # /test/cpp/jit/test_mobile_type_parser.cpp
 # /test/cpp/lite_interpreter_runtime/test_mobile_profiler.cpp
 # /test/mobile/
-# /test/test_mobile_optimizer.py
 # /torch/csrc/jit/mobile/
 #
 # [mobile_android]
 # label: module: android
 # owner: none
 # /android/
-# /test/mobile/custom_build/
 #
 # [mobile_delegates]
-# label: oncall: mobile
+# label: oncall: mobile, module: mobile delegates
 # owner: none
-# /test/test_vulkan.py
 # /test/test_xnnpack_integration.py
 # /torch/backends/_coreml/
-# /torch/backends/_nnapi/
 # /torch/backends/xnnpack/
 # /torch/csrc/jit/backends/
 #
@@ -1041,7 +973,7 @@
 /.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 #
 # [infra_github_automation]
-# label: module: ci
+# label: module: ci, module: github automation
 # owner: @pytorch/pytorch-dev-infra
 /.github/ @pytorch/pytorch-dev-infra
 #
@@ -1081,7 +1013,7 @@
 # /version.txt
 #
 # [third_party_core_build_deps]
-# label: module: third_party
+# label: module: third_party, module: build
 # owner: none
 # /.gitmodules
 # /requirements-build.txt
@@ -1117,12 +1049,14 @@
 /third_party/xpu.txt @EikanWang @gujinghui
 #
 # [third_party_serialization_schema]
-# label: module: third_party
+# label: module: third_party, module: serialization
 # owner: none
 # /third_party/flatbuffers
 # /third_party/miniz-3.0.2/
-# /third_party/onnx
 # /third_party/protobuf
+# label: module: third_party, module: onnx
+# owner: none
+# /third_party/onnx
 #
 # [benchmark_compiler]
 # label: module: benchmark
@@ -1161,21 +1095,20 @@
 /torch/distributed/_composable/replicate.py @weifengpy
 /torch/nn/parallel/ @weifengpy
 # label: module: dtensor
-# owner: @weifengpy
-/torch/distributed/tensor/placement_types.py @weifengpy
-/torch/distributed/tensor/_ops/_view_ops.py @weifengpy
-/torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy
+# owner: @weifengpy @pianpwk @anshul-si
+/torch/distributed/tensor/placement_types.py @weifengpy @pianpwk @anshul-si
+/torch/distributed/tensor/_ops/_view_ops.py @weifengpy @pianpwk @anshul-si
+/torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy @pianpwk @anshul-si
 #
 # [infra_developer_tools]
 # /.devcontainer/
 # /.vscode/
 # /benchmarks/README.md
-# /benchmarks/compare.sh
 # /benchmarks/upload_scribe.py
 # /binaries/
 # /scripts/
 # /tools/
-# label: module: rocm
+# label: module: rocm, module: build
 # owner: @jeffdaily @jithunnair-amd
 /tools/amd_build/ @jeffdaily @jithunnair-amd
 #
@@ -1215,6 +1148,7 @@
 #
 # [infra_test]
 # /test/benchmark_utils/
+# /test/hw_classification_testdata/
 # /test/junit_xml_testdata/
 # /test/scripts/
 # /test/spincli/
@@ -1242,7 +1176,7 @@
 /torch/testing/_internal/hop_db.py @tugsbayasgalan @ydwu4 @aorenste @bohnstingl
 #
 # [benchmark_operator_runtime]
-# label: module: benchmark
+# label: module: benchmark, module: operator benchmarks
 # owner: none
 # /benchmarks/framework_overhead_benchmark/
 # /benchmarks/functional_autograd_benchmark/
@@ -1250,13 +1184,12 @@
 # /benchmarks/operator_benchmark/
 # /benchmarks/overrides_benchmark/
 # /benchmarks/profiler_benchmark/
-# /benchmarks/record_function_benchmark/
 # /benchmarks/sparse/
 # /benchmarks/static_runtime/
 # /test/test_functional_autograd_benchmark.py
 #
 # [benchmark_models]
-# label: module: benchmark
+# label: module: benchmark, module: models
 # owner: none
 # /benchmarks/compare-fastrnn-results.py
 # /benchmarks/data/
@@ -1385,8 +1318,6 @@
 # /.github/pi/
 # /.github/workflows/claude-autorevert-advisor.yml
 # /.github/workflows/claude-code.yml
-# /.github/workflows/claude-distributed-triage-cron.yml
-# /.github/workflows/distributed-triage-pi.yml
 # /.github/workflows/issue-triage-pi.yml
 # /.github/workflows/issue-triage.yml
 # /.github/workflows/pi-agent-tests.yml
@@ -1395,6 +1326,7 @@
 # /AI_POLICY.md
 # /CLAUDE.md
 # /torch/_dynamo/CLAUDE.md
+/torch/REVIEW.md @albanD
 #
 # [docs_general]
 # /CITATION.cff
@@ -1424,5 +1356,6 @@
 # DO NOT MODIFY WITHOUT REVIEW FROM @albanD AND @malfet.
 # Keep these rules last so they override broader patterns.
 /CODEOWNERS @albanD @malfet
+/OWNERSHIP.yaml @albanD @malfet
 /.github/merge_rules.yaml @pytorch/pytorch-dev-infra @albanD @malfet
 #
