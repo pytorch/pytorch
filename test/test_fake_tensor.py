@@ -5759,6 +5759,44 @@ class TestCppFakeTensorModeBindings(TestCase):
         gc.collect()
         self.assertIsNone(ref())
 
+    @skipIfTorchDynamo("Dynamo keeps references that stop the mode being collected")
+    @parametrize("replace_with_fake", [False, True])
+    def test_set_data_releases_mode_after_metadata_copy(self, replace_with_fake):
+        cpu = torch.device("cpu")
+        mode = CppFakeTensorMode()
+        fake = torch._C._from_meta_and_device(torch.empty(2, device="meta"), cpu, mode)
+        real = torch.arange(16, dtype=torch.float64).reshape(4, 4)[1:].t()
+        replacement = real
+        if replace_with_fake:
+            replacement_mode = CppFakeTensorMode()
+            replacement = torch._C._from_meta_and_device(
+                torch.empty_like(real, device="meta"), cpu, replacement_mode
+            )
+
+        def metadata(tensor):
+            return (
+                tensor.shape,
+                tensor.stride(),
+                tensor.storage_offset(),
+                tensor.dtype,
+                tensor.device,
+                str(torch._C._dispatch_keys(tensor)),
+                tensor.untyped_storage().device,
+                torch._C._maybe_get_fake_mode(tensor),
+            )
+
+        observed = []
+        ref = weakref.ref(mode, lambda _: observed.append(metadata(fake)))
+        del mode
+        self.assertIsNotNone(ref())
+        expected = metadata(replacement)
+        fake.data = replacement
+        self.assertIsNone(ref())
+        self.assertEqual(observed, [expected])
+        self.assertEqual(metadata(fake), expected)
+        if not replace_with_fake:
+            self.assertEqual(fake, real)
+
     def test_from_meta_and_device_sparse_mode_installed(self):
         # The placeholder meta indices and values that the sparse impls' copies
         # allocate do not dispatch to the installed mode. With no Fake kernel
