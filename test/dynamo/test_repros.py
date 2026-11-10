@@ -3869,13 +3869,25 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     @parametrize("call", ["overload", "packet"])
     @parametrize("op", ["unsqueeze_", "squeeze_"])
-    def test_inplace_view_on_input_via_ops_api(self, call, op):
+    @parametrize("style", ["positional", "keyword"])
+    def test_inplace_view_on_input_via_ops_api(self, call, op, style):
         # `torch.ops.aten.*` does not go through the is_tensor_method() path, so
         # an inplace view op on a graph input needs the same guard here.
         # squeeze_ has multiple overloads, so it is included alongside the
         # single-overload unsqueeze_ to cover the packet form with a dim arg.
+        # The "keyword" style passes self as a keyword: OpOverload/OpOverloadPacket
+        # __call__ is (self, /, *args, **kwargs), so those calls arrive with empty
+        # positional args and the guard must fall back to kwargs["self"].
         def fn(x):
-            if call == "overload":
+            if style == "keyword":
+                if call == "overload":
+                    if op == "unsqueeze_":
+                        torch.ops.aten.unsqueeze_.default(self=x, dim=0)
+                    else:
+                        torch.ops.aten.squeeze_.dim(self=x, dim=0)
+                else:
+                    getattr(torch.ops.aten, op)(self=x, dim=0)
+            elif call == "overload":
                 if op == "unsqueeze_":
                     torch.ops.aten.unsqueeze_.default(x, 0)
                 else:
