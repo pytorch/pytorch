@@ -485,11 +485,12 @@ _tf32_off_cudnn_ctx = None
 def _save_matmul_precision():
     return (_get_legacy_float32_matmul_precision(),
             torch.backends.cuda.matmul.fp32_precision,
-            torch.backends.mkldnn.matmul.fp32_precision)
+            torch.backends.mkldnn.matmul.fp32_precision,
+            torch._C._get_onednn_allow_tf32())
 
 
 def _restore_matmul_precision(saved):
-    legacy, cuda_precision, mkldnn_precision = saved
+    legacy, cuda_precision, mkldnn_precision, onednn_allow_tf32 = saved
     # set_float32_matmul_precision overwrites both backend-specific values, so
     # it goes first. Restoring those as fp32_precision strings rather than as
     # allow_tf32 booleans also preserves the "none" default, which allow_tf32
@@ -497,6 +498,8 @@ def _restore_matmul_precision(saved):
     _set_legacy_float32_matmul_precision(legacy)
     torch.backends.cuda.matmul.fp32_precision = cuda_precision
     torch.backends.mkldnn.matmul.fp32_precision = mkldnn_precision
+    if torch.xpu._is_compiled():
+        torch._C._set_onednn_allow_tf32(onednn_allow_tf32)
 
 
 @contextlib.contextmanager
@@ -511,6 +514,10 @@ def tf32_off():
         if _tf32_off_depth == 0:
             _tf32_off_saved_precision = _save_matmul_precision()
             torch.backends.cuda.matmul.allow_tf32 = False
+            # XPU fp32 matmul precision is a separate oneDNN flag, unreachable
+            # through torch.backends.mkldnn after disable_global_flags().
+            if torch.xpu._is_compiled():
+                torch._C._set_onednn_allow_tf32(False)
             _tf32_off_cudnn_ctx = torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False)
             _tf32_off_cudnn_ctx.__enter__()
         _tf32_off_depth += 1
