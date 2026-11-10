@@ -1329,6 +1329,8 @@ class TensorVariable(VariableTracker):
 
         source = TensorPropertySource(self.source, TensorProperty.STORAGE_OFFSET)
         install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
+        # ConstantVariable bypasses VariableBuilder's traced-source registration.
+        tx.output.current_tracer.traced_sources.add(source)
         return ConstantVariable.create(storage_offset, source=source)
 
     def _method_size_stride(

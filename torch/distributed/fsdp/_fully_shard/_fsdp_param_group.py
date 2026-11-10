@@ -178,7 +178,7 @@ class AllGatherState(NamedTuple):
 
 class ReduceScatterState(NamedTuple):
     reduce_scatter_input: torch.Tensor
-    event: torch.Event | None  # reduce-scatter event
+    event: torch.Event | None  # last use of the input (see foreach_reduce)
     allocation_stream: torch.Stream  # Owns the input allocation
     param_group: FSDPParamGroup  # Identifies the owning FSDP root
 
@@ -719,8 +719,8 @@ class FSDPParamGroup:
                 if self.reshard_after_backward:
                     self.reshard()
             # Recycle prior modules' reduce-scatter input buffers, keeping at most
-            # `max_input_buffers` in flight: reclaim the oldest (wait on its
-            # reduce-scatter, then drop the keepalive ref that was deferring the
+            # `max_input_buffers` in flight: reclaim the oldest (wait on its last
+            # use, then drop the keepalive ref that was deferring the
             # allocator's reuse of its memory) until fewer than that remain, before
             # this module's reduce appends one more. See
             # set_reduce_scatter_max_input_buffers for the memory/overlap tradeoff.
