@@ -290,8 +290,13 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         "__self__": Member(lambda s, tx: s.obj, readonly_setter),
     }
 
-    def get_real_python_backed_value(self) -> types.MethodWrapperType:
-        return self.as_python_constant()
+    def get_real_python_backed_value(self) -> object:
+        # The owner may be backed by a real object without being a constant
+        # (e.g. an lru_cache wrapper).
+        obj_value = self.obj.get_real_python_backed_value()
+        if obj_value is NO_SUCH_SUBOBJ:
+            return NO_SUCH_SUBOBJ
+        return self.descriptor.__get__(obj_value, type(obj_value))
 
     def is_python_constant(self) -> bool:
         return self.obj.is_python_constant()
@@ -747,6 +752,8 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
         # producing a builtin_function_or_method via PyCMethod_New.
         # It first requires owner to be a type and a subtype of __objclass__.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
+        if owner.is_constant_none():
+            owner = obj.tp_getattro_impl(tx, "__class__")
         owner_type = owner.python_type()
         if not issubclass(owner_type, type):
             raise_type_error(

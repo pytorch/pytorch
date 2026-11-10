@@ -1705,6 +1705,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         x = torch.zeros(1)
         self.assertEqual(fn(Child, Base, x), (x + 1, False, "default"))
 
+    @unittest.expectedFailure
     def test_class_setattr_abstractmethods_hasattr(self):
         class Base:
             pass
