@@ -126,6 +126,8 @@ class TestReductionConfig(TestCase):
                 nfields=3,
                 nouts=1,
                 welford_outs=1,
+                acc_bits=32,
+                alignment=16,
             ),
             "linear",
         )
@@ -174,6 +176,8 @@ class TestReductionConfig(TestCase):
                 nfields=fields,
                 nouts=nouts,
                 welford_outs=_WELFORD_OUTS.get(key, 0),
+                acc_bits=32,
+                alignment=16,
             ),
             expected,
         )
@@ -274,6 +278,8 @@ class TestReductionConfig(TestCase):
             nfields=3,
             nouts=1,
             welford_outs=1,
+            acc_bits=32,
+            alignment=16,
         )
         self.assertEqual(rt.select_row_order(**args), "inner_tree")
         self.assertEqual(rt.select_row_order(**(args | updates)), "linear")
@@ -370,7 +376,7 @@ class TestReductionConfig(TestCase):
         """Match rules by trait type within each rule's measured scope: argmin shares the
         index rules of full and strided reductions but not of ragged columns, max_dim and
         nansum match no index or one-field rule, and amax and amin skip the wide strided
-        one-field rule."""
+        one-field rule but share the c256 rule."""
         count = (256 << 20) // torch.float16.itemsize
         index = dict(nfields=2, nouts=1, acc_bits=32)
         for trait_type in (T.ArgMaxOps, T.ArgMinOps):
@@ -389,6 +395,12 @@ class TestReductionConfig(TestCase):
             (T.AMaxOps(), default),
             (T.AMinOps(), default),
         ):
+            cfg = self.general(cc=(10, 0), **strided, **_contract(trait))
+            self.assertEqual(cfg, want, type(trait).__name__)
+        c256 = kg._GeneralConfig(kernel_order="inner_tree", rule="b200_strided_c256")
+        strided |= dict(count=256, red_pairs=((256, 2),), kept_pairs=((num_o, 512),))
+        cases = ((T.AMaxOps(), c256), (T.AMinOps(), c256), (T.NanSumOps(), default))
+        for trait, want in cases:
             cfg = self.general(cc=(10, 0), **strided, **_contract(trait))
             self.assertEqual(cfg, want, type(trait).__name__)
         rows = (16 << 20) // (4095 * 4)
@@ -761,7 +773,8 @@ class TestReductionConfigDevice(TestCase):
 
     @parametrize("op", ["argmax", "var"])
     def test_b200_strided_c256_route(self, device, op):
-        """Serve b200_strided_c256's smallest anchor, 8 outputs, with the indexed tree."""
+        """Serve b200_strided_c256 at 8 outputs, within its 2-output-and-up range, with
+        the indexed tree."""
         import cutlass
 
         if torch.cuda.get_device_capability(device) != (10, 0):

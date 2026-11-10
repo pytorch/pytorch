@@ -393,17 +393,19 @@ _B200_STRIDED_ONE_FIELD = (SumOps, ProdOps, MeanOps)
 # The B200 index rules' traits; they also need 32-bit accumulators (int32 indices).
 _B200_INDEX = (ArgMaxOps, ArgMinOps)
 # Input dtypes and view-size anchors of the SM107 launch policies, and the one-field
-# trait types they measured.
+# trait types they measured (by rule name). Their rules are named rubin_*.
 _SM107_DTYPES = (torch.float32, torch.bfloat16)
 _SM107_CCS = ((10, 7),)
-_SM107_SIZES = (16 << 20, 64 << 20, 256 << 20, 2 << 30)
+_SM107_MIN_SIZE, _SM107_MID_SIZE = 16 << 20, 64 << 20
+_SM107_LARGE_SIZE, _SM107_MAX_SIZE = 256 << 20, 2 << 30
+_SM107_SIZES = (_SM107_MIN_SIZE, _SM107_MID_SIZE, _SM107_LARGE_SIZE, _SM107_MAX_SIZE)
 _SM107_LARGE_SIZES = _SM107_SIZES[2:]
-_SM107_MIN_SIZE, _SM107_MAX_SIZE = _SM107_SIZES[0], _SM107_SIZES[-1]
-_SM107_ONE_FIELD = (SumOps, MeanOps, AMaxOps)
+_SM107_ONE_FIELD_NAMES = {SumOps: "sum", MeanOps: "mean", AMaxOps: "amax"}
+_SM107_ONE_FIELD = tuple(_SM107_ONE_FIELD_NAMES)
 _ORDERED_COL_DTYPES = _B200_DTYPES
 # Routing ccs, deliberately separate from the launch-policy _B200_CCS: the route and the
 # policies are measured and extended independently. kernel_coltile._ORDERED_COL_CONFIGS
-# entries for other architectures are not routed.
+# entries for other architectures are reached only through select_col_config hand-offs.
 _ORDERED_COL_CCS = ((10, 0),)
 _ORDERED_COL_MIN_R = 128
 _ORDERED_COL_MAX_R = 8192
@@ -532,18 +534,20 @@ def select_general_config(
         and alignment >= tile.TRANSFER_ALIGNMENT
     )
     strided_row = strided and cc in _B200_CCS and dtype in _B200_DTYPES
-    # Against the default config on B200 (fp16/bf16/fp32, 8 to 256K outputs), the c256
-    # inner tree ran 1.03-6.2x at every output count. The wider rules ran 0.76-0.95x
-    # below 2048 outputs, which keep the default config (a two-stage split below
-    # sm_count * 4 outputs), and 1.0-3.1x from 2048 with no upper bound (fp32 sum at
-    # count 1024: 1.0x). Amax and amin skip the wide one-field rule: amax ran 0.88-0.94x
-    # at count 4096 and for fp32 at count 1024, against 1.7-2.6x under c256.
+    # Against the default config on B200 (fp16/bf16/fp32, 2 to 256K outputs), the c256
+    # inner tree ran 1.03-6.2x at every output count (1.8-3.3x at 2-8 outputs). The
+    # wider rules ran 0.76-0.95x below 2048 outputs, which keep the default config (a
+    # two-stage split below sm_count * 4 outputs), and 1.0-3.1x from 2048 with no upper
+    # bound (fp32 sum at count 1024: 1.0x). Amax and amin skip the wide one-field rule:
+    # amax ran 0.88-0.94x at count 4096 and for fp32 at count 1024, against 1.7-2.6x
+    # under c256. Under c256, amin ran 1.14-2.96x and amax 1.17-2.89x (counts 256 and
+    # 257, 2 to 256K outputs).
     wide = strided_row and count in (1024, 4095, 4096) and num_o >= 2048
     if (
         strided_row
         and count in (256, 257)
         and (
-            trait_type in (SumOps, MeanOps, AMaxOps, *_B200_INDEX)
+            trait_type in (SumOps, MeanOps, AMaxOps, AMinOps, *_B200_INDEX)
             or welford_outs == nouts
         )
     ):
@@ -598,9 +602,9 @@ def _oneshot_ok(x: torch.Tensor) -> bool:
 # band, mean, prod, amax, amin, nansum, norm1/2 and count_nonzero (fp16/bf16/fp32) and
 # argmin, aminmax and max/min.dim (fp32) run 0.97-3.9x. Absmax and absmin (0.88-0.91x)
 # and general-p norms (0.57-0.92x; p = 3 and 0.5) lose at N = 255, so they start at
-# N = 1023. Rows are odd, so Welford traits start at N = 1025; at BF16 N = 4095 var_mean
-# ran 1.18x and var 1.36x. Std, std_mean, all and any (bf16/fp32, N = 255-16383, 2 to
-# 4096 rows) ran 1.07-2.38x, fp16 std, all and any 1.07-2.4x, and two- and three-row
+# N = 1023. Rows are odd, so Welford traits start at N = 1025; var, std, var_mean and
+# std_mean (fp16/bf16/fp32, N = 1025-16383, 64 and 4096 rows) ran 1.09-2.3x. All and any
+# (fp16/bf16/fp32, N = 255-16383, 2 to 4096 rows) ran 1.07-2.4x, and two- and three-row
 # sums 1.28-1.91x.
 # The kernel bakes N, so each new width compiles once (0.17 s on B200).
 _RAGGED_ROW_MIN_N = 255
