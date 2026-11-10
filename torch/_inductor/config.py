@@ -2060,6 +2060,11 @@ class cpp:
         os.environ.get("TORCHINDUCTOR_CPP_NO_REDUNDANT_LOOPS", "1") == "1"
     )
 
+    # On AVX2, reduce float vector lanes with a shuffle tree (simd_vec_reduce_all
+    # in cpp_prefix.h) instead of at::vec::vec_reduce_all, whose tree path is
+    # GCC-only. Changes the rounding of horizontal float sums.
+    simd_horizontal_reduction: bool = False
+
     # Assume number of threads is dynamic, don't specialize thread number.
     # Kernels don't recompile on thread number changes with this flag on.
     # For single-threaded workload, turning it on would incur a slight
@@ -2091,6 +2096,17 @@ class cpp:
 
     # enable weight prepacking to get a better performance; may lead to large memory footprint
     weight_prepack = os.environ.get("TORCHINDUCTOR_CPP_WEIGHT_PREPACK", "1") == "1"
+
+    # Emit scalar sqrt / rsqrt as sqrt_without_errno (cpp_prefix.h), a square root
+    # without the errno update that -fmath-errno keeps (the non-Windows build), so
+    # the compiler can optimize it like other arithmetic. sqrt results are
+    # unchanged; with enable_unsafe_math_opt_flag, 1 / sqrt(x) may become a
+    # reciprocal-sqrt estimate, which changes rsqrt results in the last bits.
+    # Where the SSE2 path isn't compiled in (see cpp_prefix.h) this is std::sqrt.
+    # Off by default because of that numerics change.
+    sqrt_without_errno = (
+        os.environ.get("TORCHINDUCTOR_CPP_SQRT_WITHOUT_ERRNO", "0") == "1"
+    )
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
