@@ -522,8 +522,11 @@ aten::_philox_randint
 aten::_philox_randint.out
 aten::_philox_randint_
 aten::_philox_uniform
+aten::_philox_uniform.Tensor
+aten::_philox_uniform.Tensor_out
 aten::_philox_uniform.out
 aten::_philox_uniform_
+aten::_philox_uniform_.Tensor
 aten::_pin_memory
 aten::_pin_memory.out
 aten::_reshape_alias_copy
