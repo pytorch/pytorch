@@ -383,16 +383,18 @@ gradients are correct.
 
 ## Disallowing implicit gradient accumulation
 
-When a tensor is used by more than one operation in forward, backward accumulates
-the gradient contributions from each use: the gradient of the tensor is the sum of
-the gradients flowing back from every operation that used it. This accumulation
-happens implicitly, inside the autograd engine.
+When a tensor is used by more than one operation in forward, for example ``h`` in a
+residual connection ``h + attn(norm(h))``, the autograd engine is responsible for
+accumulating the gradient contributions from each use during the backward.
 
 Passing ``disallow_implicit_grad_accumulation=True`` to {meth}`torch.Tensor.backward`,
-{func}`torch.autograd.backward` or {func}`torch.autograd.grad` makes this
-accumulation raise an error instead. Use it to find every place where your code
-relies on autograd to accumulate gradients, so that you can make each accumulation
-explicit, for example to control its precision.
+{func}`torch.autograd.backward` or {func}`torch.autograd.grad` makes it so that whenever
+such an accumulation is needed, we raise an error instead. This is useful for finding
+places in your code relies on autograd to accumulate gradients, when you might actually
+want to do it explicitly so you can have finer control over it. For example, you may
+want to control what precision the accumulation or how the rounding is performed
+when casting to the desired precision. Notably, however, this does NOT cover when grad
+is accumulated on the ``.grad`` field across several ``.backward()`` calls.
 
 ```python
 a = torch.randn(3, requires_grad=True)
@@ -434,19 +436,17 @@ Autograd returns each input that ``forward`` returns as a new view of it, so
 into either, and ``Split.backward`` combines their gradients. Because they are views
 of ``x``, do not modify them in place.
 
-A custom Function can also accumulate in place:
+If you are using
 {attr}`ctx.input_grad_buffers <torch.autograd.function.FunctionCtx.input_grad_buffers>`
-gives it the gradient that other uses of an input have already produced, if any.
-Adding its own gradient into that buffer and returning ``None`` for the input is an
-explicit accumulation, so it does not raise. When the entry is ``None``, the gradient
-the Function returns is checked as usual.
+and returned ``None``, this flag will not raise.
 
 A backward started while another one runs, such as the recomputation done by
 {func}`torch.utils.checkpoint.checkpoint` with ``use_reentrant=True``, inherits the
 setting. Derivative formulas can use their inputs more than once, so a graph built
 with ``create_graph=True`` accumulates gradients when it is differentiated; do not
 pass the flag when computing such higher-order gradients. The flag is not supported
-with compiled autograd.
+with compiled autograd, and is only available from Python for now: the C++
+``torch::autograd::backward`` and ``torch::autograd::grad`` do not accept it.
 
 ## Multithreaded Autograd
 
