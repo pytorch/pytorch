@@ -2910,6 +2910,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(SM120OrLater, "Quack TF32 GEMM requires SM100/SM110")
     @recover_orig_fp32_precision
     def test_mm_fp32_high_precision_runs_tf32_on_quack(self):
         torch.set_float32_matmul_precision("high")
