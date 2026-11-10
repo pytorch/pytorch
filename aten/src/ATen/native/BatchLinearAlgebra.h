@@ -4,16 +4,12 @@
 #include <string_view>
 #include <ATen/Config.h>
 #include <ATen/native/DispatchStub.h>
+#include <torch/headeronly/core/TransposeType.h>
 
 // Forward declare TI
 namespace at {
 class Tensor;
 struct TensorIterator;
-
-namespace native {
-enum class TransposeType;
-}
-
 }
 
 namespace at::native {
