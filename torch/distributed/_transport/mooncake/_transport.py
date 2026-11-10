@@ -146,8 +146,11 @@ class MooncakeTransport(Transport):
         self._notifier = ThreadPoolExecutor(4, thread_name_prefix="mooncake-notify")
         self._notify_cv = Condition()
         self._received: list[Notification] = []
-        self._waiters: list[_ThreadFuture[None]] = []
+        # Pending wait_notifications Works share this future, so a timed-out
+        # wait leaves nothing behind; it is replaced once it fires.
+        self._available: _ThreadFuture[None] | None = None
         self._watcher: Thread | None = None
+        # Guarded by _operation_lock, so close() sees every submitted send.
         self._sends: set[_FutureWork] = set()
         self._operation_lock = RLock()
         # Closing rejects new operations and is terminal.
@@ -227,11 +230,10 @@ class MooncakeTransport(Transport):
             work = _FutureWork(self._send_notify(self._engine, peer, payload), None)
 
             def untrack(_: _ThreadFuture[None]) -> None:
-                with self._notify_cv:
+                with self._operation_lock:
                     self._sends.discard(work)
 
-            with self._notify_cv:
-                self._sends.add(work)
+            self._sends.add(work)
             work._future.add_done_callback(untrack)
             return work
 
@@ -288,14 +290,16 @@ class MooncakeTransport(Transport):
 
     def wait_notifications(self, *, timeout: float | None = None) -> Work:
         _validate_timeout(timeout)
-        future: _ThreadFuture[None] = _ThreadFuture()
         with self._notify_cv:
             self._ensure_open()
             self._drain_notifies()
             if self._received:
+                future: _ThreadFuture[None] = _ThreadFuture()
                 future.set_result(None)
             else:
-                self._waiters.append(future)
+                if self._available is None:
+                    self._available = _ThreadFuture()
+                future = self._available
                 if self._watcher is None:
                     self._watcher = Thread(
                         target=self._watch, name="mooncake-notify-watch", daemon=True
@@ -322,17 +326,20 @@ class MooncakeTransport(Transport):
 
     def _watch(self) -> None:
         delay = 1e-6
+        available = None
         with self._notify_cv:
-            while self._waiters:
+            while self._available is not None:
                 self._drain_notifies()
                 if self._received:
-                    for waiter in self._waiters:
-                        waiter.set_result(None)
-                    self._waiters.clear()
+                    available, self._available = self._available, None
                     break
                 self._notify_cv.wait(delay)
                 delay = min(delay * 2, 1e-3)
             self._watcher = None
+        # Outside the lock: completion runs Work callbacks, which may call back
+        # into this transport.
+        if available is not None:
+            available.set_result(None)
 
     def register_memory(
         self, tensor: torch.Tensor, *, timeout: float | None = None
@@ -692,12 +699,11 @@ class MooncakeTransport(Transport):
     def _begin_close(self, timeout: float) -> list[_FutureWork]:
         self._closing = True
         with self._notify_cv:
-            for waiter in self._waiters:
-                waiter.set_exception(RuntimeError("transport is closed"))
-            self._waiters.clear()
-            sends = list(self._sends)
+            available, self._available = self._available, None
+        if available is not None:
+            available.set_exception(RuntimeError("transport is closed"))
         with self._locked(timeout):
-            return [*self._pending.values(), *sends]
+            return [*self._pending.values(), *self._sends]
 
     def close(self, *, timeout: float | None = None) -> None:
         if self._closed:

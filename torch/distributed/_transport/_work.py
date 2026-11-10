@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import threading
 from concurrent.futures import Future as _ThreadFuture, TimeoutError as _ThreadTimeout
 from datetime import timedelta
 from typing import Any, TYPE_CHECKING
@@ -27,17 +28,19 @@ class _FutureWork(Work):
         _validate_timeout(timeout)
         self._future = future
         self._timeout = timeout
-        self._result: torch.futures.Future[Any] = torch.futures.Future()
-        future.add_done_callback(self._settle)
+        # Created on first get_future, so Works that are only waited on, such as
+        # timed-out notification waits sharing one future, add no callbacks to it.
+        self._result: torch.futures.Future[Any] | None = None
+        self._result_lock = threading.Lock()
 
-    def _settle(self, future: _ThreadFuture[None]) -> None:
-        error = future.exception()
+    def _settle(self, result: torch.futures.Future[Any]) -> None:
+        error = self._future.exception()
         if error is None:
-            self._result.set_result([])
+            result.set_result([])
         else:
             if not isinstance(error, Exception):
                 error = RuntimeError(str(error))
-            self._result.set_exception(error)
+            result.set_exception(error)
 
     def is_completed(self) -> bool:
         return self._future.done()
@@ -62,7 +65,13 @@ class _FutureWork(Work):
         return True
 
     def get_future(self) -> torch.futures.Future[list[torch.Tensor]]:
-        return self._result
+        with self._result_lock:
+            result = self._result
+            if result is None:
+                result = self._result = torch.futures.Future()
+                future = result
+                self._future.add_done_callback(lambda _: self._settle(future))
+        return result
 
     def result(self) -> list[torch.Tensor]:
         self.wait()

@@ -461,6 +461,63 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         first.send_notification(second.peer_id, b"still works").wait()
         self.assertEqual(self._receive(second), [(first.peer_id, b"still works")])
 
+    def test_close_waits_for_notification_being_submitted(self):
+        first, second = self.make_transport_pair()
+        real_locked, real_send, real_begin = (
+            first._locked,
+            first._send_notify,
+            first._begin_close,
+        )
+        real_sync = first._engine.transfer_sync
+        closer = threading.Thread(target=first.close, name="closer")
+        close_locking, snapshotted = threading.Event(), threading.Event()
+        snapshots = []
+
+        def sync_after_snapshot(*args):
+            snapshotted.wait(10)
+            return real_sync(*args)
+
+        def locked(timeout):
+            if threading.current_thread() is closer:
+                close_locking.set()
+            return real_locked(timeout)
+
+        def send_during_close(engine, peer, payload):
+            # Past the open check but not yet tracked when close() starts.
+            closer.start()
+            close_locking.wait(10)
+            return real_send(engine, peer, payload)
+
+        def begin_close(timeout):
+            snapshots.append(real_begin(timeout))
+            snapshotted.set()
+            return snapshots[-1]
+
+        with (
+            patch.object(first._engine, "transfer_sync", sync_after_snapshot),
+            patch.object(first, "_locked", locked),
+            patch.object(first, "_send_notify", send_during_close),
+            patch.object(first, "_begin_close", begin_close),
+        ):
+            work = first.send_notification(second.peer_id, b"x")
+            closer.join(10)
+        self.assertIn(work, snapshots[0])
+        self.assertTrue(work.is_completed())
+
+    def test_timed_out_notification_waits_leave_nothing_behind(self):
+        first, second = self.make_transport_pair()
+        works = [second.wait_notifications() for _ in range(3)]
+        for work in works:
+            with self.assertRaises(TimeoutError):
+                work.wait(timedelta(milliseconds=1))
+        self.assertEqual(len({id(work._future) for work in works}), 1)
+        first.send_notification(second.peer_id, b"x").wait()
+        for work in works:
+            self.assertTrue(work.wait(timedelta(seconds=30)))
+        self.assertIsNone(second._available)
+        self.assertIsNone(second._watcher)
+        self.assertEqual(second.poll_notifications(), [(first.peer_id, b"x")])
+
 
 _RUN_INTEGRATION = os.environ.get("RUN_MOONCAKE_INTEGRATION") == "1"
 
