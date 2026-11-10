@@ -8,6 +8,7 @@ import os
 import sys
 import unittest
 from contextlib import contextmanager
+from functools import partial
 from unittest import mock
 
 import torch
@@ -127,18 +128,13 @@ def _trait_key(trait):
     return f"inner_tree_test_{trait.__name__}"
 
 
-def _norm2(acc):
-    # Like the class traits, take only the accumulator.
-    return T.NormOps(2, acc=acc)
-
-
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestInnerTreeOrder(TestCase):
-    def _run(self, trait, x):
+    def _run(self, trait, x, key=None):
         acc = cutlass.Float64 if x.dtype is torch.float64 else cutlass.Float32
         (got,) = rt.reduce_row_tile(
-            trait(acc=acc), _trait_key(trait), x, [x.dtype], order="inner_tree"
+            trait(acc=acc), key or _trait_key(trait), x, [x.dtype], order="inner_tree"
         )
         return got
 
@@ -166,7 +162,7 @@ class TestInnerTreeOrder(TestCase):
             "float64": torch.float64,
         }
         prod = op == "prod"
-        trait = {"sum": T.SumOps, "prod": T.ProdOps, "norm2": _norm2}[op]
+        trait = {"sum": T.SumOps, "prod": T.ProdOps, "norm2": partial(T.NormOps, 2)}[op]
         checked = 0
         for (kop, dname, m, n), want in _GOLDEN.items():
             if kop != op:
@@ -174,7 +170,7 @@ class TestInnerTreeOrder(TestCase):
             dtype = dtypes[dname]
             with self.subTest(dtype=dname, shape=(m, n)):
                 x = _golden_input(m, n, dtype, prod)
-                got = self._run(trait, x)
+                got = self._run(trait, x, f"inner_tree_test_{op}")
                 torch.cuda.synchronize()
                 kind = rt.itree_plan(n, m, x.element_size()).shape
                 self.assertEqual(

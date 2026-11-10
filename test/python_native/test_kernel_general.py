@@ -4,6 +4,7 @@
 # numerical coverage.
 
 import collections
+import contextlib
 import itertools
 import os
 import pathlib
@@ -58,6 +59,23 @@ def _route_tags(trait_key):
     for cache in (rt._CACHE, ct._CACHE, xc._PLAN):
         tags |= {key[0] for key in cache if key[1] == trait_key}
     return tags
+
+
+@contextlib.contextmanager
+def _replays_only(test):
+    """Empty the plan caches around the body and check that it left them empty. Replays
+    read none of them, while every full-path launch refills the cache it launches from."""
+    caches = (kg._PLAN, rt._CACHE, ct._CACHE, xc._PLAN, xc._GEOM)
+    saved = [list(cache.items()) for cache in caches]
+    for cache in caches:
+        cache.clear()
+    try:
+        yield
+        test.assertEqual([len(cache) for cache in caches], [0] * len(caches))
+    finally:
+        for cache, items in zip(caches, saved, strict=True):
+            for key, value in items:
+                cache[key] = value
 
 
 class _DecodeProbe:
@@ -648,7 +666,7 @@ class TestKernelGeneral(TestCase):
         span = f"128 to {cap} values per output for 128 threads, got"
         fold, clamp = "a linear general-axis fold, got axis=", "an unclamped run, got"
         for bad, reason in (
-            (dict(trait=trait), "a trait with combine_equal, got SumOps"),
+            (dict(trait=trait), "a trait with has_combine_equal, got SumOps"),
             (dict(count=0, red_pairs=((0, 1),)), f"{span} 0"),
             (dict(count=64, red_pairs=((64, 1),)), f"{span} 64"),
             (dict(count=cap + 1, red_pairs=((cap + 1, 1),)), f"{span} {cap + 1}"),
@@ -692,8 +710,8 @@ class TestKernelGeneral(TestCase):
         self.assertNotIn(None, replays.values())
         # A fresh input catches a replay that kept the recorded call's tensors.
         x = make()
-        got = [kg.replay_reduce(trait, key, x, dims, out_dtype) for _ in range(2)]
-        # The fresh calls replayed: they neither re-recorded nor added an entry.
+        with _replays_only(self):
+            got = [kg.replay_reduce(trait, key, x, dims, out_dtype) for _ in range(2)]
         self.assertEqual(entries(), replays)
         if dims is None:
             want = kg.reduce_all(trait(), key, x, out_dtype)
@@ -834,6 +852,20 @@ class TestKernelGeneral(TestCase):
         with torch.backends.python_native.cutedsl.disabled():
             want = x.argmax().int()
         self.assertEqual(got, want)
+        # A cached decline takes the full path without recording again, so a decline stored
+        # for an input that records stays a decline.
+        y = torch.randn(64, 256, device="cuda")
+        sums = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
+        kg.replay_reduce(sums, "replay_seeded", y, 1, torch.float32)
+        (seeded,) = [k for k in kg._REPLAYS if k[0] == "replay_seeded"]
+        self.assertIsNotNone(kg._REPLAYS.get(seeded))
+        kg._REPLAYS[seeded] = None
+        got = kg.replay_reduce(sums, "replay_seeded", y, 1, torch.float32)
+        self.assertIn(seeded, kg._REPLAYS)
+        self.assertIsNone(kg._REPLAYS.get(seeded))
+        with torch.backends.python_native.cutedsl.disabled():
+            want = y.sum(dim=1)
+        self.assertEqual(got, want)
 
     @unittest.skipIf(
         rt.inner_tree_order_enabled(), "requires unordered reduction order"
@@ -844,30 +876,41 @@ class TestKernelGeneral(TestCase):
         # A storage sliced 4 bytes in matches every other key field.
         storage = torch.randn(64 * 256 + 1, device="cuda").untyped_storage()[4:]
         shifted = torch.empty(0, device="cuda").set_(storage, 0, (64, 256), (256, 1))
-        for x in (aligned, shifted, aligned):
-            got = kg.replay_reduce(trait, "replay_keys", x, 1, torch.float32)
+        call = lambda x: kg.replay_reduce(trait, "replay_keys", x, 1, torch.float32)  # noqa: E731
+        for x in (shifted, aligned):
+            got = call(x)
             with torch.backends.python_native.cutedsl.disabled():
                 want = x.sum(dim=1)
             self.assertEqual(got, want)
-        with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "1"}):
-            got = kg.replay_reduce(trait, "replay_keys", aligned, 1, torch.float32)
+        # Unset, "" and "0" all leave the order off, so each replays the aligned entry.
+        with _replays_only(self):
+            for env in ({}, {rt._INNER_TREE_ENV: ""}, {rt._INNER_TREE_ENV: "0"}):
+                with mock.patch.dict(os.environ, env):
+                    self.assertEqual(call(aligned), got, atol=0, rtol=0)
+        # "1" and "strict" both select the inner tree, but strict raises where "1" falls
+        # back, so each records its own entry.
         want = kg.reduce_dim(
             trait(), "x", aligned, 1, torch.float32, order="inner_tree"
         )
-        self.assertEqual(got, want, atol=0, rtol=0)
+        for env in ("1", "strict"):
+            with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: env}):
+                self.assertEqual(call(aligned), want, atol=0, rtol=0)
         entries = [r for k, r in kg._REPLAYS.items() if k[0] == "replay_keys"]
-        self.assertEqual(len(entries), 3)
+        self.assertEqual(len(entries), 4)
         self.assertNotIn(None, entries)
 
     def test_replay_keys_on_normalized_dims(self):
         trait = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
         x = torch.randn(4, 8, 16, device="cuda")
-        for dims in (-1, 2, [2, 0], [0, -1]):
-            got = kg.replay_reduce(trait, "replay_dims", x, dims, torch.float32)
+        call = lambda d: kg.replay_reduce(trait, "replay_dims", x, d, torch.float32)  # noqa: E731
+        # -1 and 2 share one entry, and [2, 0] and [0, -1] another, so the second of each
+        # pair replays.
+        for dims, same in ((-1, 2), ([2, 0], [0, -1])):
             with torch.backends.python_native.cutedsl.disabled():
                 want = x.sum(dim=dims)
-            self.assertEqual(got, want)
-        # -1 and 2 share one entry, and [2, 0] and [0, -1] another.
+            self.assertEqual(call(dims), want)
+            with _replays_only(self):
+                self.assertEqual(call(same), want)
         entries = [r for k, r in kg._REPLAYS.items() if k[0] == "replay_dims"]
         self.assertEqual(len(entries), 2)
         self.assertNotIn(None, entries)
