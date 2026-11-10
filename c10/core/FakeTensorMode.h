@@ -7,12 +7,14 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
 namespace c10 {
 
 struct TensorImpl;
+struct FakeTensorModeHandle;
 
 // same as Python's FakeTensorMode
 // storing shape env and converter from Python, we'll use these later
@@ -23,11 +25,12 @@ struct TensorImpl;
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
-  // Owns a Python weakref to this mode's Python wrapper (CppFakeTensorMode),
-  // not the wrapper itself. See
-  // Note [C++ FakeTensorMode Python wrapper lifetime] in
-  // torch/csrc/FakeTensorMode.cpp.
-  std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
+  // The handle that fakes and the fake mode slot share while any of them uses
+  // this mode, if any; see Note [C++ FakeTensorMode handle] in
+  // torch/csrc/FakeTensorMode.cpp. Accessed only under handle_mutex_, by
+  // getCppFakeTensorModeHandle.
+  std::weak_ptr<FakeTensorModeHandle> handle_;
+  std::mutex handle_mutex_;
 
   // The fields below are plain, like a Python FakeTensorMode's attributes, and
   // must not be changed while another thread is using the mode.
@@ -85,6 +88,15 @@ struct C10_API FakeTensorMode {
   };
   std::unordered_map<c10::StorageImpl*, ConstantAliases>
       constant_storage_mapping_;
+};
+
+// What a fake and the fake mode slot hold to use a mode: the mode and, for a
+// mode made in Python, its Python object, which the handle keeps alive. See
+// Note [C++ FakeTensorMode handle] in torch/csrc/FakeTensorMode.cpp.
+struct C10_API FakeTensorModeHandle {
+  std::shared_ptr<FakeTensorMode> mode;
+  // The mode's CppFakeTensorMode, or null for a mode made in C++
+  std::shared_ptr<c10::SafePyObject> py_mode;
 };
 
 } // namespace c10
