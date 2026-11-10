@@ -123,6 +123,7 @@ from .base import (
     readonly_setter,
     REPR_ADDRESS_PLACEHOLDER,
     store_attr_mutation,
+    unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -3857,7 +3858,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return ConstantVariable.create(None)
 
     tp_getset = {
-        "__class__": GetSet(_class_vt, readonly_setter),
+        "__class__": GetSet(_class_vt, unmodeled_setter),
         "__dict__": GetSet(_get_dict, _set_dict),
     }
 

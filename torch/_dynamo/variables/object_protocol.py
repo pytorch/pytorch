@@ -2705,11 +2705,13 @@ def object_generic_setattr_str(
     if attr is not NO_SUCH_SUBOBJ:
         # The descriptor lives in a class __dict__ along the MRO, so it is
         # sourced by walking it (as the getattr path does).  AttrSource(
-        # obj.source, name) would instead name the value it computes.
+        # obj.source, name) would instead name the value it computes.  An
+        # object built during tracing has no source, but its class may.
+        cls_source = getattr(obj, "cls_source", None) or (
+            TypeSource(obj.source) if obj.source else None
+        )
         descr_source = (
-            mro_attr_source(tx, py_type, TypeSource(obj.source), name)
-            if obj.source
-            else None
+            mro_attr_source(tx, py_type, cls_source, name) if cls_source else None
         )
 
         result = _resolve_descriptor_set(tx, attr, obj, value, descr_source)

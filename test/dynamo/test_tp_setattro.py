@@ -663,9 +663,7 @@ class TpSetattroTests(TestCase):
 
     @unittest.expectedFailure
     def test_class_assignment_compatible_layout(self):
-        # __class__ hits the readonly_setter in UserDefinedObjectVariable.tp_getset
-        # and raises AttributeError('readonly attribute') instead of graph
-        # breaking, so a user except clause observes the wrong exception.
+        # __class__ assignment is not modeled, so fullgraph graph-breaks.
         class A:
             pass
 
@@ -723,7 +721,6 @@ class TpSetattroTests(TestCase):
 
         self._check(fn, torch.ones(3))
 
-    @unittest.expectedFailure
     def test_object_setattr_on_class(self):
         # eager: "can't apply this __setattr__ to type object".
         class K:
@@ -831,6 +828,67 @@ class TpSetattroTests(TestCase):
             return "no error"
 
         self._check(fn, torch.ones(3))
+
+    def test_object_setattr_grad_on_unused_input(self):
+        def fn(t, g, x):
+            object.__setattr__(t, "grad", g)
+            return x + 1
+
+        t, g = torch.randn(3), torch.ones(3)
+        torch.compile(fn, backend="eager", fullgraph=True)(t, g, torch.zeros(3))
+        self.assertIs(t.grad, g)
+
+    def test_descriptor_swap_on_local_object_recompiles(self):
+        def set_double(self, v):
+            self._v = v * 2
+
+        def set_triple(self, v):
+            self._v = v * 3
+
+        class P:
+            a = property(None, set_double)
+
+        def fn(x):
+            obj = P()
+            obj.a = x
+            return obj._v + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        self.assertEqual(compiled(x), fn(x))
+        P.a = property(None, set_triple)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_class_assignment_in_try(self):
+        class A:
+            pass
+
+        class B:
+            pass
+
+        def fn(obj, x):
+            try:
+                obj.__class__ = B
+            except AttributeError:
+                return x - 1
+            return x + 1
+
+        obj = A()
+        result = torch.compile(fn, backend="eager")(obj, torch.zeros(1))
+        self.assertEqual(result, torch.ones(1))
+        self.assertIs(type(obj), B)
+
+    def test_function_attr_delete_replays(self):
+        def g():
+            pass
+
+        def fn(f, x):
+            del f.tag
+            return x + 1
+
+        g.tag = 5
+        torch.compile(fn, backend="eager", fullgraph=True)(g, torch.zeros(1))
+        self.assertFalse(hasattr(g, "tag"))
 
     @unittest.expectedFailure
     def test_tensor_grad_delete_then_read(self):

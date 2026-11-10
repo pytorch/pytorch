@@ -160,7 +160,12 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
+from .user_defined import (
+    _STANDARD_DELATTRS,
+    _STANDARD_SETATTRS,
+    UserDefinedObjectVariable,
+    UserDefinedVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -2013,11 +2018,32 @@ class BuiltinVariable(BaseBuiltinVariable):
             if name == "__setattr__":
                 no_keywords(tx, "wrapper __setattr__", kwargs)
                 check_positional(tx, "object.__setattr__", len(args), 3, 3)
-                return object_generic_setattr(tx, *args)
+                obj, attr, value = args
+                standard = _STANDARD_SETATTRS
             else:
                 no_keywords(tx, "wrapper __delattr__", kwargs)
                 check_positional(tx, "object.__delattr__", len(args), 2, 2)
-                return object_generic_setattr(tx, *args, None)  # type: ignore[bad-argument-count]
+                obj, attr = args
+                value = None
+                standard = _STANDARD_DELATTRS
+            # Getset setters key side effects on the VT they receive.
+            obj = obj.realize()
+            # hackcheck: reject a receiver whose nearest C-level slot is not
+            # the generic one (e.g. `object.__setattr__(cls, ...)`).
+            # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9040-L9086
+            for base in obj.python_type().__mro__:
+                slot = base.__dict__.get(name)
+                if isinstance(slot, types.WrapperDescriptorType):
+                    if slot not in standard:
+                        raise_observed_exception(
+                            TypeError,
+                            tx,
+                            args=[
+                                f"can't apply this {name} to {obj.python_type_name()} object"
+                            ],
+                        )
+                    break
+            return object_generic_setattr(tx, obj, attr, value)
 
         if name in _BUILTIN_CONSTANT_FOLDABLE_METHODS.get(self.fn, ()):
             if all(a.is_python_constant() for a in args) and all(
