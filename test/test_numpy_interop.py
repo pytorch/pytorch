@@ -560,7 +560,6 @@ class TestNumPyInterop(TestCase):
 
     @onlyCPU
     @parametrize("nptype", [np.int16, np.int8, np.uint8, np.int32, np.int64])
-    @skipIfTorchDynamo("NumPy tracing treats integral scalars as 0-D arrays")
     def test_parse_numpy_int_mean(self, device, nptype):
         scalar = 3
         np_val = np.array([scalar], dtype=nptype)[0]
