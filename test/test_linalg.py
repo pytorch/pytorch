@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionInRange, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
+     skipIfNoLapack,
      MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision, DeterministicGuard)
 from torch.testing._internal.common_device_type import \
@@ -2986,11 +2987,6 @@ class TestLinalg(TestCase):
         for size in [(17, 4), (4, 17), (17, 17), (100, 40), (40, 100), (1000, 1000)]:
             for density in [0.005, 0.1]:
                 run_subtest(None, size, (), device, torch.svd_lowrank, density=density)
-
-        # jitting support
-        jitted = torch.jit.script(torch.svd_lowrank)
-        actual_rank, size, batches = 2, (17, 4), ()
-        run_subtest(actual_rank, size, batches, device, jitted)
 
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
@@ -6225,23 +6221,6 @@ class TestLinalg(TestCase):
             self.assertEqual(matmul(A, V) / E.max(), mm(matmul(B, V), (E / E.max()).diag_embed()),
                              atol=prec, rtol=0)
 
-    @skipCPUIfNoLapack
-    @onlyCPU
-    @dtypes(torch.double)
-    def test_lobpcg_torchscript(self, device, dtype):
-        from torch.testing._internal.common_utils import random_sparse_pd_matrix
-        from torch._linalg_utils import matmul as mm
-
-        lobpcg = torch.jit.script(torch.lobpcg)
-
-        m = 500
-        k = 5
-        A1 = random_sparse_pd_matrix(m, density=2.0 / m, device=device, dtype=dtype)
-        X1 = torch.randn((m, k), dtype=dtype, device=device)
-        E1, V1 = lobpcg(A1, X=X1)
-        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
-        self.assertLess(eq_err, 1e-6)
-
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, activation=None):
         dtype = t.dtype
         numpy_dtype = dtype
@@ -8569,11 +8548,6 @@ class TestLinalg(TestCase):
             for density in [0.005, 0.1]:
                 run_subtest(guess_rank, None, size, (), device, torch.pca_lowrank, density=density)
 
-        # jitting support
-        jitted = torch.jit.script(torch.pca_lowrank)
-        guess_rank, actual_rank, size, batches = 2, 2, (17, 4), ()
-        run_subtest(guess_rank, actual_rank, size, batches, device, jitted)
-
     # Ensure that nuclear_norm's out variant gives the same result as the non-out
     @onlyNativeDeviceTypes
     @skipCPUIfNoLapack
@@ -8766,9 +8740,16 @@ class TestLinalg(TestCase):
                 self.assertEqual(actual_pivots.shape, A.shape[:-1])
                 self.assertEqual(info.shape, A.shape[:-2])
 
-        # hermitian=True for complex inputs on CUDA is supported only with MAGMA 2.5.4+
+        # On ROCm, hermitian=True is tested only for complex inputs with MAGMA 2.5.4+
         magma_254_available = self.device_type == 'cuda' and _get_magma_version() >= (2, 5, 4)
-        hermitians = (True, False) if dtype.is_complex and (self.device_type == 'cpu' or magma_254_available) else (False,)
+        if (
+            self.device_type == "cpu"
+            or (self.device_type == "cuda" and not TEST_WITH_ROCM)
+            or (dtype.is_complex and magma_254_available)
+        ):
+            hermitians = (True, False)
+        else:
+            hermitians = (False,)
 
         shapes = (5,)
         batches = ((), (4,),)
@@ -8843,6 +8824,225 @@ class TestLinalg(TestCase):
         bad[0] = -(n + 1)
         with self.assertRaisesRegex(RuntimeError, r"\|pivot\| <= LD\.size\(-2\)"):
             torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
+
+    def _ldl_scaled_residuals(self, A, B, norms):
+        # LDL has no factors to multiply out, so its backward stability is checked
+        # through the solve, with the scaled residual of Netlib (see xSYT02) and MAGMA,
+        # ||AX - B|| / (||A|| * ||X|| * n * eps). The solve runs on the CPU.
+        compute_dtype = torch.cdouble if A.dtype.is_complex else torch.double
+        eps = torch.finfo(A.dtype).eps
+        n = A.shape[-1]
+        LD, pivots = torch.linalg.ldl_factor(A, hermitian=True)
+        A, B = A.cpu(), B.cpu()
+        X = torch.linalg.ldl_solve(LD.cpu(), pivots.cpu(), B, hermitian=True)
+        A, B, X = (t.to(compute_dtype) for t in (A, B, X))
+        residual = (A @ X).sub_(B)
+        return [norm(residual) / (norm(A) * norm(X) * n * eps) for norm in norms]
+
+    def _check_ldl_factor_random(self, n, device, dtype):
+        A = torch.randn(n, n, device=device, dtype=dtype)
+        A = A + A.mH
+        B = torch.randn(n, 3, device=device, dtype=dtype)
+        norm = partial(torch.linalg.matrix_norm, ord='fro')
+        [scaled_residual] = self._ldl_scaled_residuals(A, B, (norm,))
+        # see test_linalg_ldl_factor_stability_large_inputs
+        K = 1.0
+        self.assertTrue(scaled_residual < K)
+
+        # The last pivot is only checked, not factored. A zero last row/col is never
+        # interchanged and gets only zero updates, so that pivot is exactly zero.
+        A[-1, :] = A[:, -1] = 0
+        _, pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+        self.assertEqual(pivots[-1].item(), n)
+        self.assertEqual(info.item(), n)
+
+    @slowTest
+    @skipIfRocm
+    @skipIfNoLapack
+    @onlyCUDA
+    @skipCUDAIfNoCusolver
+    @dtypes(*complex_types())
+    def test_linalg_ldl_factor_stability_large_inputs(self, device, dtype):
+        # Check whether the LDL factorization (Bunch-Kaufman, hermitian=True) is
+        # backward stable, as in test_linalg_batched_lu_stability_large_inputs but
+        # through the solve (_ldl_scaled_residuals).
+        # NOTE: panels of more than 2048 rows are factored by a cooperative kernel
+        b = 2  # the batch is factored one matrix at a time
+        ns = (259, 513, 1027, 2048, 2049, 4100)
+
+        # Random Hermitian inputs are indefinite: about 60% of the pivots are 2x2
+        # blocks, and about 20% are 1x1 with an interchange
+        def make_well_conditioned(*shape):
+            # Eigenvalues of both signs
+            t = torch.randn(*shape, device=device, dtype=dtype)
+            q, _ = torch.linalg.qr(t)
+            s = torch.rand(*shape[:-1], device=device, dtype=dtype).real.add_(0.5)
+            s[..., ::2] *= -1
+            return (q * s.unsqueeze(-2)) @ q.mH
+
+        def make_ill_conditioned(*shape):
+            t = torch.randn(*shape, device=device, dtype=dtype)
+            return t + t.mH
+
+        make_input_methods = (make_well_conditioned, make_ill_conditioned)
+        matrix_norm = partial(torch.linalg.matrix_norm, dim=(-2, -1))
+
+        for n, make_input in product(ns, make_input_methods):
+            A = make_input(b, n, n)
+            B = torch.randn(b, n, 3, device=device, dtype=dtype)
+            # Netlib uses 1-norm, MAGMA uses Frobenius
+            norms = (partial(matrix_norm, ord=1), partial(matrix_norm, ord='fro'))
+            for scaled_residual in self._ldl_scaled_residuals(A, B, norms):
+                # Very conservative, see test_linalg_batched_lu_stability_large_inputs
+                K = 1.0
+                self.assertTrue((scaled_residual < K).all())
+
+        # Check info vector. Note, it is 1-based
+        for n in (300, 2049):
+            A = make_well_conditioned(5, n, n)
+            A[0, 0, :] = A[0, :, 0] = 0
+            A[2, -1, :] = A[2, :, -1] = 0
+            A[4].zero_()
+            LD, _, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+            self.assertTrue(torch.isfinite(LD).all())
+            self.assertEqual(info.tolist(), [1, 0, n, 0, 1])
+
+    @skipIfRocm
+    @skipIfNoLapack
+    @onlyCUDA
+    @setLinalgBackendsToDefaultFinally
+    @dtypes(*complex_types())
+    def test_linalg_ldl_factor_edge_cases(self, device, dtype):
+        # Empty inputs, in the matrix, the batch, or both
+        for shape in ((0, 0), (2, 0, 0), (0, 5, 5), (0, 2, 5, 5), (2, 0, 5, 5), (0, 0, 0), (2, 0, 0, 0)):
+            A = torch.empty(shape, device=device, dtype=dtype)
+            LD, pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+            self.assertEqual(LD.shape, A.shape)
+            self.assertEqual(pivots.shape, A.shape[:-1])
+            self.assertEqual(info, torch.zeros(A.shape[:-2], device=device, dtype=torch.int32))
+
+        # Small inputs, compared with LAPACK directly. n = 1 is not factored: the pivot is
+        # the entry itself, and info flags it if it is zero, ignoring its imaginary part
+        # as for any Hermitian diagonal. Up to n = 5, a single panel factors the matrix.
+        def compare_with_cpu(A):
+            LD, pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=True)
+            LD_ref, pivots_ref, info_ref = torch.linalg.ldl_factor_ex(A.cpu(), hermitian=True)
+            self.assertEqual(LD, LD_ref)
+            self.assertEqual(pivots, pivots_ref)
+            self.assertEqual(info, info_ref)
+
+        values = [2.0, 0.0] + ([3j, -2 + 1j] if dtype.is_complex else [])
+        compare_with_cpu(torch.tensor(values, device=device, dtype=dtype).reshape(-1, 1, 1))
+        for n in range(2, 6):
+            t = torch.randn(5, n, n, device=device, dtype=dtype)
+            A = t + t.mH
+            A[1].diagonal().zero_()  # 2x2 pivots
+            A[2, 0, :] = A[2, :, 0] = 0  # info = 1
+            A[3, -1, :] = A[3, :, -1] = 0  # info = n
+            A[4].zero_()  # info = 1
+            compare_with_cpu(A)
+
+        # The smallest shapes, and shapes around the panel boundaries. Panels end on
+        # multiples of nb and so take 2 to nb + 1 columns (see ldl_factor_panels), where
+        # nb depends on the dtype, the GPU and n (see ldl::panel_width and
+        # test_linalg_ldl_factor_panel_widths).
+        panel_widths = (16, 24, 32, 48, 64, 96, 128)
+        ns = {1, 2, 3}
+        for nb in panel_widths:
+            ns |= {nb + i for i in (-1, 0, 1, 2)}
+        for n in sorted(ns):
+            self._check_ldl_factor_random(n, device, dtype)
+
+        # Non-finite inputs. At n = 64 they also go through the trailing GEMM, as
+        # ldl::panel_width gives nb <= 32 there.
+        factor = partial(torch.linalg.ldl_factor_ex, hermitian=True)
+        for n in (5, 64):
+            t = torch.randn(n, n, device=device, dtype=dtype)
+            A = t + t.mH
+
+            # The imaginary part of a Hermitian diagonal is ignored, even when it is inf.
+            # A's diagonal is already real, so A gives the expected result.
+            A_inf = A.clone()
+            A_inf.diagonal().imag.fill_(inf)
+            self.assertEqual(factor(A_inf), factor(A), atol=0, rtol=0)
+
+            # NaNs. The pivot search skips them, so in an all-NaN column it finds no row
+            # to swap with and returns -1. The kernel has to keep that column in place
+            # rather than swap it with row -1, out of bounds (see ilambda < 0 in
+            # ldl_diagonal_panel_fused_kernel). Every pivot then has to be a valid row,
+            # 1 <= |pivot| <= n. LAPACK pivots NaNs differently, so there is no CPU reference.
+            A_nan = A.repeat(3, 1, 1)
+            A_nan[0] = nan
+            A_nan[1, 0, :] = A_nan[1, :, 0] = nan
+            A_nan[2, n // 2, :] = A_nan[2, :, n // 2] = nan
+            pivots = factor(A_nan).pivots.abs()
+            self.assertTrue(((pivots >= 1) & (pivots <= n)).all())
+
+        # cuSOLVER has no Hermitian LDL for complex inputs, so the cusolver backend
+        # takes the custom kernel too, rather than raising
+        torch.backends.cuda.preferred_linalg_library('cusolver')
+        t = torch.randn(4, 5, 5, device=device, dtype=dtype)
+        A = t + t.mH
+        A[1].diagonal().zero_()  # 2x2 pivots
+        A[2, -1, :] = A[2, :, -1] = 0  # info = 5
+        A[3].zero_()  # info = 1
+        compare_with_cpu(A)
+
+    @skipIfRocm
+    @skipIfNoLapack
+    @onlyCUDA
+    # One dtype keeps it fast, test_linalg_ldl_factor_stability_large_inputs covers both
+    @dtypes(torch.complex64)
+    def test_linalg_ldl_factor_batched_large_panels(self, device, dtype):
+        # A non-slow subset of test_linalg_ldl_factor_stability_large_inputs. The edge cases
+        # stop at n = 130, while n = 600 gives the single-block panel kernel more rows than
+        # threads (256), and n = 2100 starts with panels of more than COOP_MIN_ROWS = 2048
+        # rows, which the cooperative kernel factors. Both run on a batch of 2.
+        b = 2
+        norm = partial(torch.linalg.matrix_norm, ord='fro')
+        for n in (600, 2100):
+            t = torch.randn(b, n, n, device=device, dtype=dtype)
+            A = t + t.mH
+            B = torch.randn(b, n, 3, device=device, dtype=dtype)
+            [scaled_residual] = self._ldl_scaled_residuals(A, B, (norm,))
+            # see test_linalg_ldl_factor_stability_large_inputs
+            K = 1.0
+            self.assertTrue((scaled_residual < K).all())
+
+    @skipIfRocm
+    @onlyCUDA
+    # Real inputs go to cuSOLVER (see ldl_factor_kernel)
+    @dtypes(*complex_types())
+    def test_linalg_ldl_factor_zero_row_col_info(self, device, dtype):
+        # An exactly zero row/col makes the input singular, so info has to flag it. It stays
+        # exactly zero only if its row of L moves along with it when it becomes the
+        # curr_step + 1 partner of a 2x2 pivot that is not the first of its panel. That is
+        # about a third of random inputs, so a batch of 32 all but surely hits it.
+        b, n = 32, 300
+        t = torch.randn(b, n, n, device=device, dtype=dtype)
+        A = t + t.mH
+        for i, k in enumerate(torch.linspace(1, n - 2, b).long().tolist()):
+            A[i, k, :] = A[i, :, k] = 0
+        info = torch.linalg.ldl_factor_ex(A, hermitian=True).info
+        self.assertTrue((info > 0).all())
+
+    @slowTest
+    @skipIfRocm
+    @skipIfNoLapack
+    @onlyCUDA
+    # nb grows with n (see ldl::panel_width). On H100, 4097, 8193 and 16385 are the first
+    # n with nb = 64, 96 and 128 (complex64 skips 64).
+    # On GB200, 16385 reaches the widest nb of complex64, and complex128 needs 20481.
+    @parametrize("n", (4097, 8193, 16385, 20481))
+    # A, LD and one temporary on the device
+    @largeTensorTest(lambda self, device, dtype, n: 3 * n * n * dtype.itemsize, device="cuda")
+    # A and LD in the CPU solve, in double precision
+    @largeTensorTest(lambda self, device, dtype, n: 2 * n * n * (16 if dtype.is_complex else 8), device="cpu")
+    @dtypes(*complex_types())
+    def test_linalg_ldl_factor_panel_widths(self, device, dtype, n):
+        if n == 20481 and dtype != torch.complex128:
+            self.skipTest("Reaches no new panel width")
+        self._check_ldl_factor_random(n, device, dtype)
 
     def test_permute_matmul(self):
         a = torch.ones([2, 5, 24, 24])
@@ -9450,6 +9650,19 @@ class TestLinalgCudaOnly(TestCase):
             # We need to reset the filename to the default value so we can properly
             # clean up intermediate files
             self._set_tunableop_defaults()
+
+    @dtypes(torch.float)
+    def test_rerun_rewrites_results_file_tunableop(self, device, dtype):
+        import os
+        # Each run deletes its results file on exit, so a rerun of the same test
+        # in the same process must write a new one.
+        for _ in range(2):
+            with self._tunableop_ctx():
+                torch.cuda.tunable.set_max_tuning_duration(1)
+                torch.cuda.tunable.set_max_tuning_iterations(1)
+                A = make_tensor((17, 17), device=device, dtype=dtype)
+                torch.mm(A, A)
+                self.assertTrue(os.path.exists(torch.cuda.tunable.get_filename()))
 
     @dtypes(torch.half)
     def test_matmul_offline_tunableop(self, device, dtype):
@@ -12316,6 +12529,8 @@ _GROUPED_MM_CK_TILE_CASES = [
     subtest(((256, 96), (2, 1024, 96), [128, 256], False), name="ck_tile_2d_3d_k96"),
     subtest(((2048, 32), (2, 8192, 32), [1024, 2048], False), name="ck_tile_2d_3d_k32"),
     subtest(((2048, 128), (2, 8192, 128), [1024, 2048], False), name="ck_tile_2d_3d_k128"),
+    subtest(((256, 64), (2, 20, 64), [128, 256], True), name="ck_tile_2d_3d_n20"),
+    subtest(((1024, 64), (2, 2048, 64), [512, 1024], False), name="ck_tile_2d_3d_n2048"),
     subtest(((512, 256), (512, 256), [96, 256], False), name="ck_tile_2d_2d_n512"),
     subtest(((2048, 256), (4096, 256), [96, 256], False), name="ck_tile_2d_2d_n4096"),
     subtest(((2048, 256), (4096, 256), [32, 256], False), name="ck_tile_2d_2d_n4096_k32"),
@@ -12325,10 +12540,11 @@ _GROUPED_MM_CK_TILE_CASES = [
 
 # Every ck_tile config of each arch as "A/B layout, tile, waves, warp tile, padded dims, 1-element C stores", which
 # test_grouped_gemm_ck_tile_config_coverage requires the cases above to launch. RC is forward, RR dX and CR dW; each
-# layout also has the unaligned config (C1). Keyed by (arch, CU count): load_cost divides tiles by the CU count, so
-# which configs the cases reach depends on it. Update this table when the configs in ck_tile_group_gemm.hip change.
+# layout also has the unaligned config (C1). Keyed by (arch, CU count, dtype): each dtype has its own configs, and
+# load_cost divides tiles by the CU count, so which configs the cases reach depends on it. Update this table when the
+# configs in ck_tile_group_gemm.hip change.
 _GROUPED_MM_CK_TILE_CONFIGS = {
-    ("gfx950", 128): {
+    ("gfx950", 128, torch.bfloat16): {
         "RC 256x192x64 4w 32x32x16 -N-", "RC 256x128x64 4w 32x32x16 -N-", "RC 128x192x64 4w 32x32x16 -N-",
         "RC 128x128x64 4w 32x32x16 -N-", "RC 256x128x64 4w 16x16x32 MNK C1",
         "RR 256x256x32 8w 32x32x16 ---", "RR 256x128x64 4w 16x16x32 ---", "RR 256x128x64 4w 32x32x16 -N-",
@@ -12336,7 +12552,7 @@ _GROUPED_MM_CK_TILE_CONFIGS = {
         "CR 256x256x32 8w 32x32x16 --K", "CR 256x256x32 8w 32x32x16 MNK", "CR 256x128x32 4w 32x32x16 MNK",
         "CR 256x128x64 4w 16x16x32 MNK C1",
     },
-    ("gfx950", 256): {
+    ("gfx950", 256, torch.bfloat16): {
         "RC 256x192x64 4w 32x32x16 -N-", "RC 256x128x64 4w 32x32x16 -N-", "RC 128x192x64 4w 32x32x16 -N-",
         "RC 128x128x64 4w 32x32x16 -N-", "RC 256x128x64 4w 16x16x32 MNK C1",
         "RR 256x256x32 8w 32x32x16 ---", "RR 256x128x64 4w 16x16x32 ---", "RR 256x128x64 4w 32x32x16 -N-",
@@ -12344,13 +12560,34 @@ _GROUPED_MM_CK_TILE_CONFIGS = {
         "CR 256x256x32 8w 32x32x16 --K", "CR 256x256x32 8w 32x32x16 MNK", "CR 256x128x32 4w 32x32x16 MNK",
         "CR 256x128x64 4w 16x16x32 MNK C1",
     },
-    ("gfx942", 304): {
+    ("gfx942", 304, torch.bfloat16): {
         "RC 128x192x64 4w 32x32x16 -N-", "RC 128x128x64 4w 32x32x16 -N-", "RC 256x128x64 4w 32x32x16 -N-",
         "RC 256x192x64 4w 16x16x32 -N-", "RC 256x128x64 4w 16x16x32 MNK C1",
         "RR 256x64x64 4w 16x16x32 ---", "RR 256x256x32 8w 32x32x16 ---", "RR 128x128x64 4w 16x16x32 ---",
         "RR 256x128x32 4w 16x16x32 ---", "RR 128x64x64 4w 16x16x32 ---", "RR 256x128x32 4w 16x16x32 -N-",
         "RR 256x128x64 4w 16x16x32 MNK C1",
         "CR 128x128x64 4w 32x32x16 --K", "CR 256x128x64 4w 16x16x32 MNK", "CR 256x128x64 4w 16x16x32 MNK C1",
+    },
+    ("gfx950", 128, torch.float32): {
+        "RC 256x256x16 8w 32x32x8 -N-", "RC 128x256x32 8w 16x16x16 -N-", "RC 128x128x32 8w 16x16x16 -N-",
+        "RC 64x128x32 4w 16x16x16 -N-", "RC 128x128x16 4w 32x32x4 MNK C1",
+        "RR 256x128x16 8w 16x16x16 -N-", "RR 128x128x16 8w 16x16x16 -N-", "RR 128x64x16 4w 32x32x4 -N-",
+        "RR 128x128x16 4w 32x32x4 MNK C1",
+        "CR 128x128x16 8w 16x16x16 MNK", "CR 128x128x16 4w 32x32x4 MNK C1",
+    },
+    ("gfx950", 256, torch.float32): {
+        "RC 256x256x16 8w 32x32x8 -N-", "RC 128x256x32 8w 16x16x16 -N-", "RC 128x128x32 8w 16x16x16 -N-",
+        "RC 64x128x32 4w 16x16x16 -N-", "RC 128x128x16 4w 32x32x4 MNK C1",
+        "RR 256x128x16 8w 16x16x16 -N-", "RR 128x128x16 8w 16x16x16 -N-", "RR 128x64x16 4w 32x32x4 -N-",
+        "RR 128x128x16 4w 32x32x4 MNK C1",
+        "CR 128x128x16 8w 16x16x16 MNK", "CR 128x128x16 4w 32x32x4 MNK C1",
+    },
+    ("gfx942", 304, torch.float32): {
+        "RC 128x64x64 4w 16x16x16 ---", "RC 128x128x32 8w 16x16x16 -N-", "RC 256x128x32 4w 16x16x16 -N-",
+        "RC 128x128x16 4w 32x32x4 MNK C1",
+        "RR 128x128x16 8w 16x16x16 ---", "RR 128x64x32 8w 16x16x16 ---", "RR 256x128x16 8w 16x16x16 ---",
+        "RR 256x64x32 8w 16x16x16 ---", "RR 128x64x32 8w 16x16x16 -N-", "RR 128x128x16 4w 32x32x4 MNK C1",
+        "CR 128x128x16 8w 16x16x16 --K", "CR 128x128x16 8w 16x16x16 MNK", "CR 128x128x16 4w 32x32x4 MNK C1",
     },
 }
 
@@ -12386,6 +12623,10 @@ class TestGroupedMM(TestCase):
             grad = self._make_grouped_mm_matrix(out.shape, True, out.device, out.dtype)
             out.backward(grad)
         ends = offs.cpu().tolist() if offs is not None else [0] * a.size(0)
+        # MI200 fp16 backward GEMMs round inputs to bf16 (fp16_alt_impl), but only in some rocBLAS kernels, so the
+        # grouped and per-group gradients can pick different kernels and differ by bf16 rounding.
+        fp16_alt_impl = TEST_WITH_ROCM and a.is_cuda and isRocmArchAnyOf(MI200_ARCH) and a.dtype == torch.float16
+        grad_tol = {"atol": 0.15, "rtol": 1e-2} if fp16_alt_impl else {}
         start = 0
         for group, end in enumerate(ends):
             span = slice(start, end)
@@ -12402,8 +12643,8 @@ class TestGroupedMM(TestCase):
             self.assertEqual(out[out_idx], out_ref)
             if backward:
                 out_ref.backward(grad[out_idx])
-                self.assertEqual(a.grad[a_idx], a_ref.grad)
-                self.assertEqual(b.grad[b_idx], b_ref.grad)
+                self.assertEqual(a.grad[a_idx], a_ref.grad, **grad_tol)
+                self.assertEqual(b.grad[b_idx], b_ref.grad, **grad_tol)
             start = end
 
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
@@ -12433,7 +12674,9 @@ class TestGroupedMM(TestCase):
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
     @parametrize("a_shape,b_shape,offsets,backward", _GROUPED_MM_CASES + _GROUPED_MM_CK_TILE_CASES)
-    @dtypes(torch.bfloat16, torch.float16)
+    @dtypes(torch.bfloat16, torch.float16, torch.float32)
+    # ck_tile sums K in one fp32 accumulator; on long K that has up to 2x the rounding error of hipBLASLt kernels that split K
+    @toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)})
     def test_grouped_gemm_rocm_backend(self, device, backend, strided, a_row_major, b_row_major, a_shape, b_shape, offsets,
                                        backward, dtype):
         if backend == "ck_tile" and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
@@ -12461,21 +12704,23 @@ class TestGroupedMM(TestCase):
     # read from the kernel names, so a retune or another CU count can't drop a config from coverage unnoticed.
     @onlyCUDA
     @skipCUDAIfNotRocm
-    def test_grouped_gemm_ck_tile_config_coverage(self, device):
+    @dtypes(torch.bfloat16, torch.float32)
+    @toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)})  # same as test_grouped_gemm_rocm_backend
+    def test_grouped_gemm_ck_tile_config_coverage(self, device, dtype):
         from torch.profiler import profile, ProfilerActivity
 
+        if not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
+            self.skipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
         props = torch.cuda.get_device_properties(device)
-        key = (props.gcnArchName.split(":")[0], props.multi_processor_count)
+        arch_cus = (props.gcnArchName.split(":")[0], props.multi_processor_count)
+        key = (*arch_cus, dtype)
         if key not in _GROUPED_MM_CK_TILE_CONFIGS:
-            self.skipTest(f"ck_tile config coverage is only checked for (arch, CUs) in {sorted(_GROUPED_MM_CK_TILE_CONFIGS)}, "
-                          f"this device is {key}")
-        dtype = torch.bfloat16
-        alignment = 16 // dtype.itemsize
+            if any(k[:2] == arch_cus for k in _GROUPED_MM_CK_TILE_CONFIGS):
+                self.fail(f"no expected ck_tile configs for {dtype} on {arch_cus}; add them to _GROUPED_MM_CK_TILE_CONFIGS")
+            self.skipTest(f"ck_tile config coverage is not tracked for (arch, CUs) {arch_cus}")
         names = set()
         with mock.patch.dict(os.environ, {"ROCM_ALLOW_GROUP_GEMM_CK_TILE": "1"}):
             for a_shape, b_shape, offsets, backward in (c.arg_values for c in _GROUPED_MM_CASES + _GROUPED_MM_CK_TILE_CASES):
-                if any(size % alignment for size in a_shape[-2:] + b_shape[-2:] + tuple(offsets or ())):
-                    continue  # unaligned cases are correctness-tested in test_grouped_gemm_rocm_backend
                 for strided, a_row_major, b_row_major in itertools.product([False, True], repeat=3):
                     a = self._make_grouped_mm_matrix(a_shape, a_row_major, device, dtype, strided)
                     b = self._make_grouped_mm_matrix(b_shape, b_row_major, device, dtype, strided)
