@@ -503,6 +503,36 @@ class GraphModule(torch.nn.Module):
 
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
+class TestLeafFunctionEagerForward(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_forward_drops_fake_key(self):
+        # Include keys captured while tracing under a C++ fake mode contain
+        # Fake; the leaf function runs with the captured include set without
+        # Fake, and with the captured exclude set.
+        from torch._higher_order_ops.invoke_leaf_function import _make_forward
+
+        fake = torch._C.DispatchKey.Fake
+        seen = []
+
+        def fn(x):
+            seen_include = torch._C._dispatch_tls_local_include_set()
+            seen.append((seen_include, torch._C._dispatch_tls_local_exclude_set()))
+            return (x * 2,)
+
+        # Captured sets that differ from the ambient ones (the default include
+        # set also has ADInplaceOrView), so that forcing them is observable
+        include = torch._C.DispatchKeySet(torch._C.DispatchKey.BackendSelect)
+        snapshot = torch._C.DispatchKeySet(torch._C.DispatchKey.PythonTLSSnapshot)
+        exclude = torch._C._dispatch_tls_local_exclude_set() | snapshot
+        forward, _ = _make_forward(fn, include | torch._C.DispatchKeySet(fake), exclude)
+        x = torch.randn(3, requires_grad=True)
+        (out,) = forward(x)
+        self.assertEqual(seen, [(include, exclude)])
+        self.assertEqual(out, x * 2)
+
+
+@skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionEscapedGradients(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -2139,18 +2169,18 @@ class GraphModule(torch.nn.Module):
 
         getitem: "f32[0]" = with_effects[0];  with_effects = None
 
-        t: "f32[3, 3]" = torch.ops.aten.t.default(primals_3);  primals_3 = None
-        addmm: "f32[3, 3]" = torch.ops.aten.addmm.default(primals_2, primals_4, t);  primals_2 = None
-
-        t_1: "f32[3, 3]" = torch.ops.aten.t.default(t);  t = None
-        return (getitem, addmm, primals_4, t_1)
+        t: "f32[3, 3]" = torch.ops.aten.t.default(primals_3)
+        addmm: "f32[3, 3]" = torch.ops.aten.addmm.default(primals_2, primals_4, t);  primals_2 = t = None
+        return (getitem, addmm, primals_3, primals_4)
 """,
         )
         self.assertExpectedInline(
             bw_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_4: "f32[3, 3]", t_1: "f32[3, 3]", tangents_1: "f32[3, 3]"):
+    def forward(self, primals_3: "f32[3, 3]", primals_4: "f32[3, 3]", tangents_1: "f32[3, 3]"):
+        t: "f32[3, 3]" = torch.ops.aten.t.default(primals_3);  primals_3 = None
+        t_1: "f32[3, 3]" = torch.ops.aten.t.default(t);  t = None
         mm: "f32[3, 3]" = torch.ops.aten.mm.default(tangents_1, t_1);  t_1 = None
         t_2: "f32[3, 3]" = torch.ops.aten.t.default(tangents_1)
         mm_1: "f32[3, 3]" = torch.ops.aten.mm.default(t_2, primals_4);  t_2 = primals_4 = None

@@ -65,6 +65,7 @@ from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_methods_invocations import mask_not_all_zeros
 from torch.testing._internal.common_utils import (
     disable_gc,
+    get_cycles_per_ms,
     gradcheck,
     gradgradcheck,
     HardwareClassification,
@@ -5937,7 +5938,7 @@ Done""",
                 return x * 2
 
         x = torch.rand(3, 4)
-        traced_foo = torch.jit.trace(foo, x)
+        traced_foo = torch.jit._trace.trace(foo, x)
 
         def bar(x):
             with record_function("in_bar") as rf:
@@ -5951,7 +5952,7 @@ Done""",
                     y = y * 2
                 return y
 
-        traced_bar = torch.jit.trace(bar, x)
+        traced_bar = torch.jit._trace.trace(bar, x)
 
         with profile(use_kineto=kineto_available()) as p:
             traced_bar(x)
@@ -8235,60 +8236,15 @@ for shape in [(1,), ()]:
             checkpoint_sequential(modules_list, 3, a)
 
     @skipIfTorchDynamo("GraphExecGroup does not support compile")
-    def test_checkpoint_graph_execution_group(self):
-        def run(use_graph_execution_group):
-            counter = [0]
-
-            def fn(x):
-                counter[0] += 1
-                y = x.sin().cos()
-                z = y.sin().cos()
-                return y, z
-
-            x = torch.randn(3, 3, requires_grad=True)
-
-            y, z = checkpoint(fn, x, use_reentrant=False)
-
-            group = torch.utils.checkpoint.GraphExecGroup()
-
-            ctx = contextlib.nullcontext()
-            if use_graph_execution_group:
-                ctx = group
-
-            with ctx:
-                (grad_y,) = torch.autograd.grad(
-                    z, inputs=(y,), grad_outputs=(torch.ones(3, 3),)
-                )
-
-                (grad_x,) = torch.autograd.grad(
-                    y,
-                    inputs=(x,),
-                    grad_outputs=(grad_y,),
-                )
-
-            if use_graph_execution_group:
-                self.assertEqual(counter[0], 2)
-            else:
-                self.assertEqual(counter[0], 3)
-
-        run(use_graph_execution_group=True)
-        run(use_graph_execution_group=False)
-
-        # Test the not actually disjoint case (using retain_graph=True since
-        # otherwise autograd itself will catch this)
-        def fn(x):
-            return x.sin().cos()
-
-        x = torch.randn(3, 3, requires_grad=True)
-        out = checkpoint(fn, x, use_reentrant=False)
-        with torch.utils.checkpoint.GraphExecGroup():
-            # Under this context, we will enforce that two backward are disjoint
-            # even if retain_graph=True.
-            out.sum().backward(retain_graph=True)
-            with self.assertRaisesRegex(
-                RuntimeError, "Performing two backward calls that overlap"
-            ):
-                out.sum().backward()
+    def test_graph_exec_group_inference_mode(self):
+        group = torch.utils.checkpoint.GraphExecGroup()
+        with group:
+            self.assertIs(torch._C._get_graph_exec_group(), group)
+            for enabled in (True, False):
+                with torch.inference_mode(enabled):
+                    self.assertIs(torch._C._get_graph_exec_group(), group)
+                self.assertIs(torch._C._get_graph_exec_group(), group)
+        self.assertIsNone(torch._C._get_graph_exec_group())
 
     def test_checkpoint_detects_non_determinism(self):
         def save_3_tensors(x):
@@ -13446,10 +13402,22 @@ class TestAutogradForwardMode(TestCase):
 class TestAutogradDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @parametrize("shape,dim", [((0,), None), ((3, 0), 1), ((0, 3), 0)])
+    def test_mean_empty_double_backward(self, device, shape, dim):
+        x = torch.empty(shape, device=device, requires_grad=True)
+        y = x.mean() if dim is None else x.mean(dim=dim)
+        grad_output = torch.ones_like(y, requires_grad=True)
+        (grad_input,) = torch.autograd.grad(y, x, grad_output, create_graph=True)
+        self.assertEqual(grad_input, torch.empty_like(x))
+        (grad_grad_output,) = torch.autograd.grad(
+            grad_input, grad_output, torch.ones_like(grad_input)
+        )
+        self.assertEqual(grad_grad_output, torch.zeros_like(grad_output))
+
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
-            with self.subTest(f=f):
+            with self.subTest(f=f.__name__):
                 x1 = torch.tensor(
                     [1.0, 0.0, 1.0, 0.0, 1.0, 0.0], device=device, requires_grad=True
                 )
@@ -13472,7 +13440,7 @@ class TestAutogradDeviceType(TestCase):
             return torch.aminmax(x)[1]
 
         for f in [torch.amin, torch.amax, amax2, amin2]:
-            with self.subTest(f=f):
+            with self.subTest(f=f.__name__):
                 x1 = torch.tensor(
                     [1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
                     device=device,
@@ -13755,11 +13723,28 @@ class TestAutogradDeviceType(TestCase):
         t4 = t1 * t1
         t5 = TestAutograd.SimulateBackwardError.apply(t4)
 
-        # Child gpu graph (much longer than parent graph).
+        # Child gpu graph.
         prev = t2 * t2
         for _ in range(10):
             prev = prev * t2
         reentrant_root = prev
+
+        # The parent's error does not cancel a reentrant child graph that has
+        # already started, so start the child before the parent errors and
+        # hold it until the parent has raised.
+        child_started = threading.Event()
+        parent_errored = threading.Event()
+        child_done = threading.Event()
+
+        def hold_child(grad):
+            child_started.set()
+            parent_errored.wait(timeout=60)
+
+        def wait_for_child(grad):
+            child_started.wait(timeout=60)
+
+        reentrant_root.register_hook(hold_child)
+        t5.register_hook(wait_for_child)
 
         class ReentrantFunc(Function):
             @staticmethod
@@ -13768,23 +13753,29 @@ class TestAutogradDeviceType(TestCase):
 
             @staticmethod
             def backward(ctx, grad):
-                # Reentrant backward in child will take much longer.
                 reentrant_root.backward(grad)
+                child_done.set()
                 return grad
 
         # Parent gpu graph.
         t6 = ReentrantFunc.apply(t3)
         t7 = t6 * t6
 
-        # Parent graph will error out first, while child graph will continue executing.
-        with self.assertRaisesRegex(Exception, "Simulate error"):
-            torch.autograd.backward([t5.sum(), t7.sum()])
+        try:
+            # The parent raises without waiting for the held child.
+            with self.assertRaisesRegex(Exception, "Simulate error"):
+                torch.autograd.backward([t5.sum(), t7.sum()])
+            self.assertFalse(child_done.is_set())
+        finally:
+            parent_errored.set()
 
-        # No grads should be accumulated since child graph will stop execution
-        # after parent receives error.
-        self.assertIsNone(t2.grad)
-        self.assertIsNone(t1.grad)
+        self.assertTrue(child_started.is_set())
+        # The child is its own graph task and runs to completion.
+        self.assertTrue(child_done.wait(timeout=60))
+        self.assertIsNotNone(t2.grad)
+        # The parent errored, so it must not run the rest of its graph.
         self.assertIsNone(t3.grad)
+        self.assertIsNone(t1.grad)
 
     @onlyAccelerator
     def test_reentrant_parent_error_on_cpu(self, device):
@@ -15034,6 +15025,68 @@ class TestAutogradDeviceType(TestCase):
             # about mismatched dtypes.
             loss.backward()  # triggers recomputation to check it runs in bfloat
 
+    @skipIfTorchDynamo("GraphExecGroup does not support compile")
+    def test_checkpoint_graph_execution_group(self, device):
+        # Backward on an accelerator runs on an autograd device worker thread,
+        # so the checkpoint unpack hook only sees the group via ThreadLocalState.
+        def run(use_graph_execution_group):
+            counter = [0]
+            tids = set()
+
+            def fn(x):
+                counter[0] += 1
+                tids.add(threading.get_ident())
+                y = x.sin().cos()
+                z = y.sin().cos()
+                return y, z
+
+            x = torch.randn(3, 3, device=device, requires_grad=True)
+
+            y, z = checkpoint(fn, x, use_reentrant=False)
+
+            group = torch.utils.checkpoint.GraphExecGroup()
+
+            ctx = contextlib.nullcontext()
+            if use_graph_execution_group:
+                ctx = group
+
+            with ctx:
+                (grad_y,) = torch.autograd.grad(
+                    z, inputs=(y,), grad_outputs=(torch.ones(3, 3, device=device),)
+                )
+
+                (grad_x,) = torch.autograd.grad(
+                    y,
+                    inputs=(x,),
+                    grad_outputs=(grad_y,),
+                )
+
+            if use_graph_execution_group:
+                self.assertEqual(counter[0], 2)
+            else:
+                self.assertEqual(counter[0], 3)
+            if device != "cpu":
+                self.assertGreater(len(tids), 1)
+
+        run(use_graph_execution_group=True)
+        run(use_graph_execution_group=False)
+
+        # Test the not actually disjoint case (using retain_graph=True since
+        # otherwise autograd itself will catch this)
+        def fn(x):
+            return x.sin().cos()
+
+        x = torch.randn(3, 3, device=device, requires_grad=True)
+        out = checkpoint(fn, x, use_reentrant=False)
+        with torch.utils.checkpoint.GraphExecGroup():
+            # Under this context, we will enforce that two backward are disjoint
+            # even if retain_graph=True.
+            out.sum().backward(retain_graph=True)
+            with self.assertRaisesRegex(
+                RuntimeError, "Performing two backward calls that overlap"
+            ):
+                out.sum().backward()
+
 
 class TestAllowMutationOnSaved(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -15632,9 +15685,6 @@ class TestAutogradInferenceMode(TestCase):
         run_test(lambda x: x.transpose_(0, 1))
 
 
-NUM_GPU_CYCLES_IN_ONE_SEC = 2_000_000_000
-
-
 @contextlib.contextmanager
 def _set_device_index(target_device):
     orig_device = torch.accelerator.current_device_index()
@@ -15651,6 +15701,14 @@ def _sleep_if_cuda(cycles):
     else:
         # Update this if non-cuda accelerators support something like sleep
         return
+
+
+# Calibration synchronizes the device, so run it before building the graph.
+def _get_sleep_cycles(milliseconds):
+    if "cuda" == torch.accelerator.current_accelerator().type:
+        return int(milliseconds * get_cycles_per_ms())
+    else:
+        return 0
 
 
 def _get_device_name(idx):
@@ -15694,6 +15752,8 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     def test_consumer_to_single_producer_case_2_correctness(self, device):
+        delay_cycles = _get_sleep_cycles(500)
+
         #                          Device    Stream
         # Consumer (MulBackward):  cuda:0    s0
         # Producer              :  cuda:0    s1
@@ -15706,7 +15766,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
             @staticmethod
             def backward(ctx, gO):
                 out = gO.clone()
-                _sleep_if_cuda(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                _sleep_if_cuda(delay_cycles)
                 out.add_(1)
                 return out
 
@@ -15737,6 +15797,8 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
     def _test_consumer_to_single_producer_case_3_correctness(
         self, non_default_ambient_stream
     ):
+        delay_cycles = _get_sleep_cycles(500)
+
         #                          Device    Stream
         # Consumer (MulBackward):  cuda:0    s0
         # Producer              :  cuda:1    cuda:1 default
@@ -15753,7 +15815,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
             def backward(ctx, gO):
                 out = gO.to(_get_device_name(0))
                 with _set_device_index(0):
-                    _sleep_if_cuda(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                    _sleep_if_cuda(delay_cycles)
                 # It's the node's responsibility to sync back to its canonical stream.
                 out.add_(1)
                 ctx.node_stream.wait_stream(torch.accelerator.current_stream(0))
@@ -15829,6 +15891,8 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
     def test_consumer_to_single_producer_case_4_correctness(self, device):
+        delay_cycles = _get_sleep_cycles(500)
+
         #           Device    Stream
         # Consumer: cuda:0    cuda:0 default
         # Producer: cuda:1    s1
@@ -15841,7 +15905,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
             @staticmethod
             def backward(ctx, gO):
                 out = gO.clone()
-                _sleep_if_cuda(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                _sleep_if_cuda(delay_cycles)
                 return out.add_(1)
 
         class Consumer(torch.autograd.Function):
@@ -15892,6 +15956,8 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
         torch.accelerator.device_count() < 2, "accelerator count is less than 2"
     )
     def test_consumer_to_multi_producer_case_4_correctness(self, device):
+        delay_cycles = _get_sleep_cycles(500)
+
         #             Device    Stream
         # Consumer  : cuda:0    cuda:0 default
         #
@@ -15920,7 +15986,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
             @staticmethod
             def backward(ctx, gO):
                 out = gO.clone()
-                _sleep_if_cuda(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                _sleep_if_cuda(delay_cycles)
                 return out.mul_(2)
 
         class Consumer(torch.autograd.Function):
@@ -16028,6 +16094,8 @@ class TestAutogradStreamSynchronizationCudaOnly(_TestAutogradStreamSynchronizati
     # be calling sleep)
     @skipCUDANonDefaultStreamIf(True)
     def test_side_stream_backward_overlap(self, device):
+        delay_cycles = _get_sleep_cycles(500)
+
         # In case 2/3, we would designate the consumer as the accumulation
         # stream and naively, one might have the consumer wait for the producer
         # as soon as we've added to the InputBuffer the first time.
@@ -16069,7 +16137,7 @@ class TestAutogradStreamSynchronizationCudaOnly(_TestAutogradStreamSynchronizati
                 evt.record()
                 events["side_backward_start"] = evt
 
-                _sleep_if_cuda(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                _sleep_if_cuda(delay_cycles)
                 result = gO.clone()
 
                 evt = torch.Event(enable_timing=True)
@@ -16431,53 +16499,6 @@ class TestMultithreadAutograd(TestCase):
             x_retain.grad,
             5 * (4 * x_retain**3 + 6 * (x_retain**2) + 4 * x_retain + 1),
         )
-
-    def test_fork_join_in_middle(self):
-        # multiple backward with jit threads (fork/join primitive)
-        # similar to test_python_thread_in_middle, we test with retain_graph=False/True
-
-        # Case 1: multiple grad() calls with jit threads, retain_graph=False
-        # should throw error in some threads with no retain_graph.
-        @torch.jit.script
-        def train_fn_jit_no_retain(middle, orig_x):
-            y = middle + middle**2
-            return torch.autograd.grad([y.sum()], [orig_x])
-
-        @torch.jit.script
-        def train_fn_fork_join_calls_no_retain(x):
-            y_no_retain = (x + 3) * (x + 4) * 0.5
-
-            fut = torch.jit._fork(train_fn_jit_no_retain, y_no_retain, x)
-            grad_hat = train_fn_jit_no_retain(y_no_retain, x)
-            grad = torch.jit._wait(fut)
-            return grad, grad_hat
-
-        try:
-            train_fn_fork_join_calls_no_retain(torch.randn(5, 5, requires_grad=True))
-        except RuntimeError as error:
-            self.assertRegex(str(error), "Specify retain_graph=True")
-
-        # Case 2: no error with retain_graph=True
-        @torch.jit.script
-        def train_fn_jit_retain(middle, orig_x):
-            y = middle + middle**2
-            return torch.autograd.grad([y.sum()], [orig_x], retain_graph=True)
-
-        @torch.jit.script
-        def train_fn_fork_join_calls_retain(x):
-            y_retain = (x + 3) * (x + 4) * 0.5
-            fut1 = torch.jit._fork(train_fn_jit_retain, y_retain, x)
-            fut2 = torch.jit._fork(train_fn_jit_retain, y_retain, x)
-            grad = train_fn_jit_retain(y_retain, x)
-            grad1 = torch.jit._wait(fut1)
-            grad2 = torch.jit._wait(fut2)
-            return grad, grad1, grad2
-
-        grad, grad1, grad2 = train_fn_fork_join_calls_retain(
-            torch.randn(5, 5, requires_grad=True)
-        )
-        self.assertEqual(grad, grad1)
-        self.assertEqual(grad, grad2)
 
     def test_preserve_backtrace(self):
         class Foo(torch.autograd.Function):

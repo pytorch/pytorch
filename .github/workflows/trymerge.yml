@@ -25,7 +25,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: '3.10'
+          python-version: '3.11'
           check-latest: false
           cache: pip
           architecture: x64
@@ -81,6 +81,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
+          COMMENT_ID: ${{ github.event.client_payload.comment_id }}
         run: |
           set -x
           python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"

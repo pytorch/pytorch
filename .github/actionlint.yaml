@@ -43,12 +43,14 @@ self-hosted-runner:
     - macos-m1-stable
     - macos-m1-15
     - macos-m2-26
+    - macos-m2-27
     # GitHub-hosted MacOS runners
     - macos-latest-xlarge
     - macos-13-xlarge
     - macos-14-xlarge
     - macos-26
     - macos-26-xlarge
+    - xcode-27-xlarge
     # Organization-wide Intel hosted XPU runners
     - linux.idc.xpu
     # Organization-wide Google Cloud TPU runners
