@@ -88,10 +88,11 @@ def wrap_cutedsl(
     the side table that holds them for make_fx and export: a list, tuple, dict,
     dataclass instance or plain object by its type and contents, which must not hold
     a tensor or a DSL tensor, pointer or stream, and must be hashable values or such
-    containers. A bound ``@cute.jit`` method or a kernel object (one whose class's
-    ``__call__`` is ``@cute.jit``) cannot be wrapped: wrap a ``@cute.jit`` function
-    that takes the object as a ``cutlass.Constexpr`` parameter and calls the method
-    on it, and pass the object to that wrapper. A kernel object is keyed by its
+    containers. A list, tuple or dict subclass other than an OrderedDict, a namedtuple
+    or a torch.Size is refused. A bound ``@cute.jit`` method or a kernel object (one
+    whose class's ``__call__`` is ``@cute.jit``) cannot be wrapped: wrap a ``@cute.jit``
+    function that takes the object as a ``cutlass.Constexpr`` parameter and calls the
+    method on it, and pass the object to that wrapper. A kernel object is keyed by its
     attributes like a plain object: equal objects, such as one built for each call,
     share one compile, one mutated between calls is compiled again, and one with an
     unhashable attribute (a set, a numpy array, or a cute layout that a direct
