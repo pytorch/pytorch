@@ -4926,6 +4926,15 @@ class TestPrecompileDynamoCapture(TestCase):
                 cap(self.model, self.x2)
         self.assertFalse(os.path.exists(self.artifact))
 
+    def test_a_fullgraph_capture_is_one_frame_that_serves(self):
+        with self._capture(self.mod.single, tracer=DynamoTracer(fullgraph=True)) as cap:
+            cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            meta = torch._precompile._parse_artifact_metadata(f.read())
+        self.assertEqual(meta["FRAMES"], [("single", 1)])
+        expected = self.mod.single(self.model, self.x2)
+        self.assertEqual(load(self.artifact, self.cache)(self.model, self.x2), expected)
+
     def test_two_artifacts_of_one_capture_load_side_by_side(self):
         # A save() checkpoint and the final artifact share compiled graphs, code and
         # all, so loading both binds the same code under the same names.
