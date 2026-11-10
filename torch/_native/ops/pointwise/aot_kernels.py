@@ -8,16 +8,22 @@ import cutlass
 import cutlass.cute as cute
 
 from . import kernel, ops
-from ._limits import _MIN_ALIGNMENT, _THREADS_PER_BLOCK, _TMA_ALIGNMENT, _TMA_BOX_SIDE
+from ._limits import _MIN_ALIGNMENT, _TMA_ALIGNMENT
 
 
 class _AotTma:
     def __init__(
-        self, fn: str, dtype: Any, mask: tuple[bool, ...], boolean: bool
+        self,
+        fn: str,
+        dtype: Any,
+        mask: tuple[bool, ...],
+        boolean: bool,
+        box: int,
+        block: int,
+        stages: int,
     ) -> None:
         self.comp_type = cutlass.Float32
-        box, block = _TMA_BOX_SIDE, _THREADS_PER_BLOCK
-        config = kernel._TmaConfig(mask, box, block, (), ((), ()))
+        config = kernel._TmaConfig(mask, box, block, (), ((), ()), stages=stages)
         self.op = kernel._ElementwiseTma2D(
             fn=ops.get_fn(fn),
             ninputs=len(mask),
@@ -85,7 +91,15 @@ def build(spec: dict[str, Any]) -> dict[str, Any]:
         }[spec["dtype"]],
     )
     mask = tuple(spec["transposed"])
-    op = _AotTma(spec["fn"], dtype, mask, spec["boolean"])
+    op = _AotTma(
+        spec["fn"],
+        dtype,
+        mask,
+        spec["boolean"],
+        box=spec["box"],
+        block=spec["block"],
+        stages=spec["stages"],
+    )
     box = op.op.box
     shapes = (cute.sym_int(divisibility=box), cute.sym_int(divisibility=box))
     fakes = []
@@ -121,6 +135,7 @@ def build(spec: dict[str, Any]) -> dict[str, Any]:
     )
     tensor_args.append({"name": "out", "dynamic_sizes": [1, 2], "dynamic_strides": [1]})
     tag = "".join("t" if value else "n" for value in mask)
+    tag += f"_box{box}_b{spec['block']}_s{spec['stages']}"
     return {
         "kind": "cutedsl",
         "fn": (op.unary, op.binary, op.ternary)[len(mask) - 1],

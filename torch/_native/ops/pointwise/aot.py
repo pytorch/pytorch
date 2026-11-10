@@ -76,7 +76,8 @@ def _axes(inputs: tuple[Any, ...], out: Any, boolean: bool) -> dict[str, Any]:
     ref = inputs[0]
     if not ref.is_cuda or ref.ndim != 2 or all(t.is_contiguous() for t in inputs):
         return {"eligible": False}
-    if torch.cuda.get_device_capability(ref.device)[0] != 10:
+    cc = torch.cuda.get_device_capability(ref.device)
+    if cc[0] != 10:
         return {"eligible": False}
     if any(
         t.layout != torch.strided
@@ -120,10 +121,18 @@ def _axes(inputs: tuple[Any, ...], out: Any, boolean: bool) -> dict[str, Any]:
         address,
         torch.cuda.get_device_properties(ref.device).shared_memory_per_block_optin,
         strides,
+        cc,
     )
     if config is None:
         return {"eligible": False}
-    return {"eligible": True, "dtype": ref.dtype, "transposed": config.transposed}
+    return {
+        "eligible": True,
+        "dtype": ref.dtype,
+        "transposed": config.transposed,
+        "box": config.box,
+        "block": config.block,
+        "stages": config.stages,
+    }
 
 
 class _Declaration:
@@ -146,16 +155,28 @@ class _Declaration:
         }.get(aten, ())
 
     def kernel_precompile_grid(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "dtype": list(_DTYPES),
-                "transposed": mask,
-                "fn": self.fn,
-                "boolean": self.boolean,
-                "eligible": True,
-            }
-            for mask in itertools.product((False, True), repeat=self.nin)
-        ]
+        points = []
+        for mask in itertools.product((False, True), repeat=self.nin):
+            for dtype, size in (("bfloat16", 2), ("float32", 4)):
+                geometries = dict.fromkeys(
+                    geometry
+                    for cc in ((10, 0), (10, 7))
+                    for geometry in _limits._tma_configs(mask, cc, size)
+                )
+                for box, block, stages in geometries:
+                    points.append(
+                        dict(
+                            dtype=dtype,
+                            transposed=mask,
+                            fn=self.fn,
+                            boolean=self.boolean,
+                            eligible=True,
+                            box=box,
+                            block=block,
+                            stages=stages,
+                        )
+                    )
+        return points
 
     def covered_axes(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         for i, name in enumerate(self.scalars, self.nin):
@@ -178,7 +199,7 @@ class _Declaration:
 if (_naot_props->major != 10) return false;
 {scalar_gate}
 auto cfg = pointwise_tma_config({self._inputs()}, &out, {str(self.boolean).lower()},
-                                _naot_props->sharedMemPerBlockOptin);
+                                _naot_props->sharedMemPerBlockOptin, _naot_props->minor);
 if (cfg.mask < 0) return false;
 """
 
@@ -186,7 +207,7 @@ if (cfg.mask < 0) return false;
         mask = sum(
             (1 if value else 0) << i for i, value in enumerate(spec["transposed"])
         )
-        return f"self.scalar_type() == {_DTYPES[spec['dtype']]} && cfg.mask == {mask}"
+        return f"self.scalar_type() == {_DTYPES[spec['dtype']]} && cfg.mask == {mask} && cfg.box == {spec['box']} && cfg.block == {spec['block']} && cfg.stages == {spec['stages']}"
 
     def cpp_launch(self, spec: dict[str, Any], launch_fn: str) -> str:
         views = []
@@ -220,7 +241,7 @@ if (cfg.mask < 0) return false;
 if (_naot_props->major != 10) return false;
 {scalar_gate}
 return pointwise_tma_config({self._inputs()}, out ? &*out : nullptr,
-                            {str(self.boolean).lower()}, _naot_props->sharedMemPerBlockOptin).mask >= 0;
+                            {str(self.boolean).lower()}, _naot_props->sharedMemPerBlockOptin, _naot_props->minor).mask >= 0;
 """
 
 
@@ -233,7 +254,16 @@ _CPP_HELPERS = (
 constexpr int kPointwiseMinAlignment = {_limits._MIN_ALIGNMENT};
 constexpr int kPointwiseTmaAlignment = {_limits._TMA_ALIGNMENT};
 constexpr int kPointwiseBox = {_limits._TMA_BOX_SIDE};
-constexpr int kPointwiseStages = {_limits._TILES_PER_BLOCK};
+constexpr int kPointwiseThreads = {_limits._THREADS_PER_BLOCK};
+constexpr int kPointwiseBf16MinStages = {_limits._TMA_BF16_MIN_STAGES};
+constexpr int64_t kPointwiseLargeInputBytes = {_limits._TMA_LARGE_INPUT_BYTES};
+constexpr int kPointwiseSm107LargeBox = {_limits._TMA_SM107_LARGE_BOX};
+constexpr int kPointwiseLargeBytesPerThread = {_limits._TMA_LARGE_BYTES_PER_THREAD};
+constexpr int kPointwiseSm100Transpose[] = {{{", ".join(map(str, _limits._TMA_SM100_TRANSPOSE))}}};
+constexpr int kPointwiseSm107Transpose[] = {{{", ".join(map(str, _limits._TMA_SM107_TRANSPOSE))}}};
+constexpr int kPointwiseSm100Pointwise[] = {{{", ".join(map(str, _limits._TMA_SM100_POINTWISE))}}};
+constexpr int kPointwiseSm100LargePointwise[] = {{{", ".join(map(str, _limits._TMA_SM100_LARGE_POINTWISE))}}};
+constexpr int kPointwiseSm107Pointwise[] = {{{", ".join(map(str, _limits._TMA_SM107_POINTWISE))}}};
 constexpr int kPointwiseSmemAlignment = {_limits._SMEM_ALIGNMENT};
 constexpr int kPointwiseBarrierBytes = {_limits._BARRIER_BYTES};
 constexpr int kPointwiseMaxGridYZ = {_limits._MAX_GRID_YZ};
@@ -244,13 +274,14 @@ constexpr int kPointwiseMaxGridYZ = {_limits._MAX_GRID_YZ};
 // This post-meta native hook must work without Python or CuTeDSL.
 struct PointwiseTmaConfig {
   int mask = -1;
+  int box = 0, block = kPointwiseThreads, stages = 0;
   int fast = 1;
   int64_t rows = 0, cols = 0;
 };
 
 PointwiseTmaConfig pointwise_tma_config(
     std::initializer_list<at::Tensor> inputs, const at::Tensor* out,
-    bool boolean, size_t smem_limit) {
+    bool boolean, size_t smem_limit, int minor) {
   PointwiseTmaConfig cfg;
   const auto& ref = *inputs.begin();
   if (!ref.is_cuda() || ref.layout() != at::kStrided || ref.dim() != 2 ||
@@ -269,16 +300,14 @@ PointwiseTmaConfig pointwise_tma_config(
   }
   cfg.rows = ref.size(1 - cfg.fast);
   cfg.cols = ref.size(cfg.fast);
-  int box = kPointwiseBox;
-  if (cfg.rows % box != 0 || cfg.cols % box != 0 || cfg.rows / box > kPointwiseMaxGridYZ ||
-      inputs.size() * (kPointwiseStages * box * box * ref.element_size() + kPointwiseSmemAlignment) +
-      kPointwiseStages * kPointwiseBarrierBytes > smem_limit) return cfg;
   int mask = 0, i = 0;
+  bool transpose_only = true;
   for (const auto& t : inputs) {
     if (!t.is_cuda() || t.layout() != at::kStrided || t.device() != ref.device() ||
         t.scalar_type() != dt || t.sizes() != ref.sizes() ||
         t.is_neg() || t.is_conj()) return cfg;
     bool transposed = t.stride(cfg.fast) != 1;
+    transpose_only = transpose_only && transposed;
     int inner = transposed ? 1 - cfg.fast : cfg.fast;
     int64_t pitch = t.stride(1 - inner);
     if (t.stride(inner) != 1 || pitch < t.size(inner) || pitch > INT32_MAX ||
@@ -287,6 +316,26 @@ PointwiseTmaConfig pointwise_tma_config(
         (t.size(0) - 1) * t.stride(0) + (t.size(1) - 1) * t.stride(1) > INT32_MAX) return cfg;
     mask |= (transposed ? 1 : 0) << i++;
   }
+  // Same ordered candidates as _tma_configs, including its 32-element fallback.
+  const int* tuning = minor == 7
+      ? (transpose_only ? kPointwiseSm107Transpose : kPointwiseSm107Pointwise)
+      : (transpose_only ? kPointwiseSm100Transpose : kPointwiseSm100Pointwise);
+  if (minor != 7 && !transpose_only && cfg.rows * cfg.cols * ref.element_size() >= kPointwiseLargeInputBytes)
+    tuning = kPointwiseSm100LargePointwise;
+  cfg.box = tuning[0]; cfg.block = tuning[1]; cfg.stages = tuning[2];
+  if (ref.element_size() == 2) cfg.stages = std::max(cfg.stages, kPointwiseBf16MinStages);
+  if (minor == 7 && transpose_only && cfg.rows * cfg.cols * ref.element_size() >= kPointwiseLargeInputBytes &&
+      cfg.rows % kPointwiseSm107LargeBox == 0 && cfg.cols % kPointwiseSm107LargeBox == 0) {
+    cfg.box = kPointwiseSm107LargeBox;
+    cfg.block = cfg.box * cfg.box * ref.element_size() / kPointwiseLargeBytesPerThread;
+    cfg.stages = 1;
+  } else if (cfg.rows % cfg.box != 0 || cfg.cols % cfg.box != 0) {
+    cfg.box = kPointwiseBox; cfg.block = kPointwiseThreads;
+    if (cfg.rows % cfg.box != 0 || cfg.cols % cfg.box != 0) return cfg;
+  }
+  if (cfg.rows / cfg.box > kPointwiseMaxGridYZ ||
+      inputs.size() * (cfg.stages * cfg.box * cfg.box * ref.element_size() + kPointwiseSmemAlignment) +
+      cfg.stages * kPointwiseBarrierBytes > smem_limit) return cfg;
   cfg.mask = mask;
   return cfg;
 }
