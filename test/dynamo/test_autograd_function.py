@@ -374,29 +374,13 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
 
     @parametrize(
-        "overridden,expected_hint",
+        "overridden,expected_call",
         (
-            (
-                False,
-                "(HINT: PyTorch uses a custom Function's setup_context to decide "
-                "whether Function.apply passes ctx to forward: the inherited "
-                "method means it does; a custom method means it does not. Dynamo "
-                "traced this call with ctx and guards setup_context because "
-                "replacing it would make Function.apply call forward without ctx.)",
-            ),
-            (
-                True,
-                "(HINT: PyTorch uses a custom Function's setup_context to decide "
-                "whether Function.apply passes ctx to forward: the inherited "
-                "method means it does; a custom method means it does not. Dynamo "
-                "traced this call without ctx and, when tracking gradients, "
-                "traced setup_context to prepare ctx for backward. It guards this "
-                "method because replacing it could change how forward is called "
-                "or how ctx is prepared.)",
-            ),
+            (False, "Dynamo traced this call with ctx"),
+            (True, "Dynamo traced this call without ctx"),
         ),
     )
-    def test_apply_guards_setup_context_identity(self, overridden, expected_hint):
+    def test_apply_guards_setup_context_identity(self, overridden, expected_call):
         class Function(torch.autograd.Function):
             @staticmethod
             def forward(ctx_or_x, x=None):
@@ -434,7 +418,13 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                 opt_fn(x)
         self.assertEqual(len(failures), 1)
         self.assertIn("___check_obj_id(Function.setup_context", failures[0])
-        self.assertIn(expected_hint, failures[0])
+        self.assertIn(
+            "(HINT: PyTorch uses a custom Function's setup_context to decide "
+            "whether Function.apply passes ctx to forward: the inherited method "
+            "means it does; a custom method means it does not.",
+            failures[0],
+        )
+        self.assertIn(expected_call, failures[0])
 
     def test_apply_override_not_routed_to_autograd_function(self):
         class Function(torch.autograd.Function):
