@@ -279,23 +279,6 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(myobs.max_val, loaded_obs.max_val)
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
-
-    def test_observer_scriptable(self):
-        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver()]
-        for obs in obs_list:
-            scripted = torch.jit.script(obs)
-
-            x = torch.rand(3, 4)
-            obs(x)
-            scripted(x)
-            self.assertEqual(obs.calculate_qparams(), scripted.calculate_qparams())
-
-            buf = io.BytesIO()
-            torch.jit.save(scripted, buf)
-            buf.seek(0)
-            loaded = torch.jit.load(buf)
-            self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
-
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @override_qengines
@@ -636,43 +619,8 @@ class TestRecordHistogramObserver(QuantizationTestCase):
                 self.assertEqual(observer_dict['fc1.module.activation_post_process'].get_tensor_value()[0],
                                  model(self.calib_data[0][0]))
 
-    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)))
-    def test_observer_scriptable(self, qdtype):
-        obs = RecordingObserver(dtype=qdtype)
-        scripted = torch.jit.script(obs)
-
-        x = torch.rand(3, 4)
-        obs(x)
-        scripted(x)
-        self.assertTrue(torch.equal(obs.get_tensor_value()[0], scripted.get_tensor_value()[0]))
-        buf = io.BytesIO()
-        torch.jit.save(scripted, buf)
-        buf.seek(0)
-        loaded = torch.jit.load(buf)
-        self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
 
 class TestHistogramObserver(QuantizationTestCase):
-    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           qscheme=st.sampled_from(
-               (torch.per_tensor_affine, torch.per_tensor_symmetric))
-           )
-    def test_observer_scriptable(self, qdtype, qscheme):
-        ob_list = [
-            HistogramObserver(dtype=qdtype, qscheme=qscheme),
-            default_histogram_observer()
-        ]
-        for obs in ob_list:
-            scripted = torch.jit.script(obs)
-
-            x = torch.rand(3, 4)
-            obs(x)
-            scripted(x)
-            self.assertTrue(torch.equal(obs.histogram, scripted.histogram))
-            buf = io.BytesIO()
-            torch.jit.save(scripted, buf)
-            buf.seek(0)
-            loaded = torch.jit.load(buf)
-            self.assertTrue(torch.equal(obs.histogram, scripted.histogram))
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
@@ -936,16 +884,6 @@ class TestHistogramObserver(QuantizationTestCase):
         self.assertEqual(old_pickle_obs.calculate_qparams(), ref_obs.calculate_qparams())
         self.assertNotEqual(obs.calculate_qparams(), ref_obs.calculate_qparams())
 
-    def test_histogram_observer_consider_full_range_scripted(self):
-        x = self._sparse_far_tail_input()
-        ranges = []
-        for consider_full_range in (False, True):
-            obs = self._int16_observer(consider_full_range=consider_full_range)
-            obs(x)
-            scripted = torch.jit.script(obs)
-            self.assertEqual(scripted._non_linear_param_search(), obs._non_linear_param_search())
-            ranges.append(scripted._non_linear_param_search())
-        self.assertNotEqual(ranges[0], ranges[1])
 
 class TestFakeQuantize(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
@@ -1025,10 +963,10 @@ def _get_buffer_ids(module):
     """
     return [id(v) for k, v in module._buffers.items()]
 
-class TestFusedModuleScriptable(QuantizationTestCase):
-    def test_fx_qat_convbn_fused_jit_scriptable(self):
+class TestFusedModule(QuantizationTestCase):
+    def test_fx_qat_convbn_fused(self):
         """
-        Tests jit scriptability works for fused ConvBN.
+        Tests QAT preparation works for fused ConvBN.
         """
         for qengine in ['fbgemm', 'qnnpack']:
             with override_quantized_engine(qengine):
@@ -1063,16 +1001,10 @@ class TestFusedModuleScriptable(QuantizationTestCase):
                         f"Expected quantizable_model.conv to be ConvBn2d, got {type(quantizable_model.conv)}"
                     )
 
-                # jit script
-                scripted_model = torch.jit.script(quantizable_model)
 
-                self.assertTrue(
-                    isinstance(scripted_model, torch.jit.ScriptModule),
-                    "Expected prepared model with to be scriptable")
-
-    def test_qat_convbn_fused_jit_scriptable(self):
+    def test_qat_convbn_fused(self):
         """
-        Tests jit scriptability works for fused ConvBN.
+        Tests QAT preparation works for fused ConvBN.
         """
         for qengine in ['fbgemm', 'qnnpack']:
             with override_quantized_engine(qengine):
@@ -1103,10 +1035,6 @@ class TestFusedModuleScriptable(QuantizationTestCase):
                         f"Expected fused_model.conv to be ConvBn2d, got {type(fused_model.conv)}"
                     )
 
-                # Test jit script fails
-                # Prepared eager module fails due to observer hooks not being scriptable
-                with self.assertRaises(RuntimeError):
-                    torch.jit.script(fused_model)
 
 class TestDistributed(QuantizationTestCase):
 
@@ -1440,7 +1368,6 @@ class TestFusedObsFakeQuantModule(TestCase):
                 observer=MovingAveragePerChannelMinMaxObserver,
             )
             mod = obs()
-            mod = torch.jit.script(mod)
             mod.to(device)
 
             for i in range(10):

@@ -133,9 +133,6 @@ class DescriptorVariable(VariableTracker):
         ),
     }
 
-    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        return hash(self.as_python_constant()), False
-
     def call_getattr_fallback(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "VariableTracker | None":
@@ -217,16 +214,8 @@ class WrapperDescriptorVariable(DescriptorVariable):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
-        obj_type = obj.python_type()
-        if not issubclass(obj_type, self.descriptor.__objclass__):
-            # wrapperdescr_call validates its receiver before wrapperdescr_raw_call.
-            raise_type_error(
-                tx,
-                f"descriptor '{self.descriptor.__name__}' requires a "
-                f"'{self.descriptor.__objclass__.__name__}' object "
-                f"but received a '{obj_type.__name__}'",
-            )
-        # Dispatch through the defining type's builtin or user-defined tracker rather
+        _check_descriptor_obj_type(tx, self.descriptor, obj)
+        # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses. Routing through the class
         # mirrors CPython's wrapperdescr_call which invokes the C slot directly.
@@ -248,10 +237,6 @@ class WrapperDescriptorVariable(DescriptorVariable):
             return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen(self.owner)
-        codegen.load_attr(self.descriptor.__name__)
 
 
 class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
@@ -434,23 +419,15 @@ class MethodDescriptorVariable(DescriptorVariable):
         name = self.descriptor.__name__
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         obj = obj.realize()
-        method = obj.lookup_method_descriptor(self.descriptor)
-        if method is not None:
-            result = method(
-                obj,
-                tx,
-                name,
-                rest,
-                kwargs,
-                descriptor=self.descriptor,
-            )
-            if result is not None:
-                return result
-        # `list.__getitem__` must bypass subclass overrides via the slot.
         if isinstance(obj, UserDefinedObjectVariable):
             base_methods = obj._base_methods
             if base_methods is not None and self.descriptor in base_methods:
                 return obj.call_base_method(tx, name, rest, kwargs)
+        method = obj.lookup_tp_method(name)
+        if method is not None:
+            result = method(obj, tx, name, rest, kwargs)
+            if result is not None:
+                return result
         return self.owner.call_method(tx, name, [obj, *rest], kwargs)
 
     def tp_descr_get_impl(
@@ -468,10 +445,6 @@ class MethodDescriptorVariable(DescriptorVariable):
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         # PyCFunction_NewEx creates a fresh object; see ClassMethodDescriptorVariable.
         return BoundBuiltinMethodVariable(self.descriptor, obj)
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen(self.owner)
-        codegen.load_attr(self.descriptor.__name__)
 
 
 @functools.cache
@@ -599,7 +572,7 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
         return f"BoundBuiltinMethodVariable({cls_name}.{self.descriptor.__name__}, {self.obj})"
 
     def python_type(self) -> type:
-        return types.BuiltinMethodType
+        return type(self.value) if self.value is not None else types.BuiltinMethodType
 
     def has_fresh_container_receiver(self) -> bool:
         return (
@@ -740,21 +713,9 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
             # METH_STATIC C functions stored directly in a type dict, e.g.
             # tuple.__new__; the receiver is the class itself.
             return obj.call_method(tx, name, args, kwargs)
-        method = obj.lookup_method_descriptor(descriptor)
-        if method is not None:
-            result = method(
-                obj,
-                tx,
-                name,
-                args,
-                kwargs,
-                descriptor=descriptor,
-            )
-            if result is not None:
-                return result
         if is_torch_class(descriptor.__objclass__):
-            # Keep specialized handlers above this fallback; trace Tensor descriptors
-            # through trace_rules so subclass overrides cannot replace graph operations.
+            # TorchInGraphFunctionVariable records the descriptor itself in the
+            # graph, so a tensor subclass override never runs.
             fn = VariableTracker.build(tx, descriptor)
             return fn.call_function(tx, [obj, *args], kwargs)
         if mro_lookup(obj.python_type(), name) is descriptor:

@@ -1573,7 +1573,7 @@ class GraphLowering(torch.fx.Interpreter):
                         old_args, old_kwargs = normalize(old_args, old_kwargs)
 
                         args, kwargs = constrain_to_fake_tensors(
-                            args, kwargs, fake_args, fake_kwargs
+                            args, kwargs, fake_args, fake_kwargs, fx_node=n
                         )
                 else:
                     args, kwargs = layout_constraints(n, *args, **kwargs)
@@ -2119,6 +2119,7 @@ class GraphLowering(torch.fx.Interpreter):
                             kwargs,
                             inp_args,
                             inp_kwargs,
+                            fx_node=n,
                         )
                     else:
                         args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
