@@ -2456,9 +2456,10 @@ Arguments:
     multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
     master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. To bind an ephemeral port we recommend setting the port to 0 and reading ``.port``. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
     use_libuv (bool, optional): If True, use libuv for ``TCPServer`` backend. Default is True.
-    tls_cert (str, optional): Path to a PEM certificate (chain). Enables TLS with mutual certificate authentication, which requires ``tls_cert``, ``tls_key`` and ``tls_ca`` and must be enabled on both client and server. If none of the three is set, the ``TORCH_TCPSTORE_TLS_CERT``, ``TORCH_TCPSTORE_TLS_KEY`` and ``TORCH_TCPSTORE_TLS_CA`` environment variables are used instead; set them to empty strings to disable TLS regardless of the environment. ``clone()`` reloads the files from the resolved paths, so prefer absolute paths; replacing the files affects later clones. The server requires ``use_libuv=True``; ``USE_LIBUV=0`` (the Windows default) makes a TLS server fail. Reusing a ``multi_tenant`` server with a different TLS configuration raises. Stores created internally, such as by ``init_process_group`` with ``env://`` and by torchrun/the elastic agent, only enable TLS through the environment variables. Linux only; loads OpenSSL >= 1.1.1 (``libssl.so.3``, ``libssl.so.1.1`` or ``libssl.so``) at runtime. Any certificate signed by the CA is accepted; the hostname and subject are not checked, so use a dedicated CA. A certificate may be used for both server and client connections (rank 0 runs both), so it needs both the serverAuth and clientAuth extended key usages, or none; any extended key usage on CA certificates in the chain must also include both. Default is None.
+    tls_cert (str, optional): Path to a PEM certificate (chain). Enables TLS with mutual certificate authentication, which requires ``tls_cert``, ``tls_key`` and ``tls_ca`` and must be enabled on both client and server. If no ``tls_*`` option is set, the ``TORCH_TCPSTORE_TLS_CERT``, ``TORCH_TCPSTORE_TLS_KEY``, ``TORCH_TCPSTORE_TLS_CA`` and ``TORCH_TCPSTORE_TLS_PSK`` environment variables are used instead; set them to empty strings to disable TLS regardless of the environment. ``clone()`` reloads the files from the resolved paths, so prefer absolute paths; replacing the files affects later clones. The server requires ``use_libuv=True``; ``USE_LIBUV=0`` (the Windows default) makes a TLS server fail. Reusing a ``multi_tenant`` server with a different TLS configuration raises. Stores created internally, such as by ``init_process_group`` with ``env://`` and by torchrun/the elastic agent, only enable TLS through the environment variables. Linux only; loads OpenSSL >= 1.1.1 (``libssl.so.3``, ``libssl.so.1.1`` or ``libssl.so``) at runtime. Any certificate signed by the CA is accepted; the hostname and subject are not checked, so use a dedicated CA. A certificate may be used for both server and client connections (rank 0 runs both), so it needs both the serverAuth and clientAuth extended key usages, or none; any extended key usage on CA certificates in the chain must also include both. Default is None.
     tls_key (str, optional): Path to the unencrypted PEM private key, which may be the same file as ``tls_cert``. Default is None.
     tls_ca (str, optional): Path to the PEM CA bundle used to verify the peer certificate. Default is None.
+    tls_psk (str, optional): Path to a regular file whose raw bytes, 32 to 256 including any trailing newline, are a pre-shared key. Enables TLS 1.3 with pre-shared key authentication instead of certificates; it cannot be combined with ``tls_cert``, ``tls_key`` or ``tls_ca``. Client and server must use the same key. The key must be random, with at least 128 bits of entropy, not a passphrase: a captured handshake allows offline guessing. A key shared with NCCL must not contain NUL bytes; ``(umask 077; openssl rand -hex 32 > key)`` satisfies both. The environment variable is ``TORCH_TCPSTORE_TLS_PSK``; the other notes for ``tls_cert`` apply except those about certificates. Any holder of the key can act as a server or client, so it can impersonate either side or intercept traffic, and gets full read/write access to every key. Keep the file private (a warning is logged if group or others can access it); distributing it is up to the user. Default is None.
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
@@ -2482,7 +2483,8 @@ Example::
                       bool useLibUV,
                       std::optional<std::string> tlsCert,
                       std::optional<std::string> tlsKey,
-                      std::optional<std::string> tlsCa) {
+                      std::optional<std::string> tlsCa,
+                      std::optional<std::string> tlsPsk) {
             // gil_scoped_release is not safe as a call_guard in init.
             // https://github.com/pybind/pybind11/issues/5473
             py::gil_scoped_release nogil{};
@@ -2505,7 +2507,8 @@ Example::
                 .useLibUV = useLibUV,
                 .tlsCert = std::move(tlsCert),
                 .tlsKey = std::move(tlsKey),
-                .tlsCa = std::move(tlsCa)};
+                .tlsCa = std::move(tlsCa),
+                .tlsPsk = std::move(tlsPsk)};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -2525,6 +2528,7 @@ Example::
           py::arg("tls_cert") = py::none(),
           py::arg("tls_key") = py::none(),
           py::arg("tls_ca") = py::none(),
+          py::arg("tls_psk") = py::none(),
           R"(Creates a new TCPStore.)")
       .def_property_readonly(
           "host",

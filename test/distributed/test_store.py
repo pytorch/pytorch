@@ -4,6 +4,7 @@ import ctypes
 import datetime
 import hashlib
 import os
+import re
 import shutil
 import socket
 import ssl
@@ -45,6 +46,7 @@ from torch.testing._internal.common_utils import (
     CONNECT_TIMEOUT,
     HardwareClassification,
     load_tests,
+    parametrize,
     retry_on_connect_failures,
     run_tests,
     TestCase,
@@ -817,13 +819,23 @@ class TCPStoreTLSTest(TestCase):
             "pkey", "-in", cls.client[1], "-aes256", "-passout", "pass:secret",
             "-out", cls.encrypted_key,
         )  # fmt: skip
+        cls.psk = cls._write_psk("psk", 32)
+        cls.other_psk = cls._write_psk("other_psk", 64)
+        cls.short_psk = cls._write_psk("short_psk", 31)
+
+    @classmethod
+    def _write_psk(cls, name, size):
+        path = os.path.join(cls._tmpdir.name, name)
+        with open(os.open(path, os.O_WRONLY | os.O_CREAT, 0o600), "wb") as f:
+            f.write(os.urandom(size))
+        return path
 
     def setUp(self):
         super().setUp()
         patcher = mock.patch.dict(os.environ)
         patcher.start()
         self.addCleanup(patcher.stop)
-        for name in ("CERT", "KEY", "CA"):
+        for name in ("CERT", "KEY", "CA", "PSK"):
             os.environ.pop(f"TORCH_TCPSTORE_TLS_{name}", None)
 
     def _env(self, cert, ca=None):
@@ -832,6 +844,11 @@ class TCPStoreTLSTest(TestCase):
             "TORCH_TCPSTORE_TLS_KEY": cert[1],
             "TORCH_TCPSTORE_TLS_CA": ca or self.ca,
         }
+
+    def _tls(self, mode, cert):
+        if mode == "psk":
+            return {"tls_psk": self.psk}
+        return {"tls_cert": cert[0], "tls_key": cert[1], "tls_ca": self.ca}
 
     def _store(
         self,
@@ -901,8 +918,14 @@ class TCPStoreTLSTest(TestCase):
         self.assertEqual(server.queue_len("q"), 1)
         self.assertEqual(clone.queue_pop("q"), b"x")
 
-    def test_tls_env(self):
-        with mock.patch.dict(os.environ, self._env((self.combined, self.combined))):
+    @parametrize("mode", ["cert", "psk"])
+    def test_tls_env(self, mode):
+        env = (
+            {"TORCH_TCPSTORE_TLS_PSK": self.psk}
+            if mode == "psk"
+            else self._env((self.combined, self.combined))
+        )
+        with mock.patch.dict(os.environ, env):
             server = self._store()
             client = self._store(server.port, False)
             client.set("key", "value")
@@ -914,9 +937,13 @@ class TCPStoreTLSTest(TestCase):
             "Server requires TLS", port=server.port, is_master=False
         )
 
-    def test_tls_options_override_env(self):
+    @parametrize("mode", ["cert", "psk"])
+    def test_tls_options_override_env(self, mode):
+        env = self._env(self.server)
         no_tls = {"tls_cert": "", "tls_key": "", "tls_ca": ""}
-        with mock.patch.dict(os.environ, self._env(self.server)):
+        if mode == "psk":
+            env, no_tls = {"TORCH_TCPSTORE_TLS_PSK": self.psk}, {"tls_psk": ""}
+        with mock.patch.dict(os.environ, env):
             # Empty strings disable TLS on both ends.
             server = self._store(tls=no_tls)
             client = self._store(server.port, False, tls=no_tls)
@@ -927,6 +954,8 @@ class TCPStoreTLSTest(TestCase):
             self._assert_fails_fast(
                 "Server requires TLS", port=tls_server.port, is_master=False, tls=no_tls
             )
+            if mode == "psk":
+                return
             # Options are not merged with the env vars.
             with self.assertRaisesRegex(DistStoreError, "missing tls_key, tls_ca"):
                 self._store(tls={"tls_cert": self.server[0]})
@@ -1054,19 +1083,146 @@ class TCPStoreTLSTest(TestCase):
         )
         self.assertEqual(server.add("alive", 1), 1)
 
-    def test_tls_server_plaintext_client(self):
-        server = self._store(cert=self.server)
+    @parametrize("mode", ["cert", "psk"])
+    def test_tls_server_plaintext_client(self, mode):
+        server = self._store(tls=self._tls(mode, self.server))
         self._assert_fails_fast(
             "Server requires TLS", port=server.port, is_master=False
         )
         self.assertEqual(server.add("alive", 1), 1)
 
-    def test_plaintext_server_tls_client(self):
+    @parametrize("mode", ["cert", "psk"])
+    def test_plaintext_server_tls_client(self, mode):
         server = self._store()
         self._assert_fails_fast(
-            "protocol version", port=server.port, is_master=False, cert=self.client
+            "protocol version",
+            port=server.port,
+            is_master=False,
+            tls=self._tls(mode, self.client),
         )
         self.assertEqual(server.add("alive", 1), 1)
+
+    def test_tls_psk_ops(self):
+        psk = {"tls_psk": self.psk}
+        server = self._store(tls=psk, multi_tenant=True)
+        client = self._store(server.port, False, tls=psk)
+        client.set("key", "value")
+        self.assertEqual(server.get("key"), b"value")
+        self.assertEqual(client.add("counter", 2), 2)
+        with self.assertRaisesRegex(DistStoreError, "wait timeout"):
+            client.wait(["waited"], timedelta(milliseconds=10))
+        self.assertEqual(client.clone().get("key"), b"value")
+        same = self._store(server.port, tls=psk, multi_tenant=True)
+        self.assertEqual(same.add("counter", 1), 3)
+        with self.assertRaisesRegex(DistStoreError, "different TLS configuration"):
+            self._store(server.port, tls={"tls_psk": self.other_psk}, multi_tenant=True)
+
+    def test_tls_psk_wrong_key(self):
+        server = self._store(tls={"tls_psk": self.psk})
+        # OpenSSL 3.x sends decrypt error, 1.1.1 sends illegal parameter.
+        self._assert_fails_fast(
+            "alert (decrypt error|illegal parameter)",
+            port=server.port,
+            is_master=False,
+            tls={"tls_psk": self.other_psk},
+        )
+        self.assertEqual(server.add("alive", 1), 1)
+
+    @unittest.skipIf(
+        not getattr(ssl, "HAS_PSK", False)
+        or not hasattr(ssl.SSLContext, "set_psk_client_callback"),
+        "needs Python 3.13 with PSK support",
+    )
+    def test_tls_psk_unknown_identity(self):
+        server = self._store(tls={"tls_psk": self.psk})
+        with open(self.psk, "rb") as f:
+            key = f.read()
+
+        def handshake(identity):
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+            ctx.set_psk_client_callback(lambda hint: (identity, key))
+            with socket.create_connection(("localhost", server.port), timeout=10) as s:
+                with ctx.wrap_socket(s) as conn:
+                    return conn.version()
+
+        self.assertEqual(handshake("torch.distributed.TCPStore.psk.v1"), "TLSv1.3")
+        with self.assertRaisesRegex(ssl.SSLError, "alert handshake failure"):
+            handshake("torch.distributed.TCPStore.psk.v0")
+        self.assertEqual(server.add("alive", 1), 1)
+
+    def test_tls_psk_cert_mismatch(self):
+        psk = {"tls_psk": self.psk}
+        server = self._store(tls=psk)
+        self._assert_fails_fast(
+            "alert handshake failure.*same TLS mode",
+            port=server.port,
+            is_master=False,
+            cert=self.client,
+        )
+        self.assertEqual(server.add("alive", 1), 1)
+        server = self._store(cert=self.server)
+        self._assert_fails_fast(
+            "certificate verify failed.*same TLS mode",
+            port=server.port,
+            is_master=False,
+            tls=psk,
+        )
+        self.assertEqual(server.add("alive", 1), 1)
+
+    def test_tls_psk_bad_key(self):
+        def check(regex, path):
+            with self.assertRaisesRegex(DistStoreError, regex):
+                self._store(tls={"tls_psk": path})
+
+        check("short_psk has 31 bytes; at least 32", self.short_psk)
+        check(
+            "has more than 256 bytes, the maximum supported",
+            self._write_psk("long_psk", 257),
+        )
+        missing = os.path.join(self._tmpdir.name, "missing_psk")
+        check(f"failed to open PSK file {re.escape(missing)}", missing)
+        check("PSK file .* is not a regular file", self._tmpdir.name)
+        check("PSK file /dev/zero is not a regular file", "/dev/zero")
+        r, w = os.pipe()
+        self.addCleanup(os.close, r)
+        self.addCleanup(os.close, w)
+        check(f"PSK file /dev/fd/{r} is not a regular file", f"/dev/fd/{r}")
+        fifo_dir = tempfile.mkdtemp(dir=self._tmpdir.name)
+        fifo = os.path.join(fifo_dir, "fifo")
+        os.mkfifo(fifo)
+        check(f"{re.escape(fifo)} is not a regular file", fifo)
+
+    def test_tls_psk_key_sizes(self):
+        # The largest key, read through /dev/fd/N on both ends and in clones.
+        path = self._write_psk("max_psk", 256)
+        fd = os.open(path, os.O_RDONLY)
+        self.addCleanup(os.close, fd)
+        psk = {"tls_psk": f"/dev/fd/{fd}"}
+        server = self._store(tls=psk)
+        client = self._store(server.port, False, tls=psk)
+        self.assertEqual(client.add("counter", 1), 1)
+        self.assertEqual(client.clone().add("counter", 1), 2)
+
+    def test_tls_psk_config(self):
+        with self.assertRaisesRegex(DistStoreError, "tls_psk cannot be combined"):
+            self._store(tls={"tls_psk": self.psk, "tls_ca": self.ca})
+        env = self._env(self.server)
+        env["TORCH_TCPSTORE_TLS_PSK"] = self.psk
+        with mock.patch.dict(os.environ, env):
+            with self.assertRaisesRegex(
+                DistStoreError, "TORCH_TCPSTORE_TLS_PSK cannot be combined"
+            ):
+                self._store()
+            # Options are not merged with the env vars.
+            server = self._store(tls={"tls_psk": self.psk})
+            client = self._store(server.port, False, tls={"tls_psk": self.psk})
+            self.assertEqual(client.add("counter", 1), 1)
+
+
+instantiate_parametrized_tests(TCPStoreTLSTest)
 
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):

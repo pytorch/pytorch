@@ -69,14 +69,17 @@ struct TCPStoreOptions {
   bool useLibUV = true;
 
   // TLS with mutual certificate authentication: PEM certificate (chain),
-  // private key and CA bundle. If none is set, TORCH_TCPSTORE_TLS_CERT,
-  // TORCH_TCPSTORE_TLS_KEY and TORCH_TCPSTORE_TLS_CA are used instead. TLS is
-  // enabled if any value is non-empty, and then all three are required. Set
-  // them to empty strings to disable TLS regardless of the environment. The
-  // server requires useLibUV.
+  // private key and CA bundle, all three required. Alternatively, TLS 1.3 with
+  // a pre-shared key: a regular file of 32 to 256 random bytes, which cannot
+  // be combined with the certificate options. If no tls* option is set, the
+  // matching TORCH_TCPSTORE_TLS_{CERT,KEY,CA,PSK} environment variables are
+  // used instead. TLS is enabled if any value is non-empty; set them to empty
+  // strings to disable TLS regardless of the environment. The server requires
+  // useLibUV.
   std::optional<std::string> tlsCert = std::nullopt;
   std::optional<std::string> tlsKey = std::nullopt;
   std::optional<std::string> tlsCa = std::nullopt;
+  std::optional<std::string> tlsPsk = std::nullopt;
 };
 
 class TORCH_API TCPStore : public Store {
@@ -184,6 +187,7 @@ class TORCH_API TCPStore : public Store {
   std::string tlsCert_;
   std::string tlsKey_;
   std::string tlsCa_;
+  std::string tlsPsk_;
 };
 
 } // namespace c10d

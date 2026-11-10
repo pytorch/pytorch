@@ -363,6 +363,7 @@ class TCPStore(Store):
         tls_cert: str | None = ...,
         tls_key: str | None = ...,
         tls_ca: str | None = ...,
+        tls_psk: str | None = ...,
     ) -> None: ...
     @property
     def host(self) -> str: ...

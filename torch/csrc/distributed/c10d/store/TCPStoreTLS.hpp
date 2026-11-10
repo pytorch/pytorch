@@ -10,9 +10,9 @@
 
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 
-// TLS with mutual certificate authentication for the TCPStore client and the
-// libuv server. OpenSSL (libssl.so) is loaded at runtime only when TLS is
-// enabled, so there is no build-time dependency.
+// TLS with mutual certificate or pre-shared key authentication for the
+// TCPStore client and the libuv server. OpenSSL (libssl.so) is loaded at
+// runtime only when TLS is enabled, so there is no build-time dependency.
 
 namespace c10d::detail {
 
@@ -32,20 +32,23 @@ struct TLSConfig {
   std::string cert;
   std::string key;
   std::string ca;
+  std::string psk;
   bool fromEnv = false;
 
   bool enabled() const {
-    return !cert.empty() || !key.empty() || !ca.empty();
+    return !cert.empty() || !key.empty() || !ca.empty() || !psk.empty();
   }
 
   bool sameFiles(const TLSConfig& other) const {
-    return cert == other.cert && key == other.key && ca == other.ca;
+    return cert == other.cert && key == other.key && ca == other.ca &&
+        psk == other.psk;
   }
 };
 
 // The TLS options if any is set, otherwise the TORCH_TCPSTORE_TLS_CERT,
-// TORCH_TCPSTORE_TLS_KEY and TORCH_TCPSTORE_TLS_CA environment variables.
-// Throws if TLS is enabled but a value is missing.
+// TORCH_TCPSTORE_TLS_KEY, TORCH_TCPSTORE_TLS_CA and TORCH_TCPSTORE_TLS_PSK
+// environment variables. Throws if certificate mode is missing a value or is
+// combined with a PSK.
 TLSConfig tlsConfig(const TCPStoreOptions& opts);
 
 class TLSContext {
@@ -68,9 +71,15 @@ class TLSContext {
     return isServer_;
   }
 
+  // The pre-shared key, empty in certificate mode.
+  const std::string& psk() const {
+    return psk_;
+  }
+
  private:
   void* ctx_;
   bool isServer_;
+  std::string psk_;
 };
 
 // A TLS connection over memory buffers. Ciphertext received from the peer is

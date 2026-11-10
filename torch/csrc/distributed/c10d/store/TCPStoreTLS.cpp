@@ -1,12 +1,17 @@
 #include <torch/csrc/distributed/c10d/store/TCPStoreTLS.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cerrno>
 #include <climits>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <ATen/DynamicLibrary.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/error.h>
 #include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
@@ -15,6 +20,12 @@
 #include <torch/csrc/distributed/c10d/WinSockUtils.hpp>
 #else
 #include <torch/csrc/distributed/c10d/UnixSockUtils.hpp>
+#endif
+
+#ifdef __linux__
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 namespace c10d::detail {
@@ -32,40 +43,62 @@ constexpr size_t kRecordSize = 16 * 1024;
 constexpr size_t kRecordOverhead = 64;
 
 using PasswordCallback = int (*)(char*, int, int, void*);
+using VerifyCallback = int (*)(int, void*);
+using PskUseSessionCallback =
+    int (*)(void*, const void*, const unsigned char**, size_t*, void**);
+using PskFindSessionCallback =
+    int (*)(void*, const unsigned char*, size_t, void**);
 
-#define TCPSTORE_OPENSSL_FUNCTIONS(_)                                      \
-  _(const void*, TLS_method, ())                                           \
-  _(void*, SSL_CTX_new, (const void*))                                     \
-  _(void, SSL_CTX_free, (void*))                                           \
-  _(long, SSL_CTX_ctrl, (void*, int, long, void*))                         \
-  _(int, SSL_CTX_use_certificate_chain_file, (void*, const char*))         \
-  _(int, SSL_CTX_use_PrivateKey_file, (void*, const char*, int))           \
-  _(int, SSL_CTX_check_private_key, (const void*))                         \
-  _(void, SSL_CTX_set_default_passwd_cb, (void*, PasswordCallback))        \
-  _(void, SSL_CTX_set_default_passwd_cb_userdata, (void*, void*))          \
-  _(int, SSL_CTX_load_verify_locations, (void*, const char*, const char*)) \
-  _(void, SSL_CTX_set_verify, (void*, int, void*))                         \
-  _(int, SSL_CTX_set_num_tickets, (void*, size_t))                         \
-  _(uint64_t, SSL_CTX_set_options, (void*, uint64_t))                      \
-  _(void*, SSL_new, (void*))                                               \
-  _(void, SSL_free, (void*))                                               \
-  _(void, SSL_set_bio, (void*, void*, void*))                              \
-  _(void, SSL_set_connect_state, (void*))                                  \
-  _(void, SSL_set_accept_state, (void*))                                   \
-  _(int, SSL_do_handshake, (void*))                                        \
-  _(int, SSL_read, (void*, void*, int))                                    \
-  _(int, SSL_peek, (void*, void*, int))                                    \
-  _(int, SSL_write, (void*, const void*, int))                             \
-  _(int, SSL_get_error, (const void*, int))                                \
-  _(long, SSL_get_verify_result, (const void*))                            \
-  _(const void*, BIO_s_mem, ())                                            \
-  _(void*, BIO_new, (const void*))                                         \
-  _(int, BIO_read, (void*, void*, int))                                    \
-  _(int, BIO_write, (void*, const void*, int))                             \
-  _(size_t, BIO_ctrl_pending, (void*))                                     \
-  _(unsigned long, ERR_get_error, ())                                      \
-  _(void, ERR_error_string_n, (unsigned long, char*, size_t))              \
-  _(void, ERR_clear_error, ())                                             \
+#define TCPSTORE_OPENSSL_FUNCTIONS(_)                                        \
+  _(const void*, TLS_method, ())                                             \
+  _(void*, SSL_CTX_new, (const void*))                                       \
+  _(void, SSL_CTX_free, (void*))                                             \
+  _(long, SSL_CTX_ctrl, (void*, int, long, void*))                           \
+  _(int, SSL_CTX_use_certificate_chain_file, (void*, const char*))           \
+  _(int, SSL_CTX_use_PrivateKey_file, (void*, const char*, int))             \
+  _(int, SSL_CTX_check_private_key, (const void*))                           \
+  _(void, SSL_CTX_set_default_passwd_cb, (void*, PasswordCallback))          \
+  _(void, SSL_CTX_set_default_passwd_cb_userdata, (void*, void*))            \
+  _(int, SSL_CTX_load_verify_locations, (void*, const char*, const char*))   \
+  _(void, SSL_CTX_set_verify, (void*, int, VerifyCallback))                  \
+  _(int, SSL_CTX_set_num_tickets, (void*, size_t))                           \
+  _(uint64_t, SSL_CTX_set_options, (void*, uint64_t))                        \
+  _(uint64_t, SSL_CTX_clear_options, (void*, uint64_t))                      \
+  _(int, SSL_CTX_set_ciphersuites, (void*, const char*))                     \
+  _(void,                                                                    \
+    SSL_CTX_set_psk_use_session_callback,                                    \
+    (void*, PskUseSessionCallback))                                          \
+  _(void,                                                                    \
+    SSL_CTX_set_psk_find_session_callback,                                   \
+    (void*, PskFindSessionCallback))                                         \
+  _(int, SSL_CTX_set_ex_data, (void*, int, void*))                           \
+  _(void*, SSL_CTX_get_ex_data, (const void*, int))                          \
+  _(void*, SSL_get_SSL_CTX, (const void*))                                   \
+  _(const void*, SSL_CIPHER_find, (void*, const unsigned char*))             \
+  _(void*, SSL_SESSION_new, ())                                              \
+  _(void, SSL_SESSION_free, (void*))                                         \
+  _(int, SSL_SESSION_set1_master_key, (void*, const unsigned char*, size_t)) \
+  _(int, SSL_SESSION_set_cipher, (void*, const void*))                       \
+  _(int, SSL_SESSION_set_protocol_version, (void*, int))                     \
+  _(void*, SSL_new, (void*))                                                 \
+  _(void, SSL_free, (void*))                                                 \
+  _(void, SSL_set_bio, (void*, void*, void*))                                \
+  _(void, SSL_set_connect_state, (void*))                                    \
+  _(void, SSL_set_accept_state, (void*))                                     \
+  _(int, SSL_do_handshake, (void*))                                          \
+  _(int, SSL_read, (void*, void*, int))                                      \
+  _(int, SSL_peek, (void*, void*, int))                                      \
+  _(int, SSL_write, (void*, const void*, int))                               \
+  _(int, SSL_get_error, (const void*, int))                                  \
+  _(long, SSL_get_verify_result, (const void*))                              \
+  _(const void*, BIO_s_mem, ())                                              \
+  _(void*, BIO_new, (const void*))                                           \
+  _(int, BIO_read, (void*, void*, int))                                      \
+  _(int, BIO_write, (void*, const void*, int))                               \
+  _(size_t, BIO_ctrl_pending, (void*))                                       \
+  _(unsigned long, ERR_get_error, ())                                        \
+  _(void, ERR_error_string_n, (unsigned long, char*, size_t))                \
+  _(void, ERR_clear_error, ())                                               \
   _(const char*, X509_verify_cert_error_string, (long))
 
 struct OpenSSL {
@@ -131,23 +164,176 @@ int chunk(size_t length) {
   return -1;
 }
 
+#ifdef __linux__
+constexpr int kTls12Version = 0x0303;
+constexpr int kTls13Version = 0x0304;
+// NCCL requires at least 32 bytes and reads the key as a C string, so a key
+// shared with it must not contain NUL bytes. OpenSSL 1.1.1 accepts at most 256
+// (3.x allows 512).
+constexpr size_t kMinPskSize = 32;
+constexpr size_t kMaxPskSize = 256;
+// Change the version suffix if the PSK handshake ever becomes incompatible.
+constexpr std::string_view kPskIdentity = "torch.distributed.TCPStore.psk.v1";
+constexpr std::array<unsigned char, 2> kTlsAes128GcmSha256 = {0x13, 0x01};
+
+std::string readPsk(const std::string& path, bool checkMode) {
+  // O_NONBLOCK so a FIFO cannot block open().
+  int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+  TORCH_CHECK_WITH(
+      DistStoreError,
+      fd >= 0,
+      "TCPStore TLS: failed to open PSK file ",
+      path,
+      ": ",
+      c10::utils::str_error(errno));
+  auto closeFd = c10::make_scope_exit([fd] { ::close(fd); });
+  struct stat st{};
+  TORCH_CHECK_WITH(
+      DistStoreError,
+      ::fstat(fd, &st) == 0,
+      "TCPStore TLS: failed to stat PSK file ",
+      path,
+      ": ",
+      c10::utils::str_error(errno));
+  TORCH_CHECK_WITH(
+      DistStoreError,
+      S_ISREG(st.st_mode),
+      "TCPStore TLS: PSK file ",
+      path,
+      " is not a regular file");
+  if (checkMode && (st.st_mode & (S_IRWXG | S_IRWXO))) {
+    C10D_WARNING(
+        "TCPStore TLS: PSK file {} is accessible by group or others; run chmod 600 on it",
+        path);
+  }
+  std::string key(kMaxPskSize + 1, '\0');
+  size_t size = 0;
+  while (size < key.size()) {
+    auto n = ::read(fd, key.data() + size, key.size() - size);
+    if (n < 0 && errno == EINTR) {
+      continue;
+    }
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        n >= 0,
+        "TCPStore TLS: failed to read PSK file ",
+        path,
+        ": ",
+        c10::utils::str_error(errno));
+    if (n == 0) {
+      break;
+    }
+    size += n;
+  }
+  key.resize(size);
+  TORCH_CHECK_WITH(
+      DistStoreError,
+      size <= kMaxPskSize,
+      "TCPStore TLS: PSK file ",
+      path,
+      " has more than ",
+      kMaxPskSize,
+      " bytes, the maximum supported (the OpenSSL 1.1.1 limit)");
+  TORCH_CHECK_WITH(
+      DistStoreError,
+      size >= kMinPskSize,
+      "TCPStore TLS: PSK file ",
+      path,
+      " has ",
+      size,
+      " bytes; at least ",
+      kMinPskSize,
+      " are required");
+  return key;
+}
+
+int rejectCertificate(int /*preverifyOk*/, void* /*storeCtx*/) {
+  return 0;
+}
+
+// A new external PSK session for a handshake; OpenSSL takes ownership.
+void* newPskSession(void* ssl) {
+  const auto& lib = openssl();
+  const auto* ctx = static_cast<const TLSContext*>(
+      lib.SSL_CTX_get_ex_data(lib.SSL_get_SSL_CTX(ssl), 0));
+  const auto& key = ctx->psk();
+  const void* cipher = lib.SSL_CIPHER_find(ssl, kTlsAes128GcmSha256.data());
+  void* session = lib.SSL_SESSION_new();
+  if (cipher != nullptr && session != nullptr &&
+      lib.SSL_SESSION_set1_master_key(
+          session,
+          reinterpret_cast<const unsigned char*>(key.data()),
+          key.size()) == 1 &&
+      lib.SSL_SESSION_set_cipher(session, cipher) == 1 &&
+      lib.SSL_SESSION_set_protocol_version(session, kTls13Version) == 1) {
+    return session;
+  }
+  lib.SSL_SESSION_free(session);
+  return nullptr;
+}
+
+int usePskSession(
+    void* ssl,
+    const void* /*md*/,
+    const unsigned char** id,
+    size_t* idLength,
+    void** session) {
+  *session = newPskSession(ssl);
+  if (*session == nullptr) {
+    return 0;
+  }
+  *id = reinterpret_cast<const unsigned char*>(kPskIdentity.data());
+  *idLength = kPskIdentity.size();
+  return 1;
+}
+
+// An unknown identity leaves session null, failing the handshake.
+int findPskSession(
+    void* ssl,
+    const unsigned char* id,
+    size_t idLength,
+    void** session) {
+  *session = nullptr;
+  if (std::string_view(reinterpret_cast<const char*>(id), idLength) !=
+      kPskIdentity) {
+    return 1;
+  }
+  *session = newPskSession(ssl);
+  return *session != nullptr ? 1 : 0;
+}
+#endif
+
 } // namespace
 
 TLSConfig tlsConfig(const TCPStoreOptions& opts) {
   TLSConfig config;
-  if (opts.tlsCert || opts.tlsKey || opts.tlsCa) {
+  if (opts.tlsCert || opts.tlsKey || opts.tlsCa || opts.tlsPsk) {
     config = {
         opts.tlsCert.value_or(""),
         opts.tlsKey.value_or(""),
-        opts.tlsCa.value_or("")};
+        opts.tlsCa.value_or(""),
+        opts.tlsPsk.value_or("")};
   } else {
     config = {
         getCvarString({"TORCH_TCPSTORE_TLS_CERT"}, ""),
         getCvarString({"TORCH_TCPSTORE_TLS_KEY"}, ""),
         getCvarString({"TORCH_TCPSTORE_TLS_CA"}, ""),
+        getCvarString({"TORCH_TCPSTORE_TLS_PSK"}, ""),
         /*fromEnv=*/true};
   }
   if (!config.enabled()) {
+    return config;
+  }
+  if (!config.psk.empty()) {
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        config.cert.empty() && config.key.empty() && config.ca.empty(),
+        config.fromEnv
+            ? "TCPStore TLS: TORCH_TCPSTORE_TLS_PSK cannot be combined with "
+              "TORCH_TCPSTORE_TLS_CERT, TORCH_TCPSTORE_TLS_KEY or "
+              "TORCH_TCPSTORE_TLS_CA"
+            : "TCPStore TLS: tls_psk cannot be combined with tls_cert, "
+              "tls_key or tls_ca");
     return config;
   }
   std::vector<std::string> missing;
@@ -181,11 +367,13 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
       DistStoreError, "TCPStore TLS is not supported on this platform");
 #else
   constexpr int kSslCtrlSetMinProtoVersion = 123;
-  constexpr long kTls12Version = 0x0303;
+  constexpr int kSslCtrlSetMaxProtoVersion = 124;
   constexpr int kSslFiletypePem = 1;
   constexpr int kSslVerifyPeer = 0x01;
   constexpr int kSslVerifyFailIfNoPeerCert = 0x02;
   constexpr uint64_t kSslOpNoRenegotiation = 1U << 30;
+  constexpr uint64_t kSslOpAllowNoDheKex = 1U << 10;
+  constexpr uint64_t kSslOpPreferNoDheKex = 1ULL << 35;
   const auto& cert = config.cert;
   const auto& key = config.key;
   const auto& ca = config.ca;
@@ -207,6 +395,42 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
         ": ",
         errorString());
   };
+  if (isServer) {
+    // Session tickets are unused and would make a client socket readable
+    // without a response.
+    ssl.SSL_CTX_set_num_tickets(ctx, 0);
+  }
+  ssl.SSL_CTX_set_options(ctx, kSslOpNoRenegotiation);
+  if (!config.psk.empty()) {
+    // The server runs in the same process as a client, which checks the mode.
+    res->psk_ = readPsk(config.psk, /*checkMode=*/!isServer);
+    // External PSKs require TLS 1.3. The cipher suite must match the PSK
+    // session's hash. The key exchange still uses (EC)DHE.
+    check(
+        ssl.SSL_CTX_ctrl(
+            ctx, kSslCtrlSetMinProtoVersion, kTls13Version, nullptr) == 1 &&
+            ssl.SSL_CTX_ctrl(
+                ctx, kSslCtrlSetMaxProtoVersion, kTls13Version, nullptr) == 1,
+        "TLS version",
+        "1.3");
+    check(
+        ssl.SSL_CTX_set_ciphersuites(ctx, "TLS_AES_128_GCM_SHA256") == 1,
+        "cipher suite",
+        "TLS_AES_128_GCM_SHA256");
+    // Keep (EC)DHE, and so forward secrecy, even if openssl.cnf allows
+    // PSK-only key exchange.
+    ssl.SSL_CTX_clear_options(ctx, kSslOpAllowNoDheKex | kSslOpPreferNoDheKex);
+    check(ssl.SSL_CTX_set_ex_data(ctx, 0, res.get()) == 1, "PSK", config.psk);
+    if (isServer) {
+      // Without a certificate, only PSK handshakes can succeed.
+      ssl.SSL_CTX_set_psk_find_session_callback(ctx, findPskSession);
+    } else {
+      ssl.SSL_CTX_set_psk_use_session_callback(ctx, usePskSession);
+      // A server certificate means the server did not accept the PSK.
+      ssl.SSL_CTX_set_verify(ctx, kSslVerifyPeer, rejectCertificate);
+    }
+    return res;
+  }
   check(
       ssl.SSL_CTX_ctrl(
           ctx, kSslCtrlSetMinProtoVersion, kTls12Version, nullptr) == 1,
@@ -237,12 +461,6 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
       ca);
   ssl.SSL_CTX_set_verify(
       ctx, kSslVerifyPeer | kSslVerifyFailIfNoPeerCert, nullptr);
-  ssl.SSL_CTX_set_options(ctx, kSslOpNoRenegotiation);
-  if (isServer) {
-    // Session tickets are unused and would make a client socket readable
-    // without a response.
-    ssl.SSL_CTX_set_num_tickets(ctx, 0);
-  }
   return res;
 #endif
 }
@@ -283,14 +501,17 @@ void TLSSession::throwError(int ret, const char* op) {
   }
   auto msg = fmt::format("TCPStore TLS {} failed: {}", op, errorString());
   auto verify = ssl.SSL_get_verify_result(ssl_);
-  if (verify != kX509VOk) {
+  if (verify != kX509VOk && ctx_->psk().empty()) {
     msg += fmt::format(
         " (certificate verify: {})", ssl.X509_verify_cert_error_string(verify));
   }
-  msg +=
-      ". Check that TLS is enabled on both client and server, that each "
-      "certificate is signed by a CA trusted by the peer, and that its "
-      "purpose (extended key usage) allows both serverAuth and clientAuth.";
+  msg += ctx_->psk().empty()
+      ? ". Check that TLS is enabled on both client and server, that each "
+        "certificate is signed by a CA trusted by the peer, that its purpose "
+        "(extended key usage) allows both serverAuth and clientAuth, and that "
+        "both use the same TLS mode (certificate or PSK)."
+      : ". Check that the client and server both use TLS, the same TLS mode "
+        "(certificate or PSK) and the same PSK.";
   C10_THROW_ERROR(DistStoreError, msg);
 }
 
