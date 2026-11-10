@@ -525,18 +525,20 @@ def select_general_config(
         and acc_bits == 32
         and alignment >= 16
     )
-    # Against the default config on B200 (fp16/bf16/fp32, 8 to 256K outputs), the c256
-    # inner tree ran 1.03-6.2x at every output count. The wider rules ran 0.76-0.95x
-    # below 2048 outputs, which keep the default config (a two-stage split below
-    # sm_count * 4 outputs), and 1.0-3.1x from 2048 with no upper bound (fp32 sum at
-    # count 1024: 1.0x). Amax and amin skip the wide one-field rule: amax ran 0.88-0.94x
-    # at count 4096 and for fp32 at count 1024, against 1.7-2.6x under c256.
+    # Against the default config on B200 (fp16/bf16/fp32, 2 to 256K outputs), the c256
+    # inner tree ran 1.03-6.2x at every output count (1.8-3.3x at 2-8 outputs). The
+    # wider rules ran 0.76-0.95x below 2048 outputs, which keep the default config (a
+    # two-stage split below sm_count * 4 outputs), and 1.0-3.1x from 2048 with no upper
+    # bound (fp32 sum at count 1024: 1.0x). Amax and amin skip the wide one-field rule:
+    # amax ran 0.88-0.94x at count 4096 and for fp32 at count 1024, against 1.7-2.6x
+    # under c256. Under c256, amin ran 1.14-2.96x and amax 1.17-2.89x (counts 256 and
+    # 257, 2 to 256K outputs).
     wide = strided_row and count in (1024, 4095, 4096) and num_o >= 2048
     if (
         strided_row
         and count in (256, 257)
         and (
-            trait_type in (SumOps, MeanOps, AMaxOps, *_B200_INDEX)
+            trait_type in (SumOps, MeanOps, AMaxOps, AMinOps, *_B200_INDEX)
             or welford_outs == nouts
         )
     ):
@@ -572,9 +574,9 @@ def _oneshot_ok(x: torch.Tensor) -> bool:
 # band, mean, prod, amax, amin, nansum, norm1/2 and count_nonzero (fp16/bf16/fp32) and
 # argmin, aminmax and max/min.dim (fp32) run 0.97-3.9x. Absmax and absmin (0.88-0.91x)
 # and general-p norms (0.57-0.92x; p = 3 and 0.5) lose at N = 255, so they start at
-# N = 1023. Rows are odd, so Welford traits start at N = 1025; at BF16 N = 4095 var_mean
-# ran 1.18x and var 1.36x. Std, std_mean, all and any (bf16/fp32, N = 255-16383, 2 to
-# 4096 rows) ran 1.07-2.38x, fp16 std, all and any 1.07-2.4x, and two- and three-row
+# N = 1023. Rows are odd, so Welford traits start at N = 1025; var, std, var_mean and
+# std_mean (fp16/bf16/fp32, N = 1025-16383, 64 and 4096 rows) ran 1.09-2.3x. All and any
+# (fp16/bf16/fp32, N = 255-16383, 2 to 4096 rows) ran 1.07-2.4x, and two- and three-row
 # sums 1.28-1.91x.
 # The kernel bakes N, so each new width compiles once (0.17 s on B200).
 _RAGGED_ROW_MIN_N = 255

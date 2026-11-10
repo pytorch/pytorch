@@ -125,9 +125,10 @@ def select_ordered_col_config(
     Mappings apply to unbatched _ORDERED_COL_DTYPES views with 32-bit accumulators and,
     if the mapping has out_dtypes, only to those outputs. full_tiles requests full
     tiles; ragged splits are clamped regardless. With rows, B200 single-field views
-    whose mapping has full tiles (cfg.full_tiles) take measured tile widths, and C
-    128-257 a band of widths. Views that fill fewer than the mapping's min_blocks
-    useful 32-column blocks get None.
+    whose mapping has full tiles (cfg.full_tiles) take 16-column tiles at measured
+    shapes and, at C 128-257, over a band of rows: R 32768-65536, or to 131072 below
+    192 columns. Views that fill fewer than the mapping's min_blocks useful 32-column
+    blocks get None.
     """
     cfg = _ORDERED_COL_CONFIGS.get(cc, {}).get(trait_type)
     # Looped exact columns ran within 1% with and without address clamps on B200, so
@@ -146,15 +147,16 @@ def select_ordered_col_config(
         return None
     # Measured on routed split views only (one field, B = 1, C >= 128).
     if cc in _B200_CCS and cfg.full_tiles and rows is not None and nfields == 1:
+        band_max_rows = 131072 if columns < 192 else 65536
         if rows == 65536 and columns == 1024:
             cfg = cfg._replace(tile_columns=16)
         # A band of shapes rather than measured anchors. The default route reaches C
         # 128-191 from R = 32768 (kg._ORDERED_SPLIT_NARROW_MIN_R) and C >= 192 from
-        # R = 24577. On ragged (clamped) splits, R 32769-49153 and C 128-256, the band
-        # widths ran up to 1.7x the default mapping (fp32/bf16 sum, count_nonzero, all).
-        elif 32768 <= rows <= 131072 and 128 <= columns <= 257:
-            width = WARP if partials >= 16 and columns == 257 else 16
-            cfg = cfg._replace(tile_columns=width)
+        # R = 24577. Against 32-column tiles (fp32/bf16 sum, count_nonzero, all; ragged
+        # and exact splits), 16-column tiles ran 0.97-1.4x to R = 65536 and, below 192
+        # columns, to R = 131072; wider views ran 0.64-0.98x from R = 81921.
+        elif 32768 <= rows <= band_max_rows and 128 <= columns <= 257:
+            cfg = cfg._replace(tile_columns=16)
         bf16_amax = dtype == torch.bfloat16 and trait_type is AMaxOps
         if bf16_amax and rows == 32768 and columns == 4096:
             cfg = cfg._replace(tile_columns=16)
