@@ -6583,8 +6583,11 @@ def sample_inputs_cholesky_solve(op_info, device, dtype, requires_grad=False, **
     A = make_fullrank_matrices_with_distinct_singular_values(S, S, S, dtype=dtype, device=device)
     for upper in (False, True):
         L = torch.linalg.cholesky(A @ A.mH, upper=upper)
+        # cholesky_solve does not read the other strict triangle of L. Filling it with
+        # nonzero values checks that the derivatives do not depend on it either. See #199069
+        unread = A.tril(-1) if upper else A.triu(1)
         yield SampleInput(make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad),
-                          args=(L.requires_grad_(requires_grad),), kwargs=dict(upper=upper))
+                          args=((L + unread).requires_grad_(requires_grad),), kwargs=dict(upper=upper))
 
 
 def sample_inputs_triangular_solve(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -13286,8 +13289,6 @@ op_db: list[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           # https://github.com/pytorch/pytorch/issues/199069
-           gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
            decorators=[skipCPUIfNoLapack],
            skips=(
                # https://github.com/pytorch/pytorch/issues/165294
@@ -16283,10 +16284,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
                    'TestInductorOpInfo', 'test_comprehensive',
-               ),
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1e-4, rtol=5e-6)}),
-                   'TestCompositeCompliance', 'test_backward', device_type="xpu"
                ),
            ),
            skips=(
@@ -23457,7 +23454,9 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
                          'TestCommon',
                          'test_out_warning'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_executor'),
             DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
                          'TestCommon',
                          'test_python_ref_torch_fallback'),
