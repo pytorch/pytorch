@@ -1907,7 +1907,7 @@ class InstructionTranslatorBase(
 
         # Store the latest 20 bytecode execution for the process,
         # Used repr for byte processing and limiting the length to 2048
-        if config.verbose:
+        if self.is_verbose:
             try:
                 stack_repr = repr(self.stack)
             except ValueError:
@@ -2336,25 +2336,33 @@ class InstructionTranslatorBase(
         if not isinstance(val, VariableTracker):
             raise AssertionError(f"push expects VariableTracker, got {typestr(val)}")
         if val.source_location is None:
-            inst = self.current_instruction
-            if inst.positions is not None and inst.positions.lineno is not None:
-                val = val.with_source_location(
-                    SourceLocation(
-                        filename=self.f_code.co_filename,
-                        lineno=inst.positions.lineno,
-                        end_lineno=inst.positions.end_lineno,
-                        col_offset=inst.positions.col_offset,
-                        end_col_offset=inst.positions.end_col_offset,
-                    )
-                )
-            elif inst.starts_line is not None:
-                val = val.with_source_location(
-                    SourceLocation(
-                        filename=self.f_code.co_filename,
-                        lineno=inst.starts_line,
-                    )
-                )
+            loc = self._source_location_of(self.current_instruction)
+            if loc is not None:
+                val = val.with_source_location(loc)
         self.stack.append(val)
+
+    def _source_location_of(self, inst: Instruction) -> SourceLocation | None:
+        # Keyed by id because Instruction.__hash__ is a Python-level call; the
+        # entry keeps the instruction alive so the id cannot be reused.
+        cache = self._source_location_cache
+        entry = cache.get(id(inst))
+        if entry is not None and entry[0] is inst:
+            return entry[1]
+        loc = None
+        if inst.positions is not None and inst.positions.lineno is not None:
+            loc = SourceLocation(
+                filename=self.f_code.co_filename,
+                lineno=inst.positions.lineno,
+                end_lineno=inst.positions.end_lineno,
+                col_offset=inst.positions.col_offset,
+                end_col_offset=inst.positions.end_col_offset,
+            )
+        elif inst.starts_line is not None:
+            loc = SourceLocation(
+                filename=self.f_code.co_filename, lineno=inst.starts_line
+            )
+        cache[id(inst)] = (inst, loc)
+        return loc
 
     def push_many(self, vals: list[VariableTracker]) -> None:
         for val in vals:
@@ -5435,6 +5443,9 @@ class InstructionTranslatorBase(
         self.prefix_insts = []
         self.exn_vt_stack = exn_vt_stack
         self.latest_bytecode_queue = deque(maxlen=20)
+        self._source_location_cache: dict[
+            int, tuple[Instruction, SourceLocation | None]
+        ] = {}
         self._comprehension_depth = 0
         self._comprehension_end_for_ips: set[int] = set()
         # Per-prefix counters for generating fresh pycode-local variable names.
@@ -5527,6 +5538,8 @@ class InstructionTranslatorBase(
         self.is_trace_source_log_enabled: bool | None = trace_source_log.isEnabledFor(
             logging.DEBUG
         )
+        # Read once: config attribute access is slow and step() is hot.
+        self.is_verbose: bool = config.verbose
         linecache.lazycache(f_code.co_filename, f_globals)
 
 
@@ -5967,16 +5980,16 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         kwargs: dict[str, VariableTracker],
         allow_nested_graph_breaks: bool = False,
     ) -> VariableTracker:
-        tracer = None
+        if not config.dynamo_profiler:
+            tracer = cls.build_inline_tracer(
+                parent, func, args, kwargs, allow_nested_graph_breaks
+            )
+            return tracer.inline_call_()
         with profile_inline_call(
             parent.output, func.get_code(), lambda: parent.inline_depth + 1
         ):
             tracer = cls.build_inline_tracer(
-                parent,
-                func,
-                args,
-                kwargs,
-                allow_nested_graph_breaks=allow_nested_graph_breaks,
+                parent, func, args, kwargs, allow_nested_graph_breaks
             )
             return tracer.inline_call_()
 
@@ -6207,12 +6220,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         parent.is_child_tracer_active = True
         code = self.f_code
 
-        strict_ctx: Any = contextlib.nullcontext()
-        if parent.strict_checks_fn:
-            strict_ctx = self.strict_translation_mode(parent.strict_checks_fn)
-
         try:
-            with strict_ctx:
+            if parent.strict_checks_fn:
+                with self.strict_translation_mode(parent.strict_checks_fn):
+                    self.run()
+            else:
                 self.run()
         except exc.ObservedException as e:
             msg = f"Observed exception DURING INLING {code} : {e}"
@@ -6250,7 +6262,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         parent.inconsistent_side_effects |= self.inconsistent_side_effects
 
         log.debug("DONE INLINING %s", code)
-        self.output.tracing_context.traced_code.append(code)
+        traced_code = self.output.tracing_context.traced_code
+        if not traced_code or traced_code[-1] is not code:
+            traced_code.append(code)
 
         if (
             is_generator(code)
@@ -6332,13 +6346,22 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.nn_module_stack = parent.nn_module_stack.copy()
         self.one_graph = parent.one_graph
         self._allow_nested_graph_breaks = allow_nested_graph_breaks
+        self._parent_frame_summary_inst: Instruction | None = None
+        self._parent_frame_summary: traceback.FrameSummary | None = None
 
     @property
     def fake_mode(self) -> FakeTensorMode | None:
         return self.parent.fake_mode
 
     def run_ctx_mgr(self) -> Any:
-        return TracingContext.current_frame(self.parent.frame_summary())
+        # A generator is resumed many times from the same parent instruction;
+        # reuse that instruction's FrameSummary instead of rebuilding it.
+        parent = self.parent
+        inst = parent.current_instruction
+        if self._parent_frame_summary_inst is not inst:
+            self._parent_frame_summary_inst = inst
+            self._parent_frame_summary = parent.frame_summary()
+        return TracingContext.current_frame(self._parent_frame_summary)
 
     def _can_speculate_comprehension_nested(self) -> bool:
         """Check if comprehension speculation is allowed in this inlined context.
@@ -6511,6 +6534,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.frame_state = saved_frame_state
 
     def inline_call_(self) -> VariableTracker:
+        if not config.dynamo_profiler:
+            return super().inline_call_()
         with profile_inline_call(self.output, self.f_code, lambda: self.inline_depth):
             return super().inline_call_()
 
