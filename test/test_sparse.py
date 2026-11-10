@@ -21,7 +21,7 @@ from torch.testing._internal.common_cuda import \
     (ROCM_VERSION, SM80OrLater)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, dtypesIfXPU, onlyCPU, precisionOverride,
-     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS, expectedFailureXPU,
+     deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS,
      onlyAccelerator, largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, reduction_ops, sparse_unary_ufuncs, sparse_masked_reduction_ops, binary_ufuncs)
@@ -700,7 +700,6 @@ class TestSparse(TestSparseBase):
         sparse_matrix = sparse_matrix.coalesce()
 
     @onlyAccelerator
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5669
     @dtypes(torch.float32, torch.float16, torch.bool)
     @dtypesIfMPS(torch.float32)
     def test_coalesce_wide_dense_dims(self, device, dtype):
