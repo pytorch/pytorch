@@ -242,7 +242,7 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
 
 * When installing with `python -m pip install -e . -v --no-build-isolation` (in contrast to `python -m pip install . -v --no-build-isolation`) Python runtime will use
   the current local source-tree when importing `torch` package. (This is done by installing an import hook in the `site-packages` folder that redirects `torch`'s Python modules to the source tree; the compiled output is installed into `build/install/<wheel tag>/` in the checkout and loaded from there.)
-  The install tree is keyed by wheel tag only. If you point `SKBUILD_BUILD_DIR` at a second build tree (another CUDA toolkit, a Debug build), also set `SKBUILD_EDITABLE_REBUILD_DIR` to a directory under it, otherwise both editable installs share `build/install/<wheel tag>/` and the last one installed wins.
+  The install tree is keyed by wheel tag and, when set, by the build variant: `PYTORCH_VARIANT=cu132` builds into `build/cu132/` and installs into `build/cu132/install/<wheel tag>/` (see [Managing multiple build trees](#managing-multiple-build-trees)). If you instead point `SKBUILD_BUILD_DIR` at a second build tree (a Debug build, say), also set `SKBUILD_EDITABLE_REBUILD_DIR` to a directory under it, otherwise both editable installs share one install tree and the last one installed wins.
   This way you do not need to repeatedly install after modifying Python files (`.py`).
   However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
@@ -936,6 +936,22 @@ source pytorch-myfeature/bin/activate  # or `& .\pytorch-myfeature\Scripts\Activ
 # if you run python now, torch will NOT be installed
 python -m pip install --no-build-isolation -v -e .
 ```
+
+To keep several accelerator builds of one checkout apart, name the variant:
+
+```bash
+PYTORCH_VARIANT=cu132 python -m pip install --no-build-isolation -v -e .
+```
+
+The value selects the build tree `build/cu132/` and the editable install tree
+`build/cu132/install/<wheel tag>/`, so a later `PYTORCH_VARIANT=cpu` build lands
+next to it instead of on top of it. Accepted values are the spellings CD uses:
+`cpu`, `cu132`, `cu134`, `rocm10.0`, `rocm10.1`, `xpu`; anything else fails the
+build rather than silently building into `build/`. `-C torch.variant=cu132` is
+the config-settings spelling of the same thing, and the environment variable
+wins when both are given. Leaving it unset keeps the plain `build/` layout. The
+token does not yet choose the toolkit itself: set `USE_CUDA`, `USE_ROCM`, and
+friends as before.
 
 ## C++ development tips
 
