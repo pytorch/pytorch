@@ -1,14 +1,30 @@
 #!/usr/bin/env bash
-# Informational only, never fails: print whether each visible GPU partition is occupied.
-# occupied: `amd-smi process` lists a process in this pod, or VRAM use is above the 1 GiB idle limit
-#   (idle use is 0 to 0.6 GiB by GPU family). free: a VRAM reading exists and is at or below the limit.
-#   unknown: no VRAM reading from sysfs or amd-smi. Other pods' processes are invisible to amd-smi,
+# Informational only, never fails: print the raw `amd-smi process` output (and, with --with-monitor,
+# the `amd-smi monitor` table), then one line per visible GPU partition. Each amd-smi command runs once.
+# occupied: `amd-smi process` lists a process in this pod for the partition.
+# in use: no process is listed, but VRAM use is above the 1 GiB idle limit (idle use is 0 to 0.6 GiB by
+#   GPU family); the holder may be outside this pod.
+# free: a VRAM reading exists and is at or below the limit.
+# unknown: no VRAM reading from sysfs or amd-smi. Other pods' processes are invisible to amd-smi,
 #   so "no process listed" never proves free.
 # MATRIX_RUNNER's `.N` suffix sets the expected device count.
 
 kfd="${KFD_DIR:-/sys/class/kfd/kfd}"
 idle_mib=1024
 shopt -s nullglob
+
+# Raw output first, so it is in the log even if parsing below goes wrong. -k also kills a call that ignores TERM.
+smi_list=""
+smi_vram=""
+smi_proc=""
+proc_ok=""
+if command -v amd-smi >/dev/null; then
+  smi_list=$(timeout -k 5 30 amd-smi list 2>/dev/null)
+  smi_vram=$(timeout -k 5 30 amd-smi monitor -ptumv 2>/dev/null)
+  smi_proc=$(timeout -k 5 30 amd-smi process 2>&1) && [[ -n "${smi_proc}" ]] && proc_ok=1
+  [[ "${1:-}" != --with-monitor ]] || echo "${smi_vram}"
+  echo "${smi_proc}"
+fi
 
 # A job pod's own devices are listed here; otherwise use every render node.
 devs=()
@@ -24,13 +40,6 @@ if [[ "${MATRIX_RUNNER:-}" =~ \.([0-9]+)$ ]]; then
   [[ ${#devs[@]} -eq ${BASH_REMATCH[1]} ]] || summary+=" (MISMATCH)"
 fi
 echo "${summary}"
-
-smi_list=""
-smi_vram=""
-if command -v amd-smi >/dev/null; then
-  smi_list=$(timeout 30 amd-smi list 2>/dev/null)
-  smi_vram=$(timeout 30 amd-smi monitor -ptumv 2>/dev/null)
-fi
 
 for name in "${devs[@]}"; do
   # amd-smi numbers GPUs itself; match on the KFD id both tools report for this render node.
@@ -49,10 +58,10 @@ for name in "${devs[@]}"; do
   if [[ -n "${gpu_id}" && "${gpu_id}" != 0 ]]; then
     idx=$(awk -v id="${gpu_id}" '/^GPU:/ {gpu = $2} $1 == "KFD_ID:" && $2 == id {print gpu; exit}' <<<"${smi_list}")
   fi
-  if [[ -n "${idx}" ]] && out=$(timeout 30 amd-smi process --gpu "${idx}" 2>/dev/null) && [[ -n "${out}" ]]; then
+  if [[ -n "${idx}" && -n "${proc_ok}" ]]; then
     smi_note="amd-smi: no process listed in this pod"
     smi_unknown="amd-smi lists no process in this pod"
-    holders=$(awk '$1 == "NAME:" {n = $2} $1 == "PID:" && $2 ~ /^[0-9]+$/ {printf "%sPID %s %s", sep, $2, n; sep = ", "}' <<<"${out}")
+    holders=$(awk -v i="${idx}" '$1 == "GPU:" {on = ($2 == i)} on && $1 == "NAME:" {n = $2} on && $1 == "PID:" && $2 ~ /^[0-9]+$/ {printf "%sPID %s %s", sep, $2, n; sep = ", "}' <<<"${smi_proc}")
     [[ -z "${holders}" ]] || smi_note="amd-smi: ${holders}"
   fi
 
@@ -70,8 +79,10 @@ for name in "${devs[@]}"; do
     vram_note=$(awk -v m="${mib}" -v l="${idle_mib}" -v v="${via}" 'BEGIN {printf "VRAM %.1f GiB used%s %s %.1f GiB idle limit", m / 1024, v, (m > l ? ">" : "<="), l / 1024}')
   fi
 
-  if [[ -n "${holders}" || ( -n "${mib}" && ${mib} -gt ${idle_mib} ) ]]; then
+  if [[ -n "${holders}" ]]; then
     echo "GPU partition ${name}: occupied (${smi_note}; ${vram_note})"
+  elif [[ -n "${mib}" ]] && ((mib > idle_mib)); then
+    echo "GPU partition ${name}: in use (${smi_note}; ${vram_note})"
   elif [[ -n "${mib}" ]]; then
     echo "GPU partition ${name}: free (${smi_note}; ${vram_note})"
   else
