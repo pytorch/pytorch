@@ -83,9 +83,14 @@ template <typename T>
 inline constexpr bool rounds_through_float = [] {
   using L = std::numeric_limits<T>;
   using F = std::numeric_limits<float>;
-  return L::is_specialized && !L::is_integer && L::radix == 2 &&
-      L::digits + 2 <= F::digits && L::max_exponent <= F::max_exponent &&
-      L::min_exponent - L::digits >= F::min_exponent - F::digits + 2;
+  // Only floating-point specializations must have the other members.
+  if constexpr (L::is_specialized && !L::is_integer) {
+    return L::radix == 2 && L::digits + 2 <= F::digits &&
+        L::max_exponent <= F::max_exponent &&
+        L::min_exponent - L::digits >= F::min_exponent - F::digits + 2;
+  } else {
+    return false;
+  }
 }();
 // This deliberately includes Half on aarch64 CPUs, where it is constructed from
 // the native float16_t, which converts from double with a single rounding (fcvt
@@ -429,6 +434,9 @@ using c10::report_overflow;
 using c10::static_cast_with_inter_type;
 using c10::unchecked_cast_to_int;
 using c10::unsafe_wrapping_convert;
+namespace detail {
+using c10::detail::rounds_through_float;
+} // namespace detail
 HIDDEN_NAMESPACE_END(torch, headeronly)
 
 C10_CLANG_DIAGNOSTIC_POP()
