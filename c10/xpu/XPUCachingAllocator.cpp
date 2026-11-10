@@ -205,6 +205,11 @@ struct ExpandableSegment {
       handles_.resize(end, std::nullopt);
     }
 
+#if SYCL_COMPILER_VERSION >= 20260200
+    const bool ipc_supported = xpu::get_raw_device(device_).has(
+        sycl::aspect::ext_oneapi_ipc_physical_memory);
+#endif
+
     // Allocate and map physical memory for each segment.
     for (const auto i : c10::irange(begin, end)) {
       TORCH_INTERNAL_ASSERT(!handles_.at(i));
@@ -217,7 +222,7 @@ struct ExpandableSegment {
                 segment_size_
 #if SYCL_COMPILER_VERSION >= 20260200
                 ,
-                syclex::properties{syclex::enable_ipc{true}}
+                syclex::properties{syclex::enable_ipc{ipc_supported}}
 #endif
                 )});
         auto& mem = handle->handle;
@@ -274,6 +279,10 @@ struct ExpandableSegment {
   SegmentRange share(SegmentRange range, std::ostream& ss) {
 #if SYCL_COMPILER_VERSION >= 20260200
     namespace syclex = sycl::ext::oneapi::experimental;
+    TORCH_CHECK(
+        xpu::get_raw_device(device_).has(
+            sycl::aspect::ext_oneapi_ipc_physical_memory),
+        "Expandable segment IPC sharing is not supported on this device.");
     auto begin = segmentLeft(range.ptr);
     auto end = segmentRight(range.ptr + range.size);
     TORCH_INTERNAL_ASSERT(begin < end);
@@ -320,6 +329,10 @@ struct ExpandableSegment {
       std::istream& ss) {
 #if SYCL_COMPILER_VERSION >= 20260200
     namespace syclex = sycl::ext::oneapi::experimental;
+    TORCH_CHECK(
+        xpu::get_raw_device(device).has(
+            sycl::aspect::ext_oneapi_ipc_physical_memory),
+        "Expandable segment IPC sharing is not supported on this device.");
     ShareHeader header{};
     ss.read(reinterpret_cast<char*>(&header), sizeof(ShareHeader));
     TORCH_CHECK(
