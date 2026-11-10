@@ -42,10 +42,7 @@ from torch._subclasses.functional_tensor import (
 )
 from torch.fx.graph import _BoxedCodeGen
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    skipXPUIf,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     HardwareClassification,
@@ -3274,7 +3271,6 @@ _reuse_test_global = None
 class TestInvokeSubgraphCompileDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4819")
     @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_return_none(self, device):
         from torch.nn import functional as F
