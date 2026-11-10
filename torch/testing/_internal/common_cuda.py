@@ -235,8 +235,9 @@ def gfx_arch_supports_opportunistic_fastatomics():
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
-        # gfx1250 and gfx1250-strict use the AOTriton gfx1250 GPU image. The CK
-        # FAv3/AITER codegen is not wired for gfx1250
+        # gfx1250 and gfx1250-strict use the AOTriton gfx1250 GPU image.
+        # "gfx1250" already matches gfx1250-strict by substring; listed for explicitness.
+        # The CK FAv3/AITER codegen is not wired for gfx1250
         # (see aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/CMakeLists.txt).
         arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250", "gfx1250-strict"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
@@ -270,8 +271,9 @@ def evaluate_platform_sdpa_supports_hdim512():
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
-        # gfx1250 and gfx1250-strict use the AOTriton gfx1250 GPU image. The CK
-        # FAv3/AITER codegen is not wired for gfx1250
+        # gfx1250 and gfx1250-strict use the AOTriton gfx1250 GPU image.
+        # "gfx1250" already matches gfx1250-strict by substring; listed for explicitness.
+        # The CK FAv3/AITER codegen is not wired for gfx1250
         # (see aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/CMakeLists.txt).
         arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250", "gfx1250-strict"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
