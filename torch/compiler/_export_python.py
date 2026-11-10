@@ -188,10 +188,15 @@ def _exported_file(artifact: str) -> str:
         and getattr(node.targets[0].value, "id", None) == "GRAPH_SOURCES"
     ]
     tracer, mode = meta.get("TRACER"), meta.get("SERVING_MODE")
-    if tracer != "dynamo" or mode != "standalone" or len(sources) > 1:
+    # One frame captured once, whose graph is at most one Inductor graph (an eager
+    # graph has no code to write).
+    frames = cast(list[tuple[str, int]], meta.get("FRAMES", []))
+    one = len(frames) == 1 and frames[0][1] == 1 and len(sources) <= 1
+    if tracer != "dynamo" or mode != "standalone" or not one:
         raise PrecompileError(
             f"export_python: this capture is not one graph from the Dynamo tracer "
-            f"(TRACER={tracer!r}, SERVING_MODE={mode!r}, {len(sources)} graphs)."
+            f"(TRACER={tracer!r}, SERVING_MODE={mode!r}, FRAMES={frames!r}, "
+            f"{len(sources)} graph codes)."
         )
     name = f"{meta['ENTRY_MODULE']}.{meta['FN_NAME']}"
     py = ".".join(map(str, cast(tuple[int, ...], meta["_DYNAMO_PYTHON_VERSION"])))
@@ -227,9 +232,10 @@ def _exported_file(artifact: str) -> str:
         artifact = artifact.replace(segment, _GRAPH_CODE)
         lines += ["", _CODE_BEGIN, code, _CODE_END]
     blob = base64.b64encode(zlib.compress(artifact.encode(), 9)).decode()
+    wrapper = "AOTAutograd's wrapper around call()" if sources else "the graph"
     lines += [""] + _comment(
-        "The rest of what Dynamo captured (the guards, the frame's bytecode and "
-        "AOTAutograd's wrapper around call()), compressed. Not meant to be edited."
+        f"The rest of what Dynamo captured (the guards, the frame's bytecode and "
+        f"{wrapper}), compressed. Not meant to be edited."
     )
     return "\n".join([*lines, f"_CAPTURED = {blob!r}", ""])
 
