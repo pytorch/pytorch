@@ -157,10 +157,10 @@ if(INTERN_BUILD_ATEN_OPS)
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/GroupMM.cu"
       "90a;100a;103f;110a")
     # For the cvt.rz/rp.ue8m0x2.f32 instructions behind __nv_cvt_float_to_e8m0,
-    # which are only emitted for arch-specific targets.
+    # which are only emitted for arch-specific targets (and sm_107f).
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RoundedConversionE8m0.cu"
-      "100a;103a;110a;120a;121a")
+      "100a;103a;107f;110a;120a;121a")
     # For the cvt.*.ue5m3x2.f32 and cvt.rz.satfinite.{e4m3x2,e5m2x2}.f32
     # instructions, which only sm_107f and similar targets have.
     _BUILD_FOR_ADDITIONAL_ARCHS(
