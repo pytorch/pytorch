@@ -52,11 +52,11 @@ _cpp_fake_mode_tls = _CppFakeModeTLS()
 
 
 def is_in_torch_dispatch_mode(include_infra_modes: bool = True) -> bool:
-    return (
-        _is_in_torch_dispatch_mode
-        if include_infra_modes
-        else _is_in_non_infra_torch_dispatch_mode
-    )
+    if not include_infra_modes:
+        return _is_in_non_infra_torch_dispatch_mode
+    if _is_in_torch_dispatch_mode:
+        return True
+    return False
 
 
 def is_in_any_mode_without_ignore_compile_internals() -> bool:
