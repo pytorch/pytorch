@@ -693,7 +693,7 @@ class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
 _TEST_PSK = "0123456789abcdef0123456789abcdef"
 
 
-def _psk_options(psk: str | None) -> dist.ProcessGroupNCCL.Options:
+def _psk_options(psk: str | None) -> "dist.ProcessGroupNCCL.Options":
     opts = dist.ProcessGroupNCCL.Options()
     opts.encryption_psk = psk
     return opts
