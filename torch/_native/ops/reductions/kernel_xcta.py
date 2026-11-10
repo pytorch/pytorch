@@ -294,7 +294,8 @@ def _build_geom(
     device = x.get_device()
     elsize = x.element_size()
     vec = math.gcd(N, 128 // (elsize * 8))
-    # C fixes both stages' geometry, so derive it from N alone for reuse across M.
+    # C fixes both stages' geometry and depends only on N and subrow_target (gkey), so it
+    # reuses across M whenever select_xcta_config picks the same target.
     C = _split_C(N, vec, _RB._MAX_ROW_BYTES // elsize, subrow_target)
     if C is None:
         # Prime or poorly factored N uses K0's reshape-free, extent-independent fallback.

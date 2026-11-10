@@ -285,6 +285,8 @@ class TestReductionConfig(TestCase):
             )
             self.assertTrue(cfg.uniform_tree)
             self.assertTrue(tile.uniform_tree_ok(T.WelfordOps(), count, cfg.block, 1))
+        # TileReduce rejects general-axis blocks of a non-power-of-two warp count.
+        self.assertFalse(tile.uniform_tree_ok(T.WelfordOps(), 4096, 96, 1))
 
     @parametrize(
         "dtype,count,updates,expected",
@@ -415,7 +417,7 @@ class TestReductionConfig(TestCase):
         name_fn=lambda dtype, trait, size, cfg: f"{cfg.rule}_{size >> 20}mib",
     )
     def test_b200_ragged_column_values(self, dtype, trait, size, expected):
-        """Pin every field of the B200 ragged column rules, not just their names."""
+        """Pin every field of the B200 C = 4095 ragged column rules, not just names."""
         itemsize = dtype.itemsize
         rows = size // (4095 * itemsize)
         contract = _contract(_TRAITS[trait])
@@ -585,7 +587,7 @@ class TestReductionConfigDevice(TestCase):
         """Serve unordered odd rows inside the B200 band with the ragged-vector plan."""
         import cutlass
 
-        if torch.cuda.get_device_capability(device) != (10, 0):
+        if torch.cuda.get_device_capability(device) not in kg._B200_CCS:
             self.skipTest("the ragged-row route is measured on B200 only")
         x = torch.randn(64, N, device=device, dtype=dtype)
         key = f"ragged_route_{op}_{str(dtype)[6:]}_{N}"
@@ -612,7 +614,7 @@ class TestReductionConfigDevice(TestCase):
         the indexed tree."""
         import cutlass
 
-        if torch.cuda.get_device_capability(device) != (10, 0):
+        if torch.cuda.get_device_capability(device) not in kg._B200_CCS:
             self.skipTest("the strided rules are measured on B200 only")
         x = torch.randn(8, 512, device=device)[:, ::2]
         key = f"{op}_strided_c256"
@@ -630,7 +632,7 @@ class TestReductionConfigDevice(TestCase):
         """Run b200_strided_index's fp32 64-thread blocks at its smallest anchor."""
         import cutlass
 
-        if torch.cuda.get_device_capability(device) != (10, 0):
+        if torch.cuda.get_device_capability(device) not in kg._B200_CCS:
             self.skipTest("the strided rules are measured on B200 only")
         count, num_o = 1024, 2048
         x = torch.randn(num_o, 2 * count, device=device)[:, ::2]
@@ -649,7 +651,7 @@ class TestReductionConfigDevice(TestCase):
         """Fold b200_strided_welford's smallest anchor with the uniform Welford tree."""
         import cutlass
 
-        if torch.cuda.get_device_capability(device) != (10, 0):
+        if torch.cuda.get_device_capability(device) not in kg._B200_CCS:
             self.skipTest("the strided rules are measured on B200 only")
         count, num_o = 1024, 2048
         x = torch.randn(num_o, 2 * count, device=device)[:, ::2]

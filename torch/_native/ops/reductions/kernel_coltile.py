@@ -121,13 +121,13 @@ def select_ordered_col_config(
     default mapping and split plans decline.
 
     Entries are keyed by trait type. Split plans (partials > 1) without an entry take a
-    fallback on _ORDERED_COL_CCS that applies to any outputs and inherits full_tiles.
-    Mappings apply to unbatched _ORDERED_COL_DTYPES views with 32-bit accumulators and,
-    if the mapping has out_dtypes, only to those outputs. full_tiles requests full
-    tiles; ragged splits are clamped regardless. With rows, B200 single-field views
-    whose mapping has full tiles (cfg.full_tiles) take 16-column tiles at measured
-    shapes and over a band, R 32768-65536 at C 128-257. Views that fill fewer than the
-    mapping's min_blocks useful 32-column blocks get None.
+    fallback on _ORDERED_COL_CCS that applies to any outputs, with full_tiles as its
+    tile mode; looped plans take their entry's own full_tiles, and ragged splits are
+    clamped regardless. Mappings apply to unbatched _ORDERED_COL_DTYPES views with
+    32-bit accumulators and, if the mapping has out_dtypes, only to those outputs. With
+    rows, B200 single-field views whose mapping has full tiles (cfg.full_tiles) take
+    16-column tiles at measured shapes and over a band, R 32768-65536 at C 128-257.
+    Views filling fewer than the mapping's min_blocks useful 32-column blocks get None.
     """
     cfg = _ORDERED_COL_CONFIGS.get(cc, {}).get(trait_type)
     # Looped exact columns ran within 1% with and without address clamps on B200, so
@@ -768,7 +768,7 @@ def reduce_ordered_col(
             acc_bits=max(dt.width for dt in trait.fdtypes),
             out_dtypes=tuple(out_dtypes[:nouts]),
             rows=R,
-            full_tiles=split or plan.tms[0].exact,
+            full_tiles=split,
         )
         if config is None:
             if split:
