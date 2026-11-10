@@ -438,9 +438,9 @@ def fold_row_aligned(
     tail = prefix + groups * Int32(vec)
     # B200 64 MiB: 16-bit sums at N = 255/257 ran 1.4-1.5x N = 256/258 (27 vs 18-20 us)
     # yet beat scalar 1.7x; Welford (from N = 1025) pays at most 7%, N >= 4095 none.
-    # Both edges are multiples of gcd(N, vec) and at most vec - gcd(N, vec) long, so lane
-    # 0 keeps them rather than spreading them over lanes; the path beat ATen 1.07-2.4x
-    # (fp16 std/all/any, B200).
+    # Both edges are multiples of gcd(N, vec) and at most vec - gcd(N, vec) long. Every
+    # lane runs these vec - gcd(N, vec) predicated iterations; only lane 0 loads real
+    # edge elements (the others reread element 0 and discard it).
     for i in cutlass.range_constexpr(vec - math.gcd(tm.N, vec)):
         prefix_valid = (lane == Int32(0)) & (Int32(i) < prefix)
         prefix_index = Int32(i) if prefix_valid else Int32(0)
