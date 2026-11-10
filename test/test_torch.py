@@ -57,6 +57,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
     onlyCPU,
+    onlyOn,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
     get_all_device_types, skipXLA, onlyAccelerator, skipCUDAIf)
@@ -5662,6 +5663,27 @@ class TestTorchDeviceType(TestCase):
         samples = torch.cat([samples1, samples2])
         # expect no more than 1 repeating elements generated in 2 attempts
         self.assertLessEqual(2 * n_sample - samples.unique().size(0), 1)
+
+    # FIXME: move to test distributions
+    @onlyOn(["cpu", "cuda"])
+    @largeTensorTest("2GB")
+    @dtypes(torch.float, torch.double)
+    def test_multinomial_many_categories(self, device, dtype):
+        # A float32 CDF cannot give 2^25 categories distinct buckets (#2576)
+        n = 1 << 25
+        probs = torch.ones(n, device=device, dtype=dtype)
+        samples = torch.multinomial(probs, 20000, replacement=True)
+        upper = samples[samples >= n // 2]
+        self.assertEqual(upper.numel() / samples.numel(), 0.5, atol=0.05, rtol=0)
+        self.assertEqual((upper % 2).sum().item() / upper.numel(), 0.5, atol=0.05, rtol=0)
+        self.assertLess(samples.max().item(), n)
+
+        probs.zero_()
+        probs[-10:] = 1
+        for n_sample, replacement in ((1, True), (1, False), (10, False)):
+            samples = torch.multinomial(probs, n_sample, replacement)
+            self.assertTrue(samples.ge(n - 10).all() and samples.lt(n).all())
+            self.assertEqual(samples.unique().numel(), n_sample)
 
     def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn,
                                             memory_format, compare_data=True, default_is_preserve=False):
