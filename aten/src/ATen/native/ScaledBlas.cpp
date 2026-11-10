@@ -226,7 +226,8 @@ TORCH_META_FUNC(_scaled_addmm)(
 
 // V2: Grouped scaled matrix multiply. Shape inference, output allocation,
 // and recipe-specific output-dtype validation run here in eager mode.
-// FakeTensor and torch.compile use the corresponding Python meta checks.
+// FakeTensor and torch.compile use Python meta for shape inference, output
+// dtype checks, and offset contiguity; other checks run during execution.
 // Scale layouts, device capabilities, and backend selection are checked in
 // the CUDA implementation.
 //
