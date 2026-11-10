@@ -876,6 +876,10 @@ _efficient_attention_backward(
     ASSIGN_CHECK_OVERFLOW(p.q_strideM, query.stride(1));
     ASSIGN_CHECK_OVERFLOW(p.k_strideM, key.stride(1));
     ASSIGN_CHECK_OVERFLOW(p.v_strideM, value.stride(1));
+    // The kernel's tile iterators take 32-bit row strides.
+    TORCH_CHECK(p.q_strideM <= std::numeric_limits<int32_t>::max(), "query.stride(1) overflows int32");
+    TORCH_CHECK(p.k_strideM <= std::numeric_limits<int32_t>::max(), "key.stride(1) overflows int32");
+    TORCH_CHECK(p.v_strideM <= std::numeric_limits<int32_t>::max(), "value.stride(1) overflows int32");
     ASSIGN_CHECK_OVERFLOW(p.q_strideH, query.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.k_strideH, key.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.v_strideH, value.stride(2));

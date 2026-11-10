@@ -492,7 +492,6 @@
   "test/inductor/test_scatter_optimization.py",
   "test/inductor/test_select_algorithm.py",
   "test/inductor/test_slice_scatter_chunking.py",
-  "test/inductor/test_smoke.py",
   "test/inductor/test_snode_runtime.py",
   "test/inductor/test_split_cat_fx_aten_passes.py",
   "test/inductor/test_split_cat_fx_passes.py",
