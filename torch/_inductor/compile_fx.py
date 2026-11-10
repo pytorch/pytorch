@@ -61,7 +61,6 @@ from torch._functorch.aot_autograd import (
     make_boxed_func,
     SerializableAOTDispatchCompiler,
 )
-from torch._guards import require_python_fake_mode
 from torch._higher_order_ops.user_kernel_hop import user_kernel_hop_infos
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
@@ -960,7 +959,9 @@ def fake_tensor_prop(
     """
     # Ensure that decomps that support symbolic shapes are used
     with enable_python_dispatcher():
-        fake_mode = require_python_fake_mode(detect_fake_mode(example_inputs))
+        fake_mode = torch._guards.require_python_fake_mode(
+            detect_fake_mode(example_inputs)
+        )
         if not fake_mode:
             fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
             FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
@@ -3231,7 +3232,9 @@ def compile_fx(
                 if isinstance(model_, GraphModule)
                 else example_inputs_
             )
-            fake_mode = require_python_fake_mode(detect_fake_mode(inputs_))
+            fake_mode = torch._guards.require_python_fake_mode(
+                detect_fake_mode(inputs_)
+            )
             with _fakify_script_objects(model_, inputs_, {}, fake_mode) as (
                 patched_mod,
                 fake_args,
@@ -3449,7 +3452,7 @@ def _compile_fx_main(
 
         bw_compiler = SerializableAOTDispatchCompiler(OutputCode, bw_compiler)
 
-        fake_mode = require_python_fake_mode(
+        fake_mode = torch._guards.require_python_fake_mode(
             detect_fake_mode(example_inputs_)
         ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
         tracing_context = (
@@ -3785,7 +3788,7 @@ def autograd_cache_key(
     #       torch._guards.tracing, compiled_autograd._disable,
     #       functorch_config.patch
 
-    fake_mode = require_python_fake_mode(
+    fake_mode = torch._guards.require_python_fake_mode(
         detect_fake_mode(example_inputs)
     ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
     tracing_context = (
