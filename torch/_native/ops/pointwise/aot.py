@@ -15,8 +15,8 @@ from torchgen.native_aot_decl import load_by_path
 
 
 # Stage 1 loads this declaration before torch can be imported.
-_limits = load_by_path(
-    "pointwise_limits", os.path.join(os.path.dirname(__file__), "_limits.py")
+_config = load_by_path(
+    "pointwise_config", os.path.join(os.path.dirname(__file__), "_config.py")
 )
 
 _DTYPES = {
@@ -104,12 +104,12 @@ def _axes(inputs: tuple[Any, ...], out: Any, boolean: bool) -> dict[str, Any]:
             tuple(t.shape),
             t.stride(),
             t.element_size(),
-            t.const_data_ptr() % _limits._TMA_ALIGNMENT,
+            t.const_data_ptr() % _config._TMA_ALIGNMENT,
             t.is_contiguous(),
         )
         for t in inputs
     )
-    address = 0 if out is None else out.const_data_ptr() % _limits._MIN_ALIGNMENT
+    address = 0 if out is None else out.const_data_ptr() % _config._MIN_ALIGNMENT
     if out is None:
         # Before meta, use the reference orientation, like the C++ coverage probe.
         strides = (1, ref.size(0)) if ref.stride(0) == 1 else (ref.size(1), 1)
@@ -161,7 +161,7 @@ class _Declaration:
                 geometries = dict.fromkeys(
                     geometry
                     for cc in ((10, 0), (10, 7))
-                    for geometry in _limits._tma_configs(mask, cc, size)
+                    for geometry in _config._tma_configs(mask, cc, size)
                 )
                 for box, block, stages in geometries:
                     points.append(
@@ -251,22 +251,18 @@ def declarations() -> list[_Declaration]:
 
 _CPP_HELPERS = (
     f"""
-constexpr int kPointwiseMinAlignment = {_limits._MIN_ALIGNMENT};
-constexpr int kPointwiseTmaAlignment = {_limits._TMA_ALIGNMENT};
-constexpr int kPointwiseBox = {_limits._TMA_BOX_SIDE};
-constexpr int kPointwiseThreads = {_limits._THREADS_PER_BLOCK};
-constexpr int kPointwiseBf16MinStages = {_limits._TMA_BF16_MIN_STAGES};
-constexpr int64_t kPointwiseLargeInputBytes = {_limits._TMA_LARGE_INPUT_BYTES};
-constexpr int kPointwiseSm107LargeBox = {_limits._TMA_SM107_LARGE_BOX};
-constexpr int kPointwiseLargeBytesPerThread = {_limits._TMA_LARGE_BYTES_PER_THREAD};
-constexpr int kPointwiseSm100Transpose[] = {{{", ".join(map(str, _limits._TMA_SM100_TRANSPOSE))}}};
-constexpr int kPointwiseSm107Transpose[] = {{{", ".join(map(str, _limits._TMA_SM107_TRANSPOSE))}}};
-constexpr int kPointwiseSm100Pointwise[] = {{{", ".join(map(str, _limits._TMA_SM100_POINTWISE))}}};
-constexpr int kPointwiseSm100LargePointwise[] = {{{", ".join(map(str, _limits._TMA_SM100_LARGE_POINTWISE))}}};
-constexpr int kPointwiseSm107Pointwise[] = {{{", ".join(map(str, _limits._TMA_SM107_POINTWISE))}}};
-constexpr int kPointwiseSmemAlignment = {_limits._SMEM_ALIGNMENT};
-constexpr int kPointwiseBarrierBytes = {_limits._BARRIER_BYTES};
-constexpr int kPointwiseMaxGridYZ = {_limits._MAX_GRID_YZ};
+constexpr int kPointwiseMinAlignment = {_config._MIN_ALIGNMENT};
+constexpr int kPointwiseTmaAlignment = {_config._TMA_ALIGNMENT};
+constexpr int kPointwiseBox = {_config._TMA_BOX_SIDE};
+constexpr int kPointwiseThreads = {_config._THREADS_PER_BLOCK};
+constexpr int kPointwiseBf16MinStages = {_config._TMA_BF16_MIN_STAGES};
+constexpr int kPointwiseSm100Transpose[] = {{{", ".join(map(str, _config._TMA_SM100_TRANSPOSE))}}};
+constexpr int kPointwiseSm107Transpose[] = {{{", ".join(map(str, _config._TMA_SM107_TRANSPOSE))}}};
+constexpr int kPointwiseSm100Pointwise[] = {{{", ".join(map(str, _config._TMA_SM100_POINTWISE))}}};
+constexpr int kPointwiseSm107Pointwise[] = {{{", ".join(map(str, _config._TMA_SM107_POINTWISE))}}};
+constexpr int kPointwiseSmemAlignment = {_config._SMEM_ALIGNMENT};
+constexpr int kPointwiseBarrierBytes = {_config._BARRIER_BYTES};
+constexpr int kPointwiseMaxGridYZ = {_config._MAX_GRID_YZ};
 """
     + r"""
 // Mirrors _axes and shared _layout_config/_tma2d_config eligibility rules.
@@ -320,16 +316,9 @@ PointwiseTmaConfig pointwise_tma_config(
   const int* tuning = minor == 7
       ? (transpose_only ? kPointwiseSm107Transpose : kPointwiseSm107Pointwise)
       : (transpose_only ? kPointwiseSm100Transpose : kPointwiseSm100Pointwise);
-  if (minor != 7 && !transpose_only && cfg.rows * cfg.cols * ref.element_size() >= kPointwiseLargeInputBytes)
-    tuning = kPointwiseSm100LargePointwise;
   cfg.box = tuning[0]; cfg.block = tuning[1]; cfg.stages = tuning[2];
   if (ref.element_size() == 2) cfg.stages = std::max(cfg.stages, kPointwiseBf16MinStages);
-  if (minor == 7 && transpose_only && cfg.rows * cfg.cols * ref.element_size() >= kPointwiseLargeInputBytes &&
-      cfg.rows % kPointwiseSm107LargeBox == 0 && cfg.cols % kPointwiseSm107LargeBox == 0) {
-    cfg.box = kPointwiseSm107LargeBox;
-    cfg.block = cfg.box * cfg.box * ref.element_size() / kPointwiseLargeBytesPerThread;
-    cfg.stages = 1;
-  } else if (cfg.rows % cfg.box != 0 || cfg.cols % cfg.box != 0) {
+  if (cfg.rows % cfg.box != 0 || cfg.cols % cfg.box != 0) {
     cfg.box = kPointwiseBox; cfg.block = kPointwiseThreads;
     if (cfg.rows % cfg.box != 0 || cfg.cols % cfg.box != 0) return cfg;
   }

@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from typing import NamedTuple
 
-from ._limits import (
+from ._config import (
     _BARRIER_BYTES,
     _MAX_GRID_YZ,
     _MAX_INDEX,
@@ -42,9 +42,7 @@ def _tma_geometry(
     cols: int,
 ) -> tuple[int, int, int] | None:
     if element_bytes in (2, 4):
-        for box, block, stages in _tma_configs(
-            transposed, cc, element_bytes, rows * cols
-        ):
+        for box, block, stages in _tma_configs(transposed, cc, element_bytes):
             if rows % box == 0 and cols % box == 0:
                 return box, block, stages
     return None
