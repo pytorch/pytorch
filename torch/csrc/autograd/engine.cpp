@@ -427,9 +427,8 @@ variable_list get_current_input_grad_buffers(Node* node) {
       current_node && current_node.get() == node,
       "input_grad_buffers can only be accessed from the currently executing "
       "autograd.Function backward()");
-  // Final callbacks run while the GraphTask mutex is held. During reentrant
-  // backward, current_node can still refer to the suspended outer node, so
-  // reject post-processing before acquiring that mutex below.
+  // During reentrant backward, current_node can still refer to the suspended
+  // outer node. Its input buffers do not belong to the completing GraphTask.
   TORCH_CHECK(
       !graph_task->future_completed_.load(),
       "input_grad_buffers cannot be accessed during backward post-processing");
@@ -746,16 +745,13 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
   }
 
   try {
-    // Run post processing, before marking the future as complete.
-    // Drop lock prior to completing, to avoid holding across callbacks.
-    std::unique_lock<std::mutex> lock(mutex_);
-
     exec_post_processing();
-    std::vector<Variable> vars = std::move(captured_vars_);
-
-    // Need to unlock before we call markCompleted to avoid holding locks
-    // when the callbacks are called.
-    lock.unlock();
+    std::vector<Variable> vars;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      vars = std::move(captured_vars_);
+    }
+    // Completing the future can also run callbacks.
     future_result_->markCompleted(vars);
   } catch (std::exception&) {
     future_result_->setErrorIfNeeded(std::current_exception());
@@ -763,17 +759,9 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
 }
 
 void GraphTask::exec_post_processing() {
+  std::unique_lock<std::mutex> lock(mutex_);
   TORCH_CHECK(
       not_ready_.empty(), "could not compute gradients for some functions");
-
-  // set the thread_local current_graph_task_ as more callbacks can be installed
-  // by existing final callbacks.
-  GraphTaskGuard guard(shared_from_this());
-  // Lock mutex during each iteration for accessing final_callbacks.size()
-  // Unlocking is necessary, because the callback can register
-  // more callbacks (or they can be registered from other threads
-  // while it's waiting.
-  std::unique_lock<std::mutex> cb_lock(final_callbacks_lock_);
 
   // caller_current_streams_ with nullopt entries removed
   std::vector<c10::Stream> caller_current_streams_filtered;
@@ -850,30 +838,45 @@ void GraphTask::exec_post_processing() {
     }
   }
 
-  {
-    // final_callbacks run on the per-device caller_current_streams (the ambient
-    // streams surrounding the user's call to backward()). This has two
-    // benefits:
-    //  1. caller_current_streams have been synced with leaf_streams (except
-    //     for syncs skipped under set_override_stale_capture_stream during
-    //     CUDA graph capture), so callbacks may safely access any grad.
-    //  2. The callback's results can safely be used on (user-facing)
-    //  caller_current_streams
-    //     after backward().
-    c10::MultiStreamGuard g(caller_current_streams_filtered);
+  // Both callbacks and TLS cleanup can run Python and reenter the engine.
+  lock.unlock();
+  GraphTaskGuard guard(shared_from_this());
+  size_t callback_index = 0;
+  while (true) {
+    {
+      // final_callbacks run on the per-device caller_current_streams (the
+      // ambient streams surrounding the user's call to backward()). This has
+      // two benefits:
+      //  1. caller_current_streams have been synced with leaf_streams (except
+      //     for syncs skipped under set_override_stale_capture_stream during
+      //     CUDA graph capture), so callbacks may safely access any grad.
+      //  2. The callback's results can safely be used on (user-facing)
+      //  caller_current_streams
+      //     after backward().
+      c10::MultiStreamGuard g(caller_current_streams_filtered);
 
-    // Set the ThreadLocalState before calling the function.
-    // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
-    // always saves ThreadLocalState without grad_mode.
-    at::ThreadLocalStateGuard tls_guard(this->thread_locals_);
+      // Set the ThreadLocalState before calling the function.
+      // NB: The ThreadLocalStateGuard doesn't set the grad_mode because
+      // GraphTask always saves ThreadLocalState without grad_mode.
+      at::ThreadLocalStateGuard tls_guard(this->thread_locals_);
 
-    // WARNING: Don't use a range-for loop here because more callbacks may be
-    // added in between callback calls, so iterators may become invalidated.
-    // NOLINTNEXTLINE(modernize-loop-convert)
-    for (size_t i = 0; i < final_callbacks_.size(); ++i) {
-      cb_lock.unlock();
-      final_callbacks_[i]();
-      cb_lock.lock();
+      while (true) {
+        std::function<void()> callback;
+        {
+          std::lock_guard<std::mutex> cb_lock(final_callbacks_lock_);
+          if (callback_index == final_callbacks_.size()) {
+            break;
+          }
+          // Copy so appending callbacks cannot invalidate the running one.
+          callback = final_callbacks_[callback_index++];
+        }
+        callback();
+      }
+    }
+    // Restoring TLS can release modes whose destructors enqueue callbacks.
+    std::lock_guard<std::mutex> cb_lock(final_callbacks_lock_);
+    if (callback_index == final_callbacks_.size()) {
+      break;
     }
   }
 }
