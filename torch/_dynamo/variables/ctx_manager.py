@@ -153,12 +153,16 @@ class ContextWrappingVariable(VariableTracker):
         ):
             raise AssertionError(f"expected a function variable, got {type(args[0])}")
 
-        return self._wrap_function(args[0])
+        return self._wrap_function(args[0], tx)
 
     # noqa: RVT001
-    def _wrap_function(self, fn: VariableTracker) -> VariableTracker:
+    def _wrap_function(
+        self, fn: VariableTracker, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker:
         if isinstance(fn, NestedUserFunctionVariable):
-            return WrappedNestedUserFunctionVariable(fn, self)
+            result = WrappedNestedUserFunctionVariable(fn, self, tx)
+            tx.output.side_effects.track_attribute_mutation_new(result)
+            return result
         elif isinstance(fn, SkipFunctionVariable):
             return WrappedSkipFunctionVariable(fn, self)
         elif isinstance(

@@ -1487,6 +1487,16 @@
       ]
     }
   ],
+  "GB4311": [
+    {
+      "Gb_type": "classmethod lazy annotation access",
+      "Context": "{self}",
+      "Explanation": "Reading classmethod annotation attributes caches the value in its instance dictionary. Dynamo does not model that mutation.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB9131": [
     {
       "Gb_type": "Skipped function wrapper __dict__ access",
@@ -3767,6 +3777,16 @@
       "Gb_type": "setattr() on Tensor.requires_grad",
       "Context": "setattr({obj}, {name}, {val})",
       "Explanation": "setattr() on Tensor.requires_grad not supported. Mutating requires_grad can introduce a new leaf from non-leaf or vice versa in the middle of the graph, which AOTAutograd does not currently know how to handle.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7778": [
+    {
+      "Gb_type": "Reconstruct exception without an allocator",
+      "Context": "Exception: {self.exc_type.__name__}",
+      "Explanation": "Dynamo did not track this exception's allocation.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

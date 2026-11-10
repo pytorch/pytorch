@@ -1405,7 +1405,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                 args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
-                return variables.ExceptionVariable.create(fn, args, kwargs)
+                result = variables.ExceptionVariable.create(fn, args, kwargs)
+                tx.output.side_effects.track_attribute_mutation_new(result)
+                return result
 
             return create_exception_class_object
 
@@ -2011,6 +2013,10 @@ class BuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if self.fn is object and name in ("__setattr__", "__delattr__") and args:
+            obj = args[0].realize()
+            if isinstance(obj, variables.StaticMethodVariable):
+                return obj.call_method(tx, name, args[1:], kwargs)
         if self.fn is object and name == "__setattr__":
             if len(args) != 3:
                 raise AssertionError(
@@ -2603,6 +2609,19 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_dir(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
+        if isinstance(arg, variables.StaticMethodVariable):
+            if arg.source:
+                install_guard(
+                    AttrSource(arg.source, "__dict__").make_guard(
+                        GuardBuilder.DICT_KEYS_MATCH
+                    )
+                )
+            names = dict.fromkeys(dir(staticmethod))
+            names.update(dict.fromkeys(arg.get_dict_vt(tx).keys_as_python_constant()))
+            try:
+                return VariableTracker.build(tx, sorted(names))
+            except TypeError as exc:
+                raise_observed_exception(TypeError, tx, args=list(exc.args))
         if isinstance(arg, variables.UserDefinedClassVariable):
             return VariableTracker.build(tx, dir(arg.value))
         if isinstance(arg, BuiltinVariable):
@@ -3047,12 +3066,12 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_classmethod(
         self, tx: "InstructionTranslatorBase", func: VariableTracker
     ) -> VariableTracker:
-        return variables.ClassMethodVariable.create(func)
+        return variables.ClassMethodVariable.create(tx, func)
 
     def call_staticmethod(
         self, tx: "InstructionTranslatorBase", func: VariableTracker
     ) -> VariableTracker:
-        return variables.StaticMethodVariable.create(func)
+        return variables.StaticMethodVariable.create(tx, func)
 
     def call_next(
         self,
@@ -3895,12 +3914,24 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         name_var: VariableTracker,
         val: VariableTracker,
     ) -> VariableTracker | None:
+        if istype(obj, variables.UserFunctionVariable):
+            # A discarded HOP trace can leave the VT marked but unregistered
+            # in the current side effects table.
+            obj = obj._get_mutation_owner(tx)
+        if (
+            istype(obj, variables.UserFunctionVariable)
+            and obj.source is not None
+            and name_var.is_python_constant()
+            and obj.lookup_tp_getset_member(name_var.as_python_constant()) is None
+        ):
+            return obj.call_method(tx, "__setattr__", [name_var, val], {})
         if isinstance(
             obj,
             (
                 variables.DefaultDictVariable,
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
+                variables.StaticMethodVariable,
                 variables.ExceptionVariable,
                 variables.TracebackVariable,
                 variables.DequeVariable,

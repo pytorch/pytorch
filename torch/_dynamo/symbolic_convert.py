@@ -4258,17 +4258,17 @@ class InstructionTranslatorBase(
                 mutation_type=ValueMutationNew(),
             )
 
-        self.push(
-            NestedUserFunctionVariable(  # noqa: RVT001
-                fn_name,
-                code,
-                self.f_globals,
-                defaults,
-                kwdefaults,
-                closure,
-                ann,
-            )
+        fn = NestedUserFunctionVariable(  # noqa: RVT001
+            fn_name,
+            code,
+            self.f_globals,
+            defaults,
+            kwdefaults,
+            closure,
+            ann,
         )
+        self.output.side_effects.track_attribute_mutation_new(fn)
+        self.push(fn)
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = self.pop()
