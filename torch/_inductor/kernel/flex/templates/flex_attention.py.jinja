@@ -45,9 +45,24 @@
 
     MATMUL_PRECISION = Q.dtype.element_ty
 
+{%- if NUM_XCDS is defined %}
+    # Workgroups are dispatched round-robin across XCDs. Remap the flattened
+    # grid so consecutive programs, i.e. the query blocks of one (batch, head),
+    # share an XCD and its L2. When the grid is not a multiple of NUM_XCDS, the
+    # first tall_xcds XCDs get one extra program.
+    num_q_blocks = tl.cdiv(Q_LEN, BLOCK_M)
+    pids_per_xcd = tl.cdiv(num_q_blocks * ZQ * HQ, NUM_XCDS)
+    tall_xcds = num_q_blocks * ZQ * HQ - (pids_per_xcd - 1) * NUM_XCDS
+    xcd = tl.program_id(0) % NUM_XCDS
+    pid = tl.where(xcd < tall_xcds, xcd * pids_per_xcd, tall_xcds + xcd * (pids_per_xcd - 1)) + tl.program_id(0) // NUM_XCDS
+    q_start = (pid % num_q_blocks).to(INDEX_DTYPE)
+    off_hq = (pid // num_q_blocks % HQ).to(INDEX_DTYPE)
+    off_zq = (pid // num_q_blocks // HQ).to(INDEX_DTYPE)
+{%- else %}
     q_start = tl.program_id(0).to(INDEX_DTYPE)
     off_zq = tl.program_id(1).to(INDEX_DTYPE)
     off_hq = tl.program_id(2).to(INDEX_DTYPE)
+{%- endif %}
 
     # We support two cases for batch dimension. a) (ZKV == ZQ) where off_zkv = off_zq.
     # b) (ZKV == 1 and ZQ > 1) where KV is broadcasted along the batch dimension and off_zkv=0.
@@ -196,8 +211,8 @@
     l_i = tl.where(l_i == 0.0, 1, l_i)
 
     acc = acc / l_i[:, None]
-    idx_zq = tl.program_id(1).to(INDEX_DTYPE)
-    idx_hq = tl.program_id(2).to(INDEX_DTYPE)
+    idx_zq = off_zq
+    idx_hq = off_hq
     idx_m = offs_m[:, None].to(INDEX_DTYPE)
     idx_d = tl.arange(0, V_HEAD_DIM_ROUNDED)[None, :].to(INDEX_DTYPE)
 

@@ -5563,6 +5563,104 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     @skip_on_mps
+    def test_xcd_remap(self, device):
+        # 2 * 5 * cdiv(448, BLOCK_M) programs is not a multiple of 3 for any
+        # power-of-two BLOCK_M in 16..128, so some XCDs get one program fewer.
+        q, k, v = (torch.randn(2, 5, 448, 64, device=device) for _ in range(3))
+        block_mask = create_block_mask(
+            lambda b, h, q, kv: q >= kv, None, None, 448, 448, device=device
+        )
+
+        def run(num_xcds):
+            compiled = torch.compile(flex_attention, fullgraph=True)
+            options = {"NUM_XCDS": num_xcds}
+            return run_and_get_code(
+                compiled, q, k, v, block_mask=block_mask, kernel_options=options
+            )
+
+        out, code = run(3)
+        FileCheck().check("NUM_XCDS : tl.constexpr = 3").run(code[0])
+        ref, code = run(0)
+        FileCheck().check_not("NUM_XCDS : tl.constexpr").run(code[0])
+        self.assertEqual(out, ref)
+        with self.assertRaisesRegex(
+            (InductorError, ValueError), "NUM_XCDS must be a non-negative int"
+        ):
+            run(-1)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # MPS backward raises NotImplementedError
+    def test_xcd_remap_backward(self, device):
+        # With 2 kv heads and GQA 2, 2 * 2 * (2 * cdiv(400, BLOCK_M2) +
+        # cdiv(272, BLOCK_N1)) programs is not a multiple of 3 for any
+        # power-of-two block sizes in 16..128.
+        q = torch.randn(2, 4, 400, 64, device=device, requires_grad=True)
+        k, v = (
+            torch.randn(2, 2, 272, 64, device=device, requires_grad=True)
+            for _ in range(2)
+        )
+        block_mask = create_block_mask(
+            lambda b, h, q, kv: q >= kv, None, None, 400, 272, device=device
+        )
+
+        def run(num_xcds):
+            compiled = torch.compile(flex_attention, fullgraph=True)
+            options = {"NUM_XCDS": num_xcds}
+
+            def fwd_bwd():
+                kwargs = {"enable_gqa": True, "kernel_options": options}
+                out = compiled(q, k, v, block_mask=block_mask, **kwargs)
+                return torch.autograd.grad(out.sum(), (q, k, v))
+
+            return run_and_get_code(fwd_bwd)
+
+        grads, code = run(3)
+        FileCheck().check("NUM_XCDS : tl.constexpr = 3").run(code[-1])
+        ref, code = run(0)
+        FileCheck().check_not("NUM_XCDS : tl.constexpr").run("\n".join(code))
+        self.assertEqual(grads, ref)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # MPS backward raises NotImplementedError
+    def test_xcd_remap_dynamic_batch(self, device):
+        block_mask = create_block_mask(
+            lambda b, h, q, kv: q >= kv, None, None, 448, 448, device=device
+        )
+
+        def make_inputs(batch):
+            inputs = [
+                torch.randn(batch, 4, 448, 64, device=device, requires_grad=True)
+                for _ in range(3)
+            ]
+            for t in inputs:
+                torch._dynamo.mark_dynamic(t, 0)
+            return inputs
+
+        def fwd_bwd(fn, num_xcds, q, k, v):
+            options = {"NUM_XCDS": num_xcds}
+            out = fn(q, k, v, block_mask=block_mask, kernel_options=options)
+            return out, torch.autograd.grad(out.sum(), (q, k, v))
+
+        remapped = torch.compile(flex_attention, fullgraph=True)
+        small, large = make_inputs(2), make_inputs(5)
+        res_small, code = run_and_get_code(fwd_bwd, remapped, 3, *small)
+        self.assertEqual(len(code), 2)
+        for c in code:
+            FileCheck().check("NUM_XCDS : tl.constexpr = 3").run(c)
+        # The grid-size guard holds for the larger batch, so the remapped
+        # forward and backward graphs are reused.
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            res_large = fwd_bwd(remapped, 3, *large)
+
+        reference = torch.compile(flex_attention, fullgraph=True)
+        self.assertEqual(res_small, fwd_bwd(reference, 0, *small))
+        self.assertEqual(res_large, fwd_bwd(reference, 0, *large))
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
     @skip_on_xpu
     def test_backward_kernel_options_filtering(self, device):
         if not PLATFORM_SUPPORTS_BF16:

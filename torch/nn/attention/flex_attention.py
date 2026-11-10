@@ -304,6 +304,17 @@ class FlexKernelOptions(TypedDict, total=False):
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
 
+    NUM_XCDS: NotRequired[int]
+    """Number of XCDs that the Triton forward and backward kernels remap their
+    programs across, so that the blocks of one (batch, head) share an XCD's L2.
+    Intended for multi-XCD AMD GPUs; a value set on other GPUs is honored but
+    not tuned for. Use the fwd_/bwd_ prefixes to set it for one direction.
+    Defaults to the device's XCD count on supported ROCm GPUs (currently
+    gfx950) and to 0 elsewhere; 0 disables the remap. The remap is skipped for
+    grids over HIP's grid-size limit; with dynamic shapes this adds a guard on
+    the input sizes, and with unbacked sizes the remap is skipped. Not used by
+    the decode, FLASH or FLYDSL kernels."""
+
     BACKEND: NotRequired[_Backend]
     """Selects a specific kernel backend.
 

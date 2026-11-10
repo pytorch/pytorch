@@ -51,12 +51,27 @@
 
     MATMUL_PRECISION = Q.dtype.element_ty
 
-    pid = tl.program_id(0).to(INDEX_DTYPE)
     NUM_KV_BLOCKS = tl.cdiv(KV_LEN, BLOCK_N1)
     NUM_Q_BLOCKS = tl.cdiv(Q_LEN, BLOCK_M2)
 
+{%- if NUM_XCDS is defined %}
+    # Workgroups are dispatched round-robin across XCDs. Remap the flattened
+    # grid so consecutive programs, i.e. the dK/dV and dQ blocks of one
+    # (batch, kv head), share an XCD and its L2. When the grid is not a
+    # multiple of NUM_XCDS, the first tall_xcds XCDs get one extra program.
+    num_pids = NUM_KV_BLOCKS + NUM_Q_BLOCKS * GQA_SHARED_HEADS
+    pids_per_xcd = tl.cdiv(num_pids * ZQ * HKV, NUM_XCDS)
+    tall_xcds = num_pids * ZQ * HKV - (pids_per_xcd - 1) * NUM_XCDS
+    xcd = tl.program_id(0) % NUM_XCDS
+    flat_pid = tl.where(xcd < tall_xcds, xcd * pids_per_xcd, tall_xcds + xcd * (pids_per_xcd - 1)) + tl.program_id(0) // NUM_XCDS
+    pid = (flat_pid % num_pids).to(INDEX_DTYPE)
+    off_hkv = (flat_pid // num_pids % HKV).to(INDEX_DTYPE) # kv head idx
+    off_zq = (flat_pid // num_pids // HKV).to(INDEX_DTYPE) # q batch idx
+{%- else %}
+    pid = tl.program_id(0).to(INDEX_DTYPE)
     off_zq = tl.program_id(1).to(INDEX_DTYPE) # q batch idx
     off_hkv = tl.program_id(2).to(INDEX_DTYPE) # kv head idx
+{%- endif %}
     off_zkv = off_zq % ZKV # kv batch idx
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
