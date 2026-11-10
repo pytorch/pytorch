@@ -17,11 +17,12 @@ from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.switch import switch
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import run_and_get_cpp_code
+from torch._inductor.utils import run_and_get_code, run_and_get_cpp_code
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
     parametrize,
+    requires_multigpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.testing._internal.triton_utils import requires_gpu
@@ -483,6 +484,32 @@ class CondTests(TestCase):
                 )
 
     @requires_gpu
+    def test_cond_shared_input_predicate_codegen(self):
+        if torch._inductor.config.cpp_wrapper:
+            self.skipTest("checks Python wrapper code")
+
+        def true_fn(x):
+            return (x.sin(),)
+
+        def false_fn(x):
+            return (x.cos(),)
+
+        def model(p, x):
+            a = torch.cond(p, true_fn, false_fn, (x,))[0]
+            return a, torch.cond(p, true_fn, false_fn, (a * 2,))[0]
+
+        x = torch.randn(8, device=GPU_TYPE)
+        compiled = torch.compile(model, fullgraph=True)
+        _, (code,) = run_and_get_code(compiled, torch.tensor(True), x)
+        # Both conds share one read of the input predicate, and the branches
+        # run inside call()'s device guard instead of entering their own.
+        self.assertEqual(code.count(".item()"), 1)
+        self.assertEqual(code.count("_DeviceGuard("), 1)
+        for pred in (True, False):
+            p = torch.tensor(pred)
+            self.assertEqual(compiled(p, x), model(p, x))
+
+    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_predicate_views_of_one_buffer(self, device):
         # Each predicate is a different view of one buffer, so each needs its own read.
@@ -549,6 +576,90 @@ class CondTests(TestCase):
         for sign in (1, -1):
             x = sign * (torch.rand(8, device=device) + 0.1)
             self.assertEqual(compiled(x), model(x))
+
+    @requires_gpu
+    def test_cond_branch_on_two_devices(self):
+        # A branch with CPU work can't rely on its caller's GPU device guard.
+        def true_fn(x, y):
+            return x.sin(), y.cos()
+
+        def false_fn(x, y):
+            return x.cos(), y.sin()
+
+        def model(p, x, y):
+            return torch.cond(p, true_fn, false_fn, (x, y))
+
+        x, y = torch.randn(8, device=GPU_TYPE), torch.randn(8)
+        compiled = torch.compile(model, fullgraph=True)
+        _, (code,) = run_and_get_code(compiled, torch.tensor(True), x, y)
+        if not torch._inductor.config.cpp_wrapper:
+            for branch in ("true_graph_0", "false_graph_0"):
+                body = code.split(f"def {branch}(args):")[1].split("\ndef ")[0]
+                self.assertIn("_DeviceGuard(", body)
+        for pred in (True, False):
+            p = torch.tensor(pred)
+            self.assertEqual(compiled(p, x, y), model(p, x, y))
+
+    @requires_gpu
+    @requires_multigpu
+    def test_cond_branch_on_second_gpu(self):
+        # Branches that skip their own device guard rely on the one call()
+        # entered; with operands off the current device, that guard is what
+        # puts their kernels and allocations on the right one.
+        device = torch.device(GPU_TYPE, 1)
+
+        def inner_true(x):
+            return (x.sin(),)
+
+        def inner_false(x):
+            return (x.cos(),)
+
+        def true_fn(x, q):
+            return (torch.cond(q, inner_true, inner_false, (x * 2,))[0] + 1,)
+
+        def false_fn(x, q):
+            return (x - 1,)
+
+        def model(p, q, x):
+            return torch.cond(p, true_fn, false_fn, (x, q))[0]
+
+        x = torch.randn(8, device=device)
+        compiled = torch.compile(model, fullgraph=True)
+        _, codes = run_and_get_code(compiled, torch.tensor(True), torch.tensor(True), x)
+        if not torch._inductor.config.cpp_wrapper:
+            self.assertEqual(codes[0].count("_DeviceGuard(1)"), 1)
+        for p, q in itertools.product((True, False), repeat=2):
+            p, q = torch.tensor(p), torch.tensor(q)
+            out = compiled(p, q, x)
+            self.assertEqual(out.device, device)
+            self.assertEqual(out, model(p, q, x))
+
+    @requires_gpu
+    @torch._inductor.config.patch({"triton.autotune_at_compile_time": True})
+    def test_cond_branch_guard_with_compile_time_autotune(self):
+        # Compile-time autotuning emits setup at each device guard, so the
+        # branches keep their own.
+        if torch._inductor.config.cpp_wrapper:
+            self.skipTest("checks Python wrapper code")
+
+        def true_fn(x):
+            return (x.sin(),)
+
+        def false_fn(x):
+            return (x.cos(),)
+
+        def model(p, x):
+            return torch.cond(p, true_fn, false_fn, (x * 2,))
+
+        x = torch.randn(8, device=GPU_TYPE)
+        compiled = torch.compile(model, fullgraph=True)
+        _, (code,) = run_and_get_code(compiled, torch.tensor(True), x)
+        for branch in ("true_graph_0", "false_graph_0"):
+            body = code.split(f"def {branch}(args):")[1].split("\ndef ")[0]
+            self.assertIn("_DeviceGuard(", body)
+        for pred in (True, False):
+            p = torch.tensor(pred)
+            self.assertEqual(compiled(p, x), model(p, x))
 
     @requires_gpu
     @torch._functorch.config.patch("donated_buffer", True)
