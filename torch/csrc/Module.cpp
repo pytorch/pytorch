@@ -3176,7 +3176,8 @@ Call this whenever a new thread is created in order to propagate values from
   // any other tensor, including a Python FakeTensor (maybe_get_fake_mode
   // handles those) and a tensor with the Fake key but no mode (see
   // _set_fake_device). Unlike maybe_get_fake_mode, it does not look inside
-  // functional, functorch or traceable wrapper tensors.
+  // functional, functorch or traceable wrapper tensors. Raises for a fake of a
+  // mode made in C++, which has no Python object.
   py_module.def("_maybe_get_fake_mode", [](const at::Tensor& t) -> py::object {
     if (!t.defined() || !t.is_fake()) {
       return py::none();
