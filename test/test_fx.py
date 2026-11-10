@@ -75,7 +75,6 @@ from torch.fx._symbolic_trace import PHBase, PHWithMeta
 from torch.fx.proxy import TraceError
 from torch.testing._internal.common_cuda import blas_library_context
 from torch.testing._internal.common_utils import (
-    find_library_location,
     HardwareClassification,
     IS_FBCODE,
     IS_MACOS,
@@ -90,6 +89,7 @@ from torch.testing._internal.common_utils import (
     xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 
 import json
 import tempfile
@@ -270,6 +270,11 @@ class TestFX(JitTestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
+        # Load before super().setUp(): a missing test library skips the test,
+        # and unittest runs no tearDown after a skipping setUp, so anything
+        # super().setUp() installed would never be torn down.
+        if not (IS_FBCODE or IS_WINDOWS or IS_MACOS):
+            load_torchbind_test_lib()
         super().setUp()
         # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
@@ -277,10 +282,6 @@ class TestFX(JitTestCase):
             torch.fx.proxy.TracerBase.check_mutable_operations
         )
         torch.fx.proxy.TracerBase.check_mutable_operations = True
-
-        if not (IS_FBCODE or IS_WINDOWS or IS_MACOS):
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            torch.ops.load_library(str(lib_file_path))
 
     def tearDown(self):
         super().tearDown()
