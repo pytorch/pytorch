@@ -676,16 +676,18 @@ A merge of a stacked PR, ghstack or GitHub-native, holds every PR it lands to th
 
 The bot lands a PR by pushing its commit to `main` and closing the PR, so GitHub shows the PR as closed, not merged. The landed PRs stay at the bottom of the GitHub stack, and keeping them there matters: when a PR above them lands, its commit lists them as stack dependencies, and that link is what makes `@pytorchbot revert` on a landed PR also revert the PRs that landed on top of it.
 
-[`gh stack`](https://github.com/github/gh-stack) skips only branches whose PR GitHub marks as merged, so it treats the landed branches as active branches with no PR: `gh stack submit` opens new PRs for them, `gh stack rebase`, `sync` and `push` rebase and force-push them, and `gh stack unstack` takes them out of the GitHub stack. Do not run `gh stack` on a stack until all of it has landed. Keep the rest of it up to date with plain git instead: merge `main` into the topmost landed branch, then merge each branch into the one above it, bottom to top. For a stack `A <- B <- C` whose bottom PR `A` has landed:
+[`gh stack`](https://github.com/github/gh-stack) skips only branches whose PR GitHub marks as merged, so it treats the landed branches as active branches with no PR: `gh stack submit` opens new PRs for them, `gh stack rebase`, `sync` and `push` rebase and force-push them, and `gh stack unstack` takes them out of the GitHub stack. Do not run `gh stack` on a stack until all of it has landed. Keep the rest of it up to date with plain git instead: give the topmost landed branch the exact content of `main` with a merge commit, then merge each branch into the one above it, bottom to top. For a stack `A <- B <- C` whose bottom PR `A` has landed:
 
 ```bash
 git fetch origin
-git checkout A && git merge --ff-only origin/A && git merge origin/main && git push origin A
+git checkout A && git merge --ff-only origin/A
+git merge --ff-only "$(git commit-tree -p HEAD -p origin/main -m 'Merge main into A' 'origin/main^{tree}')"
+git push origin A
 git checkout B && git merge --ff-only origin/B && git merge A && git push origin B
 git checkout C && git merge --ff-only origin/C && git merge B && git push origin C
 ```
 
-Every push is a fast-forward, and each open PR still shows only its own changes. You only need this to pick up a newer `main` or to resolve conflicts with it. New work goes the same way: commit on its branch, merge it into the branches above, and `git push`. Never add commits other than merges of `main` to a landed branch: the bot refuses to land the PRs above a closed PR whose branch has commits that never landed.
+A plain `git merge origin/main` is not enough for `A`: `main` holds `A`'s changes as a different commit, so later `main` changes to those lines conflict, and a file `A` added that `main` later deleted would stay on `A` and reach the PRs above. Every push is a fast-forward, and each open PR still shows only its own changes. You only need this to pick up a newer `main` or to resolve conflicts with it; `@pytorchbot rebase -b main` on the top PR does the same update on GitHub. New work goes the same way: commit on its branch, merge it into the branches above, and `git push`. Never add commits other than merges of `main` to a landed branch: the bot refuses to land the PRs above a closed PR whose branch has commits that never landed.
 
 ## GreenLight
 
