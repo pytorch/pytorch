@@ -18,6 +18,28 @@
 #include <torch/headeronly/util/quint4x2.h>
 #include <torch/headeronly/util/quint8.h>
 
+#include <limits>
+#include <type_traits>
+
+template <typename T>
+constexpr bool has_denorm_is(std::float_denorm_style style) {
+  using L = std::numeric_limits<T>;
+  using Type = std::remove_cv_t<decltype(L::has_denorm)>;
+  return std::is_same_v<Type, std::float_denorm_style> &&
+      L::has_denorm == style;
+}
+
+TEST(TestDtype, TestFloat8HasDenorm) {
+  // Like float's, so that generic code can compare it with std::denorm_present.
+  using namespace torch::headeronly;
+  static_assert(has_denorm_is<Float8_e4m3fn>(std::denorm_present));
+  static_assert(has_denorm_is<Float8_e4m3fnuz>(std::denorm_present));
+  static_assert(has_denorm_is<Float8_e5m2>(std::denorm_present));
+  static_assert(has_denorm_is<Float8_e5m2fnuz>(std::denorm_present));
+  static_assert(has_denorm_is<Float8_e5m3fnu>(std::denorm_present));
+  static_assert(has_denorm_is<Float8_e8m0fnu>(std::denorm_absent));
+}
+
 TEST(TestDtype, TestBFloat16) {
   torch::headeronly::BFloat16 a = 1.0f;
   torch::headeronly::BFloat16 b = 2.0f;
