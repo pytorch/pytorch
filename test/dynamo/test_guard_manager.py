@@ -10,6 +10,7 @@ import unittest
 import weakref
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 from unittest import mock
 
 import torch
@@ -761,6 +762,40 @@ class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
         self.assertIn("c", wrapper.diff_guard_sources)
         self.assertTrue(wrapper.diff_guard_root.check(values))
         self.assertFalse(wrapper.diff_guard_root.check({**values, "c": values["a"]}))
+
+    @parametrize("reverse", [False, True])
+    def test_diff_source_union_closes_relational_groups(self, reverse):
+        values = {name: [] for name in ("a", "b", "c", "d", "e")}
+        wrappers = []
+        for names in (("b", "c"), ("a", "b"), ("a",), ("d", "e")):
+            root = RootGuardManager()
+            managers = [
+                root.dict_getitem_manager(name, name, values[name], default_mgr_enum)
+                for name in names
+            ]
+            if len(managers) == 2:
+                guards.install_object_alias_pattern_guard(managers, [0, 1], [], None)
+            wrappers.append(torch._dynamo.guards.GuardManagerWrapper(root))
+        wrappers[2].diff_guard_sources.add("a")
+        entries = [SimpleNamespace(guard_manager=wrapper) for wrapper in wrappers]
+        if reverse:
+            entries.reverse()
+        selected = (
+            torch._dynamo.guards.update_diff_guard_managers_for_existing_cache_entries(
+                entries
+            )
+        )
+        for wrapper in wrappers:
+            self.assertTrue(wrapper.diff_guard_root.check(values))
+        self.assertFalse(
+            wrappers[0].diff_guard_root.check({**values, "c": values["b"]})
+        )
+        self.assertFalse(
+            wrappers[1].diff_guard_root.check({**values, "b": values["a"]})
+        )
+        self.assertIn("c", selected)
+        self.assertNotIn("d", selected)
+        self.assertNotIn("e", selected)
 
     def test_object_alias_pattern_diff_participant_closure(self):
         from torch._dynamo.guards import GuardManagerWrapper

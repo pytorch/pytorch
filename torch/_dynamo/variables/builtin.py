@@ -90,7 +90,6 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
-    check_setattr_args,
     GetSet,
     Member,
     Method,
@@ -539,9 +538,7 @@ class BaseBuiltinVariable(VariableTracker):
                 )
                 items[ConstantVariable.create(key)] = value_vt
             return variables.MappingProxyVariable(variables.ConstDictVariable(items))
-        if isinstance(
-            attr, (types.MethodDescriptorType, types.WrapperDescriptorType)
-        ) and not is_torch_class(fn):
+        if isinstance(attr, types.MethodDescriptorType) and not is_torch_class(fn):
             # Unbound C method read off a builtin type, e.g. list.count. Torch
             # types keep their trace-rule path through GetAttrVariable.
             from .builder import VariableBuilder
@@ -549,10 +546,6 @@ class BaseBuiltinVariable(VariableTracker):
             owner: VariableTracker = self
             if attr.__objclass__ is not fn:
                 owner = VariableTracker.build(tx, attr.__objclass__)
-            if isinstance(attr, types.WrapperDescriptorType):
-                return VariableBuilder.create_internal_wrapper_descriptor(
-                    attr, owner=owner, source=source
-                )
             return VariableBuilder.create_internal_method_descriptor(
                 attr, owner=owner, source=source
             )
@@ -2019,7 +2012,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if self.fn is object and name == "__setattr__":
-            check_setattr_args(tx, args[1:], kwargs)
+            if len(args) != 3:
+                raise AssertionError(
+                    f"object.__setattr__ expects 3 args, got {len(args)}"
+                )
+            if len(kwargs) != 0:
+                raise AssertionError(
+                    f"object.__setattr__ expects no kwargs, got {len(kwargs)}"
+                )
             obj, name_var, val = args
             obj = obj.realize()
             if (
@@ -2859,6 +2859,9 @@ class BuiltinVariable(BaseBuiltinVariable):
                 explanation=f"Dynamo doesn't have a rule to determine the type of argument {arg}",
                 hints=[*graph_break_hints.DYNAMO_BUG],
             )
+        if isinstance(arg, variables.NNModuleHooksDictVariable) and arg.source:
+            # Internal slot dispatch does not observe the hook registry's exact type.
+            install_guard(arg.source.make_guard(GuardBuilder.TYPE_MATCH))
         isinstance_type = isinstance_type_var.as_python_constant()
         # An AsyncCollectiveTensor (ACT) input's tensor-class guard is relaxed
         # (see VariableBuilder.wrap_tensor): the cache entry does not discriminate
@@ -3573,7 +3576,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
+        return DictBuiltinVariable.construct_dict(tx, *args, **kwargs)
 
     def fromkeys(
         self,
@@ -3630,6 +3633,9 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         if name == "__new__":
             return self.tp_new_impl(tx, args, kwargs)
 
+        if args and name in ("update", "__init__", "__ior__"):
+            if isinstance(args[0], ConstDictVariable):
+                args[0].check_base_dict_mutation(tx, name)
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
             obj = args[0].realize()
@@ -3655,23 +3661,15 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         return super().call_method(tx, name, args, kwargs)
 
     @staticmethod
-    def call_custom_dict(
+    def construct_dict(
         tx: "InstructionTranslatorBase",
-        user_cls: type,
         /,
         *args: VariableTracker,
         **kwargs: VariableTracker,
-    ) -> VariableTracker:
-        if user_cls is dict:
-            result = ConstDictVariable({}, mutation_type=ValueMutationNew())
-            result.dict_update_common(tx, list(args), kwargs, method_name="dict")
-            return result
-        args_list = list(args)
-        return tx.inline_user_function_return(
-            VariableTracker.build(tx, polyfills.construct_dict),
-            [VariableTracker.build(tx, user_cls), *args_list],
-            kwargs,
-        )
+    ) -> ConstDictVariable:
+        result = ConstDictVariable({}, mutation_type=ValueMutationNew())
+        result.tp_init_impl(tx, list(args), kwargs)
+        return result
 
     @staticmethod
     def call_custom_dict_fromkeys(
