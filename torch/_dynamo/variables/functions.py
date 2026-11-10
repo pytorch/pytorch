@@ -2709,13 +2709,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             args,
             kwargs,  # type: ignore[arg-type]
         )
-        # Match inspect.signature(), which renames a comprehension's ".N"
-        # iterator argument to "implicitN"; symbolic_convert expects that key.
-        if code.co_argcount and code.co_varnames[0].startswith("."):
-            result = {
-                k.replace(".", "implicit") if k.startswith(".") else k: v
-                for k, v in result.items()
-            }
         init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):

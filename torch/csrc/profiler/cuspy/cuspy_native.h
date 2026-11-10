@@ -32,7 +32,6 @@
 #include <optional>
 #include <string>
 #include <thread>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -111,10 +110,7 @@ class TORCH_API CuspyBuffers {
   std::condition_variable cv_;
   // LIFO free list: reuse the warmest (most recently returned) buffer first.
   std::vector<uint8_t*> free_;
-  // Every live buffer and the size it was allocated with (for reset, and so a
-  // buffer from before a configure() with a new size is never handed out as
-  // the new size).
-  std::unordered_map<uint8_t*, size_t> sizes_;
+  std::vector<uint8_t*> all_; // every buffer ever allocated (for reset)
   std::deque<CompletedCuptiBuffer> completed_;
   size_t buffer_size_ = 4UL * 1024 * 1024;
   size_t allocated_ = 0;
