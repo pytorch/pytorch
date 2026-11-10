@@ -12,7 +12,9 @@ from torch import SymBool, SymFloat, Tensor
 from torch._decomp import (
     _add_op_to_registry,
     _convert_out_params,
+    decomposition_table,
     global_decomposition_table,
+    is_torch_decomp_decomposition,
     meta_table,
 )
 from torch._ops import OpOverload
@@ -9575,13 +9577,10 @@ def cpp_meta_supports_symint(op: OpOverload) -> bool:
 
 
 def decomposes_under_static_shapes(op: OpOverload) -> bool:
-    # Whether FakeTensorMode decomposes op under static shapes when op is not
-    # in the meta_table and has no sparse input. Uncached, unlike
+    # Static-shape eligibility for the default FakeTensorMode predicate,
+    # excluding the meta_table and sparse-input checks. Uncached, unlike
     # torch_decomp_decompositions, which FakeTensorMode caches at an op's first
     # dispatch.
-    from torch._decomp import decomposition_table
-    from torch._subclasses.fake_tensor import is_torch_decomp_decomposition
-
     return (
         op in decomposition_table
         and is_torch_decomp_decomposition(op)
@@ -9592,10 +9591,10 @@ def decomposes_under_static_shapes(op: OpOverload) -> bool:
 def _register_static_shape_decomps() -> None:
     # Records in the C++ fake dispatch tables the ops FakeTensorMode decomposes
     # under static shapes (the meta_table and sparse checks are made at
-    # dispatch), which the C++ fake fallback is to reject. The torch._decomp
-    # decompositions are all registered by now.
-    from torch._decomp import decomposition_table
-
+    # dispatch), which the C++ fake fallback is to reject. import torch enters
+    # _meta_registrations before _decomp; our top-level _decomp import finishes
+    # loading decompositions before reaching this snapshot. Eligibility must
+    # not grow afterwards; even _add_op_to_registry only mirrors Decomp.
     for op in decomposition_table:
         if isinstance(op, OpOverload) and decomposes_under_static_shapes(op):
             schema = op._schema
