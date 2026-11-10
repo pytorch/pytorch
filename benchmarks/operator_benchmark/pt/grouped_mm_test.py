@@ -17,6 +17,8 @@ The forward test is x (B * M, K) @ w (B, N, K)^T with jagged M. The gradient tes
 times backward through both inputs (dX and dW). Each test first checks the output, dX
 and dW against per-group matmuls with Primus-Turbo's tolerances.
 
+The long tag runs bf16 and fp16 everywhere, and fp32 only on ROCm.
+
 On ROCm, the CK-Tile numbers need ROCM_ALLOW_GROUP_GEMM_CK_TILE=1; without it grouped_mm
 runs hipBLASLt.
 """
@@ -62,7 +64,12 @@ grouped_mm_configs_short = op_bench.config_list(
     tags=["short"],
 )
 
-DTYPES = [torch.bfloat16, torch.float16, torch.float32]
+# fp32 only on ROCm, where ck_tile has an fp32 grouped GEMM. On CUDA, fp32 grouped_mm is
+# the per-group mm fallback at the non-tensor-core rate, which would push the A100 job
+# past its timeout.
+DTYPES = [torch.bfloat16, torch.float16]
+if torch.version.hip:
+    DTYPES.append(torch.float32)
 
 grouped_mm_configs_long = op_bench.config_list(
     attr_names=["case", "B", "M", "N", "K"],
