@@ -25,6 +25,7 @@
 #include <curand.h>
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
+#include <limits>
 #include <type_traits>
 
 namespace at::native {
@@ -48,7 +49,7 @@ inline __device__ bool _isinf(T x) {
 // Normalizes the L1 norm of every row to 1; used by multinomial
 template <typename scalar_t>
 C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
-__global__ void renormRowsL1(scalar_t* dist, long rows, long cols) {
+__global__ void renormRowsL1(scalar_t* dist, int64_t rows, int64_t cols) {
   extern __shared__  unsigned char my_smem[];
   scalar_t *smem = reinterpret_cast<scalar_t *>(my_smem);
   scalar_t zero = static_cast<scalar_t>(0);
@@ -102,17 +103,17 @@ void renormRows(Tensor& t) {
 }
 
 template <typename scalar_t>
-__device__ int binarySearchForMultinomial(const scalar_t* cumdist,
-                                          const scalar_t* dist,
-                                          int size,
-                                          scalar_t val) {
-  int start = 0;
-  int end = size;
+__device__ int64_t binarySearchForMultinomial(const scalar_t* cumdist,
+                                              const scalar_t* dist,
+                                              int64_t size,
+                                              scalar_t val) {
+  int64_t start = 0;
+  int64_t end = size;
   // cumdist[size - 1] = 0 => all zero prob dist
   CUDA_KERNEL_ASSERT(cumdist[size - 1] > static_cast<scalar_t>(0));
 
   while (end - start > 0) {
-    int mid = start + (end - start) / 2;
+    int64_t mid = start + (end - start) / 2;
 
     scalar_t midVal = cumdist[mid];
     if (midVal < val) {
@@ -142,7 +143,7 @@ sampleMultinomialWithReplacement(PhiloxCudaState philox_args,
                                  int totalSamples,
                                  int64_t* dest,
                                  int64_t distributions,
-                                 int categories,
+                                 int64_t categories,
                                  const scalar_t* normDistPrefixSum,
                                  const scalar_t* normDist) {
   // At the moment, each warp computes one sample value in the binary
@@ -169,11 +170,16 @@ sampleMultinomialWithReplacement(PhiloxCudaState philox_args,
 
       //we are losing 3 out of 4 generated numbers but it's ok
       //this kernel is not very efficient anyway
-      auto rand = curand_uniform4(&state);
-      scalar_t r = static_cast<scalar_t>(rand.x);
+      scalar_t r;
+      if constexpr (std::is_same_v<scalar_t, double>) {
+        // A float uniform has only 24 bits of resolution, too coarse for a double CDF
+        r = curand_uniform2_double(&state).x;
+      } else {
+        r = static_cast<scalar_t>(curand_uniform4(&state).x);
+      }
 
       // Find the bucket that a uniform sample lies in
-      int choice = binarySearchForMultinomial<scalar_t>(
+      int64_t choice = binarySearchForMultinomial<scalar_t>(
           normDistPrefixSum + curDist * categories,
           normDist + curDist * categories,
           categories,
@@ -334,11 +340,15 @@ void multinomial_with_replacement_kernel_impl(
   int inputSize = self.dim();
   int64_t numDist =
       inputSize == 1 ? 1 : self.size(0);
-  int numCategories =
+  int64_t numCategories =
       inputSize == 1 ? self.size(0) : self.size(1);
 
   // Restructure data for 2d
   auto self_v = inputSize == 1 ? self.view({numDist, numCategories}) : self;
+  // A float CDF cannot give distinct buckets to more than 2^24 categories
+  if (numCategories > (int64_t{1} << std::numeric_limits<float>::digits)) {
+    self_v = self_v.to(kDouble);
+  }
 
   result.resize_({numDist, n_sample});
 
@@ -351,8 +361,8 @@ void multinomial_with_replacement_kernel_impl(
     int maxShared = props->sharedMemPerBlock;
 
     int warp_size = at::cuda::warp_size();
-    int requiredWarps = at::ceil_div(numCategories, warp_size);
-    int requiredThreads = std::min(maxThreads, requiredWarps * warp_size);
+    int requiredThreads = static_cast<int>(std::min<int64_t>(
+        maxThreads, at::round_up<int64_t>(numCategories, warp_size)));
     int requiredShared = requiredThreads * sizeof(accscalar_t);
 
     if (n_sample == 1 && maxShared >= requiredShared) {
