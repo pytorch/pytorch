@@ -8149,6 +8149,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             expected_repr = repr(finalizer)
             frames = 3 if operation in ("detach", "peek") and not alive else 2
             result, value = compiled(x, finalizer)
+            if operation == "detach":
+                self.assertFalse(finalizer.alive)
             self.assertEqual(result, x + 2)
             if operation == "call":
                 self.assertEqual(value, 7 if alive else None)
