@@ -537,10 +537,8 @@ def _optimize_transform_infos(
             effective_shard_mesh_size = math.prod(
                 device_mesh.size(info.mesh_dim) for info in infos
             )
-            # We cannot flatten if the tensor dimension is not evenly divisible
-            # by the flattened mesh size: nested sharding chunks the dimension
-            # hierarchically, and those chunk boundaries only coincide with the
-            # boundaries of a single flat collective when the split is even.
+            # Flattening uneven shards can shift padded rows and corrupt data,
+            # so fall back to sequential collectives when the split is uneven.
             # The effective size is the product of mesh sizes for dims being
             # transformed (not all dims with matching placement - intervening
             # shards are already accounted for in logical_shape).
