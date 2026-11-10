@@ -16,10 +16,8 @@ import typing
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Literal
 
-import onnxscript
-import onnxscript.evaluator
-from onnxscript import ir
-from onnxscript.ir import convenience as ir_convenience
+import onnx_ir as ir
+from onnx_ir import convenience as ir_convenience
 
 import torch
 import torch.fx
@@ -27,18 +25,18 @@ from torch.export import graph_signature
 from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.exporter import (
     _analysis,
-    _building,
     _capture_strategies,
     _constants,
+    _custom_translation,
     _dispatching,
     _errors,
     _flags,
     _fx_passes,
+    _ir_builder,
     _ir_passes,
     _onnx_program,
     _registration,
     _reporting,
-    _tensors,
     _type_casting,
     _verification,
 )
@@ -48,6 +46,8 @@ if typing.TYPE_CHECKING:
     import os
 
     import numpy.typing as npt
+
+    from torch.onnx._internal.exporter import _building
 
 
 # Define utilities to convert PyTorch data types so users do not need to specify manually
@@ -100,8 +100,8 @@ _STEP_THREE_ERROR_MESSAGE = textwrap.dedent(
 )
 
 logger = logging.getLogger(__name__)
-# The current tracer that is being used to trace the operators,
-# used by torch/onnx/_internal/exporter/_torchlib/ops/hop.py
+
+# Legacy higher-order built-ins read this only inside the isolated evaluator.
 current_tracer: _building.OpRecorder | None = None
 
 
@@ -266,8 +266,13 @@ def _set_shape_type(
             value.dtype = torch_dtype_to_onnx_dtype(meta_val.dtype)
             if complex_to_float and meta_val.dtype.is_complex:
                 value.dtype = torch_dtype_to_onnx_dtype(meta_val.dtype.to_real())
-                # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
-                dims.append(2)
+        if (
+            complex_to_float
+            and meta_val.dtype.is_complex
+            and value.dtype == torch_dtype_to_onnx_dtype(meta_val.dtype.to_real())
+        ):
+            # Native builders may already have inferred the packed real dtype.
+            dims.append(2)
 
         value.shape = ir.Shape(dims)
     elif isinstance(meta_val, (int, torch.SymInt)):
@@ -491,10 +496,6 @@ def _convert_fx_arg_to_onnx_arg(
     return arg
 
 
-def _get_onnxscript_opset(opset_version: int) -> onnxscript.values.Opset:
-    return onnxscript.values.Opset("", opset_version)
-
-
 def _is_onnx_op(op: Any) -> bool:
     """Whether the op overload is an ONNX custom op implemented with PyTorch."""
     if not isinstance(op, torch._ops.OpOverload):
@@ -517,7 +518,7 @@ def _handle_call_function_node_with_lowering(
     graph_like: ir.Graph | ir.Function,
     constant_farm: dict[Any, ir.Value],
     registry: _registration.ONNXRegistry,
-    opset: onnxscript.values.Opset,
+    opset: int,
     node_name_to_local_functions: dict[str, ir.Function],
 ) -> None:
     """Translate a call_function node to an ONNX node.
@@ -530,7 +531,7 @@ def _handle_call_function_node_with_lowering(
             Must add nodes to this graph because it can be a subgraph that is currently being constructed.
         constant_farm: A mapping of constant values to existing ONNX ``Value``s.
         registry: The registry of all aten to ONNX decomposition functions.
-        opset: The ONNX Script opset object for constructing ONNX nodes.
+        opset: The target ONNX opset version.
         node_name_to_local_functions: A mapping of subgraph names to the corresponding ONNX functions.
     """
     if node.target is operator.getitem:
@@ -567,6 +568,7 @@ def _handle_call_function_node_with_lowering(
             # TODO(justinchuby): Maybe keep it as None?
             onnx_kwargs[key] = -1
 
+    native = False
     if _is_onnx_op(node.target):
         # Handle torch.ops.onnx.* ops. These ops can be directly added to the graph
         op_type, opset_version = _parse_onnx_op(node.target)  # type: ignore[arg-type]
@@ -600,35 +602,75 @@ def _handle_call_function_node_with_lowering(
                 f"No ONNX function found for {node.target!r}. Failure message: {message}"
             )
 
-        with onnxscript.evaluator.default_as(
-            tracer := _building.OpRecorder(opset, constant_farm)
-        ):
-            global current_tracer
-            current_tracer = tracer
+        if isinstance(onnx_function, _custom_translation.NativeTranslation):
+            native = True
+            graph = (
+                graph_like.graph if isinstance(graph_like, ir.Function) else graph_like
+            )
+            builder = _ir_builder.GraphBuilder(graph, opset=registry.opset_version)
+            # Native operators use the requested schema version even when the
+            # only native translation occurs inside an owned subgraph.
+            model.graph.opset_imports[""] = registry.opset_version
+            node_count = len(graph)
             try:
-                outputs = onnx_function(*onnx_args, **onnx_kwargs)
+                outputs = onnx_function(
+                    _ir_builder.TranslationContext(builder),
+                    *onnx_args,
+                    **onnx_kwargs,
+                )
             except Exception as e:
                 raise _errors.GraphConstructionError(
-                    f"Error when calling function '{onnx_function}' with args '{onnx_args}' and kwargs '{onnx_kwargs}'"
+                    f"Native translation {onnx_function.function!r} failed for "
+                    f"{node.target!r}. Check its IR inputs, explicit tensor casts "
+                    "and ONNX schema arguments."
                 ) from e
-            finally:
-                current_tracer = None
-
-        # Add the defined functions to the model
-        for identifier, onnxscript_function in tracer.functions.items():
-            if identifier in model.functions:
-                continue
-            if isinstance(onnxscript_function, ir.Function):
-                ir_function = onnxscript_function
-            else:
-                # TODO: Get IR function directly when onnxscript is updated
-                proto = onnxscript_function.to_function_proto()
-                ir_function = ir.serde.deserialize_function(proto)
-            model.functions[identifier] = ir_function
-            # Opset imports are added to the model in the final add_opset_imports pass
-
-        onnx_nodes = tracer.nodes
-        del tracer  # tracer is no longer needed
+            expected = node.meta["val"]
+            if (
+                isinstance(outputs, ir.Value)
+                and isinstance(outputs.type, ir.SequenceType)
+                and isinstance(expected, Sequence)
+            ):
+                # FX exposes a fixed tuple of tensors even when dynamic sizes
+                # require an ONNX sequence. Unpack explicitly, without tracing.
+                outputs = tuple(
+                    builder.call(
+                        "SequenceAt",
+                        outputs,
+                        index,
+                        _output_types=[outputs.type.elem_type],
+                    )[0]
+                    for index in range(len(expected))
+                )
+            values = list(outputs) if isinstance(outputs, Sequence) else [outputs]
+            expected_count = len(expected) if isinstance(expected, Sequence) else 1
+            if len(values) != expected_count or not all(
+                isinstance(value, ir.Value) for value in values
+            ):
+                raise _errors.GraphConstructionError(
+                    f"Native translation for {node.target!r} must return "
+                    f"{expected_count} ONNX IR value(s), got {outputs!r}. "
+                    "Return builder results, not Python scalars or tensors."
+                )
+            if not isinstance(expected, Sequence):
+                outputs = values[0]
+            onnx_nodes = list(
+                itertools.islice(reversed(graph), len(graph) - node_count)
+            )
+            onnx_nodes.reverse()
+            for identifier, function in builder.functions.items():
+                if (
+                    identifier in model.functions
+                    and model.functions[identifier] is not function
+                ):
+                    raise _errors.GraphConstructionError(
+                        f"Native translation defines conflicting function {identifier!r}. "
+                        "Use a unique domain/name/overload for each function."
+                    )
+                model.functions[identifier] = function
+        else:
+            onnx_nodes, outputs = _call_legacy_translation(
+                onnx_function, onnx_args, onnx_kwargs, opset, constant_farm, model
+            )
 
     # NOTE: Instead of using the output names from node.target._schema,
     # we always use the index if there are more than one outputs so the
@@ -659,9 +701,70 @@ def _handle_call_function_node_with_lowering(
         # Record the nn.Module stack for the node
         _set_node_metadata(node, ir_node)
 
-    # Add the traced nodes to the current graph
-    # Must add nodes to this graph, not model.graph, because it can be a subgraph that is currently being constructed
-    graph_like.extend(onnx_nodes)
+    # Native builders already append to the current graph, including subgraphs.
+    if not native:
+        graph_like.extend(onnx_nodes)
+
+
+def _call_legacy_translation(
+    onnx_function, onnx_args, onnx_kwargs, opset, constant_farm, model
+):
+    """Keep legacy evaluator state out of native translation invocation."""
+    import onnxscript
+    import onnxscript.evaluator
+
+    from torch.onnx._internal.exporter import _building, _tensors
+
+    opset = onnxscript.values.Opset("", opset)
+    with onnxscript.evaluator.default_as(
+        tracer := _building.OpRecorder(opset, constant_farm)
+    ):
+
+        def legacy_arg(arg):
+            if isinstance(arg, ir.Value) and not isinstance(
+                arg, _tensors.SymbolicTensor
+            ):
+                # Legacy callables may use Python operators on their inputs.
+                # Keep that behavior at this boundary, not in the native builder.
+                symbolic = opset.Identity(arg)
+                symbolic.type = arg.type
+                symbolic.shape = arg.shape
+                return symbolic
+            if isinstance(arg, tuple):
+                return tuple(legacy_arg(value) for value in arg)
+            if isinstance(arg, list):
+                return [legacy_arg(value) for value in arg]
+            return arg
+
+        global current_tracer
+        previous_tracer = current_tracer
+        current_tracer = tracer
+        try:
+            outputs = onnx_function(
+                *(legacy_arg(arg) for arg in onnx_args),
+                **{name: legacy_arg(arg) for name, arg in onnx_kwargs.items()},
+            )
+        except Exception as e:
+            raise _errors.GraphConstructionError(
+                f"Error when calling function '{onnx_function}' with args '{onnx_args}' and kwargs '{onnx_kwargs}'"
+            ) from e
+        finally:
+            current_tracer = previous_tracer
+
+    # Add the defined functions to the model
+    for identifier, onnxscript_function in tracer.functions.items():
+        if identifier in model.functions:
+            continue
+        if isinstance(onnxscript_function, ir.Function):
+            ir_function = onnxscript_function
+        else:
+            # TODO: Get IR function directly when onnxscript is updated
+            proto = onnxscript_function.to_function_proto()
+            ir_function = ir.serde.deserialize_function(proto)
+        model.functions[identifier] = ir_function
+        # Opset imports are added to the model in the final add_opset_imports pass
+
+    return tracer.nodes, outputs
 
 
 def _handle_placeholder_node(
@@ -670,13 +773,13 @@ def _handle_placeholder_node(
     *,
     graph_like: ir.Graph | ir.Function,
     lower: str,
-    opset: onnxscript.values.Opset,
+    opset: int,
 ) -> None:
     # Placeholder nodes are user inputs
     # We need to create a new tensor for each user input
     # and add it to the graph's inputs
     name = node.name
-    input_ = _tensors.SymbolicTensor(opset, name=name)
+    input_ = ir.Value(name=name)
     input_.meta["node"] = node
     _set_shape_type(input_, node.meta["val"], complex_to_float=lower != "none")
     node_name_to_values[name] = input_
@@ -797,7 +900,7 @@ def _translate_fx_graph(
     # to the subgraph. This is not typical but is valid Python.
     node_name_to_local_functions: dict[str, ir.Function] = {}
     constant_farm: dict[Any, ir.Value] = {}
-    opset = _get_onnxscript_opset(registry.opset_version)
+    opset = registry.opset_version
 
     for node in fx_graph.nodes:
         logger.debug(
@@ -1328,6 +1431,53 @@ def _exported_program_to_onnx_program(
     # Collect and add opset imports to the model
     _ir_passes.add_opset_imports(model)
 
+    if any(
+        isinstance(meta.onnx_function, _custom_translation.NativeTranslation)
+        for metas in registry.functions.values()
+        for meta in metas
+    ):
+        import onnx.version_converter
+
+        # ONNX Script's inliner requires identical function/model opsets.
+        # Convert function bodies independently so lexical subgraph captures
+        # remain in their original scopes until the normal inlining pass.
+        import onnxscript.version_converter
+
+        target_opset = model.opset_imports.get("", _constants.TORCHLIB_OPSET)
+        for identifier, function in tuple(model.functions.items()):
+            if function.opset_imports.get("", target_opset) == target_opset:
+                continue
+            body = ir.Model(function.graph.clone(), ir_version=model.ir_version)
+            try:
+                if function.attributes:
+                    # Legacy scripted functions can reference formal attributes,
+                    # which the IR-native converter does not support.
+                    converted = onnx.version_converter.convert_version(
+                        ir.serde.serialize_model(body), target_opset
+                    )
+                    graph = ir.serde.deserialize_model(converted).graph
+                else:
+                    # Keep lifted FakeTensors in IR instead of serializing their data.
+                    onnxscript.version_converter.convert_version(body, target_opset)
+                    graph = body.graph
+            except RuntimeError as error:
+                raise _errors.GraphConstructionError(
+                    f"Cannot align function {identifier!r} from ONNX opset "
+                    f"{function.opset_imports.get('')} to {target_opset}. "
+                    "Construct the function using the active translation builder's "
+                    "opset, or use operators supported by ONNX version conversion."
+                ) from error
+            normalized = ir.Function(
+                function.domain,
+                function.name,
+                function.overload,
+                graph=graph,
+                attributes=function.attributes.values(),
+            )
+            normalized.metadata_props.update(function.metadata_props)
+            normalized.meta.update(function.meta)
+            model.functions[identifier] = normalized
+
     return _onnx_program.ONNXProgram(model, exported_program)
 
 
@@ -1391,6 +1541,7 @@ def export(
         TorchExportError: If the export process fails with torch.export.
         ConversionError: If the ExportedProgram to ONNX translation fails.
     """
+    custom_translations = _custom_translation.snapshot()
     # Set up the error reporting facilities
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
     profiler = _maybe_start_profiler(profile)
@@ -1505,7 +1656,9 @@ def export(
     try:
         # Build the ONNX function registry
         if registry is None:
-            registry = _registration.ONNXRegistry.from_torchlib()
+            registry = _registration.ONNXRegistry.from_torchlib(
+                custom_translations=custom_translations
+            )
 
         # Process the exported program to run decompositions and type promotions etc.
         decomposed_program = _prepare_exported_program_for_export(

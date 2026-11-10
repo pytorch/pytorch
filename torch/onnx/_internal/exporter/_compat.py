@@ -16,6 +16,7 @@ from torch.onnx._internal._lazy_import import onnx
 from torch.onnx._internal.exporter import (
     _constants,
     _core,
+    _custom_translation,
     _dynamic_shapes,
     _exportable_module,
     _onnx_program,
@@ -68,6 +69,7 @@ def export_compat(
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
 ) -> _onnx_program.ONNXProgram:
+    custom_translations = _custom_translation.snapshot()
     if opset_version is None:
         opset_version = onnx_constants.ONNX_DEFAULT_OPSET
 
@@ -147,7 +149,8 @@ def export_compat(
         registry_opset_version = opset_version
 
     registry = _registration.ONNXRegistry().from_torchlib(
-        opset_version=registry_opset_version
+        opset_version=registry_opset_version,
+        custom_translations=custom_translations,
     )
     if custom_translation_table is not None:
         for torch_op, onnx_op in custom_translation_table.items():
