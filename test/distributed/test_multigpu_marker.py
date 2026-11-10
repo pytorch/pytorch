@@ -98,9 +98,9 @@ class TestMultiGpuMarker(TestCase):
         self.assertEqual(_resolve_gpu_requirement(_fake_item(needs2)), 2)
 
     def test_real_gloo_gpu_decorator(self):
-        from distributed.test_c10d_gloo import DistributedDataParallelTest
+        from distributed.test_c10d_gloo import DistributedDataParallelCudaTest
 
-        item = _fake_item(DistributedDataParallelTest.test_gloo_backend_2gpu_module)
+        item = _fake_item(DistributedDataParallelCudaTest.test_gloo_backend_2gpu_module)
         self.assertEqual(_resolve_gpu_requirement(item), 4)
 
     def test_real_fully_shard_2d_training(self):
