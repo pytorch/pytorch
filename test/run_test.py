@@ -2201,6 +2201,7 @@ def get_selected_tests(options) -> list[str]:
                 [
                     # Windows fatal exception / access violation
                     "functorch/test_aotdispatch",
+                    "functorch/test_aotdispatch_moduleinfo",
                     "functorch/test_control_flow",
                     "nn/test_convolution",
                     "profiler/test_profiler",
