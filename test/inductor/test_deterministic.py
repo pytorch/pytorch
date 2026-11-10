@@ -50,6 +50,19 @@ class DeterministicTest(TestCase):
         finally:
             torch.use_deterministic_algorithms(old_val, warn_only=True)
 
+    @inductor_config.patch(deterministic=True)
+    def test_deterministic_flag_survives_compile(self):
+        # Dynamo restores the deterministic-algorithms state after each frame;
+        # that must not turn off Inductor's deterministic mode.
+        from torch._inductor.utils import run_and_get_code
+
+        x = torch.randn(16, device=GPU_TYPE)
+        for fn in (lambda x: x + 1, lambda x: x * 2):
+            torch._dynamo.reset()
+            _, (code,) = run_and_get_code(torch.compile(fn), x)
+            self.assertIn("'deterministic': True", code)
+        self.assertTrue(inductor_config.deterministic)
+
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, deterministic):
         with inductor_config.patch(deterministic=deterministic):
