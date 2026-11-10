@@ -107,8 +107,11 @@ class FSDPCommContext:
         self._last_post_reduce_events: dict[torch.Stream, torch.Event] = dict()
         # Run the HSDP all-reduces concurrently with all-gather/reduce-scatter
         # since collectives use different network resources and can overlap
-        # in the typical intra-node sharding / inter-node replication case
-        self.all_reduce_stream = self.device_handle.Stream()
+        # in the typical intra-node sharding / inter-node replication case.
+        # High priority like reduce-scatter: the post-reduce cast/accumulate
+        # runs here and can otherwise be starved by long compute kernels,
+        # delaying later all-reduces queued behind it.
+        self.all_reduce_stream = self.device_handle.Stream(priority=high_priority)
         # All-gather/reduce-scatter states keep references to collective
         # tensors produced in one stream and used in another and accompanying
         # CUDA events for synchronization
