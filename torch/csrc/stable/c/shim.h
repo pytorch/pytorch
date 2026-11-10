@@ -399,6 +399,44 @@ torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
 
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    int32_t dtype_a,
+    int32_t dtype_b,
+    int32_t dtype_c,
+    int32_t add_C,
+    const void* A,
+    const void* B,
+    void* C,
+    int32_t is_vnni);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cpublas_brgemm_release(int32_t is_vnni);
+
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_default_real(
+    int32_t dtype,
+    int32_t transa,
+    int32_t transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    double alpha,
+    const void* a,
+    int64_t lda,
+    const void* b,
+    int64_t ldb,
+    double beta,
+    void* c,
+    int64_t ldc);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cpublas_could_pack(int32_t dtype, bool* ret);
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #ifdef __cplusplus
