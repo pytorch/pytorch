@@ -24,8 +24,11 @@ if "%SHARD_NUMBER%" == "1" (
 echo Copying over test times file
 robocopy /E "%PYTORCH_FINAL_PACKAGE_DIR_WIN%\.additional_ci_files" "%PROJECT_DIR_WIN%\.additional_ci_files"
 
+set EXCLUDE_CLAUSE=
+if defined TESTS_TO_EXCLUDE set EXCLUDE_CLAUSE=--exclude %TESTS_TO_EXCLUDE%
+
 echo Run nn tests
-python run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests --shard "%SHARD_NUMBER%" "%NUM_TEST_SHARDS%" --verbose
+python run_test.py --exclude-distributed-tests --exclude-quantization-tests %EXCLUDE_CLAUSE% --shard "%SHARD_NUMBER%" "%NUM_TEST_SHARDS%" --verbose
 if ERRORLEVEL 1 goto fail
 
 popd
