@@ -64,6 +64,16 @@ class DataParallelMeshInfo:
             )
         self.is_spmd_mesh = self.dp_mesh_dims is not None
 
+    @property
+    def shard_info(self) -> "FSDPMeshInfo | None":
+        """This mesh info if it shards parameters (FSDP, HSDP), else None."""
+        return None
+
+    @property
+    def replicate_info(self) -> "DDPMeshInfo | None":
+        """This mesh info if it replicates parameters (HSDP, DDP), else None."""
+        return None
+
 
 @dataclass
 class FSDPMeshInfo(DataParallelMeshInfo):
@@ -74,10 +84,10 @@ class FSDPMeshInfo(DataParallelMeshInfo):
         self.shard_mesh_size: int = self.mesh.size(self.shard_mesh_dim)
         self.shard_process_group = self.mesh.get_group(self.shard_mesh_dim)
         self.shard_mesh_rank: int = self.shard_process_group.rank()
-        # Reduce-scatter shares the shard PG (one NCCL communicator) by default;
-        # FSDPModule.set_separate_reduce_scatter_group assigns a dedicated PG
-        # here so reduce-scatter can overlap all-gather in backward.
-        self.reduce_scatter_process_group: dist.ProcessGroup | None = None
+
+    @property
+    def shard_info(self) -> "FSDPMeshInfo | None":
+        return self
 
 
 @dataclass
@@ -89,6 +99,10 @@ class DDPMeshInfo(DataParallelMeshInfo):
         self.replicate_mesh_size: int = self.mesh.size(self.replicate_mesh_dim)
         self.replicate_process_group = self.mesh.get_group(self.replicate_mesh_dim)
         self.replicate_mesh_rank: int = self.replicate_process_group.rank()
+
+    @property
+    def replicate_info(self) -> "DDPMeshInfo | None":
+        return self
 
 
 @dataclass

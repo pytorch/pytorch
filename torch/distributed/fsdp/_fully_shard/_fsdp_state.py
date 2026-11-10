@@ -265,8 +265,6 @@ class FSDPState(_State):
             self._state_ctx.manual_backward_finalization_active = None
         for state in self._state_ctx.all_states:
             state._training_state = TrainingState.IDLE
-            for bucket in state._fsdp_param_groups:
-                bucket.wait_for_grad_offload()
 
     def _validate_no_duplicate_params(self) -> None:
         seen: set[int] = set()

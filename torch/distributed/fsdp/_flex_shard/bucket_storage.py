@@ -105,8 +105,13 @@ class BucketSpec:
             another dtype. ``cast_forward_inputs`` and ``output_dtype`` cast
             the inputs and outputs of the modules that this bucket hooks; the
             buckets that hook one module must cast alike.
-        offload_policy: ``fully_shard``'s offload policy. flex_shard() does not
-            support ``CPUOffloadPolicy`` yet.
+        offload_policy: ``fully_shard``'s offload policy. With
+            ``CPUOffloadPolicy``, as in ``fully_shard``, the bucket keeps its
+            sharded parameters and their grads on the CPU (pinned unless
+            ``pin_memory=False``), so the optimizer steps there, and copies the
+            shards to the accelerator for each unshard. Requires placements
+            that declare ``supports_cpu_offload``, such as ``Shard``. Eager
+            only.
         gradient_reduce_op: Gradient reduction semantics. ``dist.ReduceOp.AVG``
             preserves FlexShard's historical average-gradient behavior.
             ``dist.ReduceOp.SUM`` matches FSDP2's no-gradient-division mode,
@@ -164,7 +169,8 @@ class BucketSpec:
             each module's own parameters. The reduce-scatter groups them by
             sharded grad dtype, as FSDP2 does, and includes only the parameters
             that got a grad, as FSDP2 does by default: every rank must then get
-            grads for the same parameters. Requires ``Shard`` placements. Eager
+            grads for the same parameters. Requires placements that declare
+            ``matches_fsdp2_collectives``, such as ``Shard``. Eager
             only.
     """
 
@@ -329,9 +335,10 @@ class ShardedBucketStorage:
         # The smaller group a reshard after forward keeps chunks for, as
         # FSDP2's reshard_after_forward=int (see BucketRuntime.reshard).
         self._post_forward_group: dist.ProcessGroup | None = None
-        # The all-gather replacing the placement's (FSDP2's custom AllGather),
-        # and where to gather a storage kept on another device (CPU offload).
+        # The all-gather replacing the placement's (FSDP2's custom AllGather).
         self._all_gather_comm: Any = None
+        # See set_cpu_offload
+        self._cpu_offload: CPUOffloadPolicy | None = None
         self._compute_device: torch.device | None = None
         # FSDP2's custom ReduceScatter and set_reduce_scatter_input_fn.
         self._reduce_scatter_comm: Any = None
@@ -348,6 +355,16 @@ class ShardedBucketStorage:
         self._gradient_reduction = GradientReduction(
             gradient_reduce_op, gradient_divide_factor
         )
+
+    def set_cpu_offload(
+        self, policy: CPUOffloadPolicy, compute_device: torch.device
+    ) -> None:
+        """Keep the sharded parameters and their grads on the CPU, as FSDP2's
+        ``CPUOffloadPolicy``: unshards gather onto ``compute_device``, and
+        reduced grads are copied back to the CPU (see
+        ``BucketRuntime._offload_sharded_grads``)."""
+        self._cpu_offload = policy
+        self._compute_device = compute_device
 
     @classmethod
     def from_bucket(
@@ -399,6 +416,8 @@ class ShardedBucketStorage:
             fsdp2_compatible=bucket_spec.fsdp2_compatible,
             mp_policy=bucket_spec.mp_policy,
         )
+        if isinstance(offload_policy, CPUOffloadPolicy):
+            bucket_storage.set_cpu_offload(offload_policy, torch.device(device))
         bucket_storage.copy_params_from(named_params)
         bucket_storage.install_sharded_params(expected_param_device)
         return bucket_storage

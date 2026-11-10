@@ -2,6 +2,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
+from typing import ClassVar
 
 import torch
 import torch.distributed as dist
@@ -127,6 +128,11 @@ class Comm(ABC):
     3. What to do/call upon the comm is called
        (see `AllGather` interface as an example)
     """
+
+    # Whether FSDP's comm settings (set_allocate_memory_from_process_group_for_comm,
+    # set_symm_mem_for_comm) may replace this comm: FSDP's own comms declare it,
+    # while a custom comm keeps the comm that the user installed
+    _replaceable_by_fsdp: ClassVar[bool] = False
 
     @abstractmethod
     def allocate(

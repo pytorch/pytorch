@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
     from torch.distributed.tensor import Placement as DTensorPlacement
 
+    from .bucket_runtime import ParamRepresentation
     from .bucket_storage import ParamInfo
 
 
@@ -224,6 +225,15 @@ class Placement(ABC):
     #: its gather buffer until its hook takes it.
     refills_persistent_buffers_in_finish: ClassVar[bool] = False
 
+    #: Whether a bucket of this placement can issue the collectives of the
+    #: FSDP2 ``fully_shard`` group it replaces, byte for byte
+    #: (``BucketSpec.fsdp2_compatible``).
+    matches_fsdp2_collectives: ClassVar[bool] = False
+
+    #: Whether ``prepare_unshard_bucket`` gathers local shards that a CPU
+    #: offloaded bucket keeps on the CPU onto its ``device`` (``CPUOffloadPolicy``).
+    supports_cpu_offload: ClassVar[bool] = False
+
     def _api_placement(self) -> Placement | DTensorPlacement:
         """The placement that flex_shard's API takes and reports for this one."""
         return self
@@ -231,6 +241,14 @@ class Placement(ABC):
     def bucket_compatibility_key(self) -> object:
         """Return a key shared by placements that can use one bucket collective."""
         return self
+
+    def new_bucket_state(
+        self, infos: list[ParamInfo], representation: ParamRepresentation
+    ) -> object | None:
+        """State that this placement keeps for one bucket across unshards, or
+        None. The bucket's runtime creates it once and passes it to every eager
+        ``prepare_unshard_bucket`` as ``bucket_state``."""
+        return None
 
     def compute_local_numel(
         self, global_shape: torch.Size, rank: int, world_size: int

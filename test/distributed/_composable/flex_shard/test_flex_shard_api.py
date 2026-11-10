@@ -18,6 +18,7 @@ from torch.distributed.fsdp._flex_shard import (
     GradientReduction,
     is_flex_shard_param,
 )
+from torch.distributed.fsdp._flex_shard.placements.block_shard import BlockShard
 from torch.distributed.fsdp._flex_shard.placements.shard import per_param_placements
 from torch.distributed.tensor import Shard
 from torch.testing._internal.common_utils import (
@@ -137,17 +138,21 @@ class TestFlexShardAPI(TestCase):
         with self.assertRaisesRegex(ValueError, "requires gradient_reduce_op=AVG"):
             GradientReduction(dist.ReduceOp.SUM, 2)
 
-    def test_offload_policy_is_rejected_until_supported(self):
+    def test_cpu_offload_requires_placements_that_support_it(self):
+        def block_placements(named_params, mesh):
+            del mesh
+            return {fqn: (BlockShard(blocks_per_rank=(1,)),) for fqn, _ in named_params}
+
         with single_rank_cuda_mesh() as mesh:
             _, model = make_transformer_model()
-            with self.assertRaisesRegex(NotImplementedError, "CPUOffloadPolicy"):
+            with self.assertRaisesRegex(NotImplementedError, "support CPU offload"):
                 flex_shard_cuda(
                     model,
                     mesh,
                     buckets=[
                         BucketSpec(
                             ["*"],
-                            placement_fn=per_param_placements,
+                            placement_fn=block_placements,
                             mesh=mesh,
                             offload_policy=CPUOffloadPolicy(pin_memory=False),
                             reshard_after_forward=False,

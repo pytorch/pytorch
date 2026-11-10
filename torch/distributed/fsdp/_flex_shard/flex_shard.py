@@ -21,9 +21,7 @@ from .bucket_runtime import (
     _EAGER_COMM_CONTEXTS_ATTR,
     _in_backward,
     _install_bucket_unshard_hooks,
-    _KEEP_PREFETCHES_UNTIL_USED_ATTR,
     _MAX_PENDING_REDUCE_GRADS_ATTR,
-    _POST_BACKWARD_PER_CALL_ATTR,
     GradientReductionHandle,
     ModuleUnshardHandle,
     ParamOwnerRef,
@@ -38,7 +36,7 @@ from .bucket_storage import (
     PlacementFn,
     ShardedBucketStorage,
 )
-from .placements.shard import _engine_placements, Shard
+from .placements.shard import _engine_placements
 from .sharded_param import is_flex_shard_param
 from .utils import (
     _get_device_from_mesh,
@@ -215,7 +213,7 @@ class FlexShardModule:
                 if not async_op or bucket.is_unsharded:
                     bucket.unshard(on_current_stream=True)
                 else:
-                    context.prefetch(bucket, explicit=True, on_current_stream=True)
+                    context.prefetch(bucket, on_current_stream=True)
                     started.append((context, bucket))
         return ModuleUnshardHandle(started) if async_op else None
 
@@ -384,34 +382,6 @@ class FlexShardModule:
             bucket_storage.set_reduce_scatter_unused_params(
                 reduce_scatter_unused_params
             )
-
-    def set_post_backward_per_call(self, enabled: bool) -> None:
-        """Reduce and reshard after the backward of each forward call, as FSDP2
-        does, for buckets called several times in a forward.
-
-        By default, such a bucket keeps its unsharded params until the last
-        call's backward and then reduces once. Per call frees the unsharded
-        params between the calls' backwards, at the cost of a re-gather and a
-        reduce-scatter per call. Call it on the module ``flex_shard`` returned.
-        """
-        setattr(self, _POST_BACKWARD_PER_CALL_ATTR, enabled)
-        for context in getattr(self, _EAGER_COMM_CONTEXTS_ATTR, {}).values():
-            context.post_backward_per_call = enabled
-
-    def set_keep_prefetches_until_used(self, enabled: bool) -> None:
-        """Keep learned-order prefetches until their buckets use them, as FSDP2
-        does.
-
-        Backward then prefetches the previous bucket in post-forward order, and
-        several prefetches may be in flight. By default, one learned-order
-        prefetch runs at a time, to the nearest bucket that still needs a
-        gather, and is released when execution diverges from the learned
-        order, which bounds the memory prefetches hold. Call it on the module
-        ``flex_shard`` returned.
-        """
-        setattr(self, _KEEP_PREFETCHES_UNTIL_USED_ATTR, enabled)
-        for context in getattr(self, _EAGER_COMM_CONTEXTS_ATTR, {}).values():
-            context.keep_prefetches_until_used = enabled
 
     def set_max_pending_reduce_grads(
         self,
@@ -583,6 +553,8 @@ def relayout_bucket(
         raise ValueError(
             "relayout_bucket needs materialized storage; call to_empty() first."
         )
+    if bucket_storage._cpu_offload is not None:
+        raise NotImplementedError("relayout_bucket does not support CPU offload yet.")
     runtime = _bucket_runtime_of(cast(nn.Module, module), bucket_storage)
     if runtime is not None and (runtime.is_unsharded or runtime.unsharded_params):
         raise RuntimeError(
@@ -834,10 +806,29 @@ def _validate_fsdp2_compatible_buckets(
             continue
         for fqn in bucket_fqns:
             (placement,) = param_placements[fqn]
-            if type(placement) is not Shard:
+            if not placement.matches_fsdp2_collectives:
                 raise ValueError(
                     f"BucketSpec {bucket.patterns} sets fsdp2_compatible, which "
-                    f"requires Shard placements, but {fqn!r} uses {placement!r}."
+                    "requires placements whose collectives match FSDP2's, such as "
+                    f"Shard, but {fqn!r} uses {placement!r}."
+                )
+
+
+def _validate_offloaded_buckets(
+    bucket_assignments: BucketParamFQNsByIndex,
+    param_placements: dict[str, tuple[Placement, ...]],
+    buckets: list[BucketSpec],
+) -> None:
+    for bucket, bucket_fqns in zip(buckets, bucket_assignments, strict=True):
+        if not isinstance(bucket.offload_policy, CPUOffloadPolicy):
+            continue
+        for fqn in bucket_fqns:
+            (placement,) = param_placements[fqn]
+            if not placement.supports_cpu_offload:
+                raise NotImplementedError(
+                    f"BucketSpec {bucket.patterns} sets CPUOffloadPolicy, which "
+                    "requires placements that support CPU offload, such as Shard, "
+                    f"but {fqn!r} uses {placement!r}."
                 )
 
 
@@ -856,10 +847,6 @@ def _prepare_flex_shard_inputs(
         if not callable(bucket.placement_fn):
             raise TypeError("BucketSpec.placement_fn must be callable.")
         _validate_flex_shard_mesh(bucket.mesh)
-        if isinstance(bucket.offload_policy, CPUOffloadPolicy):
-            raise NotImplementedError(
-                "flex_shard() does not support CPUOffloadPolicy yet."
-            )
     # A bucket is one collective over one process group, so the mesh is a
     # per-bucket property. Buckets may use different meshes, but this rank has a
     # single local device, so require all bucket meshes to share a device type.
@@ -911,6 +898,7 @@ def _prepare_flex_shard_inputs(
         named_params,
     )
     _validate_fsdp2_compatible_buckets(bucket_assignments, param_placements, buckets)
+    _validate_offloaded_buckets(bucket_assignments, param_placements, buckets)
 
     return PreparedFlexShardInputs(
         named_params=named_params,

@@ -71,6 +71,8 @@ class SymmMemAllocMixin:
 
 
 class DefaultAllGather(DefaultAllocMixin, AllGather):
+    _replaceable_by_fsdp = True
+
     def __call__(
         self,
         output_tensor: torch.Tensor,
@@ -87,6 +89,8 @@ class DefaultAllGather(DefaultAllocMixin, AllGather):
 
 
 class ProcessGroupAllocAllGather(ProcessGroupAllocMixin, AllGather):
+    _replaceable_by_fsdp = True
+
     def __init__(self, group: dist.ProcessGroup) -> None:
         super().__init__(group)
 
@@ -106,6 +110,8 @@ class ProcessGroupAllocAllGather(ProcessGroupAllocMixin, AllGather):
 
 
 class SymmMemAllGather(SymmMemAllocMixin, AllGather):
+    _replaceable_by_fsdp = True
+
     def __init__(
         self,
         group: dist.ProcessGroup,
@@ -135,6 +141,8 @@ class SymmMemAllGather(SymmMemAllocMixin, AllGather):
 
 
 class DefaultReduceScatter(DefaultAllocMixin, ReduceScatter):
+    _replaceable_by_fsdp = True
+
     def __call__(
         self,
         output_tensor: torch.Tensor,
@@ -153,6 +161,8 @@ class DefaultReduceScatter(DefaultAllocMixin, ReduceScatter):
 
 
 class ProcessGroupAllocReduceScatter(ProcessGroupAllocMixin, ReduceScatter):
+    _replaceable_by_fsdp = True
+
     def __init__(self, group: dist.ProcessGroup) -> None:
         super().__init__(group)
 
@@ -174,6 +184,8 @@ class ProcessGroupAllocReduceScatter(ProcessGroupAllocMixin, ReduceScatter):
 
 
 class SymmMemReduceScatter(SymmMemAllocMixin, ReduceScatter):
+    _replaceable_by_fsdp = True
+
     def __init__(
         self,
         group: dist.ProcessGroup,

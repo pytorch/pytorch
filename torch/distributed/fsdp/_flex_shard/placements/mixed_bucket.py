@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     import torch.nn as nn
     from torch.distributed.device_mesh import DeviceMesh
 
+    from ..bucket_runtime import ParamRepresentation
     from ..bucket_storage import ParamInfo, PlacementFn
     from ..placement_contract import GradientReduction
 
@@ -186,6 +187,11 @@ class _MixedBucketMember:
     def bucket_compatibility_key(self) -> object:
         return self._mixed_bucket
 
+    def new_bucket_state(
+        self, infos: list[ParamInfo], representation: ParamRepresentation
+    ) -> object | None:
+        return self._mixed_bucket.new_bucket_state(infos, representation)
+
     def bucket_storage_layout(
         self,
         named_params: list[tuple[str, torch.nn.Parameter]],
@@ -255,6 +261,9 @@ class _MixedShard0(_MixedBucketMember, Shard):
 
     __eq__ = _MixedBucketMember.__eq__
     __hash__ = _MixedBucketMember.__hash__
+    # Its bucket's collective is the mixed bucket's
+    matches_fsdp2_collectives = False
+    supports_cpu_offload = False
 
     def __init__(self, mixed_bucket: MixedBucketPlacement) -> None:
         Shard.__init__(self, 0)

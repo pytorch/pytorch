@@ -239,17 +239,16 @@ class TestFullyShardOverlap(FSDPTest):
 
         # The opt-in created a dedicated RS group per mesh (distinct from shard)
         for pg in fsdp_param_groups:
-            self.assertIsNotNone(pg.mesh_info.reduce_scatter_process_group)
+            self.assertIsNotNone(pg.storage._reduce_mesh)
             self.assertIsNot(
-                pg.mesh_info.reduce_scatter_process_group,
-                pg.mesh_info.shard_process_group,
+                pg.storage.reduce_mesh.get_group(), pg.mesh_info.shard_process_group
             )
 
         # ref_bwd: force RS to use the same PG as AG (serialized)
-        saved_rs_pgs = []
+        saved_rs_meshes = []
         for pg in fsdp_param_groups:
-            saved_rs_pgs.append(pg.mesh_info.reduce_scatter_process_group)
-            pg.mesh_info.reduce_scatter_process_group = pg.mesh_info.shard_process_group
+            saved_rs_meshes.append(pg.storage._reduce_mesh)
+            pg.storage._reduce_mesh = None
 
         def ref_bwd():
             loss = model(inp).sum()
@@ -261,8 +260,8 @@ class TestFullyShardOverlap(FSDPTest):
         _time_fn(ref_bwd)
 
         # Restore separate PGs for fsdp_bwd
-        for pg, saved_pg in zip(fsdp_param_groups, saved_rs_pgs):
-            pg.mesh_info.reduce_scatter_process_group = saved_pg
+        for pg, saved_mesh in zip(fsdp_param_groups, saved_rs_meshes):
+            pg.storage._reduce_mesh = saved_mesh
 
         def fsdp_bwd():
             loss = model(inp).sum()
@@ -293,7 +292,7 @@ class TestFullyShardOverlap(FSDPTest):
 
         def _assert_shares_all_gather():
             for pg in param_groups:
-                self.assertIsNone(pg.mesh_info.reduce_scatter_process_group)
+                self.assertIsNone(pg.storage._reduce_mesh)
                 self.assertIs(
                     pg.storage.reduce_mesh.get_group(),
                     pg.mesh_info.shard_process_group,
@@ -305,14 +304,10 @@ class TestFullyShardOverlap(FSDPTest):
         # Enable: one dedicated PG shared across same-rank-set meshes (dedup),
         # distinct from the shard PG
         model.set_separate_reduce_scatter_group()
-        rs_pgs = {id(pg.mesh_info.reduce_scatter_process_group) for pg in param_groups}
+        rs_pgs = {id(pg.storage.reduce_mesh.get_group()) for pg in param_groups}
         self.assertEqual(len(rs_pgs), 1)  # one communicator for the single rank set
         for pg in param_groups:
-            self.assertIsNotNone(pg.mesh_info.reduce_scatter_process_group)
-            self.assertIs(
-                pg.storage.reduce_mesh.get_group(),
-                pg.mesh_info.reduce_scatter_process_group,
-            )
+            self.assertIsNotNone(pg.storage._reduce_mesh)
             self.assertIsNot(
                 pg.storage.reduce_mesh.get_group(), pg.mesh_info.shard_process_group
             )
