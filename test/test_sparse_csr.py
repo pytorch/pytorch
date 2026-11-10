@@ -32,8 +32,6 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNoSparseGeneric,
     skipCUDAIfRocm,
     skipMeta,
-    skipMPS,
-    skipXPU,
     skipXPUIf,
     tol,
     toleranceOverride,
@@ -1809,23 +1807,6 @@ class TestSparseCSRDevice(TestCase):
                                                   device=device, index_dtype=index_dtype)
                 self.assertEqual(torch.bmm(batched, b), torch.bmm(batched.to_dense(), b))
 
-    @onlyAccelerator
-    @skipCUDAIfRocm
-    @skipMPS
-    @skipXPU
-    @dtypes(torch.float32, torch.float64)
-    @parametrize("index_dtype", [torch.int32, torch.int64])
-    @parametrize("nrows", [291104, 291105])
-    @deterministiconoff
-    def test_bmm_coo_row_index_alignment(self, device, dtype, index_dtype, nrows):
-        # An odd nnz offsets the converted COO row indices from 16-byte alignment.
-        crow = torch.arange(nrows + 1, dtype=index_dtype, device=device).unsqueeze(0)
-        col = torch.zeros((1, nrows), dtype=index_dtype, device=device)
-        values = make_tensor((1, nrows), dtype=dtype, device=device)
-        a = torch.sparse_csr_tensor(crow, col, values, size=(1, nrows, 1))
-        b = make_tensor((1, 1, 1), dtype=dtype, device=device)
-        self.assertEqual(torch.bmm(a, b), values.unsqueeze(-1) * b)
-
     def run_test_block_addmm_addmv(self,
                                    addmv_addmm,
                                    c,
@@ -2237,46 +2218,6 @@ class TestSparseCSRDevice(TestCase):
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 0))
             test_shape(7, 8, 9, 20, False, index_dtype, (1, 1))
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 1))
-
-    @onlyAccelerator
-    @skipCUDAIfRocm
-    @skipMPS
-    @skipXPU
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128,
-            *[torch.half] if PLATFORM_SUPPORTS_HALF_ATOMICS else [],
-            *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else [])
-    def test_sparse_mm_deterministic(self, device, dtype):
-        # gh-202030, see test_sparse.py::test_mm_deterministic
-        a_coo, b = hub_sparse_mm_inputs(device, dtype)
-        a = a_coo.to_sparse_csr()
-        n, k = b.shape
-        c = torch.randn_like(b)
-        b1 = b[:, :1].contiguous()  # cuSPARSE: "For n == 1, the routine may use cusparseSpMV()"
-        a_int32 = torch.sparse_csr_tensor(a.crow_indices().int(), a.col_indices().int(), a.values(), a.shape)
-        a_batched = torch.sparse_csr_tensor(
-            torch.stack([a.crow_indices()] * 2), torch.stack([a.col_indices()] * 2),
-            torch.stack([a.values(), 2 * a.values()]), (2, n, n))
-        a_bcast = torch.sparse_csr_tensor(a.crow_indices(), a.col_indices(), a.values(), (2, n, n),
-                                          check_invariants=False)
-        b_batched = torch.randn(2, n, k, dtype=dtype, device=device)
-
-        def mm_backward():
-            d = b.detach().requires_grad_()
-            torch.sparse.mm(a, d).backward(c)
-            return d.grad
-
-        check_sparse_mm_deterministic(self, [
-            ("mm", lambda: torch.mm(a, b)),
-            ("mm int32 indices", lambda: torch.mm(a_int32, b)),
-            ("mm column-major", lambda: torch.mm(a, b.t().contiguous().t())),
-            ("mm n=1", lambda: torch.mm(a, b1)),
-            ("mv", lambda: torch.mv(a, b[:, 0].contiguous())),
-            ("bmm", lambda: torch.bmm(a_batched, b_batched)),
-            ("bmm broadcast", lambda: torch.bmm(a_bcast, b_batched)),
-            ("addmm", lambda: torch.addmm(c, a, b, beta=0.5, alpha=2)),
-            ("addmv", lambda: torch.addmv(c[:, 0].contiguous(), a, b[:, 0].contiguous(), beta=0.5, alpha=2)),
-            ("mm backward", mm_backward),
-        ])
 
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
@@ -3685,6 +3626,57 @@ class TestSparseCSRDevice(TestCase):
 
 class TestSparseCSRCudaOnly(TestCase):
     hw_classification = HardwareClassification.CUDA
+
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @parametrize("nrows", [291104, 291105])
+    @deterministiconoff
+    def test_bmm_coo_row_index_alignment(self, device, dtype, index_dtype, nrows):
+        # An odd nnz offsets the converted COO row indices from 16-byte alignment.
+        crow = torch.arange(nrows + 1, dtype=index_dtype, device=device).unsqueeze(0)
+        col = torch.zeros((1, nrows), dtype=index_dtype, device=device)
+        values = make_tensor((1, nrows), dtype=dtype, device=device)
+        a = torch.sparse_csr_tensor(crow, col, values, size=(1, nrows, 1))
+        b = make_tensor((1, 1, 1), dtype=dtype, device=device)
+        self.assertEqual(torch.bmm(a, b), values.unsqueeze(-1) * b)
+
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128,
+            *[torch.half] if PLATFORM_SUPPORTS_HALF_ATOMICS else [],
+            *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else [])
+    def test_sparse_mm_deterministic(self, device, dtype):
+        # gh-202030, see test_sparse.py::test_mm_deterministic
+        a_coo, b = hub_sparse_mm_inputs(device, dtype)
+        a = a_coo.to_sparse_csr()
+        n, k = b.shape
+        c = torch.randn_like(b)
+        b1 = b[:, :1].contiguous()  # cuSPARSE: "For n == 1, the routine may use cusparseSpMV()"
+        a_int32 = torch.sparse_csr_tensor(a.crow_indices().int(), a.col_indices().int(), a.values(), a.shape)
+        a_batched = torch.sparse_csr_tensor(
+            torch.stack([a.crow_indices()] * 2), torch.stack([a.col_indices()] * 2),
+            torch.stack([a.values(), 2 * a.values()]), (2, n, n))
+        a_bcast = torch.sparse_csr_tensor(a.crow_indices(), a.col_indices(), a.values(), (2, n, n),
+                                          check_invariants=False)
+        b_batched = torch.randn(2, n, k, dtype=dtype, device=device)
+
+        def mm_backward():
+            d = b.detach().requires_grad_()
+            torch.sparse.mm(a, d).backward(c)
+            return d.grad
+
+        check_sparse_mm_deterministic(self, [
+            ("mm", lambda: torch.mm(a, b)),
+            ("mm int32 indices", lambda: torch.mm(a_int32, b)),
+            ("mm column-major", lambda: torch.mm(a, b.t().contiguous().t())),
+            ("mm n=1", lambda: torch.mm(a, b1)),
+            ("mv", lambda: torch.mv(a, b[:, 0].contiguous())),
+            ("bmm", lambda: torch.bmm(a_batched, b_batched)),
+            ("bmm broadcast", lambda: torch.bmm(a_bcast, b_batched)),
+            ("addmm", lambda: torch.addmm(c, a, b, beta=0.5, alpha=2)),
+            ("addmv", lambda: torch.addmv(c[:, 0].contiguous(), a, b[:, 0].contiguous(), beta=0.5, alpha=2)),
+            ("mm backward", mm_backward),
+        ])
 
     @unittest.skipIf(not TEST_CUDA_CUDSS, "The test requires cudss")
     @dtypes(*floating_types())
