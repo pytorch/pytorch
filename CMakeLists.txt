@@ -434,7 +434,13 @@ cmake_dependent_option(USE_NCCL_EP "Build NCCL EP library" OFF
                        "USE_NCCL;USE_CUDA" OFF)
 cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
-option(USE_NNPACK "Use NNPACK" ON)
+# On macOS, NNPACK's FFT-based convolutions are slower than im2col + Accelerate and spread NaN/Inf
+# across the whole tile, see https://github.com/pytorch/pytorch/issues/157237
+if(APPLE AND NOT IOS)
+  option(USE_NNPACK "Use NNPACK" OFF)
+else()
+  option(USE_NNPACK "Use NNPACK" ON)
+endif()
 cmake_dependent_option(USE_NUMA "Use NUMA. Only available on Linux." ON "LINUX"
                        OFF)
 cmake_dependent_option(USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on."
