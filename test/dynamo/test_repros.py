@@ -5196,6 +5196,25 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         args = [torch.empty(3), torch.empty(3)]
         self.assertIsNone(wrapper.cache_entry_bypass_reason(args, aot_config))
 
+    def test_synthetic_base_cache_validation_allows_unavailable_args(self):
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            AOTSyntheticBaseWrapper,
+        )
+
+        aot_config = types.SimpleNamespace(
+            aot_autograd_arg_pos_to_source={
+                0: types.SimpleNamespace(name="a"),
+                1: types.SimpleNamespace(name="b"),
+            }
+        )
+        wrapper = AOTSyntheticBaseWrapper(trace_joint=False)
+        wrapper.base_groups = {0: [0, 1]}
+
+        self.assertIsNone(wrapper.cache_entry_bypass_reason([], aot_config))
+        self.assertIsNone(
+            wrapper.cache_entry_bypass_reason([torch.empty(3)], aot_config)
+        )
+
     def test_stale_base_adds_no_base_guard_and_no_recompile(self):
         # A rebound tensor's _base is not a live view base, so dynamo must not
         # fakify it or build a symbolic context from it. Before this change both

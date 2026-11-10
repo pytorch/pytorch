@@ -2086,6 +2086,11 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         for group in self.base_groups.values():
             if len(group) < 2:
                 continue
+            # Bundled precompile/load reconstructs wrappers before runtime inputs
+            # exist. There is no storage identity to validate for an unavailable
+            # group, but other complete groups can still be checked.
+            if any(index >= len(flat_args) for index in group):
+                continue
             sources = [aot_config.aot_autograd_arg_pos_to_source[i] for i in group]
             # Without a complete source list Dynamo cannot install the identity
             # guard that would request a fresh compile after an input rebind.
