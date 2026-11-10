@@ -119,7 +119,7 @@ def _to_copy_single_dim_strategy(
 
 @register_single_dim_strategy(
     aten._to_dtype_rounded.default,
-    schema_info=RuntimeSchemaInfo(static_argnum=1),
+    schema_info=RuntimeSchemaInfo(static_argnum=1, static_kwargkey=["memory_format"]),
     allow_unbacked_sharding=True,
     allow_uneven_sharding=True,
 )

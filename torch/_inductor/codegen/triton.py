@@ -1464,15 +1464,22 @@ class TritonOverrides(OpOverrides):
             and dtype in (torch.float16, torch.bfloat16, *TRITON_FLOAT8_DTYPES)
             and (use_compute_types or dtype in (torch.float16, torch.bfloat16))
             and V.graph.get_current_device_or_throw().type == "cuda"
-            and torch.version.hip is None
         ):
             # Rounding to float32 first, which is the compute type of float16
-            # and bfloat16, would round twice, unlike eager. The result is
-            # exact in dtype, so converting it to the store type is exact.
-            out = TritonOverrides.to_dtype_rounded(
-                x, dtype, torch.float64, "to_nearest_even"
-            )
-            return out if use_compute_types else f"{out}.to({triton_store_type(dtype)})"
+            # and bfloat16, would round twice, unlike eager.
+            if torch.version.hip is not None:
+                # Rounding to odd instead, Triton's conversion then rounds once.
+                x = f"triton_helpers.round_float64_to_float32({x}, 4)"
+                src_dtype = torch.float32
+            else:
+                # The result is exact in dtype, so converting it to the store
+                # type is exact.
+                out = TritonOverrides.to_dtype_rounded(
+                    x, dtype, torch.float64, "to_nearest_even"
+                )
+                if use_compute_types:
+                    return out
+                return f"{out}.to({triton_store_type(dtype)})"
 
         if use_compute_types:
             out_dtype = triton_compute_type(dtype)
@@ -1534,9 +1541,16 @@ class TritonOverrides(OpOverrides):
             "toward_positive": "rp",
             "toward_negative": "rm",
         }[rounding]
-        if src_dtype == torch.float64:
-            # Only lowered on CUDA. PTX rather than libdevice, which flushes
-            # subnormal results to zero in Inductor's kernels.
+        if src_dtype == torch.float64 and cc is None:
+            # Only lowered on CUDA and ROCm: on ROCm, with integer arithmetic.
+            mode = ROUNDING_MODES[rounding]
+            if dtype == torch.float32:
+                return f"triton_helpers.round_float64_to_float32({x}, {mode})"
+            # Round to odd (mode 4), which the float32 paths then round correctly.
+            x = f"triton_helpers.round_float64_to_float32({x}, 4)"
+        elif src_dtype == torch.float64:
+            # PTX rather than libdevice, which flushes subnormal results to zero
+            # in Inductor's kernels.
             if dtype == torch.float32:
                 asm = f"cvt.{suffix}.f32.f64 $0, $1;"
                 return (
@@ -1580,9 +1594,10 @@ class TritonOverrides(OpOverrides):
                 return f"{asm_call(asm, triton_type(dtype))}.to({out_type})"
             if dtype in (torch.float8_e4m3fn, torch.float8_e5m2) and cc >= 89:
                 e4m3 = dtype == torch.float8_e4m3fn
+                # sm_107 also has cvt.rz.satfinite.{e4m3x2,e5m2x2}.f32.
                 bits = (
                     f"triton_helpers.float32_to_float8_bits({x}, "
-                    f"{ROUNDING_MODES[rounding]}, {e4m3})"
+                    f"{ROUNDING_MODES[rounding]}, {e4m3}, {cc == 107})"
                 )
                 return f"{bits}.to({triton_type(dtype)}, bitcast=True)"
             if (

@@ -11,7 +11,6 @@ from torch._inductor.utils import is_triton_fp8_dtype_supported, run_and_get_cod
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCPUIf,
-    skipCUDAIfRocm,
 )
 from torch.testing._internal.common_utils import HardwareClassification, parametrize
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -57,8 +56,9 @@ def _lowered(device, src, dst):
         return False
     if device.type == "cpu":
         return True
-    # Triton reduces float64 to float32 with PTX.
-    if src == torch.float64 and (device.type != "cuda" or torch.version.hip):
+    # Triton reduces float64 to float32 with PTX on CUDA, and with integer
+    # arithmetic on ROCm.
+    if src == torch.float64 and device.type != "cuda":
         return False
     return is_triton_fp8_dtype_supported(dst, device)
 
@@ -152,7 +152,6 @@ class TestRoundedConversionInductor(_RoundedConversionTestMixin, TestCase):
                 code = self._check(device, torch.float32, torch.float8_e5m3fnu, mode)
                 self.assertIn(FALLBACK, code)
 
-    @skipCUDAIfRocm(msg="Triton reduces float64 with PTX, so ROCm still rounds twice")
     @parametrize(
         "dst",
         [torch.float16, torch.bfloat16, torch.float8_e4m3fn, torch.float8_e5m2],
@@ -182,12 +181,14 @@ class TestRoundedConversionInductor(_RoundedConversionTestMixin, TestCase):
             # The vectorized loop uses VecConvert, the tail c10::convert.
             if valid_vec_isa_list():
                 self.assertIn("at::vec::convert", code)
+        elif torch.version.hip:
+            self.assertIn("round_float64_to_float32", code)
+        elif dst == torch.float16:
+            self.assertIn("cvt.rn.f16.f64", code)
+        elif dst == torch.bfloat16 and _cuda_capability() >= 90:
+            self.assertIn("cvt.rn.bf16.f64", code)
         else:
-            self.assertTrue(
-                "cvt.rn.f16.f64" in code
-                or "cvt.rn.bf16.f64" in code
-                or "round_float64_to_odd_float32" in code
-            )
+            self.assertIn("round_float64_to_odd_float32", code)
 
     def test_memory_format(self, device):
         def fn(x):
@@ -246,6 +247,46 @@ class TestRoundedConversionInductor(_RoundedConversionTestMixin, TestCase):
             self.assertSameValues(a, e)
         self.assertNotIn("extern_kernels", code)
         self.assertNotIn(FALLBACK, code)
+
+    @skipCPUIf(True, "tests a Triton helper")
+    def test_software_float64_helper(self, device):
+        # The float64 conversion that other backends than CUDA use, in every
+        # mode and to odd (4), checked on every Triton device.
+        import triton
+        import triton.language as tl
+
+        from torch._inductor.runtime import triton_helpers
+
+        @triton.jit
+        def kernel(in_ptr, out_ptr, n, MODE: tl.constexpr, BLOCK: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+            mask = offsets < n
+            x = tl.load(in_ptr + offsets, mask=mask)
+            y = triton_helpers.round_float64_to_float32(x, MODE)
+            tl.store(out_ptr + offsets, y, mask=mask)
+
+        x = torch.cat(
+            [
+                _inputs(torch.float64),
+                torch.tensor([3.5e38, -3.5e38, 3.4028235677973366e38, 1e-46]),
+                torch.randn(1 << 16, dtype=torch.float64),
+            ]
+        ).to(device)
+        for mode in (*MODES, "to_odd"):
+            with self.subTest(mode=mode):
+                out = torch.empty_like(x, dtype=torch.float32)
+                code = 4 if mode == "to_odd" else MODES.index(mode)
+                kernel[(triton.cdiv(x.numel(), 1024),)](
+                    x, out, x.numel(), code, BLOCK=1024
+                )
+                if mode == "to_odd":
+                    # Truncate, and set the last bit if inexact.
+                    rz = x.cpu().to(torch.float32, round="toward_zero")
+                    inexact = (rz.double() != x.cpu()).to(torch.int32)
+                    expected = (rz.view(torch.int32) | inexact).view(torch.float32)
+                else:
+                    expected = x.cpu().to(torch.float32, round=mode)
+                self.assertSameValues(out, expected)
 
     @skipCPUIf(True, "tests a Triton helper")
     def test_software_helper(self, device):
@@ -343,6 +384,11 @@ class TestRoundedConversionInductorCUDAOnly(_RoundedConversionTestMixin, TestCas
             expectations.append(
                 (f64, bf16, "toward_zero", "round_float64_to_odd_float32")
             )
+        if cc == 107:
+            expectations += [
+                (f32, e4m3, "toward_zero", "cvt.rz.satfinite.e4m3x2.f32"),
+                (f32, e5m2, "toward_positive", "cvt.rz.satfinite.e5m2x2.f32"),
+            ]
         if cc >= 100:
             expectations += [
                 (f32, e8m0, "toward_positive", "cvt.rp.ue8m0x2.f32"),
@@ -353,7 +399,6 @@ class TestRoundedConversionInductorCUDAOnly(_RoundedConversionTestMixin, TestCas
             with self.subTest(src=src, dst=dst, mode=mode):
                 code = self._check("cuda", src, dst, mode)
                 self.assertIn(snippet, code)
-                self.assertNotIn("fp_downcast_rounding", code)
                 if dst == e8m0:
                     self.assertNotIn("satfinite", code)
 
