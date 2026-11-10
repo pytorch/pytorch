@@ -7427,7 +7427,7 @@ class TestNNDeviceType(NNTestCase):
         # Extremely large kernel_size (would overflow int)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"value cannot be safely converted without overflow: kernel_size",
+            r"value cannot be converted to type int without overflow",
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -7456,7 +7456,7 @@ class TestNNDeviceType(NNTestCase):
 
         # Extremely large stride (would overflow int)
         with self.assertRaisesRegex(
-            RuntimeError, r"value cannot be safely converted without overflow: stride"
+            RuntimeError, r"value cannot be converted to type int without overflow"
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -7476,7 +7476,7 @@ class TestNNDeviceType(NNTestCase):
 
         # Extremely large padding (would overflow int)
         with self.assertRaisesRegex(
-            RuntimeError, r"value cannot be safely converted without overflow: padding"
+            RuntimeError, r"value cannot be converted to type int without overflow"
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -7488,7 +7488,7 @@ class TestNNDeviceType(NNTestCase):
         # Combined invalid parameters
         with self.assertRaisesRegex(
             RuntimeError,
-            r"value cannot be safely converted without overflow: kernel_size",
+            r"value cannot be converted to type int without overflow",
         ):
             torch.nn.functional.avg_pool2d(
                 x,
