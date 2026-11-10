@@ -1,69 +1,66 @@
 """torch.ops.aten operators under the `core` module."""
 # mypy: disable-error-code="misc,arg-type,type-arg,valid-type,assignment,return-value,type-var,operator,no-untyped-def,index"
 # pyrefly: ignore-errors
-# ruff: noqa: TC001
 
 from __future__ import annotations
 
-from typing import Sequence, TYPE_CHECKING  # noqa: UP035
+from typing import TYPE_CHECKING
 
-from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
-    opset20 as op20,
-    opset21 as op21,
-    opset23 as op23,
-)
+import onnx_ir as ir
 
 import torch
-from torch.onnx._internal._lazy_import import onnx_ir as ir
-from torch.onnx._internal.exporter._torchlib._tensor_typing import TFloat, TReal
-from torch.onnx._internal.exporter._torchlib._torchlib_registry import (
-    _legacy_onnx_impl as onnx_impl,
-)
+from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 
 
 if TYPE_CHECKING:
-    from onnxscript.values import Opset
+    from collections.abc import Sequence
+
+    from torch.onnx._internal.exporter._ir_builder import TranslationContext
+
 
 aten = torch.ops.aten
 
 
-@onnx_impl(aten.gelu.default, trace_only=True, opset_introduced=20)
+@onnx_impl(aten.gelu.default, opset_introduced=20)
 def aten_gelu_opset20(
-    self: TReal,
+    op: TranslationContext,
+    self: ir.Value,
     approximate: str = "none",
-) -> TReal:
+) -> ir.Value:
     """gelu(Tensor self, *, str approximate="none") -> Tensor"""
-    return op20.Gelu(self, approximate=approximate)
+    return op.Gelu(self, approximate=approximate)
 
 
-@onnx_impl(aten.group_norm.default, trace_only=True, opset_introduced=21)
+@onnx_impl(aten.group_norm.default, opset_introduced=21)
 def aten_group_norm(
-    input: TFloat,
+    op: TranslationContext,
+    input: ir.Value,
     num_groups: int,
-    weight: TFloat | None = None,
-    bias: TFloat | None = None,
+    weight: ir.Value | None = None,
+    bias: ir.Value | None = None,
     eps: float = 1e-05,
     cudnn_enabled: bool = True,
-) -> TFloat:
+) -> ir.Value:
     """group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor"""
 
-    c = op21.Shape(input, start=1, end=2)
+    c = op.Shape(input, start=1, end=2)
     if weight is None:
-        weight = op21.ConstantOfShape(c, value=ir.tensor([1.0], dtype=input.dtype))
+        weight = op.ConstantOfShape(c, value=ir.tensor([1.0], dtype=input.dtype))
     if bias is None:
-        bias = op21.ConstantOfShape(c, value=ir.tensor([0.0], dtype=input.dtype))
-    return op21.GroupNormalization(
+        bias = op.ConstantOfShape(c, value=ir.tensor([0.0], dtype=input.dtype))
+    return op.GroupNormalization(
         input, weight, bias, epsilon=eps, num_groups=num_groups
     )
 
 
-@onnx_impl(aten.rms_norm.default, trace_only=True, opset_introduced=23)
+@onnx_impl(aten.rms_norm.default, opset_introduced=23)
 def aten_rms_norm(
-    input: TFloat,
+    op: TranslationContext,
+    input: ir.Value,
     normalized_shape: Sequence[int],
-    weight: TFloat | None = None,
+    weight: ir.Value | None = None,
     eps: float | None = None,
-) -> TFloat:
+) -> ir.Value:
     """rms_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, float? eps=None) -> Tensor"""
 
     # Default eps value if not provided
@@ -79,26 +76,26 @@ def aten_rms_norm(
 
     # Create weight tensor if not provided
     if weight is None:
-        weight = op23.ConstantOfShape(
-            op23.Shape(input), value=ir.tensor([1], dtype=input.dtype)
+        weight = op.ConstantOfShape(
+            op.Shape(input),
+            value=ir.tensor([1], dtype=input.dtype),
         )
 
-    return op23.RMSNormalization(input, weight, axis=axis, epsilon=eps)
+    return op.RMSNormalization(input, weight, axis=axis, epsilon=eps)
 
 
-@onnx_impl(
-    aten.scaled_dot_product_attention.default, trace_only=True, opset_introduced=23
-)
+@onnx_impl(aten.scaled_dot_product_attention.default, opset_introduced=23)
 def aten_scaled_dot_product_attention_23(
-    query: TFloat,
-    key: TFloat,
-    value: TFloat,
-    attn_mask: TFloat | None = None,
+    op: TranslationContext,
+    query: ir.Value,
+    key: ir.Value,
+    value: ir.Value,
+    attn_mask: ir.Value | None = None,
     dropout_p: float = 0.0,
     is_causal: bool = False,
     scale: float | None = None,
     enable_gqa: bool = False,
-) -> TFloat:
+) -> ir.Value:
     """scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, *, float? scale=None, bool enable_gqa=False) -> Tensor
 
     Reference:
@@ -153,39 +150,40 @@ def aten_scaled_dot_product_attention_23(
         # num_heads attributes are needed for 3D attention inputs:
         # (shape: [B, S, N*H]), 4D shape is ([B, N, S, H]).
 
-        Y, _, _, _ = op23.Attention(
+        Y, _, _, _ = op.Attention(
             query,
             key,
             value,
-            attn_mask=attn_mask,
+            attn_mask,
+            outputs=4,
             scale=scale,
             is_causal=is_causal,
         )
         return Y
 
     if scale is None:
-        scale = _attention_scale(query, op23)
-    scale = op23.CastLike(scale, query)
+        scale = _attention_scale(op, query)
+    scale = op.CastLike(scale, query)
 
     if is_causal:
-        attn_mask = _causal_attention_mask(query, key, op23)
+        attn_mask = _causal_attention_mask(op, query, key)
 
     if enable_gqa:
-        key, value = _attention_repeat_kv_for_group_query(query, key, value, op23)
+        key, value = _attention_repeat_kv_for_group_query(op, query, key, value)
 
     if attn_mask is None:
         return _aten_scaled_dot_product_attention_no_mask_onnx(
-            query, key, value, scale, dropout_p, op23
+            op, query, key, value, scale, dropout_p
         )
 
     return _aten_scaled_dot_product_attention_float_mask_onnx(
-        query, key, value, attn_mask, scale, dropout_p, op23
+        op, query, key, value, attn_mask, scale, dropout_p
     )
 
 
 def _attention_repeat_kv_for_group_query(
-    query: TFloat, key: TFloat, value: TFloat, op: Opset
-) -> tuple[TFloat, TFloat]:
+    op: TranslationContext, query: ir.Value, key: ir.Value, value: ir.Value
+) -> tuple[ir.Value, ir.Value]:
     """Expand key and value for group query attention.
 
     repeat_interleave is applied on key and value to match the number of heads in query.
@@ -225,11 +223,21 @@ def _attention_repeat_kv_for_group_query(
     v_unsqueezed = op.Unsqueeze(value, two)  # [B, Hv, 1, T, Dv]
 
     k_expand_shape = op.Concat(
-        batch_size, kv_num_heads, interleave_dim, new_kv_seq_len, qk_head_size, axis=0
+        batch_size,
+        kv_num_heads,
+        interleave_dim,
+        new_kv_seq_len,
+        qk_head_size,
+        axis=0,
     )
     k_expand = op.Expand(k_unsqueezed, k_expand_shape)
     v_expand_shape = op.Concat(
-        batch_size, kv_num_heads, interleave_dim, new_kv_seq_len, v_head_size, axis=0
+        batch_size,
+        kv_num_heads,
+        interleave_dim,
+        new_kv_seq_len,
+        v_head_size,
+        axis=0,
     )
     v_expand = op.Expand(v_unsqueezed, v_expand_shape)
 
@@ -246,7 +254,7 @@ def _attention_repeat_kv_for_group_query(
     return expanded_key, expanded_value
 
 
-def _attention_scale(query: TFloat, op: Opset) -> TFloat:
+def _attention_scale(op: TranslationContext, query: ir.Value) -> ir.Value:
     """Calculate the scale factor for the attention result.
 
     Args:
@@ -264,7 +272,9 @@ def _attention_scale(query: TFloat, op: Opset) -> TFloat:
     return scale
 
 
-def _causal_attention_mask(query: TFloat, key: TFloat, op: Opset) -> TFloat:
+def _causal_attention_mask(
+    op: TranslationContext, query: ir.Value, key: ir.Value
+) -> ir.Value:
     """Create a causal mask for the given query and key tensors.
 
     Equivalent to::
@@ -283,10 +293,14 @@ def _causal_attention_mask(query: TFloat, key: TFloat, op: Opset) -> TFloat:
     k_shape = op.Shape(key)
 
     target_length = op.Slice(
-        q_shape, op.Constant(value_ints=[-2]), op.Constant(value_ints=[-1])
+        q_shape,
+        op.Constant(value_ints=[-2]),
+        op.Constant(value_ints=[-1]),
     )
     source_length = op.Slice(
-        k_shape, op.Constant(value_ints=[-2]), op.Constant(value_ints=[-1])
+        k_shape,
+        op.Constant(value_ints=[-2]),
+        op.Constant(value_ints=[-1]),
     )
     # attn_mask = torch.ones(L, S) := {
     size = op.Concat(target_length, source_length, axis=0)
@@ -304,13 +318,13 @@ def _causal_attention_mask(query: TFloat, key: TFloat, op: Opset) -> TFloat:
 
 
 def _aten_scaled_dot_product_attention_no_mask_onnx(
-    query: TFloat,
-    key: TFloat,
-    value: TFloat,
-    scale: TFloat,
+    op: TranslationContext,
+    query: ir.Value,
+    key: ir.Value,
+    value: ir.Value,
+    scale: ir.Value,
     dropout_p: float,
-    op: Opset,
-) -> TFloat:
+) -> ir.Value:
     # Swap the last two axes of key
     key_last_dim = op.Shape(key, start=-1)
     key_second_last_dim = op.Shape(key, start=-2, end=-1)
@@ -318,7 +332,10 @@ def _aten_scaled_dot_product_attention_no_mask_onnx(
     # Contract the dimensions that are not the last two so we can transpose
     # with a static permutation.
     key_squeezed_shape = op.Concat(
-        op.Constant(value_ints=[-1]), key_second_last_dim, key_last_dim, axis=0
+        op.Constant(value_ints=[-1]),
+        key_second_last_dim,
+        key_last_dim,
+        axis=0,
     )
     key_squeezed = op.Reshape(key, key_squeezed_shape)
     key_squeezed_transposed = op.Transpose(key_squeezed, perm=[0, 2, 1])
@@ -331,25 +348,26 @@ def _aten_scaled_dot_product_attention_no_mask_onnx(
     # Scale q, k before matmul for stability see https://tinyurl.com/sudb9s96 for math
     query_scaled = op.Mul(query, op.Sqrt(scale))
     key_transposed_scaled = op.Mul(
-        key_transposed, op.CastLike(op.Sqrt(scale), key_transposed)
+        key_transposed,
+        op.CastLike(op.Sqrt(scale), key_transposed),
     )
     attn_weight = op.Softmax(
         op.MatMul(query_scaled, key_transposed_scaled),
         axis=-1,
     )
-    attn_weight, _ = op.Dropout(attn_weight, dropout_p)
+    attn_weight, _ = op.Dropout(attn_weight, dropout_p, outputs=2)
     return op.MatMul(attn_weight, value)
 
 
 def _aten_scaled_dot_product_attention_float_mask_onnx(
-    query: TFloat,
-    key: TFloat,
-    value: TFloat,
-    attn_mask: TFloat,
-    scale: TFloat,
+    op: TranslationContext,
+    query: ir.Value,
+    key: ir.Value,
+    value: ir.Value,
+    attn_mask: ir.Value,
+    scale: ir.Value,
     dropout_p: float,
-    op: Opset,
-) -> TFloat:
+) -> ir.Value:
     # Swap the last two axes of key
     key_last_dim = op.Shape(key, start=-1)
     key_second_last_dim = op.Shape(key, start=-2, end=-1)
@@ -357,7 +375,10 @@ def _aten_scaled_dot_product_attention_float_mask_onnx(
     # Contract the dimensions that are not the last two so we can transpose
     # with a static permutation.
     key_squeezed_shape = op.Concat(
-        op.Constant(value_ints=[-1]), key_second_last_dim, key_last_dim, axis=0
+        op.Constant(value_ints=[-1]),
+        key_second_last_dim,
+        key_last_dim,
+        axis=0,
     )
     key_squeezed = op.Reshape(key, key_squeezed_shape)
     key_squeezed_transposed = op.Transpose(key_squeezed, perm=[0, 2, 1])
@@ -371,8 +392,11 @@ def _aten_scaled_dot_product_attention_float_mask_onnx(
     query_scaled = op.Mul(query, op.Sqrt(scale))
     key_transposed_scaled = op.Mul(key_transposed, op.Sqrt(scale))
     attn_weight = op.Softmax(
-        op.Add(op.MatMul(query_scaled, key_transposed_scaled), attn_mask),
+        op.Add(
+            op.MatMul(query_scaled, key_transposed_scaled),
+            attn_mask,
+        ),
         axis=-1,
     )
-    attn_weight, _ = op.Dropout(attn_weight, dropout_p)
+    attn_weight, _ = op.Dropout(attn_weight, dropout_p, outputs=2)
     return op.MatMul(attn_weight, value)
