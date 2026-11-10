@@ -36,6 +36,7 @@ import os
 import re
 import struct
 import sys
+import sysconfig
 import textwrap
 import threading
 import time
@@ -196,7 +197,6 @@ cumulative_time_spent_ns: dict[str, float] = collections.defaultdict(float)
 timer_counter = itertools.count()
 
 
-# Abstraction on top of counters.
 class ReinplaceCounters:
     _values: collections.defaultdict[str, int] = collections.defaultdict(int)
 
@@ -2870,10 +2870,10 @@ def torchscript(model: Any, example_inputs: Any, verbose: bool = False) -> Any:
         return model
 
     try:
-        return torch.jit.trace(model, example_inputs)
+        return torch.jit._trace.trace(model, example_inputs)
     except Exception:
         try:
-            return torch.jit.script(model)
+            return torch.jit._script.script(model)
         except Exception:
             if verbose:
                 log.exception("jit error")
@@ -3300,6 +3300,14 @@ def enumerate_items_with_dict_position(
     with PyDict_Next / C++ DictGuardManager.
     """
     if issubclass(cast(type[dict[K, V]], type(obj)), OrderedDict):
+        # Older free-threaded mutators can free linked nodes outside this lock.
+        # CPython 3.14.1 adds the shared lock to PyODict_DelItem.
+        if sys.version_info < (3, 14, 1) and sysconfig.get_config_var(
+            "Py_GIL_DISABLED"
+        ):
+            raise InvalidOrderedDict(
+                "Native OrderedDict snapshots require Python 3.14.1+ on free-threaded builds"
+            )
         items = list(dict.items(obj))
         keys = torch._C._dynamo.guards.ordered_dict_keys(obj)
         positions = {id(key): (i, key, value) for i, (key, value) in enumerate(items)}
@@ -5656,18 +5664,6 @@ def is_tensor_getset_descriptor(name: str) -> bool:
         return False
 
 
-def find_type_attribute_name(obj_type: type, value: object, /) -> str | None:
-    """Find a directly declared class attribute by value identity."""
-    return next(
-        (
-            name
-            for name, item in get_type_dict_no_user_code(obj_type).items()
-            if item is value
-        ),
-        None,
-    )
-
-
 def get_type_dict_no_user_code(cls: type) -> Mapping[str, object]:
     return type.__dict__["__dict__"].__get__(cls, type(cls))
 
@@ -5694,6 +5690,7 @@ def find_bound_builtin_method_descriptor(value: object) -> object | None:
         return None
 
     value = cast(types.BuiltinMethodType, value)
+
     receiver = value.__self__
     receiver_is_type = issubclass(type(receiver), type)
     owner = cast(type, receiver if receiver_is_type else type(receiver))

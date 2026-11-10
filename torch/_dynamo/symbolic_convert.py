@@ -144,6 +144,7 @@ from .source import (
     LocalSource,
     SkipGuardSource,
     Source,
+    TypeSource,
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
@@ -156,6 +157,7 @@ from .utils import (
     get_fake_value,
     get_instruction_source_311,
     get_metrics_context,
+    get_type_mro_no_user_code,
     graph_break_dup_warning_checker,
     istype,
     LazyString,
@@ -216,11 +218,15 @@ from .variables.object_protocol import (
     _is_skipped_constant_property,
     generic_delitem,
     generic_getattr,
+    generic_getitem,
     generic_getiter,
     generic_is_true,
     generic_setitem,
+    mro_attr_source,
+    mro_lookup,
     pyiter_send,
     pysequence_contains,
+    type_is_immutable,
 )
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
@@ -3344,7 +3350,7 @@ class InstructionTranslatorBase(
 
         # Unpack for cases like fn(**obj) where obj is a map
         if isinstance(kwargsvars, UserDefinedObjectVariable):
-            kwargsvars = DictBuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
+            kwargsvars = DictBuiltinVariable.construct_dict(self, kwargsvars)  # type: ignore[arg-type]
 
         # pyrefly: ignore [unbound-name]
         if not isinstance(argsvars, BaseListVariable) or not isinstance(
@@ -4566,7 +4572,53 @@ class InstructionTranslatorBase(
                     v.install_dict_order_guard(self)
                 else:
                     v.install_dict_keys_match_guard()
-                v = ConstDictVariable(v.items, mutation_type=ValueMutationNew())
+                side_effects = self.output.side_effects
+                if any(
+                    cls in side_effects
+                    and side_effects.has_pending_mutation_of_attr(
+                        side_effects[cls], "__iter__"
+                    )
+                    for cls in get_type_mro_no_user_code(v.python_type())
+                ):
+                    unimplemented(
+                        gb_type="kwargs expansion after iteration slot mutation",
+                        context="DICT_MERGE",
+                        explanation="Dynamo cannot expand a mapping after changing its type's __iter__.",
+                        hints=["Expand the mapping outside the compiled function."],
+                        skip_frame=True,
+                    )
+                if v.source and not type_is_immutable(v.python_type()):
+                    iter_source = mro_attr_source(
+                        self, v.python_type(), TypeSource(v.source), "__iter__"
+                    )
+                    if iter_source:
+                        install_guard(iter_source.make_guard(GuardBuilder.ID_MATCH))
+                if type_is_immutable(v.python_type()) or (
+                    mro_lookup(v.python_type(), "__iter__") is dict.__iter__
+                ):
+                    v = ConstDictVariable(v.items, mutation_type=ValueMutationNew())
+                else:
+                    # PyDict_Merge uses the mapping protocol for a different iteration slot.
+                    snapshot = ConstDictVariable(
+                        obj.items, mutation_type=ValueMutationNew()
+                    )
+                    keys = generic_getattr(self, v, "keys").call_function(self, [], {})
+                    for key in unpack_iterable(self, keys):
+                        if pysequence_contains(
+                            self, snapshot, key
+                        ).as_python_constant():
+                            unimplemented(
+                                gb_type="Duplicate keyword mapping key",
+                                context="DICT_MERGE",
+                                explanation="Dynamo cannot trace duplicate keys while expanding a custom mapping.",
+                                hints=[
+                                    "Use unique keyword names or expand the mapping outside the compiled function."
+                                ],
+                                skip_frame=True,
+                            )
+                        value = generic_getitem(self, v, key)
+                        generic_setitem(self, snapshot, key, value)
+                    v = snapshot
         obj.call_method(self, "update", [v], {})  # type: ignore[arg-type]
 
     DICT_UPDATE = DICT_MERGE
