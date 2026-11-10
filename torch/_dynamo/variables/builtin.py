@@ -3922,6 +3922,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         ):
             tx.output.side_effects.track_object_existing(underlying, obj)
             name = name_var.as_python_constant()
+            tx._check_global_write_race(obj, name)
             tx.output.side_effects.store_attr(obj, name, val)
             return val
         elif (
@@ -3929,6 +3930,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
             and name_var.is_python_constant()
         ):
             name = name_var.as_python_constant()
+            tx._check_global_write_race(obj, name)
             if obj.is_tensor():
                 from .builder import wrap_fx_proxy
 

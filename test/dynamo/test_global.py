@@ -842,6 +842,63 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), x + 1)
             self.assertNotIn("_dg_a", globals())
 
+    @parametrize("read", (False, True))
+    def test_delete_global_then_store_through_module_object(self, read):
+        me = sys.modules[__name__]
+        if read:
+
+            def fn(x):
+                global _dg_a
+                del _dg_a
+                me._dg_a = 5
+                return x + _dg_a
+
+        else:
+
+            def fn(x):
+                global _dg_a
+                del _dg_a
+                me._dg_a = 5
+                return x + 1
+
+        with mock.patch.dict(globals(), {"_dg_a": 1}):
+            x = torch.ones(2, 2)
+            expected = x + 5 if read else x + 1
+            self.assertEqual(fn(x), expected)
+            self.assertEqual(me._dg_a, 5)
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(
+                Unsupported, "Module write racing a pending global delete"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+            self.assertEqual(opt_fn(x), expected)
+            self.assertEqual(me._dg_a, 5)
+
+    def test_delete_global_then_dict_write(self):
+        me = sys.modules[__name__]
+        with mock.patch.dict(globals(), {"_dg_a": 1}):
+
+            def fn(x):
+                global _dg_a
+                del _dg_a
+                me.__dict__["_dg_a"] = 5
+                return x + 1
+
+            x = torch.ones(2, 2)
+            self.assertEqual(fn(x), x + 1)
+            self.assertEqual(me._dg_a, 5)
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(
+                Unsupported, "Module write racing a pending global delete"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertEqual(me._dg_a, 5)
+
     def test_delete_global_in_unregistered_importlib_module(self):
         module_name = "test_dynamo_unregistered_delete_global_181243"
         self.assertNotIn(module_name, sys.modules)

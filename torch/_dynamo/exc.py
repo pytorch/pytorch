@@ -613,14 +613,18 @@ def raise_value_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
     raise_observed_exception(ValueError, tx, args=[msg])
 
 
-def raise_name_error(tx: InstructionTranslatorBase, msg: str, *, name: str) -> NoReturn:
-    """Raise a NameError as an observed exception during tracing."""
+def raise_name_error(tx: InstructionTranslatorBase, name: str) -> NoReturn:
+    """Raise a NameError as an observed exception during tracing.
+
+    `kwargs` keeps the built exception's `.name` set to `name`, matching what
+    CPython sets; test_exceptions.py asserts it.
+    """
     from .variables import ConstantVariable
 
     raise_observed_exception(
         NameError,
         tx,
-        args=[msg],
+        args=[f"name '{name}' is not defined"],
         kwargs={"name": ConstantVariable.create(name)},
     )
 
