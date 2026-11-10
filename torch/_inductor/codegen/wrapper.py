@@ -2433,9 +2433,9 @@ class PythonWrapperCodegen(CodeGen):
         if not is_codegen_graph_partition_subgraph(self):
             # See [Note: Removed Graph Partition Arguments]
             self.write_prefix()
-        elif config.size_asserts:
-            # A partition's prefix is written after its kernels, too late to queue
-            # the input asserts that the scheduler emits before each input's first use.
+
+        # Queue before kernel codegen; partition prefixes are written afterwards.
+        if config.size_asserts and not (V.graph.cpp_wrapper and V.graph.is_const_graph):
             self.codegen_input_size_asserts()
 
         self.write_kernel_autotune_defs_header()
@@ -2920,21 +2920,14 @@ class PythonWrapperCodegen(CodeGen):
 
             self.codegen_inputs()
 
-            # Partition functions check the inputs they use. call() still queues
-            # size asserts, which are emitted only before its own (non-cudagraph)
-            # kernels; the other asserts would duplicate the partitions' checks.
-            if (
+            # Keep NaN and alignment checks in partition prefixes.
+            if not (
                 is_using_cudagraph_partition()
                 and not is_codegen_graph_partition_subgraph(self)
             ):
-                if config.size_asserts:
-                    self.codegen_input_size_asserts()
-            else:
-                self.codegen_input_size_and_nan_asserts()
+                self.codegen_input_alignment_and_nan_asserts()
 
-    def codegen_input_size_and_nan_asserts(self) -> None:
-        if config.size_asserts and not is_codegen_graph_partition_subgraph(self):
-            self.codegen_input_size_asserts()
+    def codegen_input_alignment_and_nan_asserts(self) -> None:
         if config.alignment_asserts_inputs:
             self.codegen_input_alignment_asserts()
         if config.nan_asserts:
