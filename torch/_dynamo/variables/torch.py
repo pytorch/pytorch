@@ -4094,7 +4094,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return self.call_tensor_method(tx, list(args), kwargs)
 
         # `is_tensor_method()` covers the `torch.Tensor.unsqueeze_(x, 0)` form;
-        # `x.unsqueeze_(0)` is handled by `TensorVariable.call_method`. Calls
+        # `x.unsqueeze_(0)` is handled by `TensorVariable.tp_getattro_impl`. Calls
         # made through the ops API, `torch.ops.aten.unsqueeze_(x, 0)`
         # (OpOverloadPacket) and `torch.ops.aten.unsqueeze_.default(x, 0)`
         # (OpOverload), do not go through either. Guard them the same way:
@@ -4102,13 +4102,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         # graph input's fake tensor shape, and guard creation later raises
         # IndexError while indexing the size list of the input with its
         # original rank.
-        if (
-            args
-            and isinstance(
-                self.value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
-            )
+        if isinstance(
+            self.value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
         ):
-            _inplace_view_op_on_input(tx, self.value, args[0])
+            # OpOverload/OpOverloadPacket.__call__ is (self, /, *args, **kwargs),
+            # so a keyword form like `torch.ops.aten.unsqueeze_.default(self=x, dim=0)`
+            # arrives with empty args.
+            tensor_var = args[0] if args else kwargs.get("self")
+            if tensor_var is not None:
+                _inplace_view_op_on_input(tx, self.value, tensor_var)
 
         special_handler = self._get_handlers().get(self.value)
         if special_handler:

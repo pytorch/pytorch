@@ -1206,15 +1206,6 @@
     },
     {
       "Gb_type": "Inplace op on input tensor",
-      "Context": "str(packet)",
-      "Explanation": "Attempted to trace an inplace view op on an input tensor.",
-      "Hints": [
-        "Ensure you do not modify input tensor in place.",
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    },
-    {
-      "Gb_type": "Inplace op on input tensor",
       "Context": "",
       "Explanation": "Attempted to trace an inplace view op on input tensor {typestr(self.value)}.",
       "Hints": [

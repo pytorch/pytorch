@@ -3886,7 +3886,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         x = torch.arange(24).reshape(1, 4, 6)
         # fullgraph first: a failed compile caches nothing, so the next call traces again.
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "inplace view"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "inplace view op on input tensor"
+        ):
             torch.compile(fn, backend="eager", fullgraph=True)(x.clone())
         ref_x, opt_x = x.clone(), x.clone()
         self.assertEqual(torch.compile(fn, backend="eager")(opt_x), fn(ref_x))
@@ -3900,7 +3902,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return x
 
         x = torch.arange(24).reshape(4, 6)
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "inplace view"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "inplace view op on input tensor"
+        ):
             torch.compile(fn, backend="eager", fullgraph=True)(x.clone())
 
     def test_inplace_view_on_copy_via_ops_api(self):
