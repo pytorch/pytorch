@@ -25,11 +25,13 @@ struct FakeTensorModeHandle;
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
-  // For a mode made in Python, the handle that fakes and the fake mode slot
-  // share while any of them uses this mode; unset for a mode made in C++, which
-  // makes its one handle itself. See Note [C++ FakeTensorMode handle] in
-  // torch/csrc/FakeTensorMode.cpp. Accessed only under handle_mutex_, by
-  // getCppFakeTensorModeHandle.
+  // Reuse the handle across Python-to-C++ handoffs, avoiding a new handle and
+  // Python keepalive allocation each time. The handle owns this mode, so this
+  // cache is weak to avoid a cycle. The handle's strong py_mode reference keeps
+  // the Python object alive. Unset for modes made in C++, which make their own
+  // handle.
+  // Accessed only under handle_mutex_, by getCppFakeTensorModeHandle.
+  // See Note [C++ FakeTensorMode handle] in torch/csrc/FakeTensorMode.cpp.
   std::weak_ptr<FakeTensorModeHandle> handle_;
   std::mutex handle_mutex_;
 
