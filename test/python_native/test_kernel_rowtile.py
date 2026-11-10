@@ -663,7 +663,9 @@ class TestKernelRowTile(TestCase):
             (got,) = rt.reduce_row_tile(
                 trait, "ragged_whole", x, [torch.float32], ragged_vector=True
             )
-            self.assertEqual(got, x.sum(dim=1), atol=0, rtol=0)
+            with torch.backends.python_native.cutedsl.disabled():
+                want = x.sum(dim=1)
+            self.assertEqual(got, want, atol=0, rtol=0)
         mine = [k for k in rt._CACHE if "ragged_whole" in k]
         self.assertEqual(len(mine), 1, f"expected one plan per vec class, got {mine}")
 

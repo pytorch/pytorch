@@ -91,6 +91,14 @@ class TestCuTeDSLReductionWiring(TestCase):
             self.assertEqual([self._run(call)[1] for call in calls], [0] * len(calls))
         self.assertEqual([self._run(call)[1] for call in calls], [1] * len(calls))
 
+    def test_dsl_opt_out(self, device):
+        """Serve nothing under cutedsl.disabled()."""
+        x = torch.randn(128, 512, device=device)
+        call = functools.partial(torch.sum, x, dim=-1)
+        with _disabled():
+            self.assertEqual(self._run(call)[1], 0)
+        self.assertEqual(self._run(call)[1], 1)
+
     def test_unsupported_dtype_falls_back(self, device):
         """Leave unsupported dtypes to ATen instead of entering a mismatched kernel."""
         xi = torch.randint(0, 9, (64, 64), device=device)
@@ -106,6 +114,16 @@ class TestCuTeDSLReductionWiring(TestCase):
         for op in ("sum", "mean", "prod", "amax", "amin"):
             call = functools.partial(getattr(torch, op), x, dim=1, out=out)
             self.assertEqual(self._run(call)[1], 0)
+
+    def test_sum_out_is_served(self, device):
+        """Serve aten::sum.out, which routes through sum.default to sum.dim_IntList."""
+        x = torch.randn(128, 512, device=device)
+        out = torch.empty((), device=device)
+        got, fires = self._run(lambda: torch.ops.aten.sum.out(x, out=out))
+        self.assertEqual(fires, 1)
+        with _disabled():
+            ref = torch.sum(x)
+        self.assertEqual(got, ref, **_TOL[torch.float32])
 
     @parametrize(
         "dim", [-1, 0, None], name_fn=lambda d: "all" if d is None else f"dim{d}"
@@ -207,6 +225,9 @@ class TestCuTeDSLReductionWiring(TestCase):
         """Match ATen across input dtypes, negative and unsorted keepdim dims, and full
         reductions; amax and amin exactly."""
         x = torch.rand(6, 33, 40, device=device, dtype=dtype) + 0.5
+        if op == "prod":
+            # Keep the products near 1 so atol=1e-2 does not swallow them.
+            x = torch.randn(6, 33, 40, device=device, dtype=dtype) * 0.01 + 1.0
         exact = op in ("amax", "amin")
         tolerance = {"atol": 0, "rtol": 0} if exact else _TOL[dtype]
         fn = getattr(torch, op)

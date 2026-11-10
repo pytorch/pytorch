@@ -249,7 +249,7 @@ class TestKernelColTile(TestCase):
         self, dtype, key, size, threads, unroll, partition, width
     ):
         """Run the B200 4095-column rules, which no explicit launch argument selects."""
-        if torch.cuda.get_device_capability() != (10, 0):
+        if torch.cuda.get_device_capability() not in kg._B200_CCS:
             self.skipTest("the ragged column rules are measured on B200 only")
         # Unroll, partial layout and combine width are policy-only, so size the view
         # onto each rule's anchor: b200_ragged_c4095 and b200_ragged_argmax_c4095_small.
@@ -284,7 +284,7 @@ class TestKernelColTile(TestCase):
 
     def test_b200_ragged_welford_columns(self):
         """Fold b200_ragged_welford_c257's 16 MiB fp32 anchor in groups of 8."""
-        if torch.cuda.get_device_capability() != (10, 0):
+        if torch.cuda.get_device_capability() not in kg._B200_CCS:
             self.skipTest("the ragged column rules are measured on B200 only")
         x = torch.randn((16 << 20) // (257 * 4), 257, device="cuda")
         trait, key = T.WelfordOps(correction=1, acc=cutlass.Float32), "var_c257_rule"
@@ -302,7 +302,7 @@ class TestKernelColTile(TestCase):
     def test_b200_ragged_c4095_ordered(self, dtype, op):
         """Hand b200_ragged_c4095_ordered's 16 MiB single-field and one-output Welford
         anchors (R = 1024 or 2048) to the ordered kernel."""
-        if torch.cuda.get_device_capability() != (10, 0):
+        if torch.cuda.get_device_capability() not in kg._B200_CCS:
             self.skipTest("the ragged column rules are measured on B200 only")
         x = torch.randn((16 << 20) // (4095 * dtype.itemsize), 4095, device="cuda")
         x = x.to(dtype)
@@ -956,7 +956,8 @@ class TestOrderedColDevice(TestCase):
 
     def test_split_plans_can_be_declined(self, device):
         """Decline split plans when no config is given or selected."""
-        # No entry is selected for this key (test_policy_contract covers the batch rule).
+        # On B200 the split fallback selects a 32-column mapping, which the batch rule
+        # declines for B = 2 (test_policy_contract covers it); elsewhere none applies.
         x = torch.randn(2, 32768, 32, device=device)
         trait = T.SumOps(acc=cutlass.Float32)
         out = [torch.float32]
@@ -1299,7 +1300,7 @@ class TestOrderedColDevice(TestCase):
     def test_split_policy_matches_the_indexed_tree(self, device, rows):
         """Keep B200's split tile widths and input-dtype outputs bitwise exact, with an
         exact and a ragged last partition."""
-        if torch.cuda.get_device_capability(device) != (10, 0):
+        if torch.cuda.get_device_capability(device) not in kg._B200_CCS:
             self.skipTest("the split policy is measured on B200 only")
         x = torch.randn(rows, 257, device=device, dtype=torch.float16)
         key, trait, outputs = f"split_policy_{rows}", T.SumOps(), [torch.float16]

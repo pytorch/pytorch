@@ -581,7 +581,7 @@ Each DSL controller provides the following methods:
         result = model(input)  # CuteDSL ops disabled
 
     # Disable specific operations across all DSLs
-    pn.disable_operations('scaled_mm', '_flash_attention_forward')
+    pn.disable_operations('sum.dim_IntList', 'amax')
 
     # Query operations for a specific DSL
     triton_ops = pn.get_dsl_operations('triton')

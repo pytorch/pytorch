@@ -111,9 +111,9 @@ def _out_ok(self: torch.Tensor, dtype: torch.dtype | None) -> bool:
 def _base_cond(self: torch.Tensor, dim: _Dim) -> bool:
     # A condition must decline unsupported calls without raising.
     return (
-        not cap.is_traced(self)
+        self.dtype in _SUPPORTED_DTYPES
+        and not cap.is_traced(self)
         and cap.device_ok(self, _ARCH_MAJORS)
-        and self.dtype in _SUPPORTED_DTYPES
         and not self.is_neg()
         # Conservative: the kernels narrow their loads for lower alignment, but served
         # calls are measured and tested from 16-byte aligned bases only.
@@ -138,6 +138,12 @@ def _dtype_cond(
 
 
 def _make_impl(trait_type: Callable[[], Any], key: str) -> Callable[..., torch.Tensor]:
+    def make_trait() -> Any:
+        # Lazy: importing cutlass at module import would pull the DSL into `import torch`.
+        import cutlass
+
+        return trait_type()(acc=cutlass.Float32)
+
     def impl(
         self: torch.Tensor,
         dim: _Dim = None,
@@ -145,14 +151,10 @@ def _make_impl(trait_type: Callable[[], Any], key: str) -> Callable[..., torch.T
         *,
         dtype: torch.dtype | None = None,
     ) -> torch.Tensor:
-        # Lazy: importing cutlass at module import would pull the DSL into `import torch`.
-        import cutlass
-
-        trait = lambda: trait_type()(acc=cutlass.Float32)  # noqa: E731
         out_dtype = self.dtype if dtype is None else dtype
         red = _normalize_dims(dim, self.dim())
         dims = None if red is None else sorted(red)
-        out = kg.replay_reduce(trait, key, self, dims, out_dtype)
+        out = kg.replay_reduce(make_trait, key, self, dims, out_dtype)
         return _keepdim_reshape(out, self.shape, red, keepdim)
 
     return impl

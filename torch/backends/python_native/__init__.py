@@ -18,8 +18,8 @@ Example usage::
     pn.cutedsl.enabled = True  # Enable all cutedsl ops
 
     # Individual operation control
-    pn.disable_operations("scaled_mm")  # Disable specific op across all DSLs
-    pn.enable_operations("scaled_mm")  # Re-enable specific op
+    pn.disable_operations("sum.dim_IntList")  # Disable specific op across all DSLs
+    pn.enable_operations("sum.dim_IntList")  # Re-enable specific op
 
     # Context manager support
     with pn.triton.disabled():
@@ -323,10 +323,10 @@ class PythonNativeModule(PropModule):
 
         Example::
 
-            with torch.backends.python_native.operations_disabled("scaled_mm"):
-                # scaled_mm is disabled across all DSLs
+            with torch.backends.python_native.operations_disabled("amax"):
+                # amax is disabled across all DSLs
                 result = model(input)
-            # scaled_mm is automatically re-enabled here
+            # amax is automatically re-enabled here
         """
         filter_state = _get_filter_state()
         previously_disabled_ops = {
