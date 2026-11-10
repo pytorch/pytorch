@@ -57,6 +57,7 @@ from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
     free_symbols,
     free_unbacked_symbols,
+    guarding_hint_or_throw,
     ShapeEnv,
     ShapeEnvSettings,
     StatefulSymbolicContext,
@@ -5867,6 +5868,140 @@ class TestCppFakeTensorModeBindings(TestCase):
         finally:
             torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
         self.assertEqual(self._installed(), (None, False))
+
+    def test_item_memo(self):
+        mode, _ = self._make_mode()
+        get_memo = torch._C._get_fake_item_memo
+
+        def set_memo(fake, memo, keep):
+            torch._C._set_fake_item_memo(fake, memo, keep_across_epochs=keep)
+
+        def make_fake():
+            meta = torch.empty((), device="meta")
+            return torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+
+        class IntSubclass(int):
+            pass
+
+        # Only Python and symbolic numbers are accepted, and returned as is
+        fake = make_fake()
+        self.assertIsNone(get_memo(fake))
+        for bad in (fake, None, 1j, IntSubclass(1)):
+            with self.assertRaisesRegex(TypeError, "Expected an int, float, bool"):
+                set_memo(fake, bad, False)
+        env = ShapeEnv()
+        syms = (env.create_unbacked_symint(), env.create_unbacked_symfloat())
+        for good in (2, 2.5, False, *syms, env.create_unbacked_symbool()):
+            set_memo(fake, good, False)
+            self.assertIs(get_memo(fake), good)
+
+        # Reading keeps the memo; it is dropped once read in another epoch, and
+        # stays dropped back in the first, unless kept across epochs
+        set_memo(fake, 2, False)
+        self.assertEqual(get_memo(fake), 2)
+        self.assertEqual(get_memo(fake), 2)
+        mode.epoch += 1
+        self.assertIsNone(get_memo(fake))
+        mode.epoch -= 1
+        self.assertIsNone(get_memo(fake))
+        set_memo(fake, 3, True)
+        for _ in range(2):
+            mode.epoch += 1
+            self.assertEqual(get_memo(fake), 3)
+        # Dropped once the tensor is mutated, whether or not kept across epochs
+        for keep in (False, True):
+            set_memo(fake, 4, keep)
+            torch.autograd.graph.increment_version(fake)
+            self.assertIsNone(get_memo(fake))
+
+        # An inference fake has no version counter, but epochs still apply
+        with torch.inference_mode():
+            inference = make_fake()
+        set_memo(inference, 2, False)
+        self.assertEqual(get_memo(inference), 2)
+        mode.epoch += 1
+        self.assertIsNone(get_memo(inference))
+        set_memo(inference, 3, True)
+        for _ in range(2):
+            mode.epoch += 1
+            self.assertEqual(get_memo(inference), 3)
+
+        # set_data drops the destination's memo and does not copy the source's
+        dst, src = make_fake(), make_fake()
+        set_memo(dst, 2, True)
+        set_memo(src, 3, True)
+        self.assertEqual((get_memo(dst), get_memo(src)), (2, 3))
+        dst.data = src
+        self.assertIsNone(get_memo(dst))
+        # An inference fake's version counter is disabled; once set_data gives
+        # it a non-inference key set, reading the version throws, so setting
+        # fails and leaves no memo
+        with torch.inference_mode():
+            disabled = make_fake()
+        disabled.data = make_fake()
+        with self.assertRaisesRegex(RuntimeError, "version counter"):
+            set_memo(disabled, 2, False)
+        self.assertIsNone(get_memo(disabled))
+
+        # A fake without a mode stores no memo (the getter would return None
+        # anyway, so check the memo is not kept alive); a real tensor has none
+        # and is rejected by the setters
+        no_mode = torch.empty((), device="meta")
+        torch._C._set_fake_device(no_mode, torch.device("cpu"))
+        unstored = env.create_unbacked_symfloat()
+        ref = weakref.ref(unstored)
+        set_memo(no_mode, unstored, True)
+        del unstored
+        gc.collect()
+        self.assertIsNone(ref())
+        self.assertIsNone(get_memo(no_mode))
+        real = torch.empty(())
+        with self.assertRaisesRegex(RuntimeError, "Expected a fake tensor"):
+            set_memo(real, 2, False)
+        with self.assertRaisesRegex(RuntimeError, "Expected a fake tensor"):
+            torch._C._set_fake_sym_memo(real, "nonzero_memo", 2)
+        self.assertIsNone(get_memo(real))
+        self.assertIsNone(torch._C._get_fake_sym_memo(real, "nonzero_memo"))
+
+    def test_memo_helpers(self):
+        # The helpers reach a C++ fake's memos, and, like SymNumberMemoDescriptor,
+        # keep only a backed SymFloat item memo across epochs
+        from torch._subclasses.fake_tensor import (
+            maybe_get_item_memo,
+            maybe_get_sym_memo,
+            maybe_set_item_memo,
+            maybe_set_sym_memo,
+        )
+
+        shape_env = ShapeEnv()
+        mode, _ = self._make_mode(shape_env)
+        meta = torch.empty((), device="meta")
+        fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+        source = LocalSource("i")
+        sym = shape_env.create_symbol(2, source, DimDynamic.DYNAMIC)
+        backed_int = shape_env.create_symintnode(sym, hint=2, source=source)
+        source = LocalSource("x")
+        sym = shape_env.create_unspecified_symbol(2.5, source, DimDynamic.DYNAMIC)
+        backed_float = shape_env.create_symfloatnode(sym, hint=2.5, source=source)
+        unbacked_float = shape_env.create_unbacked_symfloat()
+
+        # The memo is stored with the mode's current epoch
+        mode.epoch += 1
+        maybe_set_sym_memo(fake, "nonzero_memo", backed_int)
+        self.assertIs(maybe_get_sym_memo(fake, "nonzero_memo").node, backed_int.node)
+        mode.epoch += 1
+        self.assertIsNone(maybe_get_sym_memo(fake, "nonzero_memo"))
+        for memo in (backed_int, unbacked_float, backed_float):
+            maybe_set_item_memo(fake, memo)
+            self.assertIs(maybe_get_item_memo(fake), memo)
+            mode.epoch += 1
+            kept = memo is backed_float
+            self.assertIs(maybe_get_item_memo(fake), memo if kept else None)
+        mode.epoch += 1
+        self.assertIs(maybe_get_item_memo(fake), backed_float)
+        # Which relies on a SymFloat's hint never being filled in later
+        with self.assertRaisesRegex(AssertionError, "Expected an int or bool"):
+            guarding_hint_or_throw(unbacked_float.node)
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_set_get_fake_dispatch_keys(self):
