@@ -16,22 +16,35 @@ class _AotTma:
         self,
         fn: str,
         dtype: Any,
-        mask: tuple[bool, ...],
-        boolean: bool,
+        mask: tuple[bool | None, ...],
+        out_type: Any,
+        vector_bytes: int,
+        vector_ept: int,
+        scalar_type: Any,
         box: int,
         block: int,
         stages: int,
     ) -> None:
         self.comp_type = cutlass.Float32
-        config = kernel._TmaConfig(mask, box, block, (), ((), ()), stages=stages)
-        self.op = kernel._ElementwiseTma2D(
+        if vector_bytes != 0:
+            box = max(1, vector_bytes // (dtype.width // 8))
+        config = kernel._TmaConfig(
+            mask, box, block, (), ((), ()), ept=vector_ept, stages=stages
+        )
+        executor = (
+            kernel._ElementwiseScalarVector
+            if vector_bytes != 0
+            else kernel._ElementwiseTma2D
+        )
+        self.op = executor(
             fn=ops.get_fn(fn),
             ninputs=len(mask),
             nconsts=1 if fn in ("_add", "_sub", "_addcmul") else 0,
             comp_type=self.comp_type,
-            out_type=cutlass.Int8 if boolean else dtype,
+            out_type=out_type,
             in_type=dtype,
             config=config,
+            scalar_type=scalar_type,
         )
 
     @cute.jit
@@ -83,59 +96,111 @@ class _AotTma:
 
 
 def build(spec: dict[str, Any]) -> dict[str, Any]:
-    dtype = getattr(
-        cutlass,
-        {
-            "bfloat16": "BFloat16",
-            "float32": "Float32",
-        }[spec["dtype"]],
+    types = {
+        "bfloat16": "BFloat16",
+        "float32": "Float32",
+    }
+    dtype = getattr(cutlass, types[spec["dtype"]])
+    scalar_dtype = (
+        getattr(cutlass, types[spec["scalar_dtype"]]) if spec["scalar_dtype"] else dtype
     )
     mask = tuple(spec["transposed"])
+    vector_bytes = spec["vector_bytes"]
+    output_type = (
+        cutlass.Int8 if spec["boolean"] else getattr(cutlass, types[spec["out_dtype"]])
+    )
+    common_type = getattr(cutlass, types[spec["common_dtype"]])
     op = _AotTma(
         spec["fn"],
         dtype,
         mask,
-        spec["boolean"],
+        out_type=output_type,
+        vector_bytes=vector_bytes,
+        vector_ept=spec["vector_ept"],
+        scalar_type=common_type,
         box=spec["box"],
         block=spec["block"],
         stages=spec["stages"],
     )
     box = op.op.box
-    shapes = (cute.sym_int(divisibility=box), cute.sym_int(divisibility=box))
+    shapes = (
+        (cute.sym_int(),)
+        if vector_bytes != 0
+        else (cute.sym_int(divisibility=box), cute.sym_int(divisibility=box))
+    )
     fakes = []
-    tensor_args = []
+    tensor_args: list[dict[str, Any]] = []
     names = ("x", "y", "z")[: len(mask)]
     for name, transposed in zip(names, mask):
-        pitch = cute.sym_int64(divisibility=_MIN_ALIGNMENT // (dtype.width // 8))
-        stride = (1, pitch) if transposed else (pitch, 1)
+        if transposed is None:
+            fakes.append(
+                cute.runtime.make_fake_tensor(
+                    scalar_dtype,
+                    (1,),
+                    stride=(1,),
+                    assumed_align=scalar_dtype.width // 8,
+                )
+            )
+            tensor_args.append({"name": name, "read_only": True})
+            continue
+        pitch = (
+            box
+            if vector_bytes != 0
+            else cute.sym_int64(divisibility=_MIN_ALIGNMENT // (dtype.width // 8))
+        )
+        stride = (1,) if vector_bytes != 0 else (1, pitch) if transposed else (pitch, 1)
         fakes.append(
             cute.runtime.make_fake_tensor(
                 dtype,
                 shapes,
                 stride=stride,
-                assumed_align=_TMA_ALIGNMENT if transposed else _MIN_ALIGNMENT,
+                assumed_align=max(vector_bytes, dtype.width // 8)
+                if vector_bytes != 0
+                else _TMA_ALIGNMENT
+                if transposed
+                else _MIN_ALIGNMENT,
             )
         )
         tensor_args.append(
             {
                 "name": name,
-                "dynamic_sizes": [0, 1],
-                "dynamic_strides": [1 if transposed else 0],
+                "dynamic_sizes": [0] if vector_bytes != 0 else [0, 1],
+                "dynamic_strides": []
+                if vector_bytes != 0
+                else [1 if transposed else 0],
                 "read_only": True,
             }
         )
-    output_type = cutlass.Int8 if spec["boolean"] else dtype
     fakes.append(
         cute.runtime.make_fake_tensor(
             output_type,
-            (1, *shapes),
-            stride=(0, cute.sym_int64(divisibility=box), 1),
-            assumed_align=_MIN_ALIGNMENT,
+            shapes if vector_bytes != 0 else (1, *shapes),
+            stride=(1,)
+            if vector_bytes != 0
+            else (0, cute.sym_int64(divisibility=box), 1),
+            assumed_align=box * output_type.width // 8
+            if vector_bytes != 0
+            else _MIN_ALIGNMENT,
         )
     )
-    tensor_args.append({"name": "out", "dynamic_sizes": [1, 2], "dynamic_strides": [1]})
-    tag = "".join("t" if value else "n" for value in mask)
-    tag += f"_box{box}_b{spec['block']}_s{spec['stages']}"
+    tensor_args.append(
+        {
+            "name": "out",
+            "dynamic_sizes": [0] if vector_bytes != 0 else [1, 2],
+            "dynamic_strides": [] if vector_bytes != 0 else [1],
+        }
+    )
+    tag = "".join("s" if value is None else "t" if value else "n" for value in mask)
+    if not spec["boolean"] and spec["out_dtype"] != spec["dtype"]:
+        tag += f"_out_{spec['out_dtype']}"
+    if spec["boolean"] and spec["common_dtype"] != spec["dtype"]:
+        tag += "_promoted"
+    if spec["scalar_dtype"]:
+        tag += f"_{spec['scalar_dtype']}"
+    if vector_bytes != 0:
+        tag += f"_vec{vector_bytes}_ept{spec['vector_ept']}_b{spec['block']}"
+    else:
+        tag += f"_box{box}_b{spec['block']}_s{spec['stages']}"
     return {
         "kind": "cutedsl",
         "fn": (op.unary, op.binary, op.ternary)[len(mask) - 1],

@@ -2,6 +2,12 @@
 
 _MIN_ALIGNMENT = 16
 _TMA_ALIGNMENT = 128
+_VECTOR_BYTES = 16
+_MAX_VECTOR_BYTES = 32
+_MAX_VECTOR_ELEMENTS = 8
+_UNROLLED_EPT = 4
+_VECTOR_INPUT_BYTES_PER_THREAD = 128
+_VECTOR_MIN_RESIDENT_THREADS = 1024
 _TMA_BOX_SIDE = 32
 _THREADS_PER_BLOCK = 128
 _ELEMENTS_PER_THREAD = 8
@@ -23,16 +29,18 @@ _TMA_SM100_TRANSPOSE = (64, 256, 1)
 _TMA_SM107_TRANSPOSE = (64, 128, 2)
 _TMA_SM100_POINTWISE = (32, 128, 1)
 _TMA_SM107_POINTWISE = (64, 128, 1)
+_SM100_VECTOR_THREADS = 256
+_SM100_VECTOR_INPUT_BYTES_PER_THREAD = 32
 _TMA_BF16_MIN_STAGES = 2
 
 
 def _tma_configs(
-    transposed: tuple[bool, ...],
+    transposed: tuple[bool | None, ...],
     cc: tuple[int, int],
     element_bytes: int,
 ) -> tuple[tuple[int, int, int], ...]:
     # A 32-element fallback retains layouts that cannot fit the preferred tile.
-    transpose = all(transposed)
+    transpose = all(value for value in transposed if value is not None)
     if cc == (10, 7):
         config = _TMA_SM107_TRANSPOSE if transpose else _TMA_SM107_POINTWISE
     else:
