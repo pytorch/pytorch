@@ -8720,6 +8720,20 @@ class TestNNDeviceType(NNTestCase):
             # avoid this state leaking outside of this test
             torch.use_deterministic_algorithms(original_deterministic)
 
+    @onlyCUDA
+    def test_ReflectionPad2d_deterministic_overlapping_pads(self, device):
+        # https://github.com/pytorch/pytorch/issues/203421
+        # Pads large enough that some rows and columns reflect on both sides.
+        pad = (3, 2, 4, 3)
+        x = torch.randn(2, 3, 5, 4, device=device, dtype=torch.double, requires_grad=True)
+        ref_x = x.detach().cpu().requires_grad_()
+        with DeterministicGuard(True):
+            out = F.pad(x, pad, mode='reflect')
+            g = torch.randn_like(out)
+            out.backward(g)
+        F.pad(ref_x, pad, mode='reflect').backward(g.cpu())
+        self.assertEqual(x.grad, ref_x.grad)
+
     @onlyNativeDeviceTypes
     def test_LocalResponseNorm_empty(self, device):
         mod = torch.nn.LocalResponseNorm(2).to(device)
