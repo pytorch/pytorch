@@ -5249,6 +5249,65 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
         @torch._inductor.config.patch("graph_partition", True)
+        @parametrize("split", (False, True))
+        def test_graph_partition_input_asserts(self, split):
+            def f(x, y, c):
+                a = x.sin()
+                if split:
+                    a = (a.cpu() + c).cuda()
+                return (a * y,)
+
+            inps = [
+                torch.randn(8, 8, device="cuda"),
+                torch.randn(8, 8, device="cuda"),
+                torch.randn(8, 8),
+            ]
+            out, (code,) = run_and_get_code(
+                torch.compile(f, mode="reduce-overhead"), *inps
+            )
+            self.assertEqual(out, f(*inps))
+
+            # Each partition checks the inputs it reads before its first kernel;
+            # call() checks only the cpu input its own kernel reads.
+            if split:
+                checks = [
+                    "def partition_0(",
+                    "assert_size_stride(",
+                    ".run(",
+                    "def partition_1(",
+                    "assert_size_stride(",
+                    ".run(",
+                    "def call(self, args)",
+                    "assert_size_stride(",
+                    "cpp_fused",
+                ]
+            else:
+                checks = [
+                    "def partition_0(",
+                    "assert_size_stride",
+                    ".run(",
+                    "def call(self, args)",
+                ]
+            asserts = re.findall(r"assert_size_stride(?:_grouped)?\(", code)
+            self.assertEqual(len(asserts), 3 if split else 1)
+            file_check = FileCheck()
+            for check in checks:
+                file_check.check(check)
+            file_check.check_not("assert_size_stride").run(code)
+
+            # standalone_compile output has no Dynamo guards, so an input with
+            # unexpected strides reaches the compiled code and its input asserts.
+            gm = torch.fx.symbolic_trace(f)
+            compiled = torch._inductor.standalone_compile(
+                gm, inps, dynamic_shapes="from_example_inputs"
+            )
+            for i in range(3 if split else 2):
+                bad = list(inps)
+                bad[i] = bad[i].t().contiguous().t()
+                with self.assertRaisesRegex(AssertionError, "expected size"):
+                    compiled(*bad)
+
+        @torch._inductor.config.patch("graph_partition", True)
         @lowering.force_fallback(torch.ops.prims.device_put.default)
         def test_graph_partition_device_put_fallback(self):
             def f(x):
