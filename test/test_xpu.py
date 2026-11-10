@@ -166,8 +166,8 @@ class TestXpu(TestCase):
             device_capability["has_subgroup_matrix_multiply_accumulate"],
         )
         self.assertEqual(
-            device_properties.has_subgroup_matrix_multiply_accumulate_tensor_float32,
-            device_capability["has_subgroup_matrix_multiply_accumulate_tensor_float32"],
+            device_properties.has_subgroup_matrix_multiply_accumulate_tf32,
+            device_capability["has_subgroup_matrix_multiply_accumulate_tf32"],
         )
         self.assertEqual(
             device_properties.has_subgroup_2d_block_io,
@@ -1400,7 +1400,7 @@ print(torch.xpu.is_initialized())
             torch.xpu.memory.empty_cache()
             torch.xpu.memory._record_memory_history("state", stacks="python")
 
-            @torch.jit.script
+            @torch.jit._script.script
             def foo():
                 return torch.rand(311, 411, device="xpu")
 

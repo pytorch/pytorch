@@ -116,7 +116,7 @@ class BuiltinMethodKeyTracker:
         self.receivers: dict[Source, object] = {}
         self.parents: dict[Source, Source] = {}
         self.summaries: dict[int, tuple[_KeyStorage, KeySummary]] = {}
-        self.guarded_equalities: dict[int, type] = {}
+        self.guarded_equalities: dict[int, tuple[type, Source]] = {}
         self.has_method_keys = False
 
     def clear(self) -> None:
@@ -230,8 +230,9 @@ class KeySummary:
             self.receivers[source] = None
         self.input_methods.update(key.input_methods)
         for source, kind in key.equality_sources:
-            self.equality_sources[source] = kind
             self.equality_types[id(kind)] = kind
+            if id(kind) not in self.tracker.guarded_equalities:
+                self.equality_sources[source] = kind
         self.has_methods |= key.has_builtin_method and not key.method_keys_guarded
         self.custom |= key.has_custom_equality
         for kind in key.fixed_receiver_types:
@@ -280,7 +281,6 @@ def _guard_key_equalities(
     _check_pending_key_equalities(tx, (kind for _, kind in sources))
     # Share the MRO equality guard per class, but check pending mutations on every use.
     guarded = tx.output.builtin_method_keys.guarded_equalities
-    suppressed = TracingContext.get().guards_context.skip_install
     for source, kind in sources:
         entry = id(kind)
         if entry in guarded:
@@ -288,8 +288,11 @@ def _guard_key_equalities(
         attribute = mro_attr_source(tx, kind, source, "__eq__")
         if attribute is not None:
             install_guard(attribute.make_guard(GuardBuilder.FUNCTION_MATCH))
-        if not suppressed and not is_from_skip_guard_source(source):
-            guarded[entry] = kind
+        if (
+            not TracingContext.get().guards_context.skip_install
+            and not is_from_skip_guard_source(source)
+        ):
+            guarded[entry] = (kind, source)
 
 
 def _check_pending_key_equalities(
@@ -333,6 +336,12 @@ def guard_key_collisions(
     probe = collections[1] if len(collections) == 2 else ()
     probe_equalities = None
     if type(probe) is tuple and len(probe) == 1 and not probe[0].has_builtin_method:
+        if (
+            (cached := tracker.summaries.get(id(collections[0]))) is not None
+            and cached[1].size == len(cached[0])
+            and not cached[1].has_methods
+        ):
+            return cached[1]
         equalities = probe[0].equality_sources
         if not probe[0].has_custom_equality:
             probe_equalities = equalities
@@ -379,7 +388,6 @@ def guard_key_collisions(
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
-    # A literal-only operand cannot equal a method. Do not activate unrelated input keys.
     if TracingContext.get().guards_context.skip_install:
         return result
     if pin_receivers or len(collections) == 1 or len(participants) > 1:
@@ -476,7 +484,6 @@ class HashableTracker:
     has_custom_equality: bool = False
     fixed_receiver_types: tuple[type, ...] = ()
     has_custom_metaclass_equality: bool = False
-    _key_types: Iterable[tuple[type | None, Source | None]] = ()
 
     _MISSING = object()
 
@@ -494,45 +501,51 @@ class HashableTracker:
                 )
             # Only exact-int hook IDs use a hash from the source dictionary.
             # Keep them lazy until user code observes the key or its hash.
+            self._key_types = ()
             self.vt = vt
             self._hash, self._hash_is_identity = known_hash, False
             return
         # We specialize SymNodes
         vt = specialize_symnode(_guard_lazy_key(vt))
+        self.vt = vt
         if type(vt) is variables.ConstantVariable and (
             type(vt.value) is int or type(vt.value) is str
         ):
-            self.vt = vt
+            self._key_types = ()
             self._hash, self._hash_is_identity = hash(vt.value), False
             return
 
         from .descriptors import BoundBuiltinMethodVariable
 
         input_methods = ()
-        lazy_key_types: list[tuple[type | None, Source | None]] | None = None
+        lazy_key_types: Iterable[tuple[type | None, Source | None]] | None = None
         if isinstance(vt, variables.LazyVariableTracker):
             from .builder import bound_builtin_method_descriptor
 
             value = vt.original_value()
             source = cast(Source, vt.source)
-            # Lazy hashability accepts only functions/classes and flat exact tuples.
-            entries = (
-                [(item, GetItemSource(source, i)) for i, item in enumerate(value)]
-                if type(value) is tuple
-                else [(value, source)]
-            )
-            input_methods = tuple(
-                source
-                for item, source in entries
-                if type(item) is types.BuiltinMethodType
-                and bound_builtin_method_descriptor(item) is not None
-            )
-            lazy_key_types = [
-                (type(item), TypeSource(source))
-                for item, source in entries
-                if type(item) is not types.BuiltinMethodType
-            ]
             self.method_keys_guarded = not isinstance(vt.source, ConstDictKeySource)
+            if self.method_keys_guarded:
+                # _guard_lazy_key retained an already guarded builtin method.
+                input_methods, lazy_key_types = (source,), ()
+            else:
+                # Lazy hashability accepts only functions/classes and flat exact tuples.
+                entries = (
+                    [(item, GetItemSource(source, i)) for i, item in enumerate(value)]
+                    if type(value) is tuple
+                    else [(value, source)]
+                )
+                input_methods = tuple(
+                    source
+                    for item, source in entries
+                    if type(item) is types.BuiltinMethodType
+                    and bound_builtin_method_descriptor(item) is not None
+                )
+                lazy_key_types = [
+                    (type(item), TypeSource(source))
+                    for item, source in entries
+                    if type(item) is not types.BuiltinMethodType
+                ]
         from ..symbolic_convert import InstructionTranslator
 
         if type(vt) is variables.CallMethodVariable:
@@ -542,6 +555,7 @@ class HashableTracker:
         ):
             tx = InstructionTranslator.current_tx()
             self._hash, self._hash_is_identity = vt.key_hash_impl(tx)
+            self._key_types = ()
             self.has_builtin_method = True
             self.method_keys_guarded = vt.value is not None
             self.method_receivers = (vt.obj.source,)
@@ -550,26 +564,6 @@ class HashableTracker:
                 self.fixed_receiver_types = (vt.obj.python_type(),)
             self.vt = vt
             return
-        # Custom equality can observe hash collisions with builtin methods.
-        key_types: list[tuple[type | None, Source | None]]
-        try:
-            if lazy_key_types is not None:
-                key_types = lazy_key_types
-            else:
-                if isinstance(vt, variables.UserDefinedObjectVariable) and (
-                    vt.source is None
-                    or (
-                        isinstance(vt.cls_source, TypeSource)
-                        and vt.cls_source.base is vt.source
-                    )
-                ):
-                    class_source = vt.cls_source
-                else:
-                    class_source = TypeSource(vt.source) if vt.source else None
-                key_types = [(vt.python_type(), class_source)]
-        except NotImplementedError:
-            # Let generic hashing preserve its normal unsupported-type fallback.
-            key_types = [(None, None)]
         if input_methods:
             try:
                 current_tx = InstructionTranslator.current_tx()
@@ -587,7 +581,8 @@ class HashableTracker:
         self.method_receivers = tuple(
             AttrSource(source, "__self__") for source in input_methods
         )
-        self._key_types = key_types
+        if lazy_key_types is not None:
+            self._key_types = lazy_key_types
 
         # Fast path for unrealized LazyVariableTrackers: check and hash without
         # realizing, to avoid inserting guards.  If the fast-path check fails,
@@ -600,7 +595,6 @@ class HashableTracker:
             # Keep input-key laziness until a constructed method can compare with it.
             self._hash = hash(vt.original_value())
             self._hash_is_identity = False
-            self.vt = vt
             return
 
         tx = InstructionTranslator.current_tx()
@@ -652,7 +646,6 @@ class HashableTracker:
             self.has_custom_metaclass_equality = any(
                 item.has_custom_metaclass_equality for item in items
             )
-            self.vt = vt
             return
 
         if (
@@ -668,7 +661,27 @@ class HashableTracker:
         # is_fake marks an identity-based hash (e.g. id(fake_tensor)); such VTs
         # have no python-constant value, so their key equality is identity.
         self._hash, self._hash_is_identity = generic_hash_impl(tx, vt)
-        self.vt = vt
+
+    @functools.cached_property
+    def _key_types(self) -> Iterable[tuple[type | None, Source | None]]:
+        from ..symbolic_convert import InstructionTranslator
+
+        vt = self.vt
+        try:
+            kind = vt.python_type()
+            tracker = InstructionTranslator.current_tx().output.builtin_method_keys
+            if guarded := tracker.guarded_equalities.get(id(kind)):
+                return (guarded,)
+            if (
+                isinstance(vt, variables.UserDefinedObjectVariable)
+                and vt.source is None
+            ):
+                source = vt.cls_source
+            else:
+                source = TypeSource(vt.source) if vt.source else None
+            return ((kind, source),)
+        except NotImplementedError:
+            return ((None, None),)
 
     @functools.cached_property
     def equality_sources(self) -> tuple[tuple[Source, type], ...]:
@@ -684,7 +697,7 @@ class HashableTracker:
             guarded = tracker.guarded_equalities.get(id(kind))
             # Reuse only classifications protected by completed equality guards.
             if guarded is not None and source is not None:
-                sources.append((source, guarded))
+                sources.append((guarded[1], guarded[0]))
                 continue
             equality = (
                 None if kind is None else inspect.getattr_static(kind, "__eq__", None)
@@ -745,8 +758,7 @@ class HashableTracker:
     def iter_keys_by_identity(
         mapping: dict["HashableTracker", VariableTracker],
     ) -> Iterator["HashableTracker"]:
-        # OrderedDict's iterator looks up each stored key. Those internal lookups
-        # must not trace user equality; the iterator's current key is already known.
+        # OrderedDict iteration compares known stored keys by identity, without callbacks.
         iterator = iter(mapping)
         while True:
             token = _identity_key_iteration.set(True)
