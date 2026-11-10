@@ -2161,6 +2161,15 @@ class cpp:
         os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_KERNEL", "0") == "1"
     )
 
+    # Always inline the Welford helpers in cpp_prefix.h (welford_combine and
+    # welford_vec_reduce_all), which the compiler can otherwise leave as calls in
+    # Welford reduction loops. Code size can grow. The arithmetic is the same, but
+    # with enable_unsafe_math_opt_flag or FP contraction the compiler can optimize
+    # across the inlined code, which can change results in the last bits.
+    force_inline_welford = (
+        os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_WELFORD", "0") == "1"
+    )
+
     # Use static constexpr or static const for int array
     use_constexpr_for_int_array = (
         os.environ.get("TORCHINDUCTOR_CPP_USE_CONSTEXPR_FOR_INT_ARRAY", "1") == "1"
