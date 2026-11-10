@@ -403,7 +403,6 @@
   "test/inductor/test_cutlass_evt.py",
   "test/inductor/test_cutlass_fallback.py",
   "test/inductor/test_debug_graph_dump.py",
-  "test/inductor/test_debug_trace.py",
   "test/inductor/test_decompose_mem_bound_mm.py",
   "test/inductor/test_decompose_shard_dim_alltoall.py",
   "test/inductor/test_dependencies.py",

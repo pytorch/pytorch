@@ -11,10 +11,13 @@ from pathlib import Path
 import torch
 from torch._inductor import config, test_operators
 from torch._inductor.utils import fresh_cache
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipIf,
+)
 from torch.testing._internal.common_utils import HardwareClassification, skipIfWindows
-from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.testing._internal.logging_utils import multiple_logs_to_string
+from torch.utils._triton import has_triton
 
 
 try:
@@ -276,7 +279,11 @@ class TestDebugTraceAccelerator(test_torchinductor.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @config.patch("trace.enabled", True)
-    @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @skipIf(
+        not has_triton(),
+        "requires triton for CUDA or XPU",
+        device_type=("cuda", "xpu"),
+    )
     def test_debug_multi_tempalte(self, device):
         class ToyModel(torch.nn.Module):
             def __init__(self) -> None:
