@@ -640,20 +640,6 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
                 return cache_size
         return 256 * 1024 * 1024
 
-    def get_flush_buffer_size(
-        self: Self, device_type: str | torch.device | None = None
-    ) -> int:
-        """Get the size, in bytes, of the buffer zeroed between iterations to flush the cache."""
-        cache_size = self.get_device_cache_size(device_type)
-        # On XPU, zeroing a last-level-cache-sized buffer can finish before the
-        # host has launched `_callable`, leaking launch latency into the event
-        # timing. A larger flush buffer keeps the device busy longer.
-        # See https://github.com/pytorch/pytorch/issues/189144
-        if _normalize_gpu_device_type(device_type) == "xpu":
-            _MIN_XPU_FLUSH_BUFFER_BYTES = 64 * 1024 * 1024
-            return max(cache_size, _MIN_XPU_FLUSH_BUFFER_BYTES)
-        return cache_size
-
     def get_event_pairs(
         self: Self, iters: int, device_type: str | torch.device | None = None
     ) -> list[tuple[Any, Any]]:
@@ -763,9 +749,19 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         _callable()
         device_interface.synchronize()
 
+        # On XPU, zeroing a last-level-cache-sized buffer can finish before the
+        # host has launched `_callable`, leaking launch latency into the event
+        # timing. A larger flush buffer keeps the device busy longer.
+        # See https://github.com/pytorch/pytorch/issues/189144
+        if device_type == "xpu":
+            buffer_size_bytes = max(
+                self.get_device_cache_size(device_type), 64 * 1024 * 1024
+            )
+        else:
+            buffer_size_bytes = self.get_device_cache_size(device_type)
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
         buffer = torch.empty(
-            self.get_flush_buffer_size(device_type) // 4,
+            buffer_size_bytes // 4,
             dtype=torch.int,
             device=device_type,
         )
@@ -892,7 +888,7 @@ class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
         if torch.version.hip:
             buffer_size_bytes = 256 * 1024 * 1024
         else:
-            buffer_size_bytes = self.get_flush_buffer_size(device_type)
+            buffer_size_bytes = self.get_device_cache_size(device_type)
         buffer = torch.empty(
             buffer_size_bytes // 4, dtype=torch.int, device=device_type
         )
