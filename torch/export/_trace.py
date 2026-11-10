@@ -347,9 +347,8 @@ def _extract_fake_inputs(gm, args, kwargs):
     # inputs, and we want to check that the shape env is consistent between
     # both. Unfortunately we can't see what fake mode is attached to the shape
     # env, then we can just compare fake modes.
-    fake_inputs = fake_inps + fake_vals
-    detected_fake_mode = detect_fake_mode(fake_inputs)
-    detected_shape_env = detect_shape_env(fake_inputs)
+    detected_fake_mode = detect_fake_mode(fake_inps + fake_vals)
+    detected_shape_env = detect_shape_env(fake_inps + fake_vals)
 
     if detected_fake_mode:
         if detected_shape_env:
