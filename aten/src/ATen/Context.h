@@ -436,6 +436,8 @@ class TORCH_API Context {
   void setQEngine(at::QEngine e);
   static const std::vector<at::QEngine>& supportedQEngines();
   static bool isXNNPACKAvailable();
+  // Read/write the process-wide setting, or this thread's override while an
+  // impl::SparseTensorInvariantChecksGuard is alive.
   void setCheckSparseTensorInvariants(std::optional<bool> e);
   std::optional<bool> checkSparseTensorInvariants(
       bool warn_when_uninitialized = false) const;
@@ -592,27 +594,32 @@ class TORCH_API Context {
 
 TORCH_API Context& globalContext();
 
+namespace impl {
+
 // Gives this thread its own sparse invariant check setting while alive, which
 // checkSparseTensorInvariants() reports and setCheckSparseTensorInvariants()
 // changes, leaving the process-wide setting alone. The C++ fake fallback runs
 // sparse Meta kernels with checks off this way, as the checks read index data
-// meta tensors lack.
-class TORCH_API ThreadLocalSparseTensorInvariantChecks {
+// meta tensors lack. Destruction restores the previous override.
+// ThreadLocalState does not propagate it: other threads use their own override
+// or the global one.
+class TORCH_API SparseTensorInvariantChecksGuard {
  public:
-  explicit ThreadLocalSparseTensorInvariantChecks(std::optional<bool> enabled);
-  ~ThreadLocalSparseTensorInvariantChecks();
-  ThreadLocalSparseTensorInvariantChecks(
-      const ThreadLocalSparseTensorInvariantChecks&) = delete;
-  ThreadLocalSparseTensorInvariantChecks& operator=(
-      const ThreadLocalSparseTensorInvariantChecks&) = delete;
-  ThreadLocalSparseTensorInvariantChecks(
-      ThreadLocalSparseTensorInvariantChecks&&) = delete;
-  ThreadLocalSparseTensorInvariantChecks& operator=(
-      ThreadLocalSparseTensorInvariantChecks&&) = delete;
+  explicit SparseTensorInvariantChecksGuard(bool enabled);
+  ~SparseTensorInvariantChecksGuard();
+  SparseTensorInvariantChecksGuard(const SparseTensorInvariantChecksGuard&) =
+      delete;
+  SparseTensorInvariantChecksGuard& operator=(
+      const SparseTensorInvariantChecksGuard&) = delete;
+  SparseTensorInvariantChecksGuard(SparseTensorInvariantChecksGuard&&) = delete;
+  SparseTensorInvariantChecksGuard& operator=(
+      SparseTensorInvariantChecksGuard&&) = delete;
 
  private:
   std::optional<std::optional<bool>> prev_;
 };
+
+} // namespace impl
 
 inline void init() {
   globalContext();

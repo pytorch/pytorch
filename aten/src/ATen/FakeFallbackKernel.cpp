@@ -18,11 +18,14 @@
 // The C++ counterpart of FakeTensorMode.__torch_dispatch__ for C++ fakes. It
 // runs an op whose tensor inputs are fakes of one mode on one device: the op
 // runs on the inputs' meta storage through its Meta kernel (its sparse Meta
-// kernel for sparse inputs), and the new
-// outputs become fakes of that mode on that device, as Python's
-// wrap_meta_outputs_with_default_device_logic does. Python Meta registrations
+// kernel for sparse inputs), and the new outputs become fakes of that mode on
+// that device, as Python's wrap_meta_outputs_with_default_device_logic does.
+// Python Meta registrations
 // that torch._meta_registrations installs as Meta kernels run here like C++
 // ones.
+//
+// The mode is uninstalled while this Meta-only fallback runs. It does not call
+// fake_try_*; callbacks that need an active mode must run outside that scope.
 //
 // So that ops do not give results Python's FakeTensorMode would not, it raises
 // NotImplementedError where Python runs something other than the Meta kernel,
@@ -30,10 +33,10 @@
 //  - ops Python runs through a Python implementation (op_implementations,
 //    custom op fake kernels, prim metas, Python CompositeImplicitAutograd
 //    kernels; the fake_try_* callbacks in c10/core/impl/PyInterpreter.h);
-//  - ops Python decomposes under static shapes with a torch._decomp
-//    decomposition (FakeDispatchCategory::StaticShapeDecomp), which can
-//    disagree with the Meta kernel (log_sigmoid_forward's checks the device,
-//    which reads meta here);
+//  - ops without sparse inputs that Python decomposes under static shapes with
+//    a torch._decomp decomposition (FakeDispatchCategory::StaticShapeDecomp),
+//    which can disagree with the Meta kernel (log_sigmoid_forward's checks the
+//    device, which reads meta here);
 //  - CompositeImplicitAutograd ops, which reach this only below autograd:
 //    Python decomposes them with the mode active, so their sub-ops are
 //    fake-dispatched, and here they would run on the Meta key instead;
@@ -42,8 +45,8 @@
 //  - symbolic inputs (sizes, strides or scalars), for which Python decomposes
 //    most ops that lack a C++ Meta kernel supporting them;
 //  - tensors nested deeper than Tensor[] (Tensor[][], dicts of tensors), or Any;
-//  - sparse inputs to ops without a sparse Meta kernel, for which there is no
-//    Meta backend fallback;
+//  - sparse inputs to ops without a sparse Meta kernel; unlike Meta, the sparse
+//    Meta keys have no backend fallback;
 //  - ops whose Meta kernel raises c10::NotImplementedError (as the Meta
 //    backend fallback does for an op without one), which Python then runs
 //    through maybe_run_unsafe_fallback (a Python Meta kernel's
@@ -109,6 +112,7 @@ class UnsetFakeTensorModeGuard {
   }
   ~UnsetFakeTensorModeGuard() {
     if (mode_ != nullptr) {
+      // Releasing a displaced mode can run callbacks that must see restored TLS.
       auto prev_mode =
           c10::impl::FakeTensorModeTLS::create_state(std::move(mode_));
       c10::impl::tls_set_dispatch_key_included(
@@ -138,9 +142,7 @@ bool is_symbolic(const c10::IValue& ivalue) {
 }
 
 bool contains_tensor_types(const c10::TypePtr& type) {
-  // Any can hide tensors in containers the shallow IValue walk cannot visit.
-  if (type->kind() == c10::TypeKind::AnyType ||
-      type->isSubtypeOf(*c10::TensorType::get())) {
+  if (type->isSubtypeOf(*c10::TensorType::get())) {
     return true;
   }
   const auto contained = type->containedTypes();
@@ -148,7 +150,8 @@ bool contains_tensor_types(const c10::TypePtr& type) {
 }
 
 // Whether type holds tensors other than as Tensor, Tensor?, Tensor[] or
-// Tensor?[], the forms for_each_tensor and the output wrapping visit
+// Tensor?[], the forms for_each_tensor and the output wrapping visit. Any can
+// hide tensors, including inside otherwise tensor-free containers.
 bool has_nested_tensors(const c10::TypePtr& type) {
   auto unwrap = [](const c10::TypePtr& t) {
     const auto optional = t->cast<c10::OptionalType>();
@@ -158,7 +161,12 @@ bool has_nested_tensors(const c10::TypePtr& type) {
   if (const auto list = t->cast<c10::ListType>()) {
     t = unwrap(list->getElementType());
   }
-  return !t->isSubtypeOf(*c10::TensorType::get()) && contains_tensor_types(t);
+  if (t->isSubtypeOf(*c10::TensorType::get())) {
+    return false;
+  }
+  const auto contained = t->containedTypes();
+  return t->kind() == c10::TypeKind::AnyType || contains_tensor_types(t) ||
+      std::any_of(contained.begin(), contained.end(), has_nested_tensors);
 }
 
 // Same as Python's _is_tensor_constructor in fake_impls.py
@@ -171,7 +179,7 @@ bool is_tensor_constructor(const c10::FunctionSchema& schema) {
                return contains_tensor_types(a.type());
              }) &&
       schema.returns().size() == 1 &&
-      schema.returns()[0].type()->kind() == c10::TypeKind::TensorType;
+      schema.returns()[0].type() == c10::TensorType::get();
 }
 
 // See fakeHasPythonFakeImpl; categories is the op's fakeDispatchTableCategories
@@ -257,7 +265,7 @@ void fakeFallback(
   for (const auto* arguments : {&schema.arguments(), &schema.returns()}) {
     for (const auto& argument : *arguments) {
       if (has_nested_tensors(argument.type())) {
-        unsupported(op, "nested containers of tensors");
+        unsupported(op, "nested containers of tensors or Any");
       }
     }
   }
@@ -266,7 +274,7 @@ void fakeFallback(
   // an output (by in-place and out= ops) from a new tensor
   std::unordered_set<const c10::TensorImpl*> input_impls;
   std::optional<c10::Device> device;
-  // The sparse Meta keys of the sparse inputs
+  // The sparse inputs' Meta keys, or Meta for ops without sparse inputs
   c10::DispatchKeySet meta_keyset;
   for_each_tensor(
       stack, arguments_begin, num_arguments, [&](const at::Tensor& t) {
@@ -341,7 +349,7 @@ void fakeFallback(
     meta_keyset = c10::DispatchKeySet(c10::DispatchKey::Meta);
   } else if (!op.hasComputedKernelForDispatchKey(
                  meta_keyset.highestPriorityTypeId())) {
-    // Otherwise the dispatcher raises its missing kernel error
+    // Give a clearer error without constructing the dispatcher's kernel table.
     unsupported(op, "sparse inputs to ops without a sparse Meta kernel");
   }
 
@@ -364,10 +372,11 @@ void fakeFallback(
   {
     // As in Python, sparse invariant checks, which read index data meta tensors
     // lack, are off for a sparse Meta kernel; here on this thread only, where
-    // Python turns the process-wide setting off
-    std::optional<at::ThreadLocalSparseTensorInvariantChecks> checks_off;
-    if (!meta_keyset.has(c10::DispatchKey::Meta) &&
-        at::globalContext().checkSparseTensorInvariants().value_or(false)) {
+    // Python turns the process-wide setting off. Override unconditionally to
+    // avoid reading that setting, which another thread can change. This also
+    // suppresses the uninitialized-setting warning inside sparse Meta kernels.
+    std::optional<at::impl::SparseTensorInvariantChecksGuard> checks_off;
+    if (!meta_keyset.has(c10::DispatchKey::Meta)) {
       checks_off.emplace(false);
     }
     try {
@@ -403,9 +412,10 @@ void fakeFallback(
     if (c10::raw::intrusive_ptr::use_count(impl) > 1) {
       // A tensor held elsewhere, such as a Python Meta kernel's output, which
       // its Python object refers to, or a tensor a sparse input holds (as
-      // _values returns), is not changed: a shallow copy becomes the fake, a
-      // new one on each call, as Python wraps each meta output in a new
-      // FakeTensor
+      // _values/_indices return), is not changed: a shallow copy becomes the
+      // fake. Python memoizes its wraps; ADInplaceOrView makes its sparse
+      // member views fresh. Here they are fresh even below ADInplaceOrView,
+      // where Python can return the same fake on successive calls.
       out = at::Tensor(impl->shallow_copy_and_detach(
           impl->version_counter(), impl->allow_tensor_metadata_change()));
       replaced.emplace(impl, *out);

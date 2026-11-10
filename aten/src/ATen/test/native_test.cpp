@@ -16,6 +16,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/irange.h>
 
+#include <barrier>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -454,15 +455,29 @@ TEST(TestNative, ConcurrentInitCppFake) {
   auto mode = make_cpp_fake_mode();
   auto base = at::empty({4}, at::device(at::kMeta));
   auto* storage = base.storage().unsafeGetStorageImpl();
+  struct CaptureWarnings : c10::WarningHandler {
+    size_t count = 0;
+    void process(const c10::Warning& warning) override {
+      EXPECT_NE(
+          warning.msg().find("Accessing the data pointer of FakeTensor"),
+          std::string::npos);
+      ++count;
+    }
+  };
+  CaptureWarnings handler;
+  c10::WarningUtils::WarningHandlerGuard handler_guard(&handler);
+  c10::WarningUtils::WarnAlways warn_always;
   for (bool allow_unsafe : {true, false}) {
     mode->mode->allow_unsafe_data_ptr_access_ = allow_unsafe;
     std::vector<at::Tensor> views(8);
     for (auto& view : views) {
       view = at::native::as_strided_tensorimpl(base, {2}, {1});
     }
+    std::barrier start(static_cast<std::ptrdiff_t>(views.size()));
     std::vector<std::thread> workers;
     for (auto& view : views) {
       workers.emplace_back([&, view] {
+        start.arrive_and_wait();
         at::init_cpp_fake(
             view.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode);
         auto alias = at::alias(view);
@@ -474,6 +489,22 @@ TEST(TestNative, ConcurrentInitCppFake) {
       worker.join();
     }
     EXPECT_EQ(storage->throw_on_mutable_data_ptr(), !allow_unsafe);
+    const auto warnings = handler.count;
+    if (allow_unsafe) {
+      base.mutable_data_ptr();
+      EXPECT_EQ(handler.count, warnings + 1);
+    } else {
+      try {
+        base.mutable_data_ptr();
+        ADD_FAILURE() << "expected mutable_data_ptr() to throw";
+      } catch (const c10::Error& e) {
+        EXPECT_NE(
+            std::string(e.what()).find(
+                "Cannot access data pointer of Tensor (e.g. FakeTensor"),
+            std::string::npos);
+      }
+      EXPECT_EQ(handler.count, warnings);
+    }
   }
 }
 
