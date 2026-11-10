@@ -335,6 +335,7 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             ),
             ("keys", ({},)),
             ("__len__", ({},)),
+            ("__len__", ()),
         ],
     )
     def test_descriptor_type_errors(self, name, args):
@@ -344,9 +345,9 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
                     builtins.frozendict.__new__(*args)
                 else:
                     getattr(builtins.frozendict, name)(*args)
-            except TypeError:
-                return x + 1
-            return x - 1
+            except TypeError as error:
+                return x + 1, str(error) if name == "__len__" else None
+            return x - 1, None
 
         x = torch.randn(3)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
