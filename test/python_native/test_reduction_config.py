@@ -37,25 +37,14 @@ from torch._native.ops.reductions import (
 _TRAITS = {
     "sum": T.SumOps(),
     "mean": T.MeanOps(),
+    "amax": T.AMaxOps(),
+    "nansum": T.NanSumOps(),
     "argmax": T.ArgMaxOps(),
+    "argmin": T.ArgMinOps(),
     "var": T.WelfordOps(),
     "std": T.WelfordOps(take_sqrt=True),
     "var_mean": T.VarMeanOps(),
 }
-
-
-# Trait types and Welford outputs of the traits the SM107 test labels name.
-_SM107_TYPES = {
-    "sum": T.SumOps,
-    "mean": T.MeanOps,
-    "amax": T.AMaxOps,
-    "nansum": T.NanSumOps,
-    "argmaxi32": T.ArgMaxOps,
-    "argmin": T.ArgMinOps,
-    "var0": T.WelfordOps,
-    "varmean0": T.VarMeanOps,
-}
-_WELFORD_OUTS = {"var0": 1, "varmean0": 2}
 
 
 def _contract(trait):
@@ -63,6 +52,10 @@ def _contract(trait):
     contract = dict(nfields=trait.nfields, nouts=getattr(trait, "nouts", 1))
     welford = T.welford_outputs(trait)
     return contract | dict(trait_type=type(trait), welford_outs=welford)
+
+
+# Contracts by _TRAITS key, for parametrized selector rows.
+_CONTRACTS = {key: _contract(trait) for key, trait in _TRAITS.items()}
 
 
 def _served(trait_key):
@@ -143,32 +136,32 @@ class TestReductionConfig(TestCase):
         )
 
     @parametrize(
-        "dtype,width,mib,key,fields,nouts,expected",
+        "dtype,width,mib,contract,expected",
         [
-            (torch.float32, 256, 64, "mean", 1, 1, "inner_tree"),
-            (torch.float32, 256, 16, "mean", 1, 1, "linear"),
-            (torch.float32, 256, 64, "argmaxi32", 2, 1, "linear"),
-            (torch.float32, 256, 256, "argmaxi32", 2, 1, "inner_tree"),
-            (torch.bfloat16, 256, 16, "sum", 1, 1, "inner_tree"),
-            (torch.bfloat16, 256, 16, "argmaxi32", 2, 1, "linear"),
-            (torch.bfloat16, 256, 64, "sum", 1, 1, "linear"),
+            (torch.float32, 256, 64, _CONTRACTS["mean"], "inner_tree"),
+            (torch.float32, 256, 16, _CONTRACTS["mean"], "linear"),
+            (torch.float32, 256, 64, _CONTRACTS["argmax"], "linear"),
+            (torch.float32, 256, 256, _CONTRACTS["argmax"], "inner_tree"),
+            (torch.bfloat16, 256, 16, _CONTRACTS["sum"], "inner_tree"),
+            (torch.bfloat16, 256, 16, _CONTRACTS["argmax"], "linear"),
+            (torch.bfloat16, 256, 64, _CONTRACTS["sum"], "linear"),
             # Unmeasured one-field traits keep the linear order.
-            (torch.float32, 256, 64, "nansum", 1, 1, "linear"),
-            (torch.float32, 1024, 64, "var0", 3, 1, "inner_tree"),
-            (torch.float32, 1024, 64, "var0", 3, 2, "linear"),
-            (torch.float32, 1024, 256, "argmaxi32", 2, 1, "linear"),
-            (torch.bfloat16, 1024, 64, "argmaxi32", 2, 1, "inner_tree"),
+            (torch.float32, 256, 64, _CONTRACTS["nansum"], "linear"),
+            (torch.float32, 1024, 64, _CONTRACTS["var"], "inner_tree"),
+            (torch.float32, 1024, 64, _CONTRACTS["var"] | {"nouts": 2}, "linear"),
+            (torch.float32, 1024, 256, _CONTRACTS["argmax"], "linear"),
+            (torch.bfloat16, 1024, 64, _CONTRACTS["argmax"], "inner_tree"),
             # Rules match trait types: only argmax was measured.
-            (torch.bfloat16, 1024, 64, "argmin", 2, 1, "linear"),
-            (torch.float32, 4096, 16, "varmean0", 3, 2, "inner_tree"),
-            (torch.bfloat16, 4096, 16, "argmaxi32", 2, 1, "inner_tree"),
-            (torch.float32, 4096, 16, "mean", 1, 1, "inner_tree"),
-            (torch.float32, 4096, 64, "sum", 1, 1, "linear"),
-            (torch.float32, 4096, 256, "sum", 1, 1, "inner_tree"),
-            (torch.bfloat16, 4096, 2048, "mean", 1, 1, "linear"),
+            (torch.bfloat16, 1024, 64, _CONTRACTS["argmin"], "linear"),
+            (torch.float32, 4096, 16, _CONTRACTS["var_mean"], "inner_tree"),
+            (torch.bfloat16, 4096, 16, _CONTRACTS["argmax"], "inner_tree"),
+            (torch.float32, 4096, 16, _CONTRACTS["mean"], "inner_tree"),
+            (torch.float32, 4096, 64, _CONTRACTS["sum"], "linear"),
+            (torch.float32, 4096, 256, _CONTRACTS["sum"], "inner_tree"),
+            (torch.bfloat16, 4096, 2048, _CONTRACTS["mean"], "linear"),
         ],
     )
-    def test_sm107_row_profiles(self, dtype, width, mib, key, fields, nouts, expected):
+    def test_sm107_row_profiles(self, dtype, width, mib, contract, expected):
         """Pin each arm of the SM107 row policy."""
         rows = (mib << 20) // (width * dtype.itemsize)
         self.assertEqual(
@@ -177,10 +170,7 @@ class TestReductionConfig(TestCase):
                 dtype,
                 width,
                 rows,
-                trait_type=_SM107_TYPES[key],
-                nfields=fields,
-                nouts=nouts,
-                welford_outs=_WELFORD_OUTS.get(key, 0),
+                **contract,
                 acc_bits=32,
                 alignment=16,
             ),
@@ -188,28 +178,28 @@ class TestReductionConfig(TestCase):
         )
 
     @parametrize(
-        "dtype,mib,key,fields,nouts,rule",
+        "dtype,mib,contract,rule",
         [
-            (torch.float32, 256, "sum", 1, 1, "rubin_strided_sum"),
-            (torch.float32, 256, "nansum", 1, 1, "general_default"),
-            (torch.bfloat16, 2048, "sum", 1, 1, "rubin_strided_sum"),
-            (torch.bfloat16, 16, "var0", 3, 1, "rubin_strided_welford"),
-            (torch.float32, 256, "var0", 3, 1, "rubin_strided_welford"),
+            (torch.float32, 256, _CONTRACTS["sum"], "rubin_strided_sum"),
+            (torch.float32, 256, _CONTRACTS["nansum"], "general_default"),
+            (torch.bfloat16, 2048, _CONTRACTS["sum"], "rubin_strided_sum"),
+            (torch.bfloat16, 16, _CONTRACTS["var"], "rubin_strided_welford"),
+            (torch.float32, 256, _CONTRACTS["var"], "rubin_strided_welford"),
             # Welford output counts must match the trait's.
-            (torch.float32, 256, "varmean0", 3, 2, "rubin_strided_welford"),
-            (torch.float32, 256, "var0", 3, 2, "general_default"),
-            (torch.float32, 64, "mean", 1, 1, "rubin_strided_inner"),
-            (torch.float32, 64, "sum", 1, 1, "rubin_strided_inner"),
-            (torch.float32, 64, "amax", 1, 1, "rubin_strided_inner"),
-            (torch.float32, 16, "sum", 1, 1, "general_default"),
-            (torch.bfloat16, 64, "argmaxi32", 2, 1, "rubin_strided_argmax"),
-            (torch.bfloat16, 64, "argmin", 2, 1, "general_default"),
-            (torch.float32, 2048, "argmaxi32", 2, 1, "rubin_strided_argmax"),
-            (torch.float32, 256, "argmaxi32", 2, 1, "general_default"),
-            (torch.float32, 64, "argmaxi32", 2, 1, "general_default"),
+            (torch.float32, 256, _CONTRACTS["var_mean"], "rubin_strided_welford"),
+            (torch.float32, 256, _CONTRACTS["var"] | {"nouts": 2}, "general_default"),
+            (torch.float32, 64, _CONTRACTS["mean"], "rubin_strided_inner"),
+            (torch.float32, 64, _CONTRACTS["sum"], "rubin_strided_inner"),
+            (torch.float32, 64, _CONTRACTS["amax"], "rubin_strided_inner"),
+            (torch.float32, 16, _CONTRACTS["sum"], "general_default"),
+            (torch.bfloat16, 64, _CONTRACTS["argmax"], "rubin_strided_argmax"),
+            (torch.bfloat16, 64, _CONTRACTS["argmin"], "general_default"),
+            (torch.float32, 2048, _CONTRACTS["argmax"], "rubin_strided_argmax"),
+            (torch.float32, 256, _CONTRACTS["argmax"], "general_default"),
+            (torch.float32, 64, _CONTRACTS["argmax"], "general_default"),
         ],
     )
-    def test_sm107_general_profiles(self, dtype, mib, key, fields, nouts, rule):
+    def test_sm107_general_profiles(self, dtype, mib, contract, rule):
         """Pin each distinct SM107 strided policy."""
         rows = (mib << 20) // (1024 * dtype.itemsize)
         cfg = kg.select_general_config(
@@ -219,10 +209,7 @@ class TestReductionConfig(TestCase):
             rows,
             ((1024, 2),),
             ((rows, 2048),),
-            trait_type=_SM107_TYPES[key],
-            nfields=fields,
-            nouts=nouts,
-            welford_outs=_WELFORD_OUTS.get(key, 0),
+            **contract,
             acc_bits=32,
             alignment=16,
         )
@@ -562,7 +549,7 @@ class TestReductionConfig(TestCase):
             )
             self.assertTrue(cfg.uniform_tree)
             self.assertTrue(tile.uniform_tree_ok(T.WelfordOps(), count, cfg.block, 1))
-        # TileReduce rejects general-axis blocks of a non-power-of-two warp count.
+        # The block check shared with TileReduce rejects a non-power-of-two warp count.
         self.assertFalse(tile.uniform_tree_ok(T.WelfordOps(), 4096, 96, 1))
 
     @parametrize(
@@ -642,17 +629,19 @@ class TestReductionConfig(TestCase):
         self.assertEqual(cfg.rule, expected_rule)
 
     @parametrize(
-        "dtype,trait,size,expected",
+        "dtype,trait,columns,size,expected",
         [
             (
                 torch.bfloat16,
                 "sum",
+                4095,
                 256 << 20,
                 ct.ColConfig("b200_ragged_c4095", 64, 512, 1, "partition", 8, 16),
             ),
             (
                 torch.float32,
                 "argmax",
+                4095,
                 16 << 20,
                 ct.ColConfig(
                     "b200_ragged_argmax_c4095_small", 32, 8, 1, "column", 0, 64
@@ -661,12 +650,14 @@ class TestReductionConfig(TestCase):
             (
                 torch.bfloat16,
                 "argmax",
+                4095,
                 2 << 30,
                 ct.ColConfig("b200_ragged_argmax_c4095", 64, 1024, 1, "column"),
             ),
             (
                 torch.float16,
                 "mean",
+                4095,
                 16 << 20,
                 ct.ColConfig(
                     "b200_ragged_c4095_ordered",
@@ -680,6 +671,7 @@ class TestReductionConfig(TestCase):
             (
                 torch.bfloat16,
                 "var",
+                4095,
                 64 << 20,
                 ct.ColConfig(
                     "b200_ragged_welford_c4095", 64, 128, 1, "column", col_group=8
@@ -688,21 +680,69 @@ class TestReductionConfig(TestCase):
             (
                 torch.float32,
                 "var",
+                4095,
                 2 << 30,
                 ct.ColConfig(
                     "b200_ragged_welford_c4095", 64, 1928, 1, "column", col_group=8
                 ),
             ),
+            (
+                torch.float32,
+                "sum",
+                4095,
+                64 << 20,
+                ct.ColConfig("b200_ragged_c4095", 64, 256, 1, "column"),
+            ),
+            (
+                torch.float32,
+                "sum",
+                4095,
+                2 << 30,
+                ct.ColConfig("b200_ragged_c4095", 64, 512, 1, "column"),
+            ),
+            (
+                torch.float16,
+                "sum",
+                4095,
+                2 << 30,
+                ct.ColConfig("b200_ragged_c4095", 64, 512, 1, "column"),
+            ),
+            (
+                torch.float32,
+                "argmax",
+                257,
+                64 << 20,
+                ct.ColConfig("b200_ragged_c257", 64, 2048, 1, "column"),
+            ),
+            (
+                torch.float16,
+                "sum",
+                257,
+                2 << 30,
+                ct.ColConfig("b200_ragged_c257", 64, 16384, 1, "column"),
+            ),
+            (
+                torch.float16,
+                "var",
+                257,
+                256 << 20,
+                ct.ColConfig(
+                    "b200_ragged_welford_c257", 64, 1024, 1, "column", col_group=16
+                ),
+            ),
         ],
-        name_fn=lambda dtype, trait, size, cfg: f"{cfg.rule}_{size >> 20}mib",
+        name_fn=lambda d, t, c, size, cfg: f"{cfg.rule}_{str(d)[6:]}_{size >> 20}mib",
     )
-    def test_b200_ragged_column_values(self, dtype, trait, size, expected):
-        """Pin every field of the B200 C = 4095 ragged column rules, not just names."""
+    def test_b200_ragged_column_values(self, dtype, trait, columns, size, expected):
+        """Pin every ColConfig field at sampled anchors of each B200 ragged column arm:
+        C = 4095 one-field (with bf16's 256 MiB partition layout), small and large argmax,
+        ordered and Welford; C = 257 one-field (with fp16's 2 GiB npar), argmax, and
+        narrow Welford (col_group=16)."""
         itemsize = dtype.itemsize
-        rows = size // (4095 * itemsize)
+        rows = size // (columns * itemsize)
         contract = _contract(_TRAITS[trait])
         nfields = contract.pop("nfields")
-        args = ((10, 0), dtype, rows, 4095, 1, nfields)
+        args = ((10, 0), dtype, rows, columns, 1, nfields)
         nouts = contract["nouts"]
         outs = kg._sm107_outputs(dtype, type(_TRAITS[trait]), nfields, nouts)
         kw = dict(itemsize=itemsize, acc_bits=32, alignment=16, out_dtypes=outs)
