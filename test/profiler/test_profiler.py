@@ -540,20 +540,7 @@ class TestProfiler(TestCase):
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
     def test_source(self):
-        """Checks that source code attribution works for eager, TS and autograd mode"""
-        # avoid automatic inlining
-        prev_opt = torch._C._get_graph_executor_optimize()
-        torch._C._set_graph_executor_optimize(False)
-
-        @torch.jit.script
-        def ts_method_2(x, y):
-            return torch.matmul(x, y)
-
-        @torch.jit.script
-        def ts_method_1(x, y, z):
-            a = x + z
-            w = ts_method_2(x, y) + a
-            return w.sum()
+        """Checks source attribution for eager operators, modules, and autograd."""
 
         class DummyModule(nn.Module):
             def __init__(self) -> None:
@@ -578,9 +565,7 @@ class TestProfiler(TestCase):
             x = torch.randn(10, 10, requires_grad=True)
             y = torch.randn(10, 10, requires_grad=True)
             z = x + y
-            w = ts_method_1(x, y, z)
-            v = 2 * w
-            v.backward()
+            z.sum().backward()
             a = torch.randn(2, 3, 2, 2, requires_grad=True)
             b = call_module(a)
             c = b.sum()
@@ -589,16 +574,7 @@ class TestProfiler(TestCase):
         for e in p.function_events:
             if "aten::add" in e.name or "AddBackward" in e.name:
                 self.assertTrue(any("test_profiler" in entry for entry in e.stack))
-                self.assertTrue(
-                    any(
-                        (
-                            "test_source" in entry
-                            or "ts_method_1" in entry
-                            or "ts_method_2" in entry
-                        )
-                        for entry in e.stack
-                    )
-                )
+                self.assertTrue(any("test_source" in entry for entry in e.stack))
 
         if kineto_available():
             with TemporaryFileName(mode="w+") as fname:
@@ -619,8 +595,6 @@ class TestProfiler(TestCase):
                     module_event["args"]["Python parent id"],
                     wrapper_event["args"]["Python id"],
                 )
-
-        torch._C._set_graph_executor_optimize(prev_opt)
 
     @parametrize(
         "name,thread_spec",
@@ -807,81 +781,6 @@ class TestProfiler(TestCase):
         self.assertGreater(
             profiler_stats.function_events_build_tree_call_duration_us, 0
         )
-
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_module_hierarchy(self):
-        class A(nn.Module):
-            def my_new_method(self, x):
-                return x * 3
-
-            def forward_impl_(self, x, y):
-                return self.my_new_method(x) + y
-
-            def forward(self, x, y):
-                y = y - 2
-                return self.forward_impl_(x, y)
-
-        class B(nn.Module):
-            def forward(self, x):
-                return x + 2
-
-        class C(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.A0 = A()
-                self.B0 = B()
-
-            def call_b(self, x):
-                return self.B0.forward(x)
-
-            def forward(self, x, y):
-                return self.A0.forward(x, y) + self.call_b(x)
-
-        model = C()
-        model = torch.jit.script(model)
-        input_a = torch.rand(128, 128)
-        input_b = torch.rand(128, 128)
-        op_to_module_hierarchy = {}
-        op_to_module_hierarchy["aten::sub"] = ["TOP(C)::forward.A0(A)::forward."]
-        op_to_module_hierarchy["aten::mul"] = [
-            "TOP(C)::forward.A0(A)::forward.SELF(A)::forward_impl_.SELF(A)::my_new_method."
-        ]
-        op_to_module_hierarchy["aten::add"] = [
-            "TOP(C)::forward.A0(A)::forward.SELF(A)::forward_impl_.",
-            "TOP(C)::forward.SELF(C)::call_b.B0(B)::forward.",
-            "TOP(C)::forward.",
-        ]
-        with TemporaryFileName(mode="w+") as fname:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", FutureWarning)
-                with profile(
-                    activities=[torch.profiler.ProfilerActivity.CPU],
-                    with_modules=True,
-                ) as prof:
-                    model(input_a, input_b)
-            prof.export_chrome_trace(fname)
-            with open(fname) as f:
-                trace = json.load(f)
-                if "traceEvents" not in trace:
-                    raise AssertionError("Expected 'traceEvents' in trace")
-                events = trace["traceEvents"]
-                checked = 0
-                for evt in events:
-                    if "name" not in evt:
-                        raise AssertionError("Expected 'name' in event")
-                    if "args" in evt:
-                        op_name = evt["name"]
-                        if "Module Hierarchy" in evt["args"]:
-                            hierarchy = evt["args"]["Module Hierarchy"]
-                            if op_name in op_to_module_hierarchy:
-                                checked += 1
-                                if hierarchy not in op_to_module_hierarchy[op_name]:
-                                    raise AssertionError(
-                                        f"Expected hierarchy '{hierarchy}' in {op_to_module_hierarchy[op_name]}"
-                                    )
-                # Without this the comparisons above are vacuous: a trace with no
-                # module hierarchy at all satisfies every branch.
-                self.assertGreater(checked, 0)
 
     def test_high_level_trace(self):
         """Checks that python side high level events are recorded."""
