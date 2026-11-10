@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+import random
 import sys
 import tempfile
 import unittest
@@ -18,7 +19,8 @@ sys.path.append(str(REPO_ROOT))
 
 import tools.testing.do_target_determination_for_s3 as td_job
 from tools.stats import import_test_stats
-from tools.testing.target_determination import scorer, scorer_model
+from tools.testing.discover_tests import TESTS as ALL_TESTS
+from tools.testing.target_determination import gen_artifact, scorer, scorer_model
 from tools.testing.target_determination.heuristics.interface import (
     AggregatedHeuristics,
     HeuristicInterface,
@@ -513,6 +515,271 @@ class TestTDJob(unittest.TestCase):
         td_results = self.run_main(boom)
         self.assert_td_scores(td_results)
         self.assertNotIn("scorer", td_results)
+
+
+def make_block(model: Any = None, **scores: dict[str, float]) -> dict[str, Any]:
+    return {
+        "model": make_model() if model is None else model,
+        "reason": "ok",
+        "heuristics": scores,
+        "raised": [],
+        "change": {"n_files": 1},
+        "risk": 0.0,
+    }
+
+
+def td_cut(
+    tests: list[str], scores: dict[str, float]
+) -> tuple[list[TestRun], list[TestRun]]:
+    tp = TestPrioritizations(tests, {TestRun(t): s for t, s in scores.items()})
+    return tp.get_top_per_tests(25)
+
+
+def names(tests: list[TestRun]) -> list[str]:
+    return [str(t) for t in tests]
+
+
+class TestSelection(unittest.TestCase):
+    def select(
+        self, block: Any, include: list[TestRun], exclude: list[TestRun], times: Any
+    ) -> tuple[list[TestRun], list[TestRun], dict[str, Any]]:
+        return scorer.select_tests(block, include, exclude, times, "env1", "default")
+
+    def test_ranks_by_p_over_cost_within_td_cost(self) -> None:
+        tests = [f"t{i:02d}" for i in range(12)]
+        times = dict.fromkeys(tests, 50.0)
+        times["t05"] = 5000.0
+        include, exclude = td_cut(tests, {"t05": 1.0, "t07": 0.5})
+        self.assertEqual(names(include), ["t05", "t07", "t00", "t01"])
+        block = make_block(HeuristicA={"t05": 1.0, "t07": 0.5, "t09": 0.25})
+        new_include, new_exclude, info = self.select(block, include, exclude, times)
+        self.assertEqual(info["budget_ms"], 5_190_000)
+        self.assertEqual(names(new_include)[:2], ["t07", "t09"])
+        self.assertEqual(names(new_exclude), ["t05"])
+        self.assertEqual(info["cost_ms"], 660_000)
+        self.assertEqual(info["cut"], "scorer")
+        self.assertEqual(info["version"], "2026-11-11")
+        self.assertEqual((info["n"], info["seconds"]), (11, 550.0))
+        self.assertEqual((info["td_n"], info["td_seconds"]), (4, 5150.0))
+        self.assertEqual(sorted(names(new_include) + names(new_exclude)), sorted(tests))
+
+    def test_never_exceeds_budget(self) -> None:
+        rng = random.Random(0)
+        for trial in range(200):
+            tests = [f"t{i}" for i in range(rng.randint(1, 60))]
+            times = {t: rng.choice([0.0, 1.0, rng.uniform(0, 3000)]) for t in tests}
+            scores = {t: rng.random() for t in tests if rng.random() < 0.3}
+            include, exclude = td_cut(tests, scores)
+            block = make_block(HeuristicA=scores)
+            new_include, new_exclude, info = self.select(block, include, exclude, times)
+            with self.subTest(trial=trial):
+                self.assertLessEqual(info["cost_ms"], info["budget_ms"])
+                cost = sum(
+                    round((times[t.test_file] + 10.0) * 1000) for t in new_include
+                )
+                self.assertEqual(cost, info["cost_ms"])
+                self.assertEqual(len(new_include) + len(new_exclude), len(tests))
+
+    def test_deterministic_ties_by_name(self) -> None:
+        tests = ["b", "d", "a", "c", "e", "f"]
+        times = dict.fromkeys(tests, 5.0)
+        include, exclude = td_cut(tests, {"f": 1.0})
+        block = make_block()
+        first = self.select(block, include, exclude, times)
+        self.assertEqual(names(first[0]), ["a", "b"])
+        self.assertEqual(names(first[1]), ["c", "d", "e", "f"])
+        shuffled = dict(reversed(list(times.items())))
+        again = self.select(copy.deepcopy(block), include, exclude, shuffled)
+        self.assertEqual(first, again)
+
+    def test_missing_times_use_the_median(self) -> None:
+        times = {"a": 10.0, "b": 20.0, "c": 90.0}
+        block = make_block()
+        _, _, info = self.select(block, [TestRun("d")], [TestRun("a")], times)
+        self.assertEqual(info["budget_ms"], 30_000)
+        self.assertEqual(info["td_seconds"], 20.0)
+        _, _, info = self.select(block, [TestRun("d")], [], {})
+        self.assertEqual(info["budget_ms"], 10_000)
+
+    def test_build_env_one_hot_is_keyed_by_the_job_base_name(self) -> None:
+        job = "dynamo-unittest / dynamo-test (3.12)"
+        model = make_model()
+        model["scorer"]["build_env"] = {job: 5.0, "linux-jammy-py3.12-clang21": -5.0}
+        z = -2 + 0.5 * math.log(410) + 5.0 - 0.1
+        z += math.log(0.1 / 0.9) + 2 * math.log(0.2 / 0.8)
+        p = scorer_model.file_probability(model, {}, 410.0, job, "default")
+        self.assertAlmostEqual(p, 1 / (1 + math.exp(-z)), places=15)
+
+        keys = []
+
+        def spy(*args: Any) -> float:
+            keys.append(args[3])
+            return scorer_model.file_probability(*args)
+
+        with mock.patch.object(scorer, "file_probability", spy):
+            self.select(make_block(model=model), [TestRun("a")], [], {"a": 1.0})
+            scorer.select_tests(
+                make_block(model=model), [TestRun("a")], [], {}, job, "default"
+            )
+        self.assertEqual(keys, ["env1", job])
+
+    def test_td_include_set_refits_exactly(self) -> None:
+        model = make_model()
+        model["scorer"]["heuristics"]["HeuristicA"] = {
+            "weight": 10.0,
+            "x": [0.0, 0.01, 1.0],
+            "y": [1e-6, 0.5, 1 - 1e-6],
+        }
+        rng = random.Random(3)
+        for trial in range(200):
+            tests = [f"t{i:02d}" for i in range(rng.randint(4, 80))]
+            k = 25 * len(tests) // 100 + 1
+            scores = {t: rng.uniform(0.5, 1.0) for t in rng.sample(tests, k)}
+            times = {t: rng.uniform(0, 500) for t in tests}
+            include, exclude = td_cut(tests, scores)
+            block = make_block(model=model, HeuristicA=scores)
+            new_include, _, info = self.select(block, include, exclude, times)
+            with self.subTest(trial=trial):
+                self.assertEqual(sorted(names(new_include)), sorted(names(include)))
+                self.assertEqual(info["cost_ms"], info["budget_ms"])
+
+    def test_must_run_files_come_first(self) -> None:
+        model = make_model()
+        for h in model["scorer"]["heuristics"].values():
+            h["weight"] = 0.0
+        tests = [f"t{i}" for i in range(8)]
+        times = dict.fromkeys(tests, 10.0)
+        times["t6"] = 1000.0
+        include, exclude = td_cut(tests, {})
+        block = make_block(
+            model=model,
+            EditedByPR={"t6": 1.0},
+            PreviouslyFailedInPR={"t5": 0.5, "t3": 0.0},
+        )
+        new_include, _, info = self.select(block, include, exclude, times)
+        self.assertEqual(names(new_include), ["t5", "t6"])
+        self.assertGreater(info["cost_ms"], info["budget_ms"])
+
+        times["t6"] = 10.0
+        new_include, _, _ = self.select(block, include, exclude, times)
+        self.assertEqual(names(new_include), ["t5", "t6", "t0"])
+
+        block["raised"] = ["EditedByPR"]
+        new_include, _, _ = self.select(block, include, exclude, times)
+        self.assertEqual(names(new_include), ["t5", "t0", "t1"])
+
+    def test_class_level_test_runs_are_whole_files(self) -> None:
+        include = [TestRun("a::TestX"), TestRun("b")]
+        exclude = [TestRun("a", excluded=["TestX"]), TestRun("c")]
+        times = {"a": 30.0, "b": 30.0, "c": 30.0}
+        block = make_block(HeuristicA={"c": 1.0})
+        new_include, new_exclude, info = self.select(block, include, exclude, times)
+        self.assertEqual(info["budget_ms"], 80_000)
+        self.assertEqual(names(new_include), ["c", "a"])
+        self.assertEqual(names(new_exclude), ["b"])
+        self.assertTrue(all(t.is_full_file() for t in new_include + new_exclude))
+
+    def test_realistic_fixture(self) -> None:
+        rng = random.Random(1)
+        tests = sorted(ALL_TESTS)
+        times = {t: rng.lognormvariate(4, 1.5) for t in tests if rng.random() < 0.95}
+        scores = {t: rng.random() for t in rng.sample(tests, 80)}
+        include, exclude = td_cut(tests, scores)
+        block = make_block(HeuristicA=scores)
+        new_include, _, info = self.select(block, include, exclude, times)
+        median = sorted(times.values())[len(times) // 2]
+        td_cost = sum(times.get(t.test_file, median) + 10.0 for t in include)
+        self.assertAlmostEqual(info["budget_ms"] / 1000, td_cost, delta=1.0)
+        self.assertLessEqual(info["cost_ms"], info["budget_ms"])
+        self.assertGreater(len(new_include), 0)
+
+
+class TestScorerCut(unittest.TestCase):
+    def cut(self, block: Any) -> tuple[Any, Any, dict[str, Any]]:
+        self.include, self.exclude = td_cut(
+            ["a", "b", "c", "d", "e"], {"e": 1.0, "d": 0.5}
+        )
+        times: dict[str, float] = dict.fromkeys("abcde", 5.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "td_results.json"
+            if block is not None:
+                path.write_text(json.dumps({"_test_scores": [], "scorer": block}))
+            return scorer.scorer_cut(
+                path, self.include, self.exclude, times, "env1", "default"
+            )
+
+    def assert_td_cut(self, block: Any, reason: str) -> None:
+        include, exclude, info = self.cut(block)
+        self.assertEqual(include, self.include)
+        self.assertEqual(exclude, self.exclude)
+        self.assertEqual(info["cut"], "td")
+        self.assertTrue(info["reason"].startswith(reason), info["reason"])
+        self.assertEqual(info["n"], len(self.include))
+        self.assertEqual(len(info["hash"]), 12)
+
+    def test_fallbacks_give_td_cut_exactly(self) -> None:
+        bad = make_model()
+        bad["scorer"]["heuristics"]["HeuristicA"]["weight"] = -1.0
+        no_heuristics = make_block()
+        del no_heuristics["heuristics"]
+        cases: list[tuple[Any, str]] = [
+            (None, "no scorer block"),
+            ({"model": None, "reason": "error: boom"}, "no model: error: boom"),
+            (make_block(model=bad), "invalid: "),
+            (make_block(model=make_model(enabled=False)), "disabled"),
+            (no_heuristics, "error: KeyError"),
+            ([], "no scorer block"),
+        ]
+        for block, reason in cases:
+            with self.subTest(reason=reason):
+                self.assert_td_cut(block, reason)
+        with mock.patch.object(scorer, "load_scorer_block", lambda _: make_block()):
+            include, _, info = scorer.scorer_cut(
+                Path("unused"), [TestRun("a")], [], {"a": -20.0}, "", ""
+            )
+        self.assertEqual((names(include), info["cut"]), (["a"], "td"))
+        self.assertTrue(info["reason"].startswith("error: ValueError"))
+
+    def test_fallback_without_usable_times_keeps_td_cut(self) -> None:
+        include, exclude, info = scorer.scorer_cut(
+            Path("missing/td_results.json"),
+            [TestRun("a")],
+            [TestRun("b")],
+            {"a": None, "b": 1.0},  # type: ignore[dict-item]
+            "",
+            "",
+        )
+        self.assertEqual((names(include), names(exclude)), (["a"], ["b"]))
+        self.assertEqual(info["cut"], "td")
+        self.assertIsNone(info["td_seconds"])
+
+    def test_scorer_cut_with_model(self) -> None:
+        include, exclude, info = self.cut(make_block(HeuristicA={"a": 1.0}))
+        self.assertEqual(info["cut"], "scorer")
+        self.assertEqual(names(include)[0], "a")
+        self.assertEqual(info["budget_ms"], 30_000)
+
+    def test_artifact_carries_scorer_info(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "test" / "test-reports").mkdir(parents=True)
+            with mock.patch.object(gen_artifact, "REPO_ROOT", Path(tmp)):
+                gen_artifact.gen_ci_artifact([{"test_file": "a"}], [], {"cut": "td"})
+                gen_artifact.gen_ci_artifact([{"test_file": "a"}], [])
+            written = [
+                json.loads(p.read_text())
+                for p in (Path(tmp) / "test" / "test-reports").iterdir()
+            ]
+        self.assertCountEqual(
+            written,
+            [
+                {
+                    "included": [{"test_file": "a"}],
+                    "excluded": [],
+                    "scorer": {"cut": "td"},
+                },
+                {"included": [{"test_file": "a"}], "excluded": []},
+            ],
+        )
 
 
 if __name__ == "__main__":

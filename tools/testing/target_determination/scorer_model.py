@@ -213,8 +213,7 @@ def file_probability(
 
     scores maps heuristic name to this file's score (missing means 0.0); cost is
     the file's seconds plus overhead_seconds. build_env_key is the job's
-    test-times key: run_test.py's get_job_base_name(JOB_NAME), or
-    BUILD_ENVIRONMENT when JOB_NAME is empty.
+    test-times key, run_test.py's get_test_times_job_key().
     """
     s = model["scorer"]
     z = (
