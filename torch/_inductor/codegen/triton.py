@@ -2264,6 +2264,12 @@ class TritonOverrides(OpOverrides):
         return f"triton_helpers.randint64({seed}, {offset}, {low}, {high})"
 
     @staticmethod
+    def philox_rand(seed, offset, idx, dtype):
+        # Mantissa bits, matching std::numeric_limits<T>::digits in eager.
+        digits = 1 - int(math.log2(torch.finfo(dtype).eps))
+        return f"triton_helpers.philox_rand({seed}, {offset}, {idx}, {digits})"
+
+    @staticmethod
     def load_seed(name, offset):
         raise NotImplementedError("ops.load_seed not implemented outside a kernel")
 

@@ -24,6 +24,7 @@ from torch._inductor.fx_utils import (
     get_node_storage,
     is_node_realized,
 )
+from torch._inductor.ir import is_triton
 from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
@@ -240,6 +241,12 @@ def should_reinplace_index_put(node: torch.fx.Node) -> bool:
     )
 
 
+def should_reinplace_philox(node: torch.fx.Node) -> bool:
+    # Triton lowers the functional op to fusible pointwise code; reinplacing
+    # would force the extern in-place kernel instead.
+    return not is_triton(node.meta["val"].device)
+
+
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -434,10 +441,14 @@ inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
     # Stateless Philox RNG: reinplace the functionalized clone onto the dead
     # output buffer, so out-of-place uniform()/normal()/bits() don't pay an
     # extra copy.
-    aten._philox_uniform.default: InplaceableOp(aten._philox_uniform_.default, 0),
+    aten._philox_uniform.default: InplaceableOp(
+        aten._philox_uniform_.default, 0, extra_check=should_reinplace_philox
+    ),
     aten._philox_normal.default: InplaceableOp(aten._philox_normal_.default, 0),
     aten._philox_randint.default: InplaceableOp(aten._philox_randint_.default, 0),
-    aten._philox_uniform.Tensor: InplaceableOp(aten._philox_uniform_.Tensor, 0),
+    aten._philox_uniform.Tensor: InplaceableOp(
+        aten._philox_uniform_.Tensor, 0, extra_check=should_reinplace_philox
+    ),
 }
 
 try:

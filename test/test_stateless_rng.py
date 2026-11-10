@@ -1,9 +1,11 @@
 # Owner(s): ["module: random"]
 
 import contextlib
+import math
 
 import torch
 import torch.func._random as random
+from torch._inductor.utils import run_and_get_code
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.autograd import gradcheck, gradgradcheck
 from torch.testing._internal.common_device_type import (
@@ -1035,6 +1037,101 @@ class TestStatelessRNGCompile(TestCase):
         expected = random.uniform(key, (8, 33), low=-3.0, high=5.5, dtype=dtype)
         actual = torch.compile(f, fullgraph=True)(key, low, high)
         self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @dtypes(*all_floating_dtypes)
+    @parametrize(
+        "key_batch",
+        [
+            subtest((), name="single"),
+            subtest((4, 1, 1), name="batched"),
+            subtest((4, 1, 33), name="per_element"),
+            subtest((1, 5, 1), name="broadcast"),
+        ],
+    )
+    @parametrize("tensor_bounds", [False, True])
+    def test_uniform_compiled_exact(self, device, dtype, key_batch, tensor_bounds):
+        if torch.device(device).type == "cuda" and not HAS_TRITON:
+            self.skipTest("CUDA inductor codegen requires triton")
+        shape = (4, 5, 33)
+        key = random.key(42, device=device)
+        if key_batch:
+            key = random.split(key, math.prod(key_batch)).view(*key_batch, 2)
+        # Bounds that dtype can't represent check that they're rounded like eager.
+        low, high = 0.1, 0.7
+        if tensor_bounds:
+            low = torch.randn(4, 1, 33, dtype=torch.float64, device=device)
+            high = low + torch.rand(33, dtype=torch.float64, device=device)
+
+        def f(key, low, high):
+            # Upcasting checks that consumers see values rounded to dtype.
+            return random.uniform(key, shape, low=low, high=high, dtype=dtype).double()
+
+        compiled = torch.compile(f, fullgraph=True)
+        actual, code = run_and_get_code(compiled, key, low, high)
+        self.assertEqual(actual, f(key, low, high), atol=0, rtol=0)
+        if torch.device(device).type == "cuda":
+            self.assertIn("triton_helpers.philox_rand", code[0])
+
+    @dtypes(*all_floating_dtypes)
+    def test_uniform_compiled_fused_matches_unfused(self, device, dtype):
+        if torch.device(device).type == "cuda" and not HAS_TRITON:
+            self.skipTest("CUDA inductor codegen requires triton")
+
+        def consumer(u, x):
+            return (u * 3 + x).exp()
+
+        def f(key, x):
+            u = random.uniform(key, x.shape, low=-1.0, high=2.0, dtype=dtype)
+            return consumer(u, x)
+
+        key = random.key(42, device=device)
+        x = torch.randn(64, 1001, dtype=dtype, device=device)
+        u = random.uniform(key, x.shape, low=-1.0, high=2.0, dtype=dtype)
+        # Fusing generation into its consumer shouldn't change the result.
+        expected = torch.compile(consumer, fullgraph=True)(u, x)
+        actual = torch.compile(f, fullgraph=True)(key, x)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    def test_uniform_compiled_dynamic(self, device):
+        if torch.device(device).type == "cuda" and not HAS_TRITON:
+            self.skipTest("CUDA inductor codegen requires triton")
+
+        def f(key, low):
+            return random.uniform(key, low.shape, low=low, high=low + 2)
+
+        compiled = torch.compile(f, fullgraph=True, dynamic=True)
+        for n in (3, 17, 1000):
+            low = torch.randn(n, 33, device=device)
+            key = random.key(42, device=device)
+            keys = random.split(key, n).view(n, 1, 2)
+            for k in (key, keys):
+                self.assertEqual(compiled(k, low), f(k, low), atol=0, rtol=0)
+
+    @dtypes(*all_floating_dtypes)
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_uniform_compiled_emulate_precision_casts(self, device, dtype):
+        # This config disables Triton's FMA contraction, which eager relies on.
+        if torch.device(device).type == "cuda" and not HAS_TRITON:
+            self.skipTest("CUDA inductor codegen requires triton")
+
+        def f(key):
+            return random.uniform(key, (1001,), low=-0.3, high=2.7, dtype=dtype)
+
+        key = random.key(42, device=device)
+        self.assertEqual(torch.compile(f, fullgraph=True)(key), f(key), atol=0, rtol=0)
+
+    def test_uniform_compiled_noncontig_inplace(self, device):
+        if torch.device(device).type == "cuda" and not HAS_TRITON:
+            self.skipTest("CUDA inductor codegen requires triton")
+
+        def f(key):
+            out = torch.empty(37, 101, device=device).t()
+            return random.uniform_(key, out, low=-1.0, high=1.0)
+
+        key = random.key(42, device=device)
+        actual, expected = torch.compile(f, fullgraph=True)(key), f(key)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertEqual(actual.stride(), expected.stride())
 
     def test_dropout_backward(self, device):
         if torch.device(device).type == "cuda" and not HAS_TRITON:

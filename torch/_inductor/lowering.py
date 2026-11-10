@@ -106,6 +106,7 @@ from .utils import (
     pad_listlike,
     register_op_dtype_propagation_rules,
     register_op_requires_libdevice_fp64,
+    sympy_dot,
     sympy_product,
     use_scatter_fallback,
 )
@@ -3368,6 +3369,78 @@ def inductor_randint(
         inner_fn=inner_fn,
         ranges=[*size],
     )
+
+
+def philox_counter(key: TensorBox, size: Sequence[sympy.Expr]):
+    """
+    Returns a function mapping an output index to the int64 (seed, offset, idx)
+    that the eager _philox_* kernels use for that element. A batched key covers
+    a row-major block of the output spanning the trailing dims where its batch
+    size is 1; idx is the element's position within its block.
+    """
+    key_loader = to_dtype_bitcast(key, torch.int64).make_loader()
+    is_one = V.graph.sizevars.is_size_one_or_false
+    batch_is_one = [is_one(s) for s in key.get_size()[:-1]]
+    block_start = len(batch_is_one)
+    while block_start > 0 and batch_is_one[block_start - 1]:
+        block_start -= 1
+    block_strides = ir.FlexibleLayout.contiguous_strides(size[block_start:])
+
+    def fn(index):
+        key_index = [0 if one else i for one, i in zip(batch_is_one, index)]
+        seed, offset = key_loader([*key_index, 0]), key_loader([*key_index, 1])
+        idx = sympy_dot(index[block_start:], block_strides)
+        return seed, offset, ops.index_expr(idx, torch.int64)
+
+    return fn
+
+
+philox_uniform_ops = (aten._philox_uniform.default, aten._philox_uniform.Tensor)
+
+
+@register_lowering(philox_uniform_ops, type_promotion_kind=None)
+def philox_uniform(self, key, low=0.0, high=1.0):
+    if not is_triton(key):
+        op = V.graph.current_node.target
+        return fallback_handler(op, add_to_fallback_set=False)(self, key, low, high)
+    dtype = self.get_dtype()
+    acc_dtype = torch.float64 if dtype == torch.float64 else torch.float32
+    size = list(self.get_size())
+    counter = philox_counter(key, size)
+
+    def round_to_dtype(x):
+        # Inductor computes half and bfloat16 in float32; round where eager does.
+        if acc_dtype == dtype:
+            return x
+        rounded = ops.to_dtype(x, dtype, use_compute_types=False)
+        return ops.to_dtype(rounded, acc_dtype)
+
+    if isinstance(low, TensorBox):
+        low_loader, high_loader = (expand(b, size).make_loader() for b in (low, high))
+
+        def bounds(index):
+            # The float32 step matches c10::Half(double) for float64 bounds.
+            lo = round_to_dtype(ops.to_dtype(low_loader(index), acc_dtype))
+            hi = round_to_dtype(ops.to_dtype(high_loader(index), acc_dtype))
+            return lo, round_to_dtype(ops.sub(hi, lo))
+
+    else:
+        # Computed here because Inductor's constant folding skips float32 rounding.
+        low_t, high_t = torch.tensor([low, high], dtype=torch.float64).to(dtype)
+        lo_val, span_val = float(low_t), float(high_t - low_t)
+
+        def bounds(index):
+            return ops.constant(lo_val, acc_dtype), ops.constant(span_val, acc_dtype)
+
+    def inner_fn(index):
+        lo, span = bounds(index)
+        seed, offset, idx = counter(index)
+        u = ops.philox_rand(seed, offset, idx, dtype)
+        # nvcc contracts eager's u * (high - low) + low into an FMA.
+        return round_to_dtype(ops.fma(u, span, lo))
+
+    device = key.get_device()
+    return Pointwise.create(device=device, dtype=dtype, inner_fn=inner_fn, ranges=size)
 
 
 def _boundaries_helper(tb: TensorBox) -> tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
