@@ -6,6 +6,7 @@ import itertools
 import math
 import os
 import re
+import traceback
 import unittest
 import warnings
 from collections import defaultdict
@@ -18,8 +19,14 @@ import torch._prims as prims
 import torch.utils._pytree as pytree
 from torch._prims.context import TorchRefsMode
 from torch._prims_common.wrappers import _maybe_remove_out_wrapper
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
-from torch._subclasses.fake_utils import outputs_alias_inputs
+from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
+    FakeTensor,
+    FakeTensorMode,
+    is_fake_tensor,
+    UnsupportedFakeTensorException,
+)
+from torch._subclasses.fake_utils import _check_alias_info, outputs_alias_inputs
 from torch.fx.experimental.symbolic_shapes import (
     constrain_range,
     ShapeEnv as SymbolicShapeEnv,
@@ -3237,6 +3244,99 @@ class TestFakeTensor(TestCase):
             self.assertEqual(strided_result.layout, torch.strided)
 
 
+class TestCppFakeFallbackOpInfoDevice(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    # Compare CPU samples accepted by C++ input conversion and fake fallback.
+    # UnsupportedFakeTensorException from conversion and the fallback's explicit
+    # NotImplementedError rejection exclude samples. Without a support baseline,
+    # this sweep cannot detect regressions that turn supported samples into
+    # rejections; newly supported samples are compared automatically.
+    @skipIfTorchDynamo("Dynamo does not support C++ fakes as inputs yet")
+    @torch._dynamo.config.patch(
+        fake_tensor_cache_enabled=True, fake_tensor_cache_crosscheck_enabled=True
+    )
+    @ops(op_db, dtypes=OpDTypes.any_one)
+    def test_fake_fallback_matches_python(self, device, dtype, op):
+        def convert(mode, sample):
+            inputs = (sample.input, sample.args, sample.kwargs)
+            return pytree.tree_map_only(torch.Tensor, mode.from_tensor, inputs)
+
+        def run(mode, inputs):
+            inp, args, kwargs = inputs
+            with mode:
+                return op(inp, *args, **kwargs)
+
+        compared = 0
+        for sample in op.sample_inputs(device, dtype, requires_grad=False):
+            # The C++ side first, as it rejects much of op_db
+            mode = CppFakeTensorMode()
+            try:
+                inputs = convert(mode, sample)
+            except UnsupportedFakeTensorException:
+                continue
+            cpp_error = None
+            try:
+                out = run(mode, inputs)
+            except Exception as e:
+                rejected = "fake tensor fallback does not support" in str(e)
+                if type(e) is NotImplementedError and rejected:
+                    continue
+                cpp_error = e
+            python_mode = FakeTensorMode()
+            python_inputs = convert(python_mode, sample)
+            python_error = None
+            try:
+                expected = run(python_mode, python_inputs)
+            except Exception as e:
+                python_error = e
+            compared += 1
+            if cpp_error is not None or python_error is not None:
+                # Match exception types and reject C++ internal asserts.
+                # Meta kernels and Python fake implementations word errors differently.
+                same = type(cpp_error) is type(python_error)
+                if not same or "INTERNAL ASSERT" in str(cpp_error):
+                    msg = f"C++ raised {cpp_error!r}; Python raised {python_error!r}"
+                    if cpp_error is not None and python_error is not None:
+                        msg += "\nPython traceback:\n" + "".join(
+                            traceback.format_exception(python_error)
+                        )
+                    raise AssertionError(msg) from (cpp_error or python_error)
+                continue
+            expected_leaves, expected_spec = pytree.tree_flatten(expected)
+            out_leaves, out_spec = pytree.tree_flatten(out)
+            self.assertEqual(out_spec, expected_spec)
+            tensor_pairs = [
+                (e, o)
+                for e, o in zip(
+                    pytree.tree_leaves(python_inputs), pytree.tree_leaves(inputs)
+                )
+                if isinstance(e, torch.Tensor)
+            ]
+            for e, o in zip(expected_leaves, out_leaves):
+                if not isinstance(e, torch.Tensor):
+                    self.assertIs(type(o), type(e))
+                    self.assertEqual(o, e)
+                    continue
+                self.assertIsInstance(o, torch.Tensor)
+                self.assertIs(torch._C._maybe_get_fake_mode(o), mode)
+                self.assertEqual(
+                    (o.shape, o.dtype, o.device, o.layout),
+                    (e.shape, e.dtype, e.device, e.layout),
+                )
+                self.assertEqual((o.is_conj(), o.is_neg()), (e.is_conj(), e.is_neg()))
+                if e.layout == torch.strided:
+                    # Fake-vs-fake parity includes size-one and empty tensor strides.
+                    self.assertEqual(o.stride(), e.stride())
+                    self.assertEqual(o.storage_offset(), e.storage_offset())
+                # Check each input and earlier output, preserving the alias mapping.
+                for py_tensor, cpp_tensor in tensor_pairs:
+                    _check_alias_info("C++ fake", e, py_tensor, o, cpp_tensor)
+                tensor_pairs.append((e, o))
+        if compared == 0:
+            self.skipTest("no supported sample to compare")
+
+
 class TestForwardADWithScalars(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -3285,6 +3385,9 @@ instantiate_device_type_tests(TestCompositeCompliance, globals(), allow_xpu=True
 instantiate_device_type_tests(TestMathBits, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFakeTensor, globals(), allow_xpu=True, allow_mps=True)
+instantiate_device_type_tests(
+    TestCppFakeFallbackOpInfoDevice, globals(), only_for=("cpu",)
+)
 instantiate_device_type_tests(TestTags, globals(), only_for="cpu")
 instantiate_device_type_tests(TestForwardADWithScalars, globals(), allow_xpu=True)
 

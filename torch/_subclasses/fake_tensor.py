@@ -959,20 +959,10 @@ def get_schema_info(func: OpOverload) -> torch._C._SchemaInfo:
 # torch/_decomp/decompositions.py.
 # decomps are used for aot autograd tracing so we would like to unify on their
 # implementation and add additional testing to them
-def is_torch_decomp_decomposition(func: OpOverload) -> bool:
-    from torch._decomp import decomposition_table
-
-    decompositions = torch._decomp.decompositions
-    # Note that the function in the decomposition table might be
-    # different from the one in the module because of the difference
-    # in out handling in aten API and torch public API
-    fn = decomposition_table[func]
-    in_decomp_module = fn.__module__.startswith("torch._decomp")
-    return in_decomp_module and hasattr(decompositions, fn.__name__)
-
-
 @functools.cache
 def torch_decomp_decompositions(func: OpOverload) -> bool:
+    from torch._decomp import is_torch_decomp_decomposition
+
     return is_torch_decomp_decomposition(func)
 
 
