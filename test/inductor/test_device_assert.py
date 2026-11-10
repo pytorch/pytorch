@@ -1,13 +1,14 @@
 # Owner(s): ["module: inductor"]
 
-from unittest import skipIf
-
 import torch
 import torch._inductor.config
 from torch._inductor import metrics
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipIf,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -95,7 +96,7 @@ class TestTorchDeviceAssertTriggerGeneric(TestCase):
 class TestTorchDeviceAssertTriggerAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @skipIf(not HAS_TRITON, "requires triton")
+    @skipIf(not HAS_TRITON, "requires triton", device_type=("cuda", "xpu"))
     @torch._inductor.config.patch(force_disable_caches=True)
     def test_assert_fusion(self, device):
         torch._logging.set_logs(inductor_metrics=True)
@@ -113,7 +114,7 @@ class TestTorchDeviceAssertTriggerAccelerator(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 1)
         torch._logging.set_logs()
 
-    @skipIf(not HAS_TRITON, "requires triton")
+    @skipIf(not HAS_TRITON, "requires triton", device_type=("cuda", "xpu"))
     @torch._inductor.config.patch(force_disable_caches=True)
     def test_run_assert_triton(self, device):
         @torch.compile(backend="inductor")
@@ -138,7 +139,6 @@ class TestTorchDeviceAssertTriggerAccelerator(TestCase):
 instantiate_device_type_tests(
     TestTorchDeviceAssertTriggerAccelerator,
     globals(),
-    except_for="cpu",
     allow_xpu=True,
 )
 
