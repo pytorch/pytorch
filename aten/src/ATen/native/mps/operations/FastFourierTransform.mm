@@ -20,6 +20,7 @@
 #include <ATen/ops/cat.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/fft_fft.h>
+#include <ATen/ops/mul.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/polar.h>
 #include <ATen/ops/zeros.h>
@@ -132,8 +133,13 @@ bool is_smooth(int64_t n) {
   return !radices(n).empty();
 }
 
+// Bluestein's convolution length for n points: a power of two >= 2n - 1
+int64_t chirp_fft_size(int64_t n) {
+  return static_cast<int64_t>(std::bit_ceil<uint64_t>(2 * n - 1));
+}
+
 // Cached MPS tables. W: W_n^k for k < n. W2, for long axes: W_n^b for b < 4096 then W_n^(4096 a). Chirp: Bluestein's
-// exp(-+ i pi k^2 / n), and ChirpFFT: the M-point FFT of its conjugate wrapped around zero, M a power of two >= 2n - 1
+// exp(-+ i pi k^2 / n), and ChirpFFT: the chirp_fft_size(n)-point FFT of its conjugate wrapped around zero
 enum class Table { W, W2, Chirp, ChirpFFT };
 
 Tensor table(Table kind, int64_t n, bool inverse = false) {
@@ -151,7 +157,7 @@ Tensor table(Table kind, int64_t n, bool inverse = false) {
       ? k.mul(-2 * M_PI / n)
       : k.mul(k).remainder(2 * n).mul((inverse ? 1 : -1) * M_PI / n);
   const auto c = at::polar(at::ones_like(angle), angle);
-  const auto M = static_cast<int64_t>(std::bit_ceil<uint64_t>(2 * n - 1));
+  const auto M = chirp_fft_size(n);
   const auto b = kind == Table::ChirpFFT
       ? at::fft_fft(at::cat({c.conj(), at::zeros({M - 2 * n + 1}, c.options()), c.narrow(0, 1, n - 1).conj().flip(0)}))
       : c;
@@ -167,6 +173,7 @@ struct Batch {
   Tensor out;
   c10::SmallVector<Dim, c10::metal::max_ndim> dims; // Innermost first
   int64_t numel, si, so; // Transforms, and the element strides along the axis
+  bool wide = false; // Offsets need 64 bits
 };
 
 // Batch dims of a pass along `dim` (every other dim), innermost first, merged where both tensors allow it
@@ -209,11 +216,12 @@ struct Pass {
   bool i0_dim1 = false;
 };
 
-// Encodes n-point transforms of the batch
-void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool inv, const Pass& x) {
+// Encodes n-point transforms of the batch with the kernels whose offsets are of type index_t
+template <typename index_t>
+void launch_as(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool inv, const Pass& x) {
   const auto radix = x.global ? radices(x.global, kFFTGlobalRadices) : radices(n);
   const auto to_u32 = [](int64_t v) { return c10::checked_convert<uint32_t>(v, "uint32_t"); };
-  const auto to_i32 = [](int64_t v) { return c10::checked_convert<int32_t>(v, "int32_t"); };
+  const auto to_off = [](int64_t v) { return c10::checked_convert<index_t>(v, "offset"); };
   const uint32_t n_u32 = to_u32(n);
 
   // Kernel family: a global radix, a fixed length, or the smallest radix set factoring n (p16: lengths 1 and 16);
@@ -256,7 +264,7 @@ void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool in
   const bool pad = !strided && B * (padded - (B == 1)) <= kFFTMaxPoints;
   const int64_t row = strided ? 1 : pad ? padded - (B == 1) : n + (B > 1);
 
-  FFTParams params{
+  FFTParams<index_t> params{
       .n = n_u32,
       .n_sig = to_u32(n_sig),
       .n_out = to_u32(n_out),
@@ -264,8 +272,8 @@ void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool in
       .jt = to_u32(J),
       .ndim = to_u32(b.dims.size()),
       .nstages = to_u32(radix.size()),
-      .in_stride = to_i32(b.si),
-      .out_stride = to_i32(b.so),
+      .in_stride = to_off(b.si),
+      .out_stride = to_off(b.so),
       .scale = static_cast<float>(x.scale),
       .ld_mul = to_u32(x.ld_mul),
       .out_k_mul = to_u32(x.out_k_mul),
@@ -287,12 +295,12 @@ void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool in
 
   for (const auto d : c10::irange(b.dims.size())) {
     params.sizes[d] = to_u32(b.dims[d].size);
-    params.in_strides[d] = to_i32(b.dims[d].in_stride);
-    params.out_strides[d] = to_i32(b.dims[d].out_stride);
+    params.in_strides[d] = to_off(b.dims[d].in_stride);
+    params.out_strides[d] = to_off(b.dims[d].out_stride);
   }
 
   const bool contig = !strided && B == 1 && has(kFFTContigSizes, n) && !(F & kFFTMultiPass);
-  const auto suffix = contig ? "c"sv : ""sv;
+  const auto suffix = contig ? "c"sv : b.wide ? "w"sv : ""sv;
   const auto name = fmt::format(
       "fft_{}_{}_{}{}_{}", scalarToMetalTypeString(b.in), scalarToMetalTypeString(b.out), family, suffix, F);
   const int64_t ny = b.dims.size() > 1 ? b.dims[1].size : 1;
@@ -311,6 +319,10 @@ void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool in
   [enc setThreadgroupMemoryLength:static_cast<NSUInteger>(smem) atIndex:0];
   [enc dispatchThreadgroups:grid threadsPerThreadgroup:MTLSizeMake(B * J, 1, 1)];
   getMPSProfiler().endProfileKernel(pso, getCurrentMPSStream());
+}
+
+void launch(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool inv, const Pass& x) {
+  return b.wide ? launch_as<int64_t>(enc, b, n, inv, x) : launch_as<int32_t>(enc, b, n, inv, x);
 }
 
 // Encodes the launches of `encode` on the stream; tables and temps are made first, as ATen ops wait on its queue
@@ -345,7 +357,7 @@ void fft_batch(const Batch& b, int64_t n, bool inv, const Pass& x) {
   // Long non-pow2 lengths: one global-memory stage per radix between two contiguous temps
   const bool plain = !x.cl && !x.cs && !x.n_sig;
   const auto gplan = radices(n, kFFTGlobalRadices);
-  if (n >= kFFTLongPoints && (n & (n - 1)) && plain && !gplan.empty()) {
+  if (n >= kFFTLongPoints && (n & (n - 1)) && plain && !b.wide && !gplan.empty()) {
     const auto tmp = at::empty({2, b.numel * n}, b.out.options().dtype(kComplexFloat));
     const Tensor temps[] = {tmp[0], tmp[1]};
     const auto tt = table(Table::W2, n), tw = table(Table::W, n);
@@ -392,6 +404,7 @@ void fft_batch(const Batch& b, int64_t n, bool inv, const Pass& x) {
   const int64_t ninner = inner ? b.dims[0].size : 1;
   Batch b1{b.in, {}, {}, b.numel * n2, b.si * n2, ninner};
   Batch b2{{}, b.out, {}, b.numel * n1, n1 * ninner, b.so * n1};
+  b1.wide = b2.wide = b.wide;
   int64_t t = 1;
   for (int64_t d = 0; d < static_cast<int64_t>(b.dims.size()); d++) {
     const int64_t ts = d < inner ? t : t * n; // The temp's stride of batch dim d
@@ -428,32 +441,52 @@ void fft_batch(const Batch& b, int64_t n, bool inv, const Pass& x) {
 // n-point transforms along `dim`; lengths with other prime factors use Bluestein's algorithm
 void fft_pass(const Tensor& in, const Tensor& out, int64_t dim, int64_t n, bool inv, const Pass& x = {}) {
   dim = maybe_wrap_dim(dim, in.dim());
-  if (!canUse32BitIndexMath(in) || !canUse32BitIndexMath(out)) {
-    // Kernels index with 32 bits: halve the largest batch dim
-    int64_t d = dim == 0;
+  constexpr int64_t kMax = std::numeric_limits<int32_t>::max();
+  // One transform spanning 2^31 elements takes the kernels with 64-bit offsets
+  const auto reach = [&](const Tensor& t) { return (t.size(dim) - 1) * t.stride(dim); };
+  const bool wide = n < kMax && std::max(reach(in), reach(out)) >= kMax;
+  const auto points = std::min<int64_t>(n, kFFTMaxPoints);
+  const auto threads = out.numel() / out.size(dim) * at::ceil_div<int64_t>(points, fft_points_per_thread(points, 0));
+  if (wide ? threads > kMax : !canUse32BitIndexMath(in) || !canUse32BitIndexMath(out)) {
+    // Halve the batch dim spanning the most elements
+    const auto span = [&](int64_t i) { return (in.size(i) - 1) * std::max(in.stride(i), out.stride(i)); };
+    int64_t d = -1;
     for (const auto i : c10::irange(in.dim())) {
-      d = i != dim && in.size(i) > in.size(d) ? i : d;
+      d = i != dim && in.size(i) > 1 && (d < 0 || span(i) > span(d)) ? i : d;
     }
-    TORCH_CHECK_NOT_IMPLEMENTED(in.dim() > 1 && in.size(d) > 1,
-                                "MPS FFT: a transform must have fewer than 2^31 elements");
+    TORCH_CHECK_NOT_IMPLEMENTED(d >= 0, "MPS FFT: a transform must have fewer than 2^31 elements");
     const auto h = in.size(d) / 2;
     fft_pass(in.narrow(d, 0, h), out.narrow(d, 0, h), dim, n, inv, x);
     return fft_pass(in.narrow(d, h, in.size(d) - h), out.narrow(d, h, in.size(d) - h), dim, n, inv, x);
   }
   if (is_smooth(n)) {
-    return fft_batch(collapse(in, out, dim), n, inv, x);
+    auto b = collapse(in, out, dim);
+    b.wide = wide;
+    return fft_batch(b, n, inv, x);
   }
 
-  // Bluestein: X = c * IFFT_M(FFT_M(x * c) * B)[:n], M a power of two >= 2n - 1 (at most two tile passes, 2^24),
-  // chirps folded into the kernels
-  TORCH_CHECK_NOT_IMPLEMENTED(n <= 1 << 23, "MPS FFT: lengths with prime factors above 7 are limited to 2^23");
+  // Bluestein: X = c * IFFT_M(FFT_M(x * c) * B)[:n], M = chirp_fft_size(n)
+  TORCH_CHECK_NOT_IMPLEMENTED(!wide, "MPS FFT: lengths with prime factors above 7 cannot span 2^31 elements");
+  const auto M = chirp_fft_size(n);
+  TORCH_CHECK_NOT_IMPLEMENTED(M < kMax, "MPS FFT: lengths with prime factors above 7 are limited to 2^29");
   const auto c = table(Table::Chirp, n, inv), B = table(Table::ChirpFFT, n, inv);
-  const auto M = B.numel();
+  // The temp's axis goes last where its transforms would otherwise span 2^31 elements
+  const bool last = (M - 1) * c10::multiply_integers(in.sizes().slice(dim + 1)) >= kMax;
   DimVector sizes(in.sizes());
   sizes[dim] = M;
+  std::rotate(sizes.begin() + dim, sizes.begin() + dim + last, sizes.end());
   auto tmp = at::empty(sizes, in.options().dtype(kComplexFloat)); // Several passes always run in fp32
-  fft_pass(in, tmp, dim, M, false, {.n_sig = n, .scale = x.scale / M, .cl = c, .cs = B});
-  fft_pass(tmp, out, dim, M, true, {.n_out = n, .cs = c});
+  tmp = last ? tmp.movedim(-1, dim) : std::move(tmp);
+  // Two tile passes fold every chirp into the kernels
+  if (M <= kFFTMaxPoints * kFFTMaxPoints) {
+    fft_pass(in, tmp, dim, M, false, {.n_sig = n, .scale = x.scale / M, .cl = c, .cs = B});
+    return fft_pass(tmp, out, dim, M, true, {.n_out = n, .cs = c});
+  }
+  // Longer transforms nest and their stores fold none: B goes into the second transform's loads, c into a mul
+  fft_pass(in, tmp, dim, M, false, {.n_sig = n, .scale = x.scale / M, .cl = c});
+  fft_pass(tmp, tmp, dim, M, true, {.cl = B});
+  auto dst = out.movedim(dim, -1); // c broadcasts along the last dim
+  at::mul_out(dst, tmp.narrow(dim, 0, n).movedim(dim, -1), c);
 }
 
 // fp16 partials overflow and lose precision between passes, so transforms taking more than one pass run in fp32
