@@ -4150,8 +4150,8 @@ def main() -> None:
                     f"PR #{pr.pr_num} is in a stack based on {native_stack.base_ref} "
                     f"rather than {pr.default_branch()}, refusing merge request"
                 )
-            # check_mergeability_ghstack.yml runs on every PR into a branch other than
-            # the default one, most of which never go through the merge bot
+            # A check run also covers PRs into other branches that never go through
+            # the merge bot, so it must not comment on them
             if args.check_mergeability:
                 print(f"Not checking mergeability: {refusal}")
                 return
