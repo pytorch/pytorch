@@ -11,7 +11,14 @@ import onnx_ir as ir
 
 import torch
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
-from torch.onnx._internal.exporter._torchlib.ops import normalization
+from torch.onnx._internal.exporter._torchlib.ops import (
+    common as common_ops,
+    normalization,
+)
+from torch.onnx._internal.exporter._torchlib.ops.nn import (
+    _attention_repeat_kv_for_group_query,
+    _attention_scale,
+)
 
 
 if TYPE_CHECKING:
@@ -1053,3 +1060,959 @@ def _process_padding(
         # Interleave the padding values
         paddings = paddings[-2::-2] + paddings[-1::-2]
         return op.Concat(*paddings, axis=0)
+
+
+@onnx_impl(aten.pad.default)
+def aten_pad(
+    op: TranslationContext,
+    self: ir.Value,
+    pad: Sequence[ir.Value],
+    mode: str = "constant",
+    value: float | None = None,
+) -> ir.Value:
+    """pad(Tensor self, SymInt[] pad, str mode="constant", float? value=None) -> Tensor"""
+
+    rank = len(self.shape)
+    paddings = _process_padding(op, pad, rank)
+    const_value = (
+        op.Constant(value=ir.tensor(value, dtype=ir.DataType(self.dtype)))
+        if value is not None
+        else None
+    )
+    onnx_mode = {
+        "constant": "constant",
+        "reflect": "reflect",
+        "replicate": "edge",
+        "circular": "wrap",
+    }[mode]
+
+    return op.Pad(self, paddings, const_value, mode=onnx_mode)
+
+
+@onnx_impl(aten.reflection_pad1d.default)
+def aten_reflection_pad1d(
+    op: TranslationContext, self: ir.Value, padding: Sequence[ir.Value]
+) -> ir.Value:
+    """reflection_pad1d(Tensor self, SymInt[2] padding) -> Tensor"""
+
+    # assert len(padding) == 2
+    # Input of padding argument should be [x,y], need change to onnx format [0, x, 0, y]
+    rank = len(self.shape)
+    paddings = _process_padding(op, padding, rank)
+    return op.Pad(self, paddings, mode="reflect")
+
+
+@onnx_impl(aten.reflection_pad2d.default)
+def aten_reflection_pad2d(
+    op: TranslationContext, self: ir.Value, padding: Sequence[ir.Value]
+) -> ir.Value:
+    """reflection_pad2d(Tensor self, SymInt[4] padding) -> Tensor"""
+    rank = len(self.shape)
+    paddings = _process_padding(op, padding, rank)
+    return op.Pad(self, paddings, mode="reflect")
+
+
+@onnx_impl(aten.reflection_pad3d.default)
+def aten_reflection_pad3d(
+    op: TranslationContext, self: ir.Value, padding: Sequence[ir.Value]
+) -> ir.Value:
+    """reflection_pad3d(Tensor self, SymInt[6] padding) -> Tensor"""
+    rank = len(self.shape)
+    paddings = _process_padding(op, padding, rank)
+    return op.Pad(self, paddings, mode="reflect")
+
+
+@onnx_impl(aten.relu.default)
+def aten_relu(op: TranslationContext, self: ir.Value) -> ir.Value:
+    """relu(Tensor self) -> Tensor"""
+
+    return op.Relu(self)
+
+
+@onnx_impl(aten.relu6.default)
+def aten_relu6(op: TranslationContext, self: ir.Value) -> ir.Value:
+    """relu6(Tensor self) -> Tensor"""
+    builder = op.builder
+
+    zero = op.CastLike(builder.constant(0, dtype=ir.DataType.INT64), self)
+    six = op.CastLike(builder.constant(6, dtype=ir.DataType.INT64), self)
+    return op.Clip(self, zero, six)
+
+
+@onnx_impl(aten.replication_pad1d.default)
+def aten_replication_pad1d(
+    op: TranslationContext, self: ir.Value, padding: Sequence[ir.Value]
+) -> ir.Value:
+    """replication_pad1d(Tensor self, SymInt[2] padding) -> Tensor"""
+
+    rank = len(self.shape)
+    paddings = _process_padding(op, padding, rank)
+    return op.Pad(self, paddings, mode="edge")
+
+
+@onnx_impl(aten.replication_pad2d.default)
+def aten_replication_pad2d(
+    op: TranslationContext, self: ir.Value, padding: Sequence[ir.Value]
+) -> ir.Value:
+    """replication_pad2d(Tensor self, SymInt[4] padding) -> Tensor"""
+
+    rank = len(self.shape)
+    paddings = _process_padding(op, padding, rank)
+    return op.Pad(self, paddings, mode="edge")
+
+
+@onnx_impl(aten.replication_pad3d.default)
+def aten_replication_pad3d(
+    op: TranslationContext, self: ir.Value, padding: Sequence[ir.Value]
+) -> ir.Value:
+    """replication_pad3d(Tensor self, SymInt[6] padding) -> Tensor"""
+
+    rank = len(self.shape)
+    paddings = _process_padding(op, padding, rank)
+    return op.Pad(self, paddings, mode="edge")
+
+
+def _causal_attention_mask(
+    op: TranslationContext, query: ir.Value, key: ir.Value
+) -> ir.Value:
+    """Create a causal mask for the given query and key tensors.
+
+    Equivalent to::
+        mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+        attn_mask = torch.zeros(L, S, dtype=torch.float)
+        attn_mask = attn_mask.masked_fill(not mask, -float("inf"))
+
+    Args:
+        query: Tensor of shape [..., L, E]
+        key: Tensor of shape [..., S, E]
+
+    Returns:
+        Tensor of shape [L, S]
+    """
+    builder = op.builder
+    q_shape = op.Shape(query)
+    k_shape = op.Shape(key)
+
+    target_length = op.Slice(
+        q_shape,
+        builder.constant([-2], dtype=ir.DataType.INT64),
+        builder.constant([-1], dtype=ir.DataType.INT64),
+    )
+    source_length = op.Slice(
+        k_shape,
+        builder.constant([-2], dtype=ir.DataType.INT64),
+        builder.constant([-1], dtype=ir.DataType.INT64),
+    )
+    # attn_mask = torch.ones(L, S) := {
+    size = op.Concat(target_length, source_length, axis=0)
+    attn_mask = op.Expand(builder.constant(1.0, dtype=ir.DataType.FLOAT), size)
+    # }
+    attn_mask = op.Trilu(attn_mask, upper=0)
+    # The causal mask has 0s in the lower triangle and the lowest representable value
+    # of the query dtype in the upper triangle. The lowest finite value is used instead
+    # of -inf to stay consistent with the boolean mask path and to avoid producing NaN
+    # in the subsequent Softmax when a row is fully masked.
+    # The constants are built in the query dtype directly rather than in float32 and
+    # cast down, because casting float32's lowest value to float16 overflows to -inf.
+    attn_mask = op.Where(
+        op.Equal(attn_mask, builder.constant(0.0, dtype=ir.DataType.FLOAT)),
+        op.Constant(value=ir.tensor(query.dtype.min, dtype=query.dtype)),
+        op.Constant(value=ir.tensor(0.0, dtype=query.dtype)),
+    )
+    return attn_mask
+
+
+@onnx_impl(aten.scaled_dot_product_attention.default, opset_introduced=18)
+def aten_scaled_dot_product_attention(
+    op: TranslationContext,
+    query: ir.Value,
+    key: ir.Value,
+    value: ir.Value,
+    attn_mask: ir.Value | None = None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    scale: float | None = None,
+    enable_gqa: bool = False,
+) -> ir.Value:
+    """scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, *, float? scale=None, bool enable_gqa=False) -> Tensor
+
+    Reference: https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
+
+    Equivalent to the PyTorch code::
+        scale_factor = 1 / math.sqrt(Q.size(-1)) if scale is None else scale
+        attn_mask = (
+            torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+            if is_causal
+            else attn_mask
+        )
+        attn_mask = (
+            attn_mask.masked_fill(not attn_mask, -float("inf"))
+            if attn_mask.dtype == torch.bool
+            else attn_mask
+        )
+        attn_weight = torch.softmax(
+            (Q @ K.transpose(-2, -1) * scale_factor) + attn_mask, dim=-1
+        )
+        attn_weight = torch.dropout(attn_weight, dropout_p)
+        return attn_weight @ V
+
+    where Q, K, V are the query, key, and value tensors, respectively.
+    L is the target sequence length, S is the source sequence length, and E is the embedding size.
+    """
+    # Optional inputs are handled during native construction.
+    if is_causal and attn_mask is not None:
+        raise ValueError(
+            "is_causal and attn_mask cannot be set at the same time. "
+            "Set is_causal=False or omit attn_mask."
+        )
+
+    if not (len(query.shape) == 4 and len(key.shape) == 4 and len(value.shape) == 4):
+        raise ValueError(
+            "Native opset18 attention requires 4D query, key, and value. "
+            f"Got shapes {query.shape}, {key.shape}, and {value.shape}. "
+            "Reshape inputs to [batch, heads, sequence, channels]."
+        )
+
+    # Reference: https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
+    if scale is None:
+        scale = _attention_scale(op, query)
+    scale = op.CastLike(scale, query)
+
+    if is_causal:
+        attn_mask = _causal_attention_mask(op, query, key)
+
+    if enable_gqa:
+        if not isinstance(query.shape[1], int) or not isinstance(key.shape[1], int):
+            raise ValueError(
+                "Grouped-query attention needs known query and key head counts. "
+                "Keep dimension 1 static when exporting with enable_gqa=True."
+            )
+        if query.shape[1] != key.shape[1]:
+            key, value = _attention_repeat_kv_for_group_query(op, query, key, value)
+
+    return _attention(op, query, key, value, attn_mask, scale, dropout_p)
+
+
+@onnx_impl(aten._scaled_dot_product_flash_attention_for_cpu.default)
+def aten__scaled_dot_product_flash_attention_for_cpu(
+    op: TranslationContext,
+    query: ir.Value,
+    key: ir.Value,
+    value: ir.Value,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    attn_mask: ir.Value | None = None,
+    scale: float | None = None,
+) -> tuple[ir.Value, ir.Value]:
+    """_scaled_dot_product_flash_attention_for_cpu(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, *, Tensor? attn_mask=None, float? scale=None) -> (Tensor output, Tensor logsumexp)"""
+    result = aten_scaled_dot_product_attention(
+        op,
+        query,
+        key,
+        value,
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        scale=scale,
+    )
+    query_shape = op.Shape(query)
+    query_first_dims = op.Slice(query_shape, [0], [1])
+    query_second_dims = op.Slice(query_shape, [1], [2])
+    num_heads = op.Slice(query_shape, [-2], [-1])
+    logsumexp_dim = op.Cast(
+        op.Mul(
+            op.Ceil(
+                op.Div(
+                    op.Cast(query_second_dims, to=ir.DataType.FLOAT),
+                    32.0,
+                ),
+            ),
+            32.0,
+        ),
+        to=ir.DataType.INT64,
+    )
+    logsum_exp = op.Expand(
+        0.0,
+        op.Concat(query_first_dims, num_heads, logsumexp_dim, axis=0),
+    )
+    return result, logsum_exp
+
+
+def _attention(op: TranslationContext, query, key, value, attn_mask, scale, dropout_p):
+    builder = op.builder
+    # Swap the last two axes of key.
+    key_shape = op.Shape(key)
+    key_last_dim = op.Slice(key_shape, [-1], [_INT64_MAX])
+    key_second_last_dim = op.Slice(key_shape, [-2], [-1])
+    key_first_dims = op.Slice(key_shape, [_INT64_MIN], [-2])
+    # Contract the dimensions that are not the last two so we can transpose
+    # with a static permutation.
+    key_squeezed_shape = op.Concat([-1], key_second_last_dim, key_last_dim, axis=0)
+    key_squeezed = op.Reshape(key, key_squeezed_shape)
+    key_squeezed_transposed = op.Transpose(key_squeezed, perm=[0, 2, 1])
+    key_transposed_shape = op.Concat(
+        key_first_dims, key_last_dim, key_second_last_dim, axis=0
+    )
+    key_transposed = op.Reshape(key_squeezed_transposed, key_transposed_shape)
+    # https://github.com/pytorch/pytorch/blob/12da0c70378b5be9135c6fda62a9863bce4a4818/aten/src/ATen/native/transformers/attention.cpp#L653
+    # Scale q, k before matmul for stability see https://tinyurl.com/sudb9s96 for math.
+    query_scaled = op.Mul(query, op.Sqrt(scale))
+    key_scaled = op.Mul(
+        key_transposed,
+        op.CastLike(op.Sqrt(scale), key_transposed),
+    )
+    logits = op.MatMul(query_scaled, key_scaled)
+    boolean_mask = attn_mask is not None and attn_mask.dtype == ir.DataType.BOOL
+    zero = builder.constant(0.0, dtype=query.dtype)
+    if attn_mask is not None:
+        mask = attn_mask
+        if boolean_mask:
+            # Turn the Boolean mask to float: attn_mask.masked_fill(not attn_mask, -float('inf')).
+            mask = op.Where(
+                mask,
+                zero,
+                builder.constant(query.dtype.min, dtype=query.dtype),
+            )
+        logits = op.Add(logits, mask)
+    attn_weight = op.Softmax(logits, axis=-1)
+    # When using scaled dot product attention with a boolean mask, the softmax operation might return NaN values
+    # due to the presence of -inf in an entire row (padding tokens), resulting in 0/0 (NaN) in the softmax output.
+    # This is because there's no safe/masked softmax imp in ONNX, so we need to handle NaN values explicitly to match
+    # the behavior of PyTorch with boolean masks.
+    # Reference: https://github.com/pytorch/pytorch/issues/103749
+    attn_weight = op.Where(op.IsNaN(attn_weight), zero, attn_weight)
+    if boolean_mask:
+        attn_weight = op.Where(attn_mask, attn_weight, zero)
+    if dropout_p == 1.0:
+        attn_weight = op.Expand(zero, op.Shape(attn_weight))
+    elif dropout_p != 0:
+        attn_weight, _ = op.Dropout(attn_weight, dropout_p, True, outputs=2)
+    return op.MatMul(attn_weight, value)
+
+
+@onnx_impl(aten.silu.default)
+def aten_silu(op: TranslationContext, self: ir.Value) -> ir.Value:
+    """silu(Tensor self) -> Tensor"""
+
+    return op.Mul(self, op.Sigmoid(self))
+
+
+@onnx_impl(aten.softplus.default)
+def aten_softplus(
+    op: TranslationContext, self: ir.Value, beta: float = 1.0, threshold: float = 20.0
+) -> ir.Value:
+    """softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor"""
+
+    self_scaled = op.Mul(self, beta)
+    softplus = op.Div(op.Softplus(self_scaled), beta)
+    return op.Where(op.Greater(self_scaled, threshold), self, softplus)
+
+
+def _get_upsample_align_corners_mode(
+    op: TranslationContext, align_corners: bool
+) -> str:
+    return "align_corners" if align_corners else "half_pixel"
+
+
+def _aten_upsample_output_size(
+    op: TranslationContext,
+    self: ir.Value,
+    output_size: ir.Value,
+    mode: str,
+    coordinate_transformation_mode: str,
+    antialias: int = 0,
+    cubic_coeff_a: float = -0.75,
+    exclude_outside: int = 0,
+) -> ir.Value:
+    batch_and_channel = op.Shape(self, end=2, start=0)
+    # When output_size is passed in as a list of integers, the torch.onnx
+    # graph builder when handling op.Concat may fail
+    # to determine the output type. We cast it to INT64 to ensure the output
+    output_size = common_ops.merge_dims(op, output_size)
+    # Append the batch and channel dimensions to the requested output size
+    output_size = op.Concat(batch_and_channel, output_size, axis=0)
+    return op.Resize(
+        self,
+        None,
+        None,
+        output_size,
+        mode=mode,
+        coordinate_transformation_mode=coordinate_transformation_mode,
+        cubic_coeff_a=cubic_coeff_a,
+        nearest_mode="floor",
+        antialias=antialias,
+        exclude_outside=exclude_outside,
+    )
+
+
+def _aten_upsample_scales(
+    op: TranslationContext,
+    self: ir.Value,
+    scale_factors: Sequence[float],
+    mode: str,
+    coordinate_transformation_mode: str,
+    antialias: int = 0,
+    cubic_coeff_a: float = -0.75,
+    exclude_outside: int = 0,
+) -> ir.Value:
+    builder = op.builder
+    # For 2D the format is [1.0, 1.0, scale_h, scale_w]; include every spatial axis.
+    return op.Resize(
+        self,
+        None,
+        builder.constant(
+            [1.0] * (len(self.shape) - len(scale_factors)) + list(scale_factors),
+            dtype=ir.DataType.FLOAT,
+        ),
+        None,
+        mode=mode,
+        coordinate_transformation_mode=coordinate_transformation_mode,
+        cubic_coeff_a=cubic_coeff_a,
+        nearest_mode="floor",
+        antialias=antialias,
+        exclude_outside=exclude_outside,
+    )
+
+
+@onnx_impl(aten.upsample_bicubic2d.default)
+def aten_upsample_bicubic2d(
+    op: TranslationContext,
+    self: ir.Value,
+    output_size: ir.Value,
+    align_corners: bool,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
+) -> ir.Value:
+    """upsample_bicubic2d(Tensor self, SymInt[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor"""
+
+    # NOTE: Based on experimentation, scales_h and scales_w are always ignored in PyTorch,
+    # unless when align_corners is True, in which case we do not know what is going on.
+    coordinate_transformation_mode = _get_upsample_align_corners_mode(op, align_corners)
+    return _aten_upsample_output_size(
+        op,
+        self,
+        output_size,
+        mode="cubic",
+        coordinate_transformation_mode=coordinate_transformation_mode,
+    )
+
+
+@onnx_impl(aten._upsample_bicubic2d_aa.default)
+def aten__upsample_bicubic2d_aa(
+    op: TranslationContext,
+    self: ir.Value,
+    output_size: ir.Value,
+    align_corners: bool,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
+) -> ir.Value:
+    """_upsample_bicubic2d_aa(Tensor self, SymInt[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor"""
+
+    # NOTE: Based on experimentation, scales_h and scales_w are always ignored in PyTorch,
+    # unless when align_corners is True, in which case we do not know what is going on.
+    coordinate_transformation_mode = _get_upsample_align_corners_mode(op, align_corners)
+    # PyTorch uses cubic_coeff_a=-0.5 (Keys interpolation, PIL-compatible) when
+    # antialias=True, as opposed to -0.75 (OpenCV-compatible) for the non-antialias case.
+    # exclude_outside=1 matches PyTorch's antialias kernel, which drops out-of-bounds
+    # samples from the filter window and renormalizes the remaining weights so they
+    # sum to 1. Without it the ONNX Resize keeps phantom out-of-bounds weight in the
+    # denominator and produces values that differ from eager near the boundary.
+    return _aten_upsample_output_size(
+        op,
+        self,
+        output_size,
+        mode="cubic",
+        coordinate_transformation_mode=coordinate_transformation_mode,
+        antialias=1,
+        cubic_coeff_a=-0.5,
+        exclude_outside=1,
+    )
+
+
+@onnx_impl(aten.upsample_bicubic2d.vec)
+def aten_upsample_bicubic2d_vec(
+    op: TranslationContext,
+    self: ir.Value,
+    output_size: ir.Value,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> ir.Value:
+    """upsample_bicubic2d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor"""
+
+    coordinate_transformation_mode = _get_upsample_align_corners_mode(op, align_corners)
+    if scale_factors is not None:
+        result = _aten_upsample_scales(
+            op,
+            self,
+            scale_factors,
+            mode="cubic",
+            coordinate_transformation_mode=coordinate_transformation_mode,
+        )
+    else:
+        result = _aten_upsample_output_size(
+            op,
+            self,
+            output_size,
+            mode="cubic",
+            coordinate_transformation_mode=coordinate_transformation_mode,
+        )
+
+    return result
+
+
+@onnx_impl(aten.upsample_bilinear2d.default)
+def aten_upsample_bilinear2d(
+    op: TranslationContext,
+    self: ir.Value,
+    output_size: ir.Value,
+    align_corners: bool,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
+) -> ir.Value:
+    """upsample_bilinear2d(Tensor self, SymInt[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor"""
+
+    # NOTE: Based on experimentation, scales_h and scales_w are always ignored in PyTorch,
+    # unless when align_corners is True, in which case we do not know what is going on.
+    coordinate_transformation_mode = _get_upsample_align_corners_mode(op, align_corners)
+    return _aten_upsample_output_size(
+        op,
+        self,
+        output_size,
+        coordinate_transformation_mode=coordinate_transformation_mode,
+        mode="linear",
+    )
+
+
+@onnx_impl(aten._upsample_bilinear2d_aa.default)
+def aten__upsample_bilinear2d_aa(
+    op: TranslationContext,
+    self: ir.Value,
+    output_size: ir.Value,
+    align_corners: bool,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
+) -> ir.Value:
+    """_upsample_bilinear2d_aa(Tensor self, SymInt[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor"""
+
+    # NOTE: Based on experimentation, scales_h and scales_w are always ignored in PyTorch,
+    # unless when align_corners is True, in which case we do not know what is going on.
+    coordinate_transformation_mode = _get_upsample_align_corners_mode(op, align_corners)
+    # exclude_outside=1 matches PyTorch's antialias kernel, which drops out-of-bounds
+    # samples from the filter window and renormalizes the remaining weights so they
+    # sum to 1. Without it the ONNX Resize keeps phantom out-of-bounds weight in the
+    # denominator and produces values that differ from eager near the boundary.
+    return _aten_upsample_output_size(
+        op,
+        self,
+        output_size,
+        coordinate_transformation_mode=coordinate_transformation_mode,
+        mode="linear",
+        antialias=1,
+        exclude_outside=1,
+    )
+
+
+@onnx_impl(aten.upsample_bilinear2d.vec)
+def aten_upsample_bilinear2d_vec(
+    op: TranslationContext,
+    self: ir.Value,
+    output_size: ir.Value | None,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> ir.Value:
+    """upsample_bilinear2d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor"""
+
+    coordinate_transformation_mode = _get_upsample_align_corners_mode(op, align_corners)
+    if scale_factors is not None:
+        result = _aten_upsample_scales(
+            op,
+            self,
+            scale_factors,
+            mode="linear",
+            coordinate_transformation_mode=coordinate_transformation_mode,
+        )
+    else:
+        if output_size is None:
+            raise ValueError(
+                "aten::upsample_bilinear2d.vec received neither output_size nor "
+                "scale_factors. Supply one of them to determine the output shape."
+            )
+        result = _aten_upsample_output_size(
+            op,
+            self,
+            output_size,
+            mode="linear",
+            coordinate_transformation_mode=coordinate_transformation_mode,
+        )
+
+    return result
+
+
+@onnx_impl(aten.upsample_linear1d.default)
+def aten_upsample_linear1d(
+    op: TranslationContext,
+    self: ir.Value,
+    output_size: ir.Value,
+    align_corners: bool,
+    scales: float | None = None,
+) -> ir.Value:
+    """upsample_linear1d(Tensor self, SymInt[1] output_size, bool align_corners, float? scales=None) -> Tensor"""
+    coordinate_transformation_mode = _get_upsample_align_corners_mode(op, align_corners)
+    # scales is ignored in PyTorch
+    return _aten_upsample_output_size(
+        op,
+        self,
+        output_size,
+        mode="linear",
+        coordinate_transformation_mode=coordinate_transformation_mode,
+    )
+
+
+@onnx_impl(aten.upsample_linear1d.vec)
+def aten_upsample_linear1d_vec(
+    op: TranslationContext,
+    self: ir.Value,
+    output_size: ir.Value | None,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> ir.Value:
+    """upsample_linear1d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor"""
+
+    coordinate_transformation_mode = _get_upsample_align_corners_mode(op, align_corners)
+    if scale_factors is not None:
+        return _aten_upsample_scales(
+            op,
+            self,
+            scale_factors,
+            mode="linear",
+            coordinate_transformation_mode=coordinate_transformation_mode,
+        )
+    if output_size is None:
+        raise ValueError(
+            "aten::upsample_linear1d.vec received neither output_size nor "
+            "scale_factors. Supply one of them to determine the output shape."
+        )
+    return _aten_upsample_output_size(
+        op,
+        self,
+        output_size,
+        mode="linear",
+        coordinate_transformation_mode=coordinate_transformation_mode,
+    )
+
+
+@onnx_impl(aten.upsample_nearest1d.default)
+def aten_upsample_nearest1d(
+    op: TranslationContext,
+    self: ir.Value,
+    output_size: ir.Value,
+    scales: float | None = None,
+) -> ir.Value:
+    """upsample_nearest1d(Tensor self, SymInt[1] output_size, float? scales=None) -> Tensor"""
+    if scales is not None:
+        return _aten_upsample_scales(op, self, [scales], "nearest", "asymmetric")
+    else:
+        return _aten_upsample_output_size(
+            op, self, output_size, "nearest", "asymmetric"
+        )
+
+
+@onnx_impl(
+    (
+        aten.upsample_nearest1d.vec,
+        aten.upsample_nearest2d.vec,
+        aten.upsample_nearest3d.vec,
+    )
+)
+def aten_upsample_nearestnd_vec(
+    op: TranslationContext,
+    input: ir.Value,
+    output_size: ir.Value | None = None,
+    scale_factors: Sequence[float] | None = None,
+) -> ir.Value:
+    """upsample_nearest3d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor"""
+
+    if scale_factors is not None:
+        return _aten_upsample_scales(op, input, scale_factors, "nearest", "asymmetric")
+    else:
+        if output_size is None:
+            raise ValueError(
+                "aten::upsample_nearestnd.vec received neither output_size nor "
+                "scale_factors. Supply one of them to determine the output shape."
+            )
+        return _aten_upsample_output_size(
+            op, input, output_size, "nearest", "asymmetric"
+        )
+
+
+@onnx_impl(aten.upsample_nearest2d.default)
+def aten_upsample_nearest2d(
+    op: TranslationContext,
+    self: ir.Value,
+    output_size: ir.Value,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
+) -> ir.Value:
+    """upsample_nearest2d(Tensor self, SymInt[2] output_size, float? scales_h=None, float? scales_w=None) -> Tensor"""
+
+    if scales_h is not None and scales_w is not None:
+        return _aten_upsample_scales(
+            op,
+            self,
+            [scales_h, scales_w],
+            "nearest",
+            "asymmetric",
+        )
+    else:
+        return _aten_upsample_output_size(
+            op, self, output_size, "nearest", "asymmetric"
+        )
+
+
+@onnx_impl(aten.upsample_nearest3d.default)
+def aten_upsample_nearest3d(
+    op: TranslationContext,
+    self: ir.Value,
+    output_size: ir.Value,
+    scales_d: float | None = None,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
+) -> ir.Value:
+    """upsample_nearest3d(Tensor self, SymInt[3] output_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor"""
+
+    if scales_d is not None and scales_h is not None and scales_w is not None:
+        return _aten_upsample_scales(
+            op,
+            self,
+            [scales_d, scales_h, scales_w],
+            "nearest",
+            "asymmetric",
+        )
+    else:
+        return _aten_upsample_output_size(
+            op, self, output_size, "nearest", "asymmetric"
+        )
+
+
+@onnx_impl(aten.upsample_trilinear3d.default)
+def aten_upsample_trilinear3d(
+    op: TranslationContext,
+    self: ir.Value,
+    output_size: ir.Value,
+    align_corners: bool,
+    scales_d: float | None = None,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
+) -> ir.Value:
+    """upsample_trilinear3d(Tensor self, SymInt[3] output_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor"""
+
+    del scales_d
+    del scales_h
+    del scales_w
+
+    coordinate_transformation_mode = _get_upsample_align_corners_mode(op, align_corners)
+    return _aten_upsample_output_size(
+        op,
+        self,
+        output_size,
+        mode="linear",
+        coordinate_transformation_mode=coordinate_transformation_mode,
+    )
+
+
+@onnx_impl(aten.upsample_trilinear3d.vec)
+def aten_upsample_trilinear3d_vec(
+    op: TranslationContext,
+    self: ir.Value,
+    output_size: ir.Value,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> ir.Value:
+    """upsample_trilinear3d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor"""
+
+    coordinate_transformation_mode = _get_upsample_align_corners_mode(op, align_corners)
+    if scale_factors is not None:
+        result = _aten_upsample_scales(
+            op,
+            self,
+            scale_factors,
+            mode="linear",
+            coordinate_transformation_mode=coordinate_transformation_mode,
+        )
+    else:
+        result = _aten_upsample_output_size(
+            op,
+            self,
+            output_size,
+            mode="linear",
+            coordinate_transformation_mode=coordinate_transformation_mode,
+        )
+    return result
+
+
+def _aten__scaled_dot_product_flash_attention_fillin_empty_outputs(
+    op: TranslationContext,
+    query: ir.Value,
+) -> tuple[ir.Value, ir.Value, ir.Value, ir.Value]:
+    builder = op.builder
+    query_first_three_dims = op.Slice(
+        op.Shape(query),
+        builder.constant([0], dtype=ir.DataType.INT64),
+        builder.constant([3], dtype=ir.DataType.INT64),
+    )
+    logsumexp = op.Expand(0.0, query_first_three_dims)
+    empty_tensor_int = op.ConstantOfShape(
+        op.Constant(value=ir.tensor([], dtype=ir.DataType.INT64)),
+    )
+    # ConstantOfShape requires an INT64 shape even for a FLOAT dummy output.
+    empty_tensor_float = op.ConstantOfShape(
+        op.Constant(value=ir.tensor([], dtype=ir.DataType.INT64)),
+    )
+    empty_int = builder.constant(0, dtype=ir.DataType.INT64)
+
+    return logsumexp, empty_tensor_int, empty_int, empty_tensor_float
+
+
+@onnx_impl(aten._scaled_dot_product_flash_attention.default, opset_introduced=18)
+def aten__scaled_dot_product_flash_attention(
+    op: TranslationContext,
+    query: ir.Value,
+    key: ir.Value,
+    value: ir.Value,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    scale: float | None = None,
+) -> tuple[
+    ir.Value,
+    ir.Value,
+    ir.Value,
+    ir.Value,
+    ir.Value,
+    ir.Value,
+    ir.Value,
+    ir.Value,
+    ir.Value,
+]:
+    """_scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+
+    One of the implementations of scaled_dot_product_attention.
+    Reference: https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
+
+    NOTE: Currently, there are three implementations of nn.scaled_dot_product_attention in PyTorch due to optimization.
+    However, it's the same implementation from ONNX perspective.
+
+    """
+    result = aten_scaled_dot_product_attention(
+        op, query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale
+    )
+
+    # The followings are not consumed by the graph.
+    (
+        logsumexp,
+        empty_tensor_int,
+        empty_int,
+        empty_tensor_float,
+    ) = _aten__scaled_dot_product_flash_attention_fillin_empty_outputs(op, query)
+
+    return (
+        result,
+        logsumexp,
+        empty_tensor_int,
+        empty_tensor_int,
+        empty_int,
+        empty_int,
+        empty_tensor_int,
+        empty_tensor_int,
+        empty_tensor_float,
+    )
+
+
+def _aten_scaled_dot_product_efficient_attention_fillin_empty_outputs(
+    op: TranslationContext,
+    query: ir.Value,
+    compute_log_sumexp: bool,
+) -> tuple[ir.Value, ir.Value]:
+    """_scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)"""
+    builder = op.builder
+
+    query = op.Transpose(query, perm=[0, 2, 1, 3])
+    query_shape = op.Shape(query)
+    query_first_dims = op.Slice(
+        query_shape,
+        builder.constant([_INT64_MIN], dtype=ir.DataType.INT64),
+        [1],
+    )
+    query_second_dims = op.Slice(query_shape, [1], [2])
+    num_heads = op.Slice(query_shape, [-2], [-1])
+
+    if compute_log_sumexp:
+        logsumexp_dim = op.Cast(
+            op.Mul(
+                op.Ceil(
+                    op.Div(
+                        op.Cast(query_second_dims, to=ir.DataType.FLOAT),
+                        32.0,
+                    ),
+                ),
+                32.0,
+            ),
+            to=ir.DataType.INT64,
+        )
+        logsum_exp = op.Expand(
+            0.0,
+            op.Concat(query_first_dims, num_heads, logsumexp_dim, axis=0),
+        )
+    else:
+        logsum_exp = op.Expand(
+            0.0,
+            op.Concat(query_first_dims, num_heads, [0], axis=0),
+        )
+
+    # See Note [Seed and Offset]:
+    empty_tensor_int = op.ConstantOfShape(
+        op.Constant(value=ir.tensor([], dtype=ir.DataType.INT64)),
+    )
+
+    return logsum_exp, empty_tensor_int
+
+
+@onnx_impl(aten._scaled_dot_product_efficient_attention.default, opset_introduced=18)
+def aten__scaled_dot_product_efficient_attention(
+    op: TranslationContext,
+    query: ir.Value,
+    key: ir.Value,
+    value: ir.Value,
+    attn_bias: ir.Value | None,
+    compute_log_sumexp: bool,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    scale: float | None = None,
+) -> tuple[ir.Value, ir.Value, ir.Value, ir.Value]:
+    """_scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)"""
+
+    result = aten_scaled_dot_product_attention(
+        op,
+        query,
+        key,
+        value,
+        attn_bias,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        scale=scale,
+    )
+
+    # The followings are not consumed by the graph.
+    (
+        logsumexp,
+        empty_tensor_int,
+    ) = _aten_scaled_dot_product_efficient_attention_fillin_empty_outputs(
+        op, query, compute_log_sumexp
+    )
+
+    return (
+        result,
+        logsumexp,
+        empty_tensor_int,
+        empty_tensor_int,
+    )
