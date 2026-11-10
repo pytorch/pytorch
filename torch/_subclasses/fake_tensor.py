@@ -837,9 +837,7 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
 
     # What TorchDispatchMode.__enter__ and __exit__ do for FakeTensorMode, with
     # this mode taking the FAKE dispatch mode slot (see _set_dispatch_mode in
-    # torch/csrc/autograd/init.cpp). They also set flags, which
-    # is_in_torch_dispatch_mode() reads; it asks _is_cpp_fake_mode_active()
-    # instead.
+    # torch/csrc/autograd/init.cpp).
     def _install(self) -> None:
         _cpp_fake_mode_tls.entered.append(self)
         torch._C._set_dispatch_mode(self)
