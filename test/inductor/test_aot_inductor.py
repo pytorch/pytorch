@@ -42,6 +42,7 @@ from torch._inductor.codegen.wrapper import (
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.graph import GraphLowering
 from torch._inductor.package import package_aoti
+from torch._inductor.runtime.hints import HeuristicType
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.select_algorithm import TritonTemplate
 from torch._inductor.test_case import TestCase
@@ -103,6 +104,7 @@ from torch.testing._internal.common_utils import (
     random_matrix_with_scaled_reduction_dim,
     runOnRocm,
     set_cwd,
+    skipIfCachingAllocatorDisabled,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
@@ -324,6 +326,63 @@ def _record_bmm_shared_a_choices(example_inputs, model=None, **config_overrides)
             model if model is not None else _bmm_shared_a_model(), example_inputs
         )
     return offered
+
+
+def _check_model_keeping_device_asserts_unlaunched(
+    test, model, example_inputs, patches=None
+):
+    # Compile-time autotuning runs kernels on generated tensors: zeros for
+    # integers, random values for floats. Each model checks on device something
+    # that those tensors fail and the real inputs pass, so launching its kernel
+    # there would trip a device-side assert. Returns the kernels that kept their
+    # first config instead.
+    if test.device != GPU_TYPE or test.device == "mps":
+        raise unittest.SkipTest("requires triton")
+    from torch._inductor.codegen.multi_kernel import MultiKernelCall
+
+    kept = []
+
+    def keep(cls):
+        use_first_config = cls.use_first_config
+
+        def spy(kernel, stream):
+            kept.append(kernel)
+            return use_first_config(kernel, stream)
+
+        return patch.object(cls, "use_first_config", new=spy)
+
+    patches = {**(patches or {}), "triton.autotune_at_compile_time": None}
+    with config.patch(patches), keep(CachingAutotuner), keep(MultiKernelCall):
+        test.check_model(model, example_inputs, atol=1e-4, rtol=1e-4)
+    return kept
+
+
+def _gather_one_past_the_end_on_zeros(device):
+    # On zeros, no 7 is found and the gather reads positions one past the end.
+    class Model(torch.nn.Module):
+        def forward(self, x, ids):
+            counts = (ids == 7).cumsum(0)
+            nth = torch.arange(4, device=x.device).unsqueeze(1)
+            return x[(counts <= nth).sum(1)].sum(-1)
+
+    ids = torch.zeros(16, dtype=torch.int64, device=device)
+    ids[[2, 5, 9, 11]] = 7
+    return Model(), (torch.randn(16, 4096, device=device), ids)
+
+
+def _batched_gather_one_past_the_end_on_zeros(device):
+    # The same count over a batch, from a bool mask, with torch.gather.
+    class Model(torch.nn.Module):
+        def forward(self, hidden, mask):
+            counts = mask.cumsum(1)
+            nth = torch.arange(2, device=hidden.device).view(1, 2, 1)
+            positions = (counts.unsqueeze(1) <= nth).sum(-1)
+            index = positions.unsqueeze(-1).expand(-1, -1, hidden.shape[-1])
+            return hidden.gather(1, index)
+
+    mask = torch.zeros(2, 21, dtype=torch.bool, device=device)
+    mask[0, [5, 7]] = mask[1, [10, 11]] = True
+    return Model(), (torch.randn(2, 21, 64, device=device), mask)
 
 
 def profiled_ivalue_kinds(code, kernel_name):
@@ -820,6 +879,20 @@ class AOTInductorTestsTemplate:
             "::run_impl("
         ).check_not(call0).run(code)
 
+    def test_constant_folding_non_dense_view(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.randn(8, 12, device=device)
+
+            def forward(self, x):
+                # Folds to a non-dense view of w with strides (1, 12).
+                return x + self.w[:, :6].t()
+
+        example_inputs = (torch.randn(6, 8, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
+
     def test_const_graph_no_autotune_at_compile_time(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -916,6 +989,62 @@ class AOTInductorTestsTemplate:
         runner.swap_constant_buffer()
         new_output = runner_call(test_inputs)
         self.assertEqual(expected, new_output)
+
+    @skipIfCachingAllocatorDisabled
+    def test_failed_inactive_constant_folding_keeps_active_constants(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+        if torch.cuda.get_allocator_backend() != "native":
+            raise unittest.SkipTest("needs a memory fraction cap")
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.randn(2048, 4096, device=device))
+                self.b = torch.nn.Parameter(torch.randn(2048, device=device))
+
+            def forward(self, x):
+                return x @ torch.relu(self.w.t()) + self.b
+
+        model = Model(self.device)
+        x = torch.randn(2, 4096, device=self.device)
+        with config.patch(
+            {
+                "always_keep_tensor_constants": True,
+                "aot_inductor.use_runtime_constant_folding": True,
+            }
+        ):
+            so_path = AOTIRunnerUtil.legacy_compile(model, (x,))
+        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, self.device)
+        expected = model(x)
+        self.assertEqual(runner.run([x])[0], expected, atol=1e-3, rtol=1e-3)
+        params = dict(model.named_parameters())
+        new_weights = {
+            name: params[fqn].detach() + 1
+            for name, fqn in runner.get_constant_names_to_original_fqns().items()
+            if fqn in params
+        }
+        runner.update_constant_buffer(new_weights, True, False)
+
+        # Leave too little memory for the 32 MB folded constant. The fold
+        # allocates from a fresh pool, so it can't reuse cached blocks, which
+        # the cap doesn't cover.
+        original_fraction = torch.cuda.get_per_process_memory_fraction()
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        total = torch.cuda.get_device_properties(self.device).total_memory
+        fraction = (torch.cuda.memory_reserved() + (8 << 20)) / total
+        ooms = torch.cuda.memory_stats()["num_ooms"]
+        pool = torch.cuda.MemPool()
+        torch.cuda.set_per_process_memory_fraction(fraction)
+        try:
+            with self.assertRaises(RuntimeError), torch.cuda.use_mem_pool(pool):
+                runner.run_const_fold(True)
+        finally:
+            torch.cuda.empty_cache()
+            torch.cuda.set_per_process_memory_fraction(original_fraction)
+        self.assertGreater(torch.cuda.memory_stats()["num_ooms"], ooms)
+        self.assertEqual(runner.run([x])[0], expected, atol=1e-3, rtol=1e-3)
 
     def test_update_inactive_constant_buffer_with_interleaved_folded_constants(self):
         if self.device == "mps":
@@ -2844,6 +2973,124 @@ class AOTInductorTestsTemplate:
             dynamic_shapes={"x": (Dim.DYNAMIC,)},
         )
 
+    @parametrize("gather", ["index", "batched_gather"])
+    def test_autotune_at_compile_time_keeps_a_gather_unlaunched(self, gather):
+        make_model = {
+            "index": _gather_one_past_the_end_on_zeros,
+            "batched_gather": _batched_gather_one_past_the_end_on_zeros,
+        }[gather]
+        kept = _check_model_keeping_device_asserts_unlaunched(
+            self, *make_model(self.device)
+        )
+        self.assertTrue(kept)
+
+    def test_autotune_at_compile_time_keeps_a_multi_kernel_unlaunched(self):
+        from torch._inductor.codegen.multi_kernel import MultiKernelCall
+
+        with self.assertLogs("torch._inductor.codegen.wrapper", "WARNING") as logs:
+            kept = _check_model_keeping_device_asserts_unlaunched(
+                self,
+                *_gather_one_past_the_end_on_zeros(self.device),
+                {"triton.multi_kernel": 1},
+            )
+        self.assertTrue(any(isinstance(k, MultiKernelCall) for k in kept))
+        # The multi-kernel did not choose between its sub-kernels.
+        (warning,) = logs.output
+        self.assertIn("autotune_at_compile_time=False", warning)
+
+    def test_autotune_at_compile_time_keeps_an_assert_op_unlaunched(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, ids):
+                torch._assert_async((ids > 0).all(), "ids must be positive")
+                return x * ids
+
+        ids = torch.ones(64, dtype=torch.int64, device=self.device)
+        example_inputs = (torch.randn(64, device=self.device), ids)
+        kept = _check_model_keeping_device_asserts_unlaunched(
+            self, Model(), example_inputs
+        )
+        self.assertTrue(kept)
+
+    def test_autotune_at_compile_time_keeps_nan_checks_unlaunched(self):
+        # The square root of a negative random value is NaN.
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x.sqrt() + 1, y.sqrt() + 2
+
+        example_inputs = (
+            torch.ones(256, device=self.device),
+            torch.ones(256, device=self.device),
+        )
+        kept = _check_model_keeping_device_asserts_unlaunched(
+            self,
+            Model(),
+            example_inputs,
+            {
+                "runtime_triton_nan_asserts": True,
+                "combo_kernels": True,
+                "combo_kernels_autotune": 0,
+            },
+        )
+        # The two independent kernels form one combo kernel.
+        self.assertEqual(len({k.inductor_meta["kernel_name"] for k in kept}), 1)
+
+    @parametrize(
+        "benchmark",
+        ["none", "template_fusion", "multi_kernel_hints", "prologue_after_epilogue"],
+    )
+    def test_autotune_at_compile_time_keeps_a_template_unlaunched(self, benchmark):
+        if self.device != GPU_TYPE or not is_big_gpu():
+            raise unittest.SkipTest("requires modern GPU to run max-autotune")
+
+        # On zeros, the gather reads row 64 of 64. Without fusion benchmarking the
+        # gather is fused into the matmul template; with it, the fusion is judged
+        # without launching the gather.
+        class Model(torch.nn.Module):
+            def forward(self, a, b, w, idx):
+                return a @ b + w[idx + 64]
+
+        # The gather fuses into the template as an epilogue first, and the
+        # prologue a * 2 is then judged on the template that holds it.
+        class EpilogueThenPrologue(torch.nn.Module):
+            def forward(self, a, b, w, idx):
+                return ((a * 2) @ b) * w[idx + 64]
+
+        example_inputs = (
+            torch.randn(64, 32, device=self.device),
+            torch.randn(32, 64, device=self.device),
+            torch.randn(64, 64, device=self.device),
+            torch.full((64,), -64, dtype=torch.int64, device=self.device),
+        )
+        # The fused template has one config, so keeping it loses nothing to warn about.
+        no_warning = (
+            self.assertNoLogs("torch._inductor.codegen.wrapper", "WARNING")
+            if benchmark == "none"
+            else contextlib.nullcontext()
+        )
+        with no_warning:
+            kept = _check_model_keeping_device_asserts_unlaunched(
+                self,
+                EpilogueThenPrologue()
+                if benchmark == "prologue_after_epilogue"
+                else Model(),
+                example_inputs,
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "prologue_fusion": True,
+                    "benchmark_template_fusion": benchmark != "none",
+                    "multi_kernel_hints": [64]
+                    if benchmark == "multi_kernel_hints"
+                    else [],
+                },
+            )
+        if benchmark == "none":
+            self.assertTrue(
+                any(k.heuristic_type == HeuristicType.TEMPLATE for k in kept)
+            )
+        else:
+            self.assertTrue(kept)
+
     @config.patch({"triton.autotune_at_compile_time": None})
     def test_stride_with_unbacked_expr(self):
         class Repro(torch.nn.Module):
@@ -4540,6 +4787,53 @@ class AOTInductorTestsTemplate:
 
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
+
+    def test_return_non_dense_view_constant(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.cst = torch.randn(8, 12, device=device)
+
+            def forward(self, x):
+                # A non-dense view of the constant with strides (1, 12).
+                return (x, self.cst[:, :6].t())
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(5, device=self.device),)
+        self.check_model(model, example_inputs)
+        # The output_handles path copies a returned constant with
+        # aoti_torch_clone_preserve_strides, so the output keeps the eager
+        # strides. The arrayref variants are covered in test_aot_inductor_arrayref.py.
+        if not (self.allow_stack_allocation or self.use_minimal_arrayref_interface):
+            with torch.no_grad():
+                actual = AOTIRunnerUtil.run(model, example_inputs)
+                expected = model(*example_inputs)
+            self.assertFalse(expected[1].is_contiguous())
+            self.assertEqual(actual[1], expected[1])
+            self.assertEqual(actual[1].stride(), expected[1].stride())
+
+    def test_constant_folding_return_non_dense_view(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.randn(8, 12, device=device)
+
+            def forward(self, x):
+                # Folds to a constant; the output is a non-dense view of it.
+                return (x + 1, (self.w * 2)[:, :6].t())
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(5, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(model, example_inputs)
+            # See test_return_non_dense_view_constant.
+            if not (self.allow_stack_allocation or self.use_minimal_arrayref_interface):
+                with torch.no_grad():
+                    actual = AOTIRunnerUtil.run(model, example_inputs)
+                    expected = model(*example_inputs)
+                self.assertFalse(expected[1].is_contiguous())
+                self.assertEqual(actual[1], expected[1])
+                self.assertEqual(actual[1].stride(), expected[1].stride())
 
     def test_profile_benchmark_harness(self):
         batch_size = 32
@@ -11590,7 +11884,7 @@ torch._inductor.aoti_load_package("{model_path}")
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: this file only runs with a GPU or on macOS (see __main__).
 
     @make_logging_test(dynamic=logging.DEBUG)
     def test_shape_env_reuse(self, records):
@@ -11641,7 +11935,7 @@ class KernelProfileNumelScopeTest(TestCase):
     no small model produces it.
     """
 
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: this file only runs with a GPU or on macOS (see __main__).
 
     def _wrapper(self):
         # A fully constructed wrapper over an empty graph. Hand-setting the
@@ -11758,7 +12052,7 @@ class KernelProfileScopeMemoryPlanningTest(TestCase):
     after the `}` that destroyed `old`.
     """
 
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: this file only runs with a GPU or on macOS (see __main__).
 
     class _ProbeLine(MemoryPlanningLine):
         """Records which planning state it was planned against."""
@@ -11801,7 +12095,7 @@ class KernelProfileScopeMemoryPlanningTest(TestCase):
 
 
 class TestAOTInductorConfig(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: this file only runs with a GPU or on macOS (see __main__).
 
     def test_no_compile_standalone(self):
         with config.patch({"aot_inductor_mode.compile_standalone": False}):
@@ -12074,7 +12368,7 @@ copy_tests(
 
 
 class TestCheckLowerboundConfig(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: this file only runs with a GPU or on macOS (see __main__).
 
     def test_aoti_check_lowerbound_codegen(self):
         """
@@ -12122,7 +12416,7 @@ class TestCheckLowerboundConfig(TestCase):
 
 
 class AOTInductorCompileTimeTests(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: this file only runs with a GPU or on macOS (see __main__).
 
     def test_fx_gm_return_tuple_validation(self):
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -12169,7 +12463,7 @@ class AOTInductorCompileTimeTests(TestCase):
 
 
 class TestCheckUpperboundConfig(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: this file only runs with a GPU or on macOS (see __main__).
 
     def test_aoti_check_upperbound_codegen(self):
         """

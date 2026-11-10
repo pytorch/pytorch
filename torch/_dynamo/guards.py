@@ -2840,6 +2840,27 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: _guard_create_fn_keyword(
+            guard, "expected"
+        ),
+        eval_fn=lambda value, metadata: (
+            isinstance(value, torch.Tensor)
+            and torch._C._is_fake_tensor(value) == metadata
+        ),
+    )
+    def FAKE_TENSOR_MATCH(self, guard: Guard, expected: bool | None = None) -> None:
+        # Whether the tensor is a C++ fake, which TENSOR_MATCH does not check.
+        # expected is bound into the guard rather than read from the value,
+        # which is a stand-in when the guard is rebuilt from saved state.
+        if expected is None:
+            raise AssertionError("expected must not be None for FAKE_TENSOR_MATCH")
+        code = [f"torch._C._is_fake_tensor({self.arg_ref(guard)}) == {expected!r}"]
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_fake_tensor_match_guard(
+            expected, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: None,
         eval_fn=lambda value, metadata: value is None,
     )
@@ -5246,10 +5267,11 @@ class GuardsStatePickler(FunctionPicklerBase):
                     inner_data,
                 )
 
-            # _dispatch_keys() on a fake reports the Python and
-            # PythonTLSSnapshot keys of the fake itself; the converter may
-            # have recorded the real tensor's keys (from_meta_and_device
-            # always does, from_real_tensor only for an mkldnn source).
+            # _dispatch_keys() on a fake reports the fake's own keys: besides
+            # the fake device's backend, Python and PythonTLSSnapshot for a
+            # Python FakeTensor and Fake for a C++ fake. A fake may instead
+            # have recorded the real tensor's keys, e.g. a fake of an mkldnn
+            # tensor (see Note [C++ fake dispatch keys] for a C++ fake).
             dispatch_keys = maybe_get_fake_dispatch_keys(obj)
             if dispatch_keys is None:
                 dispatch_keys = torch._C._dispatch_keys(obj)

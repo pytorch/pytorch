@@ -883,6 +883,7 @@ command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
     '--pattern=cudaStreamSynchronize',
+    '--line-allowlist-pattern=C10_CUDA_ERROR_HANDLED',
     '--linter-name=RAWCUDA',
     '--error-name=raw CUDA API usage',
     """--error-description=\
@@ -1078,6 +1079,23 @@ include_patterns = ['**']
 command = [
     'python3',
     'scripts/codeowners/check_taxonomy.py',
+    '--lintrunner',
+]
+
+[[linter]]
+code = 'CODEOWNERS_GENERATED'
+include_patterns = [
+    'CODEOWNERS',
+    'OWNERSHIP.yaml',
+    'scripts/codeowners/generate_codeowners.py',
+]
+command = [
+    'uv',
+    'run',
+    '--python',
+    '3.11',
+    '--script',
+    'scripts/codeowners/generate_codeowners.py',
     '--lintrunner',
 ]
 
@@ -1424,7 +1442,6 @@ exclude_patterns = [
     'test/test_mkldnn.py',
     'test/test_mkldnn_fusion.py',
     'test/test_mkldnn_verbose.py',
-    'test/test_mobile_optimizer.py',
     'test/test_model_dump.py',
     'test/test_modules.py',
     'test/test_monitor.py',
@@ -1510,7 +1527,6 @@ exclude_patterns = [
     'torch/testing/_internal/codegen/__init__.py',
     'torch/testing/_internal/codegen/random_topo_test.py',
     'torch/testing/_internal/common_cuda.py',
-    'torch/testing/_internal/common_jit.py',
     'torch/testing/_internal/common_methods_invocations.py',
     'torch/testing/_internal/common_modules.py',
     'torch/testing/_internal/common_nn.py',
@@ -1529,7 +1545,6 @@ exclude_patterns = [
     'torch/testing/_internal/generated/__init__.py',
     'torch/testing/_internal/hypothesis_utils.py',
     'torch/testing/_internal/inductor_utils.py',
-    'torch/testing/_internal/jit_metaprogramming_utils.py',
     'torch/testing/_internal/jit_utils.py',
     'torch/testing/_internal/logging_tensor.py',
     'torch/testing/_internal/logging_utils.py',
