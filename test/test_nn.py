@@ -5178,8 +5178,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     @set_default_dtype(torch.double)
     def test_interpolate_identity_shortcut(self):
-        # Issue 199620: F.interpolate incorrectly took an identity shortcut
-        # when scale_factor != 1.0 but rounded to the same output size.
         torch.manual_seed(0)
         x = torch.randn(1, 1, 4, 4)
         for mode in ['bicubic', 'bilinear', 'nearest']:
@@ -5189,7 +5187,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 kwargs = {'align_corners': False}
 
             def f(x):
-                return F.interpolate(x, scale_factor=(1.2,1.2), mode=mode, **kwargs)
+                return F.interpolate(x, scale_factor=(1.2, 1.2), mode=mode, **kwargs)
 
             ref = f(x.double())
 
