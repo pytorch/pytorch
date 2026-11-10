@@ -17,6 +17,7 @@ from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._higher_order_ops.switch import switch
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import run_and_get_cpp_code
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
@@ -24,6 +25,11 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.testing._internal.triton_utils import requires_gpu
+
+
+@torch.library.custom_op("test_control_flow::flip_", mutates_args=("p",))
+def flip_(p: torch.Tensor) -> None:
+    p.logical_not_()
 
 
 def _prepend_product_of_values(inputs, possible_values, num_to_prepend=1, device=None):
@@ -475,6 +481,74 @@ class CondTests(TestCase):
                 self.assertEqual(
                     compiled(p, a, w), model(p, a, w), atol=1e-4, rtol=1e-4
                 )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_predicate_views_of_one_buffer(self, device):
+        # Each predicate is a different view of one buffer, so each needs its own read.
+        def true_fn(x):
+            return (x.sin(),)
+
+        def false_fn(x):
+            return (x.cos(),)
+
+        def model(p, x):
+            q = ~p
+            a = torch.cond(p[0], true_fn, false_fn, (x,))[0]
+            b = torch.cond(p[1], true_fn, false_fn, (x,))[0]
+            c = torch.cond(q[0], true_fn, false_fn, (x,))[0]
+            return a, b, c, torch.cond(q[1], true_fn, false_fn, (x,))[0]
+
+        x = torch.randn(8, device=device)
+        compiled = torch.compile(model, fullgraph=True)
+        for preds in ([True, False], [False, True]):
+            p = torch.tensor(preds, device=device)
+            self.assertEqual(compiled(p, x), model(p, x))
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_mutated_input_predicate(self, device):
+        # A custom op mutates the input in place, so the second cond reads the
+        # input buffer again (logical_not_ would be functionalized into a new one).
+        def true_fn(x):
+            return (x.sin(),)
+
+        def false_fn(x):
+            return (x.cos(),)
+
+        def model(p, x):
+            a = torch.cond(p, true_fn, false_fn, (x,))[0]
+            flip_(p)
+            return a, torch.cond(p, true_fn, false_fn, (x,))[0]
+
+        x = torch.randn(8, device=device)
+        compiled = torch.compile(model, fullgraph=True)
+        for pred in (True, False):
+            p = torch.tensor(pred, device=device)
+            p_ref = p.clone()
+            self.assertEqual(compiled(p, x), model(p_ref, x))
+            self.assertEqual(p, p_ref)
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_mutated_computed_predicate(self, device):
+        # As test_cond_mutated_input_predicate, for a predicate the graph computes.
+        def true_fn(x):
+            return (x.sin(),)
+
+        def false_fn(x):
+            return (x.cos(),)
+
+        def model(x):
+            p = x.sum() > 0
+            a = torch.cond(p, true_fn, false_fn, (x,))[0]
+            flip_(p)
+            return a, torch.cond(p, true_fn, false_fn, (x,))[0]
+
+        compiled = torch.compile(model, fullgraph=True)
+        for sign in (1, -1):
+            x = sign * (torch.rand(8, device=device) + 0.1)
+            self.assertEqual(compiled(x), model(x))
 
     @requires_gpu
     @torch._functorch.config.patch("donated_buffer", True)
@@ -2915,7 +2989,26 @@ class _CppWrapperMixin:
 
 
 class CondTestsCppWrapper(_CppWrapperMixin, CondTests):
-    pass
+    @requires_gpu
+    def test_cond_computed_predicate_read_once(self):
+        def true_fn(x):
+            return (x.sin(),)
+
+        def false_fn(x):
+            return (x.cos(),)
+
+        def model(x):
+            p = x.sum() > 0
+            a = torch.cond(p, true_fn, false_fn, (x,))[0]
+            return a, torch.cond(p, true_fn, false_fn, (a * 2,))[0]
+
+        for device in ("cpu", GPU_TYPE):
+            torch._dynamo.reset()
+            x = torch.randn(8, device=device)
+            out, code = run_and_get_cpp_code(torch.compile(model, fullgraph=True), x)
+            self.assertEqual(out, model(x))
+            # Both conds share one read of the unmutated predicate buffer.
+            self.assertEqual(code.count("aoti_torch_item_int64("), 1)
 
 
 class AssociativeScanTestsCppWrapper(_CppWrapperMixin, AssociativeScanTests):
