@@ -321,7 +321,7 @@ typename Config<C>::cls_t set_class(
     typename Config<C>::cache_t& cache,
     const typename Config<C>::key_t& key,
     const typename Config<C>::ephemeral_t& frame) {
-  if (C10_UNLIKELY(!cache.location_.has_value())) {
+  if (!cache.location_.has_value()) [[unlikely]] {
     auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
     TORCH_INTERNAL_ASSERT(code.get() == getCode<C>());
     cache.location_ = PyCallKey(frame);
@@ -371,7 +371,7 @@ void ValueCache::store<CallType::PyCall>(
     const PyCallKey& key,
     no_ephemeral_t /*unused*/) {
   auto& locations = std::get<CallType::PyCall>(state_);
-  if (C10_UNLIKELY(locations.find(key) == locations.end())) {
+  if (locations.find(key) == locations.end()) [[unlikely]] {
     locations[key] = {
         key.line_number_,
         at::StringView(std::string(key.filename_)),
@@ -390,9 +390,8 @@ void ValueCache::store<CallType::PyModuleCall>(
     const PyModuleCallKey& key,
     Config<CallType::PyModuleCall>::ephemeral_t frame) {
   auto& cache = std::get<CallType::PyModuleCall>(state_);
-  if (C10_UNLIKELY(
-          cache.cls_and_parameters_.find(key) ==
-          cache.cls_and_parameters_.end())) {
+  if (cache.cls_and_parameters_.find(key) == cache.cls_and_parameters_.end())
+      [[unlikely]] {
     auto cls = set_class<CallType::PyModuleCall>(this, cache, key, frame);
 
     py::dict params = py::handle((PyObject*)key).attr("_parameters");
@@ -430,9 +429,8 @@ void ValueCache::store<CallType::PyOptimizerCall>(
     const PyOptimizerCallKey& key,
     Config<CallType::PyOptimizerCall>::ephemeral_t frame) {
   auto& cache = std::get<CallType::PyOptimizerCall>(state_);
-  if (C10_UNLIKELY(
-          cache.cls_and_parameters_.find(key) ==
-          cache.cls_and_parameters_.end())) {
+  if (cache.cls_and_parameters_.find(key) == cache.cls_and_parameters_.end())
+      [[unlikely]] {
     auto cls = set_class<CallType::PyOptimizerCall>(this, cache, key, frame);
     const py::handle self{(PyObject*)key};
     std::vector<OptimizerInfo::ParameterInfo> params;
@@ -478,7 +476,7 @@ void ValueCache::store<CallType::PyCCall>(
     const PyCCallKey& key,
     Config<CallType::PyCCall>::ephemeral_t arg) {
   auto& names = std::get<CallType::PyCCall>(state_);
-  if (C10_UNLIKELY(names.find(key) == names.end())) {
+  if (names.find(key) == names.end()) [[unlikely]] {
     names[key] = at::StringView(py::repr(arg));
   }
 }
@@ -533,7 +531,7 @@ struct TraceKeyCacheState {
       typename Config<C>::ephemeral_t ephemeral,
       ValueCache& value_cache) {
     auto it = state_.find(callsite);
-    if (C10_UNLIKELY(it == state_.end())) {
+    if (it == state_.end()) [[unlikely]] {
       value_cache.store<C>(callsite.value_, ephemeral);
       value_cache.store<CallType::PyCall>(callsite.caller_, no_ephemeral_t());
       it = state_.insert({callsite, nextKey()}).first;
@@ -1579,7 +1577,7 @@ int PythonTracer::pyProfileFn(
   HANDLE_TH_ERRORS
   auto* tracer = reinterpret_cast<TraceContext*>(obj)->tracer_;
   auto* local_results = tracer->findThreadLocalResults(PyThreadState_Get());
-  if (C10_UNLIKELY(!local_results)) {
+  if (!local_results) [[unlikely]] {
     return 0;
   }
   bool acquired = local_results->profile_sem.tryAcquire();
