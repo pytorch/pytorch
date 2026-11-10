@@ -15,6 +15,7 @@ import random
 import subprocess
 import sys
 import tempfile
+import textwrap
 import threading
 import time
 import unittest
@@ -19299,15 +19300,42 @@ class TestDisallowImplicitGradAccumulation(TestCase):
         self.assertEqual(a.grad, 5 * a.cos())
 
     def test_message(self, device):
+        def message(fn):
+            with self.assertRaises(RuntimeError) as cm:
+                fn().sum().backward(disallow_implicit_grad_accumulation=True)
+            # Wrapped so the expected message is easy to review.
+            return textwrap.fill(
+                str(cm.exception), 80, break_long_words=False, break_on_hyphens=False
+            )
+
         a = torch.randn(3, device=device, requires_grad=True)
         x = a.sin()
-        with self.assertRaisesRegex(RuntimeError, "SinBackward0") as cm:
-            (x * x).sum().backward(disallow_implicit_grad_accumulation=True)
-        message = str(cm.exception)
-        self.assertIn("(shape [3], dtype float)", message)
-        self.assertIn("MulBackward0 produced another", message)
-        self.assertIn("custom autograd Function", message)
-        self.assertIn("torch.autograd.detect_anomaly()", message)
+        self.assertExpectedInline(
+            message(lambda: x * x),
+            """\
+Gradients would be summed implicitly into output 0 of SinBackward0 (shape [3],
+dtype float): it already received a gradient, and MulBackward0 produced another.
+backward was run with disallow_implicit_grad_accumulation=True, which raises
+instead of accumulating the gradient contributions of a tensor used more than
+once. To accumulate them yourself, use a custom autograd Function whose forward
+returns the tensor once per use and whose backward sums their gradients. See
+https://pytorch.org/docs/main/notes/autograd.html#disallow-implicit-grad-accumulation
+for an example. Run under torch.autograd.detect_anomaly() to print the forward
+traceback of the operation that produced this gradient.""",
+        )
+        self.assertExpectedInline(
+            message(lambda: a * a),
+            """\
+Gradients would be summed implicitly into a leaf tensor of shape [3] and dtype
+Float: it already received a gradient, and MulBackward0 produced another.
+backward was run with disallow_implicit_grad_accumulation=True, which raises
+instead of accumulating the gradient contributions of a tensor used more than
+once. To accumulate them yourself, use a custom autograd Function whose forward
+returns the tensor once per use and whose backward sums their gradients. See
+https://pytorch.org/docs/main/notes/autograd.html#disallow-implicit-grad-accumulation
+for an example. Run under torch.autograd.detect_anomaly() to print the forward
+traceback of the operation that produced this gradient.""",
+        )
 
     def test_leaf(self, device):
         a = torch.randn(3, device=device, requires_grad=True)
