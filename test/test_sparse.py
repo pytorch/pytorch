@@ -4339,6 +4339,20 @@ class TestSparse(TestSparseBase):
                 # TODO: uncomment once supported
                 # check_autograd(x, y)
 
+    def test_sparse_sparse_mul_sparse_numel_edge_cases(self, device):
+        # The product of the sparse dims is used as a divisor; it was 0 for an
+        # empty sparse dim and wrapped to 0 in int32 for 2**16 * 2**16.
+        a = torch.zeros(0, 3, device=device).to_sparse(sparse_dim=1)
+        b = torch.zeros(0, 1, device=device).to_sparse(sparse_dim=1)
+        self.assertEqual((a * b).to_dense(), torch.zeros(0, 3, device=device))
+
+        i = torch.tensor([[0, 1], [0, 1]], device=device)
+        a = torch.sparse_coo_tensor(i, torch.full((2, 3), 2.0, device=device), (2**16, 2**16, 3))
+        b = torch.sparse_coo_tensor(i, torch.full((2, 1), 3.0, device=device), (2**16, 2**16, 1))
+        res = (a * b).coalesce()
+        self.assertEqual(res.indices(), i)
+        self.assertEqual(res.values(), torch.full((2, 3), 6.0, device=device))
+
     @coalescedonoff
     @expectedFailureMPS
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
