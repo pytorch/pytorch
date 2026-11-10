@@ -26,18 +26,21 @@ namespace torch::fake_tensor {
 // So, like a Python FakeTensorMode, which its FakeTensors and the FAKE slot
 // hold, the Python object lives at least as long as anything uses the mode,
 // and lookups (getCppFakeTensorModePyObj) return that object. The mode holds
-// its handle only weakly, so there is no cycle. A cycle back through Python
-// would need an attribute on the object holding a fake, which GC could not
-// see through the handle; so CppFakeTensorMode has __slots__ that hold no
-// fakes, and getCppFakeTensorModeHandle accepts no other type, including a
-// subclass.
+// its handle only weakly, so the handle makes no cycle. But GC can see neither
+// through the handle nor through the mode's shape_env_ and
+// fake_tensor_converter_, so the CppFakeTensorMode, its ShapeEnv and its
+// converter must not hold the mode's fakes strongly, or the fakes, the mode
+// and its Python object leak (Dynamo's ShapeEnv tracked_fakes, for one, must be
+// cleared as Dynamo does for a Python FakeTensorMode). So CppFakeTensorMode has
+// __slots__ that hold no fakes, and getCppFakeTensorModeHandle accepts no other
+// type, including a subclass.
 //
 // A mode has at most one handle at a time: getCppFakeTensorModeHandle reuses
 // the live one, and makes a new one only once every holder of the last is
 // gone. C++ code copies a handle from a fake or the slot, and a mode made in
-// C++ (which has no Python object) makes its one handle itself. As a mode may
-// get a new handle over time, code compares and keys modes by handle->mode,
-// never by handle.
+// C++ (which has no Python object) makes its one handle itself and leaves
+// handle_ unset. As a mode may get a new handle over time, code compares and
+// keys modes by handle->mode, never by handle.
 //
 // Copying or dropping a handle reference takes no GIL. When the last one
 // drops, the handle releases its Python object through SafePyObject, which
@@ -68,7 +71,8 @@ std::shared_ptr<c10::FakeTensorModeHandle> getCppFakeTensorModeHandle(
       Py_TYPE(py_mode.ptr()) ==
           reinterpret_cast<PyTypeObject*>(
               get_cpp_fake_tensor_mode_class().ptr()),
-      "Expected a CppFakeTensorMode, got ",
+      "Expected a CppFakeTensorMode (not a subclass, nor a bare ",
+      "_CppFakeTensorMode), got ",
       Py_TYPE(py_mode.ptr())->tp_name);
   auto mode = py::cast<std::shared_ptr<c10::FakeTensorMode>>(py_mode);
   // Under free-threaded Python, threads can get the same mode's handle at
