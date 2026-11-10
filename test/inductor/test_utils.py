@@ -66,6 +66,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfXpu,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -607,7 +608,8 @@ class TestDeviceTflopsTritonFallback(TestCase):
         not triton_utils.has_triton_package(),
         "requires Triton",
     )
-    @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
+    @unittest.skipIf(not torch.cuda.is_available() and not torch.xpu.is_available(), "skip if no device")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4853")
     def test_get_device_tflops_triton_fallback_magnitude(self):
         # The Triton fallback feeds max_clock_rate() (MHz) into triton's tflops
         # helpers, which are dimensioned in kHz. Getting that wrong under-reports
