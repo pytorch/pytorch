@@ -193,7 +193,7 @@ ProcessGroupXCCL::RedOpRAII ProcessGroupXCCL::getXcclReduceOp(
       C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with XCCL");
     case ::c10d::ReduceOp::BXOR:
       // XCCL doesn't support bitwise XOR
-      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with XCCL");
+      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BXOR with XCCL");
     default:
       TORCH_CHECK(false, "Unsupported reduce operation");
   }
