@@ -6,6 +6,7 @@ set CMAKE_C_COMPILER_LAUNCHER=sccache
 set CMAKE_CXX_COMPILER_LAUNCHER=sccache
 set libuv_ROOT=%DEPENDENCIES_DIR%\libuv\install
 set MSSdk=1
+set USE_MKLDNN=0
 if defined PYTORCH_BUILD_VERSION (
   set PYTORCH_BUILD_VERSION=%PYTORCH_BUILD_VERSION%
   set PYTORCH_BUILD_NUMBER=1
@@ -45,7 +46,7 @@ set DISTUTILS_USE_SDK=1
 sccache --start-server
 sccache --zero-stats
 sccache --show-stats
- 
+
 :: Prepare the environment
 mkdir libtorch
 mkdir libtorch\bin
@@ -61,7 +62,7 @@ python ./tools/build_libtorch.py
 :: Check if there is an error
 IF ERRORLEVEL 1 exit /b 1
 IF NOT ERRORLEVEL 0 exit /b 1
- 
+
 :: Move the files to the correct location
 move /Y torch\bin\*.* libtorch\bin\
 move /Y torch\cmake\*.* libtorch\cmake\

@@ -5,18 +5,14 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+
+# tomllib is built in on Python 3.11+, and spin depends on tomli for older versions.
+import tomllib
 from pathlib import Path
 from tempfile import gettempdir, mktemp
 
 import click
 import spin
-
-
-# tomllib is built in on Python 3.11+, and spin depends on tomli for older versions.
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
 
 
 CWD = Path(__file__).absolute().parent.parent
@@ -155,6 +151,7 @@ VERY_FAST_LINTERS = {
     "CMAKE_INSTALL_PREFIX_ROOT",
     "CMAKE_MINIMUM_REQUIRED",
     "CMAKE_PLATLIB_DESTINATION",
+    "CODEOWNERS_GENERATED",
     "CODEOWNERS_TAXONOMY",
     "CONTEXT_DECORATOR",
     "COPYRIGHT",
@@ -245,7 +242,7 @@ LINTRUNNER_CACHE_INFO = (
 LINTRUNNER_BASE_CMD = [
     "uvx",
     "--python",
-    "3.10",
+    "3.11",
     "lintrunner@0.12.7",
 ]
 
@@ -264,13 +261,13 @@ def _check_linter_python_versions():
         except ValueError:
             python_index = -1
         if python_index == -1 or command[python_index + 1 : python_index + 2] != [
-            "3.10"
+            "3.11"
         ]:
             invalid_linters.append(linter["code"])
 
     if invalid_linters:
         raise click.ClickException(
-            "Linters using `uv run --script` must specify `--python 3.10`: "
+            "Linters using `uv run --script` must specify `--python 3.11`: "
             + ", ".join(invalid_linters)
         )
 

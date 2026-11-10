@@ -14,11 +14,13 @@
 #include <ATen/native/mps/TensorFactory.h>
 #include <c10/core/ScalarType.h>
 #include <c10/metal/common.h>
+#include <c10/util/SmallVector.h>
 #include <fmt/format.h>
 #include <torch/library.h>
 #include <limits>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -600,7 +602,7 @@ static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
                                      NSUInteger length) {
   static_assert(sizeof(NSUInteger) == sizeof(uint64_t));
   // thread_position_in_grid is at most 32-bit per axis; Metal silently truncates larger grids
-  TORCH_CHECK(length <= std::numeric_limits<uint32_t>::max(), "MPS 1D dispatch of ", length, " threads exceeds 2^32");
+  TORCH_CHECK(std::in_range<uint32_t>(length), "MPS 1D dispatch of ", length, " threads exceeds 2^32");
   const auto maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
   auto size = MTLSizeMake(length, 1, 1);
   auto threadGroupSize = MTLSizeMake(std::clamp(length, 1UL, maxThreadsPerGroup), 1, 1);
@@ -620,7 +622,7 @@ static inline void mtl_dispatch2DJob(id<MTLComputeCommandEncoder> encoder,
                                      id<MTLComputePipelineState> cplState,
                                      NSUInteger inner_len,
                                      NSUInteger outer_len) {
-  TORCH_CHECK(inner_len <= std::numeric_limits<uint32_t>::max() && outer_len <= std::numeric_limits<uint32_t>::max(),
+  TORCH_CHECK(std::in_range<uint32_t>(inner_len) && std::in_range<uint32_t>(outer_len),
               "MPS 2D dispatch of ",
               inner_len,
               "x",
@@ -639,8 +641,7 @@ static inline void mtl_dispatch3DJob(id<MTLComputeCommandEncoder> encoder,
                                      NSUInteger dim0,
                                      NSUInteger dim1,
                                      NSUInteger dim2) {
-  constexpr NSUInteger max_dim = std::numeric_limits<uint32_t>::max();
-  TORCH_CHECK(dim0 <= max_dim && dim1 <= max_dim && dim2 <= max_dim,
+  TORCH_CHECK(std::in_range<uint32_t>(dim0) && std::in_range<uint32_t>(dim1) && std::in_range<uint32_t>(dim2),
               "MPS 3D dispatch of ",
               dim0,
               "x",
@@ -653,6 +654,13 @@ static inline void mtl_dispatch3DJob(id<MTLComputeCommandEncoder> encoder,
   auto tg_y = std::clamp(dim1, 1UL, maxThreadsPerGroup / tg_x);
   auto tg_z = std::clamp(dim2, 1UL, maxThreadsPerGroup / (tg_x * tg_y));
   [encoder dispatchThreads:MTLSizeMake(dim0, dim1, dim2) threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, tg_z)];
+}
+
+// Threadgroups that keep every GPU core busy: 4 x 1024 threads cover the ~3072 resident threads per core
+static inline int64_t occupancy_threadgroups() {
+  constexpr int64_t threadgroups_per_core = 4;
+  static const int64_t cores = std::max(MPSDevice::getInstance()->getCoreCount(), 1u);
+  return threadgroups_per_core * cores;
 }
 
 inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1) {
@@ -773,6 +781,15 @@ void MetalShaderLibrary::exec_unary_kernel_with_params(TensorIteratorBase& iter,
   }
 }
 
+// Per-dim magic divisors for the strided kernels; 32-bit chunking keeps every size below 2^31.
+inline c10::SmallVector<c10::metal::DimDivider, 5> dimDividers(IntArrayRef sizes) {
+  c10::SmallVector<c10::metal::DimDivider, 5> dividers;
+  for (const auto size : sizes) {
+    dividers.push_back({c10::IntDivider<uint32_t>(static_cast<uint32_t>(size))});
+  }
+  return dividers;
+}
+
 template <typename T>
 void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter,
                                                         const std::string& name,
@@ -855,8 +872,9 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
                                              static_cast<int>(input.scalar_type()),
                                              static_cast<int>(other.scalar_type()),
                                              static_cast<int>(out.scalar_type())};
+        const auto sizes = dimDividers(iter.shape());
         mtl_setArgs<3>(
-            computeEncoder, params, iter.shape(), iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
+            computeEncoder, params, sizes, iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
       getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
