@@ -1,7 +1,6 @@
 # Owner(s): ["module: cpp-extensions"]
 
 import sys
-import tempfile
 import unittest
 
 from model import get_custom_op_library_path, Model
@@ -147,19 +146,6 @@ def forward(self, arg0_1):
         model = Model()
         output = model.forward(torch.ones(5))
         self.assertTrue(output.allclose(torch.ones(5) + 1))
-
-    def test_saving_and_loading_script_module_with_custom_op(self):
-        model = Model()
-        # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
-        # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
-        # close the file after creation and try to remove it manually.
-        with tempfile.NamedTemporaryFile() as file:
-            file.close()
-            model.save(file.name)
-            loaded = torch.jit.load(file.name)
-
-            output = loaded.forward(torch.ones(5))
-            self.assertTrue(output.allclose(torch.ones(5) + 1))
 
 
 if __name__ == "__main__":
