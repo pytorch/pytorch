@@ -509,11 +509,9 @@ def _resolve_fake_mode(
         output_nodes = [n for n in nodes if isinstance(n, torch.fx.Node)]
         for node in itertools.chain(output_nodes, gm.graph.nodes):
             for key in ("example_value", "val"):
-                maybe_fake_mode = torch._guards.require_python_fake_mode(
-                    maybe_get_fake_mode(node.meta.get(key))
-                )
+                maybe_fake_mode = maybe_get_fake_mode(node.meta.get(key))
                 if maybe_fake_mode is not None:
-                    return maybe_fake_mode
+                    return torch._guards.require_python_fake_mode(maybe_fake_mode)
 
         return FakeTensorMode(shape_env=ShapeEnv())
     else:
