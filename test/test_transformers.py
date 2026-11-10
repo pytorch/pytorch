@@ -5800,7 +5800,11 @@ class TestSDPAAccelerator(NNTestCase):
     # AOTriton's fp32 forward is not run-to-run deterministic on gfx950.
     @skipIfRocmArch(MI350_ARCH)
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
+    @setSdpaBackendsToDefaultFinally
     def test_mem_eff_backwards_determinism(self, device):
+        if TEST_WITH_ROCM:
+            # CK's mem-efficient backward ignores deterministic mode; pin AOTriton.
+            torch.backends.cuda.preferred_rocm_fa_library("aotriton")
         # Without deterministic mode this shape uses num_splits_key > 1, whose grad_q accumulation order is racy
         shape = (1, 1, 4096, 64)
         query, key, value = (torch.rand(shape, device=device, requires_grad=True) for _ in range(3))
