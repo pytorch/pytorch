@@ -20881,8 +20881,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         # rank mismatches must also be rejected, as in eager, instead of
         # passing the check and crashing later in lowering; the index numel
-        # matches source.size(dim) so the shape check is what fires
-        index4 = torch.tensor([0, 1, 2, 3], dtype=torch.int64, device=self.device)
+        # matches source.size(dim) so the shape check is what fires, and the
+        # index values stay in range of self so a validation regression fails
+        # on its regex instead of on lowering's out-of-bounds handling
+        index4 = torch.tensor([0, 1, 2, 0], dtype=torch.int64, device=self.device)
         with self.assertRaisesRegex(
             RuntimeError, "source tensor shape must match self tensor shape"
         ):
@@ -20897,6 +20899,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             torch.compile(fn, backend="inductor")(
                 torch.randn(3, 4, device=self.device),
                 index4,
+                torch.randn(4, device=self.device),
+            )
+        # same rank with mismatched sizes exercises the sym_eq check itself
+        with self.assertRaisesRegex(
+            RuntimeError, "source tensor shape must match self tensor shape"
+        ):
+            torch.compile(fn, backend="inductor")(
+                torch.randn(3, 4, device=self.device),
+                torch.tensor([0, 1], dtype=torch.int64, device=self.device),
+                torch.randn(2, 5, device=self.device),
+            )
+
+        # a dim that is valid for self but out of bounds of the source is
+        # rejected with eager's message instead of a raw IndexError
+        def fn_dim1(self_, index, source):
+            return self_.index_reduce(1, index, source, "mean", include_self=True)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Indexing dim 1 is out of bounds of the source tensor"
+        ):
+            torch.compile(fn_dim1, backend="inductor")(
+                torch.randn(3, 4, device=self.device),
+                torch.tensor([0, 1, 2, 0], dtype=torch.int64, device=self.device),
                 torch.randn(4, device=self.device),
             )
 

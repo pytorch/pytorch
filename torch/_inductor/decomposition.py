@@ -1347,6 +1347,13 @@ def index_reduce(
         ),
     )
     dim = utils.canonicalize_dim(self.dim(), dim)
+    torch._check(
+        dim == 0 or dim < src.dim(),
+        lambda: (
+            f"index_reduce_(): Indexing dim {dim} is out of bounds of the "
+            f"source tensor with dim {src.dim()}"
+        ),
+    )
     numel = index.numel()
     torch._check(
         numel == (1 if src.dim() == 0 else src.shape[dim]),
@@ -1390,33 +1397,10 @@ def index_reduce(
         out = out.index_add(dim, index, src)
         return out / counts if true_division else out // counts
 
-    if use_scatter_fallback(
-        aten.scatter_reduce_.two,
-        reduction_type,
-        self.dtype,
-        src.dtype,
-        src.device.type,
-        True,
-    ):
-        return NotImplemented
-
-    # pyrefly: ignore [missing-attribute]
-    repeats = self.shape[dim + 1 :].numel() * self.shape[:dim].numel()
-    index_shape = (index.numel(), *self.shape[dim + 1 :], *self.shape[:dim])
-    perm = (*range(self.ndim - dim, self.ndim), 0, *range(1, self.ndim - dim))
-    scatter_index = (
-        index.to(torch.int64)
-        .repeat_interleave(repeats)
-        .reshape(index_shape)
-        .permute(perm)
-    )
-    return self.scatter_reduce(
-        dim,
-        scatter_index,
-        src,
-        reduction_type,
-        include_self=include_self,
-    )
+    # Only "mean" with types that support atomic adds returns above; every
+    # remaining input falls back to eager (the scatter_reduce lowering only
+    # supports "sum").
+    return NotImplemented
 
 
 def _max_pool_with_indices(
