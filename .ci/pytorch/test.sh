@@ -2436,6 +2436,7 @@ test_vec256() {
     pushd build/bin
     vec256_tests=$(find . -maxdepth 1 -executable -name 'vec_test_all_types_*')
     cpu_capability=$(python -c "import torch; print(torch.backends.cpu.get_cpu_capability())")
+    ran=0
     for vec256_exec in $vec256_tests
     do
       case "$vec256_exec" in
@@ -2456,8 +2457,13 @@ test_vec256() {
         continue
       fi
       $vec256_exec --gtest_output=xml:"$TEST_REPORTS_DIR/${vec256_exec#./}.xml"
+      ran=$((ran + 1))
     done
     popd
+    if [[ "$ran" == 0 ]]; then
+      echo "No vec_test_all_types binary ran"
+      exit 1
+    fi
     assert_git_not_dirty
   fi
 }
