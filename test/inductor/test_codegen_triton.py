@@ -4,6 +4,7 @@ import contextlib
 import dataclasses
 import inspect
 import re
+import sys
 import unittest
 from collections import namedtuple, OrderedDict
 from enum import Enum, IntEnum
@@ -53,7 +54,6 @@ from torch._inductor.utils import (
     run_and_get_kernels,
 )
 from torch._inductor.virtualized import ops, V
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -554,7 +554,9 @@ def helper(x):
         "requires triton.aggregate",
     )
     @parametrize("nested", [False, True])
-    @parametrize("source_lookup", ["inspect", "missing", "replacement"])
+    @parametrize(
+        "source_lookup", ["inspect", "missing", "replacement", "unparsable", "empty"]
+    )
     def test_user_defined_triton_kernel_aggregate(self, nested, source_lookup):
         kernel = nested_aggregate_kernel if nested else aggregate_kernel
         getsource = inspect.getsource
@@ -565,6 +567,10 @@ def helper(x):
                     raise OSError("replacement class has no __firstlineno__")
                 if source_lookup == "replacement":
                     return "class aggregate_value:\n    pass\n"
+                if source_lookup == "unparsable":
+                    return "        x = 1\n    y = 2\n"
+                if source_lookup == "empty":
+                    return ""
             return getsource(obj)
 
         with (
@@ -592,6 +598,110 @@ def helper(x):
         if nested:
             self.assertIs(module.NestedConfigAlias, module.NestedConfig)
             self.assertIs(module.NestedConfig.__annotations__["config"], module.Config)
+
+    @unittest.skipUnless(
+        has_triton_package() and hasattr(triton, "aggregate"),
+        "requires triton.aggregate",
+    )
+    @parametrize("lookup", ["no_module", "no_file"])
+    def test_user_defined_triton_kernel_aggregate_source_unavailable(self, lookup):
+        def no_file(obj):
+            raise TypeError(f"{obj!r} is a built-in module")
+
+        with contextlib.ExitStack() as stack:
+            if lookup == "no_module":
+                stack.enter_context(patch.dict(sys.modules))
+                del sys.modules[aggregate_kernel.fn.__module__]
+            else:
+                stack.enter_context(
+                    patch("torch._inductor.codegen.wrapper.inspect.getsource", no_file)
+                )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "source of the Triton aggregate .*Config.*aggregate_kernel",
+            ):
+                user_defined_triton_kernel_transitive_closure(aggregate_kernel)
+
+    @unittest.skipUnless(
+        has_triton_package() and hasattr(triton, "aggregate"),
+        "requires triton.aggregate",
+    )
+    def test_user_defined_triton_kernel_aggregate_name_conflict(self):
+        other = PyCodeCache.load(
+            "import triton\nimport triton.language as tl\n\n"
+            "@triton.aggregate\nclass Config:\n    size: tl.constexpr\n"
+        )
+
+        @triton.jit
+        def kernel(n):
+            HelperConfig(n)  # noqa: F821
+            OtherConfig(n)  # noqa: F821
+
+        helper_config = aggregate_kernel.fn.__globals__["Config"]
+        aliases = {"HelperConfig": helper_config, "OtherConfig": other.Config}
+        with (
+            patch.dict(kernel.fn.__globals__, aliases),
+            self.assertRaisesRegex(NotImplementedError, "globals named Config"),
+        ):
+            user_defined_triton_kernel_transitive_closure(kernel)
+
+    @unittest.skipUnless(
+        has_triton_package() and hasattr(triton, "aggregate"),
+        "requires triton.aggregate",
+    )
+    def test_user_defined_triton_kernel_triton_module_aggregate(self):
+        # An aggregate that ships with Triton is imported, like Triton's other globals.
+        module_name = "triton._test_inductor_aggregate"
+        module = PyCodeCache.load(
+            "import triton\nimport triton.language as tl\n\n"
+            "@triton.aggregate\nclass Config:\n"
+            f"    __module__ = {module_name!r}\n    size: tl.constexpr\n"
+        )
+
+        @triton.jit
+        def kernel(n):
+            TritonConfig(n)  # noqa: F821
+
+        with (
+            patch.dict(sys.modules, {module_name: module}),
+            patch.dict(kernel.fn.__globals__, {"TritonConfig": module.Config}),
+        ):
+            source = user_defined_triton_kernel_transitive_closure_source_code(kernel)
+            self.assertNotIn("class Config", source)
+            self.assertIn(f"from {module_name} import Config as TritonConfig", source)
+            header = "import triton\nimport triton.language as tl\n@triton.jit\n"
+            generated = PyCodeCache.load(header + source)
+        self.assertIs(generated.TritonConfig, module.Config)
+
+    @unittest.skipUnless(
+        HAS_GPU_AND_TRITON and hasattr(triton, "aggregate"),
+        "requires GPU and triton.aggregate",
+    )
+    @parametrize("nested", [False, True])
+    @parametrize("as_code", [False, True])
+    def test_user_defined_triton_kernel_aggregate_compile(self, nested, as_code):
+        kernel = nested_aggregate_kernel if nested else aggregate_kernel
+        self.assertFalse(kernel.fn.__module__.startswith("triton"))
+
+        @torch.library.triton_op(
+            f"test_aggregate::{self._testMethodName}", mutates_args={}
+        )
+        def add_one(x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            torch.library.wrap_triton(kernel)[(1,)](x, out, x.numel())
+            return out
+
+        x = torch.arange(17, device=GPU_TYPE)
+        self.assertEqual(add_one(x), x + 1)
+        with (
+            inductor_config.patch(fx_graph_cache=False),
+            patch.object(
+                PythonWrapperCodegen,
+                "defines_triton_kernels_as_code",
+                return_value=as_code,
+            ),
+        ):
+            self.assertEqual(torch.compile(add_one, fullgraph=True)(x), x + 1)
 
     @unittest.skipUnless(
         has_triton_package() and hasattr(triton, "constexpr_function"),
@@ -2270,41 +2380,6 @@ def helper(x):
             repr(hints),
             "(AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ACCUMULATORS)",
         )
-
-
-class TestTritonAggregate(InductorTestCase):
-    @unittest.skipUnless(
-        HAS_GPU_AND_TRITON and hasattr(triton, "aggregate"),
-        "requires GPU and triton.aggregate",
-    )
-    @parametrize("nested", [False, True])
-    @parametrize("as_code", [False, True])
-    def test_compile(self, device, nested, as_code):
-        kernel = nested_aggregate_kernel if nested else aggregate_kernel
-        self.assertFalse(kernel.fn.__module__.startswith("triton"))
-
-        @torch.library.triton_op(
-            f"test_aggregate::{self._testMethodName}", mutates_args={}
-        )
-        def add_one(x: torch.Tensor) -> torch.Tensor:
-            out = torch.empty_like(x)
-            torch.library.wrap_triton(kernel)[(1,)](x, out, x.numel())
-            return out
-
-        x = torch.arange(17, device=device)
-        self.assertEqual(add_one(x), x + 1)
-        with (
-            inductor_config.patch(fx_graph_cache=False),
-            patch.object(
-                PythonWrapperCodegen,
-                "defines_triton_kernels_as_code",
-                return_value=as_code,
-            ),
-        ):
-            self.assertEqual(torch.compile(add_one, fullgraph=True)(x), x + 1)
-
-
-instantiate_device_type_tests(TestTritonAggregate, globals(), only_for=(GPU_TYPE,))
 
 
 if __name__ == "__main__":

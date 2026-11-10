@@ -5116,6 +5116,8 @@ def exec_from_cache_file(code: str, name: str) -> dict[str, Any]:
     # the file the kernels read their lines from must hold exactly the code being run.
     _, path = write(code, "py", key=get_hash(code, "exec_from_cache_file"))
     namespace: dict[str, Any] = {"__name__": name, "__file__": path}
+    # Without dont_inherit, this file's `from __future__ import annotations` would
+    # apply to the code too and turn its annotations (aggregate fields) into strings.
     exec(compile(code, path, "exec", dont_inherit=True), namespace)
     return namespace
 

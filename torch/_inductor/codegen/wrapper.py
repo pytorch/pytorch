@@ -687,18 +687,32 @@ class TritonKernelSource:
     symbol_map: dict[str, str]
 
 
-def _triton_aggregate_source(aggregate: type) -> ast.ClassDef:
+def _triton_aggregate_class_def(aggregate: type, kernel_name: str) -> ast.ClassDef:
+    name = f"{aggregate.__module__}.{aggregate.__qualname__}"
+    copied = "torch.compile copies the aggregates a Triton kernel uses into its source"
     if aggregate.__qualname__ != aggregate.__name__:
-        raise NotImplementedError("Only module-level Triton aggregates are supported")
+        raise NotImplementedError(
+            f"Triton kernel {kernel_name} uses the aggregate {name}, which is not "
+            f"defined at module level. {copied}, which only works for module-level "
+            "classes: move the class to module scope."
+        )
     try:
         node = ast.parse(textwrap.dedent(inspect.getsource(aggregate))).body[0]
-    except (OSError, TypeError):
+    except (OSError, TypeError, SyntaxError, IndexError):
         node = None
     if isinstance(node, ast.ClassDef) and node.name == aggregate.__name__:
         return node
-    # Triton's replacement class loses __firstlineno__ on Python 3.14.
-    source = inspect.getsource(sys.modules[aggregate.__module__])
-    pending: list[ast.AST] = [ast.parse(source)]
+    # Before Triton 3.9, the replacement class loses __firstlineno__ on Python 3.13+,
+    # so inspect cannot find it; search the module source instead.
+    try:
+        tree = ast.parse(inspect.getsource(sys.modules[aggregate.__module__]))
+    except (KeyError, OSError, TypeError, SyntaxError) as e:
+        raise RuntimeError(
+            f"Cannot read the source of the Triton aggregate {name}, which Triton "
+            f"kernel {kernel_name} uses. {copied}: define the aggregate at module "
+            "level in a Python source file."
+        ) from e
+    pending: list[ast.AST] = [tree]
     matches: list[ast.ClassDef] = []
     while pending:
         node = pending.pop()
@@ -708,8 +722,56 @@ def _triton_aggregate_source(aggregate: type) -> ast.ClassDef:
         elif not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             pending.extend(ast.iter_child_nodes(node))
     if len(matches) != 1:
-        raise RuntimeError(f"Cannot locate Triton aggregate {aggregate.__qualname__}")
+        raise RuntimeError(
+            f"Cannot locate the Triton aggregate {name}, which Triton kernel "
+            f"{kernel_name} uses: its module has {len(matches)} module-level classes "
+            f"named {aggregate.__name__}. {copied}: give the aggregate a unique name."
+        )
     return matches[0]
+
+
+class _TritonAggregateGlobals(ast.NodeVisitor):
+    """Collects the names a Triton aggregate's class body loads.
+
+    Method bodies are skipped: their locals cannot be told apart from globals here,
+    and the closure collects what the JIT methods use from their bytecode instead.
+    """
+
+    def __init__(self) -> None:
+        self.loads: OrderedSet[str] = OrderedSet()
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, ast.Load):
+            self.loads.add(node.id)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        self.visit(node.args)
+        if node.returns is not None:
+            self.visit(node.returns)
+
+
+def _triton_aggregate_source(
+    aggregate: type, kernel_name: str
+) -> tuple[str, OrderedSet[str]]:
+    """Return a module-level Triton aggregate's class definition and the names its
+    class body loads."""
+    class_def = _triton_aggregate_class_def(aggregate, kernel_name)
+    for stmt in class_def.body:
+        if (
+            isinstance(stmt, ast.AnnAssign)
+            and isinstance(stmt.annotation, ast.Constant)
+            and isinstance(stmt.annotation.value, str)
+        ):
+            # The generated module is not in sys.modules yet when aggregate
+            # resolves its fields with get_type_hints.
+            stmt.annotation = ast.parse(stmt.annotation.value, mode="eval").body
+    visitor = _TritonAggregateGlobals()
+    visitor.visit(class_def)
+    # Unparsing (needed for the rewritten annotations) drops the user's comments and
+    # formatting; the copy only has to define the same class.
+    return ast.unparse(class_def), visitor.loads
 
 
 def user_defined_triton_kernel_transitive_closure(
@@ -774,7 +836,14 @@ def user_defined_triton_kernel_transitive_closure(
     add_source_module(None, source)
     # global constexpr vars handled above
     symbols_included = {kernel.__name__: kernel}
-    aggregates_included: set[type] = set()
+    aggregates_included: OrderedSet[type] = OrderedSet()
+
+    def conflicting_global(name: str) -> NotImplementedError:
+        return NotImplementedError(
+            f"Triton kernel {kernel.__name__} uses two different globals named "
+            f"{name}, at least one of them a Triton aggregate. torch.compile copies "
+            "both into one module, where one would shadow the other: rename one."
+        )
 
     def traverse(cur_kernel) -> None:
         # here we extract the unqualified names (i.e., not attributes and
@@ -809,9 +878,7 @@ def user_defined_triton_kernel_transitive_closure(
                         for value in (symbol, previous)
                     )
                 ):
-                    raise NotImplementedError(
-                        f"Conflicting Triton aggregate global: {symbol_name}"
-                    )
+                    raise conflicting_global(symbol_name)
                 continue
             if symbol_name in global_scope:
                 symbol = global_scope[symbol_name]
@@ -819,45 +886,30 @@ def user_defined_triton_kernel_transitive_closure(
                     symbol_name in unqualified_loads
                     and isinstance(symbol, type)
                     and getattr(symbol, "__triton_aggregate__", False)
+                    # Aggregates that ship with Triton are imported below.
+                    and not symbol.__module__.startswith("triton")
                 ):
                     symbols_included[symbol_name] = symbol
+                    if symbol in aggregates_included:
+                        add_source_module(symbol, IndentedBuffer(), symbol_name)
+                        continue
+                    aggregates_included.add(symbol)
+                    # The class is emitted under its own name, not symbol_name.
+                    name = symbol.__name__
+                    if symbols_included.setdefault(name, symbol) is not symbol:
+                        raise conflicting_global(name)
+                    class_source, class_loads = _triton_aggregate_source(
+                        symbol, kernel.__name__
+                    )
+                    class_globals = vars(sys.modules[symbol.__module__])
+                    traverse_globals(symbol, class_loads, class_globals, class_loads)
                     source = IndentedBuffer()
-                    if symbol not in aggregates_included:
-                        aggregates_included.add(symbol)
-                        class_node = _triton_aggregate_source(symbol)
-                        for stmt in class_node.body:
-                            if (
-                                isinstance(stmt, ast.AnnAssign)
-                                and isinstance(stmt.annotation, ast.Constant)
-                                and isinstance(stmt.annotation.value, str)
-                            ):
-                                # The generated module is not in sys.modules yet when
-                                # aggregate resolves its fields with get_type_hints.
-                                annotation = stmt.annotation.value
-                                stmt.annotation = ast.parse(
-                                    annotation, mode="eval"
-                                ).body
-                        loads: OrderedSet[str] = OrderedSet()
-
-                        class ClassGlobals(ast.NodeVisitor):
-                            def visit_Name(self, node):
-                                if isinstance(node.ctx, ast.Load):
-                                    loads.add(node.id)
-
-                            def visit_FunctionDef(self, node):
-                                for decorator in node.decorator_list:
-                                    self.visit(decorator)
-                                self.visit(node.args)
-                                if node.returns is not None:
-                                    self.visit(node.returns)
-
-                        ClassGlobals().visit(class_node)
-                        class_globals = vars(sys.modules[symbol.__module__])
-                        traverse_globals(symbol, loads, class_globals, loads)
-                        source.newline()
-                        source.splice(ast.unparse(class_node), strip=True)
+                    source.newline()
+                    source.splice(class_source, strip=True)
                     add_source_module(symbol, source, symbol_name)
-                    for method in symbol.hash_attrs:
+                    # hash_attrs (Triton 3.6+) holds __init__ and the methods; Triton
+                    # 3.4 and 3.5 only set the methods on the class.
+                    for method in getattr(symbol, "hash_attrs", vars(symbol).values()):
                         if isinstance(method, JITFunction) or (
                             ConstexprFunction is not None
                             and isinstance(method, ConstexprFunction)
@@ -992,16 +1044,17 @@ def user_defined_triton_kernel_transitive_closure_source_code(
 def _rename_kernel_module_globals(src: str, kernel_name: str, subs_name: str) -> str:
     """Make what a kernel's source binds at its top level unique to the kernel.
 
-    The def named subs_name becomes kernel_name, and every other def, class and assignment
-    (helpers, and globals like ``BLOCK = tl.constexpr(64)`` from a user kernel's
-    closure) gets a ``_<kernel_name>`` suffix, as does every import after the first
-    def, which a user kernel's closure emits (``from triton.language import exp as
-    op``). The imports above it are the common kernel header, the same in every
-    kernel, and a repeat of one of them after the first def keeps its name: a
-    template that defines ``@triton.jit`` helpers above ``def_kernel`` gets the header
-    again where ``def_kernel`` is. A name is renamed only where it refers to the
-    global, so a parameter or local that shares it keeps its name: autotune configs
-    and launches pass parameters by name.
+    The def named subs_name becomes kernel_name, and every other def, class and
+    assignment (helpers, aggregates, and globals like ``BLOCK = tl.constexpr(64)``
+    from a user kernel's closure) gets a ``_<kernel_name>`` suffix, as does every
+    import after the first def or class, which a user kernel's closure emits
+    (``from triton.language import exp as op``). The imports above it are the
+    common kernel header, the same in every kernel, and a repeat of one of them
+    after the first def or class keeps its name: a template that defines
+    ``@triton.jit`` helpers above ``def_kernel`` gets the header again where
+    ``def_kernel`` is. A name is renamed only where it refers to the global, so a
+    parameter or local that shares it keeps its name: autotune configs and launches
+    pass parameters by name.
     """
     defs = re.findall(r"^(?:def|class) (\w+)[(:]", src, re.MULTILINE)
     assigns = re.search(r"^\w+\s*(:[^=\n]*)?=", src, re.MULTILINE)
