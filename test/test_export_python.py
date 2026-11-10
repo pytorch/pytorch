@@ -135,11 +135,20 @@ class TestExportPython(_ExportPythonTestCase):
         tail = lines[lines.index(_CODE_END) + 1 : -1]
         self.assertTrue(all(not line or line.startswith("#") for line in tail), tail)
 
+    def test_only_a_file_this_process_did_not_write_gets_the_exec_warning(self):
+        path = os.path.join(self.dir, "scaled.py")
+        with self.assertNoLogs("torch._precompile", "WARNING"):
+            self._export("scaled", path)(torch.randn(8))
+        with self.assertLogs("torch._precompile", "WARNING") as logs:
+            self._export("scaled", path)(torch.randn(8))
+        self.assertIn("about to EXEC", logs.output[0])
+
     def test_a_graph_break_is_refused(self):
         path = os.path.join(self.dir, "breaks.py")
         with self.assertRaisesRegex(PrecompileError, "does not trace as one graph"):
             self._export("breaks", path)(torch.randn(4))
         self.assertFalse(os.path.exists(path))
+        self.assertFalse(os.path.exists(path + ".cache"))
 
     def test_a_call_that_needs_a_backward_graph_is_refused(self):
         path = os.path.join(self.dir, "scaled.py")
@@ -148,6 +157,7 @@ class TestExportPython(_ExportPythonTestCase):
         with self.assertRaisesRegex(PrecompileError, "backward graph too"):
             run(x)
         self.assertFalse(os.path.exists(path))
+        self.assertFalse(os.path.exists(path + ".cache"))
         with torch.no_grad():
             self.assertEqual(run(x), (x * 2.0).relu())
             with no_compilation():
