@@ -2326,7 +2326,9 @@ def mro_attr_source(
         install_guard(mro_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
         # The builtin metaclass always puts the already guarded class first.
         first = 1 if type(klass) is type else 0
-        for index in range(first, len(entries)):
+        # Its C3 MRO also always ends in object; length already pins that position.
+        stop = len(entries) - 1 if type(klass) is type else len(entries)
+        for index in range(first, stop):
             install_guard(
                 GetItemSource(mro_source, index).make_guard(GuardBuilder.ID_MATCH)
             )
@@ -2619,6 +2621,23 @@ def generic_getattr(
     # NOTE [Tensor "grad" and "_grad" attr]
     if obj.is_tensor() and name == "_grad":
         name = "grad"
+
+    if (
+        default is not _NO_DEFAULT
+        and isinstance(obj, variables.UserDefinedObjectVariable)
+        and obj.cls_source is not None
+    ):
+        # Protect both adding a hook and rebinding an existing mutable owner.
+        lookup_source = mro_attr_source(
+            tx, obj.python_type(), obj.cls_source, "__getattribute__"
+        )
+        owner = next(
+            cls
+            for cls, namespace in iter_mro_static_dicts(obj.python_type())
+            if "__getattribute__" in namespace
+        )
+        if lookup_source is not None and not type_is_immutable(owner):
+            install_guard(lookup_source.make_guard(GuardBuilder.ID_MATCH))
 
     # Side effects: check for pending attribute mutations.
     if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
