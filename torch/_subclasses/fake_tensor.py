@@ -187,6 +187,27 @@ class FakeTensorDeviceMismatchError(RuntimeError):
         )
 
 
+def _resolve_device_conflict(
+    func: OpOverload, common_device: torch.device, device: torch.device, /
+) -> torch.device:
+    # if prefer_device_type is set, prefer that device type over others
+    prefer_device_type = torch._functorch.config.fake_tensor_prefer_device_type
+    if prefer_device_type is not None:
+        common_has_preferred = prefer_device_type in common_device.type
+        t_has_preferred = prefer_device_type in device.type
+
+        if not common_has_preferred and t_has_preferred:
+            # Switch to the preferred device type
+            return device
+        elif common_has_preferred and not t_has_preferred:
+            # Keep the existing preferred device type
+            return common_device
+
+    # mismatching devices of non-zero dim tensors, throw
+    # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
+    raise FakeTensorDeviceMismatchError(func, common_device, device)
+
+
 @dataclass
 class DynamicOutputShapeException(RuntimeError):
     func: OpOverload
@@ -1634,24 +1655,9 @@ class FakeTensor(Tensor):
                 if any(map(is_device_meta, (common_device, device))):
                     return
 
-            # if prefer_device_type is set, prefer that device type over others
-            prefer_device_type = torch._functorch.config.fake_tensor_prefer_device_type
-            if prefer_device_type is not None:
-                common_has_preferred = prefer_device_type in common_device.type
-                t_has_preferred = prefer_device_type in device.type
-
-                if not common_has_preferred and t_has_preferred:
-                    # Switch to the preferred device type
-                    common_device = device
-                    is_cpu_zero_dim = t_is_cpu_zero_dim
-                    return
-                elif common_has_preferred and not t_has_preferred:
-                    # Keep the existing preferred device type
-                    return
-
-            # mismatching devices of non-zero dim tensors, throw
-            # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
-            raise FakeTensorDeviceMismatchError(func, common_device, device)
+            if _resolve_device_conflict(func, common_device, device) == device:
+                common_device = device
+                is_cpu_zero_dim = t_is_cpu_zero_dim
 
         for arg in flat_args:
             merge_devices(arg)
