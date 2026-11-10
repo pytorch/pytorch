@@ -30,7 +30,7 @@ constexpr bool has_denorm_is(std::float_denorm_style style) {
 }
 
 TEST(TestDtype, TestFloat8HasDenorm) {
-  // Like float's, so that generic code can compare it with std::denorm_present.
+  // Like float's, so that it has the same type in type-generic code.
   using namespace torch::headeronly;
   static_assert(has_denorm_is<Float8_e4m3fn>(std::denorm_present));
   static_assert(has_denorm_is<Float8_e4m3fnuz>(std::denorm_present));

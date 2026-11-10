@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <torch/headeronly/util/Exception.h>
+#include <torch/headeronly/util/FloatRounding.h>
 #include <torch/headeronly/util/TypeCast.h>
 
 #include <cuda_runtime.h>
@@ -31,15 +32,28 @@ namespace {
         cudaGetErrorString(err_));                                  \
   } while (0)
 
+using torch::headeronly::BFloat16;
 using torch::headeronly::convert;
+using torch::headeronly::convert_with_rounding;
+using torch::headeronly::Float8_e4m3fn;
+using torch::headeronly::Float8_e8m0fnu;
 using torch::headeronly::Half;
+using torch::headeronly::RoundingMode;
 
-// Per input: round_to_odd_float and convert<Half>.
-constexpr int kResults = 2;
+constexpr int kModes = 4;
+// Per input: round_to_odd_float, convert<Half>, then convert_with_rounding to
+// Half, BFloat16 (whose subnormals cover float subnormals), Float8_e4m3fn
+// (which saturates) and Float8_e8m0fnu (which has no zero), from the double
+// and from the float, in each mode.
+constexpr int kResults = 2 + 8 * kModes;
 
 template <typename T>
 __host__ __device__ uint32_t bits(T value) {
-  if constexpr (sizeof(T) == 2) {
+  if constexpr (sizeof(T) == 1) {
+    uint8_t b;
+    memcpy(&b, &value, sizeof(b));
+    return b;
+  } else if constexpr (sizeof(T) == 2) {
     uint16_t b;
     memcpy(&b, &value, sizeof(b));
     return b;
@@ -53,6 +67,19 @@ __host__ __device__ uint32_t bits(T value) {
 __host__ __device__ void round_all(double x, uint32_t* out) {
   out[0] = bits(torch::headeronly::detail::round_to_odd_float(x));
   out[1] = bits(convert<Half>(x));
+  const float f = static_cast<float>(x);
+  uint32_t* o = out + 2;
+  for (int m = 0; m < kModes; ++m) {
+    const auto mode = static_cast<RoundingMode>(m);
+    *o++ = bits(convert_with_rounding<Half>(x, mode));
+    *o++ = bits(convert_with_rounding<Half>(f, mode));
+    *o++ = bits(convert_with_rounding<BFloat16>(x, mode));
+    *o++ = bits(convert_with_rounding<BFloat16>(f, mode));
+    *o++ = bits(convert_with_rounding<Float8_e4m3fn>(x, mode));
+    *o++ = bits(convert_with_rounding<Float8_e4m3fn>(f, mode));
+    *o++ = bits(convert_with_rounding<Float8_e8m0fnu>(x, mode));
+    *o++ = bits(convert_with_rounding<Float8_e8m0fnu>(f, mode));
+  }
 }
 
 __global__ void round_kernel(const double* x, uint32_t* out, int n) {
@@ -62,7 +89,8 @@ __global__ void round_kernel(const double* x, uint32_t* out, int n) {
   }
 }
 
-// Device code (round_to_odd_float's __double2float_rz branch) must give the
+// Device code (round_to_odd_float's __double2float_rz branch, and
+// leading_zeros' __clzll, which normalizes subnormal sources) must give the
 // host's bits.
 TEST(TestCastCuda, ConvertFromDoubleDeviceMatchesHost) {
   SKIP_IF_NO_CUDA();
@@ -77,7 +105,11 @@ TEST(TestCastCuda, ConvertFromDoubleDeviceMatchesHost) {
       65520.0,
       0x1p-149,
       0x1.8p-140,
-      -0x1p-130};
+      -0x1p-130,
+      // Subnormal doubles.
+      0x1p-1074,
+      -0x1.8p-1060,
+      0x1.234p-1030};
   // Half's values, the midpoints between them and their neighbours, and
   // float subnormals.
   for (int i = 0; i < 0x7C00; i += 7) {
