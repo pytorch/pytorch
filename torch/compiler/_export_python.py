@@ -250,8 +250,9 @@ class _ExportedPython:
         return self._runnable(*args, **kwargs)
 
     def _load(self, *, trusted: bool = False) -> PrecompiledRunnable:
-        with open(self._path, "rb") as f:
-            python_code = _captured_artifact(f.read().decode(), self._path)
+        # Text mode, so a file saved with CRLF line endings reads as it was written.
+        with open(self._path, encoding="utf-8") as f:
+            python_code = _captured_artifact(f.read(), self._path)
         meta = _parse_artifact_metadata(python_code)
         captured = f"{meta['ENTRY_MODULE']}.{meta['FN_NAME']}"
         decorated = f"{self._fn.__module__}.{self._name}"
