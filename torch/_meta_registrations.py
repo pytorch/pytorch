@@ -6133,6 +6133,111 @@ def grid_sampler_3d_backward(
     return grad_input, grad_grid
 
 
+def check_grid_sampler_pixel(input: Tensor, grid: Tensor):
+    torch._check(
+        grid.dtype == input.dtype or grid.dtype == torch.double,
+        lambda: "grid_sampler(): expected grid dtype to match the input's "
+        f"({input.dtype}) or to be Double, but got {grid.dtype}",
+    )
+    # the pixel ops have CPU and CUDA kernels only: a trace refuses what eager cannot run
+    torch._check(
+        device_hint(input) in ("cpu", "cuda"),
+        lambda: "grid_sampler(): pixel units are not supported "
+        f"on {device_hint(input)}",
+    )
+
+
+@register_meta(aten._grid_sampler_2d_pixel)
+@out_wrapper()
+def _grid_sampler_2d_pixel(
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+    cubic_coeff_a=-0.75,
+):
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_2d(input, grid)
+    check_grid_sampler_pixel(input, grid)
+    N = input.shape[0]
+    C = input.shape[1]
+    out_H = grid.shape[1]
+    out_W = grid.shape[2]
+    return input.new_empty((N, C, out_H, out_W))
+
+
+@register_meta(aten._grid_sampler_2d_pixel_backward)
+@out_wrapper("grad_input", "grad_grid")
+def _grid_sampler_2d_pixel_backward(
+    grad_output,
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+    cubic_coeff_a,
+    output_mask,
+):
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_2d(input, grid)
+    check_grid_sampler_pixel(input, grid)
+    return grid_sampler_2d_backward_meta(
+        grad_output,
+        input,
+        grid,
+        interpolation_mode,
+        padding_mode,
+        align_corners,
+        output_mask,
+    )
+
+
+@register_meta(aten._grid_sampler_3d_pixel)
+@out_wrapper()
+def _grid_sampler_3d_pixel(
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+    cubic_coeff_a=-0.75,
+):
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_3d(input, grid, interpolation_mode)
+    check_grid_sampler_pixel(input, grid)
+    N = input.shape[0]
+    C = input.shape[1]
+    out_D = grid.shape[1]
+    out_H = grid.shape[2]
+    out_W = grid.shape[3]
+    return input.new_empty((N, C, out_D, out_H, out_W))
+
+
+@register_meta(aten._grid_sampler_3d_pixel_backward)
+@out_wrapper("grad_input", "grad_grid")
+def _grid_sampler_3d_pixel_backward(
+    grad_output,
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+    cubic_coeff_a,
+    output_mask,
+):
+    check_grid_sampler_pixel(input, grid)
+    return grid_sampler_3d_backward(
+        grad_output,
+        input,
+        grid,
+        interpolation_mode,
+        padding_mode,
+        align_corners,
+        output_mask,
+    )
+
+
 @register_meta([aten.full.default])
 def full(size, fill_value, *args, **kwargs):
     dtype = kwargs.get("dtype")
