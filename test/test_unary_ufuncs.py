@@ -1587,11 +1587,15 @@ class TestUnaryUfuncs(TestCase):
     @dtypes(*float8_types_and(torch.float8_e8m0fnu))
     @dtypesIfMPS(torch.float8_e4m3fn)
     def test_isinf_isfinite_float8(self, device, dtype):
-        # Float8_e5m2 is the only fp8 dtype that can encode infinity; for the
-        # rest isinf is trivially false and isfinite reduces to "not NaN".
+        # Float8_e5m2 is the only fp8 dtype that can encode infinity (which
+        # conversions saturate, so build it from its encoding); for the rest
+        # isinf is trivially false and isfinite reduces to "not NaN".
         vals = [1.0, inf, -inf, nan] if dtype is torch.float8_e5m2 else [1.0, nan]
         ref = torch.tensor(vals, device=device)
         t = ref.to(dtype)
+        if dtype is torch.float8_e5m2:
+            bits = torch.tensor([0x3C, 0x7C, 0xFC, 0x7F], dtype=torch.uint8)
+            t = bits.to(device).view(dtype)
 
         self.assertEqual(t.isinf(), ref.isinf())
         self.assertEqual(t.isfinite(), ref.isfinite())

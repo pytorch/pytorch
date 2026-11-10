@@ -82,12 +82,11 @@ inline C10_HOST_DEVICE uint8_t fp8e5m2_from_fp32_value(float f) {
   constexpr uint32_t fp32_inf = UINT32_C(255) << 23;
 
   /*
-   * Binary representation of 65536.0f, which is the first value
-   * not representable in fp8e5m2 range:
-   * 0 11111 00 - fp8e5m2
-   * 0 10001111 00000000000000000000000 - fp32
+   * Binary representation of 61440.0f, halfway between the largest fp8e5m2
+   * value (57344) and 2^16, from which values round past the largest value:
+   * 0 10001110 11100000000000000000000 - fp32
    */
-  constexpr uint32_t fp8_max = UINT32_C(143) << 23;
+  constexpr uint32_t fp8_max = UINT32_C(1143) << 20;
 
   /*
    * A mask for converting fp32 numbers lower than fp8e5m2 normal range
@@ -115,8 +114,13 @@ inline C10_HOST_DEVICE uint8_t fp8e5m2_from_fp32_value(float f) {
   f_bits ^= sign;
 
   if (f_bits >= fp8_max) {
-    // NaN - all exponent and mantissa bits set to 1
-    result = f_bits > fp32_inf ? UINT8_C(0x7F) : UINT8_C(0x7C);
+    if (f_bits > fp32_inf) {
+      // NaN input -> NaN output (all exponent and mantissa bits set to 1)
+      result = UINT8_C(0x7F);
+    } else {
+      // Finite overflow or inf -> saturate to max finite value
+      result = UINT8_C(0x7B);
+    }
   } else {
     if (f_bits < (UINT32_C(113) << 23)) {
       // Input number is smaller than 2^(-14), which is the smallest
@@ -200,7 +204,8 @@ inline C10_HOST_DEVICE Float8_e5m2 operator/(
 }
 
 inline C10_HOST_DEVICE Float8_e5m2 operator-(const Float8_e5m2& a) {
-  return -static_cast<float>(a);
+  // Exact, unlike going through float: the conversion saturates infinities
+  return Float8_e5m2(a.x ^ 0x80, Float8_e5m2::from_bits());
 }
 
 inline C10_HOST_DEVICE Float8_e5m2& operator+=(

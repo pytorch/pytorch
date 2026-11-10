@@ -206,7 +206,9 @@ static inline void cvtfp8e5m2_fp32(const __m128i& a, __m512& o) {
 
 static inline __m128i cvtfp32_fp8e5m2(const __m512& src) {
   constexpr uint32_t fp32_inf = UINT32_C(255) << 23;
-  constexpr uint32_t fp8_max = UINT32_C(143) << 23;
+  // 61440.0f, halfway between the largest fp8e5m2 value (57344) and 2^16, from
+  // which values round past the largest value
+  constexpr uint32_t fp8_max = UINT32_C(1143) << 20;
   constexpr uint32_t denorm_mask = UINT32_C(134) << 23;
 
   // Cvt to bits
@@ -244,10 +246,10 @@ static inline __m128i cvtfp32_fp8e5m2(const __m512& src) {
   input_bits = _mm512_add_epi32(input_bits, mant_odd_mask);
   result = _mm512_srli_epi32(input_bits, 21);
 
-  // Step 2: INF and NAN
+  // Step 2: finite overflow and inf saturate to max finite value, NaN is NaN
   if (greater_than_fp8_max) {
     result = _mm512_mask_mov_epi32(
-        result, greater_than_fp8_max, _mm512_set1_epi8(0x7C));
+        result, greater_than_fp8_max, _mm512_set1_epi8(0x7B));
     if (greater_than_fp32_inf) {
       result = _mm512_mask_mov_epi32(
           result, greater_than_fp32_inf, _mm512_set1_epi8(0x7F));

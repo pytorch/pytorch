@@ -71,7 +71,7 @@ def _finite_magnitudes(dtype):
 
 def _overflow_value(dtype):
     """The default conversion's result past the largest finite magnitude."""
-    if dtype in (torch.float8_e4m3fn, torch.float8_e5m3fnu):
+    if dtype in (torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e5m3fnu):
         return torch.finfo(dtype).max
     if dtype in (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz, torch.float8_e8m0fnu):
         return math.nan
@@ -377,9 +377,9 @@ class TestRoundedConversion(TestCase):
                 [65504, -math.inf, math.inf, -math.inf],
             ),
             torch.float8_e5m2: (
-                [57344, -57344, math.inf, -math.inf],
-                [math.inf, -57344, math.inf, -math.inf],
-                [57344, -math.inf, math.inf, -math.inf],
+                [57344, -57344, 57344, -57344],
+                [57344, -57344, 57344, -57344],
+                [57344, -57344, 57344, -57344],
             ),
             torch.float8_e4m3fn: (
                 [448, -448, 448, -448],

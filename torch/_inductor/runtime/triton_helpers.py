@@ -237,8 +237,8 @@ def float32_to_float8_bits(x, MODE: tl.constexpr, E4M3: tl.constexpr):
         # The hardware only rounds to nearest, saturating. Step the result by
         # one encoding toward x when it is on the wrong side of x. Comparisons
         # with NaN are false, so NaN is left alone. Consecutive magnitudes have
-        # consecutive encodings, so for e5m2 stepping past the largest finite
-        # value gives infinity; e4m3fn saturates instead.
+        # consecutive encodings, so stepping up from the largest finite value
+        # would leave it.
         magnitude = (bits & 0x7F).to(tl.uint16)
         if E4M3:
             rounded = tl.inline_asm_elementwise(
@@ -261,10 +261,8 @@ def float32_to_float8_bits(x, MODE: tl.constexpr, E4M3: tl.constexpr):
                 pack=1,
             )
         down = tl.where(rounded > tl.abs(x), -1, 0)
-        up_cond = rounded < tl.abs(x)
-        if E4M3:
-            up_cond = up_cond & (magnitude != 0x7E)
-        up = tl.where(up_cond, 1, 0)
+        max_magnitude = 0x7E if E4M3 else 0x7B
+        up = tl.where((rounded < tl.abs(x)) & (magnitude != max_magnitude), 1, 0)
         neg = x < 0
         if MODE == 1:
             step = down
@@ -273,15 +271,6 @@ def float32_to_float8_bits(x, MODE: tl.constexpr, E4M3: tl.constexpr):
         else:
             step = tl.where(neg, up, down)
         bits = (bits.to(tl.int32) + step).to(tl.uint8)
-    if not E4M3:
-        # e5m2 has infinities, where the hardware saturates: for infinite x,
-        # and when rounding to nearest from halfway between the largest finite
-        # value (57344) and 2^16.
-        if MODE == 0:
-            overflow = tl.abs(x) >= 61440.0
-        else:
-            overflow = tl.abs(x) == float("inf")
-        bits = tl.where(overflow, tl.where(x < 0, 0xFC, 0x7C).to(tl.uint8), bits)
     return bits
 
 

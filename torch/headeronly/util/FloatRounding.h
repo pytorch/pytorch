@@ -7,10 +7,11 @@
 // Semantics:
 // - The exact source value is rounded once to the destination format.
 // - On overflow, results rounded toward zero become the largest finite value;
-//   otherwise they become infinity or, for formats without infinity, the value
-//   that the default conversion produces on overflow (saturation for
-//   Float8_e4m3fn and Float8_e5m3fnu, NaN for the fnuz formats and
-//   Float8_e8m0fnu).
+//   otherwise they become the value that the default conversion produces on
+//   overflow: the largest finite value for the saturating formats
+//   (Float8_e4m3fn, Float8_e5m2 and Float8_e5m3fnu, which also map infinity to
+//   it), infinity for the other formats that have it, and NaN for the fnuz
+//   formats and Float8_e8m0fnu.
 // - For the unsigned formats (Float8_e8m0fnu and Float8_e5m3fnu), the
 //   magnitude of the source is rounded.
 // - Float8_e8m0fnu has no zero: values below the smallest power of two clamp
@@ -63,6 +64,8 @@ template <typename T>
 struct Saturates : std::false_type {};
 template <>
 struct Saturates<Float8_e4m3fn> : std::true_type {};
+template <>
+struct Saturates<Float8_e5m2> : std::true_type {};
 template <>
 struct Saturates<Float8_e5m3fnu> : std::true_type {};
 

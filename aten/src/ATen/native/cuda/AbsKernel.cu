@@ -44,9 +44,13 @@ void abs_kernel_cuda(TensorIteratorBase& iter) {
             ScalarType::BFloat16,
             ScalarType::Bool,
             [&]() { gpu_kernel(iter, AbsFunctor<scalar_t>()); })
-        AT_DISPATCH_CASE(
-            ScalarType::Float8_e5m2,
-            [&]() { gpu_kernel(iter, AbsFunctor<scalar_t>()); }));
+        // Exact, unlike std::abs, which goes through float, whose conversion
+        // back saturates infinities.
+        AT_DISPATCH_CASE(ScalarType::Float8_e5m2, [&]() {
+          gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) {
+            return scalar_t(a.x & 0x7F, scalar_t::from_bits());
+          });
+        }));
   }
 }
 

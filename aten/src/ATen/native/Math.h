@@ -5,6 +5,7 @@
 #include <ATen/jiterator_macros.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/Float8_e5m2.h>
 #include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
 #include <cfloat>
@@ -1236,6 +1237,13 @@ inline T abs_impl(T v) {
 template <>
 [[maybe_unused]] inline uint8_t abs_impl(uint8_t v) {
   return v;
+}
+
+// Exact, unlike std::abs, which goes through float, whose conversion back
+// saturates infinities.
+template <>
+[[maybe_unused]] inline c10::Float8_e5m2 abs_impl(c10::Float8_e5m2 v) {
+  return c10::Float8_e5m2(v.x & 0x7F, c10::Float8_e5m2::from_bits());
 }
 
 template <typename T>

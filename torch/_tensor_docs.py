@@ -5227,11 +5227,12 @@ Here are the ways to call ``to``:
     The exact value is rounded once, even for ``float64`` inputs. On overflow,
     values whose magnitude is rounded down (toward zero) become the largest
     finite value of their sign, e.g. ``"toward_negative"`` turns ``1e6`` into
-    ``65504`` in ``torch.float16``; the others become infinity, or, for dtypes
-    without infinity, the value that a conversion without :attr:`round`
-    produces (the largest finite value for ``torch.float8_e4m3fn`` and
-    ``torch.float8_e5m3fnu``, NaN for the ``fnuz`` dtypes and
-    ``torch.float8_e8m0fnu``). The unsigned dtypes ``torch.float8_e8m0fnu`` and
+    ``65504`` in ``torch.float16``; the others become the value that a
+    conversion without :attr:`round` produces: the largest finite value for
+    the saturating dtypes ``torch.float8_e4m3fn``, ``torch.float8_e5m2`` and
+    ``torch.float8_e5m3fnu`` (which also turn infinities into it), infinity
+    for the other dtypes that have it, and NaN for the ``fnuz`` dtypes and
+    ``torch.float8_e8m0fnu``. The unsigned dtypes ``torch.float8_e8m0fnu`` and
     ``torch.float8_e5m3fnu`` round the magnitude of the input, so
     ``"toward_negative"`` behaves like ``"toward_zero"``.
     ``torch.float8_e8m0fnu`` only has powers of two: values below

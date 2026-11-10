@@ -1215,7 +1215,7 @@ ROUNDING_FORMATS = {
     torch.float16: (10, 15, True, True, True, 0x8000, 0x7BFF, 0x7C00, 0x7E00),
     torch.bfloat16: (7, 127, True, True, True, 0x8000, 0x7F7F, 0x7F80, 0x7FC0),
     torch.float8_e4m3fn: (3, 7, True, True, True, 0x80, 0x7E, 0x7E, 0x7F),
-    torch.float8_e5m2: (2, 15, True, True, True, 0x80, 0x7B, 0x7C, 0x7F),
+    torch.float8_e5m2: (2, 15, True, True, True, 0x80, 0x7B, 0x7B, 0x7F),
     torch.float8_e4m3fnuz: (3, 8, True, False, True, 0x80, 0x7F, 0x80, 0x80),
     torch.float8_e5m2fnuz: (2, 16, True, False, True, 0x80, 0x7F, 0x80, 0x80),
     torch.float8_e8m0fnu: (0, 127, False, False, False, 0, 0xFE, 0xFF, 0xFF),

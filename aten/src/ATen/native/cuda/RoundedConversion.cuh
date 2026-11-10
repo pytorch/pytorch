@@ -69,7 +69,9 @@ convert_rounded_from_float(float x, c10::RoundingMode mode) {
         std::is_same_v<dst_t, Float8_e4m3fn>,
         __nv_fp8_e4m3,
         __nv_fp8_e5m2>;
-    constexpr bool kSaturates = torch::headeronly::detail::Saturates<dst_t>::value;
+    static_assert(
+        torch::headeronly::detail::Saturates<dst_t>::value,
+        "the default conversion must saturate like the hardware");
     const float kDstMaxFinite = L::max();
     // The hardware only rounds to nearest, saturating. The other modes step
     // the result by one encoding toward x when it is on the wrong side of x.
@@ -81,23 +83,12 @@ convert_rounded_from_float(float x, c10::RoundingMode mode) {
           (mode == RoundingMode::TowardNegative && !neg);
       const float rounded = fabsf(static_cast<float>(y));
       // Comparisons with NaN are false, so NaN is left alone. Consecutive
-      // magnitudes have consecutive encodings, so without saturation stepping
-      // past the largest finite value gives infinity.
+      // magnitudes have consecutive encodings, so stepping up from the largest
+      // finite value would leave it.
       const bool step_down = to_zero && rounded > fabsf(x);
-      const bool step_up = !to_zero && rounded < fabsf(x) &&
-          !(kSaturates && rounded == kDstMaxFinite);
+      const bool step_up =
+          !to_zero && rounded < fabsf(x) && rounded != kDstMaxFinite;
       y.__x += static_cast<int>(step_up) - static_cast<int>(step_down);
-    }
-    if constexpr (!kSaturates) {
-      // Where the hardware saturates, dst_t has infinities: for infinite x,
-      // and when rounding to nearest from halfway between the largest finite
-      // value and the next power of two.
-      const float midpoint =
-          0.5f * (kDstMaxFinite + static_cast<float>(1 << L::max_exponent));
-      if (isinf(x) ||
-          (mode == RoundingMode::ToNearestEven && fabsf(x) >= midpoint)) {
-        return signbit(x) ? -L::infinity() : L::infinity();
-      }
     }
     return dst_t(y.__x, dst_t::from_bits());
 #endif
