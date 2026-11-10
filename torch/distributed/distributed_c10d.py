@@ -23,13 +23,14 @@ from typing import (
     Literal,
     NamedTuple,
     NewType,
+    NotRequired,
     overload,
     Protocol,
     TYPE_CHECKING,
     TypeAlias,
     TypeVar,
 )
-from typing_extensions import deprecated, NotRequired, TypedDict, TypeIs
+from typing_extensions import deprecated, TypedDict, TypeIs
 
 import torch
 from torch._C import _DistStoreError as DistStoreError

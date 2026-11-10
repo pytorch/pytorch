@@ -1082,8 +1082,7 @@ std::function<py::object(py::object)> make_fake_device_stamp(
         t.device(),
         " tensor; handlers must return Meta or fake tensors, see "
         "Note [C++ fake op_impl outputs]");
-    at::set_and_normalize_fake_device(t.unsafeGetTensorImpl(), common_device);
-    t.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
+    at::init_cpp_fake(t.unsafeGetTensorImpl(), common_device, mode);
     return obj;
   };
 }
@@ -1428,7 +1427,12 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
   at::Tensor fake_tensor;
   {
     // Exclude Fake so from_real_tensor's meta conversion doesn't re-enter the
-    // fake fallback (the meta factory ops it runs are otherwise plain).
+    // fake fallback (the meta factory ops it runs are otherwise plain). With
+    // allow_non_fake_inputs this also re-fakeifies fakes from another mode; the
+    // describer then reads the source's fake device, which Fake exclusion no
+    // longer hides (see Note [C++ in_kernel_invocation]). from_real_tensor
+    // must only query the source's metadata and build outputs with an explicit
+    // meta device.
     c10::impl::ExcludeDispatchKeyGuard exclude_fake(
         {c10::DispatchKeySet(c10::DispatchKey::Fake)});
     auto obj = converter.attr("from_real_tensor")(active.py_fake_mode, real);
