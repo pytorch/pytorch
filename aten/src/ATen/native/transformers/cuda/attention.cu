@@ -126,16 +126,14 @@ mha_fwd(
     const float p_dropout,
     const float softmax_scale,
     bool is_causal,
-    std::optional<int64_t> window_size_left,
-    std::optional<int64_t> window_size_right,
+    int window_size_left,
+    int window_size_right,
     const float softcap,
     const bool return_softmax,
     std::optional<at::Generator> gen_) {
 #if defined(USE_ROCM_CK_SDPA)
   if (at::globalContext().getROCmFAPreferredBackend() ==
       at::ROCmFABackend::Ck) {
-    const int non_null_window_left = window_size_left.value_or(-1);
-    const int non_null_window_right = window_size_right.value_or(-1);
     std::optional<at::Tensor> dummy_attn_bias = std::nullopt;
     return mha_fwd_ck(
         q,
@@ -145,8 +143,8 @@ mha_fwd(
         p_dropout,
         softmax_scale,
         is_causal,
-        non_null_window_left,
-        non_null_window_right,
+        ck_window_size(window_size_left),
+        ck_window_size(window_size_right),
         return_softmax,
         gen_,
         dummy_attn_bias); // Not used in flash attention
@@ -508,20 +506,9 @@ _flash_attention_forward_impl(
   TORCH_CHECK(
       !num_splits.has_value(),
       "num_splits is not supported on ROCm");
-  // ROCM backend accepts std::optional for window_size_left/right directly.
-#ifdef DISABLE_AOTRITON  // CK backend, Passing window_size as it is
-  const auto window_left = window_size_left;
-  const auto window_right = window_size_right;
-#else  // AOTriton implements "generalized" SWA and negative size means negative shifting.
-  // aotriton_adapter::parse_window_size tries to match the behavior of CUTLASS backend
-  using sdp::aotriton_adapter::parse_window_size;
-  const auto [window_left, window_right] = parse_window_size(window_size_left,
-                                                             window_size_right);
-#endif
-#else  // USE_ROCM
+#endif  // USE_ROCM
   const int window_left = window_size_left.value_or(-1);
   const int window_right = window_size_right.value_or(-1);
-#endif  // USE_ROCM
 
   // We are going to have two paths:
   // 1. The standard MHA path for dense tensors

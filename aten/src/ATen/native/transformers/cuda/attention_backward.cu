@@ -128,20 +128,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
       : grad_out.clone(at::MemoryFormat::Contiguous);
   auto contiguous_out = out.contiguous();
 
-#ifdef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
-#ifdef DISABLE_AOTRITON  // CK backend, Passing window_size as it is
-  const auto window_left = window_size_left;
-  const auto window_right = window_size_right;
-#else  // AOTriton implements "generalized" SWA and negative size means negative shifting.
-  // aotriton_adapter::parse_window_size tries to match the behavior of CUTLASS backend
-  using sdp::aotriton_adapter::parse_window_size;
-  const auto [window_left, window_right] = parse_window_size(window_size_left,
-                                                             window_size_right);
-#endif
-#else  // USE_ROCM
   const int window_left = window_size_left.value_or(-1);
   const int window_right = window_size_right.value_or(-1);
-#endif  // USE_ROCM
 
   std::optional<at::Tensor> dq{std::nullopt};
   std::optional<at::Tensor> dk{std::nullopt};
