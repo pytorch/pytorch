@@ -21,7 +21,6 @@ from ...cutedsl.plan_cache import cached_plan
 from ...utils import capability as cap
 from ._layout import _layout_config, _OperandLayout, _TmaConfig
 from ._limits import (
-    _ELEMENTS_PER_THREAD,
     _FP16_ELEMENTS_PER_BANK,
     _FP16_LANES_PER_GROUP,
     _FP32_LANES_PER_GROUP,
@@ -30,7 +29,6 @@ from ._limits import (
     _SWIZZLE_ATOM_BYTES,
     _SWIZZLE_BASE_LOG2,
     _SWIZZLE_SHIFT,
-    _TILES_PER_BLOCK,
     _TMA_ALIGNMENT,
     _WARP_SIZE,
 )
@@ -61,6 +59,7 @@ def _layout_key(
     inputs: Sequence[torch.Tensor],
     address: int,
     smem_limit: int,
+    cc: tuple[int, int],
     output_strides: Sequence[int] | None,
 ) -> tuple:
     layouts = tuple(
@@ -79,16 +78,22 @@ def _layout_key(
         address % _MIN_ALIGNMENT,
         smem_limit,
         None if output_strides is None else tuple(output_strides),
+        cc,
     )
 
 
-def _tma_smem_layout(dtype: Any, box: int, transposed: bool) -> Any:
+def _tma_smem_layout(dtype: Any, box: int, transposed: bool, stages: int) -> Any:
     # Transposed reads need a bank swizzle: 64-byte rows use two XOR bits and
     # 128-byte rows use three. The lane mapping below complements this swizzle.
-    inner_bytes = box * dtype.width // 8
     if not transposed:
-        swizzle_bits = 0
-    elif inner_bytes <= 32:
+        # Keep normal input rows contiguous in shared memory as well as globally.
+        return cute.make_composed_layout(
+            cute.make_swizzle(0, _SWIZZLE_BASE_LOG2, _SWIZZLE_SHIFT),
+            0,
+            cute.make_layout((box, box, stages), stride=(box, 1, box * box)),
+        )
+    inner_bytes = box * dtype.width // 8
+    if inner_bytes <= 32:
         swizzle_bits = 1
     elif inner_bytes <= 64:
         swizzle_bits = 2
@@ -98,14 +103,9 @@ def _tma_smem_layout(dtype: Any, box: int, transposed: bool) -> Any:
     # Repeat an eight-row swizzled atom over the box and its pipeline stages.
     atom_bytes = _SWIZZLE_ATOM_BYTES << swizzle_bits
     atom_elements = atom_bytes * 8 // (8 * dtype.width)
-    if transposed:
-        outer = cute.make_layout((atom_elements, 8), stride=(1, atom_elements))
-        order = (1, 0, 2)
-    else:
-        outer = cute.make_layout((8, atom_elements), stride=(atom_elements, 1))
-        order = (0, 1, 2)
+    outer = cute.make_layout((atom_elements, 8), stride=(1, atom_elements))
     atom = cute.make_composed_layout(swizzle, 0, outer)
-    return cute.tile_to_shape(atom, (box, box, _TILES_PER_BLOCK), order=order)
+    return cute.tile_to_shape(atom, (box, box, stages), order=(1, 0, 2))
 
 
 class _ElementwiseTma2D:
@@ -128,6 +128,7 @@ class _ElementwiseTma2D:
         self.transposed = config.transposed
         self.box = config.box
         self.block = config.block
+        self.stages = config.stages
 
     @cute.jit
     def __call__(
@@ -142,7 +143,9 @@ class _ElementwiseTma2D:
         tma_inputs = []
         layouts = []
         for k in cutlass.range_constexpr(self.ninputs):
-            layout = _tma_smem_layout(self.in_type, self.box, self.transposed[k])
+            layout = _tma_smem_layout(
+                self.in_type, self.box, self.transposed[k], self.stages
+            )
             info = cpasync.make_tiled_tma_atom(
                 cpasync.CopyBulkTensorTileG2SOp(), mIns[k], layout, (self.box, self.box)
             )
@@ -160,7 +163,7 @@ class _ElementwiseTma2D:
             layouts,
         ).launch(
             grid=[
-                cute.ceil_div(cols, self.box * _TILES_PER_BLOCK),
+                cute.ceil_div(cols, self.box * self.stages),
                 cute.ceil_div(rows, self.box),
                 batch,
             ],
@@ -180,10 +183,10 @@ class _ElementwiseTma2D:
     ) -> None:
         tidx, _, _ = cute.arch.thread_idx()
         fast_group, slow_tile, batch = cute.arch.block_idx()
-        fast_tile = fast_group * _TILES_PER_BLOCK
+        fast_tile = fast_group * self.stages
         fast_tiles = mOut.shape[2] // const_expr(self.box)
         slow_tiles = mOut.shape[1] // const_expr(self.box)
-        valid_stages = cutlass.min(fast_tiles - fast_tile, _TILES_PER_BLOCK)
+        valid_stages = cutlass.min(fast_tiles - fast_tile, self.stages)
 
         smem = cutlass.memory.SmemAllocator()
         buffers = [
@@ -195,7 +198,7 @@ class _ElementwiseTma2D:
             )
             for k in range(const_expr(self.ninputs))
         ]
-        barriers = smem.allocate_array(cutlass.Int64, num_elems=_TILES_PER_BLOCK)
+        barriers = smem.allocate_array(cutlass.Int64, num_elems=self.stages)
         tx_bytes = const_expr(
             self.ninputs * self.box * self.box * self.in_type.width // 8
         )
@@ -210,7 +213,7 @@ class _ElementwiseTma2D:
         if warp_idx == 0:
             for k in cutlass.range_constexpr(self.ninputs):
                 cpasync.prefetch_descriptor(tma_inputs[k][0].atom)
-            for stage in cutlass.range_constexpr(_TILES_PER_BLOCK):
+            for stage in cutlass.range_constexpr(self.stages):
                 if stage < valid_stages:
                     barrier = barriers + stage
                     with cute.arch.elect_one():
@@ -241,19 +244,20 @@ class _ElementwiseTma2D:
         cute.arch.barrier()
 
         lane = tidx % _WARP_SIZE
-        warp_iteration = (tidx // _WARP_SIZE) * _ELEMENTS_PER_THREAD
+        # Each warp handles a row strip; wider tiles span several lane groups.
+        warp_iteration = (tidx // _WARP_SIZE) * (self.box // (self.block // _WARP_SIZE))
         slow_base = slow_tile * const_expr(self.box)
-        for stage in cutlass.range_constexpr(_TILES_PER_BLOCK):
+        for stage in cutlass.range_constexpr(self.stages):
             if stage < valid_stages:
                 cute.arch.mbarrier_wait(barriers + stage, 0)
                 fast_base = (fast_tile + stage) * const_expr(self.box)
-                for i in cutlass.range_constexpr(_ELEMENTS_PER_THREAD):
-                    wi = warp_iteration + i
+                for i in cutlass.range_constexpr(self.box * self.box // self.block):
+                    wi = warp_iteration + i // (self.box // _WARP_SIZE)
                     if const_expr(self.in_type.width == 32):
-                        fast = lane
+                        fast = lane + (i % (self.box // _WARP_SIZE)) * _WARP_SIZE
                         slow = wi ^ (lane // _FP32_LANES_PER_GROUP)
                     else:
-                        fast = lane
+                        fast = lane + (i % (self.box // _WARP_SIZE)) * _WARP_SIZE
                         slow = wi ^ (
                             (lane // _FP16_LANES_PER_GROUP) * _FP16_ELEMENTS_PER_BANK
                         )
@@ -320,10 +324,12 @@ def can_run(
     ):
         return False
     address = 0 if target is None else _pointer(target)
+    caps = _hw.caps(ref.device)
     key = _layout_key(
         inputs,
         address,
-        _hw.caps(ref.device).smem_per_block_optin,
+        caps.smem_per_block_optin,
+        caps.cc,
         target.stride() if target is not None else None,
     )
     return _layout_config(*key) is not None
@@ -390,7 +396,7 @@ def run(
 ) -> None:
     caps = _hw.caps(inputs[0].device)
     layout_key = _layout_key(
-        inputs, _pointer(out), caps.smem_per_block_optin, out.stride()
+        inputs, _pointer(out), caps.smem_per_block_optin, caps.cc, out.stride()
     )
     plan_key = (
         aten_name,

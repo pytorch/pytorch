@@ -10,10 +10,9 @@ from ._limits import (
     _MAX_INDEX,
     _MIN_ALIGNMENT,
     _SMEM_ALIGNMENT,
-    _THREADS_PER_BLOCK,
     _TILES_PER_BLOCK,
     _TMA_ALIGNMENT,
-    _TMA_BOX_SIDE,
+    _tma_configs,
 )
 
 
@@ -24,6 +23,7 @@ class _TmaConfig(NamedTuple):
     block: int
     input_views: tuple[tuple[tuple[int, ...], tuple[int, ...]], ...]
     output_view: tuple[tuple[int, ...], tuple[int, ...]]
+    stages: int = _TILES_PER_BLOCK
 
 
 class _OperandLayout(NamedTuple):
@@ -34,11 +34,19 @@ class _OperandLayout(NamedTuple):
     contiguous: bool
 
 
-def _tma_geometry(element_bytes: int) -> tuple[int, int] | None:
-    # Return (square box side in elements, threads per block).
-    # Each thread handles eight elements of the square box.
+def _tma_geometry(
+    element_bytes: int,
+    transposed: tuple[bool, ...],
+    cc: tuple[int, int],
+    rows: int,
+    cols: int,
+) -> tuple[int, int, int] | None:
     if element_bytes in (2, 4):
-        return _TMA_BOX_SIDE, _THREADS_PER_BLOCK
+        for box, block, stages in _tma_configs(
+            transposed, cc, element_bytes, rows * cols
+        ):
+            if rows % box == 0 and cols % box == 0:
+                return box, block, stages
     return None
 
 
@@ -118,6 +126,7 @@ def _tma2d_config(
     shape: tuple[int, ...],
     smem_limit: int,
     output_strides: tuple[int, ...] | None = None,
+    cc: tuple[int, int] = (10, 0),
 ) -> _TmaConfig | None:
     # Accept higher-order permutations that collapse to one 2-D transpose, plus
     # a batch group. Physical orders identify the swapped groups directly.
@@ -128,15 +137,7 @@ def _tma2d_config(
     # Both have shape (2, 3, 32, 64); their strides are (6144, 32, 1, 96)
     # and (8192, 32, 1, 128). The gap in y is between its dense row groups.
     # The steps below derive the 2-D input views and a (batch, row, col) output.
-    # 1. Select 32x32-element boxes, 128 threads, and check pipeline storage.
-    geometry = _tma_geometry(inputs[0].element_bytes)
-    if geometry is None:
-        return None
-    box, block = geometry
-    tile_bytes = box * box * inputs[0].element_bytes
-    smem_bytes = len(inputs) * (_TILES_PER_BLOCK * tile_bytes + _SMEM_ALIGNMENT)
-    if smem_bytes + _TILES_PER_BLOCK * _BARRIER_BYTES > smem_limit:
-        return None
+    # 1. Tile geometry is selected below, after identifying operand orientations.
     # 2. The example's contiguous output has strides (6144, 2048, 64, 1)
     # and physical order (3, 2, 1, 0), fastest first. Without an explicit
     # output, follow ATen/empty_like: densify the first tensor's physical order.
@@ -176,8 +177,6 @@ def _tma2d_config(
     a_end, b_end = split
     a_dims = output_order[:a_end]
     shape_a = math.prod(shape[dim] for dim in a_dims)
-    if shape_a % box != 0:
-        return None
     identity = tuple(range(len(shape)))
     transposed = [order != identity for order in orders]
     # Only untransposed padded layouts need to choose a row/batch factoring.
@@ -187,7 +186,17 @@ def _tma2d_config(
         b_dims, batch_dims = output_order[a_end:end], output_order[end:]
         shape_b = math.prod(shape[dim] for dim in b_dims)
         batch = math.prod(shape[dim] for dim in batch_dims)
-        if shape_b % box != 0 or shape_b // box > _MAX_GRID_YZ or batch > _MAX_GRID_YZ:
+        geometry = _tma_geometry(
+            inputs[0].element_bytes, tuple(transposed), cc, shape_b, shape_a
+        )
+        if geometry is None:
+            continue
+        box, block, stages = geometry
+        if shape_b // box > _MAX_GRID_YZ or batch > _MAX_GRID_YZ:
+            continue
+        tile_bytes = box * box * inputs[0].element_bytes
+        smem_bytes = len(inputs) * (stages * tile_bytes + _SMEM_ALIGNMENT)
+        if smem_bytes + stages * _BARRIER_BYTES > smem_limit:
             continue
         # 5. Verify each group is dense; padding is allowed only in the
         # pitch between groups. x has pitch 96 elements, y has pitch 128.
@@ -233,6 +242,7 @@ def _tma2d_config(
                 (batch, shape_b, shape_a),
                 (output_batch_stride, output_stride_b, output_stride_a),
             ),
+            stages=stages,
         )
     return None
 
@@ -243,6 +253,7 @@ def _layout_config(
     output_address: int,
     smem_limit: int,
     output_strides: tuple[int, ...] | None = None,
+    cc: tuple[int, int] = (10, 0),
 ) -> _TmaConfig | None:
     # Batch extents affect views and launch limits, so this decision is not cached.
     if (
@@ -259,4 +270,4 @@ def _layout_config(
         for t in inputs
     ):
         return None
-    return _tma2d_config(inputs, shape, smem_limit, output_strides)
+    return _tma2d_config(inputs, shape, smem_limit, output_strides, cc)
