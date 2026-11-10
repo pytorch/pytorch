@@ -9,7 +9,6 @@ from pathlib import Path
 
 import torch
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
@@ -2120,9 +2119,6 @@ except RuntimeError as e:
     @skipIfTorchVersionLessThan(2, 10)
     @onlyCUDA
     @parametrize("show_cpp_stacktraces", [False, True])
-    @unittest.skipIf(
-        _get_torch_cuda_version() >= (13, 0), "To be resolved after branch cut"
-    )
     def test_std_cuda_kernel_launch_check_error(self, device, show_cpp_stacktraces):
         """Test that STD_CUDA_KERNEL_LAUNCH_CHECK throws std::runtime_error for invalid kernel launches.
 
@@ -2158,8 +2154,9 @@ except RuntimeError as e:
 
         self.assertTrue(
             "CUDA error: invalid configuration argument" in error_message
+            or "CUDA error: invalid argument" in error_message
             or "HIP error: invalid configuration argument" in error_message,
-            lambda msg: f"{msg}\nExpected 'CUDA|HIP error: invalid configuration argument' in error message, got: {error_message}",
+            lambda msg: f"{msg}\nExpected 'CUDA|HIP error: invalid (configuration )?argument' in error message, got: {error_message}",
         )
 
         if show_cpp_stacktraces:
