@@ -718,7 +718,7 @@ multi_kernel_hints: list[int] = []
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
-# CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
+# CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM 10.x and 11.x only).
 # FLYDSL: FlyDSL templates for ROCm GPUs (experimental).
 # NVGEMM: NVIDIA Universal GEMM via cutlass.operators (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
@@ -1753,11 +1753,12 @@ keep_static_cubin_raw: bool = (
     os.environ.get("TORCHINDUCTOR_KEEP_STATIC_CUBIN_RAW", "0") == "1"
 )
 
-# Use _FastCudaLauncher (vectorcall C extension) instead of
-# StaticallyLaunchedCudaKernel.run for the CachingAutotuner fast path.
+# Use _FastCudaLauncher / _FastXpuLauncher (vectorcall C extension) instead of
+# StaticallyLaunchedTritonKernel.run for the CachingAutotuner fast path.
 # Pre-binds kernel metadata at first launch and uses THPVariable_Unpack +
-# tensor.data_ptr() in C++ to bypass PyArg_ParseTuple, cuPointerGetAttribute,
-# and cuCtxGetCurrent.
+# tensor.data_ptr() in C++ to bypass PyArg_ParseTuple and, per pointer
+# argument, cuPointerGetAttribute and cuCtxGetCurrent on CUDA, or
+# zeMemGetAllocProperties and the context lookup it needs on XPU.
 use_fast_triton_launcher: bool = (
     os.environ.get("TORCHINDUCTOR_USE_FAST_TRITON_LAUNCHER", "1") == "1"
 )
@@ -2012,11 +2013,22 @@ class cpp:
     # set to torch.get_num_threads()
     threads = -1
 
+    # Decompose output-only FP32 aten._scaled_dot_product_flash_attention_for_cpu
+    # into Inductor ops; eligibility is in fx_passes/post_grad.py and numerics (incl.
+    # a NaN difference from native) in Note [CPU flash attention accumulation order].
+    # No size heuristic, so benchmark the model before enabling.
+    enable_cpu_flash_attention_decomposition: bool = False
+
     # Do not generate loops when the condition doesn't hold, like:
     # for(long i0=4096; i0<4096; i0+=1)
     no_redundant_loops = (
         os.environ.get("TORCHINDUCTOR_CPP_NO_REDUNDANT_LOOPS", "1") == "1"
     )
+
+    # On AVX2, reduce float vector lanes with a shuffle tree (simd_vec_reduce_all
+    # in cpp_prefix.h) instead of at::vec::vec_reduce_all, whose tree path is
+    # GCC-only. Changes the rounding of horizontal float sums.
+    simd_horizontal_reduction: bool = False
 
     # Assume number of threads is dynamic, don't specialize thread number.
     # Kernels don't recompile on thread number changes with this flag on.
@@ -2049,6 +2061,17 @@ class cpp:
 
     # enable weight prepacking to get a better performance; may lead to large memory footprint
     weight_prepack = os.environ.get("TORCHINDUCTOR_CPP_WEIGHT_PREPACK", "1") == "1"
+
+    # Emit scalar sqrt / rsqrt as sqrt_without_errno (cpp_prefix.h), a square root
+    # without the errno update that -fmath-errno keeps (the non-Windows build), so
+    # the compiler can optimize it like other arithmetic. sqrt results are
+    # unchanged; with enable_unsafe_math_opt_flag, 1 / sqrt(x) may become a
+    # reciprocal-sqrt estimate, which changes rsqrt results in the last bits.
+    # Where the SSE2 path isn't compiled in (see cpp_prefix.h) this is std::sqrt.
+    # Off by default because of that numerics change.
+    sqrt_without_errno = (
+        os.environ.get("TORCHINDUCTOR_CPP_SQRT_WITHOUT_ERRNO", "0") == "1"
+    )
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
@@ -2136,6 +2159,15 @@ class cpp:
 
     force_inline_kernel = (
         os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_KERNEL", "0") == "1"
+    )
+
+    # Always inline the Welford helpers in cpp_prefix.h (welford_combine and
+    # welford_vec_reduce_all), which the compiler can otherwise leave as calls in
+    # Welford reduction loops. Code size can grow. The arithmetic is the same, but
+    # with enable_unsafe_math_opt_flag or FP contraction the compiler can optimize
+    # across the inlined code, which can change results in the last bits.
+    force_inline_welford = (
+        os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_WELFORD", "0") == "1"
     )
 
     # Use static constexpr or static const for int array
