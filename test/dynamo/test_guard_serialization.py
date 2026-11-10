@@ -952,6 +952,93 @@ class LockHolder:
         self.lock = threading.Lock()
 
 
+class DictionaryToken:
+    pass
+
+
+class InstanceReducedDict(dict):
+    def __init__(self, token):
+        if not isinstance(token, DictionaryToken):
+            raise TypeError("InstanceReducedDict requires a DictionaryToken")
+        super().__init__(token=token)
+
+
+class DictionaryProtocolMeta(type):
+    def __getattribute__(cls, name):
+        if name in ("__reduce__", "__reduce_ex__"):
+            return getattr(object, name)
+        return super().__getattribute__(name)
+
+
+class ClassReducedDict(InstanceReducedDict):
+    def __reduce_ex__(self, protocol):
+        return type(self), (self["token"],)
+
+
+class MetaclassReducedDict(ClassReducedDict, metaclass=DictionaryProtocolMeta):
+    pass
+
+
+class DictionaryProtocolPropertyMeta(type):
+    __reduce__ = property(lambda cls: object.__reduce__)
+    __reduce_ex__ = property(lambda cls: object.__reduce_ex__)
+
+
+class PropertyMetaclassReducedDict(
+    ClassReducedDict, metaclass=DictionaryProtocolPropertyMeta
+):
+    pass
+
+
+class DictionaryNamespaceMeta(type):
+    def __getattribute__(cls, name):
+        namespace = super().__getattribute__(name)
+        if name == "__dict__":
+            namespace = dict(namespace)
+            namespace["__reduce_ex__"] = object.__reduce_ex__
+        return namespace
+
+
+class NamespaceMetaclassReducedDict(
+    ClassReducedDict, metaclass=DictionaryNamespaceMeta
+):
+    pass
+
+
+class NamespaceReducedDict(InstanceReducedDict):
+    @property
+    def __dict__(self):
+        return {}
+
+
+class PlainNamespaceDict(dict):
+    pass
+
+
+class InheritedNamespaceReducedDict(PlainNamespaceDict, NamespaceReducedDict):
+    def __init__(self, token):
+        InstanceReducedDict.__init__(self, token)
+
+
+class DictionaryReducerDescriptor:
+    def __get__(self, owner, cls=None):
+        if owner is None:
+            return object.__reduce_ex__
+        return InstanceDictReducer(owner)
+
+
+class DescriptorReducedDict(InstanceReducedDict):
+    __reduce_ex__ = DictionaryReducerDescriptor()
+
+
+class InstanceDictReducer:
+    def __init__(self, owner):
+        self.owner = owner
+
+    def __call__(self, *args):
+        return type(self.owner), (self.owner["token"],)
+
+
 class LockDict(dict):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -4666,6 +4753,87 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, inputs(3), True)
         self._test_check_fn(ref, loaded, inputs(4), False)
+
+    @parametrize("iterate", [False, True])
+    @parametrize(
+        "mapping_type",
+        [
+            dict,
+            LockDict,
+            collections.OrderedDict,
+            functools.partial(collections.defaultdict, list),
+        ],
+    )
+    def test_dictionary_keys_prune_unused_values(self, iterate, mapping_type):
+        def fn(x, cfg):
+            return x + len(cfg), tuple(cfg) if iterate else None
+
+        owner = mapping_type(a=threading.Lock(), b=threading.Lock())
+        if mapping_type is collections.OrderedDict:
+            owner.unused = threading.Lock()
+        cfg = owner
+        x = torch.ones(1)
+        ref, loaded = self._test_serialization(
+            (
+                "TYPE_MATCH",
+                "SEQUENCE_LENGTH",
+                "DICT_KEYS_MATCH",
+                "ORDERED_DICT_ORDER_MATCH",
+            ),
+            fn,
+            x,
+            cfg,
+        )
+        self._test_check_fn(ref, loaded, {"x": x, "cfg": cfg}, True)
+        owner["c"] = owner.pop("b")
+        self._test_check_fn(ref, loaded, {"x": x, "cfg": cfg}, False)
+
+    @parametrize(
+        "protocol",
+        [
+            "__reduce__",
+            "__reduce_ex__",
+            "metaclass",
+            "metaclass_property",
+            "descriptor",
+            "metaclass_dict",
+            "instance_dict",
+            "inherited_dict",
+        ],
+    )
+    def test_dictionary_reducer_keeps_constructor_values(self, protocol):
+        def fn(x, cfg):
+            return x + len(cfg)
+
+        def make():
+            if protocol == "metaclass":
+                return MetaclassReducedDict(DictionaryToken())
+            if protocol == "metaclass_property":
+                return PropertyMetaclassReducedDict(DictionaryToken())
+            if protocol == "descriptor":
+                return DescriptorReducedDict(DictionaryToken())
+            if protocol == "metaclass_dict":
+                return NamespaceMetaclassReducedDict(DictionaryToken())
+            if protocol == "instance_dict":
+                cfg = NamespaceReducedDict(DictionaryToken())
+                cfg.__reduce_ex__ = InstanceDictReducer(cfg)
+                return cfg
+            if protocol == "inherited_dict":
+                cfg = InheritedNamespaceReducedDict(DictionaryToken())
+                cfg.__reduce_ex__ = InstanceDictReducer(cfg)
+                return cfg
+            cfg = InstanceReducedDict(DictionaryToken())
+            setattr(cfg, protocol, InstanceDictReducer(cfg))
+            return cfg
+
+        x = torch.ones(1)
+        cfg = make()
+        ref, loaded = self._test_serialization(
+            ("TYPE_MATCH", "SEQUENCE_LENGTH"), fn, x, cfg
+        )
+        self._test_check_fn(ref, loaded, {"x": x, "cfg": make()}, True)
+        cfg["extra"] = None
+        self._test_check_fn(ref, loaded, {"x": x, "cfg": cfg}, False)
 
     def test_a_dict_subclass_keeps_its_items_when_pruned(self):
         def fn(x, cfg):
