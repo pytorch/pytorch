@@ -98,10 +98,13 @@ class TestColumnConfig(TestCase):
             (torch.float32, T.SumOps, 65536, 1024, 8, True, (0, 16)),
             (torch.float32, T.SumOps, 32768, 257, 4, True, (0, 16)),
             (torch.float32, T.SumOps, 131072, 257, 16, True, (0, 32)),
-            # The band stops at 65536 rows from 192 columns, 131072 rows below.
+            # The band stops at 65536 rows.
             (torch.float32, T.SumOps, 65536, 256, 8, True, (0, 16)),
             (torch.float32, T.SumOps, 65537, 256, 9, True, (0, 32)),
-            (torch.float32, T.SumOps, 131072, 191, 16, True, (0, 16)),
+            (torch.float32, T.SumOps, 65536, 128, 8, True, (0, 16)),
+            (torch.float32, T.SumOps, 65537, 128, 9, True, (0, 32)),
+            (torch.float16, T.MeanOps, 65536, 191, 8, True, (0, 16)),
+            (torch.float32, T.SumOps, 131072, 191, 16, True, (0, 32)),
             # It starts at 32768 rows and spans 128-257 columns.
             (torch.float32, T.SumOps, 32767, 256, 4, True, (0, 32)),
             (torch.float32, T.SumOps, 32768, 127, 4, True, (0, 32)),
