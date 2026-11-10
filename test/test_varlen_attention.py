@@ -1505,6 +1505,9 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         # flash_api.cpp. Rows whose window holds no key give zeros.
         # Covers the dense (_flash_attention_forward without cu_seqlens) and the
         # varlen path; the varlen batch mixes two different seqlen_k - seqlen_q.
+        if TEST_WITH_ROCM:
+            # CK does not support these windows; pin AOTriton.
+            torch.backends.cuda.preferred_rocm_fa_library("aotriton")
         torch.manual_seed(0)
         H, D = 2, 64
         left, right = window_size
@@ -1535,6 +1538,8 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
                 out = F.scaled_dot_product_attention(qf, kf, vf, attn_mask=mask)
             return out.transpose(0, 1)
 
+        # The expected masks follow FA2's host-side window normalization, so do
+        # not parametrize this test over the other CUDA backends.
         with _use_backend("fa2"):
             # Dense
             q = torch.randn(1, q_len, H, D, device=device, dtype=dtype)
