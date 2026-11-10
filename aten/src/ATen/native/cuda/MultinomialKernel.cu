@@ -3,7 +3,6 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
-#include <ATen/OpMathType.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/EmptyTensor.h>
@@ -346,15 +345,16 @@ void multinomial_with_replacement_kernel_impl(
 
   // Restructure data for 2d
   auto self_v = inputSize == 1 ? self.view({numDist, numCategories}) : self;
-  // Half row sums overflow and half/bfloat16 CDFs are too coarse, and a float CDF
-  // cannot give distinct buckets to more than 2^24 categories
-  self_v = self_v.to(numCategories > (int64_t{1} << std::numeric_limits<float>::digits)
-                         ? kDouble
-                         : toOpMathType(self_v.scalar_type()));
+  // Half row sums overflow and bfloat16 CDFs are too coarse, so both build the CDF in
+  // float; a float CDF cannot give distinct buckets to more than 2^24 categories
+  const auto inputType = self_v.scalar_type();
+  const auto cdfType = numCategories > (int64_t{1} << std::numeric_limits<float>::digits)
+      ? kDouble
+      : (inputType == kHalf || inputType == kBFloat16 ? kFloat : inputType);
 
   result.resize_({numDist, n_sample});
 
-  AT_DISPATCH_FLOATING_TYPES(self_v.scalar_type(), "multinomial_kernel_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(cdfType, "multinomial_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto props = at::cuda::getCurrentDeviceProperties();
     TORCH_CHECK(props != nullptr);
@@ -372,7 +372,8 @@ void multinomial_with_replacement_kernel_impl(
       // To exploit greater parallelism for the sampling, generate the
       // Uniform random samples in a separate kernel launch, into
       // temporarily allocated memory. The device RNG is thread-limited
-      Tensor sampled = at::detail::empty_cuda({numDist, n_sample}, self_v.options());
+      const Tensor dist = self_v.to(cdfType);
+      Tensor sampled = at::detail::empty_cuda({numDist, n_sample}, dist.options());
       at::native::uniform_(sampled, 0.0, 1.0, generator);
 
       dim3 block(requiredThreads);
@@ -386,29 +387,16 @@ void multinomial_with_replacement_kernel_impl(
                   numDist,
                   numCategories,
                   sampled.const_data_ptr<scalar_t>(),
-                  self_v.const_data_ptr<scalar_t>(),
-                  self_v.stride(0),
-                  self_v.stride(1)
+                  dist.const_data_ptr<scalar_t>(),
+                  dist.stride(0),
+                  dist.stride(1)
           );
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       // Generic, slow implementation with memory allocations
 
-      Tensor normDist = native::empty_like(
-          self_v,
-          std::nullopt /* dtype */,
-          std::nullopt /* layout */,
-          std::nullopt /* device */,
-          std::nullopt /* pin_memory */,
-          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-      Tensor prefixSum = native::empty_like(
-          self_v,
-          std::nullopt /* dtype */,
-          std::nullopt /* layout */,
-          std::nullopt /* device */,
-          std::nullopt /* pin_memory */,
-          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      Tensor normDist = at::detail::empty_cuda({numDist, numCategories}, self_v.options().dtype(cdfType));
+      Tensor prefixSum = at::detail::empty_cuda({numDist, numCategories}, normDist.options());
 
       // Renorm along rows
       normDist.copy_(self_v);

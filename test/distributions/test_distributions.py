@@ -2042,8 +2042,8 @@ class TestDistributionsDevice(DistributionsTestCase):
     @skipXPUIf(True, "XPU builds the with-replacement CDF in the input dtype")
     @dtypes(torch.half, torch.bfloat16)
     def test_multinomial_reduced_precision_with_replacement(self, device, dtype):
-        # Half row sums overflow past 65504, and a bfloat16 CDF only reaches about 1/8
-        # of these categories; 10000 uniform draws hit about 9630 distinct ones
+        # Half row sums overflow past 65504, and a bfloat16 CDF is too coarse: the old
+        # kernel's 10000 uniform draws hit about 830 distinct categories, not about 9630
         n = 1 << 17
         probs = torch.ones(n, device=device, dtype=dtype)
         samples = torch.multinomial(probs, 10000, replacement=True)
