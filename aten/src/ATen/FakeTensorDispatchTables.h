@@ -30,20 +30,16 @@ namespace at::impl {
 //   - PrimMeta: prims ops that define a prim_meta_impl, via torch._prims
 //   - PythonCIA: Python CompositeImplicitAutograd overrides, via
 //                OpOverload.py_impl
-//   - StaticShapeDecomp: the Decomp ops that FakeTensorMode decomposes under
-//                static shapes when they are not in Meta and have no sparse
-//                input (decomposes_under_static_shapes), filled by
-//                torch._meta_registrations once the decompositions are
-//                registered. This snapshot assumes eligibility does not grow
-//                after import: stale positives only over-reject, but newly
-//                eligible ops could incorrectly run their Meta kernel.
-//                Later registrations (including _add_op_to_registry), removals
-//                and direct dictionary writes are not mirrored. Export's
-//                lstm/gru replacements currently only leave stale positives.
-//                FakeTensorMode.cpp_meta_supports_symint overrides are also
-//                outside this snapshot's module-level predicate.
-//                test_fake_fallback_static_shape_decomps checks the initial
-//                table, not these later mutations.
+//   - StaticShapeDecomp: default static-shape decomposition eligibility,
+//                recorded once after torch._meta_registrations imports finish.
+//                Callers still check Meta membership and sparse inputs.
+//                This precise filter avoids declined Python callbacks while
+//                C++ follows Python's decomposition-selection policy.
+//                Assumes eligibility cannot grow after import: registrations,
+//                removals, direct dictionary writes and mode-method overrides
+//                are not mirrored. Stale positives can over-reject; missed
+//                additions can incorrectly reach Meta. The parity test checks
+//                the initial table only.
 //
 // This does not store the Python callables and is backed by c10::LeftRight
 enum class FakeDispatchCategory {
