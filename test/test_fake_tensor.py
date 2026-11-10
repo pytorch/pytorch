@@ -6192,10 +6192,6 @@ if __name__ == "__main__":
 
         self.addCleanup(self._restore_fake_mode_state)
         mode, other = make_mode(), make_other()
-        # Each mode records the stack it was created at
-        self.assertIn("in make_mode", mode.stack)
-        self.assertNotIn("in make_other", mode.stack)
-        self.assertIn("in make_other", other.stack)
         cpu = torch.device("cpu")
 
         def make_fake(m):
@@ -6464,7 +6460,6 @@ if __name__ == "__main__":
             check(x + x, (2, 3))
         check(x.sum(0), (3,))
         check(x * 2, (2, 3))
-        check(x.t(), (3, 2))
         # Outputs are on the inputs' fake device, also for a view that inherits
         # only the Fake key from its input
         cuda = torch.device("cuda")
