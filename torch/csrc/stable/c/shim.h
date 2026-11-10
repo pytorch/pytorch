@@ -384,6 +384,34 @@ AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
  */
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
+struct AtenScalarOpaque;
+using AtenScalarHandle = AtenScalarOpaque*;
+
+// Constructors return owning handles, freed with torch_delete_scalar.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_scalar_int(int64_t value, AtenScalarHandle* ret);
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_scalar_double(double value, AtenScalarHandle* ret);
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_scalar_bool(bool value, AtenScalarHandle* ret);
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_scalar_complex(double real, double imag, AtenScalarHandle* ret);
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_scalar_handle(AtenScalarHandle self, AtenScalarHandle* ret);
+AOTI_TORCH_EXPORT AOTITorchError torch_delete_scalar(AtenScalarHandle scalar);
+
+// Returns a dtype code, interpreted like the result of aoti_torch_get_dtype.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_scalar_type(AtenScalarHandle scalar, int32_t* ret);
+AOTI_TORCH_EXPORT AOTITorchError
+torch_scalar_to_int(AtenScalarHandle scalar, int64_t* ret);
+AOTI_TORCH_EXPORT AOTITorchError
+torch_scalar_to_double(AtenScalarHandle scalar, double* ret);
+AOTI_TORCH_EXPORT AOTITorchError
+torch_scalar_to_bool(AtenScalarHandle scalar, bool* ret);
+AOTI_TORCH_EXPORT AOTITorchError
+torch_scalar_to_complex(AtenScalarHandle scalar, double* real, double* imag);
+
 // Returns whether torch.set_warn_always(True) is in effect.
 AOTI_TORCH_EXPORT bool torch_is_warn_always_enabled();
 

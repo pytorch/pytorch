@@ -1,10 +1,19 @@
 #pragma once
 
+#include <c10/core/Scalar.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/c/shim.h>
 
 #include <vector>
+
+inline c10::Scalar* scalar_handle_to_scalar_pointer(AtenScalarHandle handle) {
+  return reinterpret_cast<c10::Scalar*>(handle);
+}
+
+inline AtenScalarHandle scalar_pointer_to_scalar_handle(c10::Scalar* scalar) {
+  return reinterpret_cast<AtenScalarHandle>(scalar);
+}
 
 inline std::vector<StableIValue>* list_handle_to_list_pointer(
     StableListHandle handle) {

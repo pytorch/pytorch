@@ -92,6 +92,11 @@ static StableIValue from_ivalue(
       return torch::stable::detail::_from(
           ivalue.toDouble(), extension_build_version);
     }
+    case c10::TypeKind::NumberType: {
+      return torch::stable::detail::_from(
+          scalar_pointer_to_scalar_handle(new c10::Scalar(ivalue.toScalar())),
+          extension_build_version);
+    }
     case c10::TypeKind::BoolType: {
       return torch::stable::detail::_from(
           ivalue.toBool(), extension_build_version);
@@ -206,6 +211,12 @@ static c10::IValue to_ivalue(
     case c10::TypeKind::FloatType: {
       return c10::IValue(torch::stable::detail::_to<double>(
           stable_ivalue, extension_build_version));
+    }
+    case c10::TypeKind::NumberType: {
+      std::unique_ptr<c10::Scalar> scalar(scalar_handle_to_scalar_pointer(
+          torch::stable::detail::_to<AtenScalarHandle>(
+              stable_ivalue, extension_build_version)));
+      return c10::IValue(*scalar);
     }
     case c10::TypeKind::BoolType: {
       return c10::IValue(torch::stable::detail::_to<bool>(
@@ -940,6 +951,78 @@ AOTITorchError torch_new_generator_handle(
     *ret_new_generator =
         torch::aot_inductor::generator_pointer_to_generator_handle(
             new at::Generator(*generator));
+  });
+}
+
+AOTITorchError torch_new_scalar_int(int64_t value, AtenScalarHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret = scalar_pointer_to_scalar_handle(new c10::Scalar(value)); });
+}
+
+AOTITorchError torch_new_scalar_double(double value, AtenScalarHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret = scalar_pointer_to_scalar_handle(new c10::Scalar(value)); });
+}
+
+AOTITorchError torch_new_scalar_bool(bool value, AtenScalarHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret = scalar_pointer_to_scalar_handle(new c10::Scalar(value)); });
+}
+
+AOTITorchError torch_new_scalar_complex(
+    double real,
+    double imag,
+    AtenScalarHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret = scalar_pointer_to_scalar_handle(
+        new c10::Scalar(c10::complex<double>(real, imag)));
+  });
+}
+
+AOTITorchError torch_new_scalar_handle(
+    AtenScalarHandle self,
+    AtenScalarHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret = scalar_pointer_to_scalar_handle(
+        new c10::Scalar(*scalar_handle_to_scalar_pointer(self)));
+  });
+}
+
+AOTITorchError torch_delete_scalar(AtenScalarHandle scalar) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { delete scalar_handle_to_scalar_pointer(scalar); });
+}
+
+AOTITorchError torch_scalar_type(AtenScalarHandle scalar, int32_t* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret =
+        static_cast<int32_t>(scalar_handle_to_scalar_pointer(scalar)->type());
+  });
+}
+
+AOTITorchError torch_scalar_to_int(AtenScalarHandle scalar, int64_t* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret = scalar_handle_to_scalar_pointer(scalar)->toLong(); });
+}
+
+AOTITorchError torch_scalar_to_double(AtenScalarHandle scalar, double* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret = scalar_handle_to_scalar_pointer(scalar)->toDouble(); });
+}
+
+AOTITorchError torch_scalar_to_bool(AtenScalarHandle scalar, bool* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret = scalar_handle_to_scalar_pointer(scalar)->toBool(); });
+}
+
+AOTITorchError torch_scalar_to_complex(
+    AtenScalarHandle scalar,
+    double* real,
+    double* imag) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto value = scalar_handle_to_scalar_pointer(scalar)->toComplexDouble();
+    *real = value.real();
+    *imag = value.imag();
   });
 }
 

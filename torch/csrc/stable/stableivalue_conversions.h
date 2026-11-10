@@ -5,6 +5,7 @@
 #include <torch/csrc/stable/device_struct.h>
 #include <torch/csrc/stable/generator_struct.h>
 #include <torch/csrc/stable/macros.h>
+#include <torch/csrc/stable/scalar_struct.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/DeviceType.h>
 #include <torch/headeronly/core/Layout.h>
@@ -278,6 +279,21 @@ struct FromImpl<std::optional<T>> {
 #endif
   }
 };
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+// Packing creates an owning copy; unpacking consumes the handle.
+template <>
+struct FromImpl<torch::stable::Scalar> {
+  static StableIValue call(
+      const torch::stable::Scalar& val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    AtenScalarHandle scalar = nullptr;
+    STABLE_TORCH_ERROR_CODE_CHECK(torch_new_scalar_handle(val.get(), &scalar));
+    return torch::stable::detail::from(scalar);
+  }
+};
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 // Specialization for torch::stable::Tensor => StableIValue
 // Returns a new owning reference of the underlying Tensor.
@@ -653,6 +669,19 @@ struct ToImpl<std::optional<T>> {
     return std::make_optional(inner_val);
   }
 };
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+template <>
+struct ToImpl<torch::stable::Scalar> {
+  static torch::stable::Scalar call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    return torch::stable::Scalar(
+        torch::stable::detail::to<AtenScalarHandle>(val));
+  }
+};
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 // Specialization for StableIValue => torch::stable::Tensor
 // The resulting stable::Tensor steals ownership of the input's
