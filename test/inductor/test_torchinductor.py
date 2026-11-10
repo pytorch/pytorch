@@ -21121,7 +21121,7 @@ def add_test_failures(
             test_failures[name] = new_failure
 
 
-class _ScalarAddPrecisionTestBase(TorchTestCase):
+class _ScalarAddSubPrecisionTestBase(TorchTestCase):
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -21133,30 +21133,58 @@ class _ScalarAddPrecisionTestBase(TorchTestCase):
             config.patch(implicit_fallbacks=False, force_disable_caches=True)
         )
 
+    def _check_precision_configs(self, device, check):
+        configs = (
+            ((False, True),)
+            if torch.device(device).type == "cpu"
+            else ((False, False), (False, True), (True, False), (True, True))
+        )
+        for strict, upcast in configs:
+            with (
+                self.subTest(strict=strict, upcast=upcast),
+                config.patch(
+                    {
+                        "emulate_precision_casts": True,
+                        "strict_pointwise": strict,
+                        "triton.codegen_upcast_to_fp32": upcast,
+                    }
+                ),
+            ):
+                torch._dynamo.reset()
+                check()
+
 
 if RUN_CPU or (RUN_GPU and GPU_TYPE == "cuda"):
 
-    class ScalarAddPrecisionTest(_ScalarAddPrecisionTestBase):
+    class ScalarAddSubPrecisionTest(_ScalarAddSubPrecisionTestBase):
         hw_classification = HardwareClassification.ACCELERATOR
 
         @dtypes(torch.bfloat16, torch.float16, torch.float32, torch.float64)
-        @parametrize("emulate", (False, True))
-        @parametrize("strict", (False, True))
-        def test_literal(self, device, dtype, emulate, strict):
+        @parametrize("emulate,strict", [(False, False), (True, False), (True, True)])
+        @parametrize("op", (operator.add, operator.sub), name_fn=lambda op: op.__name__)
+        def test_literal(self, device, dtype, emulate, strict, op):
             x = torch.tensor(
-                [-2048, -256, -0.01, -0.009, 0, 0.009, 0.01, 0.1],
+                [-2048, -256, -0.01, -0.009, 0, 0.009, 0.01, 0.1, 256, 2048],
                 device=device,
                 dtype=dtype,
             )
+            scalar_op = (
+                torch.ops.aten.add.Scalar
+                if op is operator.add
+                else torch.ops.aten.sub.Scalar
+            )
 
             def fn(x):
-                return (
-                    x + 0.01,
-                    0.01 + x,
-                    x + 257,
-                    x + 2049,
-                    torch.ops.aten.add.Scalar(x, 0.01),
+                result = (
+                    op(x, 0.01),
+                    op(0.01, x),
+                    op(x, 257),
+                    op(x, 2049),
+                    scalar_op(x, 0.01),
                 )
+                if op is operator.sub:
+                    return (*result, torch.ops.aten.rsub.Scalar(x, 0.01))
+                return result
 
             with config.patch(emulate_precision_casts=emulate, strict_pointwise=strict):
                 self.assertEqual(
@@ -21164,125 +21192,127 @@ if RUN_CPU or (RUN_GPU and GPU_TYPE == "cuda"):
                 )
 
         @dtypes(torch.bfloat16, torch.float16)
-        @parametrize("strict", (False, True))
-        @parametrize("upcast", (False, True))
-        def test_rounding_and_tensor_constants(self, device, dtype, strict, upcast):
+        @parametrize("op", (operator.add, operator.sub), name_fn=lambda op: op.__name__)
+        def test_rounding_and_tensor_constants(self, device, dtype, op):
             x = torch.linspace(-0.1, 0.1, 1024, device=device).to(dtype)
             divisor = torch.full_like(x, 6.324555320336759)
 
             def fn(x, divisor):
-                scalar = x + 0.01
-                constant = x + torch.full_like(x, 0.01)
-                tensor = x + divisor
+                scalar = op(x, 0.01)
+                reverse = op(0.01, x)
+                constant = torch.full_like(x, 0.01)
+                tensor_constant = op(x, constant)
+                reverse_constant = op(constant, x)
+                tensor = op(x, divisor)
                 divided = x / divisor
-                return scalar, scalar.float(), constant.float(), tensor.float(), divided
+                return (
+                    scalar,
+                    scalar.float(),
+                    tensor_constant.float(),
+                    tensor.float(),
+                    divided,
+                    reverse,
+                    reverse.float(),
+                    reverse_constant.float(),
+                )
 
-            with config.patch(
-                {
-                    "emulate_precision_casts": True,
-                    "strict_pointwise": strict,
-                    "triton.codegen_upcast_to_fp32": upcast,
-                }
-            ):
+            def check():
                 actual = torch.compile(fn, fullgraph=True)(x, divisor)
                 expected = fn(x, divisor)
                 self.assertEqual(actual, expected, atol=0, rtol=0)
                 self.assertEqual(actual[0].dtype, dtype)
                 self.assertEqual(actual[1].dtype, torch.float32)
-                self.assertEqual(torch.equal(expected[1], expected[2]), device == "cpu")
+                if torch.device(device).type == "cuda":
+                    self.assertFalse(torch.equal(expected[1], expected[2]))
+                    self.assertFalse(torch.equal(expected[6], expected[7]))
+
+            self._check_precision_configs(device, check)
 
         @dtypes(torch.bfloat16, torch.float16)
-        @parametrize("strict", (False, True))
-        @parametrize("upcast", (False, True))
-        def test_gradients(self, device, dtype, strict, upcast):
+        @parametrize("op", (operator.add, operator.sub), name_fn=lambda op: op.__name__)
+        def test_gradients(self, device, dtype, op):
             x = torch.linspace(-0.1, 0.1, 1024, device=device).to(dtype)
 
             def fn(x):
-                y = x + 0.01
-                return y * y
+                y = op(x, 0.01)
+                reverse = op(0.01, x)
+                return y * y, reverse * reverse
 
             def run(fn):
                 inp = x.detach().clone().requires_grad_()
                 out = fn(inp)
-                grad = torch.autograd.grad(out, inp, torch.ones_like(out))[0]
+                grad = torch.autograd.grad(
+                    out, inp, tuple(torch.ones_like(value) for value in out)
+                )[0]
                 return out, grad
 
-            with config.patch(
-                {
-                    "emulate_precision_casts": True,
-                    "strict_pointwise": strict,
-                    "triton.codegen_upcast_to_fp32": upcast,
-                }
-            ):
+            def check():
                 self.assertEqual(
                     run(torch.compile(fn, fullgraph=True)), run(fn), atol=0, rtol=0
                 )
 
-    _scalar_add_devices = (("cpu",) if RUN_CPU else ()) + (
+            self._check_precision_configs(device, check)
+
+    _scalar_add_sub_devices = (("cpu",) if RUN_CPU else ()) + (
         ("cuda",) if RUN_GPU and GPU_TYPE == "cuda" else ()
     )
     instantiate_device_type_tests(
-        ScalarAddPrecisionTest, globals(), only_for=_scalar_add_devices
+        ScalarAddSubPrecisionTest, globals(), only_for=_scalar_add_sub_devices
     )
 
 
 if RUN_GPU and GPU_TYPE == "cuda":
 
-    class CudaScalarAddPrecisionTest(_ScalarAddPrecisionTestBase):
+    class CudaScalarAddSubPrecisionTest(_ScalarAddSubPrecisionTestBase):
         hw_classification = HardwareClassification.CUDA
 
         @dtypes(torch.bfloat16, torch.float16)
-        @parametrize("strict", (False, True))
-        @parametrize("upcast", (False, True))
-        def test_alpha(self, device, dtype, strict, upcast):
+        def test_add_alpha(self, device, dtype):
             x = torch.linspace(-0.1, 0.1, 1024, device=device).to(dtype)
-            with config.patch(
-                {
-                    "emulate_precision_casts": True,
-                    "strict_pointwise": strict,
-                    "triton.codegen_upcast_to_fp32": upcast,
-                }
-            ):
+
+            def check():
                 for alpha in (0.7, -0.7, 2):
+                    with self.subTest(alpha=alpha):
 
-                    def fn(x):
-                        y = torch.add(x, 0.01, alpha=alpha)
-                        return y, y.float()
+                        def fn(x):
+                            y = torch.add(x, 0.01, alpha=alpha)
+                            return y, y.float()
 
-                    self.assertEqual(
-                        torch.compile(fn, fullgraph=True)(x), fn(x), atol=0, rtol=0
-                    )
+                        self.assertEqual(
+                            torch.compile(fn, fullgraph=True)(x), fn(x), atol=0, rtol=0
+                        )
 
-                    def scalar_fn(x):
-                        y = torch.ops.aten.add.Scalar(x, 0.01, alpha)
-                        return (y,)
+                        def scalar_fn(x):
+                            y = torch.ops.aten.add.Scalar(x, 0.01, alpha)
+                            return (y,)
 
-                    graph = make_fx(scalar_fn)(x)
-                    compiled = compile_fx_inner(graph, [x])
-                    self.assertEqual(compiled([x])[0], scalar_fn(x)[0], atol=0, rtol=0)
+                        graph = make_fx(scalar_fn)(x)
+                        compiled = compile_fx_inner(graph, [x])
+                        self.assertEqual(
+                            compiled([x])[0], scalar_fn(x)[0], atol=0, rtol=0
+                        )
+
+            self._check_precision_configs(device, check)
 
         @dtypes(torch.bfloat16, torch.float16)
-        @parametrize("strict", (False, True))
-        @parametrize("upcast", (False, True))
-        def test_symbolic(self, device, dtype, strict, upcast):
+        @parametrize("op", (operator.add, operator.sub), name_fn=lambda op: op.__name__)
+        def test_symbolic(self, device, dtype, op):
             def fn(x):
-                y = x + x.shape[0]
-                return y, y.float()
+                y = op(x, x.shape[0])
+                reverse = op(x.shape[0], x)
+                return y, y.float(), reverse, reverse.float()
 
-            with config.patch(
-                {
-                    "emulate_precision_casts": True,
-                    "strict_pointwise": strict,
-                    "triton.codegen_upcast_to_fp32": upcast,
-                }
-            ):
+            def check():
                 compiled = torch.compile(fn, fullgraph=True, dynamic=True)
                 for length in (257, 2049):
-                    x = torch.full((length,), -(length - 1), device=device, dtype=dtype)
+                    value = -(length - 1) if op is operator.add else length - 1
+                    x = torch.full((length,), value, device=device, dtype=dtype)
                     self.assertEqual(compiled(x), fn(x), atol=0, rtol=0)
 
+            self._check_precision_configs(device, check)
+
     instantiate_device_type_tests(
-        CudaScalarAddPrecisionTest, globals(), only_for="cuda"
+        CudaScalarAddSubPrecisionTest, globals(), only_for="cuda"
     )
 
 
