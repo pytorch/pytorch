@@ -923,8 +923,8 @@ def reduce_row_tile(
         raise ValueError("ragged vectors require the linear order")
     if ragged_vector and use_tma:
         raise ValueError("ragged vectors cannot use TMA")
-    # Rows of whole vectors have no edges; the rolled path folds them with one kernel
-    # per vector class rather than one per width.
+    # Rows of whole vectors have no edges; normal path selection folds them with one
+    # kernel per vector class rather than one per width.
     whole = N % (tile.TRANSFER_ALIGNMENT // x.element_size()) == 0
     ragged_vector = ragged_vector and not whole
     itree = None
