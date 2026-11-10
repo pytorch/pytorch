@@ -9,6 +9,7 @@
 #include <aotriton/config.h>
 #include <aotriton/flash.h>
 #include <ATen/native/transformers/hip/aotriton_versions.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/util/Exception.h>
 #include <cstdint>
 #include <limits>
@@ -246,6 +247,40 @@ mem_eff_window_aot(int64_t window_size,
                              static_cast<int>(max_seqlen_q),
                              static_cast<int>(max_seqlen_k),
                              is_varlen);
+}
+
+// Applies the mem-efficient API's window_size, if set and positive, to
+// attn_fwd_params or attn_bwd_params. Call after the causal window sentinels
+// and, for varlen, varlen_bits have been set: both are overridden here.
+template <typename Params>
+void mem_eff_apply_window(Params& params,
+                          std::optional<int64_t> window_size,
+                          int64_t custom_mask_type,
+                          int64_t max_seqlen_q,
+                          int64_t max_seqlen_k,
+                          bool is_varlen) {
+  if (!window_size.has_value() || *window_size <= 0) {
+    return;
+  }
+#if AOTRITON_V3_API
+  TORCH_CHECK(static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) != custom_mask_type,
+              "window_size requires a causal custom_mask_type");
+  const bool bottom_right =
+      static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type;
+  std::tie(params.window_left, params.window_right) =
+      mem_eff_window_aot(*window_size,
+                         bottom_right,
+                         max_seqlen_q,
+                         max_seqlen_k,
+                         is_varlen);
+#if AOTRITON_PRINCIPAL_DIAGONAL_API
+  if (bottom_right && is_varlen) {
+    params.varlen_bits = with_bottom_right_diagonal(params.varlen_bits);
+  }
+#endif
+#else
+  TORCH_CHECK(false, "window_size requires AOTriton >= 0.10");
+#endif
 }
 
 #if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 11)
