@@ -34,9 +34,9 @@ Other callbacks don't provide exception safety so avoid there.
 */
 
 // This controls how many un-accepted TCP connections can be waiting in the
-// backlog. This should be at least world size to avoid issues on init. We set
-// it to -1 to use the host max value which is controlled by `soconnmax`.
-// libuv on Windows asserts a positive backlog; SOMAXCONN is the host max there.
+// backlog. This should be at least world size to avoid issues on init. -1 uses
+// the host max (`somaxconn`); libuv on Windows asserts a positive backlog, so
+// use SOMAXCONN there.
 #ifdef _WIN32
 auto constexpr DEFAULT_BACKLOG = SOMAXCONN;
 #else

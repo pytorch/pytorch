@@ -260,8 +260,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     TORCH_CHECK_WITH(
         DistStoreError,
         ::c10d::detail::is_libuv_tcpstore_backend_available(),
-        "TCPStore server requires libuv but PyTorch was built without libuv support. "
-        "Rebuild with USE_TENSORPIPE=1.");
+        "TCPStore server requires libuv but PyTorch was built without libuv support.");
   }
 
   Socket::initialize();
