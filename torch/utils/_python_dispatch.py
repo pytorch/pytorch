@@ -46,11 +46,9 @@ _is_in_any_mode_without_ignore_compile_internals = False
 class _CppFakeModeTLS(threading.local):
     def __init__(self) -> None:
         # The CppFakeTensorModes entered through __enter__ on this thread and
-        # not yet exited. The FAKE slot holds only the C++ mode, which refers to
-        # its Python object by weakref, unlike a Python FakeTensorMode, which
-        # the slot holds strongly; so this keeps an entered mode, and its
-        # enter_stack, alive until __exit__ on this thread, or until this thread
-        # ends.
+        # not yet exited, which is_in_torch_dispatch_mode() reads and __exit__
+        # checks an exit against. Like the C++ FAKE slot, it is per thread, so
+        # a thread that ends without exiting its mode leaves nothing entered.
         self.entered: list[CppFakeTensorMode] = []
         # Whether _disable_current_modes has taken a C++ FakeTensorMode out of
         # this thread's FAKE slot, which it may hold without an entered mode

@@ -329,14 +329,14 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
 
 
 # Note [Fake mode lookups and CppFakeTensorMode]
-# maybe_get_fake_mode, detect_fake_mode and active_fake_mode return a
-# CppFakeTensorMode for a C++ fake or a wrapper of one, or while a C++ mode is
-# entered. CppFakeTensorMode is not a FakeTensorMode subclass and does not yet
+# maybe_get_fake_mode returns a CppFakeTensorMode for a C++ fake or a wrapper of
+# one, active_fake_mode while a C++ mode is installed, and detect_fake_mode in
+# either case. CppFakeTensorMode is not a FakeTensorMode subclass and does not yet
 # have all of its interface, so a caller that needs a Python FakeTensorMode (to
 # call from_tensor on it, or to pass it on to code that uses more of
 # FakeTensorMode) narrows the result with
-# torch._guards.require_python_fake_mode, which raises NotImplementedError for
-# a C++ mode.
+# torch._guards.require_python_fake_mode, which raises RuntimeError for a C++
+# mode.
 def maybe_get_fake_mode(t: object) -> FakeTensorMode | CppFakeTensorMode | None:
     """The fake mode of t, a Python FakeTensorMode or, for a C++ fake or a
     wrapper of one, a CppFakeTensorMode (see Note [Fake mode lookups and
@@ -782,12 +782,11 @@ def _exit_fake_mode(
 @typing.final
 class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     # The Python object of a C++ FakeTensorMode, which the Python parts of fake
-    # dispatch run against. The mode's state lives on the C++ mode, so an object
-    # rebuilt by _from_cpp_mode is equivalent, except for its enter_stack,
-    # which is why an entered mode is kept in _cpp_fake_mode_tls.entered. See
-    # Note [C++ FakeTensorMode Python object lifetime] in
-    # torch/csrc/FakeTensorMode.cpp.
-    __slots__ = ("enter_stack",)
+    # dispatch run against. Its fakes and the fake mode slot keep it alive, so
+    # it must not hold a fake: GC cannot see the reference back from the fake.
+    # Hence __slots__, and final, as a subclass could add a __dict__. See
+    # Note [C++ FakeTensorMode handle] in torch/csrc/FakeTensorMode.cpp.
+    __slots__ = ("enter_stack", "_creation_traceback")
 
     def __init__(
         self, *, shape_env: ShapeEnv | None = None, allow_non_fake_inputs: bool = False
@@ -795,34 +794,19 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         import torch._functorch.config
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
-        converter = FakeTensorConverter(copy_data=copy_data)
-        tb = CapturedTraceback.extract()
-        super().__init__(converter, shape_env, creation_traceback=tb)
-        self._attach_python_object()
-        self._init_enter_state()
+        super().__init__(FakeTensorConverter(copy_data=copy_data), shape_env)
+        self._creation_traceback = CapturedTraceback.extract()
+        self.enter_stack: list[_FakeModeEnterRecord] = []
         self.allow_non_fake_inputs = allow_non_fake_inputs
 
-    @classmethod
-    def _from_cpp_mode(cls, cpp_mode: object) -> Self:
-        # Rebuilds a collected CppFakeTensorMode around the same C++ mode, which
-        # getCppFakeTensorModePyObj passes in a capsule
-        self = cls.__new__(cls)
-        torch._C._CppFakeTensorMode.__init__(self, cpp_mode)
-        self._init_enter_state()
-        return self
-
-    def _init_enter_state(self) -> None:
-        self.enter_stack: list[_FakeModeEnterRecord] = []
-
     # Where the mode was created: the frames FakeTensorMode.stack shows, in its
-    # format (empty for a mode made in C++). Unlike FakeTensorMode.stack it is
-    # formatted on each access (only error messages read it), and its source
-    # lines are looked up then, without the module's globals, so they can be
-    # missing for a module loaded through a loader (e.g. from a zip).
+    # format. Unlike FakeTensorMode.stack it is formatted on each access (only
+    # error messages read it), and its source lines are looked up then, without
+    # the module's globals, so they can be missing for a module loaded through
+    # a loader (e.g. from a zip).
     @property
     def stack(self) -> str:
-        tb = self._creation_traceback
-        return "" if tb is None else "".join(tb.format())
+        return "".join(self._creation_traceback.format())
 
     # Same as FakeTensorMode.avoid_device_init
     @property
