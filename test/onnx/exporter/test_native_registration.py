@@ -28,6 +28,25 @@ from torch.testing._internal.common_utils import (
 class TestNativeRegistration(TestCase):
     hw_classification = HardwareClassification.CPU
 
+    def test_embedding_softmax_native_export(self):
+        class EmbeddingSoftmax(torch.nn.Module):
+            def forward(self, indices, weight):
+                return torch.nn.functional.embedding(indices, weight).softmax(-1)
+
+        model = EmbeddingSoftmax()
+        inputs = (torch.tensor([0, 2]), torch.arange(12.0).reshape(3, 4))
+        program = torch.onnx.export(
+            model, inputs, opset_version=18, optimize=False, verbose=False
+        )
+        proto = program.model_proto
+        onnx.checker.check_model(proto, full_check=True)
+        feed = {
+            value.name: tensor.numpy()
+            for value, tensor in zip(program.model.graph.inputs, inputs)
+        }
+        result = ReferenceEvaluator(proto).run(None, feed)[0]
+        self.assertEqual(torch.from_numpy(result), model(*inputs))
+
     def test_decorator_returns_plain_function(self):
         size = len(_torchlib_registry._registry)
         self.addCleanup(
