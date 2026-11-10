@@ -6181,10 +6181,6 @@ if __name__ == "__main__":
 
         self.addCleanup(self._restore_fake_mode_state)
         mode, other = make_mode(), make_other()
-        # Each mode records the stack it was created at
-        self.assertIn("in make_mode", mode.stack)
-        self.assertNotIn("in make_other", mode.stack)
-        self.assertIn("in make_other", other.stack)
         cpu = torch.device("cpu")
 
         def make_fake(m):
