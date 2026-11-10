@@ -7,6 +7,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 #include <torch/csrc/distributed/c10d/store/TCPStoreBackend.hpp>
+#include <torch/csrc/distributed/c10d/store/TCPStoreTLS.hpp>
 
 #include <chrono>
 #include <fstream>
@@ -29,8 +30,9 @@ class TCPServer {
 
   explicit TCPServer(
       std::uint16_t port,
-      std::unique_ptr<BackgroundThread>&& daemon)
-      : port_{port}, daemon_{std::move(daemon)} {}
+      std::unique_ptr<BackgroundThread>&& daemon,
+      TLSConfig tls = {})
+      : port_{port}, daemon_{std::move(daemon)}, tls_{std::move(tls)} {}
 
   std::string repr() const {
     return fmt::format("TCPServer(port={})", port_);
@@ -39,6 +41,7 @@ class TCPServer {
  private:
   std::uint16_t port_;
   std::unique_ptr<BackgroundThread> daemon_;
+  TLSConfig tls_;
 
   // We store weak references to all TCPServers for which the caller requested
   // multi-tenancy.
@@ -54,11 +57,12 @@ std::unordered_map<std::uint16_t, std::weak_ptr<TCPServer>>
 std::mutex TCPServer::cache_mutex_{};
 
 std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
-  auto startCore = [&opts]() {
+  auto tls = tlsConfig(opts);
+  auto startCore = [&opts, &tls]() {
     auto daemon = opts.useLibUV ? create_libuv_tcpstore_backend(opts)
                                 : create_tcpstore_backend(opts);
     daemon->start();
-    return std::make_shared<TCPServer>(daemon->port(), std::move(daemon));
+    return std::make_shared<TCPServer>(daemon->port(), std::move(daemon), tls);
   };
 
   std::shared_ptr<TCPServer> server{};
@@ -73,6 +77,12 @@ std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
       if (pos != cachedServers_.end()) {
         server = pos->second.lock();
         if (server != nullptr) {
+          TORCH_CHECK_WITH(
+              DistStoreError,
+              server->tls_.sameFiles(tls),
+              "multi_tenant TCPStore server on port ",
+              opts.port,
+              " was started with a different TLS configuration");
           return server;
         }
 
@@ -97,11 +107,12 @@ class TCPClient {
   static std::unique_ptr<TCPClient> connect(
       const SocketAddress& addr,
       const TCPStoreOptions& opts,
-      std::shared_ptr<Backoff> backoff);
+      std::shared_ptr<Backoff> backoff,
+      const std::shared_ptr<TLSContext>& tlsContext);
 
   void sendRaw(uint8_t* data, size_t length) {
     try {
-      tcputil::sendBytes(socket_.handle(), data, length);
+      tcputil::sendBytes(io(), data, length);
     } catch (const std::exception& e) {
       C10D_WARNING("sendBytes failed on {}: {}", socket_.repr(), e.what());
       throw;
@@ -110,7 +121,7 @@ class TCPClient {
 
   std::vector<std::uint8_t> receiveBits() {
     try {
-      return tcputil::recvVector<std::uint8_t>(socket_.handle());
+      return tcputil::recvVector<std::uint8_t>(io());
     } catch (const std::exception& e) {
       C10D_WARNING("recvVector failed on {}: {}", socket_.repr(), e.what());
       throw;
@@ -120,7 +131,7 @@ class TCPClient {
   template <typename T>
   T receiveValue() {
     try {
-      return tcputil::recvValue<T>(socket_.handle());
+      return tcputil::recvValue<T>(io());
     } catch (const std::exception& e) {
       C10D_WARNING("recvValue failed on {}: {}", socket_.repr(), e.what());
       throw;
@@ -128,12 +139,19 @@ class TCPClient {
   }
   template <typename T>
   std::optional<T> receiveValueWithTimeout(std::chrono::milliseconds timeout) {
-    if (!socket_.waitForInput(timeout)) {
+    // Negative timeout waits forever, as in Socket::waitForInput.
+    bool ready = tls_
+        ? tls_->waitForInput(
+              socket_.handle(),
+              timeout.count() < 0 ? std::chrono::steady_clock::time_point::max()
+                                  : std::chrono::steady_clock::now() + timeout)
+        : socket_.waitForInput(timeout);
+    if (!ready) {
       return {};
     }
 
     try {
-      return tcputil::recvValue<T>(socket_.handle());
+      return tcputil::recvValue<T>(io());
     } catch (const std::exception& e) {
       C10D_WARNING(
           "recvValueWithTimeout failed on {}: {}", socket_.repr(), e.what());
@@ -142,20 +160,32 @@ class TCPClient {
   }
   void setTimeout(std::chrono::milliseconds value);
 
-  explicit TCPClient(Socket&& socket) : socket_{std::move(socket)} {}
+  explicit TCPClient(Socket&& socket, std::unique_ptr<TLSSession> tls = nullptr)
+      : socket_{std::move(socket)}, tls_{std::move(tls)} {}
 
   std::string repr() const {
     return fmt::format("TCPClient({})", socket_.repr());
   }
 
  private:
+  SocketIO io() const {
+    return SocketIO{socket_.handle(), tls_.get()};
+  }
+
   Socket socket_;
+  std::unique_ptr<TLSSession> tls_;
 };
 
 std::unique_ptr<TCPClient> TCPClient::connect(
     const SocketAddress& addr,
     const TCPStoreOptions& opts,
-    std::shared_ptr<Backoff> backoff) {
+    std::shared_ptr<Backoff> backoff,
+    const std::shared_ptr<TLSContext>& tlsContext) {
+  // The TLS handshake gets the time left after connecting.
+  std::optional<TLSSession::Deadline> deadline;
+  if (opts.timeout != std::chrono::milliseconds::zero()) {
+    deadline = std::chrono::steady_clock::now() + opts.timeout;
+  }
   Socket socket = Socket::connect(
       addr.host,
       addr.port,
@@ -163,7 +193,12 @@ std::unique_ptr<TCPClient> TCPClient::connect(
           .connect_timeout(opts.timeout)
           .connect_backoff(std::move(backoff)));
 
-  return std::make_unique<TCPClient>(std::move(socket));
+  if (!tlsContext) {
+    return std::make_unique<TCPClient>(std::move(socket));
+  }
+  auto tls = std::make_unique<TLSSession>(tlsContext);
+  tls->handshake(socket.handle(), deadline);
+  return std::make_unique<TCPClient>(std::move(socket), std::move(tls));
 }
 
 void TCPClient::setTimeout(std::chrono::milliseconds value) {
@@ -253,12 +288,28 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
       usingLibUv_{opts.useLibUV} {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__init);
 
+  // Resolved once for the server and connect retries. clone() reuses the
+  // resolved paths but builds a new context.
+  auto tls = detail::tlsConfig(opts);
+  // Checks the platform, OpenSSL and files before the backend.
+  auto clientTls = detail::TLSContext::fromConfig(tls, /*isServer=*/false);
   if (opts.useLibUV) {
     TORCH_CHECK_WITH(
         DistStoreError,
         ::c10d::detail::is_libuv_tcpstore_backend_available(),
         "use_libuv was requested but PyTorch was built without libuv support, run with USE_LIBUV=0 to disable it.");
   }
+  TORCH_CHECK_WITH(
+      DistStoreError,
+      !opts.isServer || opts.useLibUV || !tls.enabled(),
+      "TCPStore TLS (enabled by ",
+      tls.fromEnv ? "TORCH_TCPSTORE_TLS_* environment variables"
+                  : "tls_* options",
+      ") requires the libuv backend: use_libuv=True, "
+      "or USE_LIBUV=1 for env:// and tcp:// initialization");
+  tlsCert_ = tls.cert;
+  tlsKey_ = tls.key;
+  tlsCa_ = tls.ca;
 
   Socket::initialize();
 
@@ -266,7 +317,11 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 
   if (opts.isServer) {
     try {
-      server_ = detail::TCPServer::start(opts);
+      TCPStoreOptions serverOpts = opts;
+      serverOpts.tlsCert = tlsCert_;
+      serverOpts.tlsKey = tlsKey_;
+      serverOpts.tlsCa = tlsCa_;
+      server_ = detail::TCPServer::start(serverOpts);
       // server successfully started
       C10D_DEBUG("The server has started on port = {}.", server_->port());
       addr_.port = server_->port();
@@ -311,7 +366,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   auto retry = 0;
   do {
     try {
-      client_ = detail::TCPClient::connect(addr_, opts, backoff);
+      client_ = detail::TCPClient::connect(addr_, opts, backoff, clientTls);
       // TCP connection established
       C10D_DEBUG("TCP client connected to host {}:{}", addr_.host, addr_.port);
 
@@ -365,6 +420,9 @@ c10::intrusive_ptr<Store> TCPStore::clone() {
   opts.waitWorkers = false;
   opts.timeout = timeout_;
   opts.useLibUV = usingLibUv_;
+  opts.tlsCert = tlsCert_;
+  opts.tlsKey = tlsKey_;
+  opts.tlsCa = tlsCa_;
 
   return c10::make_intrusive<TCPStore>(addr_.host, opts);
 }
@@ -423,6 +481,13 @@ void TCPStore::ping() {
   buffer.flush();
 
   uint32_t returnedNonce = client_->receiveValue<std::uint32_t>();
+  if (returnedNonce == detail::tlsRequiredMagicNumber) {
+    C10_THROW_ERROR(
+        DistStoreError,
+        "Server requires TLS. Set tls_cert, tls_key and tls_ca or "
+        "TORCH_TCPSTORE_TLS_CERT, TORCH_TCPSTORE_TLS_KEY and "
+        "TORCH_TCPSTORE_TLS_CA on the client.");
+  }
   if (nonce != returnedNonce) {
     C10_THROW_ERROR(
         DistNetworkError,

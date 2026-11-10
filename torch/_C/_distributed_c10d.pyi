@@ -359,6 +359,10 @@ class TCPStore(Store):
         multi_tenant: bool = ...,
         master_listen_fd: int | None = ...,
         use_libuv: bool | None = ...,
+        *,
+        tls_cert: str | None = ...,
+        tls_key: str | None = ...,
+        tls_ca: str | None = ...,
     ) -> None: ...
     @property
     def host(self) -> str: ...
