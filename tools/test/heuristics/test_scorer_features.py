@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -34,6 +35,8 @@ from tools.testing.test_run import TestRun
 sys.path.remove(str(REPO_ROOT))
 
 TESTS = ["test_a", "test_b", "test_c", "dir/test_d"]
+TRAINED = datetime(2026, 11, 10, tzinfo=UTC)
+NOW = TRAINED + timedelta(days=2)
 REGISTERED = list(features.SERVED_FEATURES.values()) + ["Profiling"]
 
 
@@ -372,6 +375,7 @@ class ScorerTestCase(unittest.TestCase):
             "unit": features.Unit(fake_sources(["torch/a.py"])),
             "registered": REGISTERED,
             "ratings_path": self.ratings_path,
+            "now": NOW,
         }
         args.update(kwargs)
         aggregated = args.pop("aggregated", make_aggregated(ALL_SCORES))
@@ -443,7 +447,8 @@ class TestComputeScorer(ScorerTestCase):
     def test_checks_only_features_the_model_reads(self) -> None:
         self.write_model({**fixture.DOC, "features": ["edited", "is_pr", "n_files"]})
         self.ratings_path.unlink()
-        block = self.compute(times={}, aggregated=make_aggregated({})).block
+        only_edited = make_aggregated({"EditedByPR": {"test_b": 1.0}})
+        block = self.compute(times={}, aggregated=only_edited).block
         self.assertIn("p", block)
 
     def test_exception_is_truncated(self) -> None:
@@ -462,6 +467,48 @@ class TestComputeScorer(ScorerTestCase):
         ):
             block, _ = self.compute()
         self.assertTrue(block["fallback"].startswith("ValueError"))
+
+    def test_stale_model_falls_back(self) -> None:
+        self.write_model()
+        limit = TRAINED + infer.MAX_MODEL_AGE
+        self.assertIn("p", self.compute(now=limit).block)
+        block, metric = self.compute(now=limit + timedelta(seconds=1))
+        self.assertEqual(block, {"fallback": "model trained 16 days ago"})
+        self.assertEqual(metric["fallback"], "model trained 16 days ago")
+        self.assertEqual(metric["trained_at"], "2026-11-10T00:00:00Z")
+        self.assertIn("p", self.compute(now=TRAINED - timedelta(days=1)).block)
+        block, metric = self.compute(now=TRAINED - timedelta(days=1, seconds=1))
+        self.assertEqual(block, {"fallback": "model trained in the future"})
+        self.assertEqual(metric["fallback"], "model trained in the future")
+
+    def test_unparsable_trained_at_falls_back(self) -> None:
+        for trained_at in ("yesterday", ""):
+            self.write_model({**fixture.DOC, "trained_at": trained_at})
+            block, metric = self.compute()
+            self.assertTrue(
+                block["fallback"].startswith("unparsable trained_at"), trained_at
+            )
+            self.assertEqual(metric["fallback"], block["fallback"])
+        no_time = {k: v for k, v in fixture.DOC.items() if k != "trained_at"}
+        for doc in (no_time, {**fixture.DOC, "trained_at": 5}):
+            self.write_model(doc)
+            block, metric = self.compute()
+            self.assertEqual(block, {"fallback": "no trained_at"})
+            self.assertEqual(metric["fallback"], "no trained_at")
+        self.write_model({**fixture.DOC, "trained_at": "2026-11-10T00:00:00"})
+        self.assertIn("p", self.compute().block)
+        self.write_model({**fixture.DOC, "trained_at": "2026-11-10T00:00:00-08:00"})
+        later = TRAINED + infer.MAX_MODEL_AGE + timedelta(hours=1)
+        self.assertIn("p", self.compute(now=later).block)
+
+    def test_raised_heuristic_behind_a_feature_falls_back(self) -> None:
+        self.write_model({**fixture.DOC, "features": ["fail_n", "edited", "is_pr"]})
+        self.assertIn("p", self.compute().block)
+        scores = {k: v for k, v in ALL_SCORES.items() if k != "EditedByPR"}
+        block, metric = self.compute(aggregated=make_aggregated(scores))
+        self.assertEqual(block, {"fallback": "EditedByPR raised"})
+        self.assertEqual(metric["fallback"], "EditedByPR raised")
+        self.assertEqual(metric["heuristics_raised"], ["EditedByPR", "Profiling"])
 
     def test_risk_reads_the_change_alone(self) -> None:
         self.write_model()
@@ -506,6 +553,7 @@ class TestTDJob(ScorerTestCase):
             unit=features.Unit(fake_sources(["torch/a.py"])),
             registered=REGISTERED,
             ratings_path=self.ratings_path,
+            now=NOW,
         )
         downloads: dict[str, Any] = {
             name: mock.patch.object(

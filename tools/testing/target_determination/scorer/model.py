@@ -35,6 +35,8 @@ MIN_QUANTILES = 2
 MAX_QUANTILES = 2001
 MAX_CLIP = 0.01
 MAX_TRAINED_AT_CHARS = 32
+SHARE_FLOOR = 0.10
+SHARE_CEILING = 0.40
 # td_scorer.json format 1 takes the logistic of anything below this as 0.0, so
 # both repos agree and exp() never overflows.
 MIN_LOGIT = -700.0
@@ -277,8 +279,10 @@ def _risk(value: object, known: Collection[str]) -> Risk:
         raise ModelError("invalid risk: quantiles not ascending in [0, 1]")
     share_min = _number(doc.get("share_min"), "invalid risk share_min")
     share_max = _number(doc.get("share_max"), "invalid risk share_max")
-    if not 0 <= share_min <= share_max <= 1:
-        raise ModelError("invalid risk: shares out of order")
+    if not SHARE_FLOOR <= share_min <= share_max <= SHARE_CEILING:
+        raise ModelError(
+            f"invalid risk: shares not in order within [{SHARE_FLOOR}, {SHARE_CEILING}]"
+        )
     paths = None
     if "paths" in doc:
         try:

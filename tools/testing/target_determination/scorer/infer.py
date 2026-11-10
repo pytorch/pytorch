@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import traceback
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 from typing import Any, NamedTuple, TYPE_CHECKING
 
@@ -19,6 +20,7 @@ from tools.testing.target_determination.scorer.features import (
     MODEL_FEATURES,
     RISK_FEATURES,
     risk_values,
+    SERVED_FEATURES,
     served_scores,
     test_seconds,
     Unit,
@@ -39,6 +41,8 @@ if TYPE_CHECKING:
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RATINGS_PATH = REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / TEST_FILE_RATINGS_FILE
 MAX_REASON_CHARS = 300
+MAX_MODEL_AGE = timedelta(days=16)
+MIN_MODEL_AGE = timedelta(days=-1)
 
 
 class DegradedInputs(Exception):
@@ -71,6 +75,25 @@ def _risk(model: Model, unit: Unit) -> RiskScore | None:
     return score
 
 
+def check_age(trained_at: str | None, now: datetime) -> None:
+    """Raises DegradedInputs unless the model was trained at most
+    MAX_MODEL_AGE before `now` (a refit that keeps failing must not leave an
+    old model cutting) and no more than a day after it."""
+    if trained_at is None:
+        raise DegradedInputs("no trained_at")
+    try:
+        trained = datetime.fromisoformat(trained_at)
+        if trained.tzinfo is None:
+            trained = trained.replace(tzinfo=UTC)
+        age = now - trained
+    except (ValueError, TypeError) as e:
+        raise DegradedInputs(f"unparsable trained_at: {e}") from e
+    if age > MAX_MODEL_AGE:
+        raise DegradedInputs(f"model trained {age.days} days ago")
+    if age < MIN_MODEL_AGE:
+        raise DegradedInputs("model trained in the future")
+
+
 def _has_ratings(path: Path) -> bool:
     try:
         with open(path) as f:
@@ -89,7 +112,8 @@ def check_inputs(
     registered: Collection[str],
 ) -> None:
     """Raises DegradedInputs when an input behind one of the model's
-    `features` is missing for the whole job."""
+    `features` is missing for the whole job, or a registered heuristic
+    behind one of them raised (its scores would read as 0.0)."""
     if "test_seconds" in features:
         seconds = test_seconds(test_times)
         if not any(test in seconds for test in tests):
@@ -100,6 +124,12 @@ def check_inputs(
             raise DegradedInputs("no LLM scores")
     if "fail_n" in features and not _has_ratings(ratings_path):
         raise DegradedInputs("no failure ratings")
+    for name in features:
+        heuristic = SERVED_FEATURES.get(name)
+        if heuristic is None or heuristic not in registered:
+            continue
+        if aggregated.get_heuristic_results(heuristic) is None:
+            raise DegradedInputs(f"{heuristic} raised")
 
 
 def compute_scorer(
@@ -110,6 +140,7 @@ def compute_scorer(
     unit: Unit | None = None,
     registered: Collection[str] | None = None,
     ratings_path: Path | None = None,
+    now: datetime | None = None,
 ) -> ScorerResult:
     """The scorer block for td_results.json and the td_scorer metric. Never
     raises: any problem gives {"fallback": reason}."""
@@ -134,6 +165,7 @@ def compute_scorer(
         )
         model = load_model(model_path, MODEL_FEATURES, RISK_FEATURES)
         metric["trained_at"] = model.trained_at
+        check_age(model.trained_at, datetime.now(UTC) if now is None else now)
         check_inputs(
             model.features,
             tests,

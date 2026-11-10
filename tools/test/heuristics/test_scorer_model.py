@@ -260,6 +260,20 @@ class TestValidation(unittest.TestCase):
             self.assertIsNone(model.risk(RISK_VALUES))
             self.assertEqual(len(model.predict(fixture.ROWS)), len(fixture.ROWS))
 
+    def test_share_range(self) -> None:
+        self.assertEqual(scorer_model.SHARE_FLOOR, 0.10)
+        self.assertEqual(scorer_model.SHARE_CEILING, 0.40)
+        for share_min, share_max in ((0.05, 0.2), (0.1, 0.45), (0.0, 0.1), (0.3, 1.0)):
+            doc = self.mutate(["risk", "share_min"], share_min)
+            doc["risk"]["share_max"] = share_max
+            model = parse(doc)
+            self.assertIsNone(model.risk_model, (share_min, share_max))
+            self.assertIn("shares", str(model.risk_error))
+        for share_min, share_max in ((0.1, 0.1), (0.4, 0.4), (0.1, 0.4)):
+            doc = self.mutate(["risk", "share_min"], share_min)
+            doc["risk"]["share_max"] = share_max
+            self.assertIsNotNone(parse(doc).risk_model, (share_min, share_max))
+
     def test_absent_risk(self) -> None:
         doc = copy.deepcopy(fixture.DOC)
         del doc["risk"]
