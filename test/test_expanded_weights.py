@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     make_tensor,
     parametrize,
-    periodic,
     run_tests,
     skipIfTorchDynamo,
     TEST_ACCELERATOR,
@@ -793,7 +792,6 @@ class TestExpandedWeightModule(TestCase):
                 for (actual, expected) in zip(actual_grads, expected_grads)
             ]
 
-    @periodic
     @modules(
         filter(
             lambda m_info: m_info.module_cls

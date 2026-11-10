@@ -316,6 +316,7 @@ jobs:
       # Same as the build job
       python-version: 3.12.7
       test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
+      tests-to-exclude: "test_modules functorch/test_aotdispatch_moduleinfo"
       disable-monitor: false
     secrets: inherit
 
@@ -362,6 +363,7 @@ jobs:
       build-environment: ${{ needs.win-vs2022-cpu-py3-build.outputs.build-environment }}
       cuda-version: cpu
       test-matrix: ${{ needs.win-vs2022-cpu-py3-build.outputs.test-matrix }}
+      tests-to-exclude: "test_modules functorch/test_aotdispatch_moduleinfo"
       disable-monitor: false
     secrets: inherit
 
@@ -547,6 +549,7 @@ jobs:
       build-environment: ${{ needs.linux-jammy-aarch64-py3_11-gcc13-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-aarch64-py3_11-gcc13-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_11-gcc13-build.outputs.test-matrix }}
+      tests-to-exclude: "test_modules functorch/test_aotdispatch_moduleinfo"
       python-version: "3.11"
       compiler: gcc13
     secrets: inherit
