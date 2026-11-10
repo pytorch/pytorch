@@ -3469,6 +3469,30 @@ class TestTorchDeviceType(TestCase):
                 # If accumulate=True, `put_` should be deterministic regardless of the inputs on CPU
                 # On CUDA it may not be, but the test has enough tolerance to account for this
                 if accumulate:
+                    # Known issue on PPU parts below sm_89: put_(accumulate=True) folds the
+                    # source elements into a destination slot in a different order than the
+                    # single-threaded index_add_ reference below. For float16/bfloat16 a
+                    # reordering of the same additions can already move the result by 1-2 ulp
+                    # past the destination's initial value, which exceeds the default
+                    # assertEqual tolerance. That is an accumulation-order divergence, not a
+                    # precision regression, and PPU sm_89 and later match the reference.
+                    # Report it explicitly so the tolerance failure is not read as a
+                    # numerics bug.
+                    if (
+                        getattr(torch.version, "ppu", None) is not None
+                        and torch.device(device).type == "cuda"
+                        and dtype in (torch.float16, torch.bfloat16)
+                        and torch.cuda.get_device_capability(device) < (8, 9)
+                    ):
+                        raise RuntimeError(
+                            f"known issue: put_(accumulate=True) on {dtype} is not bit-exact "
+                            "against the index_add_ reference on PPU below sm_89. The atomics "
+                            "accumulate in a different order than the single-threaded "
+                            "reference, so the result can differ by 1-2 ulp and exceed the "
+                            "default assertEqual tolerance. This is an accumulation-order "
+                            "divergence, not a precision regression; PPU sm_89 and later "
+                            "match the reference."
+                        )
                     idx = make_idx(src_size, high=dst.numel())
                 else:
                     idx = torch.randperm(dst.numel(), dtype=torch.int64, device=device)[:src_size[0]]
