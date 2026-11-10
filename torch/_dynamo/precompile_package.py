@@ -2286,9 +2286,10 @@ def precompile_capture(
     limit exists to catch runaway recompilation. ``guard_filter_fn`` applies to
     the runtime guards as well as the serialized ones, so a dropped guard never
     triggers a recompile during capture, just as it cannot pick a graph at serve
-    time. ``fullgraph`` makes a graph break (and a recompile past
-    ``recompile_limit``) an error, as ``torch.compile(fullgraph=True)`` does, so the
-    artifact is one frame with one graph.
+    time. ``fullgraph`` makes a graph break an error, as
+    ``torch.compile(fullgraph=True)`` does, so the capture is one frame with no
+    graph-break continuations; each recompile adds a graph to that frame, and a
+    recompile past ``recompile_limit`` raises rather than running eager.
     """
     if isinstance(fn, functools.partial):
         raise PackageError(
