@@ -6076,6 +6076,31 @@ class TestCppFakeTensorModeBindings(TestCase):
                 raise ValueError("raised in the body")
         self.assertFalse(mode.allow_non_fake_inputs)
 
+    def test_require_python_fake_mode(self):
+        from torch._guards import require_python_fake_mode
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+        msg = "CppFakeTensorMode is not supported here yet"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            require_python_fake_mode(CppFakeTensorMode())
+        py_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        self.assertIs(require_python_fake_mode(py_mode), py_mode)
+        self.assertIsNone(require_python_fake_mode(None))
+
+    def test_require_python_fake_mode_caller(self):
+        from torch._subclasses.fake_tensor import CppFakeTensorMode
+        from torch.fx.passes.shape_prop import ShapeProp
+
+        # ShapeProp needs a Python FakeTensorMode, so it rejects a C++ one,
+        # given to it or found by detect_fake_mode
+        gm = torch.fx.symbolic_trace(lambda x: x + 1)
+        msg = "CppFakeTensorMode is not supported here yet"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            ShapeProp(gm, fake_mode=CppFakeTensorMode())
+        with tracing(TracingContext(CppFakeTensorMode())):
+            with self.assertRaisesRegex(RuntimeError, msg):
+                ShapeProp(gm)
+
     # Dynamo keeps references that stop the mode being collected
     @xfailIfTorchDynamo
     def test_cpp_fake_tensor_mode_lifetime(self):

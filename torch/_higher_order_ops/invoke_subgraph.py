@@ -1003,11 +1003,13 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         # different invoke_subgraphs, the backward graph can be different
         # because the tangent strides can be different. So, here we cache on
         # tangent_metadata in addition to identifier
-        from torch._guards import detect_fake_mode
+        from torch._guards import detect_fake_mode, require_python_fake_mode
         from torch._subclasses._fake_tensor_utils import _CacheKeyState
         from torch._subclasses.fake_tensor import extract_tensor_metadata
 
-        fake_mode = detect_fake_mode(primals + filtered_grad_outs)
+        fake_mode = require_python_fake_mode(
+            detect_fake_mode(primals + filtered_grad_outs)
+        )
         if fake_mode is None:
             raise AssertionError("fake_mode should be enabled for HOPs")
         state = _CacheKeyState(fake_mode.shape_env)
