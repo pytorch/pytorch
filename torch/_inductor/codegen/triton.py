@@ -97,6 +97,7 @@ from ..utils import (
     sympy_subs,
     TMA_ALIGNMENT,
     TRITON_FLOAT8_DTYPES,
+    triton_fp_fusion_enabled,
     triton_type,
     triton_version_uses_attrs_dict,
     upcast_compute_type,
@@ -7919,9 +7920,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     @classmethod
     def triton_meta_common(cls) -> TritonMeta:
         return {
-            "enable_fp_fusion": (
-                config.triton.enable_fp_fusion and not config.emulate_precision_casts
-            ),
+            "enable_fp_fusion": triton_fp_fusion_enabled(),
             "launch_pdl": cls._enable_pdl_codegen(),
             "disable_ftz": config.eager_numerics.disable_ftz,
         }

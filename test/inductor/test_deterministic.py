@@ -139,11 +139,46 @@ class DeterministicTest(TestCase):
         ):
             x = torch.randn(16, device=GPU_TYPE)
             _, (code,) = run_and_get_code(torch.compile(lambda x: x * 2 + 1), x)
-        # Deterministic mode alone keeps FMA contraction.
-        self.assertIn(f"'enable_fp_fusion': {fp_fusion}", code)
+        # Deterministic mode also turns off Triton's contraction; Inductor then
+        # emits the FMA itself.
+        triton_fusion = fp_fusion and not deterministic
+        self.assertIn(f"'enable_fp_fusion': {triton_fusion}", code)
+        self.assertEqual("tl.fma(" in code, not triton_fusion)
 
-    @inductor_config.patch({"deterministic": True, "triton.enable_fp_fusion": False})
-    def test_pointwise_config_numerics(self):
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    @inductor_config.patch(deterministic=True)
+    def test_explicit_fma(self, dtype):
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x, y, z, i):
+            p = x * y
+            return p + z, p - z, z - p, i * i + i
+
+        x, y, z = (torch.randn(1024, device=GPU_TYPE, dtype=dtype) for _ in range(3))
+        i = torch.randint(-100, 100, (1024,), device=GPU_TYPE)
+        out, (code,) = run_and_get_code(torch.compile(fn), x, y, z, i)
+        # Compiled kernels compute in fp32 even for bf16 inputs.
+        ref = fn(x.float(), y.float(), z.float(), i)
+        self.assertEqual(out, [r.to(o.dtype) for r, o in zip(ref, out)])
+        # One FMA per float add/sub; the integer multiply-add is left alone.
+        self.assertEqual(code.count("tl.fma("), 3)
+
+    @inductor_config.patch(deterministic=True)
+    def test_explicit_fma_welford(self):
+        # A looped var_mean is a welford reduction with several outputs.
+        def fn(x):
+            var, mean = torch.var_mean(x * 2 + 1, dim=1)
+            return var * mean + 1
+
+        x = torch.randn(8, 65536, device=GPU_TYPE)
+        self.assertEqual(torch.compile(fn)(x), fn(x))
+
+    @parametrize(
+        "deterministic,fp_fusion",
+        [(True, True), (False, False)],
+        name_fn=lambda d, f: "deterministic" if d else "fp_fusion_off",
+    )
+    def test_pointwise_config_numerics(self, deterministic, fp_fusion):
         # XBLOCK=128 and XBLOCK=256 contract different products into an FMA here.
         def fn(x, buf):
             return x / x.shape[0] * 0.01 + buf * 0.99
@@ -162,6 +197,12 @@ class DeterministicTest(TestCase):
 
             torch._dynamo.reset()
             with (
+                inductor_config.patch(
+                    {
+                        "deterministic": deterministic,
+                        "triton.enable_fp_fusion": fp_fusion,
+                    }
+                ),
                 fresh_cache(),
                 unittest.mock.patch.object(CachingAutotuner, "bench", bench),
             ):

@@ -3,7 +3,10 @@
 import torch
 from torch._inductor import config
 from torch._inductor.loop_body import LoopBody
-from torch._inductor.optimize_loop_body import eliminate_redundant_lowp_round_trips
+from torch._inductor.optimize_loop_body import (
+    eliminate_redundant_lowp_round_trips,
+    form_explicit_fmas,
+)
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -33,6 +36,37 @@ class TestOptimizeLoopBody(TestCase):
         self.assertFalse(eliminate_redundant_lowp_round_trips(loop_body))
         self.assertEqual(len(graph.find_nodes(op="call_method", target="to_dtype")), 2)
         self.assertEqual(loop_body.op_counts["to_dtype"], 2)
+
+    def test_form_explicit_fmas(self):
+        def fn(index):
+            a, b, c = (V.ops.constant(v, torch.float32) for v in (1.5, 2.5, 3.5))
+            p = V.ops.mul(a, b)
+            i = V.ops.constant(3, torch.int32)
+            return (
+                V.ops.add(p, c),
+                V.ops.sub(p, c),
+                V.ops.sub(c, p),
+                V.ops.add(V.ops.mul(i, i), i),
+            )
+
+        with config.patch(constant_and_index_propagation=False):
+            loop_body = LoopBody(fn, ([],), {}, [], [])
+
+        self.assertTrue(form_explicit_fmas(loop_body))
+        graph = loop_body.root_block.graph
+        fmas = graph.find_nodes(op="call_method", target="fma")
+        self.assertEqual(len(fmas), 3)
+        # fma(a, b, c), fma(a, b, neg(c)), fma(neg(a), b, c)
+        self.assertEqual(fmas[0].args[3].target, "constant")
+        self.assertEqual(fmas[1].args[3].target, "neg")
+        self.assertEqual(fmas[2].args[1].target, "neg")
+        # Only the integer multiply-add is left.
+        self.assertEqual(len(graph.find_nodes(op="call_method", target="mul")), 1)
+        self.assertEqual(len(graph.find_nodes(op="call_method", target="add")), 1)
+        self.assertEqual(len(graph.find_nodes(op="call_method", target="sub")), 0)
+        counts = loop_body.op_counts
+        self.assertEqual((counts["fma"], counts["neg"], counts["mul"]), (3, 2, 1))
+        self.assertEqual((counts["add"], counts["sub"]), (1, 0))
 
 
 class TestOptimizeLoopBodyDevice(TestCase):

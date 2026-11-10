@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import dataclasses
 import inspect
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
+
+import sympy
 
 import torch
 from torch.fx import Graph, Node
 
-from .ops_handler import OpsHandler
+from .dtype_propagation import DtypePropagationOpsHandler
+from .ops_handler import DefaultHandler, OpsHandler
+from .virtualized import V
 
 
 if TYPE_CHECKING:
@@ -14,6 +19,108 @@ if TYPE_CHECKING:
 
 
 _TO_DTYPE_SIGNATURE = inspect.signature(OpsHandler.to_dtype)
+
+
+@dataclasses.dataclass
+class _Dtype:
+    dtype: torch.dtype
+
+    def __getitem__(self, index: int) -> _Dtype:
+        # Multi-output ops such as welford reductions get one dtype for all
+        # outputs from dtype propagation.
+        return self
+
+
+class _RecordNodeDtypes(DefaultHandler):
+    """Ops handler that records the dtype each FX node of a LoopBody produces."""
+
+    def __init__(self) -> None:
+        self.dtype_prop = DtypePropagationOpsHandler()
+        self.dtypes: dict[Node, torch.dtype] = {}
+
+    def indirect_indexing(self, *args: object, **kwargs: object) -> sympy.Expr:
+        return sympy.S.Zero
+
+    def _default(
+        self, name: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> Any:
+        out = getattr(self.dtype_prop, name)(*args, **kwargs)
+        if isinstance(out, tuple):
+            return tuple(_Dtype(dtype) for dtype in out)
+        if not isinstance(out, torch.dtype):
+            return out
+        self.dtypes[V.interpreter.current_node] = out
+        return _Dtype(out)
+
+
+def form_explicit_fmas(loop_body: LoopBody) -> bool:
+    """Rewrite each float ``add``/``sub`` of a ``mul`` into an ``fma``.
+
+    Before::
+
+        p = mul(a, b)
+        y = add(p, c)  # sub(p, c), sub(c, p)
+
+    After::
+
+        y = fma(a, b, c)  # fma(a, b, neg(c)), fma(neg(a), b, c)
+
+    Used when Triton's own FMA contraction is off for reproducibility: which
+    multiply-adds Triton contracts depends on the block size, while this choice
+    depends only on the graph, so it is the same for every config. ``p`` stays
+    if something else uses it. Multiply-adds split across fused nodes, or inside
+    ``masked`` subblocks, are not contracted.
+    """
+    counts = loop_body.op_counts
+    if not counts["mul"] or not (counts["add"] or counts["sub"]):
+        return False
+
+    recorder = _RecordNodeDtypes()
+    with V.set_ops_handler(recorder):
+        loop_body(list(loop_body.var_ranges), allow_same_symbol_in_index=True)
+    dtypes = recorder.dtypes
+
+    def same_float_dtype(*nodes: object) -> torch.dtype | None:
+        found = {dtypes.get(n) if isinstance(n, Node) else None for n in nodes}
+        if found in ({torch.float32}, {torch.float64}):
+            return found.pop()
+        return None
+
+    graph = loop_body.root_block.graph
+    formed = 0
+    candidates = [
+        *graph.find_nodes(op="call_method", target="add"),
+        *graph.find_nodes(op="call_method", target="sub"),
+    ]
+    for node in candidates:
+        ops, lhs, rhs = node.args
+        sub = node.target == "sub"
+        for prod, addend, prod_is_lhs in ((lhs, rhs, True), (rhs, lhs, False)):
+            if not (isinstance(prod, Node) and prod.target == "mul"):
+                continue
+            _, a, b = prod.args
+            if (dtype := same_float_dtype(a, b, addend, prod)) is None:
+                continue
+            with graph.inserting_before(node):
+                if sub and prod_is_lhs:
+                    addend = graph.call_method("neg", (ops, addend))
+                    dtypes[addend] = dtype
+                elif sub:
+                    a = graph.call_method("neg", (ops, a))
+                    dtypes[a] = dtype
+                fma = graph.call_method("fma", (ops, a, b, addend))
+            dtypes[fma] = dtype
+            node.replace_all_uses_with(fma)
+            graph.erase_node(node)
+            counts[node.target] -= 1
+            counts["fma"] += 1
+            counts["neg"] += sub
+            if not prod.users:
+                graph.erase_node(prod)
+                counts["mul"] -= 1
+            formed += 1
+            break
+    return formed > 0
 
 
 def eliminate_redundant_lowp_round_trips(loop_body: LoopBody) -> bool:
