@@ -54,6 +54,7 @@ AREAS: dict[str, tuple[str, ...]] = {
 CHANGE_FEATURES = ("n_files", "n_src_files", "n_test_files", "docs_only", *AREAS)
 UNIT_FEATURES = ("is_pr", *CHANGE_FEATURES)
 MODEL_FEATURES = frozenset([*SERVED_FEATURES, "test_seconds", *UNIT_FEATURES])
+PATH_FEATURES = ("path_revert_max", "path_revert_mean")
 RISK_FEATURES = frozenset(
     [
         "log_files",
@@ -63,11 +64,13 @@ RISK_FEATURES = frozenset(
         *AREAS,
         "log_sig_added",
         "log_sig_deleted",
-        "sum_p",
-        "max_p",
-        "max_llm",
+        *PATH_FEATURES,
     ]
 )
+MAX_PATH_NODES = 20000
+MAX_PATH_KEY_CHARS = 512
+MAX_CHANGED_PATHS = 10000
+MIN_PATH_RATE = 1e-6
 
 NON_SIGNIFICANT_PREFIXES = ("test/", "docs/", "third_party/", ".github/")
 NON_SIGNIFICANT_SUFFIXES = (".md", ".rst", ".txt", ".ipynb", ".expect")
@@ -76,6 +79,73 @@ GIT_TIMEOUT_SECONDS = 60.0
 
 class UnregisteredHeuristic(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class Paths:
+    """The risk block's per-path revert rates: `base` for a file none of
+    whose nodes is listed."""
+
+    base: float
+    nodes: Mapping[str, float]
+
+
+def _rate(value: object, what: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{what}: not a number")
+    if not 0 <= value <= 1:
+        raise ValueError(f"{what}: not in [0, 1]")
+    return float(value)
+
+
+def parse_paths(value: object) -> Paths:
+    """Validates the risk block's "paths"; raises ValueError with a short
+    reason."""
+    if not isinstance(value, dict):
+        raise ValueError("not an object")
+    base = _rate(value.get("base"), "base")
+    nodes = value.get("nodes")
+    if not isinstance(nodes, dict):
+        raise ValueError("nodes: not an object")
+    if len(nodes) > MAX_PATH_NODES:
+        raise ValueError(f"{len(nodes)} nodes")
+    for key, rate in nodes.items():
+        if (
+            not isinstance(key, str)
+            or not 1 <= len(key) <= MAX_PATH_KEY_CHARS
+            or any(ord(c) < 32 or ord(c) == 127 for c in key)
+        ):
+            raise ValueError("invalid node key")
+        _rate(rate, "node")
+    return Paths(base, {key: float(rate) for key, rate in nodes.items()})
+
+
+def path_rate(paths: Paths, path: str) -> float:
+    """The rate of the first node listed among the file itself, then its
+    directories from the deepest; a node longer than MAX_PATH_KEY_CHARS is
+    never a key."""
+    nodes = paths.nodes
+    if len(path) <= MAX_PATH_KEY_CHARS and path in nodes:
+        return nodes[path]
+    end = path.rfind("/")
+    while end >= 0:
+        if end < MAX_PATH_KEY_CHARS and path[: end + 1] in nodes:
+            return nodes[path[: end + 1]]
+        end = path.rfind("/", 0, end)
+    return paths.base
+
+
+def path_values(paths: Paths, files: Collection[str]) -> dict[str, float]:
+    """PATH_FEATURES over the change's files (de-duplicated, sorted, the
+    first MAX_CHANGED_PATHS); NaN without files."""
+    unique = sorted(set(files))[:MAX_CHANGED_PATHS]
+    if not unique:
+        return dict.fromkeys(PATH_FEATURES, math.nan)
+    rates = [path_rate(paths, f) for f in unique]
+    return {
+        "path_revert_max": math.log(max(MIN_PATH_RATE, *rates)),
+        "path_revert_mean": math.log(max(MIN_PATH_RATE, math.fsum(rates) / len(rates))),
+    }
 
 
 def is_significant(path: str) -> bool:
@@ -248,14 +318,10 @@ def build_rows(
 
 
 def risk_values(
-    names: Collection[str],
-    unit: Unit,
-    p: Sequence[float],
-    llm: Sequence[float] | None,
+    names: Collection[str], unit: Unit, paths: Paths | None
 ) -> dict[str, float]:
-    """The per-unit values the risk score reads, for the names it lists. `p`
-    and `llm` (the LLM heuristic's score, None when it is not registered)
-    hold one value per test."""
+    """The per-unit values the risk score reads, for the names it lists: the
+    change alone, never the scorer's p."""
     wanted = set(names)
     values: dict[str, float] = {}
     if wanted & {"log_sig_added", "log_sig_deleted"}:
@@ -268,7 +334,6 @@ def risk_values(
         values["log_src_files"] = math.log1p(stats["n_src_files"])
         for name in ("n_test_files", "docs_only", *AREAS):
             values[name] = stats[name]
-    values["sum_p"] = math.fsum(p)
-    values["max_p"] = max(p, default=math.nan)
-    values["max_llm"] = max(llm, default=math.nan) if llm is not None else math.nan
+    if paths is not None and wanted & set(PATH_FEATURES):
+        values.update(path_values(paths, unit.changed_files()))
     return values

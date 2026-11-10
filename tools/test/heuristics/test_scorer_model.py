@@ -16,13 +16,21 @@ sys.path.append(str(REPO_ROOT))
 
 from tools.test.heuristics import scorer_fixture as fixture
 from tools.testing.target_determination.scorer import model as scorer_model
+from tools.testing.target_determination.scorer.features import path_values, Paths
 
 
 sys.path.remove(str(REPO_ROOT))
 
 KNOWN = {"fail_n", "test_seconds", "is_pr", "edited"}
-KNOWN_RISK = {"log_files", "max_p"}
+KNOWN_RISK = {"log_files", "path_revert_max", "path_revert_mean"}
 TOLERANCE = 1e-11
+CASE_PATHS = Paths(
+    fixture.PATHS_CASE["paths"]["base"], fixture.PATHS_CASE["paths"]["nodes"]
+)
+RISK_VALUES = {
+    "log_files": math.log1p(len(set(fixture.RISK_CASE["changed"]))),
+    **path_values(CASE_PATHS, fixture.RISK_CASE["changed"]),
+}
 
 
 def parse(doc: Any) -> scorer_model.Model:
@@ -78,31 +86,37 @@ class TestParity(unittest.TestCase):
             self.assertAlmostEqual(p, expected, delta=TOLERANCE)
 
     def test_risk_matches_fixture(self) -> None:
-        score = parse(fixture.DOC).risk(fixture.RISK_VALUES)
+        model = parse(fixture.DOC)
+        if model.risk_model is None:
+            self.fail(f"no risk model: {model.risk_error}")
+        self.assertEqual(model.risk_model.paths, CASE_PATHS)
+        score = model.risk(RISK_VALUES)
         if score is None:
             self.fail("no risk score")
-        for got, expected in zip(
-            (score.risk, score.percentile, score.share), fixture.EXPECTED_RISK
-        ):
-            self.assertAlmostEqual(got, expected, delta=TOLERANCE)
+        case = fixture.RISK_CASE
+        self.assertAlmostEqual(score.risk, case["expected_risk"], delta=TOLERANCE)
+        self.assertEqual(score.percentile, case["expected_percentile"])
+        self.assertAlmostEqual(score.share, case["expected_share"], delta=TOLERANCE)
 
     def test_risk_nan_uses_fill(self) -> None:
         model = parse(fixture.DOC)
-        nan = model.risk({"log_files": math.nan, "max_p": 0.0})
-        filled = model.risk({"log_files": 0.0, "max_p": 0.0})
+        nan = model.risk({"log_files": math.nan, "path_revert_max": math.nan})
+        filled = model.risk(
+            {"log_files": 0.0, "path_revert_max": -2.0, "path_revert_mean": -2.5}
+        )
         self.assertIsNotNone(filled)
         self.assertEqual(nan, filled)
-        self.assertEqual(model.risk({"max_p": 0.0}), filled)
+        self.assertEqual(model.risk({}), filled)
 
     def test_risk_infinite_value_is_none(self) -> None:
         self.assertIsNone(
-            parse(fixture.DOC).risk({"log_files": math.inf, "max_p": 0.0})
+            parse(fixture.DOC).risk({**RISK_VALUES, "log_files": math.inf})
         )
 
     def test_very_negative_risk_logit_is_zero(self) -> None:
         doc = copy.deepcopy(fixture.DOC)
         doc["risk"]["intercept"] = -1e6
-        score = parse(doc).risk(fixture.RISK_VALUES)
+        score = parse(doc).risk(RISK_VALUES)
         self.assertEqual(score, scorer_model.RiskScore(0.0, 0.0, 0.1))
 
     def test_predict_rejects_wrong_row_length(self) -> None:
@@ -243,7 +257,7 @@ class TestValidation(unittest.TestCase):
             model = parse(self.mutate(path, value))
             self.assertIsNone(model.risk_model, path)
             self.assertIsNotNone(model.risk_error, path)
-            self.assertIsNone(model.risk(fixture.RISK_VALUES))
+            self.assertIsNone(model.risk(RISK_VALUES))
             self.assertEqual(len(model.predict(fixture.ROWS)), len(fixture.ROWS))
 
     def test_absent_risk(self) -> None:
@@ -251,7 +265,68 @@ class TestValidation(unittest.TestCase):
         del doc["risk"]
         model = parse(doc)
         self.assertEqual(model.risk_error, "absent")
-        self.assertIsNone(model.risk(fixture.RISK_VALUES))
+        self.assertIsNone(model.risk(RISK_VALUES))
+
+    def assert_bad_paths(self, paths: Any, reason: str) -> None:
+        doc = copy.deepcopy(fixture.DOC)
+        if paths is None:
+            del doc["risk"]["paths"]
+        else:
+            doc["risk"]["paths"] = paths
+        model = parse(doc)
+        self.assertIsNone(model.risk_model, reason)
+        self.assertIn(reason, str(model.risk_error))
+        self.assertEqual(len(model.predict(fixture.ROWS)), len(fixture.ROWS))
+
+    def test_paths_required_by_a_path_feature(self) -> None:
+        self.assert_bad_paths(None, "no paths")
+        doc = copy.deepcopy(fixture.DOC)
+        del doc["risk"]["paths"]
+        for key in ("fill", "mean", "scale", "coef"):
+            doc["risk"][key] = doc["risk"][key][:1]
+        doc["risk"]["features"] = ["log_files"]
+        risk_model = parse(doc).risk_model
+        if risk_model is None:
+            self.fail("a risk block without path features needs no paths")
+        self.assertIsNone(risk_model.paths)
+
+    def test_bad_paths_disable_only_risk(self) -> None:
+        good = fixture.DOC["risk"]["paths"]
+        nodes = good["nodes"]
+        cases: list[tuple[Any, str]] = [
+            ("x", "not an object"),
+            ({"nodes": nodes}, "base: not a number"),
+            ({"base": True, "nodes": nodes}, "base: not a number"),
+            ({"base": 1.5, "nodes": nodes}, "base: not in [0, 1]"),
+            ({"base": -0.1, "nodes": nodes}, "base: not in [0, 1]"),
+            ({"base": 0.1}, "nodes: not an object"),
+            ({"base": 0.1, "nodes": [["a/", 0.1]]}, "nodes: not an object"),
+            ({"base": 0.1, "nodes": {"a/": 2.0}}, "node: not in [0, 1]"),
+            ({"base": 0.1, "nodes": {"a/": "0.1"}}, "node: not a number"),
+            ({"base": 0.1, "nodes": {"a/": None}}, "node: not a number"),
+            ({"base": 0.1, "nodes": {"": 0.1}}, "invalid node key"),
+            ({"base": 0.1, "nodes": {"a" * 513: 0.1}}, "invalid node key"),
+            ({"base": 0.1, "nodes": {"a/\tb": 0.1}}, "invalid node key"),
+            ({"base": 0.1, "nodes": {"a/\x1fb": 0.1}}, "invalid node key"),
+            ({"base": 0.1, "nodes": {"a/\x7fb": 0.1}}, "invalid node key"),
+            (
+                {"base": 0.1, "nodes": {f"d{i}/": 0.1 for i in range(20001)}},
+                "20001 nodes",
+            ),
+        ]
+        for paths, reason in cases:
+            self.assert_bad_paths(paths, reason)
+
+    def test_paths_limits_accepted(self) -> None:
+        doc = copy.deepcopy(fixture.DOC)
+        nodes = {f"d{i}/": 0.0 for i in range(19999)}
+        nodes["a" * 512] = 1.0
+        doc["risk"]["paths"] = {"base": 0, "nodes": nodes, "extra": 1}
+        risk_model = parse(doc).risk_model
+        if risk_model is None or risk_model.paths is None:
+            self.fail("paths at the limits rejected")
+        self.assertEqual(len(risk_model.paths.nodes), 20000)
+        self.assertEqual(risk_model.paths.base, 0.0)
 
 
 class TestLoad(unittest.TestCase):

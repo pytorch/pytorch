@@ -22,7 +22,6 @@ from tools.testing.target_determination.scorer.features import (
     served_scores,
     test_seconds,
     Unit,
-    UnregisteredHeuristic,
 )
 from tools.testing.target_determination.scorer.model import load_model, ModelError
 
@@ -57,33 +56,19 @@ def _registered_names() -> list[str]:
     return [heuristic.name for heuristic in HEURISTICS]
 
 
-def _risk(
-    model: Model, unit: Unit, p: Sequence[float], llm: Sequence[float] | None
-) -> RiskScore | None:
+def _risk(model: Model, unit: Unit) -> RiskScore | None:
     risk_model = model.risk_model
     if risk_model is None:
         print(f"TD scorer: no risk score ({model.risk_error})")
         return None
     try:
-        score = model.risk(risk_values(risk_model.features, unit, p, llm))
+        score = model.risk(risk_values(risk_model.features, unit, risk_model.paths))
     except Exception:
         print(f"TD scorer: no risk score:\n{traceback.format_exc()}")
         return None
     if score is None:
         print("TD scorer: no risk score (an infinite input)")
     return score
-
-
-def _llm_scores(
-    aggregated: AggregatedHeuristics,
-    tests: Sequence[str],
-    registered: Collection[str],
-) -> list[float] | None:
-    try:
-        served = served_scores(aggregated, [LLM_FEATURE], registered)
-    except UnregisteredHeuristic:
-        return None
-    return [served[LLM_FEATURE].get(test, 0.0) for test in tests]
 
 
 def _has_ratings(path: Path) -> bool:
@@ -161,7 +146,7 @@ def compute_scorer(
             model.features, tests, aggregated, test_times, unit, registered
         )
         p = model.predict(rows)
-        score = _risk(model, unit, p, _llm_scores(aggregated, tests, registered))
+        score = _risk(model, unit)
         block = {
             "trained_at": model.trained_at,
             "p": dict(zip(tests, p)),

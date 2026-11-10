@@ -23,6 +23,7 @@ import tools.testing.target_determination.heuristics.interface as interface
 from tools.test.heuristics import scorer_fixture as fixture
 from tools.testing.target_determination.scorer import features, infer
 from tools.testing.target_determination.scorer.model import (
+    load_model,
     MAX_FILE_BYTES,
     Model,
     RiskScore,
@@ -212,7 +213,10 @@ class TestFeatures(unittest.TestCase):
         self.assertNotIn("coedit_n", features.MODEL_FEATURES)
         self.assertNotIn("profiling_n", features.MODEL_FEATURES)
         self.assertEqual(len(features.MODEL_FEATURES), 7 + 1 + 1 + 10)
-        self.assertEqual(len(features.RISK_FEATURES), 15)
+        self.assertEqual(len(features.RISK_FEATURES), 14)
+        for name in ("sum_p", "max_p", "max_llm"):
+            self.assertNotIn(name, features.RISK_FEATURES)
+        self.assertLessEqual(set(features.PATH_FEATURES), features.RISK_FEATURES)
 
 
 def numstat_z(records: list[dict[str, Any]]) -> str:
@@ -282,16 +286,68 @@ class TestNumstat(unittest.TestCase):
 
     def test_risk_values(self) -> None:
         unit = features.Unit(fake_sources(["torch/a.py"], numstat="3\t0\ttorch/a.py\0"))
-        values = features.risk_values(
-            features.RISK_FEATURES, unit, [0.1, 0.3], [0.0, 0.25]
-        )
+        values = features.risk_values(features.RISK_FEATURES, unit, CASE_PATHS)
         self.assertEqual(set(values), set(features.RISK_FEATURES))
-        self.assertAlmostEqual(values["sum_p"], 0.4)
-        self.assertEqual(values["max_p"], 0.3)
-        self.assertEqual(values["max_llm"], 0.25)
         self.assertEqual(values["log_files"], math.log1p(1))
         self.assertEqual(values["log_sig_added"], math.log1p(3))
-        self.assertTrue(math.isnan(features.risk_values([], unit, [], None)["max_llm"]))
+        self.assertEqual(values["path_revert_max"], math.log(0.12))
+        self.assertEqual(values["path_revert_mean"], math.log(0.12))
+        self.assertEqual(features.risk_values([], unit, CASE_PATHS), {})
+        only_paths = features.risk_values(features.PATH_FEATURES, unit, CASE_PATHS)
+        self.assertEqual(set(only_paths), set(features.PATH_FEATURES))
+        self.assertEqual(features.risk_values(features.PATH_FEATURES, unit, None), {})
+
+
+CASE_PATHS = features.Paths(
+    fixture.PATHS_CASE["paths"]["base"], fixture.PATHS_CASE["paths"]["nodes"]
+)
+
+
+class TestPathValues(unittest.TestCase):
+    def assert_values(self, files: list[str], expected: dict[str, float]) -> None:
+        values = features.path_values(CASE_PATHS, files)
+        self.assertEqual(set(values), set(features.PATH_FEATURES))
+        for name in features.PATH_FEATURES:
+            self.assertAlmostEqual(values[name], expected[name], delta=1e-11)
+
+    def test_fixture_cases(self) -> None:
+        case = fixture.PATHS_CASE
+        self.assert_values(case["changed"], case["expected"])
+        self.assert_values(case["docs_changed"], case["docs_expected"])
+        self.assert_values(case["long_changed"], case["long_expected"])
+
+    def test_no_files_is_nan(self) -> None:
+        values = features.path_values(CASE_PATHS, [])
+        self.assertTrue(all(math.isnan(v) for v in values.values()))
+        self.assertEqual(set(values), set(features.PATH_FEATURES))
+
+    def test_lookup_order(self) -> None:
+        rate = functools.partial(features.path_rate, CASE_PATHS)
+        self.assertEqual(rate("torch/_inductor/ir.py"), 0.4)
+        self.assertEqual(rate("torch/_inductor/x/y.py"), 0.25)
+        self.assertEqual(rate("torch/nn/a.py"), 0.12)
+        self.assertEqual(rate("setup.py"), 0.1)
+        self.assertEqual(rate("torchx/a.py"), 0.1)
+        self.assertEqual(rate("docs/a.md"), 0.0)
+        paths = features.Paths(0.1, {"/": 0.3, "a//": 0.2})
+        self.assertEqual(features.path_rate(paths, "/x.py"), 0.3)
+        self.assertEqual(features.path_rate(paths, "a//b.py"), 0.2)
+
+    def test_keys_longer_than_the_limit_never_match(self) -> None:
+        long_dir = "a/" + "b" * 600 + "/"
+        paths = features.Paths(0.1, {long_dir: 0.9, long_dir + "c.py": 0.8})
+        self.assertEqual(features.path_rate(paths, long_dir + "c.py"), 0.1)
+        edge = "d" * (features.MAX_PATH_KEY_CHARS - 1) + "/"
+        paths = features.Paths(0.1, {edge: 0.7})
+        self.assertEqual(features.path_rate(paths, edge + "e.py"), 0.7)
+
+    def test_files_deduplicated_sorted_and_capped(self) -> None:
+        paths = features.Paths(0.0, {"z/": 1.0, "a/": 0.5})
+        many = [f"a/{i:05d}.py" for i in range(features.MAX_CHANGED_PATHS)]
+        values = features.path_values(paths, ["z/last.py", *many])
+        self.assertEqual(values["path_revert_max"], math.log(0.5))
+        values = features.path_values(paths, ["z/x.py", "a/y.py", "a/y.py"])
+        self.assertAlmostEqual(values["path_revert_mean"], math.log(0.75))
 
 
 class ScorerTestCase(unittest.TestCase):
@@ -406,6 +462,25 @@ class TestComputeScorer(ScorerTestCase):
         ):
             block, _ = self.compute()
         self.assertTrue(block["fallback"].startswith("ValueError"))
+
+    def test_risk_reads_the_change_alone(self) -> None:
+        self.write_model()
+        changed = ["torch/_inductor/ir.py", "aten/x.cpp"]
+        block = self.compute(unit=features.Unit(fake_sources(changed))).block
+        values = {
+            "log_files": math.log1p(2),
+            **features.path_values(CASE_PATHS, changed),
+        }
+        expected = load_model(
+            self.model_path, features.MODEL_FEATURES, features.RISK_FEATURES
+        ).risk(values)
+        if expected is None:
+            self.fail("no risk score")
+        self.assertEqual(block["risk"], expected.risk)
+        self.assertEqual(block["budget_share"], expected.share)
+        with mock.patch.object(Model, "predict", return_value=[0.9] * len(TESTS)):
+            again = self.compute(unit=features.Unit(fake_sources(changed))).block
+        self.assertEqual(again["risk"], block["risk"])
 
     def test_risk_failure_keeps_p(self) -> None:
         self.write_model()

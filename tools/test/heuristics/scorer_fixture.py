@@ -51,15 +51,25 @@ DOC: dict[str, Any] = {
     },
     "platt": {"coef": 0.9, "intercept": -0.4, "clip": 1e-07},
     "risk": {
-        "features": ["log_files", "max_p"],
-        "fill": [0.0, 0.0],
-        "mean": [1.0, 0.01],
-        "scale": [0.5, 0.02],
-        "coef": [0.7, -0.3],
+        "features": ["log_files", "path_revert_max", "path_revert_mean"],
+        "fill": [0.0, -2.0, -2.5],
+        "mean": [1.0, -2.0, -2.5],
+        "scale": [0.5, 0.6, 0.8],
+        "coef": [0.7, 0.9, 0.3],
         "intercept": -1.0,
-        "quantiles": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "quantiles": [0.5, 0.7, 0.85, 0.9, 0.95],
         "share_min": 0.1,
         "share_max": 0.2,
+        "paths": {
+            "base": 0.1,
+            "nodes": {
+                "torch/": 0.12,
+                "torch/_inductor/": 0.25,
+                "torch/_inductor/ir.py": 0.4,
+                "aten/": 0.05,
+                "docs/": 0.0,
+            },
+        },
     },
     "gate": {},
 }
@@ -82,9 +92,43 @@ EXPECTED_P = [
     0.024482727435,
 ]
 
-RISK_VALUES = {"log_files": 2.0, "max_p": 0.05}
+CHANGED = [
+    "torch/_inductor/ir.py",
+    "torch/_inductor/lowering.py",
+    "torch/nn/modules/linear.py",
+    "aten/src/ATen/native/Foo.cpp",
+    "docs/source/index.rst",
+    "setup.py",
+    "torch/_inductor/ir.py",
+]
 
-EXPECTED_RISK = [0.450166002688, 0.8, 0.18]  # risk, percentile, share
+# The risk's values: {"log_files": log1p(distinct changed files)} and the
+# path features of the changed files under DOC's risk paths.
+RISK_CASE: dict[str, Any] = {
+    "changed": CHANGED,
+    "expected_risk": 0.898818046851,
+    "expected_percentile": 0.6,
+    "expected_share": 0.16,
+}
+
+PATHS_CASE: dict[str, Any] = {
+    "paths": DOC["risk"]["paths"],
+    "changed": CHANGED,
+    "expected": {
+        "path_revert_max": -0.916290731874,
+        "path_revert_mean": -1.875141078167,
+    },
+    "docs_changed": ["docs/a.md"],
+    "docs_expected": {
+        "path_revert_max": -13.815510557964,
+        "path_revert_mean": -13.815510557964,
+    },
+    "long_changed": ["torch/" + "x" * 600 + "/y.py"],
+    "long_expected": {
+        "path_revert_max": -2.1202635362,
+        "path_revert_mean": -2.1202635362,
+    },
+}
 
 CUT_CASE: dict[str, Any] = {
     "td_order": ["h", "b", "d", "c", "a", "e", "f", "g"],

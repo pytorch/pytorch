@@ -12,9 +12,16 @@ from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any, TYPE_CHECKING
 
+from tools.testing.target_determination.scorer.features import (
+    parse_paths,
+    PATH_FEATURES,
+)
+
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping, Sequence
+
+    from tools.testing.target_determination.scorer.features import Paths
 
 
 FORMAT = 1
@@ -64,6 +71,7 @@ class Risk:
     quantiles: tuple[float, ...]
     share_min: float
     share_max: float
+    paths: Paths | None
 
 
 @dataclass(frozen=True)
@@ -271,6 +279,14 @@ def _risk(value: object, known: Collection[str]) -> Risk:
     share_max = _number(doc.get("share_max"), "invalid risk share_max")
     if not 0 <= share_min <= share_max <= 1:
         raise ModelError("invalid risk: shares out of order")
+    paths = None
+    if "paths" in doc:
+        try:
+            paths = parse_paths(doc["paths"])
+        except ValueError as e:
+            raise ModelError(f"invalid risk paths: {e}") from e
+    elif set(names) & set(PATH_FEATURES):
+        raise ModelError("invalid risk: no paths")
     return Risk(
         features=tuple(names),
         fill=lists["fill"],
@@ -281,6 +297,7 @@ def _risk(value: object, known: Collection[str]) -> Risk:
         quantiles=quantiles,
         share_min=share_min,
         share_max=share_max,
+        paths=paths,
     )
 
 
