@@ -1025,12 +1025,13 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(subsets, [])
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
 
+    @parametrize("consumer", ["as_strided", "as_strided_copy"])
     @torch._inductor.config.patch(
         post_grad_fusion_options={
             "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
         },
     )
-    def test_batch_linear_lhs_post_grad_aliased_as_strided(self):
+    def test_batch_linear_lhs_post_grad_aliased_as_strided(self, consumer):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1040,8 +1041,13 @@ class TestGroupBatchFusion(TestCase):
                 self.d = torch.nn.Linear(64, 48, bias=False)
 
             def forward(self, x):
+                a = self.a(x)
+                if consumer == "as_strided":
+                    out = a.t().as_strided((48, 32), (32, 1))
+                else:
+                    out = torch.as_strided_copy(a.t(), (48, 32), (32, 1))
                 return (
-                    torch.sin(self.a(x).t().as_strided((48, 32), (32, 1))),
+                    torch.sin(out),
                     torch.cos(self.b(x)),
                     self.c(x),
                     self.d(x),
@@ -1055,8 +1061,8 @@ class TestGroupBatchFusion(TestCase):
             with _record_fusion_subsets() as subsets:
                 actual = torch.compile(module, fullgraph=True)(x)
         self.assertEqual(actual, expected)
-        # The view chain leading to as_strided blocks a, while the unrelated
-        # b/c/d projections still fuse.
+        # The view chain leading to the raw-storage consumer blocks a, while
+        # the unrelated b/c/d projections still fuse.
         self.assertEqual(subsets, [3])
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
 

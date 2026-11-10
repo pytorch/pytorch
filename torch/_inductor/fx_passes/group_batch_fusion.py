@@ -572,6 +572,7 @@ class BatchLinearLHSFusion(BatchFusion):
         raw_storage_ops = (
             aten.as_strided.default,
             aten.as_strided_.default,
+            aten.as_strided_copy.default,
             aten.as_strided_scatter.default,
             aten.resize.default,
             aten.resize_as.default,
