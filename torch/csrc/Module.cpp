@@ -612,7 +612,7 @@ namespace {
 
 template <class T>
 void DLPack_Capsule_Destructor(PyObject* data) {
-  if (C10_LIKELY(!PyCapsule_IsValid(data, at::DLPackTraits<T>::capsule))) {
+  if (!PyCapsule_IsValid(data, at::DLPackTraits<T>::capsule)) [[likely]] {
     // early out, see DLPack spec: if a consuming library sets the capsule
     // name to something else, they own it and we don't need to do anything
     return;
