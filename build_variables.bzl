@@ -531,6 +531,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/ProcessGroupWrapper.cpp",
     "torch/csrc/distributed/c10d/Store.cpp",
     "torch/csrc/distributed/c10d/TCPStore.cpp",
+    "torch/csrc/distributed/c10d/store/TCPStoreAllowList.cpp",
     "torch/csrc/distributed/c10d/store/TCPStoreBackend.cpp",
     "torch/csrc/distributed/c10d/store/TCPStoreLibUvBackend.cpp",
     "torch/csrc/distributed/c10d/Types.cpp",
