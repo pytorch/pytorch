@@ -1,6 +1,8 @@
 # Owner(s): ["module: cuda"]
 
 import importlib
+import subprocess
+import sys
 import unittest
 import unittest.mock
 
@@ -109,6 +111,37 @@ class TestGpuTraceDevice(TestCase):
         event.synchronize()
         self.mock.assert_called_once_with(event._as_parameter_.value)
 
+    def test_stream_creation_callback(self, device):
+        if self.device_type == "xpu":
+            script = """
+import torch
+import sys
+from unittest.mock import MagicMock
+
+torch._C._activate_gpu_trace()
+from torch.xpu import _gpu_trace
+
+mock = MagicMock()
+_gpu_trace.register_callback_for_stream_creation(mock)
+torch.xpu.Stream(device=torch.device(sys.argv[1]))
+mock.assert_called()
+"""
+            subprocess.run([sys.executable, "-c", script, str(device)], check=True)
+            return
+
+        self.gpu_trace.register_callback_for_stream_creation(self.mock)
+
+        # see Note [HIP Lazy Streams]
+        device_module = torch.get_device_module(device)
+        if self.device_type == "cuda" and torch.version.hip:
+            user_stream = device_module.Stream()
+            with device_module.stream(user_stream):
+                torch.ones(5, device=device)
+        else:
+            device_module.Stream()
+
+        self.mock.assert_called()
+
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5238")
     def test_memcpy_synchronization(self, device):
         self.gpu_trace.register_callback_for_stream_synchronization(self.mock)
@@ -138,21 +171,6 @@ class TestGpuTraceCUDA(TestCase):
         super().setUp()
         torch._C._activate_gpu_trace()
         self.mock = unittest.mock.MagicMock()
-
-    def test_stream_creation_callback(self):
-        import torch.cuda._gpu_trace as gpu_trace
-
-        gpu_trace.register_callback_for_stream_creation(self.mock)
-
-        # see Note [HIP Lazy Streams]
-        if torch.version.hip:
-            user_stream = torch.cuda.Stream()
-            with torch.cuda.stream(user_stream):
-                torch.ones(5, device="cuda")
-        else:
-            torch.cuda.Stream()
-
-        self.mock.assert_called()
 
 
 instantiate_device_type_tests(
