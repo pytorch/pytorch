@@ -6,15 +6,14 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/TensorCompare.h>
+#include <c10/util/safe_conv.h>
 #include <algorithm>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/eq.h>
 #include <ATen/ops/isin_native.h>
-#include <ATen/ops/ones_like_native.h>
 #include <ATen/ops/result_type.h>
 #include <ATen/ops/where_native.h>
 #endif
@@ -28,69 +27,55 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 
 namespace mps {
 
-struct CachedGraph : public MPSCachedGraph {
-  CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-  MPSGraphTensor *inputTensor = nil, *outputTensor = nil;
-  MPSGraphTensor *minTensor = nil, *maxTensor = nil;
-};
-
 static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
                                        const Tensor& test_elements,
-                                       bool assume_unique,
                                        bool invert,
-                                       const Tensor& out,
-                                       std::string op_name) {
-  if (elements.numel() == 0) {
-    return;
-  }
-
-  if (test_elements.numel() == 0) {
-    if (invert) {
-      auto ones = ones_like(out);
-      out.copy_(ones);
-    } else {
-      auto zeros = zeros_like(out);
-      out.copy_(zeros);
-    }
-    return;
-  }
-
-  const auto common_type = at::result_type(elements, test_elements);
+                                       const Tensor& out) {
   TORCH_CHECK(elements.is_mps() && test_elements.is_mps());
-
-  @autoreleasepool {
-    std::string key = op_name + getTensorsStringKey({elements, test_elements}) + std::to_string(invert);
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<MPSBinaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->inputTensor_ = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(elements.scalar_type()));
-      newCachedGraph->otherTensor_ = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(test_elements.scalar_type()));
-
-      // Cast to common type
-      auto inputTensor = castMPSTensor(mpsGraph, newCachedGraph->inputTensor_, common_type);
-      auto otherTensor = castMPSTensor(mpsGraph, newCachedGraph->otherTensor_, common_type);
-
-      MPSShape* outputShape = getMPSShape(out);
-
-      MPSGraphTensor* input_flattened = [mpsGraph reshapeTensor:inputTensor withShape:@[ @-1, @1 ] name:nil];
-      MPSGraphTensor* other_flattened = [mpsGraph reshapeTensor:otherTensor withShape:@[ @1, @-1 ] name:nil];
-      MPSGraphTensor* isInTensor = [mpsGraph equalWithPrimaryTensor:input_flattened
-                                                    secondaryTensor:other_flattened
-                                                               name:nil];
-      MPSGraphTensor* output = [mpsGraph reductionOrWithTensor:isInTensor axis:1 name:nil];
-      output = [mpsGraph reshapeTensor:output withShape:outputShape name:nil];
-
-      if (invert) {
-        output = [mpsGraph notWithTensor:output name:nil];
+  if (elements.numel() == 0 || test_elements.numel() == 0) {
+    out.fill_(invert);
+    return;
+  }
+  // Above this many test elements, sorting them once and binary searching beats a linear scan per element
+  constexpr int64_t max_linear_scan_test_elements = 8;
+  // Same for elements when one thread per test element searches them
+  constexpr int64_t max_linear_scan_elements = 4;
+  // Parallelize over test elements (sorting elements instead) once they outnumber elements by more than this
+  constexpr int64_t test_parallel_min_ratio = 2;
+  const auto common_type = at::result_type(elements, test_elements);
+  const auto elements_c = elements.to(common_type).contiguous();
+  const auto test_c = test_elements.to(common_type).contiguous();
+  const auto test_parallel =
+      test_c.numel() > max_linear_scan_test_elements && test_c.numel() > test_parallel_min_ratio * elements_c.numel();
+  const auto& lookup_c = test_parallel ? elements_c : test_c;
+  const auto sorted = lookup_c.numel() > (test_parallel ? max_linear_scan_elements : max_linear_scan_test_elements);
+  const auto lookup = sorted ? std::get<0>(lookup_c.view(-1).sort()) : lookup_c;
+  const auto lookup_size = c10::safe_conv<uint32_t>(lookup.numel(), "uint32_t");
+  const auto found = test_parallel ? elements_c.new_zeros({elements_c.numel()}, kInt) : Tensor();
+  const auto suffix = (sorted ? "sorted_" : "") + scalarToMetalTypeString(common_type);
+  const auto out_c = out.contiguous();
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto enc = stream->commandEncoder();
+      if (test_parallel) {
+        auto mark = lib.getPipelineStateForFunc("isin_mark_" + suffix);
+        [enc setComputePipelineState:mark];
+        mtl_setArgs(enc, lookup, test_c, found, lookup_size);
+        mtl_dispatch1DJob(enc, mark, test_c.numel());
       }
-      newCachedGraph->outputTensor_ = output;
-    });
-
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, elements);
-    auto otherPlaceholder = Placeholder(cachedGraph->otherTensor_, test_elements);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, otherPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
+      auto pso = lib.getPipelineStateForFunc((test_parallel ? "isin_gather_" : "isin_") + suffix);
+      [enc setComputePipelineState:pso];
+      if (test_parallel) {
+        mtl_setArgs(enc, elements_c, lookup, out_c, lookup_size, invert, found);
+      } else {
+        mtl_setArgs(enc, elements_c, lookup, out_c, lookup_size, invert);
+      }
+      mtl_dispatch1DJob(enc, pso, elements_c.numel());
+    }
+  });
+  if (!out_c.is_same(out)) {
+    out.copy_(out_c);
   }
 }
 
@@ -100,13 +85,12 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
 
 TORCH_IMPL_FUNC(isin_Tensor_Tensor_out_mps)
 (const Tensor& elements, const Tensor& test_elements, bool assume_unique, bool invert, const Tensor& out) {
-  mps::isin_Tensor_Tensor_out_mps(elements, test_elements, assume_unique, invert, out, __func__);
+  mps::isin_Tensor_Tensor_out_mps(elements, test_elements, invert, out);
 }
 TORCH_IMPL_FUNC(isin_Scalar_Tensor_out_mps)
 (const Scalar& elements, const Tensor& test_elements, bool assume_unique, bool invert, const Tensor& out) {
   at::native::resize_output(out, {});
-  mps::isin_Tensor_Tensor_out_mps(
-      mps::wrapped_scalar_tensor_mps(elements, kMPS), test_elements, assume_unique, invert, out, __func__);
+  mps::isin_Tensor_Tensor_out_mps(mps::wrapped_scalar_tensor_mps(elements, kMPS), test_elements, invert, out);
 }
 
 static void where_kernel_mps(TensorIterator& iter) {
