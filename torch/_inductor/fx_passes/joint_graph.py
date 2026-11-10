@@ -105,6 +105,8 @@ def remove_no_ops(
     """
     Removes operations that are essentially no-ops e.g. (+ 0, - 0, * 1, / 1)
     """
+    from .post_grad import _aliased_by_writing_op
+
     with torch.utils._python_dispatch._disable_current_modes():
         graph = gm.graph
 
@@ -170,6 +172,9 @@ def remove_no_ops(
                         )
                 else:
                     return
+
+            if _aliased_by_writing_op(node, [replacement]):
+                return
 
             node.replace_all_uses_with(replacement)
             replacement.meta.update(node.meta)
