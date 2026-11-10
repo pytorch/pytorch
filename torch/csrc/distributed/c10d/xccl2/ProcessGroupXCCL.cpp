@@ -64,6 +64,10 @@ void applyPreMulFactor(at::Tensor& tensor, const ::c10d::ReduceOp& op) {
 // result afterwards at the call site.
 //   PREMUL_SUM: https://github.com/uxlfoundation/oneCCL/issues/196
 //   AVG:        https://github.com/uxlfoundation/oneCCL/issues/195
+// TODO: oneCCL recent release added the PREMUL_SUM and AVG native support.
+// However, the AVG has some accuracy issues, which are being investigated.
+// Both of these implementations are planned to be evaluated after XCCL2
+// landing, for both performance and functionality.
 template <typename T>
 std::pair<T, ::c10d::ReduceOp> getMaybeScaledInputsAndNewOp(
     const T& input,
@@ -190,26 +194,8 @@ ProcessGroupXCCL::~ProcessGroupXCCL() {
     // anything else so a concurrent allocator event cannot reach a dead object.
     detachMemoryHook();
 
-    // Signal shutdown to timeout watchdog thread to prevent it from accessing
-    // this object after destruction
-    shutdown_ = true;
-    // Wake up the timeout watchdog thread
-    {
-      std::lock_guard<std::mutex> lock(timeout_mutex_);
-      timeout_cv_.notify_all();
-    }
-
-    // Wait for timeout thread to finish. If we're being called from within
-    // the timeout thread itself (e.g., garbageCollect popped a work item whose
-    // destruction released the last reference to this backend), we must detach
-    // instead of join to avoid a deadlock.
-    if (timeout_thread_.joinable()) {
-      if (std::this_thread::get_id() != timeout_thread_.get_id()) {
-        timeout_thread_.join();
-      } else {
-        timeout_thread_.detach(); // NOLINT(facebook-hte-BadCall-detach)
-      }
-    }
+    // Stop the watchdog so it cannot access this object after destruction.
+    stopWatchdog();
 
     if (xccl_comm_) {
       if (xccl_api_) {
@@ -472,19 +458,8 @@ void ProcessGroupXCCL::finalize() {
   // pointer to this backend and can fire from an allocator thread.
   detachMemoryHook();
 
-  // Signal shutdown to timeout watchdog
-  shutdown_ = true;
-
-  // Wake up the timeout watchdog thread
-  {
-    std::lock_guard<std::mutex> lock(timeout_mutex_);
-    timeout_cv_.notify_all();
-  }
-
-  // Wait for timeout thread to finish
-  if (timeout_thread_.joinable()) {
-    timeout_thread_.join();
-  }
+  // Stop the watchdog first
+  stopWatchdog();
 
   // Wait for all pending work objects to complete and get final status
   auto work_status = workq_.finalize();
@@ -551,6 +526,26 @@ void ProcessGroupXCCL::abortXcclComm() {
     TC_LOG(ERROR, this) << "Aborting process due to error or timeout";
     runAbortHooks();
     ::abort();
+  }
+}
+
+void ProcessGroupXCCL::stopWatchdog() {
+  shutdown_ = true;
+  {
+    std::lock_guard<std::mutex> lock(timeout_mutex_);
+    timeout_cv_.notify_all();
+  }
+
+  // Wait for timeout thread to finish. If we're being called from within
+  // the timeout thread itself (e.g., garbageCollect popped a work item whose
+  // destruction released the last reference to this backend), we must detach
+  // instead of join to avoid a deadlock.
+  if (timeout_thread_.joinable()) {
+    if (std::this_thread::get_id() != timeout_thread_.get_id()) {
+      timeout_thread_.join();
+    } else {
+      timeout_thread_.detach(); // NOLINT(facebook-hte-BadCall-detach)
+    }
   }
 }
 
@@ -834,6 +829,9 @@ c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::all_reduce(
   // all_reduce is in place, so PREMUL_SUM scales the caller's buffer directly
   // rather than a clone. See getMaybeScaledInputsAndNewOp for the oneCCL
   // limitation this works around.
+  // TODO: oneCCL recent release added the PREMUL_SUM and AVG native support.
+  // Both of these native implementations are planned to be evaluated after
+  // XCCL2 landing, for both performance and functionality.
   const auto maybe_new_op = [&]() -> ::c10d::ReduceOp {
     if (op == ::c10d::ReduceOp::PREMUL_SUM) {
       c10::StreamGuard guard(stream);
