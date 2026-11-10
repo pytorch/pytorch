@@ -732,8 +732,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 }}
                 """)
         self.prefix.writeline_aot("namespace torch::aot_inductor {")
-        if not V.graph.is_const_graph:
-            self.codegen_input_alignment_and_nan_asserts()
+        self.codegen_input_alignment_and_nan_asserts()
 
     def write_input_output_info(
         self,
