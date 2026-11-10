@@ -58,7 +58,6 @@ from torch.testing._internal.common_cuda import (
     tf32_on,
     tf32_on_and_off,
     with_limited_cuda_memory_on_integrated_device,
-    xfailCUDAIfSM89OrLaterOnWindows,
 )
 from torch.testing._internal.common_device_type import (
     has_cusolver,
@@ -4093,7 +4092,6 @@ torch.cuda.synchronize()
         self.assertEqual(seed_t.data_ptr(), data_ptr)
 
     @skipIfRocmVersionLessThan((7, 14))
-    @xfailCUDAIfSM89OrLaterOnWindows
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -4144,7 +4142,6 @@ torch.cuda.synchronize()
         )
 
     @skipIfRocmVersionLessThan((7, 14))
-    @xfailCUDAIfSM89OrLaterOnWindows
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
