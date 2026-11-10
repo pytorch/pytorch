@@ -6,7 +6,7 @@ import logging
 import math
 import operator
 from collections import Counter, defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from typing import Any, cast, TypeVar
 from typing_extensions import ParamSpec
 
@@ -36,6 +36,7 @@ from torch._prims_common import (
     make_contiguous_strides_for,
 )
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.passes.reinplace import _is_view_op
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, inductor_prims, ir, pattern_matcher  # noqa: F401
@@ -44,7 +45,6 @@ from ..fx_utils import (
     FakeTensorUpdater,
     get_fake_args_kwargs,
     get_node_storage,
-    get_storage,
     same_tensor_meta,
 )
 from ..kernel.symmetric_mm import quack_symmetric_mm
@@ -124,6 +124,12 @@ pass_patterns = [
 # NaN scores always propagate; native's scalar-tail std::max can drop one.
 _CPU_FLASH_ATTENTION_KV_BLOCK_SIZE = 512
 
+# Applied only when cpp.enable_cpu_flash_attention_decomposition is set, so other
+# graphs do not pay for matching its getitem root.
+cpu_flash_attention_decomposition_pass = PatternMatcherPass(
+    pass_name="cpu_flash_attention_decomposition"
+)
+
 
 def _can_decompose_cpu_flash_attention(match: Match) -> bool:
     if not config.cpp.enable_cpu_flash_attention_decomposition:
@@ -182,7 +188,7 @@ def _can_decompose_cpu_flash_attention(match: Match) -> bool:
         ),
         0,
     ),
-    pass_dict=pass_patterns[0],  # pyrefly: ignore [bad-argument-type]
+    pass_dict=cpu_flash_attention_decomposition_pass,  # pyrefly: ignore [bad-argument-type]
     extra_check=_can_decompose_cpu_flash_attention,
 )
 def _decompose_cpu_flash_attention(match: Match, *args, **kwargs):
@@ -436,6 +442,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(gm, "remove_assert_ops").apply_graph_pass(
             remove_assert_ops
         )
+        if config.cpp.enable_cpu_flash_attention_decomposition:
+            GraphTransformObserver(
+                gm, "cpu_flash_attention_decomposition"
+            ).apply_graph_pass(cpu_flash_attention_decomposition_pass.apply)
         for i, patterns in enumerate(pass_patterns):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
@@ -1412,7 +1422,8 @@ def is_valid_splitwithsizes_cat(match):
     if cat_items_args_order != list(range(len(split_sizes))):
         return False
 
-    return True
+    # The cat is a fresh copy of the input, like a clone in remove_noop_ops.
+    return not _aliased_by_writing_op(cat_node, [match.kwargs["input_"]])
 
 
 def _canonicalize_dim_arg(rank, dim):
@@ -1655,6 +1666,58 @@ def _collect_output_storage(
     )
 
 
+def _storage_users(node: torch.fx.Node) -> Iterator[torch.fx.Node]:
+    """The users of ``node`` and of its views, each once, followed through view ops and
+    pass-through lowerings as in ``_storage_base``."""
+    storage = _storage_key(node)
+    if storage is None:
+        return
+    pending = [node]
+    seen = OrderedSet([node])
+    while pending:
+        current = pending.pop()
+        for user in current.users:
+            if user in seen:
+                continue
+            seen.add(user)
+            yield user
+            # A multi-output pass-through lowering has no storage of its own, but the
+            # getitems of the inputs it forwards do.
+            getitems = [u for u in user.users if u.target is operator.getitem]
+            if any(_storage_key(n) == storage for n in [user, *getitems]):
+                pending.append(user)
+
+
+def _storage_key(node: torch.fx.Node) -> int | None:
+    return get_node_storage(_storage_base(node))
+
+
+def _storage_base(node: torch.fx.Node) -> torch.fx.Node:
+    """The node that owns ``node``'s storage, found by walking up views and pass-through
+    lowerings rather than from ``node``'s metadata: until fake tensors are updated, a
+    view of a copy that a pass replaced with its source still names the copy's
+    storage."""
+    while node.op == "call_function":
+        op, index = node, None
+        if node.target is operator.getitem and isinstance(node.args[0], fx.Node):
+            op, index = node.args[0], cast(int, node.args[1])
+        name = getattr(op.target, "_inductor_lowering_output_metadata_is_input", None)
+        if _is_view_op(op.target):
+            base = op.args[0]
+        elif name is not None:
+            base = op.args[name] if isinstance(name, int) else op.kwargs[name]
+            if index is not None:
+                if not isinstance(base, (list, tuple)):
+                    break
+                base = base[index]
+        else:
+            break
+        if not isinstance(base, fx.Node):
+            break
+        node = base
+    return node
+
+
 def _depends_on_storage_offset(node: torch.fx.Node) -> bool:
     """Whether a user of ``node``, or of a view of it, depends on where it sits in its storage.
 
@@ -1662,33 +1725,114 @@ def _depends_on_storage_offset(node: torch.fx.Node) -> bool:
     storage offset is relative to the storage, and user-defined kernels of any DSL,
     which are opaque and may need an aligned base, for example to build a TMA
     descriptor on the host or on the device. Other opaque consumers, such as custom
-    ops and extern fallback kernels, are intentionally not included. Views are
-    followed through single- and multi-output view ops.
+    ops and extern fallback kernels, are intentionally not included.
     """
-    storage = get_node_storage(node)
-    if storage is None:
+    return any(
+        user.target is aten.as_strided.default
+        or is_user_kernel_functional_hop(user.target)
+        for user in _storage_users(node)
+    )
+
+
+def _receive_op(name: str) -> torch._ops.OpOverload | None:
+    packet = getattr(torch.ops._c10d_functional, name, None)
+    return None if packet is None else packet.default
+
+
+def _received_into(op: torch.fx.Node) -> list[Any]:
+    """The tensors that a receive writes. ``irecv`` and ``batch_p2p_ops`` have
+    functional schemas, but their lowerings write the buffers they get in place, so
+    nothing else in the graph records these writes."""
+    if op.target is _receive_op("irecv"):
+        return [op.args[0]]
+    if op.target is _receive_op("batch_p2p_ops"):
+        kinds, tensors = cast(list[str], op.args[0]), cast(list[Any], op.args[3])
+        return [t for kind, t in zip(kinds, tensors) if kind == "irecv"]
+    return []
+
+
+def _reinplaced_writes(op: torch.fx.Node) -> tuple[list[Any], list[Any]] | None:
+    """The arguments that ``op`` writes once reinplaced, and all its arguments, for a
+    user-kernel functional HOP, ``auto_functionalized`` or ``auto_functionalized_v2``,
+    read from the fields that ``reinplace_inplaceable_ops`` uses."""
+    kwargs = cast(dict[str, Any], op.kwargs)
+    if is_user_kernel_functional_hop(op.target):
+        kernel_args = kwargs["kwargs"]
+        names = kwargs["tensors_to_clone"]
+        return [kernel_args[name] for name in names], list(kernel_args.values())
+    if op.target is torch.ops.higher_order.auto_functionalized:
+        from torch._higher_order_ops.auto_functionalize import get_mutable_args
+
+        names, _ = get_mutable_args(cast(torch._ops.OpOverload, op.args[0]))
+        return [kwargs[name] for name in names], list(kwargs.values())
+    if op.target is torch.ops.higher_order.auto_functionalized_v2:
+        return kwargs["_all_bases"], list(kwargs.values())
+    return None
+
+
+def _has_writing_op(graph: torch.fx.Graph) -> bool:
+    """Whether ``graph`` has an op that ``_received_into`` or ``_reinplaced_writes``
+    knows to write its arguments."""
+    targets = [
+        _receive_op("irecv"),
+        _receive_op("batch_p2p_ops"),
+        torch.ops.higher_order.auto_functionalized,
+        torch.ops.higher_order.auto_functionalized_v2,
+        *(info.functional for info in user_kernel_hop_infos()),
+    ]
+    return any(
+        graph.find_nodes(op="call_function", target=target)
+        for target in targets
+        if target is not None
+    )
+
+
+def _aliased_by_writing_op(node: torch.fx.Node, srcs: Sequence[torch.fx.Node]) -> bool:
+    """Whether replacing the fresh storage of ``node`` with that of ``srcs`` would let an
+    op write one of them where eager wrote another, or read its own writes. ``srcs`` is
+    the source of a copy, or the cat inputs that the outputs of ``cat(...).split(...)``
+    become.
+
+    That is the case when a receive (``_received_into``) writes any of these storages,
+    or a view of one, or when an op (``_reinplaced_writes``) takes ``node``'s storage
+    and a source's as arguments, or only ``node``'s when two sources share a storage,
+    and writes one of them: ``w = z.clone(); kernel(w, z.T)``, ``zt = z.clone();
+    kernel(z, zt.T)`` and ``p, q = torch.cat([z, z.clone()]).split(...); kernel(p,
+    q.T)`` would all become ``kernel(z, z.T)``, which reads its own writes. An op that
+    writes one storage and reads no other is safe: reinplacing writes a storage only
+    when no later op reads it, the copy's users included.
+    """
+
+    def storages(args: list[Any]) -> OrderedSet[int | None]:
+        leaves = pytree.tree_leaves(args)
+        return OrderedSet(_storage_key(a) for a in leaves if isinstance(a, fx.Node))
+
+    if not _has_writing_op(node.graph):
         return False
-    pending = [node]
-    seen = OrderedSet([node])
-    while pending:
-        current = pending.pop()
-        for user in current.users:
-            if user.target is aten.as_strided.default:
-                return True
-            if is_user_kernel_functional_hop(user.target):
-                return True
-            if user.op != "call_function" or user in seen:
-                continue
-            val = user.meta.get("val")
-            outputs = val if isinstance(val, (list, tuple)) else [val]
-            if any(
-                isinstance(out, torch.Tensor)
-                and torch._C._has_storage(out)
-                and get_storage(out) == storage
-                for out in outputs
-            ):
-                seen.add(user)
-                pending.append(user)
+    storage = _storage_key(node)
+    src_storages = OrderedSet(_storage_key(src) for src in srcs)
+    if storage is None or None in src_storages:
+        return False
+    repeated = len(src_storages) < len(srcs)
+    bases = OrderedSet([node, *(_storage_base(src) for src in srcs)])
+    seen = OrderedSet[torch.fx.Node]()
+    for user in itertools.chain.from_iterable(map(_storage_users, bases)):
+        if user in seen:
+            continue
+        seen.add(user)
+        received = storages(_received_into(user))
+        if storage in received or any(s in received for s in src_storages):
+            return True
+        if (accesses := _reinplaced_writes(user)) is None:
+            continue
+        written, used = map(storages, accesses)
+        if storage in used and (
+            (repeated and storage in written)
+            or any(
+                s in used and (storage in written or s in written) for s in src_storages
+            )
+        ):
+            return True
     return False
 
 
@@ -1790,12 +1934,17 @@ def remove_noop_ops(graph: torch.fx.Graph):
             # A non-view noop such as clone has fresh storage at offset 0. Replacing it
             # with a source at another offset changes what storage-relative users read,
             # so compare offsets only when such a user exists.
-            if same_tensor_meta(
-                node,
-                src,
-                skip_storage_offset=node_is_view
-                or not _depends_on_storage_offset(node),
-            ) and cond(*args, **kwargs):
+            if (
+                same_tensor_meta(
+                    node,
+                    src,
+                    skip_storage_offset=node_is_view
+                    or not _depends_on_storage_offset(node),
+                )
+                and cond(*args, **kwargs)
+                # Keep a real copy when an op writes it or its source and uses both.
+                and (node_is_view or not _aliased_by_writing_op(node, [src]))
+            ):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
 
@@ -2382,7 +2531,9 @@ def is_valid_cat_splitwithsizes(match):
         if cat_input_size != split_size:
             return False
 
-    return True
+    # Like a clone in remove_noop_ops, each split output is a copy of its cat input,
+    # and the outputs of cat inputs that share a storage become one storage.
+    return not _aliased_by_writing_op(cat_node, cat_inputs)
 
 
 # dim defaults to 0 for both ops, and aot autograd does not fill in defaults,

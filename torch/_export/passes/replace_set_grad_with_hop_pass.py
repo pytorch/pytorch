@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING
 import torch
 from torch._higher_order_ops.wrap import wrap_with_set_grad_enabled
 
-from ..utils import node_inline_, nodes_filter, nodes_first, nodes_map, sequential_split
+from ..utils import node_inline_, nodes_filter, nodes_map, sequential_split
 from .replace_with_hop_pass_util import (
+    _first_call_in_sub_mod,
     _replace_with_hop_helper,
     _replace_with_hop_pass_helper,
     _sequential_split_and_maybe_inline_subgraphs_helper,
@@ -33,16 +34,14 @@ def _is_set_grad_enabled_sub_mod(
         if not isinstance(node.target, str):
             raise AssertionError(f"expected str target, got {type(node.target)}")
         subgm = getattr(node.graph.owning_module, node.target)
-        first_non_ph = nodes_first(
-            subgm.graph.nodes, lambda node: node.op != "placeholder"
-        )
+        first_call = _first_call_in_sub_mod(subgm)
         if (
-            first_non_ph
-            and first_non_ph.op == "call_function"
-            and first_non_ph.target is torch._C._set_grad_enabled
+            first_call
+            and first_call.op == "call_function"
+            and first_call.target is torch._C._set_grad_enabled
         ):
             return (
-                first_non_ph.args[0] != torch.is_grad_enabled()  # type: ignore[bad-return]
+                first_call.args[0] != torch.is_grad_enabled()  # type: ignore[bad-return]
                 if omit_if_same_with_ambient
                 else True
             )

@@ -246,9 +246,6 @@ def is_forbidden_context_manager(ctx: object) -> bool:
     except ImportError:
         pass
 
-    if m := sys.modules.get("torch.testing._internal.jit_utils"):
-        f_ctxs.append(m._AssertRaisesRegexWithHighlightContext)
-
     return ctx in f_ctxs
 
 
@@ -5431,6 +5428,9 @@ class DefaultDictVariable(ConstDictVariable):
 
             default_factory = ConstantVariable.create(None)
         self.default_factory = default_factory
+
+    def python_type(self) -> type:
+        return collections.defaultdict
 
     @staticmethod
     def is_supported_factory(arg: VariableTracker) -> bool:

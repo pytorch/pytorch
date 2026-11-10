@@ -138,6 +138,15 @@ def pytest_addoption(parser: Parser) -> None:
         metavar="path",
         help="run only the tests whose node ids are listed, one per line, in this file",
     )
+    parser.addoption(
+        "--serial-report-file",
+        action="store",
+        default=None,
+        dest="serial_report_file",
+        metavar="path",
+        help="append the number of @serialTest tests that -m deselected from this "
+        "shard to this file",
+    )
     shard_addoptions(parser)
 
 
@@ -158,6 +167,30 @@ class NodeidFilePlugin:
             items=[item for item in items if item.nodeid not in self.nodeids]
         )
         items[:] = selected
+
+
+class SerialReportPlugin:
+    """Counts the @serialTest tests of this shard that `-m "not serial"` left out
+    (see --serial-report-file). run_test.py runs a file's serial pass only when its
+    parallel pass reports some. Tests left out by other filters count too, which
+    can only add a serial pass that runs nothing."""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self.serial: list[Any] = []
+
+    def pytest_deselected(self, items: list[Any]) -> None:
+        self.serial += [item for item in items if item.get_closest_marker("serial")]
+
+    def pytest_collection_finish(self, session: pytest.Session) -> None:
+        config = session.config
+        serial = self.serial
+        # -m may deselect before PytestShardPlugin keeps this shard's tests.
+        if shard := config.pluginmanager.get_plugin("pytestshardplugin"):
+            shard_args = config.getoption("shard_id"), config.getoption("num_shards")
+            serial = shard.filter_items_by_shard(serial, *shard_args)
+        with open(self.path, "a") as f:
+            f.write(f"{len(serial)}\n")
 
 
 class HardwareClassificationPytestPlugin:
@@ -233,6 +266,11 @@ def pytest_configure(config: Config) -> None:
                 config.getoption("hw_classification"), exclude=HW_CLASSIFICATION_EXCLUDE
             ),
             "hw_classification_plugin",
+        )
+    if config.getoption("serial_report_file"):
+        config.pluginmanager.register(
+            SerialReportPlugin(config.getoption("serial_report_file")),
+            "serial_report_plugin",
         )
     if config.getoption("multigpu_min_gpus"):
         config.pluginmanager.register(
