@@ -1983,6 +1983,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 and tf_state.in_torch_function_mode()
             ):
                 return VariableTracker.build(tx, True)
+            if not tf_state.torch_function_subclass_enabled:
+                return VariableTracker.build(tx, False)
             elems = (
                 unpack_iterable(tx, args[0])
                 if len(args) == 1 and isinstance(args[0], TupleVariable)

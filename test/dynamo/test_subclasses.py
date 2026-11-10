@@ -1910,6 +1910,16 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         self.assertEqual(result, torch.tensor([3.0]))
         self.assertFalse(torch._C._peek_should_skip_torch_function())
 
+    def test_has_torch_function_under_disable_torch_function_subclass(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            with torch._C.DisableTorchFunctionSubclass():
+                inner = torch.overrides.has_torch_function_unary(x)
+            return inner, torch.overrides.has_torch_function_unary(x)
+
+        x = torch.ones(1).as_subclass(BaseTorchFunction)
+        self.assertEqual(fn(x), (False, True))
+
     def test_parameter_subclass_custom_torch_func_and_dynamic_attr(self):
         # This is a slight variation of
         # https://github.com/huggingface/diffusers/blob/fbf6b856cc61fd22ad8635547bff4aafe05723f3/src/diffusers/quantizers/gguf/utils.py#L398-L435

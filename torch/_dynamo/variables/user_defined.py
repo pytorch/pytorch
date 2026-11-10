@@ -207,8 +207,14 @@ if sys.version_info < (3, 13):
     # Types that name tp_setattro in their static struct get their own
     # __setattr__/__delattr__ wrappers from PyType_Ready before 3.13, even when
     # the slot is PyObject_GenericSetAttr. BaseException above is the same case.
-    _STANDARD_SETATTRS += (types.SimpleNamespace.__setattr__,)
-    _STANDARD_DELATTRS += (types.SimpleNamespace.__delattr__,)
+    _STANDARD_SETATTRS += (
+        types.SimpleNamespace.__setattr__,
+        types.MethodType.__setattr__,
+    )
+    _STANDARD_DELATTRS += (
+        types.SimpleNamespace.__delattr__,
+        types.MethodType.__delattr__,
+    )
 
 
 def is_standard_setattr(val: object) -> bool:
