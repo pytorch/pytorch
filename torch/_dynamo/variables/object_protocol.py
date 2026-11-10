@@ -44,6 +44,7 @@ from ..source import (
     DictGetItemSource,
     GetItemSource,
     is_constant_source,
+    is_from_skip_guard_source,
     Source,
     TypeDictSource,
     TypeMROSource,
@@ -2266,16 +2267,19 @@ def guard_mro_absent(
     stop: int,
 ) -> None:
     """Guard that *name* stays out of the ``__dict__`` of ``klass.__mro__[:stop]``."""
+    guards_context = tx.output.tracing_context.guards_context
+    if guards_context.skip_install or is_from_skip_guard_source(klass_source):
+        return
     for idx in range(stop):
         absent_key = (id(klass), idx, name)
         if absent_key in tx.output.guarded_mro_absent_keys:
             continue
-        tx.output.guarded_mro_absent_keys.add(absent_key)
         install_guard(
             TypeDictSource(_mro_entry_source(klass, klass_source, idx)).make_guard(
                 partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
             )
         )
+        tx.output.guarded_mro_absent_keys.add(absent_key)
 
 
 def mro_attr_source(
