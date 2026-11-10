@@ -2455,7 +2455,10 @@ Arguments:
     wait_for_workers (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
     multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
     master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. To bind an ephemeral port we recommend setting the port to 0 and reading ``.port``. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
-    use_libuv (bool, optional): If True, use libuv for ``TCPServer`` backend. Default is True.
+    use_libuv (bool, optional): Deprecated since 2.16 and ignored; ``TCPServer`` always uses libuv. ``False`` emits a ``FutureWarning``. Default is True.
+
+.. note:: The server limits keys (including any prefix) to 8 KiB, values to 8 MiB per request and multi-key requests to 128K keys; it disconnects clients that exceed them.
+
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
@@ -2477,6 +2480,21 @@ Example::
                       bool multiTenant,
                       std::optional<int> masterListenFd,
                       bool useLibUV) {
+            if (!useLibUV) {
+              static std::atomic<bool> warned{false};
+              if (!warned.load() || c10::WarningUtils::get_warnAlways()) {
+                if (PyErr_WarnEx(
+                        PyExc_FutureWarning,
+                        "TCPStore use_libuv=False (USE_LIBUV=0, ?use_libuv=0) is "
+                        "deprecated and ignored since PyTorch 2.16: libuv is the "
+                        "only backend. Remove the option to silence this warning.",
+                        1) != 0) {
+                  throw py::error_already_set();
+                }
+                warned.store(true);
+              }
+            }
+
             // gil_scoped_release is not safe as a call_guard in init.
             // https://github.com/pybind/pybind11/issues/5473
             py::gil_scoped_release nogil{};
@@ -2495,8 +2513,7 @@ Example::
                 .waitWorkers = waitWorkers,
                 .timeout = timeout,
                 .multiTenant = multiTenant,
-                .masterListenFd = masterListenFd,
-                .useLibUV = useLibUV};
+                .masterListenFd = masterListenFd};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -2524,7 +2541,7 @@ Example::
       .def_property_readonly(
           "libuvBackend",
           &::c10d::TCPStore::isLibUvBackend,
-          R"(Returns True if it's using the libuv backend.)")
+          R"(Always True; libuv is the only ``TCPServer`` backend.)")
       .def(
           "__repr__",
           &::c10d::TCPStore::repr,
