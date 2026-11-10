@@ -206,8 +206,12 @@ enum class CublasGroupedScaleLayout : uint8_t {
 };
 
 inline bool cublaslt_grouped_gemm_arch_supported() {
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
   const auto major = at::cuda::getCurrentDeviceProperties()->major;
   return major >= 9 && major <= 11;
+#else
+  return false;
+#endif
 }
 
 struct GroupedGemmScaleOptions {
