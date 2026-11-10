@@ -498,46 +498,18 @@ class CuteDSLHOPTests(TestCase):
         self.assertEqual(compile_spy.call_count, 2)
 
     def test_signed_zero_constants(self):
-        # Float constants are keyed by their bits in the eager compile cache too, as
-        # in the side table (test/test_hop_infra.py): -0.0 and 0.0 are different
-        # constants (x * alpha has the sign of alpha for x > 0).
+        # Float constants, np.float32 ones too, are keyed by their bits in the eager
+        # compile cache, as in the side table (test/test_hop_infra.py): -0.0 and 0.0
+        # are different constants (x * alpha has the sign of alpha for x > 0).
         from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
         x = torch.rand(1000, device=DEVICE) + 1
-        for alpha in (0.0, -0.0):
+        for alpha in (0.0, -0.0, np.float32(0.0), np.float32(-0.0)):
             out = torch.empty_like(x)
             launch_cutedsl_kernel(
                 mul_const_kernel, {"mX": x, "mOut": out, "n": 1000, "alpha": alpha}
             )
             self.assertEqual(torch.signbit(out), torch.signbit(x * alpha))
-
-    def test_numpy_float_constants_are_keyed_by_their_bits(self):
-        # A numpy floating constant that is not a Python float, such as np.float32,
-        # is keyed by its type and the hex() of its value, as a float is
-        # (test/test_hop_infra.py has constant_key's part): -0.0 and 0.0 get their
-        # own side-table entries and compiles, and two NaNs share one.
-        x = torch.rand(1000, device=DEVICE) + 1
-        kidx = _add_kernel_to_table(mul_const_kernel, ["mOut"])
-
-        def launch(alpha):
-            out = torch.empty_like(x)
-            cidx = cutedsl_kernel_side_table.add_constant_args({"alpha": alpha})
-            cutedsl_kernel_wrapper_mutation(
-                kernel_idx=kidx,
-                constant_args_idx=cidx,
-                kwargs={"mX": x, "mOut": out, "n": 1000},
-            )
-            self.assertEqual(out, x * alpha)  # NaN equals NaN here, and -0.0 equals 0.0
-            if alpha == 0:  # x > 0, so x * alpha has the sign of alpha
-                self.assertEqual(torch.signbit(out), torch.signbit(x * alpha))
-            return cidx
-
-        with _counting_compiles() as compile_spy:
-            self.assertNotEqual(launch(np.float32(-0.0)), launch(np.float32(0.0)))
-            self.assertEqual(compile_spy.call_count, 2)
-            nan = float("nan")
-            self.assertEqual(launch(np.float32(nan)), launch(np.float32(nan)))
-            self.assertEqual(compile_spy.call_count, 3)
 
     def test_cyclic_constants_are_refused(self):
         # The eager launch refuses a constant that refers to itself, as constant_key
