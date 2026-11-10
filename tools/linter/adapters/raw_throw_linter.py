@@ -67,6 +67,9 @@ ALLOWED_EXCEPTION_TYPES = {
     # Same shape as AcceleratorError: carries the ncclResult_t alongside the
     # message, and is what this backend's own NCCL_CHECK macros raise.
     "NCCLException": "torch/csrc/distributed/c10d/nccl2/",
+    # Caught by name in the libuv TCPStore read callback to log rejected
+    # unauthenticated connections at the right level.
+    "AuthRejected": "torch/csrc/distributed/c10d/store/TCPStoreLibUvBackend.cpp",
     # Built from a SourceRange/TreeRef/Token and carries the TorchScript
     # compilation call stack, so what() points at the user's Python source.
     # TORCH_CHECK stamps this file's C++ location instead, which is not the
