@@ -1,13 +1,17 @@
 # Owner(s): ["oncall: distributed"]
 
+import ctypes
 import datetime
 import os
+import shutil
 import socket
 import struct
+import subprocess
 import sys
 import tempfile
 import threading
 import time
+import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from sys import platform
@@ -1330,6 +1334,434 @@ class TestClientProtocol(TestCase):
         )
 
         thread.join()
+
+
+def _libcrypto_available() -> bool:
+    try:
+        ctypes.CDLL("libcrypto.so.3")
+        return True
+    except OSError:
+        return False
+
+
+def _recv_exact(conn, size):
+    data = b""
+    while len(data) < size:
+        chunk = conn.recv(size - len(data))
+        if not chunk:
+            raise ConnectionError("connection closed")
+        data += chunk
+    return data
+
+
+@unittest.skipIf(
+    not sys.platform.startswith("linux")
+    or shutil.which("openssl") is None
+    or not _libcrypto_available(),
+    "requires Linux, the openssl CLI and libcrypto.so.3",
+)
+class TCPStoreAuthTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._tmpdir = tempfile.TemporaryDirectory()
+        cls._dir = cls._tmpdir.name
+        cls._make_ca("ca")
+        cls._make_ca("rogue_ca")
+        # EC and RSA leaves cover both signature types.
+        cls._make_leaf(
+            "server", "ca", ["-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256"]
+        )
+        cls._make_leaf("client", "ca", ["-newkey", "rsa:2048"])
+        cls._make_leaf("rogue", "rogue_ca", ["-newkey", "rsa:2048"])
+        cls._make_leaf("weak", "ca", ["-newkey", "rsa:1024"])
+        with open(cls._path("intermediate.ext"), "w") as f:
+            f.write("basicConstraints=critical,CA:TRUE\nkeyUsage=keyCertSign\n")
+        cls._make_leaf(
+            "intermediate", "ca", ["-newkey", "rsa:2048"], "intermediate.ext"
+        )
+        cls._make_leaf("leaf", "intermediate", ["-newkey", "rsa:2048"])
+        for name in ("server", "client"):
+            cls._openssl(
+                "x509", "-in", f"{name}.pem", "-outform", "DER", "-out", f"{name}.der"
+            )
+            # A well-formed signature over the wrong data.
+            cls._openssl(
+                "dgst", "-sha256", "-sign", f"{name}.key",
+                "-out", f"{name}_bad.sig", f"{name}.der",
+            )  # fmt: skip
+        bad_block = "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"
+        cls._concat("combined.pem", "client.pem", "client.key")
+        cls._concat("leaf_chain.pem", "leaf.pem", "intermediate.pem")
+        cls._concat("corrupt_chain.pem", "client.pem", text=bad_block)
+        cls._concat("corrupt_ca.pem", "ca.pem", text=bad_block)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmpdir.cleanup()
+        super().tearDownClass()
+
+    @classmethod
+    def _path(cls, name):
+        return os.path.join(cls._dir, name)
+
+    @classmethod
+    def _concat(cls, out_name, *names, text=""):
+        with open(cls._path(out_name), "w") as out:
+            for name in names:
+                with open(cls._path(name)) as f:
+                    out.write(f.read())
+            out.write(text)
+
+    @classmethod
+    def _openssl(cls, *args):
+        subprocess.run(
+            ["openssl", *args], cwd=cls._dir, check=True, capture_output=True
+        )
+
+    @classmethod
+    def _make_ca(cls, name):
+        cls._openssl(
+            "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+            "-subj", f"/CN={name}", "-keyout", f"{name}.key", "-out", f"{name}.pem",
+        )  # fmt: skip
+
+    @classmethod
+    def _make_leaf(cls, name, ca, keyargs, extfile=None):
+        cls._openssl(
+            "req", *keyargs, "-nodes", "-subj", f"/CN={name}",
+            "-keyout", f"{name}.key", "-out", f"{name}.csr",
+        )  # fmt: skip
+        cls._openssl(
+            "x509", "-req", "-in", f"{name}.csr", "-CA", f"{ca}.pem",
+            "-CAkey", f"{ca}.key", "-set_serial", "1", "-days", "1",
+            "-out", f"{name}.pem", *(["-extfile", extfile] if extfile else []),
+        )  # fmt: skip
+
+    def _env(self, cert="", key="", ca=""):
+        return mock.patch.dict(
+            os.environ,
+            {
+                "TORCH_TCPSTORE_AUTH_CERT": cert and self._path(cert),
+                "TORCH_TCPSTORE_AUTH_KEY": key and self._path(key),
+                "TORCH_TCPSTORE_AUTH_CA": ca and self._path(ca),
+            },
+        )
+
+    def _server(self, auth=True, use_libuv=True, **kwargs):
+        env = self._env("server.pem", "server.key", "ca.pem") if auth else self._env()
+        with env:
+            return dist.TCPStore(
+                "localhost",
+                kwargs.pop("port", 0),
+                is_master=True,
+                wait_for_workers=False,
+                timeout=timedelta(seconds=30),
+                use_libuv=use_libuv,
+                **kwargs,
+            )
+
+    def _client(self, server, **env):
+        with self._env(**env):
+            return dist.TCPStore(
+                "localhost",
+                server.port,
+                is_master=False,
+                timeout=timedelta(seconds=30),
+            )
+
+    def _good_client(self, server):
+        return self._client(server, cert="client.pem", key="client.key", ca="ca.pem")
+
+    # DistStoreError, unlike DistNetworkError, is not retried until the timeout.
+    def _assert_rejected(self, regex, server, **env):
+        with self.assertRaisesRegex(DistStoreError, regex):
+            self._client(server, **env)
+
+    def test_basic(self):
+        server = self._server()
+        client = self._good_client(server)
+        client.set("key", "value")
+        self.assertEqual(server.get("key"), b"value")
+        self.assertEqual(client.add("counter", 2), 2)
+        server.set("key2", "value2")
+        client.wait(["key2"])
+        self.assertEqual(client.get("key2"), b"value2")
+
+        combined = self._client(
+            server, cert="combined.pem", key="combined.pem", ca="ca.pem"
+        )
+        self.assertEqual(combined.get("key"), b"value")
+
+    def test_clone_reuses_auth(self):
+        server = self._server()
+        client = self._good_client(server)
+        with self._env():
+            self.assertEqual(client.clone().add("counter", 1), 1)
+        plain_server = self._server(auth=False)
+        plain_client = self._client(plain_server)
+        with self._env("client.pem", "client.key", "ca.pem"):
+            self.assertEqual(plain_client.clone().add("counter", 1), 1)
+
+    def test_kwargs_override_env(self):
+        server = self._server()
+        with self._env("rogue.pem", "rogue.key", "rogue_ca.pem"):
+            client = dist.TCPStore(
+                "localhost",
+                server.port,
+                is_master=False,
+                timeout=timedelta(seconds=30),
+                auth_cert=self._path("client.pem"),
+                auth_key=self._path("client.key"),
+                auth_ca=self._path("ca.pem"),
+            )
+        client.set("key", "value")
+        self.assertEqual(server.get("key"), b"value")
+
+    def test_intermediate_ca(self):
+        server = self._server()
+        client = self._client(
+            server, cert="leaf_chain.pem", key="leaf.key", ca="ca.pem"
+        )
+        client.set("key", "value")
+        self.assertEqual(server.get("key"), b"value")
+        self._assert_rejected(
+            "rejected", server, cert="leaf.pem", key="leaf.key", ca="ca.pem"
+        )
+
+    def test_untrusted_client(self):
+        server = self._server()
+        self._assert_rejected(
+            "rejected", server, cert="rogue.pem", key="rogue.key", ca="ca.pem"
+        )
+        # The server keeps serving authenticated clients.
+        self._good_client(server).set("key", "value")
+        self.assertEqual(server.get("key"), b"value")
+
+    def test_untrusted_server(self):
+        self._assert_rejected(
+            "certificate verification failed",
+            self._server(),
+            cert="rogue.pem",
+            key="rogue.key",
+            ca="rogue_ca.pem",
+        )
+
+    def test_bad_server_signature(self):
+        with open(self._path("server.der"), "rb") as f:
+            der = f.read()
+        with open(self._path("server_bad.sig"), "rb") as f:
+            sig = f.read()
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(30)
+        sock.bind(("localhost", 0))
+        sock.listen()
+        received = []
+
+        def serve() -> None:
+            conn, _ = sock.accept()
+            with conn:
+                conn.settimeout(30)
+                magic = _recv_exact(conn, 8)
+                (size,) = struct.unpack("<I", _recv_exact(conn, 4))
+                _recv_exact(conn, size)
+                received.append(magic)
+                reply = os.urandom(32) + struct.pack("<I", len(der)) + der + sig
+                conn.sendall(struct.pack("<I", len(reply)) + reply)
+                while conn.recv(4096):
+                    pass
+
+        thread = threading.Thread(target=serve)
+        thread.start()
+        try:
+            with self.assertRaisesRegex(DistStoreError, "signature verification"):
+                with self._env("client.pem", "client.key", "ca.pem"):
+                    dist.TCPStore(
+                        "localhost",
+                        sock.getsockname()[1],
+                        is_master=False,
+                        timeout=timedelta(seconds=30),
+                    )
+        finally:
+            thread.join(timeout=30)
+            sock.close()
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(received, [b"\xffTSAUTH\x01"])
+
+    def test_bad_client_signature(self):
+        with open(self._path("client.der"), "rb") as f:
+            der = f.read()
+        with open(self._path("client_bad.sig"), "rb") as f:
+            sig = f.read()
+        server = self._server()
+        with socket.create_connection(("localhost", server.port), timeout=30) as conn:
+            hello = os.urandom(32) + der
+            conn.sendall(b"\xffTSAUTH\x01" + struct.pack("<I", len(hello)) + hello)
+            (size,) = struct.unpack("<I", _recv_exact(conn, 4))
+            _recv_exact(conn, size)
+            conn.sendall(struct.pack("<I", len(sig)) + sig)
+            self.assertEqual(_recv_exact(conn, 1), b"\x00")
+            self.assertEqual(conn.recv(1), b"")
+        self._good_client(server).set("key", "value")
+
+    def _send_raw(self, server, data):
+        with socket.create_connection(("localhost", server.port), timeout=30) as conn:
+            conn.sendall(data)
+            conn.shutdown(socket.SHUT_WR)
+            # The server closes after processing everything before EOF.
+            reply = b""
+            while chunk := conn.recv(4096):
+                reply += chunk
+        return reply
+
+    def test_command_before_auth(self):
+        # VALIDATE followed by SET is executed by a server without auth.
+        key = b"/raw"
+        cmds = b"\x00" + struct.pack("<I", 0x3C85F7CE)
+        cmds += b"\x01" + struct.pack("<Q", len(key)) + key
+        cmds += struct.pack("<Q", 1) + b"v"
+        plain_server = self._server(auth=False)
+        self._send_raw(plain_server, cmds)
+        self.assertTrue(self._client(plain_server).check(["raw"]))
+
+        server = self._server()
+        reply = self._send_raw(server, cmds)
+        self.assertEqual(reply, struct.pack("<I", 0xFFA07B5E))
+        self.assertFalse(self._good_client(server).check(["raw"]))
+
+    def test_weak_key_rejected(self):
+        self._assert_rejected(
+            "rejected", self._server(), cert="weak.pem", key="weak.key", ca="ca.pem"
+        )
+
+    def test_explicit_kwargs_ignore_env(self):
+        # Empty kwargs disable auth even though the environment configures it.
+        plain = {"auth_cert": "", "auth_key": "", "auth_ca": ""}
+        with self._env("server.pem", "server.key", "ca.pem"):
+            server = dist.TCPStore(
+                "localhost",
+                0,
+                is_master=True,
+                wait_for_workers=False,
+                timeout=timedelta(seconds=30),
+                **plain,
+            )
+        with self._env("client.pem", "client.key", "ca.pem"):
+            client = dist.TCPStore(
+                "localhost",
+                server.port,
+                is_master=False,
+                timeout=timedelta(seconds=30),
+                **plain,
+            )
+            client.set("key", "value")
+            self.assertEqual(server.get("key"), b"value")
+            # Kwargs are not completed field by field from the environment.
+            with self.assertRaisesRegex(
+                DistStoreError, r"missing auth_key, auth_ca \(from TCPStore options\)"
+            ):
+                dist.TCPStore(
+                    "localhost",
+                    server.port,
+                    is_master=False,
+                    timeout=timedelta(seconds=30),
+                    auth_cert=self._path("client.pem"),
+                )
+        # The server did not fall back to the environment.
+        self.assertEqual(self._client(server).get("key"), b"value")
+
+    def test_key_mismatch(self):
+        self._assert_rejected(
+            "does not match certificate",
+            self._server(auth=False),
+            cert="client.pem",
+            key="server.key",
+            ca="ca.pem",
+        )
+
+    def test_invalid_pem(self):
+        server = self._server(auth=False)
+        self._assert_rejected(
+            "Failed to read certificates",
+            server,
+            cert="corrupt_chain.pem",
+            key="client.key",
+            ca="ca.pem",
+        )
+        self._assert_rejected(
+            "Failed to load CA file",
+            server,
+            cert="client.pem",
+            key="client.key",
+            ca="corrupt_ca.pem",
+        )
+        # Key contents passed instead of a path are not echoed.
+        with open(self._path("client.key")) as f:
+            key_pem = f.read()
+        with self.assertRaisesRegex(DistStoreError, "not a path") as cm:
+            dist.TCPStore(
+                "localhost",
+                server.port,
+                is_master=False,
+                timeout=timedelta(seconds=30),
+                auth_cert=self._path("client.pem"),
+                auth_key=key_pem,
+                auth_ca=self._path("ca.pem"),
+            )
+        self.assertNotIn("PRIVATE KEY", str(cm.exception))
+
+    def test_plain_client(self):
+        self._assert_rejected("requires authentication", self._server())
+
+    def test_plain_server(self):
+        server = self._server(auth=False)
+        self._assert_rejected(
+            "does not have authentication enabled",
+            server,
+            cert="client.pem",
+            key="client.key",
+            ca="ca.pem",
+        )
+        self._client(server).set("key", "value")
+
+    def test_incomplete_config(self):
+        server = self._server(auth=False)
+        for env in (
+            {"cert": "client.pem"},
+            {"key": "client.key"},
+            {"ca": "ca.pem"},
+            {"key": "client.key", "ca": "ca.pem"},
+            {"cert": "client.pem", "key": "client.key"},
+        ):
+            with self.subTest(**env):
+                self._assert_rejected(
+                    "requires a certificate, key and CA; missing .*TORCH_TCPSTORE_AUTH_.* "
+                    r"\(from environment\)",
+                    server,
+                    **env,
+                )
+
+    def test_multi_tenant_mismatch(self):
+        server = self._server(multi_tenant=True)
+        with self.assertRaisesRegex(DistStoreError, "different authentication"):
+            self._server(auth=False, multi_tenant=True, port=server.port)
+        # The same files spelled differently share the server.
+        same = self._server(
+            auth=False,
+            multi_tenant=True,
+            port=server.port,
+            auth_cert=os.path.relpath(self._path("server.pem")),
+            auth_key=self._path("server.key"),
+            auth_ca=os.path.join(self._dir, ".", "ca.pem"),
+        )
+        same.set("key", "value")
+        self.assertEqual(server.get("key"), b"value")
+
+    def test_legacy_server_rejected(self):
+        with self.assertRaisesRegex(DistStoreError, "requires the libuv backend"):
+            self._server(use_libuv=False)
 
 
 class PrefixStoreBarrierTimeoutTest(TestCase):

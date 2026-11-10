@@ -1,7 +1,10 @@
 #include <algorithm>
+#include <array>
 #include <deque>
 #include <exception>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -14,6 +17,7 @@
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 #include <torch/csrc/distributed/c10d/socket_fmt.h>
+#include <torch/csrc/distributed/c10d/store/TCPStoreAuth.hpp>
 #include <torch/csrc/distributed/c10d/store/TCPStoreBackend.hpp>
 
 #ifdef TORCH_USE_LIBUV
@@ -45,6 +49,14 @@ auto constexpr MAX_PAYLOAD_LEN = 8 * 1024 * 1024;
 // Too small and we'll need multiple buffers for one request
 // Too big and we might taxing malloc
 auto constexpr ALLOC_BUFFER_SIZE = static_cast<size_t>(4096);
+
+// Rejected unauthenticated connection. Malformed input is logged at debug like
+// invalid commands; failed certificate checks are logged as warnings.
+struct AuthRejected : std::runtime_error {
+  explicit AuthRejected(const std::string& msg, bool warn = false)
+      : std::runtime_error(msg), warn(warn) {}
+  bool warn;
+};
 class UvHandle : public c10::intrusive_ptr_target {
  public:
   ~UvHandle() override = default;
@@ -123,6 +135,19 @@ class UvTcpSocket : public UvHandle {
       try {
         uv_socket->processBuf(buf, nread);
         return; // We do free inside processBuf.
+      } catch (const AuthRejected& ex) {
+        if (ex.warn) {
+          C10D_WARNING(
+              "Rejected TCPStore client {}: {}",
+              uv_socket->address(),
+              ex.what());
+        } else {
+          C10D_DEBUG(
+              "Rejected TCPStore client {}: {}",
+              uv_socket->address(),
+              ex.what());
+        }
+        uv_socket->close();
       } catch (std::exception& ex) {
         C10D_WARNING("Error processing client message: {}", ex.what());
         uv_socket->close();
@@ -697,7 +722,12 @@ class LibUVStoreDaemon : public BackgroundThread {
   bool isMiscellaneousClient(const c10::intrusive_ptr<UvHandle>& client);
 
   uint16_t get_socket_port(uv_tcp_t* handle);
-  void init(const TCPStoreOptions& opts);
+  void init(
+      const TCPStoreOptions& opts,
+      std::shared_ptr<const TCPStoreAuth> auth);
+  const TCPStoreAuth* auth() const {
+    return auth_.get();
+  }
 
  protected:
   void run() override;
@@ -708,6 +738,7 @@ class LibUVStoreDaemon : public BackgroundThread {
   c10::intrusive_ptr<UvTcpServer> tcpServer_;
 
   uv_async_t exit_handle_{};
+  std::shared_ptr<const TCPStoreAuth> auth_;
   std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
   // From key -> the list of UvClient waiting on the key
   std::unordered_map<std::string, std::vector<c10::intrusive_ptr<UvHandle>>>
@@ -744,8 +775,14 @@ class LibUVStoreDaemon : public BackgroundThread {
 };
 
 class UvClient : public UvTcpSocket {
+  enum class AuthStep { Hello, Finish, Done };
+
   ChunkedStream stream;
   LibUVStoreDaemon* store;
+  // No command is processed until authentication is Done.
+  AuthStep authStep_;
+  std::vector<uint8_t> authHello_;
+  TCPStoreAuth::Nonce authNonce_{};
 
  protected:
   void processBuf(const uv_buf_t* buf, size_t nread) override {
@@ -755,10 +792,21 @@ class UvClient : public UvTcpSocket {
 
     while (true) {
       stream.reset();
+      if (authStep_ != AuthStep::Done) {
+        if (!parse_auth())
+          return;
+        stream.commit();
+        continue;
+      }
       uint8_t command = -1;
       if (!stream.read1(command))
         break;
       if (store->isMiscellaneousClient(iptr())) {
+        if (command == kAuthMagic[0] && !store->auth()) {
+          writeBeforeClose(&kAuthMismatch, sizeof(kAuthMismatch));
+          throw AuthRejected(
+              "Client requires authentication but it is not enabled on this server");
+        }
         if (static_cast<QueryType>(command) != QueryType::VALIDATE)
           return;
         if (!parse_validate_command())
@@ -848,6 +896,79 @@ class UvClient : public UvTcpSocket {
       }
       stream.commit();
     }
+  }
+
+  // Best-effort write that is not cancelled by a following close().
+  void writeBeforeClose(const void* data, size_t size) {
+    auto buf = uv_buf_init(
+        const_cast<char*>(static_cast<const char*>(data)),
+        static_cast<unsigned int>(size));
+    int res = uv_try_write(
+        reinterpret_cast<uv_stream_t*>(unsafeGetHandle()), &buf, 1);
+    if (res != static_cast<int>(size)) {
+      C10D_DEBUG(
+          "Failed to send TCPStore authentication reply to {}: {}",
+          address(),
+          res < 0 ? uv_strerror(res) : "short write");
+    }
+  }
+
+  bool read_auth_frame(std::vector<uint8_t>& out) {
+    uint32_t size = 0;
+    if (!stream.read_value(size))
+      return false;
+    if (size > kAuthMaxFrameSize) {
+      throw AuthRejected(
+          "TCPStore authentication frame too large: " + std::to_string(size));
+    }
+    if (stream.available() < size)
+      return false;
+    out.resize(size);
+    return stream.read_many(reinterpret_cast<char*>(out.data()), size);
+  }
+
+  bool parse_auth() {
+    if (authStep_ == AuthStep::Hello) {
+      std::array<uint8_t, kAuthMagic.size()> magic{};
+      if (!stream.read1(magic[0]))
+        return false;
+      if (magic[0] != kAuthMagic[0]) {
+        writeBeforeClose(&kAuthMismatch, sizeof(kAuthMismatch));
+        throw AuthRejected(
+            "Client did not authenticate; configure TCPStore authentication on the client");
+      }
+      if (!stream.read_many(
+              reinterpret_cast<char*>(magic.data() + 1), magic.size() - 1))
+        return false;
+      if (magic != kAuthMagic)
+        throw AuthRejected("Unsupported TCPStore authentication version");
+      if (!read_auth_frame(authHello_))
+        return false;
+      if (!TCPStoreAuth::validHello(authHello_))
+        throw AuthRejected("Invalid TCPStore authentication hello");
+      // Server-side failures (RAND_bytes, signing) propagate as errors.
+      c10::make_intrusive<WriterPayload>(
+          store->auth()->serverHello(authHello_, authNonce_), iptr())
+          ->send();
+      authStep_ = AuthStep::Finish;
+      return true;
+    }
+
+    std::vector<uint8_t> finish;
+    if (!read_auth_frame(finish))
+      return false;
+    try {
+      store->auth()->verifyClient(authHello_, authNonce_, finish);
+    } catch (const c10::Error& ex) {
+      writeBeforeClose(&kAuthRejected, sizeof(kAuthRejected));
+      throw AuthRejected(ex.what_without_backtrace(), /*warn=*/true);
+    }
+    StreamWriter sw(iptr());
+    sw.write1(kAuthOk);
+    sw.send();
+    authStep_ = AuthStep::Done;
+    authHello_.clear();
+    return true;
   }
 
   bool parse_validate_command() {
@@ -1218,7 +1339,9 @@ class UvClient : public UvTcpSocket {
 
  public:
   explicit UvClient(uv_loop_t* loop, LibUVStoreDaemon* store)
-      : UvTcpSocket(loop), store(store) {}
+      : UvTcpSocket(loop),
+        store(store),
+        authStep_(store->auth() ? AuthStep::Hello : AuthStep::Done) {}
 
   static c10::intrusive_ptr<UvClient> make(
       uv_loop_t* loop,
@@ -1256,7 +1379,10 @@ void LibUVStoreDaemon::onExitRequest() {
   uv_stop(&loop_);
 }
 
-void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
+void LibUVStoreDaemon::init(
+    const TCPStoreOptions& opts,
+    std::shared_ptr<const TCPStoreAuth> auth) {
+  auth_ = std::move(auth);
   if (opts.masterListenFd.has_value()) {
     tcpServer_ = UvTcpServer::makeWithSocket(&loop_, *opts.masterListenFd);
   } else {
@@ -1629,10 +1755,11 @@ bool LibUVStoreDaemon::barrier(
 #endif
 
 std::unique_ptr<BackgroundThread> create_libuv_tcpstore_backend(
-    const TCPStoreOptions& opts) {
+    const TCPStoreOptions& opts,
+    std::shared_ptr<const TCPStoreAuth> auth) {
 #ifdef TORCH_USE_LIBUV
   auto res = std::make_unique<LibUVStoreDaemon>(opts.port);
-  res->init(opts);
+  res->init(opts, std::move(auth));
   return res;
 #else
   C10D_THROW_ERROR(DistStoreError, "LibUV TCPStore implementation missing");

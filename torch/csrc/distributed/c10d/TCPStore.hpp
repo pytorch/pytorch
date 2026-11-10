@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <string>
 
 #include <torch/csrc/distributed/c10d/Store.hpp>
 
@@ -40,6 +42,8 @@ class TCPServer;
 
 class TCPClient;
 
+class TCPStoreAuth;
+
 struct SocketAddress {
   std::string host;
   std::uint16_t port{};
@@ -67,6 +71,14 @@ struct TCPStoreOptions {
 
   // A boolean value indicating whether to use the experimental libUV backend.
   bool useLibUV = true;
+
+  // PEM paths for mutual certificate authentication (libuv server only).
+  // If all are unset, they are read from TORCH_TCPSTORE_AUTH_CERT,
+  // TORCH_TCPSTORE_AUTH_KEY and TORCH_TCPSTORE_AUTH_CA. Empty strings disable
+  // authentication.
+  std::optional<std::string> authCert = std::nullopt;
+  std::optional<std::string> authKey = std::nullopt;
+  std::optional<std::string> authCa = std::nullopt;
 };
 
 class TORCH_API TCPStore : public Store {
@@ -151,6 +163,11 @@ class TORCH_API TCPStore : public Store {
   std::string repr() const;
 
  private:
+  TCPStore(
+      std::string host,
+      const TCPStoreOptions& opts,
+      std::shared_ptr<const detail::TCPStoreAuth> auth);
+
   int64_t incrementValueBy(const std::string& key, int64_t delta);
 
   void ping();
@@ -166,6 +183,7 @@ class TORCH_API TCPStore : public Store {
   std::shared_ptr<detail::TCPServer> server_;
   std::unique_ptr<detail::TCPClient> client_;
   std::optional<std::size_t> numWorkers_;
+  std::shared_ptr<const detail::TCPStoreAuth> auth_;
 
   const std::string initKey_ = "init/";
   const std::string keyPrefix_ = "/";
