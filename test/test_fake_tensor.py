@@ -13,6 +13,7 @@ import pickle
 import re
 import subprocess
 import sys
+import time
 import unittest
 import weakref
 from unittest.mock import patch
@@ -5520,14 +5521,21 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertFalse(mode.allow_meta)
         with self.assertRaisesRegex(RuntimeError, "Expected a FakeTensorConverter"):
             torch._C._CppFakeTensorMode(None, None)
-        # A mode's Python object is set once, and is a CppFakeTensorMode
-        with self.assertRaisesRegex(RuntimeError, "already has a Python object"):
-            mode._attach_python_object()
+        # Only a CppFakeTensorMode stands for its C++ mode
         bare = torch._C._CppFakeTensorMode(FakeTensorConverter(), None)
         with self.assertRaisesRegex(TypeError, "Expected a CppFakeTensorMode"):
-            bare._attach_python_object()
-        with self.assertRaisesRegex(TypeError, "expects a CppFakeTensorMode"):
+            torch._C._from_meta_and_device(
+                torch.empty(2, device="meta"), torch.device("cpu"), bare
+            )
+        with self.assertRaisesRegex(TypeError, "Expected a CppFakeTensorMode"):
             torch._C._set_dispatch_mode(bare)
+
+        # Nor does a subclass, whose __dict__ could hold a fake
+        class Subclass(CppFakeTensorMode):  # type: ignore[misc]
+            pass
+
+        with self.assertRaisesRegex(TypeError, "Expected a CppFakeTensorMode"):
+            torch._C._set_dispatch_mode(Subclass())
 
     def test_allow_unsafe_data_ptr_access(self):
         mode = self._make_mode()
@@ -5732,62 +5740,36 @@ class TestCppFakeTensorModeBindings(TestCase):
         finally:
             # A rejection that regressed can leave both a Python and a C++ mode
             # installed, which _unset_dispatch_mode rejects, so the Python one
-            # is popped first. The modes are still alive, so unsetting does not
-            # rebuild them.
+            # is popped first.
             if torch._C._get_dispatch_mode(fake) is python_mode:
                 torch._C._pop_torch_dispatch_stack(fake)
             torch._C._unset_dispatch_mode(fake)
         self.assertEqual(self._installed(), (None, False))
 
-    @skipIfTorchDynamo("Dynamo suspends the fake mode, rebuilding its Python object")
-    def test_failed_unset_keeps_mode(self):
-        # Unsetting a mode whose Python object was collected rebuilds the
-        # object; if that fails, the mode stays installed
+    # Dynamo keeps references that stop the mode being collected
+    @xfailIfTorchDynamo
+    def test_slot_keeps_mode_alive(self):
+        # The FAKE slot keeps the mode's Python object alive, and only that
         mode = self._make_mode()
-        converter = mode.fake_tensor_converter
+        ref = weakref.ref(mode)
         fake = torch._C._TorchDispatchModeKey.FAKE
         torch._C._set_dispatch_mode(mode)
         del mode
         gc.collect()
-
-        class Unrebuildable:
-            @classmethod
-            def _from_cpp_mode(cls, cpp_mode):
-                raise RuntimeError("rebuild failed")
-
-        ft = torch._subclasses.fake_tensor
         try:
-            with patch.object(ft, "CppFakeTensorMode", Unrebuildable):
-                with self.assertRaisesRegex(RuntimeError, "rebuild failed"):
-                    torch._C._get_dispatch_mode(fake)
-                with self.assertRaisesRegex(RuntimeError, "rebuild failed"):
-                    torch._C._unset_dispatch_mode(fake)
-                # _disable_current_modes pushes the Python modes it popped back
-                # even when unsetting the C++ mode fails
-                with BaseTorchDispatchMode() as py_mode:
-                    with self.assertRaisesRegex(RuntimeError, "rebuild failed"):
-                        with _disable_current_modes():
-                            pass
-                    self.assertIs(_get_current_dispatch_mode(), py_mode)
-            installed = torch._C._dispatch_tls_is_dispatch_key_included(
-                torch._C.DispatchKey.Fake
-            )
+            self.assertIsNotNone(ref())
+            self.assertIs(torch._C._get_dispatch_mode(fake), ref())
+            with unset_fake_temporarily():
+                suspended = self._installed()
+            self.assertEqual(suspended, (None, False))
+            self.assertEqual(self._installed(), (ref(), True))
         finally:
-            try:
-                got = torch._C._get_dispatch_mode(fake)
-                # Suspending and restoring goes through the rebuilt object
-                with unset_fake_temporarily():
-                    suspended = self._installed()
-                restored = self._installed()
-            finally:
-                unset = torch._C._unset_dispatch_mode(fake)
-        self.assertTrue(installed)
-        self.assertIsInstance(got, ft.CppFakeTensorMode)
-        self.assertIs(got.fake_tensor_converter, converter)
-        self.assertEqual(suspended, (None, False))
-        self.assertEqual(restored, (got, True))
-        self.assertIs(unset, got)
+            unset = torch._C._unset_dispatch_mode(fake)
+        self.assertIs(unset, ref())
         self.assertEqual(self._installed(), (None, False))
+        del unset
+        gc.collect()
+        self.assertIsNone(ref())
 
     def test_from_meta_and_device_sparse_mode_installed(self):
         # The placeholder meta indices and values that the sparse impls' copies
@@ -6057,92 +6039,32 @@ class TestCppFakeTensorModeBindings(TestCase):
 
     # Dynamo keeps references that stop the mode being collected
     @xfailIfTorchDynamo
-    def test_cpp_fake_tensor_mode_rebuild(self):
+    def test_cpp_fake_tensor_mode_lifetime(self):
         from torch._subclasses.fake_tensor import CppFakeTensorMode
 
         self.addCleanup(self._restore_fake_mode_state)
-        shape_env = ShapeEnv()
-        mode = CppFakeTensorMode(shape_env=shape_env)
-        converter = mode.fake_tensor_converter
-        mode.epoch += 2
-        epoch = mode.epoch
+        mode = CppFakeTensorMode(shape_env=ShapeEnv())
         meta = torch.empty((), device="meta")
-        fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
-
-        # A collected mode is rebuilt around the same C++ mode and state
+        cpu = torch.device("cpu")
+        fake = torch._C._from_meta_and_device(meta, cpu, mode)
+        # The mode's fakes keep its Python object alive, and lookups return it
         ref = weakref.ref(mode)
         del mode
         gc.collect()
-        self.assertIsNone(ref())
-        # A rebuilt object must hold the same C++ mode
-        other = CppFakeTensorMode()
-        wrong = classmethod(lambda cls, cpp_mode: other)
-        with patch.object(CppFakeTensorMode, "_from_cpp_mode", wrong):
-            with self.assertRaisesRegex(RuntimeError, "does not hold"):
-                torch._C._maybe_get_fake_mode(fake)
-        rebuilt = torch._C._maybe_get_fake_mode(fake)
-        self.assertIsInstance(rebuilt, CppFakeTensorMode)
-        self.assertIs(rebuilt.fake_tensor_converter, converter)
-        self.assertIs(rebuilt.shape_env, shape_env)
-        self.assertEqual(rebuilt.epoch, epoch)
-        self.assertIs(torch._C._maybe_get_fake_mode(fake), rebuilt)
-        with rebuilt:
-            self.assertEqual(self._installed(), (rebuilt, True))
+        self.assertIsInstance(ref(), CppFakeTensorMode)
+        self.assertIs(torch._C._maybe_get_fake_mode(fake), ref())
+        other = torch._C._from_meta_and_device(meta, cpu, ref())
+        self.assertIs(torch._C._maybe_get_fake_mode(other), ref())
+        with ref():
+            self.assertEqual(self._installed(), (ref(), True))
         self.assertEqual(self._installed(), (None, False))
-
-    def _rebuild_with_nested_lookup(self, keep_inner):
-        # Looks up a fake whose mode's Python object was collected, with a
-        # nested lookup in a patched _from_cpp_mode standing in for a second
-        # thread. Returns the fake, its mode's converter, the outer lookup's
-        # object and the inner one (held strongly if keep_inner, otherwise by
-        # weakref).
-        from torch._subclasses.fake_tensor import CppFakeTensorMode
-
-        mode = CppFakeTensorMode()
-        meta = torch.empty((), device="meta")
-        fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
-        converter = mode.fake_tensor_converter
-        ref = weakref.ref(mode)
-        del mode
+        # Nothing else does, so it is freed with its last fake
+        del fake
+        gc.collect()
+        self.assertIsNotNone(ref())
+        del other
         gc.collect()
         self.assertIsNone(ref())
-        from_cpp_mode = CppFakeTensorMode._from_cpp_mode.__func__
-        inner = []
-
-        def reentrant(cls, cpp_mode):
-            if not inner:
-                inner.append(None)
-                inner[0] = torch._C._maybe_get_fake_mode(fake)
-                if not keep_inner:
-                    inner[0] = weakref.ref(inner[0])
-            return from_cpp_mode(cls, cpp_mode)
-
-        with patch.object(CppFakeTensorMode, "_from_cpp_mode", classmethod(reentrant)):
-            outer = torch._C._maybe_get_fake_mode(fake)
-        return fake, converter, outer, inner[0]
-
-    # Dynamo keeps references that stop the mode being collected
-    @xfailIfTorchDynamo
-    def test_cpp_fake_tensor_mode_rebuild_race_alive(self):
-        # An object another lookup cached while _from_cpp_mode ran is returned
-        # rather than replaced, and stays cached
-        fake, converter, outer, inner = self._rebuild_with_nested_lookup(True)
-        self.assertIs(outer, inner)
-        self.assertIs(outer.fake_tensor_converter, converter)
-        self.assertIs(torch._C._maybe_get_fake_mode(fake), inner)
-
-    # Dynamo keeps references that stop the mode being collected
-    @xfailIfTorchDynamo
-    def test_cpp_fake_tensor_mode_rebuild_race_dropped(self):
-        # If the object the other lookup cached is already gone, the lookup
-        # caches and returns its own
-        from torch._subclasses.fake_tensor import CppFakeTensorMode
-
-        fake, converter, outer, inner_ref = self._rebuild_with_nested_lookup(False)
-        self.assertIsNone(inner_ref())
-        self.assertIsInstance(outer, CppFakeTensorMode)
-        self.assertIs(outer.fake_tensor_converter, converter)
-        self.assertIs(torch._C._maybe_get_fake_mode(fake), outer)
 
     def _restore_fake_mode_state(self):
         # Undoes a manual enter whose exit failed partway, so the failure does
@@ -6214,8 +6136,8 @@ class TestCppFakeTensorModeBindings(TestCase):
                     inner.__enter__()
                 self.assertEqual(self._installed(), (outer, outer is mode))
 
-        # An entered mode is kept alive until it exits, so exiting it through
-        # the FAKE slot still finds its enter_stack
+        # The FAKE slot keeps an entered mode alive, so exiting it through the
+        # slot finds its enter_stack, and the mode is freed once it exits
         mode = CppFakeTensorMode()
         ref = weakref.ref(mode)
         mode.__enter__()
@@ -6382,8 +6304,8 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(reentered, [(True, True, True)])
 
     def test_cpp_fake_tensor_mode_thread_exit_without_exiting(self):
-        # The mode slot is per thread, and so is what keeps an entered mode
-        # alive: a thread that ends without exiting its mode releases it.
+        # The mode slot and the list of entered modes are per thread: a thread
+        # that ends without exiting its mode releases it.
         # is_in_torch_dispatch_mode() reports the C++ mode only on its thread.
         import threading
 
@@ -6415,7 +6337,13 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(entered, [(True, True, True)])
         self.assertEqual(self._installed(), (None, False))
         self.assertFalse(is_in_torch_dispatch_mode())
-        gc.collect()
+        # The thread's C++ slot releases the mode when the OS thread ends,
+        # which can be after join() returns (before Python 3.13)
+        for _ in range(500):
+            gc.collect()
+            if refs[0]() is None:
+                break
+            time.sleep(0.01)
         self.assertIsNone(refs[0]())
 
 
