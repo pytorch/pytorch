@@ -292,6 +292,8 @@ Currently, CUDAGraph partition supports splitting off the following types of ops
 - **CUDAGraph Unsafe Custom Ops**: Custom ops tagged with `torch._C.Tag.cudagraph_unsafe` are split off. See *CUDAGraph Unsafe Custom Ops* section for details.
 - **Unbacked Symints**: Please refer to *Dynamic Shape Support* section for more information.
 
+A `torch.compiler.nested_compile_region` call is judged by the ops in its body: if the body contains any of the ops above, the whole region call is split off.
+
 
 ### Limitations
 
