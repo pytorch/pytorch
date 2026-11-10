@@ -291,7 +291,7 @@ static PyObject* THPStorage_shareDevice(PyObject* self, PyObject* /*noargs*/) {
   if (storage_impl->received_ipc()) {
     TORCH_CHECK(
         false,
-        "Attempted to send CUDA tensor received from another process; this is not currently supported. Consider cloning before sending.");
+        "Attempted to send device tensor received from another process; this is not currently supported. Consider cloning before sending.");
   }
 
   at::DeviceGuard device_guard(storage.device());
@@ -669,7 +669,7 @@ static PyMethodDef THPStorage_sharingMethods[] = {
      THPStorage_releaseIPCCounter,
      METH_VARARGS | METH_STATIC,
      nullptr},
-    // Deprecated CUDA-named aliases, to be removed in 2.18
+    // Deprecated CUDA-named aliases
     {"_share_cuda_", THPStorage_shareCudaDeprecated, METH_NOARGS, nullptr},
     {"_new_shared_cuda",
      THPStorage_newSharedCudaDeprecated,
