@@ -1,13 +1,10 @@
 load("//third_party:glog.buck.bzl", "define_glog")
 load("//third_party:xnnpack.buck.bzl", "define_xnnpack")
-load("//torch/csrc/profiler/kineto/libkineto:kineto.buck.bzl", "define_kineto")
 load("//:buckbuild.bzl", "third_party")
 
 define_glog()
 
 define_xnnpack(third_party)
-
-define_kineto()
 
 # a placeholder for libraries that are not implemented in OSS
 cxx_library(
