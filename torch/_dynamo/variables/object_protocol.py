@@ -2321,7 +2321,9 @@ def mro_attr_source(
         install_guard(mro_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
         # The builtin metaclass always puts the already guarded class first.
         first = 1 if type(klass) is type else 0
-        for index in range(first, len(entries)):
+        # Its C3 MRO also always ends in object; length already pins that position.
+        stop = len(entries) - 1 if type(klass) is type else len(entries)
+        for index in range(first, stop):
             install_guard(
                 GetItemSource(mro_source, index).make_guard(GuardBuilder.ID_MATCH)
             )
