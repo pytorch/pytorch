@@ -1767,11 +1767,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             def build_key_value(
                 i: int, k: Any, v: Any
             ) -> tuple[HashableTracker, VariableTracker]:
-                # Read IDs from their storage position when returned; specialize
-                # only when the traced code observes their value (e.g. repr(id)).
+                # Read storage-position IDs lazily; observing their value specializes them.
                 source_key = ConstDictKeySource(hooks_dict_source, i)
-                # Hash existing keys without specializing their sourced values;
-                # hashing a key in user code must still realize and guard it.
+                # Internal key hashing must not specialize sourced IDs.
                 key_vt = LazyVariableTracker.create(k, source_key, tx=tx)
                 key = (
                     HashableTracker(key_vt, known_hash=hash(k))
@@ -1779,8 +1777,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     else HashableTracker(key_vt)
                 )
 
-                # Access values by storage position too, so equivalent modules
-                # can share a graph despite having different hook IDs.
+                # Storage-position values permit reuse across modules with different IDs.
                 source_value = DictGetItemSource(hooks_dict_source, source_key)
                 value = LazyVariableTracker.create(v, source_value, tx=tx)
                 return key, value

@@ -4,6 +4,7 @@ import builtins
 import collections
 import functools
 import operator
+import types
 from typing import Any, TYPE_CHECKING
 
 from .. import config
@@ -357,7 +358,11 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         # path for unrealized LazyVTs.
         def _helper(value: object) -> bool:
             # TODO: Add support for more types
-            return issubclass(type(value), type) or is_function_or_wrapper(value)
+            return (
+                issubclass(type(value), types.BuiltinMethodType)
+                or issubclass(type(value), type)
+                or is_function_or_wrapper(value)
+            )
 
         if self.is_realized():
             raise AssertionError(
