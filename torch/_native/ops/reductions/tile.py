@@ -523,9 +523,9 @@ def fold_row_aligned(
     tail = prefix + groups * Int32(vec)
     # B200 64 MiB: 16-bit sums at N = 255/257 ran 1.4-1.5x N = 256/258 (27 vs 18-20 us)
     # yet beat scalar 1.7x; Welford (from N = 1025) pays at most 7%, N >= 4095 none.
-    # Both edges are multiples of gcd(N, vec) and at most vec - gcd(N, vec) long, so lane
-    # 0 keeps them rather than spreading them over lanes; the path beat ATen 1.07-2.4x
-    # (fp16 std/all/any, B200).
+    # Both edges are multiples of gcd(N, vec) and at most vec - gcd(N, vec) long. Every
+    # lane runs these vec - gcd(N, vec) predicated iterations; only lane 0 loads real
+    # edge elements (the others reread element 0 and discard it).
     for i in cutlass.range_constexpr(vec - math.gcd(tm.N, vec)):
         prefix_valid = (lane == Int32(0)) & (Int32(i) < prefix)
         prefix_index = Int32(i) if prefix_valid else Int32(0)
@@ -705,6 +705,7 @@ def fold_cols_rolled(
 @cute.jit
 def _fold_welford_equal_group(
     leaf_fn,
+    acc_dt,
     combine_equal_fn,
     mX,
     col,
@@ -715,7 +716,7 @@ def _fold_welford_equal_group(
     tree = []
     for i in cutlass.range_constexpr(group):
         row = mX[Int64(row0 + Int32(i)), None]
-        tree.append(leaf_fn(row[col], idx0 + Int32(i)))
+        tree.append(leaf_fn(acc_dt(row[col]), idx0 + Int32(i)))
     width = 1
     for _ in cutlass.range_constexpr(group.bit_length() - 1):
         tree = [
@@ -753,6 +754,7 @@ def fold_col_welford_grouped(
         idx0 = index_row0 + tail + g * Int32(group)
         root = _fold_welford_equal_group(
             leaf_fn,
+            acc_dt,
             combine_equal_fn,
             mX,
             col,
@@ -803,8 +805,8 @@ class TileReduce:
         ragged_vector=False,
         # Values per output for the general-axis uniform Welford tree; 0 disables it.
         uniform_tree_count: int = 0,
-        # Rows per equal-count Welford tree in scalar column folds, after the leading
-        # nrows % col_group rows fold online; 1 disables it.
+        # Rows per equal-count Welford tree in scalar column folds, after each block's
+        # leading cnt % col_group rows fold online; 1 disables it.
         col_group: int = 1,
     ) -> None:
         if axis not in ("row", "col", "general"):
@@ -874,17 +876,17 @@ class TileReduce:
                 raise ValueError(
                     f"uniform combine counts fail uniform_combine_ok (an FP32 trait with combine_uniform and 1 to 2**24 partials of one power-of-two count up to 2**24), got {type(trait).__name__} acc={trait.acc} {itree.split=}"
                 )
-            staged = itree.shape == "combine" and itree.combine_tile
-            if staged and itree.rows_per_block > WARP:
-                # Partial and weight staging index the block's rows by lane.
-                raise ValueError(
-                    f"staged combine plans require rows_per_block <= {WARP}, got {itree.rows_per_block}"
-                )
             # The plan maps wpr chunks to wpr // kchunk warps and rows_per_block rows.
             threads_per_row = WARP * (itree.wpr // itree.kchunk) if itree.wpr else 1
             if itree.stage_e:
                 threads_per_row = WARP
             threads_per_block = threads_per_row * itree.rows_per_block
+            staged = itree.shape == "combine" and itree.combine_tile
+            if staged and threads_per_block > WARP:
+                # Partial and weight staging index the block's rows by lane.
+                raise ValueError(
+                    f"staged combine plans require at most {WARP} threads per block, got {threads_per_block}"
+                )
             if staged:
                 # The async transpose needs every lane even for a short row group.
                 threads_per_block = max(WARP, threads_per_block)

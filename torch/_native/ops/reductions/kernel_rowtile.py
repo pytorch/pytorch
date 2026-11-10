@@ -534,7 +534,7 @@ def itree_combine_plan(
     counts stage one field fewer per row, and their weights add one row shared by the
     block. A given `trait` supplies nfields (default 1) and may enable uniform counts;
     without one, arch.uniform_count does nothing. `arch` replaces the device's policy:
-    the SM107 full-reduction profile (#200095) and tests pass one.
+    a workload-specific profile and tests pass one.
     """
     if trait is not None:
         if nfields is not None and nfields != trait.nfields:
@@ -900,8 +900,9 @@ def reduce_row_tile(
     """Reduce 2-D `x` rows, returning outputs or raw field partials when `final=False`.
 
     x's device must be current. `ragged_vector` asks for aligned wide loads with scalar
-    edges (one kernel per N); rows of whole 16-byte vectors ignore it. Ragged rows need
-    the linear order, no TMA, and a contiguous, 16-byte aligned input.
+    edges (one kernel per N) and rejects order="inner_tree" and TMA for every N. Rows of
+    whole 16-byte vectors otherwise ignore it (rolled path); ragged rows need a
+    contiguous, 16-byte aligned input.
     """
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
@@ -917,14 +918,14 @@ def reduce_row_tile(
     # Empty rows have no defined min, max or arg result.
     if ragged_vector and N < 1:
         raise ValueError(f"ragged vectors require nonempty rows, got {N=}")
-    # Rows of whole vectors have no edges; the rolled path folds them with one kernel
-    # per vector class rather than one per width.
-    whole = N % (tile.TRANSFER_ALIGNMENT // x.element_size()) == 0
-    ragged_vector = ragged_vector and not whole
     if ragged_vector and order == "inner_tree":
         raise ValueError("ragged vectors require the linear order")
     if ragged_vector and use_tma:
         raise ValueError("ragged vectors cannot use TMA")
+    # Rows of whole vectors have no edges; the rolled path folds them with one kernel
+    # per vector class rather than one per width.
+    whole = N % (tile.TRANSFER_ALIGNMENT // x.element_size()) == 0
+    ragged_vector = ragged_vector and not whole
     itree = None
     if order == "inner_tree" and final and threads_per_row is None:
         itree = trait_itree_plan(trait, N, M, x.element_size(), device=x.device)
