@@ -30,6 +30,7 @@ from torch._functorch._activation_checkpointing.ac_logging_utils import (
 )
 from torch._functorch._aot_autograd.streams import _SYNC_OPS
 from torch._functorch._aot_autograd.utils import is_with_effects
+from torch._higher_order_ops.user_kernel_hop import is_user_kernel_functional_hop
 from torch._inductor import config as inductor_config
 from torch._inductor.custom_graph_pass import (
     CustomKnapsackSolver,
@@ -709,7 +710,7 @@ def _extract_graph_with_inputs_outputs(
 def is_non_builtin_to_include(node: fx.Node) -> bool:
     return config.is_non_builtin_to_include and (
         (isinstance(node.target, torch._ops.OpOverload) and not is_builtin(node.target))
-        or node.target == torch.ops.higher_order.triton_kernel_wrapper_functional
+        or is_user_kernel_functional_hop(node.target)
     )
 
 
@@ -2529,8 +2530,8 @@ def solve_min_cut(
                     return True
         return False
 
-    def can_fuse_into_triton_kernel_wrapper_functional(a: fx.Node, b: fx.Node) -> bool:
-        if b.target != torch.ops.higher_order.triton_kernel_wrapper_functional:
+    def can_fuse_into_user_kernel_wrapper_functional(a: fx.Node, b: fx.Node) -> bool:
+        if not is_user_kernel_functional_hop(b.target):
             return False
         mutable_arg_names = b.kwargs["tensors_to_clone"]
         for name in mutable_arg_names:  # pyrefly: ignore [not-iterable]
@@ -2549,14 +2550,12 @@ def solve_min_cut(
             return True
         if can_fuse_into_auto_functionalized(a, b):
             return True
-        if can_fuse_into_triton_kernel_wrapper_functional(a, b):
+        if can_fuse_into_user_kernel_wrapper_functional(a, b):
             return True
-        if (
-            a.target is operator.getitem
-            and a.args[0].target  # pyrefly: ignore [missing-attribute]
-            is torch.ops.higher_order.triton_kernel_wrapper_functional
+        if a.target is operator.getitem and is_user_kernel_functional_hop(
+            a.args[0].target  # pyrefly: ignore [missing-attribute]
         ):
-            # if a is the output of a user triton kernel,
+            # if a is the output of a user kernel,
             # then (by default) we will not be able to fuse b into it
             return False
         return op_types.is_fusible(a) and op_types.is_fusible(b)
