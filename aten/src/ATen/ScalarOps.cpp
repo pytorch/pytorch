@@ -26,10 +26,11 @@ inline void fill_inplace(Tensor& self, const Scalar& value_scalar) {
     //   torch.ops.aten.scalar_tensor.default(1123581321, dtype=torch.float16)
     //     => RuntimeError: value cannot be converted to type at::Half without overflow
 
-    // (Integer Scalars keep rounding through float, like the other fills.)
-    value = value_scalar.isFloatingPoint()
-        ? c10::convert<scalar_t>(value_scalar.to<double>())
-        : static_cast<scalar_t>(value_scalar.to<double>());
+    // (Integer and bool Scalars keep rounding through float, like the other
+    // fills.)
+    value = value_scalar.isIntegral(/*includeBool=*/true)
+        ? static_cast<scalar_t>(value_scalar.to<double>())
+        : c10::convert<scalar_t>(value_scalar.to<double>());
   } else {
     value = value_scalar.to<scalar_t>();
   }
