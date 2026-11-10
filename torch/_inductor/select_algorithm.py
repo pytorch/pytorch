@@ -92,6 +92,7 @@ from .utils import (
     forwarded_cuda_compile_options,
     fp32_matmul_precision_key,
     get_dtype_size,
+    get_sm_carveout,
     is_gpu,
     Placeholder,
     restore_stdout_stderr,
@@ -4138,7 +4139,11 @@ def get_num_workers() -> int:
 
 
 def create_inputs_key(input_nodes) -> str:
-    return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes])
+    key = repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes])
+    if (sm_carveout := get_sm_carveout()) is not None:
+        # Choices' timings (and their NUM_SMS) depend on the SMs left to them.
+        key += f":sm_carveout={sm_carveout}"
+    return key
 
 
 def create_benchmark_cache_key(

@@ -2227,14 +2227,19 @@ def is_nvidia_sm100_or_later() -> bool:
     )
 
 
+def get_sm_carveout() -> int | None:
+    """The experimental SM carveout that get_num_sms() subtracts, or None. Kernels
+    bake get_num_sms() into NUM_SMS and their grids, so caches of compiled code or
+    benchmark timings must key on this."""
+    if torch.xpu.is_available():
+        return None
+    return torch._C._get_sm_carveout_experimental()
+
+
 def get_num_sms(two_ctas: bool = False) -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
-    # TODO we need to properly guard on this global
-    if torch.xpu.is_available():
-        num_sms = get_max_num_sms()
-    else:
-        carveout = torch._C._get_sm_carveout_experimental()
-        num_sms = get_max_num_sms() - (carveout if carveout is not None else 0)
+    carveout = get_sm_carveout()
+    num_sms = get_max_num_sms() - (carveout if carveout is not None else 0)
     return num_sms // 2 * 2 if two_ctas else num_sms
 
 
