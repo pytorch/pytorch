@@ -9178,7 +9178,19 @@ def meta_scaled_grouped_mm_v2(
 
     rowwise = scale_recipe_a == scale_recipe_b == [ScalingType.RowWise.value]
     tensorwise = [ScalingType.TensorWise.value]
-    bf16_only = scale_recipe_a != tensorwise or scale_recipe_b != tensorwise
+    block_recipes = (
+        ScalingType.BlockWise1x128.value,
+        ScalingType.BlockWise128x128.value,
+    )
+    fp32_block = (
+        len(scale_recipe_a) == len(scale_recipe_b) == 1
+        and scale_recipe_a[0] in block_recipes
+        and scale_recipe_b[0] in block_recipes
+        and ScalingType.BlockWise1x128.value in (scale_recipe_a[0], scale_recipe_b[0])
+    )
+    bf16_only = not fp32_block and (
+        scale_recipe_a != tensorwise or scale_recipe_b != tensorwise
+    )
     message = "Grouped scaling configuration requires BFloat16 output"
     if rowwise:
         message = "Rowwise grouped GEMM requires BFloat16 output"

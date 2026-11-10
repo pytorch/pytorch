@@ -2349,12 +2349,18 @@ void int8_gemm(
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13040
 namespace {
 
-int grouped_scale_mode(CublasGroupedScaleLayout layout) {
+int grouped_scale_mode(CublasGroupedScaleLayout layout, bool use_fast_accum) {
   switch (layout) {
     case CublasGroupedScaleLayout::Scalar:
       return CUBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
     case CublasGroupedScaleLayout::PerBatchScalar:
       return CUBLASLT_MATMUL_MATRIX_SCALE_PER_BATCH_SCALAR_32F;
+    case CublasGroupedScaleLayout::Vec128F32:
+      TORCH_CHECK(!use_fast_accum, "scaled_gemm doesn't support fast accum with FP32 block scales");
+      return CUBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F;
+    case CublasGroupedScaleLayout::Block128x128F32:
+      TORCH_CHECK(!use_fast_accum, "scaled_gemm doesn't support fast accum with FP32 block scales");
+      return CUBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F;
   }
   TORCH_INTERNAL_ASSERT(false, "unsupported grouped GEMM scale layout");
 }
@@ -2420,8 +2426,8 @@ void grouped_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE, betaBatchStride);
   if (scaled) {
 #if CUDA_VERSION >= 13040
-    const int a_scale_mode = grouped_scale_mode(scales->A_layout);
-    const int b_scale_mode = grouped_scale_mode(scales->B_layout);
+    const int a_scale_mode = grouped_scale_mode(scales->A_layout, scales->use_fast_accum);
+    const int b_scale_mode = grouped_scale_mode(scales->B_layout, scales->use_fast_accum);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, scales->A_scale_ptr);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, scales->B_scale_ptr);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, a_scale_mode);
