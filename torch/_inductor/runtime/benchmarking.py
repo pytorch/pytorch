@@ -753,12 +753,9 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         # host has launched `_callable`, leaking launch latency into the event
         # timing. A larger flush buffer keeps the device busy longer.
         # See https://github.com/pytorch/pytorch/issues/189144
+        buffer_size_bytes = self.get_device_cache_size(device_type)
         if device_type == "xpu":
-            buffer_size_bytes = max(
-                self.get_device_cache_size(device_type), 64 * 1024 * 1024
-            )
-        else:
-            buffer_size_bytes = self.get_device_cache_size(device_type)
+            buffer_size_bytes = max(buffer_size_bytes, 64 * 1024 * 1024)
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
         buffer = torch.empty(
             buffer_size_bytes // 4,
