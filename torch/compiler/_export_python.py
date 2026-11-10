@@ -2,6 +2,7 @@
 
 import ast
 import base64
+import binascii
 import contextlib
 import functools
 import os
@@ -111,7 +112,6 @@ def _comment(text: str) -> list[str]:
 def _exported_file(artifact: str) -> str:
     """The file export_python writes for the precompile ``artifact`` of one graph."""
     meta = _parse_artifact_metadata(artifact)
-    name = f"{meta['ENTRY_MODULE']}.{meta['FN_NAME']}"
     sources = [
         node.value
         for node in ast.parse(artifact).body
@@ -119,11 +119,13 @@ def _exported_file(artifact: str) -> str:
         and isinstance(node.targets[0], ast.Subscript)
         and getattr(node.targets[0].value, "id", None) == "GRAPH_SOURCES"
     ]
-    if meta["SERVING_MODE"] != "standalone" or len(sources) > 1:
+    tracer, mode = meta.get("TRACER"), meta.get("SERVING_MODE")
+    if tracer != "dynamo" or mode != "standalone" or len(sources) > 1:
         raise PrecompileError(
-            f"export_python: the capture of {name} is not one graph "
-            f"(SERVING_MODE={meta['SERVING_MODE']!r}, {len(sources)} graphs)."
+            f"export_python: this capture is not one graph from the Dynamo tracer "
+            f"(TRACER={tracer!r}, SERVING_MODE={mode!r}, {len(sources)} graphs)."
         )
+    name = f"{meta['ENTRY_MODULE']}.{meta['FN_NAME']}"
     py = ".".join(map(str, cast(tuple[int, ...], meta["_DYNAMO_PYTHON_VERSION"])))
     lines = _comment(
         f"Exported by torch.compiler.export_python from {name}, one graph, captured "
@@ -134,20 +136,25 @@ def _exported_file(artifact: str) -> str:
         lines += _comment(
             f"Served only with the captured values of: {', '.join(pinned)}."
         )
-    if dropped := [n for _, n in cast(list[list[str]], meta["DROPPED_GUARDS"])]:
-        lines += _comment(
-            f"Not checked when served (they cannot be serialized): {', '.join(dropped)}."
-        )
+    groups = ("DROPPED_GUARDS", "RISKY_DROPPED_GUARDS", "POLICY_DROPPED_GUARDS")
+    unchecked = [
+        n for group in groups for _, n in cast(list[list[str]], meta.get(group, []))
+    ]
+    if unchecked:
+        lines += _comment(f"Guards not checked when served: {', '.join(unchecked)}.")
     if sources:
-        lines += ["#"] + _comment(
-            "The graph code below is Inductor's output and is what runs. Running this "
-            "file benchmarks it on random inputs."
-        )
         segment = ast.get_source_segment(artifact, sources[0])
         if segment is None or artifact.count(segment) != 1:
-            raise AssertionError("the graph code literal is not unique in the artifact")
+            raise PrecompileError(
+                "export_python: the artifact's graph code literal is not unique"
+            )
+        code = ast.literal_eval(segment)
+        about = "The graph code below is Inductor's output and is what runs."
+        if 'if __name__ == "__main__":' in code:
+            about += " Running this file benchmarks it on random inputs."
+        lines += ["#"] + _comment(about)
         artifact = artifact.replace(segment, _GRAPH_CODE)
-        lines += ["", _CODE_BEGIN, ast.literal_eval(segment), _CODE_END]
+        lines += ["", _CODE_BEGIN, code, _CODE_END]
     blob = base64.b64encode(zlib.compress(artifact.encode(), 9)).decode()
     lines += [""] + _comment(
         "The rest of what Dynamo captured (the guards, the frame's bytecode and "
@@ -165,7 +172,13 @@ def _captured_artifact(text: str, path: str) -> str:
             f"export_python: {path} has no _CAPTURED line, so it is not a file "
             "export_python wrote. Delete it to recapture."
         )
-    artifact = zlib.decompress(base64.b64decode(match.group(1))).decode()
+    try:
+        artifact = zlib.decompress(base64.b64decode(match.group(1))).decode()
+    except (binascii.Error, zlib.error, UnicodeDecodeError) as e:
+        raise PrecompileError(
+            f"export_python: the _CAPTURED line of {path} is corrupt ({e}). Delete "
+            "it to recapture."
+        ) from e
     if _GRAPH_CODE not in artifact:
         return artifact
     begin, end = text.find(_CODE_BEGIN + "\n"), text.rfind("\n" + _CODE_END)
@@ -214,6 +227,15 @@ class _ExportedPython:
     def _load(self, *, trusted: bool = False) -> PrecompiledRunnable:
         with open(self._path, "rb") as f:
             python_code = _captured_artifact(f.read().decode(), self._path)
+        meta = _parse_artifact_metadata(python_code)
+        captured = f"{meta['ENTRY_MODULE']}.{meta['FN_NAME']}"
+        decorated = f"{self._fn.__module__}.{self._name}"
+        if captured != decorated:
+            raise PrecompileError(
+                f"export_python: {self._path} was captured from {captured}, not "
+                f"{decorated}: two functions cannot share a path. Give {decorated} "
+                "a path of its own."
+            )
         try:
             with open(self._cache_path, "rb") as f:
                 cache = f.read()
