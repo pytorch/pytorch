@@ -404,6 +404,7 @@ if __name__ == "__main__":
         current_device = torch.xpu.current_device()
         self.assertRegex(processes_info, rf"GPU:\s*{current_device}\b")
 
+    @unittest.skip("https://github.com/intel/torch-xpu-ops/issues/6131")
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_device_count_respects_affinity_mask(self):
         def _run(mask: str) -> str:
