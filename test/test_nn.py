@@ -7737,19 +7737,20 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float)
     def test_InstanceNorm_empty(self, norm_cls, shape, affine, device, dtype):
-        mod = norm_cls(3, device=device, track_running_stats=True, affine=affine)
+        mod = norm_cls(3, device=device, track_running_stats=True, affine=affine, dtype=dtype)
         inp = torch.randn(*shape, device=device, dtype=dtype)
         _test_module_empty_input(self, mod, inp)
 
-        self.assertEqual(mod.running_mean, torch.zeros(3, device=device))
-        self.assertEqual(mod.running_var, torch.ones(3, device=device))
+        self.assertEqual(mod.running_mean, torch.zeros(3, device=device, dtype=dtype))
+        self.assertEqual(mod.running_var, torch.ones(3, device=device, dtype=dtype))
         if affine:
-            self.assertEqual(mod.bias.grad, torch.zeros(3, device=device))
-            self.assertEqual(mod.weight.grad, torch.zeros(3, device=device))
+            self.assertEqual(mod.bias.grad, torch.zeros(3, device=device, dtype=dtype))
+            self.assertEqual(mod.weight.grad, torch.zeros(3, device=device, dtype=dtype))
 
         # verify subsequent eval forward
         mod.eval()
-        out = mod(inp)
+        valid_shape = (2, ) + shape[1:]
+        out = mod(torch.randn(*valid_shape, device=device, dtype=dtype))
         self.assertTrue(torch.isfinite(out).all())
 
     @parametrize_test("instance_norm_cls", [nn.InstanceNorm1d, nn.InstanceNorm2d, nn.InstanceNorm3d], name_fn=lambda c: c.__name__)
