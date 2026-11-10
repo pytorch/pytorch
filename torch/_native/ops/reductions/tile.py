@@ -221,16 +221,34 @@ def fold_decoded(
 
 
 # Caps the loads fold_uniform_tree unrolls per thread; each adds a load and its merges.
+# On B200 one kernel compiles in 0.24-0.31 s (64 loads: 0.31 s vs 0.25 s for the online
+# chain), and a configuration can compile up to 127 kernels (whole loads x tail).
 UNIFORM_TREE_MAX_LOADS = 64
 
 
 def _uniform_tree_issue(
-    trait, count, threads_per_block, npairs_red, flat_tail, ragged_chunk
+    trait,
+    count,
+    threads_per_block,
+    npairs_red,
+    *,
+    axis="general",
+    order="linear",
+    combine=False,
+    gidx_from="r",
+    flat_tail=False,
+    ragged_chunk=False,
 ) -> str | None:
     # The tree indexes one run with Int32 r, which the load cap keeps in range. It bounds
     # the tail by the unclamped rb (no flat_tail or ragged_chunk clamp), and masked lanes
     # read obase rather than in_base, which only overhanging chunks need.
     max_count = threads_per_block * UNIFORM_TREE_MAX_LOADS
+    if axis != "general" or order != "linear":
+        return f"a linear general-axis fold, got {axis=} {order=}"
+    if combine:
+        return "a fold of inputs, not partials"
+    if gidx_from != "r":
+        return f"indices from r, got {gidx_from=}"
     if not getattr(trait, "has_combine_equal", False):
         return f"a trait with combine_equal, got {type(trait).__name__}"
     if npairs_red != 1:
@@ -720,23 +738,26 @@ class TileReduce:
         # Duck-typed because its driver-owned type would invert the dependency.
         itree: Any = None,
         ragged_vector=False,
-        # Values per output for the general-axis uniform Welford tree; 0 disables it.
-        uniform_tree_count: int = 0,
+        # Values per output for the general-axis uniform Welford tree; None disables it.
+        uniform_tree_count: int | None = None,
     ) -> None:
         if axis not in ("row", "col", "general"):
             raise ValueError(f"axis must be 'row', 'col' or 'general', got {axis!r}")
         if order not in ("linear", "inner_tree"):
             raise ValueError(f"order must be 'linear' or 'inner_tree', got {order!r}")
-        if uniform_tree_count:
-            if axis != "general" or order != "linear":
-                issue = f"a linear general-axis fold, got {axis=} {order=}"
-            elif combine:
-                issue = "a fold of inputs, not partials"
-            elif gidx_from != "r":
-                issue = f"indices from r, got {gidx_from=}"
-            else:
-                args = (uniform_tree_count, threads_per_block, npairs_red)
-                issue = _uniform_tree_issue(trait, *args, flat_tail, ragged_chunk)
+        if uniform_tree_count is not None:
+            issue = _uniform_tree_issue(
+                trait,
+                uniform_tree_count,
+                threads_per_block,
+                npairs_red,
+                axis=axis,
+                order=order,
+                combine=combine,
+                gidx_from=gidx_from,
+                flat_tail=flat_tail,
+                ragged_chunk=ragged_chunk,
+            )
             if issue is not None:
                 raise ValueError(f"the uniform Welford tree needs {issue}")
         itemsize = dtype.width // 8 if dtype is not None else 0
@@ -813,7 +834,8 @@ class TileReduce:
         self.unroll = unroll
         self.ragged_vector = ragged_vector
         # The count compiles as whole loads and whether a tail remains.
-        self.uniform_tree_loads, tail = divmod(uniform_tree_count, threads_per_block)
+        tree_count = uniform_tree_count or 0
+        self.uniform_tree_loads, tail = divmod(tree_count, threads_per_block)
         self.uniform_tree_tail = bool(tail)
         self.use_tma = use_tma
         self.combine = combine
