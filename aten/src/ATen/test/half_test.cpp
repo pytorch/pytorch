@@ -183,10 +183,10 @@ TEST(TestHalf, ComplexHalf) {
   ASSERT_EQ(complex.imag(), imag);
 }
 
-#if defined(__FLT16_MAX__) && \
-    (defined(__clang__) || !defined(__GNUC__) || __GNUC__ >= 13)
+#ifdef AT_HAS_ITEM_FLOAT16
 TEST(TestHalf, ItemFloat16) {
+  // 0x2E66 is the binary16 encoding of 0.1.
   auto t = at::full({}, 0.1, kHalf);
-  ASSERT_EQ(c10::bit_cast<uint16_t>(t.item<_Float16>()), t.item<Half>().x);
+  ASSERT_EQ(c10::bit_cast<uint16_t>(t.item<_Float16>()), uint16_t{0x2E66});
 }
 #endif
