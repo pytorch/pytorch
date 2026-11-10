@@ -20,6 +20,7 @@ struct FakeTensorModeTLSState {
 
   ~FakeTensorModeTLSState() {
     // Last release can run Python, including lookups from weakref callbacks.
+    // Only the fake slot is protected; other dispatch TLS may be destroyed.
     fakeTensorModeTLSClosed = true;
     auto saved = std::move(state);
     tls_set_dispatch_key_included(DispatchKey::Fake, false);
