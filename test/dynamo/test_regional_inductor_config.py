@@ -40,6 +40,16 @@ def _(x):
     return torch.empty_like(x)
 
 
+@torch.library.custom_op("regional_cudagraph_test::plain_clone", mutates_args=())
+def _plain_clone(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+
+
+@_plain_clone.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+
 @torch.library.custom_op("regional_cudagraph_test::count_positive", mutates_args=())
 def _count_positive(x: torch.Tensor) -> int:
     return int((x[:, 0] > 0).sum().item())
@@ -76,7 +86,9 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
     @staticmethod
     @contextlib.contextmanager
     def _record_captures():
-        """Collect the kwargs of every cudagraphify call, i.e. of every capture."""
+        """Collect the kwargs of every cudagraphify wrapper built at compile time,
+        one per graph or partition set up for capture. Recording happens later,
+        when the compiled function runs: count that with _num_recorded_graphs."""
         from torch._inductor.compile_fx import cudagraphify
 
         captures = []
@@ -87,6 +99,27 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
 
         with mock.patch("torch._inductor.compile_fx.cudagraphify", record):
             yield captures
+
+    @staticmethod
+    def _num_recorded_graphs():
+        """CUDA graphs recorded by the tree manager so far. Consumes a graph id,
+        so call it once, after the last run."""
+        from torch._inductor.cudagraph_trees import get_manager
+
+        manager = get_manager(torch.cuda.current_device(), create_if_none_exists=False)
+        return 0 if manager is None else manager.new_graph_id().id
+
+    def _run_and_get_code_and_recordings(self, fn, *inputs):
+        """Run torch.compile(fn) three times, so that the CUDA graph tree warms
+        up, records and replays, comparing every result with eager. Returns the
+        generated code and the number of CUDA graphs recorded."""
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        expected = fn(*inputs)
+        result, (code,) = run_and_get_code(compiled_fn, *inputs)
+        self.assertEqual(result, expected)
+        for _ in range(2):
+            self.assertEqual(compiled_fn(*inputs), expected)
+        return code, self._num_recorded_graphs()
 
     @staticmethod
     def _empty_graph_module():
@@ -316,18 +349,15 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
             n = _count_positive(x)
             torch._check_is_size(n)
             torch._check(n <= x.shape[0])
-            return region(x[:n] + 1)
+            return region(x[:n] + 1), torch.cos(x)
 
         x = torch.randn(64, 16, device=GPU_TYPE)
-        with self._record_captures() as captures:
-            result, (code,) = run_and_get_code(
-                torch.compile(fn, backend="inductor", fullgraph=True), x
-            )
+        code, recorded = self._run_and_get_code_and_recordings(fn, x)
 
-        self.assertEqual(result, fn(x))
-        self.assertIn("repeated_subgraph0(", code)
+        self.assertIn("= repeated_subgraph0(", code)
         partitions = self._partition_bodies(code)
-        self.assertEqual(len(captures), len(partitions))
+        self.assertGreater(len(partitions), 0)
+        self.assertEqual(recorded, len(partitions))
         for partition in partitions:
             self.assertNotIn("repeated_subgraph0(", partition)
 
@@ -349,7 +379,9 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         (
             "cpu_round_trip",
             "cudagraph_unsafe_op",
+            "custom_should_partition_op",
             "unbacked",
+            "cond",
             "nested_region",
             "multi_output",
         ),
@@ -367,7 +399,9 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         bodies = {
             "cpu_round_trip": cpu_round_trip,
             "cudagraph_unsafe_op": cudagraph_unsafe_op,
+            "custom_should_partition_op": lambda x: _plain_clone(torch.sin(x)),
             "unbacked": lambda x: x + torch.nonzero(x > 0).sum(),
+            "cond": lambda x: torch.cond(x.sum() > 0, torch.sin, torch.cos, (x,)),
             "nested_region": lambda x: torch.cos(inner_region(x)),
             "multi_output": lambda x: (cpu_round_trip(x), torch.cos(x)),
         }
@@ -380,20 +414,119 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
             return torch.cos(out)
 
         x = torch.randn(16, 16, device=GPU_TYPE)
-        with self._record_captures() as captures:
-            result, (code,) = run_and_get_code(
-                torch.compile(fn, backend="inductor", fullgraph=True), x
-            )
+        custom_should_partition_ops = (
+            ["regional_cudagraph_test::plain_clone"]
+            if body == "custom_should_partition_op"
+            else []
+        )
+        with torch._inductor.config.patch(
+            custom_should_partition_ops=custom_should_partition_ops
+        ):
+            code, recorded = self._run_and_get_code_and_recordings(fn, x)
 
-        self.assertEqual(result, fn(x))
         # The MultiOutputs that unpack the region's results must stay with it.
         (region_buf,) = re.findall(r"(\w+) = repeated_subgraph0\(", code)
         partitions = self._partition_bodies(code)
         self.assertGreater(len(partitions), 0)
-        self.assertEqual(len(captures), len(partitions))
+        self.assertEqual(recorded, len(partitions))
         for partition in partitions:
             self.assertNotIn("repeated_subgraph0(", partition)
             self.assertNotIn(f"{region_buf}[", partition)
+        if body == "nested_region":
+            # The inner region must survive as its own call for the body walk
+            # to recurse into it.
+            body_code = self._generated_fn_body(code, "def repeated_subgraph0(")
+            self.assertRegex(body_code, r"= \w*repeated_subgraph\w*\(")
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": True,
+            "triton.cudagraphs": True,
+            "triton.cudagraph_skip_dynamic_graphs": True,
+        }
+    )
+    def test_dynamic_region_body_stays_out_of_partitions(self):
+        @torch.compiler.nested_compile_region
+        def region(x):
+            return torch.sin(x).sum(0)
+
+        def fn(x, weight):
+            return torch.cos(region(x) @ weight)
+
+        x = torch.randn(8, 16, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0)
+        weight = torch.randn(16, 16, device=GPU_TYPE)
+        code, recorded = self._run_and_get_code_and_recordings(fn, x, weight)
+
+        self.assertIn("= repeated_subgraph0(", code)
+        partitions = self._partition_bodies(code)
+        self.assertGreater(len(partitions), 0)
+        self.assertEqual(recorded, len(partitions))
+        for partition in partitions:
+            self.assertNotIn("repeated_subgraph0(", partition)
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": True,
+            "triton.cudagraphs": True,
+        }
+    )
+    def test_uncapturable_region_body_stays_out_of_partitions_training(self):
+        @torch.compiler.nested_compile_region
+        def region(x):
+            return torch.sin(x).cpu().to(GPU_TYPE) * 2
+
+        def fn(x, weight):
+            return torch.cos(region(x @ weight))
+
+        inputs = [
+            torch.randn(16, 16, device=GPU_TYPE, requires_grad=True) for _ in range(2)
+        ]
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        with self._record_captures() as captures:
+            for i in range(3):
+                compiled_inputs, eager_inputs = (
+                    [x.detach().clone().requires_grad_() for x in inputs]
+                    for _ in range(2)
+                )
+                if i == 0:
+                    result, codes = run_fw_bw_and_get_code(
+                        lambda: compiled_fn(*compiled_inputs)
+                    )
+                else:
+                    result = compiled_fn(*compiled_inputs)
+                    result.sum().backward()
+                expected = fn(*eager_inputs)
+                expected.sum().backward()
+                self.assertEqual(result, expected)
+                self.assertEqual(
+                    [x.grad for x in compiled_inputs], [x.grad for x in eager_inputs]
+                )
+
+        self.assertEqual(len(codes), 2)
+        partitions = [self._partition_bodies(code) for code in codes]
+        self.assertEqual(
+            sorted(c["is_backward"] for c in captures),
+            [False] * len(partitions[0]) + [True] * len(partitions[1]),
+        )
+        self.assertEqual(self._num_recorded_graphs(), len(captures))
+        for code, code_partitions, subgraph_name in zip(
+            codes,
+            partitions,
+            ("partitioned_fw_subgraph_0_0(", "partitioned_bw_subgraph_0_0("),
+        ):
+            self.assertIn(f"= {subgraph_name}", code)
+            self.assertGreater(len(code_partitions), 0)
+            for partition in code_partitions:
+                self.assertNotIn(subgraph_name, partition)
 
     @requires_cuda_and_triton
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
@@ -406,23 +539,31 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
             "triton.cudagraph_min_partition_size": 3,
         }
     )
-    def test_region_body_kernels_count_toward_min_partition_size(self):
-        # The region call site is a couple of scheduler nodes, but its body
-        # holds four kernels, which is what the partition size should weigh.
+    @parametrize("nested", (False, True))
+    def test_region_body_kernels_count_toward_min_partition_size(self, nested):
+        """The region call site is a couple of scheduler nodes, but its body
+        holds three matmuls (two of them in a nested region when nested=True),
+        which is what the partition size should weigh."""
+
         @torch.compiler.nested_compile_region
-        def region(x, weight0, weight1, weight2, weight3):
-            return ((x @ weight0) @ weight1 @ weight2) @ weight3
+        def inner(x, weight0, weight1):
+            return (x @ weight0) @ weight1
 
-        inputs = [torch.randn(16, 16, device=GPU_TYPE) for _ in range(5)]
-        with self._record_captures() as captures:
-            result, (code,) = run_and_get_code(
-                torch.compile(region, backend="inductor", fullgraph=True), *inputs
-            )
+        @torch.compiler.nested_compile_region
+        def region(x, weight0, weight1, weight2):
+            if nested:
+                return inner(x, weight0, weight1) @ weight2
+            return ((x @ weight0) @ weight1) @ weight2
 
-        self.assertEqual(result, region(*inputs))
+        inputs = [torch.randn(16, 16, device=GPU_TYPE) for _ in range(4)]
+        code, recorded = self._run_and_get_code_and_recordings(region, *inputs)
+
         (partition,) = self._partition_bodies(code)
-        self.assertIn("repeated_subgraph0(", partition)
-        self.assertEqual(len(captures), 1)
+        self.assertIn("= repeated_subgraph0(", partition)
+        self.assertEqual(recorded, 1)
+        if nested:
+            body_code = self._generated_fn_body(code, "def repeated_subgraph0(")
+            self.assertRegex(body_code, r"= \w*repeated_subgraph\w*\(")
 
     @requires_cuda_and_triton
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
@@ -448,16 +589,12 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
             return tuple(region(x, weight0, weight1, weight2) for x in xs)
 
         inputs = [torch.randn(16, 16, device=GPU_TYPE) for _ in range(3 + num_calls)]
-        with self._record_captures() as captures:
-            result, (code,) = run_and_get_code(
-                torch.compile(fn, backend="inductor", fullgraph=True), *inputs
-            )
+        code, recorded = self._run_and_get_code_and_recordings(fn, *inputs)
 
-        self.assertEqual(result, fn(*inputs))
         self.assertEqual(code.count("= repeated_subgraph0("), num_calls)
         captured = num_calls == 2
         self.assertEqual(len(self._partition_bodies(code)), int(captured))
-        self.assertEqual(len(captures), int(captured))
+        self.assertEqual(recorded, int(captured))
 
 
 if __name__ == "__main__":
