@@ -1075,14 +1075,16 @@ namespace {
             // generate test_val based on expected
             for (int i = 0; i < vec::size(); ++i)
             {
-                if (expected & (1 << i)) {
+                if (expected & (1UL << i)) {
                     test_vals[i] = (VT)0;
                 }
                 else {
                     test_vals[i] = (VT)0.897;
                 }
             }
-            int actual = vec::loadu(test_vals).zero_mask();
+            // zero_mask returns an int, whose sign bit is the mask of lane 31
+            // for 32 lanes (Half and BFloat16 on AVX-512).
+            uint32_t actual = vec::loadu(test_vals).zero_mask();
             ASSERT_EQ(expected, actual) << "Failure Details:\n"
                 << std::hex << "Expected:\n#\t" << expected
                 << "\nActual:\n#\t" << actual;
