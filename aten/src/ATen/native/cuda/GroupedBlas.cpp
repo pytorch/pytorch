@@ -620,8 +620,6 @@ std::optional<c10::ScalarType> out_dtype) {
   const bool b_is_2d = mat_b.dim() == 2;
   const int64_t batchCount64 = (a_is_2d || b_is_2d)
       ? offs->size(0) : mat_a.size(0);
-  TORCH_CHECK(batchCount64 > 0 && batchCount64 <= kMaxCublasGroupedBatchCount,
-      "batchCount must be in [1, 1024], got ", batchCount64);
   const int batchCount = static_cast<int>(batchCount64);
 
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
@@ -642,11 +640,7 @@ static void scaled_grouped_mm_cublaslt(
     const Tensor& mat_a,
     const Tensor& mat_b,
     ArrayRef<Tensor> scale_a,
-    ArrayRef<ScalingType> recipe_a,
-    ArrayRef<SwizzleType> swizzle_a,
     ArrayRef<Tensor> scale_b,
-    ArrayRef<ScalingType> recipe_b,
-    ArrayRef<SwizzleType> swizzle_b,
     const std::optional<Tensor>& offs,
     bool use_fast_accum,
     int64_t batchCount,
@@ -657,7 +651,8 @@ static void scaled_grouped_mm_cublaslt(
   const int64_t min_batch_count = empty_out ? 0 : 1;
   TORCH_CHECK_VALUE(
       batchCount >= min_batch_count && batchCount <= kMaxCublasGroupedBatchCount,
-      "cuBLASLt grouped GEMM batchCount must be in [", min_batch_count, ", 1024], got ", batchCount);
+      "cuBLASLt grouped GEMM batchCount must be in [", min_batch_count, ", ",
+      kMaxCublasGroupedBatchCount, "], got ", batchCount);
   const auto [layout_a, layout_b] = get_cublaslt_grouped_scale_layouts(gemm_impl, scale_a[0], scale_b[0]);
   check_cublaslt_grouped_scale_storage(scale_a[0], batchCount, "scale_a");
   check_cublaslt_grouped_scale_storage(scale_b[0], batchCount, "scale_b");
@@ -885,8 +880,8 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
     // These cases are only supported by cuBLASLt
     case ScaledGemmImplementation::TENSORWISE_TENSORWISE: {
       scaled_grouped_mm_cublaslt(
-          gemm_impl, mat_a, mat_b, scale_a_ref, scale_recipe_a_enum, swizzle_a_enum,
-          scale_b_ref, scale_recipe_b_enum, swizzle_b_enum, offs_opt, use_fast_accum, batch_count, out_mut);
+          gemm_impl, mat_a, mat_b, scale_a_ref, scale_b_ref,
+          offs_opt, use_fast_accum, batch_count, out_mut);
       return;
     }
     // RowWise uses in-tree CUTLASS on CUDA and MSLK on ROCm.
