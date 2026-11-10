@@ -108,6 +108,8 @@ def _geometry(t: torch.Tensor) -> tuple[tuple[int, ...], tuple[int, ...], int]:
 def launch(fn: "Function", device: int, ins: Any, *args: Any) -> None:
     """Call compiled `fn` on `device`'s current stream. `ins`, a tensor or a list of
     tensors, is exported read-only; tensors in `args`, bare or in lists, are outputs.
+    This calls fn(read-only ins, *args, stream), so kernels are compiled with the stream
+    as their last parameter and callers do not pass it.
 
     Compiled kernels launched through here must treat outputs as write-only scratch: a
     replay allocates them uninitialized and repeats only the launches. While recording,
@@ -129,7 +131,8 @@ class LaunchRecord:
     (resizes that do not grow the storage are fine), that launch outputs are write-only
     scratch (a replay allocates them uninitialized and repeats only the launches), and
     that every compiled-kernel call goes through launch(): finish() catches a direct
-    call only when its result feeds a launch or is returned unwritten.
+    call only when it writes a storage no launch has seen and a launch then reads that
+    storage, or that storage is returned without a launch writing it.
     finish() returns None unless every operand views `x` or a buffer whose storage first
     appeared in a launch's output position, before any input position, and every output
     views a distinct such buffer. Torch-op results that a launch reads, or that are
