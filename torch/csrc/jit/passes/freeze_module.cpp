@@ -176,7 +176,7 @@ class AttributePropagator {
     std::vector<ResolvedName> attr_infos;
     attr_infos.reserve(sub_names.size() - 1);
 
-    for (size_t i = 0; i < sub_names.size() - 1; ++i) {
+    for (const auto i : c10::irange(sub_names.size() - 1)) {
       bool found = false;
       const auto& sub_name = sub_names[i];
       for (const auto& child_module : cur_module.named_children()) {

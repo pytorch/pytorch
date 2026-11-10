@@ -1260,7 +1260,7 @@ SimpleIREvaluator::~SimpleIREvaluator() = default;
 
 void SimpleIREvaluator::call(const std::vector<CallArg>& args) {
   std::vector<void*> raw_args(args.size());
-  for (size_t i = 0; i < args.size(); i++) {
+  for (const auto i : c10::irange(args.size())) {
     auto const& bufferArg = buffer_args()[i];
     auto const& callArg = args[i];
     raw_args[i] = argToPtr(bufferArg, callArg);
