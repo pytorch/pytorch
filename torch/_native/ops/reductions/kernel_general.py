@@ -355,13 +355,10 @@ def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
 # max.dim, min.dim, aminmax, var and std) runs 1.0-13x. General-p norms (an exp/log
 # leaf; p = 3 measured) run 0.34-2.3x below 16384 outputs and 1.1-2.6x from there.
 # The route starts at the shortest measured win, R = 128 (reduce_ordered_col declines
-# the multirow plans of rows up to 32 for fp32 and 64 for 16-bit inputs anyway). Rows
-# compile once per R and mapping (see kernel_coltile.OrderedColConfig.min_blocks):
-# single-field rows replay every lane statically, taking 0.35 s at R = 2048, 1.5 s at
-# R = 8192 and 4.3 s at R = 24576 (fp32/bf16, C = 2048), and multi-field rows 1.3 s at
-# R = 8192 and 2.5-3.1 s at R = 8193-16384 (fp32), against 0.3-0.75 s for the indexed
-# tree. reduce_ordered_col declines replays past tile.MAX_UNROLL leaves, so the route
-# stops at R = 8192.
+# the multirow plans of rows up to 32 for fp32 and 64 for 16-bit inputs anyway), and
+# stops at R = 8192, the longest looped row within reduce_ordered_col's replay cap of
+# tile.MAX_UNROLL leaves (see the compile timings there). Each R compiles once per
+# mapping (see kernel_coltile.OrderedColConfig.min_blocks) and stride width.
 _ORDERED_COL_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 # kernel_coltile._ORDERED_COL_CONFIGS entries for other architectures are not routed.
 _ORDERED_COL_CCS = ((10, 0),)
