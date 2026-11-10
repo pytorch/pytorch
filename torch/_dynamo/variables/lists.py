@@ -180,6 +180,9 @@ class BaseListVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.python_type()([x.as_python_constant() for x in self.items])
 
+    def can_load_const_for_codegen(self) -> bool:
+        return False
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         return VariableTracker.build(tx, self.debug_repr())
 
@@ -2024,6 +2027,31 @@ class TupleVariable(BaseListVariable):
     def python_type(self) -> type[tuple]:  # type: ignore[type-arg]
         return tuple
 
+    def can_load_const_for_codegen(self) -> bool:
+        from .constant import FakeIdVariable
+        from .script_object import CustomClassVariable
+        from .tensor import SymNodeVariable
+
+        if type(self) not in (TupleVariable, SizeVariable):
+            return False
+        excluded = (SymNodeVariable, FakeIdVariable, CustomClassVariable)
+        can_load_const = True
+
+        def check(var: VariableTracker) -> None:
+            nonlocal can_load_const
+            if (
+                not var.is_realized()
+                or isinstance(var, excluded)
+                or not var._can_load_const_for_codegen_in_tuple()
+            ):
+                can_load_const = False
+
+        VariableTracker.visit(check, self)
+        return can_load_const
+
+    def _can_load_const_for_codegen_in_tuple(self) -> bool:
+        return type(self) in (TupleVariable, SizeVariable)
+
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.items)})"
 
@@ -2121,6 +2149,9 @@ class ByteArrayVariable(VariableTracker):
 
     def as_python_constant(self) -> bytearray:
         return bytearray(self.data)
+
+    def can_load_const_for_codegen(self) -> bool:
+        return False
 
     def as_proxy(self) -> bytearray:
         return self.data
@@ -2739,6 +2770,12 @@ class SliceVariable(VariableTracker):
     def as_python_constant(self) -> slice:
         return slice(*[guard_if_dyn(x) for x in self.items])
 
+    def can_load_const_for_codegen(self) -> bool:
+        return type(self) is not SliceVariable or all(
+            item.is_realized() and type(item.unwrap()) is ConstantVariable
+            for item in self.items
+        )
+
     def as_index_slice(self, tx: "InstructionTranslatorBase") -> slice:
         # PySlice_Unpack -> evaluate_slice_index: each non-None member is
         # coerced through __index__ (nb_index), so user objects with an
@@ -2884,6 +2921,9 @@ class BaseListIteratorVariable(IteratorVariable):
         if self.index > 0:
             raise NotImplementedError
         return iter([x.as_python_constant() for x in self.items])
+
+    def can_load_const_for_codegen(self) -> bool:
+        return False
 
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"

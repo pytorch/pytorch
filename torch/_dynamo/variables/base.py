@@ -2007,6 +2007,22 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def is_python_constant(self) -> bool:
         return self.try_as_python_constant()[0]
 
+    def can_load_const_for_codegen(self) -> bool:
+        r"""can_load_const_for_codegen() -> bool
+
+        Whether codegen may attempt guarded constant conversion. True does not
+        establish that this VT is a Python constant. This query must not realize
+        variables or install guards.
+        """
+        return True
+
+    def _can_load_const_for_codegen_in_tuple(self) -> bool:
+        r"""_can_load_const_for_codegen_in_tuple() -> bool
+
+        Check one node; TupleVariable visits its descendants separately.
+        """
+        return self.can_load_const_for_codegen()
+
     def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         # Mirrors CPython's tp_as_number->nb_bool slot.
         # https://github.com/python/cpython/blob/c09ccd9c429/Objects/object.c#L2135-L2158
