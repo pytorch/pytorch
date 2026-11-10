@@ -52,7 +52,10 @@ from torch.testing._internal.inductor_utils import (
     is_big_gpu,
 )
 from torch.utils._sympy.symbol import SymT
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import (
+    has_datacenter_blackwell_tma_device,
+    has_triton_tma_device,
+)
 
 
 _PRIOR_FP32_MATMUL_PRECISION: str | None = None
@@ -1735,6 +1738,127 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need datacenter Blackwell with device-side TMA support in Triton",
+    )
+    @onlyCUDA
+    @parametrize("api", ("v1", "v2"))
+    def test_blockwise_fp32_scaling_skips_blackwell_epilogue_template(
+        self, api, device
+    ):
+        # https://github.com/pytorch/pytorch/issues/193802: the Blackwell mm
+        # template only scales in its epilogue, and autotuning used to pick it for
+        # blockwise recipes, silently returning wrong results.
+        from torch._inductor.select_algorithm import (
+            add_preprocessing_fn,
+            clear_preprocessing_fns,
+        )
+
+        M, N, K = 512, 1024, 2048
+        torch.manual_seed(0)
+        x = torch.randn(M, K, device=device)
+        w = torch.randn(N, K, device=device)
+        x_fp8, x_scale = _quantize_blockwise(x, torch.float8_e4m3fn, 1, 128)
+        w_fp8, w_scale = _quantize_blockwise(w, torch.float8_e4m3fn, 128, 128)
+        ref = (x_fp8.double() * x_scale.double().repeat_interleave(128, 1)) @ (
+            w_fp8.double()
+            * w_scale.double().repeat_interleave(128, 0).repeat_interleave(128, 1)
+        ).t()
+        x_scale = _prepare_blockwise_scale(x_scale, 1, 128)
+        w_scale = _prepare_blockwise_scale(w_scale, 128, 128)
+
+        def fn(x_fp8, w_t_fp8, x_scale, w_scale):
+            if api == "v1":
+                return torch._scaled_mm(
+                    x_fp8, w_t_fp8, x_scale, w_scale, out_dtype=torch.float32
+                )
+            return scaled_mm(
+                x_fp8,
+                w_t_fp8,
+                x_scale,
+                ScalingType.BlockWise1x128,
+                w_scale,
+                ScalingType.BlockWise128x128,
+                output_dtype=torch.float32,
+            )
+
+        templates = set()
+
+        def record_templates(choices):
+            templates.update(choice.name.rsplit("_", 1)[0] for choice in choices)
+            return choices
+
+        torch._dynamo.reset()
+        add_preprocessing_fn(record_templates)
+        try:
+            with config.patch(
+                {
+                    "fx_graph_cache": False,
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": True,
+                    "test_configs.autotune_choice_name_regex": None,
+                    "test_configs.autotune_choice_desc_regex": None,
+                }
+            ):
+                actual = torch.compile(fn, fullgraph=True)(
+                    x_fp8, w_fp8.t(), x_scale, w_scale
+                )
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        self.assertNotIn("triton_blackwell_ws_persistent_tma", templates)
+        self.assertIn("triton_scaled_mm_device_tma_main_loop_scaling", templates)
+        rel = ((actual.double() - ref).abs().sum() / ref.abs().sum()).item()
+        self.assertLess(rel, 1e-3, f"relative error {rel} against fp64 reference")
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @onlyCUDA
+    @parametrize("fp32_side", ("a", "b"))
+    def test_blockwise_scaling_mixed_scale_dtypes_falls_back(self, fp32_side, device):
+        # The Triton scaled_mm lowering reads both block scales as fp32, so a
+        # single non-fp32 scale must go to the eager op.
+        from torch._inductor.exc import InductorError
+        from torch._inductor.kernel import mm
+
+        M = N = K = 128
+        a = torch.ones((M, K), device=device, dtype=torch.float8_e4m3fn)
+        b = torch.ones((N, K), device=device, dtype=torch.float8_e4m3fn).t()
+        scale_a = torch.ones((M, 1), device=device, dtype=torch.float8_e8m0fnu)
+        scale_b = torch.ones((N, 1), device=device, dtype=torch.float8_e8m0fnu)
+        if fp32_side == "a":
+            scale_a = torch.ones((M, 1), device=device, dtype=torch.float32)
+        else:
+            scale_b = torch.ones((N, 1), device=device, dtype=torch.float32)
+
+        def fn(a, b, scale_a, scale_b):
+            return scaled_mm(
+                a,
+                b,
+                scale_a,
+                ScalingType.BlockWise1x128,
+                scale_b,
+                ScalingType.BlockWise1x128,
+                output_dtype=torch.bfloat16,
+                use_fast_accum=False,
+            )
+
+        torch._dynamo.reset()
+        with (
+            mock.patch.object(
+                mm,
+                "scaled_mm_v2_fallback",
+                side_effect=RuntimeError("expected scaled_mm_v2 fallback"),
+            ),
+            config.patch({"fx_graph_cache": False}),
+            self.assertRaisesRegex(InductorError, "expected scaled_mm_v2 fallback"),
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(
+                a, b, scale_a, scale_b
+            )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
