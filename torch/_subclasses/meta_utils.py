@@ -1091,6 +1091,7 @@ class MetaConverter(Generic[_TensorT]):
         source: Source | None,
         symbolic_context: SymbolicContext | None,
     ) -> _TensorT:
+        from torch._guards import require_python_fake_mode
         from torch._subclasses.fake_tensor import (
             is_fake_tensor,
             maybe_get_fake_mode,
@@ -2235,7 +2236,7 @@ class MetaConverter(Generic[_TensorT]):
                                 in_kernel_invocation_manager,
                             )
 
-                            mb_fake_mode = torch._guards.require_python_fake_mode(
+                            mb_fake_mode = require_python_fake_mode(
                                 maybe_get_fake_mode(r)
                             )
                             if mb_fake_mode is not None:
@@ -2322,7 +2323,7 @@ class MetaConverter(Generic[_TensorT]):
                 if not is_fake_tensor(r):
                     raise AssertionError("Expected r to be a FakeTensor for nested int")
                 # pyrefly: ignore [unbound-name]
-                r_mode = torch._guards.require_python_fake_mode(maybe_get_fake_mode(r))
+                r_mode = require_python_fake_mode(maybe_get_fake_mode(r))
                 # pyrefly: ignore [unbound-name, missing-attribute]
                 r.nested_int_memo = r_mode.create_symbolic_nested_int(
                     nt_tensor_id=t.nested_int
