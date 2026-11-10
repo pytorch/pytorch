@@ -1872,11 +1872,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       const bool bottom_right =
           static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type;
       std::tie(params.window_left, params.window_right) =
-          pytorch_flash::mem_eff_window_aot(*window_size,
-                                            bottom_right,
-                                            max_seqlen_q,
-                                            max_seqlen_k,
-                                            seqstart_q.has_value());
+          sdp::aotriton_adapter::mem_eff_window_aot(*window_size,
+                                                    bottom_right,
+                                                    max_seqlen_q,
+                                                    max_seqlen_k,
+                                                    seqstart_q.has_value());
 #else
       TORCH_CHECK(false, "window_size requires AOTriton >= 0.10");
 #endif

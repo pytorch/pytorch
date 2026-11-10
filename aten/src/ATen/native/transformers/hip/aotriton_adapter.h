@@ -9,6 +9,9 @@
 #include <aotriton/config.h>
 #include <aotriton/flash.h>
 #include <ATen/native/transformers/hip/aotriton_versions.h>
+#include <c10/util/Exception.h>
+#include <cstdint>
+#include <limits>
 #include <tuple>
 #include <optional>
 
@@ -193,6 +196,51 @@ constexpr aotriton::v3::flash::VarlenBits with_bottom_right_diagonal(aotriton::v
 }
 #endif // AOTRITON_PRINCIPAL_DIAGONAL_API
 #endif // AOTRITON_VARLEN_BITS_API
+
+// Places a numeric window, measured from the bottom-right diagonal of each
+// sequence (d = seqlen_k - seqlen_q), in AOTriton's terms. Dense calls shift it
+// on the host; varlen callers keep it and set principal_diagonal_choice (see
+// with_bottom_right_diagonal), because d differs per sequence. Without that API
+// (AOTriton < 0.15) the window stays measured from the top-left diagonal.
+inline std::tuple<int, int>
+bottom_right_window(int window_left,
+                    int window_right,
+                    int max_seqlen_q,
+                    int max_seqlen_k,
+                    bool is_varlen) {
+#if AOTRITON_PRINCIPAL_DIAGONAL_API
+  if (!is_varlen) {
+    const int diag = max_seqlen_k - max_seqlen_q;
+    return std::make_tuple(window_left - diag, window_right + diag);
+  }
+#endif
+  return std::make_tuple(window_left, window_right);
+}
+
+// The mem-efficient API's window_size is a number of keys ending at the causal
+// diagonal: key j is visible to query i iff i + d - window_size < j <= i + d,
+// where d = 0 (top-left) or seqlen_k - seqlen_q (bottom-right). AOTriton windows
+// are inclusive: (window_size - 1, 0) around that diagonal. This is not FA2's
+// window, so it skips calculate_swa's normalization; varlen callers must
+// additionally set with_bottom_right_diagonal on VarlenBits.
+inline std::tuple<int, int>
+mem_eff_window_aot(int64_t window_size,
+                   bool bottom_right,
+                   int64_t max_seqlen_q,
+                   int64_t max_seqlen_k,
+                   bool is_varlen) {
+  TORCH_CHECK(window_size > 0 && window_size <= std::numeric_limits<int>::max(),
+              "window_size must be positive and fit in int32");
+  const int window_left = static_cast<int>(window_size - 1);
+  if (!bottom_right) {
+    return std::make_tuple(window_left, 0);
+  }
+  return bottom_right_window(window_left,
+                             0,
+                             static_cast<int>(max_seqlen_q),
+                             static_cast<int>(max_seqlen_k),
+                             is_varlen);
+}
 
 #if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 11)
 
