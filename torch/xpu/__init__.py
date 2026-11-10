@@ -97,11 +97,6 @@ def _parse_visible_devices(strict=False) -> list[int]:
     for ``int8_t`` device indices).  Returns an empty list for unsupported
     COMPOSITE-style masks (e.g. ``"0.0,0.1"``).
 
-    Also returns an empty list (regardless of ``strict``) when
-    ``ONEAPI_DEVICE_SELECTOR`` is set, since Level Zero Sysman does not honor
-    it and the visible devices cannot be derived from ``ZE_AFFINITY_MASK``
-    alone; callers must defer to the SYCL runtime.
-
     Args:
         strict (bool): If ``True``, raises ``ValueError`` on unsupported mask
             formats (e.g. COMPOSITE-style ``"0.0,0.1"``).  If ``False``
