@@ -1,7 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 
 import datetime
+import functools
+import ipaddress
 import os
+import re
 import socket
 import struct
 import sys
@@ -389,6 +392,51 @@ class PrefixFileStoreTest(TestCase, StoreTestBase):
         return 6
 
 
+def _recv_exact(s, size):
+    data = b""
+    while len(data) < size:
+        chunk = s.recv(size - len(data))
+        if not chunk:
+            raise ConnectionError("connection closed early")
+        data += chunk
+    return data
+
+
+@functools.cache
+def _local_ips():
+    ips = set()
+    for name in (socket.gethostname(), socket.getfqdn()):
+        try:
+            ips.update(ai[4][0] for ai in socket.getaddrinfo(name, None))
+        except OSError:
+            pass
+    # Routing lookup only; connecting a UDP socket sends nothing.
+    for family, dest in (
+        (socket.AF_INET, "192.0.2.1"),
+        (socket.AF_INET6, "2001:db8::1"),
+    ):
+        try:
+            with socket.socket(family, socket.SOCK_DGRAM) as s:
+                s.connect((dest, 1))
+                ips.add(s.getsockname()[0])
+        except OSError:
+            pass
+    result = []
+    for ip in sorted(ips):
+        addr = ipaddress.ip_address(ip)
+        if addr.is_loopback or addr.is_link_local:
+            continue
+        try:
+            with socket.socket(
+                socket.AF_INET6 if ":" in ip else socket.AF_INET, socket.SOCK_STREAM
+            ) as s:
+                s.bind((ip, 0))
+        except OSError:
+            continue
+        result.append(ip)
+    return tuple(result)
+
+
 class TCPStoreTest(TestCase, StoreTestBase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -722,6 +770,152 @@ class TCPStoreTest(TestCase, StoreTestBase):
             futures = [pool.submit(worker, i) for i in range(world_size)]
             for f in futures:
                 f.result()
+
+    def _write_allowed_hosts(self, contents, path=None):
+        if path is None:
+            fd, path = tempfile.mkstemp()
+            os.close(fd)
+            self.addCleanup(os.remove, path)
+        with open(path, "w") as f:
+            f.write(contents)
+        return path
+
+    def _create_allowed_hosts_store(self, path, timeout=timedelta(seconds=60)):
+        with mock.patch.dict(os.environ, {"TORCH_TCPSTORE_ALLOWED_HOSTS_FILE": path}):
+            return dist.TCPStore(
+                "localhost", 0, 1, True, timeout=timeout, use_libuv=self._use_libuv
+            )
+
+    def _family(self, ip):
+        return socket.AF_INET6 if ":" in ip else socket.AF_INET
+
+    def _remote_ips(self):
+        # Connecting to loopback from a non-loopback local address gives a peer
+        # that is neither loopback nor the server's local address.
+        for client_ip in _local_ips():
+            server_ip = "::1" if ":" in client_ip else "127.0.0.1"
+            family = self._family(client_ip)
+            try:
+                with (
+                    socket.create_server((server_ip, 0), family=family) as srv,
+                    socket.socket(family, socket.SOCK_STREAM) as s,
+                ):
+                    s.bind((client_ip, 0))
+                    s.connect(srv.getsockname()[:2])
+            except OSError:
+                continue
+            return server_ip, client_ip
+        self.skipTest("cannot connect to loopback from a non-loopback address")
+
+    def _handshake(self, server_ip, port, client_ip):
+        """Sends VALIDATE and PING like a client; returns the server's reply."""
+        with socket.socket(self._family(server_ip), socket.SOCK_STREAM) as s:
+            s.settimeout(60)
+            s.bind((client_ip, 0))
+            s.connect((server_ip, port))
+            s.sendall(struct.pack("<BIBi", 0, 0x3C85F7CE, 13, os.getpid()))
+            (reply,) = struct.unpack("<I", _recv_exact(s, 4))
+            if reply == os.getpid():
+                return None
+            self.assertEqual(reply, 0xC10D0BAD)
+            (size,) = struct.unpack("<Q", _recv_exact(s, 8))
+            addr = _recv_exact(s, size).decode()
+            # The server drains until our EOF and then closes cleanly; closing
+            # with unread data would reset the connection.
+            s.shutdown(socket.SHUT_WR)
+            self.assertEqual(s.recv(1), b"")
+            return addr
+
+    def _connect(self, host, port):
+        return dist.TCPStore(
+            host,
+            port,
+            is_master=False,
+            timeout=timedelta(seconds=60),
+            use_libuv=self._use_libuv,
+        )
+
+    def test_allowed_hosts(self):
+        server_ip, client_ip = self._remote_ips()
+        path = self._write_allowed_hosts(
+            f"# comment\n\n  {client_ip}  # self\nunresolvable..invalid\n"
+        )
+        store = self._create_allowed_hosts_store(path)
+        self.assertIsNone(self._handshake(server_ip, store.port, client_ip))
+
+    def test_allowed_hosts_loopback(self):
+        path = self._write_allowed_hosts("192.0.2.1\n")
+        store = self._create_allowed_hosts_store(path)
+        store.set("key", "value")
+        self.assertEqual(self._connect("127.0.0.1", store.port).get("key"), b"value")
+
+    def test_allowed_hosts_same_host(self):
+        ips = _local_ips()
+        if not ips:
+            self.skipTest("no non-loopback local address")
+        path = self._write_allowed_hosts("192.0.2.1\n")
+        store = self._create_allowed_hosts_store(path)
+        store.set("key", "value")
+        self.assertEqual(self._connect(ips[0], store.port).get("key"), b"value")
+
+    def test_allowed_hosts_rejects(self):
+        server_ip, client_ip = self._remote_ips()
+        # Comments are ignored even if they contain an address.
+        path = self._write_allowed_hosts(
+            f"# {client_ip}\n  # {client_ip}\n\n192.0.2.1\n"
+        )
+        # Repeat on fresh servers, which start a refresh on the first miss at
+        # once, to catch the server resetting the connection before the client
+        # reads the rejection.
+        for _ in range(10):
+            store = self._create_allowed_hosts_store(path)
+            self.assertEqual(
+                self._handshake(server_ip, store.port, client_ip), client_ip
+            )
+            # The server keeps serving.
+            store.set("key", "value")
+            self.assertEqual(
+                self._connect("127.0.0.1", store.port).get("key"), b"value"
+            )
+
+    def test_allowed_hosts_unreadable(self):
+        with self.assertRaisesRegex(DistStoreError, "allowed hosts file"):
+            self._create_allowed_hosts_store("/nonexistent/allowed_hosts")
+
+    @skip_if_win32()
+    def test_allowed_hosts_hung_refresh(self):
+        server_ip, client_ip = self._remote_ips()
+        path = self._write_allowed_hosts("192.0.2.1\n")
+        store = self._create_allowed_hosts_store(path, timeout=timedelta(seconds=2))
+        # Refreshes block opening a FIFO that has no writer.
+        os.remove(path)
+        os.mkfifo(path)
+
+        def unblock():
+            # Opening for writing unblocks the refresh thread's open().
+            try:
+                os.close(os.open(path, os.O_WRONLY | os.O_NONBLOCK))
+            except OSError:
+                pass
+
+        self.addCleanup(unblock)
+        # Held until the refresh has run for the store timeout, then rejected.
+        start = time.monotonic()
+        self.assertEqual(self._handshake(server_ip, store.port, client_ip), client_ip)
+        self.assertGreater(time.monotonic() - start, 1.5)
+        # Rejected at once while the refresh is stalled.
+        start = time.monotonic()
+        self.assertEqual(self._handshake(server_ip, store.port, client_ip), client_ip)
+        self.assertLess(time.monotonic() - start, 1.5)
+
+    def test_allowed_hosts_refresh(self):
+        server_ip, client_ip = self._remote_ips()
+        path = self._write_allowed_hosts("192.0.2.1\n")
+        store = self._create_allowed_hosts_store(path)
+        self.assertEqual(self._handshake(server_ip, store.port, client_ip), client_ip)
+        # Added within the refresh interval of the rejection above.
+        self._write_allowed_hosts(f"{client_ip}\n", path)
+        self.assertIsNone(self._handshake(server_ip, store.port, client_ip))
 
 
 class LibUvTCPStoreTest(TCPStoreTest):
@@ -1330,6 +1524,46 @@ class TestClientProtocol(TestCase):
         )
 
         thread.join()
+
+    def test_client_rejected(self) -> None:
+        sock = socket.create_server(("localhost", 0))
+        sock.settimeout(60)
+        port = sock.getsockname()[1]
+
+        def serve() -> None:
+            with sock:
+                conn, _ = sock.accept()
+            with conn:
+                conn.settimeout(60)
+                # VALIDATE and PING
+                _recv_exact(conn, 10)
+                addr = b"203.0.113.7"
+                conn.sendall(struct.pack("<IQ", 0xC10D0BAD, len(addr)) + addr)
+                # Wait for the client to close.
+                while conn.recv(1024):
+                    pass
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+
+        # Raised without retrying until the timeout.
+        msg = (
+            f"connection rejected by TCPStore server localhost:{port}: client "
+            "address 203.0.113.7 was not admitted by the server's "
+            "TORCH_TCPSTORE_ALLOWED_HOSTS_FILE allow list"
+        )
+        with self.assertRaisesRegex(DistStoreError, re.escape(msg)):
+            dist.TCPStore(
+                host_name="localhost",
+                port=port,
+                world_size=2,
+                is_master=False,
+                timeout=timedelta(seconds=60),
+                wait_for_workers=False,
+            )
+
+        thread.join(timeout=60)
+        self.assertFalse(thread.is_alive())
 
 
 class PrefixStoreBarrierTimeoutTest(TestCase):

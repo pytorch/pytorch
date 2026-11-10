@@ -18,6 +18,20 @@ namespace c10d::detail {
 // Magic number for client validation.
 static const uint32_t validationMagicNumber = 0x3C85F7CE;
 
+// Sent by a server with an allow list in place of the PING reply (the client's
+// pid) to a rejected client, followed by the client's address. Exceeds any
+// pid, so older clients treat it as an invalid reply and retry until their
+// timeout.
+static const uint32_t rejectedMagicNumber = 0xC10D0BAD;
+
+// Poll events, beyond POLLHUP and POLLERR, that report a peer closing a
+// connection whose data has not been read.
+#ifdef POLLRDHUP
+constexpr short kPeerClosedEvents = POLLRDHUP;
+#else
+constexpr short kPeerClosedEvents = 0;
+#endif
+
 enum class QueryType : uint8_t {
   VALIDATE,
   SET,

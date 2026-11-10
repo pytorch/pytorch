@@ -2456,6 +2456,37 @@ Arguments:
     multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
     master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. To bind an ephemeral port we recommend setting the port to 0 and reading ``.port``. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
     use_libuv (bool, optional): If True, use libuv for ``TCPServer`` backend. Default is True.
+
+Connection allow list:
+    If ``TORCH_TCPSTORE_ALLOWED_HOSTS_FILE`` is set when the server starts, the
+    server only accepts connections from IP addresses of the hosts listed in
+    that file, one hostname or IP address per line (``#`` starts a comment).
+    CIDR ranges are not supported; such lines are skipped with a warning.
+    It also accepts loopback connections and connections whose source address
+    equals the server's own address on that connection, e.g. clients on the
+    same host that connect via its hostname. Other local clients, such as
+    containers in another network namespace or connections to ``127.0.0.1``
+    from a non-loopback source address, are rejected unless listed. Behind NAT
+    or masquerading, clients on the server's own host may appear with a
+    non-local address that must be listed. The server fails to start if the
+    file cannot be read.
+
+    A connection from an unlisted address triggers a background re-read of the
+    file and re-resolution of every hostname, at most every 5 seconds, so hosts
+    added later are accepted. The connection is held until a re-read that
+    starts after it arrived completes. While a re-read has run longer than
+    ``timeout`` (at most 30 seconds), e.g. because the file or DNS hangs,
+    unlisted connections are rejected immediately. Only such connections
+    trigger re-reads, so removals take effect at the next one, and established
+    connections are kept. Rejected clients raise
+    ``DistStoreError``; clients from older PyTorch versions retry and fail at
+    their timeout with "Ping failed". With ``multi_tenant``, the first server on
+    a port owns the configuration.
+
+    This only checks the peer's source IP address, which can be spoofed; it is
+    not authentication. The loopback exemption also admits local sidecars and
+    tunnels.
+
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
