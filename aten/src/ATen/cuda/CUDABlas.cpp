@@ -2349,7 +2349,7 @@ void int8_gemm(
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13040
 namespace {
 
-int grouped_scale_mode(CublasGroupedScaleLayout layout, bool use_fast_accum) {
+int grouped_scale_mode(CublasGroupedScaleLayout layout) {
   switch (layout) {
     case CublasGroupedScaleLayout::Scalar:
       return CUBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
@@ -2396,7 +2396,7 @@ void grouped_gemm(
 #endif
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   const bool sm90 = prop->major == 9;
-  TORCH_CHECK(cublaslt_grouped_gemm_arch_supported(), "grouped cublasLtMatmul requires SM 9.0-11.0");
+  TORCH_CHECK(cublaslt_grouped_gemm_arch_supported(), "grouped cublasLtMatmul requires SM9.x/SM10.x/SM11.x");
   if (scaled) {
     TORCH_INTERNAL_ASSERT(
         scales->A_scale_ptr != nullptr && scales->B_scale_ptr != nullptr,
@@ -2420,8 +2420,8 @@ void grouped_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE, betaBatchStride);
   if (scaled) {
 #if CUDA_VERSION >= 13040
-    const int a_scale_mode = grouped_scale_mode(scales->A_layout, scales->use_fast_accum);
-    const int b_scale_mode = grouped_scale_mode(scales->B_layout, scales->use_fast_accum);
+    const int a_scale_mode = grouped_scale_mode(scales->A_layout);
+    const int b_scale_mode = grouped_scale_mode(scales->B_layout);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, scales->A_scale_ptr);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, scales->B_scale_ptr);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, a_scale_mode);

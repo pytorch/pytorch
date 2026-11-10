@@ -585,8 +585,9 @@ void validate_scaled_mm_v2_inputs(
 }
 
 // Shape, offset, and recipe-specific output-dtype validation for v2.
-// Mirrored by the Python meta for FakeTensor and compile. Scale layouts,
-// device capabilities, and backend selection are validated by the kernel.
+// Python meta checks output dtype and offset contiguity for FakeTensor and
+// compile. Other input checks run during execution. Scale layouts, device
+// capabilities, and backend selection are validated by the kernel.
 void validate_scaled_grouped_mm_v2_inputs(
     const Tensor& mat_a,
     const Tensor& mat_b,
