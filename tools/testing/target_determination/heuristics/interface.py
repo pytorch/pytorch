@@ -252,6 +252,14 @@ class AggregatedHeuristics:
         self._heuristic_results[heuristic] = heuristic_results
         self.validate()
 
+    def get_heuristic_results(self, name: str) -> TestPrioritizations | None:
+        """The results of the heuristic called `name`, or None when it has
+        none (it is not registered or it raised)."""
+        for heuristic, heuristic_results in self._heuristic_results.items():
+            if heuristic.name == name:
+                return heuristic_results
+        return None
+
     def get_aggregated_priorities(
         self, include_trial: bool = False
     ) -> TestPrioritizations:

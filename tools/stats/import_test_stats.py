@@ -35,6 +35,8 @@ TD_HEURISTIC_PROFILING_FILE = "td_heuristic_profiling.json"
 TD_HEURISTIC_HISTORICAL_EDITED_FILES = "td_heuristic_historical_edited_files.json"
 TD_HEURISTIC_PREVIOUSLY_FAILED = "previous_failures.json"
 TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL = "previous_failures_additional.json"
+TD_SCORER_FILE = "td_scorer.json"
+TD_SCORER_TIMEOUT_SECONDS = 30
 
 FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
 
@@ -149,6 +151,36 @@ def get_td_heuristic_profiling_json() -> dict[str, Any]:
         TD_HEURISTIC_PROFILING_FILE,
         "Couldn't download td_heuristic_profiling.json not reordering...",
     )
+
+
+def get_td_scorer() -> None:
+    """Downloads the learned TD scorer to ADDITIONAL_CI_FILES_FOLDER, reading
+    at most its size cap; a failed or too large download leaves no file."""
+    from tools.testing.target_determination.scorer.model import MAX_FILE_BYTES
+
+    url = f"https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/{TD_SCORER_FILE}"
+    path = REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER / TD_SCORER_FILE
+    print(f"Downloading {url} to {path}")
+    try:
+        path.parent.mkdir(exist_ok=True)
+        path.unlink(missing_ok=True)
+        for _ in range(3):
+            try:
+                with urlopen(url, timeout=TD_SCORER_TIMEOUT_SECONDS) as response:
+                    contents = response.read(MAX_FILE_BYTES + 1)
+            except Exception as e:
+                print(f"Could not download {url} because: {e}.")
+                continue
+            if len(contents) > MAX_FILE_BYTES:
+                print(f"Not using {url}: larger than {MAX_FILE_BYTES} bytes.")
+                return
+            partial = path.with_name(f"{TD_SCORER_FILE}.partial")
+            partial.write_bytes(contents)
+            partial.replace(path)
+            return
+        print(f"All retries exhausted, downloading {url} failed.")
+    except Exception as e:
+        print(f"Could not save {url} to {path} because: {e}.")
 
 
 def copy_pytest_cache() -> None:
