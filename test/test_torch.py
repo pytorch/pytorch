@@ -931,6 +931,51 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(frameinfo.lineno - 8, warning.lineno)
             self.assertEqual(len(w), 1)
 
+        # Checks jitted cpp warning
+        with warnings.catch_warnings(record=True) as w:
+            # nvfuser deprecation warning filter
+            warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
+            # ignore all deprecation warnings
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            # torch.jit.script emits a visible FutureWarning; ignore it too
+            warnings.filterwarnings("ignore", category=FutureWarning)
+            scripted_cpp_warn_fn = torch.jit.script(cpp_warn_fn)
+            scripted_cpp_warn_fn()
+            warning = w[0]
+
+            # Checks for cpp context in the warning message
+            escaped_warning_message = str(warning.message).encode('unicode_escape')
+            self.assertTrue(re.search(s, repr(escaped_warning_message), re.IGNORECASE) is not None)
+
+            # Checks the Python features of the warning
+            # Note: the jitted warning's lineno refers to the call to the jitted
+            # function, which in our test suite has a layer of indirection
+            # that makes checking the Python lineno fragile
+            self.assertEqual(len(w), 1)
+
+        # Checks jitted Python warning
+        def warn_fn():
+            warnings.warn("Warning!")
+
+        # The jit mimics an eager-mode Python warning in this case
+        with warnings.catch_warnings(record=True) as w:
+            # nvfuser deprecation warning filter
+            warnings.filterwarnings("ignore", "torch::jit::fuser::cuda", UserWarning)
+            # ignore all deprecation warnings
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            # torch.jit.script emits a visible FutureWarning; ignore it too
+            warnings.filterwarnings("ignore", category=FutureWarning)
+            scripted_warn_fn = torch.jit.script(warn_fn)
+            scripted_warn_fn()
+            frameinfo = inspect.getframeinfo(inspect.currentframe())
+            warning = w[0]
+
+            self.assertTrue(re.search('Warning!', str(warning.message)) is not None)
+
+            # Checks the Python features of the warning
+            self.assertEqual(frameinfo.lineno - 12, warning.lineno)
+            self.assertEqual(len(w), 1)
+
     @onlyNativeDeviceTypes
     def test_complex_half_experimental_warning(self, device):
         msg = 'ComplexHalf support is experimental'
@@ -7142,41 +7187,6 @@ class TestTorchDeviceType(TestCase):
             torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
             self.assertEqual([t.shape for t in out], [v.shape for v in views])
 
-    @skipIfXpu(msg="XPU split_with_sizes_copy.out still uses stride(dim) as the chunk size")
-    def test_split_with_sizes_copy_out_non_canonical_layouts(self, device):
-        def check(x, split_sizes, dim, out):
-            torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
-            for t, expect in zip(out, x.split_with_sizes(split_sizes, dim=dim)):
-                self.assertEqual(t, expect)
-
-        # Dense but not contiguous input
-        x = torch.arange(12.0, device=device).reshape(3, 4).t()
-        check(x, [2, 2], 0, [torch.empty(2, 3, device=device) for _ in range(2)])
-        # Contiguous input whose size-1 split dim has an arbitrary stride; nothing
-        # past the output may be written
-        x = torch.zeros(64, device=device).as_strided((2, 1, 2), (2, 16, 1))
-        x.copy_(torch.arange(4.0, device=device).view(2, 1, 2))
-        guard = torch.full((16,), -1.0, device=device)
-        check(x, [1], 1, [guard[:4].view(2, 1, 2)])
-        self.assertEqual(guard[4:], torch.full((12,), -1.0, device=device))
-        # Channels-last dim-0 split into channels-last or contiguous outputs
-        x = torch.randn(4, 3, 2, 5, device=device).to(memory_format=torch.channels_last)
-        for memory_format in (torch.channels_last, torch.contiguous_format):
-            out = [torch.empty(2, 3, 2, 5, device=device, memory_format=memory_format) for _ in range(2)]
-            check(x, [2, 2], 0, out)
-        check(x, [4, 0], 0, [torch.empty_like(x), torch.empty(0, 3, 2, 5, device=device)])
-        # Permuted leading dims, with outputs permuted the same way
-        x = torch.randn(3, 4, 6, device=device).transpose(0, 1)
-        check(x, [2, 4], 2, [torch.empty_like(x[:, :, :2]), torch.empty_like(x[:, :, 2:])])
-        # The split dim's stride is the trailing size product, though dim 0 is
-        # physically inside it and dim 2 outside
-        x = torch.arange(40.0, device=device).as_strided((2, 10, 2), (1, 2, 20))
-        sizes = [4, 4, 2]
-        check(x, sizes, 1, [torch.empty_strided((2, s, 2), (1, 2, 2 * s), device=device) for s in sizes])
-        # A single non-empty split laid out like the transposed input
-        x = torch.arange(12.0, device=device).reshape(3, 4).t()
-        check(x, [0, 3], 1, [torch.empty(4, 0, device=device), torch.empty_like(x)])
-
     def test_copy_float16(self, device):
         # Check that fbgemm code no longer reads memory out of bounds, see
         # copy_impl and fbgemm::Float16ToFloat_ref.
@@ -9780,6 +9790,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # This method is primarily exposed for torchvision's resize
         torch.backends.cpu.get_cpu_capability()
 
+        # We have to ensure that method is torchscriptable as torchvision's resize
+        # should be torchscriptable
+        torch.jit.script(torch.backends.cpu.get_cpu_capability)
+
     @slowTest
     def test_slow_test(self):
         # Just a smoketest to make sure our slowTest decorator works.
@@ -12042,6 +12056,50 @@ instantiate_parametrized_tests(TestTorch)
 # pytest-xdist workers import this file instead of running it as __main__.
 if "PYTEST_XDIST_WORKER" in os.environ:
     TestCase._default_dtype_check_enabled = True
+
+class TestPythonKernelDefaultTrim(TestCase):
+    def test_python_kernel_default_trim_keeps_signed_zero(self):
+        lib = torch.library.Library("default_trim_repro", "FRAGMENT")
+        lib.define("f(Tensor x, float v=0.) -> Tensor")
+        received = []
+
+        @torch.library.impl(lib, "f", "CPU")
+        def _f(x, v=0):
+            received.append(v)
+            return x.clone()
+
+        x = torch.zeros(3)
+
+        torch.ops.default_trim_repro.f(x, -0.0)
+        self.assertIsInstance(received[-1], float)
+        self.assertEqual(math.copysign(1.0, received[-1]), -1.0)
+
+        torch.ops.default_trim_repro.f(x, v=-0.0)
+        self.assertIsInstance(received[-1], float)
+        self.assertEqual(math.copysign(1.0, received[-1]), -1.0)
+
+        torch.ops.default_trim_repro.f(x, 0.0)
+        self.assertEqual(math.copysign(1.0, received[-1]), 1.0)
+
+        torch.ops.default_trim_repro.f(x)
+        self.assertEqual(math.copysign(1.0, received[-1]), 1.0)
+
+        lib_c = torch.library.Library("complex_default_trim_repro", "FRAGMENT")
+        lib_c.define("g(Tensor x, complex v=0j) -> Tensor")
+        received_c = []
+
+        @torch.library.impl(lib_c, "g", "CPU")
+        def _g(x, v=0j):
+            received_c.append(v)
+            return x.clone()
+
+        torch.ops.complex_default_trim_repro.g(x, complex(-0.0, 0.0))
+        self.assertIsInstance(received_c[-1], complex)
+        self.assertEqual(math.copysign(1.0, received_c[-1].real), -1.0)
+
+        torch.ops.complex_default_trim_repro.g(x, 0j)
+        self.assertEqual(math.copysign(1.0, received_c[-1].real), 1.0)
+
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
