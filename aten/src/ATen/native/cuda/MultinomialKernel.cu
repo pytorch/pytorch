@@ -3,6 +3,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/EmptyTensor.h>
@@ -93,7 +94,7 @@ void renormRows(Tensor& t) {
   dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
   dim3 block(std::min(maxThreads, warp_size * ceil_div(cols, int64_t{warp_size})));
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, t.scalar_type(), "renormRows_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(t.scalar_type(), "renormRows_cuda", [&] {
     renormRowsL1<scalar_t>
         <<<grid, block, (block.x / warp_size) * sizeof(scalar_t),
         at::cuda::getCurrentCUDAStream()>>>(t.mutable_data_ptr<scalar_t>(),
@@ -345,14 +346,15 @@ void multinomial_with_replacement_kernel_impl(
 
   // Restructure data for 2d
   auto self_v = inputSize == 1 ? self.view({numDist, numCategories}) : self;
-  // A float CDF cannot give distinct buckets to more than 2^24 categories
-  if (numCategories > (int64_t{1} << std::numeric_limits<float>::digits)) {
-    self_v = self_v.to(kDouble);
-  }
+  // Half row sums overflow and half/bfloat16 CDFs are too coarse, and a float CDF
+  // cannot give distinct buckets to more than 2^24 categories
+  self_v = self_v.to(numCategories > (int64_t{1} << std::numeric_limits<float>::digits)
+                         ? kDouble
+                         : toOpMathType(self_v.scalar_type()));
 
   result.resize_({numDist, n_sample});
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self_v.scalar_type(), "multinomial_kernel_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self_v.scalar_type(), "multinomial_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto props = at::cuda::getCurrentDeviceProperties();
     TORCH_CHECK(props != nullptr);

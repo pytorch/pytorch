@@ -2030,6 +2030,27 @@ class TestDistributionsDevice(DistributionsTestCase):
             self.assertTrue(samples.ge(n - 10).all() and samples.lt(n).all())
             self.assertEqual(samples.unique().numel(), n_sample)
 
+    def test_multinomial_half_without_replacement(self, device):
+        # In half, p / Exp(1) overflowed to inf whenever Exp(1) < p / 65504 (about 16
+        # times per row here) and argmax picked the first tie
+        n = 1 << 14
+        probs = torch.full((32, n), 64.0, device=device, dtype=torch.half)
+        samples = torch.cat([torch.multinomial(probs, 1) for _ in range(8)])
+        low_fraction = (samples < n // 10).float().mean().item()
+        self.assertEqual(low_fraction, 0.1, atol=0.08, rtol=0)
+
+    @skipXPUIf(True, "XPU builds the with-replacement CDF in the input dtype")
+    @dtypes(torch.half, torch.bfloat16)
+    def test_multinomial_reduced_precision_with_replacement(self, device, dtype):
+        # Half row sums overflow past 65504, and a bfloat16 CDF only reaches about 1/8
+        # of these categories; 10000 uniform draws hit about 9630 distinct ones
+        n = 1 << 17
+        probs = torch.ones(n, device=device, dtype=dtype)
+        samples = torch.multinomial(probs, 10000, replacement=True)
+        upper_fraction = (samples >= n // 2).float().mean().item()
+        self.assertEqual(upper_fraction, 0.5, atol=0.05, rtol=0)
+        self.assertGreater(samples.unique().numel(), 9000)
+
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
     def test_categorical_1d(self):

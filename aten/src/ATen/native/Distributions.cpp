@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <c10/util/Exception.h>
@@ -605,7 +606,10 @@ Tensor& multinomial_out(const Tensor& self,
     // s = argmax( p / (-log(eps)) ) where eps ~ U(0, 1).
     // We can also simplify the formula above by
     // s = argmax( p / q ) where q ~ Exp(1)
-    Tensor q = at::empty_like(self).exponential_(1, std::move(gen));
+    // q is computed in opmath: for half, p / q overflows to inf (ties that argmax
+    // breaks toward low indices) whenever q < p / 65504.
+    Tensor q = at::empty_like(self, self.options().dtype(toOpMathType(self.scalar_type())))
+                   .exponential_(1, std::move(gen));
     // In theory the probability to generate 0 from exponential distribution is
     // 0. However, on CUDA side there is a protection to avoid 0s, but on CPU
     // side, there is a very low probability to generate 0 from
@@ -615,7 +619,7 @@ Tensor& multinomial_out(const Tensor& self,
     if (n_sample == 1) {
       at::argmax_out(result, q, /*dim=*/-1, /*keepdim=*/true);
     } else {
-      Tensor vals = at::empty(result.sizes(), self.options());
+      Tensor vals = at::empty(result.sizes(), q.options());
       at::topk_out(vals, result, q, n_sample);
     }
     return result;
