@@ -86,6 +86,8 @@ from torch.testing._internal.common_fsdp import (
     patch_unshard,
 )
 from torch.testing._internal.common_utils import (
+    device_sleep,
+    get_cycles_per_ms,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda_p2p_access,
@@ -2825,13 +2827,12 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
         return 1
 
     @parametrize("divide_factor", [None, 1.0, 2.0])
-    def test_singleton_copy_division(self, divide_factor):
-        divisions = []
+    def test_singleton_reduce_reuses_input(self, divide_factor):
+        ops = []
 
-        class RecordDivisions(TorchDispatchMode):
+        class RecordOps(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                if func == torch.ops.aten.div.Tensor:
-                    divisions.append(func)
+                ops.append(func)
                 return func(*args, **(kwargs or {}))
 
         model = nn.Linear(8, 4, bias=False, device=device)
@@ -2840,11 +2841,95 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
             model.set_gradient_divide_factor(divide_factor)
         inp = torch.ones(3, 8, device=device)
         loss = model(inp).sum()
-        with RecordDivisions():
+        allocate = DefaultReduceScatter.allocate
+        with (
+            patch.object(
+                DefaultReduceScatter, "allocate", autospec=True, side_effect=allocate
+            ) as mock_allocate,
+            RecordOps(),
+        ):
             loss.backward()
+        # The comm allocates nothing and the packed input is not copied to an output
+        self.assertEqual(mock_allocate.call_count, 0)
+        self.assertNotIn(torch.ops.aten.copy_.default, ops)
+        div_ops = (torch.ops.aten.div.Tensor, torch.ops.aten.div_.Tensor)
+        divisions = [op for op in ops if op in div_ops]
         self.assertEqual(len(divisions), int(divide_factor not in (None, 1)))
         expected = torch.full_like(inp[:1].expand(4, -1), 3 / (divide_factor or 1))
         self.assertEqual(model.weight.grad.to_local(), expected)
+
+    @unittest.skipIf(not hasattr(device_module, "_sleep"), "requires device sleep")
+    @parametrize("hsdp", [False, True])
+    def test_singleton_reduce_accumulation_with_delayed_post_reduce(self, hsdp):
+        # Delay reduce-scatter stream work so that reading a buffer released
+        # too early would race with the next module's backward reusing it. The
+        # sleep only widens that window; nothing relies on it for ordering.
+        # hsdp=True checks that partial accumulation keeps a separate output.
+        sleep_cycles = int(50 * get_cycles_per_ms(device.type))
+
+        def delayed_div_if_needed(tensor, div_factor):
+            device_sleep(device.type, sleep_cycles)
+            _div_if_needed(tensor, div_factor)
+
+        torch.manual_seed(42)
+        dim, num_layers, num_microbatches = 2048, 8, 3
+        layers = [nn.Linear(dim, dim, bias=False) for _ in range(num_layers)]
+        ref_model = nn.Sequential(*layers).to(device)
+        model = copy.deepcopy(ref_model)
+        shape = (1, 1) if hsdp else (1,)
+        names = ("replicate", "shard") if hsdp else None
+        mesh = init_device_mesh(device.type, shape, mesh_dim_names=names)
+        for layer in model:
+            fully_shard(layer, mesh=mesh)
+        fully_shard(model, mesh=mesh)
+        target = "torch.distributed.fsdp._fully_shard._fsdp_collectives._div_if_needed"
+        with patch(target, delayed_div_if_needed):
+            for microbatch_idx in range(num_microbatches):
+                is_last_microbatch = microbatch_idx == num_microbatches - 1
+                if hsdp:
+                    model.set_requires_all_reduce(is_last_microbatch)
+                inp = torch.randn(512, dim, device=device)
+                ref_model(inp).square().mean().backward()
+                model(inp).square().mean().backward()
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            self.assertEqual(param.grad.to_local(), ref_param.grad)
+
+    @parametrize("hsdp", [False, True])
+    def test_singleton_reduce_custom_comm_persistent_input(self, hsdp):
+        class PersistentInputReduceScatter(DefaultReduceScatter):
+            # Comm allows reusing a persistent buffer for the input
+            def __init__(self):
+                self.buffer = None
+                self.next_allocation_is_input = True
+
+            def allocate(self, size, *, dtype, device):
+                is_input = self.next_allocation_is_input
+                self.next_allocation_is_input = not is_input
+                if not is_input:
+                    return super().allocate(size, dtype=dtype, device=device)
+                if self.buffer is None:
+                    self.buffer = super().allocate(size, dtype=dtype, device=device)
+                return self.buffer
+
+        torch.manual_seed(42)
+        layers = [nn.Linear(16, 16, bias=False) for _ in range(4)]
+        ref_model = nn.Sequential(*layers).to(device)
+        model = copy.deepcopy(ref_model)
+        shape = (1, 1) if hsdp else (1,)
+        names = ("replicate", "shard") if hsdp else None
+        mesh = init_device_mesh(device.type, shape, mesh_dim_names=names)
+        comm = PersistentInputReduceScatter()
+        for layer in model:
+            fully_shard(layer, mesh=mesh)
+            layer.set_custom_reduce_scatter(comm)
+        fully_shard(model, mesh=mesh)
+        inp = torch.randn(8, 16, device=device)
+        ref_model(inp).square().mean().backward()
+        model(inp).square().mean().backward()
+        # No reduce-scatter runs, so the comm is never asked for a buffer
+        self.assertIsNone(comm.buffer)
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            self.assertEqual(param.grad.to_local(), ref_param.grad)
 
     def test_size1_reduceop(self):
         from torch.distributed.distributed_c10d import ReduceOp

@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import re
 from dataclasses import FrozenInstanceError
 
 import torch
@@ -146,6 +147,85 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         ):
             get_invoke_subgraph_compile_options(
                 **{config_arg: {"triton.persistent_reductions": False}}
+            )
+
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": True,
+            "triton.cudagraphs": False,
+            "max_autotune": False,
+            "benchmark_combo_kernel": False,
+            "combo_kernel_max_distance": -1,
+            "combo_kernel_peak_memory_increase_gb": None,
+            "combo_kernel_peak_memory_pct_threshold": None,
+        }
+    )
+    @parametrize("key", ("combo_kernels", "max_autotune_pointwise"))
+    @parametrize("parent_value", (False, True))
+    @parametrize("nested_value", (False, True))
+    def test_supported_nested_region_inductor_config(
+        self, key, parent_value, nested_value
+    ):
+        """Check that region kernels follow the nested value and parent kernels the parent's, forward and backward."""
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={key: nested_value},
+            bw_inductor_config_patches={key: nested_value},
+        )
+
+        # Independent pointwise ops on differently sized inputs, so that each
+        # graph can group its two kernels into one combo kernel.
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def region(x, y):
+            return x.sin(), y.cos()
+
+        def fn(x, y, a, b):
+            return (*region(x, y), a.tan(), b.exp())
+
+        inputs = [
+            torch.randn(n, device=GPU_TYPE, requires_grad=True)
+            for n in (1024, 512, 1024, 512)
+        ]
+        with torch.no_grad():
+            expected = torch.stack([out.sum() for out in fn(*inputs)])
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        with torch._inductor.config.patch({key: parent_value}):
+            result, codes = run_fw_bw_and_get_code(
+                lambda: torch.stack([out.sum() for out in compiled(*inputs)])
+            )
+
+        self.assertEqual(result, expected)
+        self.assertEqual(len(codes), 2)
+        marker = (
+            "'num_kernels': 2"
+            if key == "combo_kernels"
+            else "'max_autotune_pointwise': True"
+        )
+        fw_code, bw_code = codes
+        for code, signature, enabled in (
+            (fw_code, "def partitioned_fw_subgraph_0_0(", nested_value),
+            (fw_code, "    def call(self, args):", parent_value),
+            (bw_code, "def partitioned_bw_subgraph_0_0(", nested_value),
+            (bw_code, "    def call(self, args):", parent_value),
+        ):
+            body = self._generated_fn_body(code, signature)
+            kernel_metas = []
+            for name in re.findall(r"(triton_\w+)\.run\(", body):
+                pattern = rf"inductor_meta=\{{.*'kernel_name': '{name}'.*"
+                match = re.search(pattern, code)
+                self.assertIsNotNone(
+                    match, f"no inductor_meta for {name} in {signature!r}"
+                )
+                kernel_metas.append(match[0])
+            self.assertTrue(kernel_metas, f"no kernel launched in {signature!r}")
+            self.assertEqual(
+                any(marker in meta for meta in kernel_metas),
+                enabled,
+                f"{marker} in kernels launched by {signature!r}",
             )
 
     def test_nested_region_options_validate_direct_construction(self):
