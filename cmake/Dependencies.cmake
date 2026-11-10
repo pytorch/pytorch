@@ -1314,26 +1314,38 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   endif()
 endif()
 
-# libuv for the TCPStore server. Elsewhere it is built by TensorPipe above;
-# Windows has no TensorPipe, so use libuv_ROOT, the same libuv Gloo uses.
-if(USE_DISTRIBUTED AND WIN32)
-  find_library(
-    libuv_LIBRARY
-    NAMES uv libuv
-    HINTS ${libuv_ROOT} ENV libuv_ROOT
-    PATH_SUFFIXES lib/release lib/debug lib
-    REQUIRED
-    NO_DEFAULT_PATH)
-  find_path(
-    libuv_INCLUDE_DIR
-    NAMES uv.h
-    HINTS ${libuv_ROOT} ENV libuv_ROOT
-    PATH_SUFFIXES include
-    REQUIRED
-    NO_DEFAULT_PATH)
-  include_directories(SYSTEM ${libuv_INCLUDE_DIR})
+# libuv for the TCPStore server. TensorPipe builds it above. Windows uses
+# libuv_ROOT, the same libuv Gloo uses; elsewhere build the TensorPipe submodule copy.
+if(USE_DISTRIBUTED AND NOT USE_TENSORPIPE)
+  if(WIN32)
+    find_library(
+      libuv_LIBRARY
+      NAMES uv libuv
+      HINTS ${libuv_ROOT} ENV libuv_ROOT
+      PATH_SUFFIXES lib/release lib/debug lib
+      REQUIRED
+      NO_DEFAULT_PATH)
+    find_path(
+      libuv_INCLUDE_DIR
+      NAMES uv.h
+      HINTS ${libuv_ROOT} ENV libuv_ROOT
+      PATH_SUFFIXES include
+      REQUIRED
+      NO_DEFAULT_PATH)
+    include_directories(SYSTEM ${libuv_INCLUDE_DIR})
+    list(APPEND Caffe2_DEPENDENCY_LIBS ${libuv_LIBRARY})
+  else()
+    if(NOT EXISTS "${PROJECT_SOURCE_DIR}/third_party/tensorpipe/third_party/libuv/CMakeLists.txt")
+      message(FATAL_ERROR "third_party/tensorpipe/third_party/libuv is missing. Please run: git submodule update --init --recursive")
+    endif()
+    add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe/third_party/libuv ${PROJECT_BINARY_DIR}/third_party/libuv EXCLUDE_FROM_ALL)
+    set_target_properties(uv_a PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+      target_compile_options_if_supported(uv_a -mno-outline-atomics)
+    endif()
+    list(APPEND Caffe2_DEPENDENCY_LIBS uv_a)
+  endif()
   add_compile_definitions(TORCH_USE_LIBUV)
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${libuv_LIBRARY})
 endif()
 
 if(USE_GLOO)
