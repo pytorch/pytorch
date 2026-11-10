@@ -50,7 +50,11 @@ if TYPE_CHECKING:
 
     from torch._C._functorch import CInterpreter
     from torch._guards import Source
-    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+    from torch._subclasses.fake_tensor import (
+        CppFakeTensorMode,
+        FakeTensor,
+        FakeTensorMode,
+    )
 
     # Import here to avoid cycle
     # Import the following modules during type checking to enable code intelligence features,
@@ -748,7 +752,7 @@ class MetaTensorDesc(Generic[_TensorT]):
 
     ctx: object | None = None  # is_traceable_wrapper_subclass
     type: type | None = None  # is_traceable_wrapper_subclass
-    fake_mode: FakeTensorMode | None = None
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None = None
     view_func: ViewFunc[Any] | None = None
     # level looks serializable, but actually it is meaningless without
     # the functorch_stack below
@@ -917,7 +921,7 @@ def _grad_context_compatible(
 # meta storages. This class will hold weak references to cached tensors
 # and tensor storages.
 class MetaConverter(Generic[_TensorT]):
-    def __init__(self, *, copy_data: bool = False) -> None:
+    def __init__(self, *, copy_data: bool = False, cpp_fakes: bool = False) -> None:
         # Maps MetaStorageId to UntypedStorage
         self.storage_memo: weakref.WeakValueDictionary[
             MetaStorageId, torch.UntypedStorage
@@ -936,7 +940,31 @@ class MetaConverter(Generic[_TensorT]):
         # bearing: FakeTensor relies on real tensor being set to exactly this
         # value
         self.copy_data = copy_data
+        # Whether the callback makes C++ fakes, which cannot hold views, sparse
+        # or mkldnn layouts or nested ints yet, so converting those raises
+        # UnsupportedFakeTensorException
+        self.cpp_fakes = cpp_fakes
         self.describer = MetaTensorDescriber(copy_data=copy_data)
+
+    def _check_cpp_fakes_support(self, t: MetaTensorDesc[Any]) -> None:
+        # C++ fakes cannot hold these yet, and making views and sparse tensors
+        # runs ops on the new fake (views under the Python dispatcher). The
+        # whole tensor, its grad and inner tensors included, is checked before
+        # anything is made for it.
+        from torch._subclasses.fake_tensor import UnsupportedFakeTensorException
+
+        is_sparse = t.is_sparse or is_sparse_compressed_layout(t.layout)
+        for kind, applies in (
+            ("views", t.is_view),
+            ("sparse", is_sparse),
+            ("mkldnn", t.is_mkldnn),
+            ("nested ints", t.nested_int is not None),
+        ):
+            if applies:
+                raise UnsupportedFakeTensorException(f"{kind} nyi in C++ fake tensors")
+        for inner in (t.grad, t.unwrapped, *(t.attrs or {}).values()):
+            if inner is not None:
+                self._check_cpp_fakes_support(inner)
 
     def successful(self) -> bool:
         return self.hit > 0 and self.miss == 0
@@ -1091,6 +1119,7 @@ class MetaConverter(Generic[_TensorT]):
         source: Source | None,
         symbolic_context: SymbolicContext | None,
     ) -> _TensorT:
+        from torch._guards import require_python_fake_mode
         from torch._subclasses.fake_tensor import (
             is_fake_tensor,
             maybe_get_fake_mode,
@@ -2319,8 +2348,10 @@ class MetaConverter(Generic[_TensorT]):
                 # pyrefly: ignore [unbound-name]
                 if not is_fake_tensor(r):
                     raise AssertionError("Expected r to be a FakeTensor for nested int")
+                # pyrefly: ignore [unbound-name]
+                r_mode = require_python_fake_mode(maybe_get_fake_mode(r))
                 # pyrefly: ignore [unbound-name, missing-attribute]
-                r.nested_int_memo = maybe_get_fake_mode(r).create_symbolic_nested_int(
+                r.nested_int_memo = r_mode.create_symbolic_nested_int(
                     nt_tensor_id=t.nested_int
                 )
 
@@ -2386,6 +2417,8 @@ class MetaConverter(Generic[_TensorT]):
         # Describe the tensor.  NB: do NOT disable ambient modes, we may need
         # to query them when figuring out what to put in here
         t_desc = self.describer.describe_tensor(t, trace=trace)
+        if self.cpp_fakes:
+            self._check_cpp_fakes_support(t_desc)
 
         if trace:
             if source is None:

@@ -11,7 +11,7 @@ import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._functorch.vmap import unwrap_batched, wrap_batched
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, require_python_fake_mode
 from torch._higher_order_ops.auto_functionalize import (
     can_auto_functionalize,
     do_auto_functionalize_v2,
@@ -96,7 +96,8 @@ def _build_empty_output_for_length_zero(
     combine_fn: Callable, init: pytree.PyTree
 ) -> pytree.PyTree:
     """Probe combine_fn(init, None) to learn the output structure for length==0."""
-    fake_mode = detect_fake_mode(pytree.tree_leaves(init)) or FakeTensorMode()
+    leaves = pytree.tree_leaves(init)
+    fake_mode = require_python_fake_mode(detect_fake_mode(leaves)) or FakeTensorMode()
     with fake_mode:
         fake_init = pytree.tree_map(
             lambda t: fake_mode.from_tensor(t)
