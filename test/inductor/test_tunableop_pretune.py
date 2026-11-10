@@ -126,6 +126,9 @@ def _ladder(sym, hint=512, declared=(2, 2**31 - 1), ladder=True):
     submitted = []
 
     def _record(job, timeout=None):
+        # The job itself, not just its request: what the ladder asks the
+        # worker for is as much a contract as the shapes it rebuilds.
+        job.bmreq.job = job
         submitted.append(job.bmreq)
         return mock.Mock(status="ok", time=1.0)
 
@@ -152,8 +155,13 @@ def _ladder(sym, hint=512, declared=(2, 2**31 - 1), ladder=True):
 
 
 class _Job:
-    def __init__(self, bmreq, tuning=False, **kwargs):
+    def __init__(self, bmreq, tuning=False, measure=True, **kwargs):
         self.bmreq = bmreq
+        # Kept rather than swallowed by **kwargs: the ladder asks for
+        # measure=False, and a stub that drops it cannot notice when that
+        # stops happening.
+        self.tuning = tuning
+        self.measure = measure
 
 
 def _run(winner, **kwargs):
@@ -210,6 +218,16 @@ class TestTunableOpPretune(TestCase):
             self.assertEqual(len(metas), 4, "scales must reach the worker")
             # scale_a carries the symbol, so it is rebuilt with the matrices
             self.assertEqual(metas[2].sizes[0], metas[0].sizes[0])
+
+    def test_ladder_jobs_are_tune_only(self):
+        """measure=False is what halves the worker cost per rung: the caller
+        discards the time, so the second benchmark would be pure waste."""
+        s = sympy.Symbol("s_measure", positive=True, integer=True)
+        submitted = _run(self._mm_winner("mm", s), sym=s)
+        self.assertTrue(submitted)
+        for bmreq in submitted:
+            self.assertTrue(bmreq.job.tuning)
+            self.assertFalse(bmreq.job.measure)
 
     def test_unsupported_op_is_skipped(self):
         s = sympy.Symbol("s_other", positive=True, integer=True)
@@ -915,7 +933,80 @@ class TestTunableOpPretune(TestCase):
             sched._has_layout_conflict_for_template.assert_not_called()
         winner.output_node.assert_called_once()
 
+    def _gemm_gm(self, device):
+        """A one-node graph whose mm carries a device, as lowering would."""
+        g = torch.fx.Graph()
+        node = g.call_function(
+            torch.ops.aten.mm.default, (g.placeholder("a"), g.placeholder("b"))
+        )
+        node.meta["val"] = mock.Mock(device=torch.device(device))
+        g.output(node)
+        return torch.fx.GraphModule(torch.nn.Module(), g)
 
+    @parametrize("tunableop_on", (True, False))
+    def test_pipelined_autotuning_is_off_when_enabled(self, tunableop_on):
+        # The pipelined path benchmarks the bmreq directly, so the routing in
+        # ExternKernelCaller.benchmark never runs and nothing is tuned.
+        from torch._inductor.autotune_process import use_pipelined_autotuning
+
+        with config.patch({"pipeline_max_autotune_gemm": True}):
+            with mock.patch(
+                "torch._inductor.tunableop.is_enabled", return_value=tunableop_on
+            ):
+                self.assertEqual(use_pipelined_autotuning(), not tunableop_on)
+
+    @parametrize(
+        "mode,disable_caches,expect_warning",
+        (
+            ("tune", False, True),
+            ("reuse", False, True),
+            # Asked for and granted: nothing to say.
+            ("tune", True, False),
+            ("reuse", True, False),
+            # No mode, no pass, no warning -- the control that keeps this from
+            # passing just because the string is never emitted at all.
+            ("off", False, False),
+        ),
+    )
+    def test_a_mode_warns_while_the_compile_caches_are_live(
+        self, mode, disable_caches, expect_warning
+    ):
+        # Both passes work while lowering, so a cached graph is never tuned.
+        # The pass asks for a cold cache rather than enforcing one: suppressing
+        # the caches from here costs every graph the cache entry that
+        # standalone_compile and precompile build their artifact from.
+        tunableop._env_warned.clear()
+        with (
+            mock.patch("torch.cuda.is_available", return_value=True),
+            config.patch({"cuda.autotune_tunableop_mode": mode}),
+            torch.compiler.config.patch({"force_disable_caches": disable_caches}),
+            mock.patch.object(tunableop.log, "warning") as warn,
+        ):
+            tunableop.is_enabled()
+        emitted = " ".join(str(c) for c in warn.call_args_list)
+        self.assertEqual(
+            "FORCE_DISABLE_CACHES" in emitted,
+            expect_warning,
+            f"mode={mode} disable_caches={disable_caches}: {emitted}",
+        )
+
+    def test_the_caching_warning_is_emitted_once_per_mode(self):
+        # It is consulted per GEMM; without the memo a compile would bury the
+        # log in one line per candidate.
+        tunableop._env_warned.clear()
+        with (
+            mock.patch("torch.cuda.is_available", return_value=True),
+            config.patch({"cuda.autotune_tunableop_mode": "tune"}),
+            torch.compiler.config.patch({"force_disable_caches": False}),
+            mock.patch.object(tunableop.log, "warning") as warn,
+        ):
+            for _ in range(5):
+                tunableop.is_enabled()
+        hits = [c for c in warn.call_args_list if "FORCE_DISABLE_CACHES" in str(c)]
+        self.assertEqual(len(hits), 1, f"expected one warning, got {hits}")
+
+
+@instantiate_parametrized_tests
 class TunableOpPretuneRealGpuTest(InductorTestCase):
     """The ladder against a real compile, worker and results file.
 
@@ -924,11 +1015,39 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
     hipBLASLt accepts and that each reaches the file runtime reads.
 
     InductorTestCase enters fresh_cache(), which isolates the cache directory
-    per test and clears _pretuned_gemms with it, so the compile always starts
-    cold.
+    per test and clears _pretuned_gemms with it, so each test starts cold --
+    which is what a pass needs, since a cached graph is not lowered and so is
+    never tuned. The passes do not enforce that; _warn_if_caching_enabled
+    asks for it instead, because suppressing the caches from here would cost
+    every graph the cache entry standalone_compile builds its artifact from.
     """
 
     hw_classification = HardwareClassification.CUDA
+
+    def _tunableop_process_cleanup(self):
+        """Restore the process-global TunableOp knobs a compile leaves set.
+
+        Leaving one behind makes a later test tune at a single iteration.
+        Cleanups run LIFO, so the worker goes down first.
+        """
+        tunable = torch.cuda.tunable
+        self.addCleanup(tunable.set_filename, tunable.get_filename(), False)
+        for getter, setter in (
+            (tunable.is_enabled, tunable.enable),
+            (tunable.get_max_tuning_duration, tunable.set_max_tuning_duration),
+            (tunable.get_max_tuning_iterations, tunable.set_max_tuning_iterations),
+        ):
+            self.addCleanup(setter, getter())
+        # Not in the loop: the rotating buffer's getter reports bytes and its
+        # setter takes MiB, so restoring the raw value multiplies by 1 MiB,
+        # overflows int and silently leaves rotation off for every later test
+        # in the process. _rotating_buffer_mb converts, and maps an L2-sized
+        # value back to -1 so "use L2" survives the round trip.
+        self.addCleanup(
+            tunable.set_rotating_buffer_size,
+            tunableop._rotating_buffer_mb(tunable.get_rotating_buffer_size()),
+        )
+        self.addCleanup(tunableop.shutdown_worker)
 
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
     @skipIfWindows(msg="pass_fds not supported on Windows.")
@@ -937,17 +1056,7 @@ class TunableOpPretuneRealGpuTest(InductorTestCase):
             return a @ b
 
         tunable = torch.cuda.tunable
-        # All process-global: leaving one behind makes a later test tune at
-        # a single iteration. Cleanups run LIFO, so the worker goes first.
-        self.addCleanup(tunable.set_filename, tunable.get_filename(), False)
-        for getter, setter in (
-            (tunable.is_enabled, tunable.enable),
-            (tunable.get_max_tuning_duration, tunable.set_max_tuning_duration),
-            (tunable.get_max_tuning_iterations, tunable.set_max_tuning_iterations),
-            (tunable.get_rotating_buffer_size, tunable.set_rotating_buffer_size),
-        ):
-            self.addCleanup(setter, getter())
-        self.addCleanup(tunableop.shutdown_worker)
+        self._tunableop_process_cleanup()
 
         with tempfile.TemporaryDirectory(prefix="tunableop_pretune_gpu_") as d:
             results = os.path.join(d, "results.csv")
