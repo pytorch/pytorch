@@ -56,7 +56,10 @@ onecclDataType_t getXcclDataTypeInternal(const at::Tensor& tensor) {
       return onecclUint8;
     default:
       // TODO: Add Float8 datatype handling
-      TORCH_CHECK(false, "Unsupported tensor data type for XCCL");
+      TORCH_CHECK(
+          false,
+          "Unsupported tensor data type for XCCL: ",
+          tensor.scalar_type());
   }
 }
 
@@ -160,7 +163,7 @@ ProcessGroupXCCL::RedOpRAII ProcessGroupXCCL::getXcclReduceOp(
     onecclComm_t comm,
     const onecclDataType_t dataType) {
   // Bool is sent as uint8, so a plain SUM would add bytes; MAX is logical OR.
-  if (tensor.scalar_type() == at::kBool) {
+  if (dataType == at::kBool) {
     if (op == ::c10d::ReduceOp::SUM) {
       return onecclMax;
     }
@@ -183,14 +186,14 @@ ProcessGroupXCCL::RedOpRAII ProcessGroupXCCL::getXcclReduceOp(
     case ::c10d::ReduceOp::AVG:
       return onecclAvg;
     case ::c10d::ReduceOp::BAND:
-      // XCCL doesn't have bitwise AND
-      TORCH_CHECK(false, "Unsupported BAND reduce operation");
+      // XCCL doesn't support bitwise AND
+      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BAND with XCCL");
     case ::c10d::ReduceOp::BOR:
-      // XCCL doesn't have bitwise OR
-      TORCH_CHECK(false, "Unsupported BOR reduce operation");
+      // XCCL doesn't support bitwise OR
+      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with XCCL");
     case ::c10d::ReduceOp::BXOR:
-      // XCCL doesn't have bitwise XOR
-      TORCH_CHECK(false, "Unsupported BXOR reduce operation");
+      // XCCL doesn't support bitwise XOR
+      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with XCCL");
     default:
       TORCH_CHECK(false, "Unsupported reduce operation");
   }
