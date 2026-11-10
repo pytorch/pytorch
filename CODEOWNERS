@@ -1354,6 +1354,7 @@
 # /test/inductor/
 # /test/inductor_expected_failures/
 # /test/inductor_skips/
+# /test/test_export_python.py
 # /test/test_precompile.py
 # /test/test_triton_utils.py
 # /torch/_inductor/
