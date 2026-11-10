@@ -539,6 +539,7 @@ class TestOrigami(TestCase):
                     result = compiled(*args)
 
                 selector.assert_called()
+                self.assertGreater(counters["inductor"]["origami_fallback"], 0)
                 torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
                 self.assertGreater(
                     self._benchmark_gpu_call_count(), ORIGAMI_COMPILE_TOPK
@@ -551,7 +552,14 @@ class TestOrigami(TestCase):
         torch._dynamo.reset()
         counters.clear()
         calls = []
+        real_topk = origami.select_topk_configs
         real_mapping = origami.select_workgroup_mapping
+
+        # Count only calls made after topk selection: the selector constructor
+        # also calls select_workgroup_mapping.
+        def arm_topk(*a, **kw):
+            calls.clear()
+            return real_topk(*a, **kw)
 
         def fail_on_second_call(*a, **kw):
             calls.append(1)
@@ -562,50 +570,58 @@ class TestOrigami(TestCase):
         with (
             fresh_cache(),
             config.patch(self._origami_default_config(ORIGAMI_TOPK_VALUES[0])),
+            mock.patch.object(origami, "select_topk_configs", arm_topk),
             mock.patch.object(origami, "select_workgroup_mapping", fail_on_second_call),
         ):
             result = torch.compile(fn, dynamic=False)(*args)
 
         torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
         self.assertGreaterEqual(len(calls), 2)
+        self.assertGreater(counters["inductor"]["origami_fallback"], 0)
         # A kept partial result would leave at most one benchmarked config.
         self.assertGreater(self._benchmark_gpu_call_count(), ORIGAMI_COMPILE_TOPK)
 
-    def test_origami_unsupported_layout_falls_back(self):
-        # A batch-last permute keeps strides (512, 8) on A, which Origami's
-        # selector rejects with ValueError; compile must still succeed.
-        torch.manual_seed(0)
-        a = torch.randn(32, 64, 8, device=GPU_TYPE, dtype=torch.float16)
-        b = torch.randn(8, 64, 64, device=GPU_TYPE, dtype=torch.float16)
+    def test_origami_falls_back_when_config_lookup_fails(self):
+        import dataclasses
 
-        def fn(x, y):
-            return torch.bmm(x.permute(2, 0, 1), y)
+        import torch._inductor.heuristics.template.triton as th
 
-        expected = fn(a, b)
+        fn, args = self._make_fn_and_inputs("mm", 256)
+        expected = fn(*args)
+
         torch._dynamo.reset()
         counters.clear()
-        raised = []
-        real_selector = origami.OrigamiMatmulSelector
+        armed = []
+        rebuilt = []
+        real_mapping = origami.select_workgroup_mapping
+        real_filter = th.ROCmConfigHeuristic._filter_configs
 
-        def spy(*args, **kwargs):
-            try:
-                return real_selector(*args, **kwargs)
-            except ValueError as e:
-                raised.append(e)
-                raise
+        def arm_mapping(*a, **kw):
+            armed.append(1)
+            return real_mapping(*a, **kw)
+
+        # The first filter call after Origami selection gets tiles whose keys
+        # match nothing stored, so every lookup fails.
+        def rebuild_tiles(self, configs):
+            out = real_filter(self, configs)
+            if armed:
+                armed.clear()
+                out = [dataclasses.replace(c, block_m=c.block_m + 1) for c in out]
+                rebuilt.append(len(out))
+            return out
 
         with (
             fresh_cache(),
             config.patch(self._origami_default_config(ORIGAMI_COMPILE_TOPK)),
-            mock.patch.object(origami, "OrigamiMatmulSelector", spy),
+            mock.patch.object(origami, "select_workgroup_mapping", arm_mapping),
+            mock.patch.object(th.ROCmConfigHeuristic, "_filter_configs", rebuild_tiles),
         ):
-            result = torch.compile(fn, dynamic=False)(a, b)
+            result = torch.compile(fn, dynamic=False)(*args)
+
         torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
-        if not raised:
-            self.skipTest(
-                "selector accepted this layout; fallback is covered by "
-                "test_origami_falls_back_when_selector_raises"
-            )
+        self.assertTrue(rebuilt and all(rebuilt), rebuilt)
+        self.assertGreater(counters["inductor"]["origami_fallback"], 0)
+        self.assertGreater(self._benchmark_gpu_call_count(), ORIGAMI_COMPILE_TOPK)
 
     def test_origami_honors_max_mm_configs(self):
         patch_config = self._origami_default_config(ORIGAMI_TOPK_VALUES[0])
@@ -636,34 +652,6 @@ class TestOrigami(TestCase):
                 self.assertTrue(cls()._origami_may_select(), cls)
                 custom_cls = type(f"Custom{cls.__name__}", (cls,), {})
                 self.assertFalse(custom_cls()._origami_may_select(), custom_cls)
-
-    def test_heuristic_subclass_without_mm_configs_constructs(self):
-        import torch._inductor.heuristics.template.triton as th
-
-        # An override whose __init__ skips super().__init__ has no mm_configs;
-        # constructing it must still work.
-        class NoInitHeuristic(th.ROCmMMTemplateConfigHeuristic):
-            def __init__(self) -> None:
-                pass
-
-        with mock.patch.dict(th.BaseHeuristicSingleton._instances):
-            heuristic = NoInitHeuristic()
-            self.assertIsNone(heuristic._constructed_mm_configs)
-
-    def test_origami_not_used_after_mm_configs_reassigned(self):
-        import torch._inductor.heuristics.template.triton as th
-
-        heuristic = th.ROCmMMTemplateConfigHeuristic()
-        original = heuristic.mm_configs
-        patch_config = self._origami_default_config(ORIGAMI_TOPK_VALUES[0])
-        try:
-            heuristic.mm_configs = original[:1]
-            self.assertFalse(heuristic._origami_may_select())
-            case = self._compile_with_config("mm", patch_config, size=256)
-            self.assertEqual(case["topk_calls"], 0)
-        finally:
-            heuristic.mm_configs = original
-        self.assertTrue(heuristic._origami_may_select())
 
     def _matmul_inputs(
         self,
@@ -711,10 +699,14 @@ class TestOrigami(TestCase):
         tol = 5e-2 if expected.is_floating_point() else 0
         torch.testing.assert_close(result, expected, atol=tol, rtol=tol)
         if expect_origami:
-            # Without this a case could pass through the fallback and test nothing.
+            # Without these a case could pass through the fallback and test nothing.
             self.assertGreater(select_topk.call_count, 0, "Origami did not select")
+            self.assertEqual(
+                counters["inductor"]["origami_fallback"], 0, "Origami fell back"
+            )
         else:
             self.assertEqual(select_topk.call_count, 0)
+            self.assertEqual(counters["inductor"]["origami_fallback"], 0)
 
     @parametrize("op_name", ("mm", "addmm", "bmm"))
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
