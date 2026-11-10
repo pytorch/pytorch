@@ -187,16 +187,17 @@ class InductorChoices:
         non-empty unless ``configs`` is; a single config takes the lowering's
         one-config path.
         ``append_flex_attention_choices`` still receives the unrefined pool.
-        Only the stock pool is refined: a handler that overrides
-        ``get_flex_attention_fwd_configs`` keeps its pool unless it also
+        Only the stock pool is refined: when the active handler overrides
+        ``get_flex_attention_fwd_configs``, it keeps its pool unless it also
         overrides this method.
         """
-        # Resolve through the instance: composed choices dispatch each hook to
-        # the contributor that overrides it, which type(self) would not see.
-        lookup = getattr(self.get_flex_attention_fwd_configs, "__func__", None)
+        # The pool comes from the active handler. With composed choices that is
+        # not necessarily the contributor this hook is bound to.
+        handler = V.choices
+        lookup = getattr(handler.get_flex_attention_fwd_configs, "__func__", None)
         if lookup is not _STOCK_FLEX_ATTENTION_FWD_CONFIGS:
             return configs
-        flex_heuristics = self.get_config_heuristics(context.device.type)
+        flex_heuristics = handler.get_config_heuristics(context.device.type)
         refine = getattr(flex_heuristics, "refine_flex_attn_fwd_configs", None)
         return configs if refine is None else refine(configs, context)
 
