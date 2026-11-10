@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     import torch.nn as nn
     from torch.distributed.device_mesh import DeviceMesh
 
+    from ..bucket_runtime import ParamRepresentation
     from ..bucket_storage import ParamInfo, PlacementFn
     from ..placement_contract import GradientReduction
 
@@ -185,6 +186,11 @@ class _MixedBucketMember:
 
     def bucket_compatibility_key(self) -> object:
         return self._mixed_bucket
+
+    def new_bucket_state(
+        self, infos: list[ParamInfo], representation: ParamRepresentation
+    ) -> object | None:
+        return self._mixed_bucket.new_bucket_state(infos, representation)
 
     def bucket_storage_layout(
         self,

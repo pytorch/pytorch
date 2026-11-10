@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     import torch.nn as nn
     from torch.distributed.device_mesh import DeviceMesh
 
+    from .bucket_runtime import ParamRepresentation
     from .bucket_storage import ParamInfo
 
 
@@ -226,6 +227,14 @@ class Placement(ABC):
     def bucket_compatibility_key(self) -> object:
         """Return a key shared by placements that can use one bucket collective."""
         return self
+
+    def new_bucket_state(
+        self, infos: list[ParamInfo], representation: ParamRepresentation
+    ) -> object | None:
+        """State that this placement keeps for one bucket across unshards, or
+        None. The bucket's runtime creates it once and passes it to every eager
+        ``prepare_unshard_bucket`` as ``bucket_state``."""
+        return None
 
     def compute_local_numel(
         self, global_shape: torch.Size, rank: int, world_size: int

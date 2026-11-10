@@ -17,9 +17,7 @@ from .bucket_runtime import (
     _EAGER_COMM_CONTEXTS_ATTR,
     _in_backward,
     _install_bucket_unshard_hooks,
-    _KEEP_PREFETCHES_UNTIL_USED_ATTR,
     _MAX_PENDING_REDUCE_GRADS_ATTR,
-    _POST_BACKWARD_PER_CALL_ATTR,
     GradientReductionHandle,
     ModuleUnshardHandle,
     ParamOwnerRef,
@@ -211,7 +209,7 @@ class FlexShardModule:
                 if not async_op or bucket.is_unsharded:
                     bucket.unshard(on_current_stream=True)
                 else:
-                    context.prefetch(bucket, explicit=True, on_current_stream=True)
+                    context.prefetch(bucket, on_current_stream=True)
                     started.append((context, bucket))
         return ModuleUnshardHandle(started) if async_op else None
 
@@ -380,34 +378,6 @@ class FlexShardModule:
             bucket_storage.set_reduce_scatter_unused_params(
                 reduce_scatter_unused_params
             )
-
-    def set_post_backward_per_call(self, enabled: bool) -> None:
-        """Reduce and reshard after the backward of each forward call, as FSDP2
-        does, for buckets called several times in a forward.
-
-        By default, such a bucket keeps its unsharded params until the last
-        call's backward and then reduces once. Per call frees the unsharded
-        params between the calls' backwards, at the cost of a re-gather and a
-        reduce-scatter per call. Call it on the module ``flex_shard`` returned.
-        """
-        setattr(self, _POST_BACKWARD_PER_CALL_ATTR, enabled)
-        for context in getattr(self, _EAGER_COMM_CONTEXTS_ATTR, {}).values():
-            context.post_backward_per_call = enabled
-
-    def set_keep_prefetches_until_used(self, enabled: bool) -> None:
-        """Keep learned-order prefetches until their buckets use them, as FSDP2
-        does.
-
-        Backward then prefetches the previous bucket in post-forward order, and
-        several prefetches may be in flight. By default, one learned-order
-        prefetch runs at a time, to the nearest bucket that still needs a
-        gather, and is released when execution diverges from the learned
-        order, which bounds the memory prefetches hold. Call it on the module
-        ``flex_shard`` returned.
-        """
-        setattr(self, _KEEP_PREFETCHES_UNTIL_USED_ATTR, enabled)
-        for context in getattr(self, _EAGER_COMM_CONTEXTS_ATTR, {}).values():
-            context.keep_prefetches_until_used = enabled
 
     def set_max_pending_reduce_grads(
         self,

@@ -36,11 +36,11 @@ from torch.distributed.fsdp._flex_shard.all_gather_layout import (
     foreach_all_gather_copy_out,
 )
 from torch.distributed.fsdp._flex_shard.placement_contract import GradientReduction
-from torch.distributed.fsdp._flex_shard.placements.param_driven_shard import (
-    ParamAllGather,
-)
 from torch.distributed.fsdp._flex_shard.placements.shard import (
     reduce_scatter_input_fn as default_reduce_scatter_input_fn,
+)
+from torch.distributed.fsdp._flex_shard.placements.shard_all_gather import (
+    ParamAllGather,
 )
 from torch.distributed.fsdp._flex_shard.placements.utils import _gradient_reduce_ops
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather

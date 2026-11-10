@@ -1,8 +1,7 @@
 """Experimental contract for all-gather input packing and output handling.
 
-It applies to buckets whose parameters define their own all-gather inputs
-(``ParamDrivenShard``), such as ``fully_shard`` groups with all-gather
-extensions or a custom layout.
+It applies to the all-gathers of ``Shard`` buckets (see ``ShardAllGather``),
+such as ``fully_shard`` groups.
 
 A layout prepares each all-gather before its output is allocated, packs the
 collective input, and finalizes the collective output into the parameters'
@@ -50,7 +49,7 @@ from . import ops as _fsdp_ops  # noqa: F401  # registers the fsdp:: ops it call
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .placements.param_driven_shard import ParamAllGather
+    from .placements.shard_all_gather import ParamAllGather
 
 
 @dataclass(eq=False, slots=True)
@@ -320,7 +319,7 @@ class DefaultAllGatherLayout(AllGatherLayout):
 
     Args:
         output_fn (Optional[Callable]): Copy-out function, or ``None`` for FSDP's
-            copy through intermediate buffers. FSDP calls ``output_fn(output,
+            own copy-out. FSDP calls ``output_fn(output,
             outputs, split_sizes=..., outer_sizes=..., world_size=...)`` under
             ``no_grad`` on the current stream for multi-rank, nonempty all-gathers:
             each rank's chunk holds ``split_sizes[i]`` elements (bytes for a uint8

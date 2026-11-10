@@ -984,7 +984,7 @@ class TestFlexShardEagerRuntime(TestCase):
             model(x).sum().backward()
             handle = bucket.begin_unshard()
             self.assertEqual(len(handle.prepared.buffers), 1)
-            self.assertTrue(handle.prepared.placement_state.local_copy_out)
+            self.assertIsNotNone(handle.prepared.placement_state.single_rank_inputs)
             self.assertTrue(
                 all(b.untyped_storage().size() == 0 for b in bucket.persistent_buffers)
             )
