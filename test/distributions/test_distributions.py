@@ -115,6 +115,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     expectedFailureXPU,
     instantiate_device_type_tests,
+    largeTensorTest,
     skipCUDAIf,
     skipMPS,
     skipXPUIf,
@@ -2006,6 +2007,28 @@ class TestDistributionsDevice(DistributionsTestCase):
             else:
                 perm_counts_mult[p] = 1
         self.assertLess(dups_mult, 10)
+
+    @skipMPS  # MPS limits sampling with replacement to 2^24 categories
+    @skipXPUIf(True, "XPU limits sampling with replacement to 2^24 categories")
+    @largeTensorTest("2GB")
+    @dtypes(torch.float, torch.double)
+    def test_multinomial_many_categories(self, device, dtype):
+        # A float32 CDF cannot give 2^25 categories distinct buckets (#2576)
+        n = 1 << 25
+        probs = torch.ones(n, device=device, dtype=dtype)
+        samples = torch.multinomial(probs, 20000, replacement=True)
+        upper = samples[samples >= n // 2]
+        self.assertEqual(upper.numel() / samples.numel(), 0.5, atol=0.05, rtol=0)
+        odd_fraction = (upper % 2).sum().item() / upper.numel()
+        self.assertEqual(odd_fraction, 0.5, atol=0.05, rtol=0)
+        self.assertLess(samples.max().item(), n)
+
+        probs.zero_()
+        probs[-10:] = 1
+        for n_sample, replacement in ((1, True), (1, False), (10, False)):
+            samples = torch.multinomial(probs, n_sample, replacement)
+            self.assertTrue(samples.ge(n - 10).all() and samples.lt(n).all())
+            self.assertEqual(samples.unique().numel(), n_sample)
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
