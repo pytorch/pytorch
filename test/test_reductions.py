@@ -1694,7 +1694,8 @@ class TestReductionsDevice(TestCase):
             test_dtype_bfloat16(False, True)
             test_dtype_bfloat16(True, True)
 
-    @onlyCUDA
+    @onlyAccelerator
+    @skipIfMPS
     @largeTensorTest("10GB", "cuda")
     @serialTest()
     def test_bucketization_int32_overflow(self, device):
