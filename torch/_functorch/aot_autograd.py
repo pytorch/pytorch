@@ -556,9 +556,8 @@ def create_aot_state(
     stack.enter_context(
         torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing()
     )
-    # Make it an error to backprop through PT2 compliant ops that silently
-    # detach autograd
-    stack.enter_context(autograd_fallback_mode("error"))
+    if config.error_on_missing_autograd_kernel:
+        stack.enter_context(autograd_fallback_mode("error"))
 
     from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
     from torch._library.opaque_object import is_custom_class

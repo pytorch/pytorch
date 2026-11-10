@@ -6,6 +6,7 @@ import warnings
 import numpy as np
 
 import torch
+from torch._functorch import config as functorch_config
 from torch._library.autograd import autograd_fallback_mode
 from torch.library import _scoped_library
 from torch.testing._internal.common_utils import (
@@ -82,8 +83,10 @@ class TestAutogradFallback(TestCase):
                 out.backward()
             self.assertIsNone(b.grad)
 
+    @functorch_config.patch(enable_autograd_cache=False)
     @parametrize("backend", ("aot_eager", "inductor"))
-    def test_compile_error_deferred_until_backward(self, backend):
+    @parametrize("mode", ("error", "warn", "nothing"))
+    def test_compile_autograd_fallback(self, backend, mode):
         from torch._dynamo.testing import CompileCounterWithBackend
 
         lib = self.get_lib()
@@ -93,20 +96,30 @@ class TestAutogradFallback(TestCase):
         op = self.get_op("foo")
 
         def fn(x):
-            return op(x).sum()
+            return (op(x) + x).sum()
 
         counter = CompileCounterWithBackend(backend)
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.randn(3, requires_grad=True)
-        out = compiled(x)
-        self.assertEqual(counter.frame_count, 1)
-        self.assertTrue(out.requires_grad)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            f"{self.test_ns}::foo: an autograd kernel was not registered",
+        fallback_mode = "warn" if mode == "error" else mode
+        with (
+            functorch_config.patch(error_on_missing_autograd_kernel=mode == "error"),
+            autograd_fallback_mode(fallback_mode),
         ):
-            out.backward()
-        self.assertIsNone(x.grad)
+            with self._check_ctx("warn" if mode == "warn" else "nothing"):
+                out = compiled(x)
+            self.assertEqual(counter.frame_count, 1)
+            self.assertTrue(out.requires_grad)
+            if mode == "error":
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    f"{self.test_ns}::foo: an autograd kernel was not registered",
+                ):
+                    out.backward()
+                self.assertIsNone(x.grad)
+            else:
+                out.backward()
+                self.assertIsNotNone(x.grad)
 
     def _check_ctx(self, mode, *, mode_nothing_raises=False):
         if mode == "warn":

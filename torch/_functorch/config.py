@@ -112,6 +112,14 @@ error_on_custom_op_aliasing: bool = Config(
 )
 
 
+# Error on missing custom-op autograd kernels in compiled backward. Disable
+# this to preserve the caller's autograd fallback mode during tracing.
+error_on_missing_autograd_kernel: bool = Config(
+    env_name_force="TORCHINDUCTOR_ERROR_ON_MISSING_AUTOGRAD_KERNEL",
+    default=True,
+)
+
+
 def remote_autograd_cache_default() -> bool | None:
     if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "1":
         return True
