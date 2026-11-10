@@ -605,7 +605,12 @@ Tensor& multinomial_out(const Tensor& self,
     // s = argmax( p / (-log(eps)) ) where eps ~ U(0, 1).
     // We can also simplify the formula above by
     // s = argmax( p / q ) where q ~ Exp(1)
-    Tensor q = at::empty_like(self).exponential_(1, std::move(gen));
+    // q is float for half and bfloat16: in half, p / q overflows to inf whenever
+    // q < p / 65504, and bfloat16 rounding ties near-equal p / q; argmax breaks
+    // both kinds of tie toward low indices.
+    const auto self_type = self.scalar_type();
+    const auto q_type = self_type == kHalf || self_type == kBFloat16 ? kFloat : self_type;
+    Tensor q = at::empty_like(self, self.options().dtype(q_type)).exponential_(1, std::move(gen));
     // In theory the probability to generate 0 from exponential distribution is
     // 0. However, on CUDA side there is a protection to avoid 0s, but on CPU
     // side, there is a very low probability to generate 0 from
@@ -615,7 +620,7 @@ Tensor& multinomial_out(const Tensor& self,
     if (n_sample == 1) {
       at::argmax_out(result, q, /*dim=*/-1, /*keepdim=*/true);
     } else {
-      Tensor vals = at::empty(result.sizes(), self.options());
+      Tensor vals = at::empty(result.sizes(), q.options());
       at::topk_out(vals, result, q, n_sample);
     }
     return result;
