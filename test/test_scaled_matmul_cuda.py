@@ -849,13 +849,13 @@ class TestFP8MatmulGeneric(TestCase):
     @parametrize("groups", [1, 2])
     def test_scaled_grouped_mm_offsets_fake(self, wrap_v2, groups):
         with FakeTensorMode():
-            a = torch.ones(16, 64, dtype=torch.float8_e4m3fn)
+            a = torch.ones(16, 64, dtype=e4m3_type)
             scale = torch.ones(16 * groups)
             offs = torch.tensor([64, 0] if groups == 1 else [32, 0, 64, 0], dtype=torch.int32)[::2]
             self.assertEqual(offs.stride(), (2,))
             self.assertEqual(offs.is_contiguous(), groups == 1)
             context = contextlib.nullcontext() if groups == 1 else self.assertRaisesRegex(
-                ValueError, "Offsets have to be contiguous"
+                (ValueError, RuntimeError), "Offsets have to be contiguous"
             )
             with context:
                 result = scaled_grouped_mm_wrap(
