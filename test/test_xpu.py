@@ -293,6 +293,37 @@ if __name__ == "__main__":
         with self.assertRaisesRegex(ValueError, "Unsupported ZE_AFFINITY_MASK format"):
             _parse_visible_devices("one, two", strict=True)
 
+        # ONEAPI_DEVICE_SELECTOR is not honored by Sysman; it overrides
+        # ZE_AFFINITY_MASK, returning [] or raising ValueError in strict mode
+        with patch.dict(
+            os.environ,
+            {"ZE_AFFINITY_MASK": "0, 1", "ONEAPI_DEVICE_SELECTOR": "level_zero:0"},
+            clear=True,
+        ):
+            self.assertEqual(torch.xpu._parse_visible_devices(), [])
+            with self.assertRaisesRegex(
+                ValueError, "Unsupported ONEAPI_DEVICE_SELECTOR format"
+            ):
+                torch.xpu._parse_visible_devices(strict=True)
+
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
+    def test_device_info_api_raises_with_oneapi_device_selector(self):
+        torch.xpu._cached_zes_device_infos.clear()
+        with patch.dict(os.environ, {"ONEAPI_DEVICE_SELECTOR": "level_zero:0"}):
+            for api in (
+                torch.xpu.temperature,
+                torch.xpu.clock_rate,
+                torch.xpu.power_draw,
+                torch.xpu.utilization,
+                torch.xpu.memory_usage,
+                torch.xpu.device_memory_used,
+                torch.xpu.list_gpu_processes,
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "Unsupported ONEAPI_DEVICE_SELECTOR format"
+                ):
+                    api()
+
     def test_device_info_api_raises_import_error_without_pyzes(self):
         with unittest.mock.patch.dict("sys.modules", {"pyzes": None}):
             with self.assertRaisesRegex(ImportError, "pyzes is required"):
@@ -431,6 +462,21 @@ print(f"{{r1}}, {{r2}}")
         if TEST_MULTIXPU:
             # Valid mask selecting device 1 on a multi-GPU system → both return 1
             self.assertEqual(_run("1"), "1, 1")
+
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
+    def test_device_count_respects_oneapi_device_selector(self):
+        test_script = """\
+import torch
+print(f"{torch.xpu._device_count_zes()}, {torch.xpu.device_count()}")
+"""
+        env = {**os.environ, "ONEAPI_DEVICE_SELECTOR": "!*:gpu"}
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script], env=env)
+            .decode("ascii")
+            .strip()
+            .splitlines()[-1]
+        )
+        self.assertEqual(r, "-1, 0")
 
     @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
