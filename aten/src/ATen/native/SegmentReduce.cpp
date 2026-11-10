@@ -95,7 +95,7 @@ void _segment_reduce_lengths_cpu_kernel1(
                 if (reduction == ReductionType::MAX) {
                   initial_value = at::_isnan(val)
                       ? val
-                      : std::max<opmath_t>(initial_value, val);
+                      : std::max(initial_value, val);
                 } else if (
                     reduction == ReductionType::MEAN ||
                     reduction == ReductionType::SUM) {
@@ -103,7 +103,7 @@ void _segment_reduce_lengths_cpu_kernel1(
                 } else if (reduction == ReductionType::MIN) {
                   initial_value = at::_isnan(val)
                       ? val
-                      : std::min<opmath_t>(initial_value, val);
+                      : std::min(initial_value, val);
                 } else if (reduction == ReductionType::PROD) {
                   initial_value = initial_value * val;
                 }

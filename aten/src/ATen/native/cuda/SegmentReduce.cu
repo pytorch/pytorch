@@ -26,45 +26,45 @@
 namespace at::native {
 
 namespace {
-template <typename acc_t>
+template <typename OutputT>
 struct CustomMax {
-  __host__ __device__ __forceinline__ acc_t
-  operator()(const acc_t& a, const acc_t& b) const {
+  __host__ __device__ __forceinline__ OutputT
+  operator()(const OutputT& a, const OutputT& b) const {
     if (at::_isnan(a)) {
       return a;
     } else if (at::_isnan(b)) {
       return b;
     }
-    return std::max<acc_t>(a, b);
+    return std::max(a, b);
   }
 };
 
-template <typename acc_t>
+template <typename OutputT>
 struct CustomSum {
-  __host__ __device__ __forceinline__ acc_t
-  operator()(const acc_t& a, const acc_t& b) const {
+  __host__ __device__ __forceinline__ OutputT
+  operator()(const OutputT& a, const OutputT& b) const {
     return a + b;
   }
 };
 
-template <typename acc_t>
+template <typename OutputT>
 struct CustomProd {
-  __host__ __device__ __forceinline__ acc_t
-  operator()(const acc_t& a, const acc_t& b) const {
+  __host__ __device__ __forceinline__ OutputT
+  operator()(const OutputT& a, const OutputT& b) const {
     return a * b;
   }
 };
 
-template <typename acc_t>
+template <typename OutputT>
 struct CustomMin {
-  __host__ __device__ __forceinline__ acc_t
-  operator()(const acc_t& a, const acc_t& b) const {
+  __host__ __device__ __forceinline__ OutputT
+  operator()(const OutputT& a, const OutputT& b) const {
     if (at::_isnan(a)) {
       return a;
     } else if (at::_isnan(b)) {
       return b;
     }
-    return std::min<acc_t>(a, b);
+    return std::min(a, b);
   }
 };
 
