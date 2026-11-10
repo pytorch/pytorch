@@ -147,8 +147,11 @@ class HashableTracker:
 
         items = []
         for item in vt.items:
+            is_constant, value = False, None
             if item.is_python_constant():
-                items.append(item.as_python_constant())
+                is_constant, value = item.try_as_python_constant()
+            if is_constant:
+                items.append(value)
                 continue
 
             if isinstance(item, TensorVariable):
@@ -219,8 +222,11 @@ class HashableTracker:
         tx = InstructionTranslator.current_tx()
 
         result = generic_richcompare_bool(tx, self.vt, other.vt, op="__eq__")
+        is_constant, value = False, None
         if result.is_python_constant():
-            return bool(result.as_python_constant())
+            is_constant, value = result.try_as_python_constant()
+        if is_constant:
+            return bool(value)
 
         if result.is_symnode_like():
             return bool(guard_if_dyn(result))

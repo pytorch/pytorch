@@ -55,6 +55,7 @@ from ..utils import (
     unpack_iterable,
 )
 from .base import (
+    AsPythonConstantNotImplementedError,
     AttributeMutationExisting,
     AttributeMutationNew,
     AttrMutationKind,
@@ -200,10 +201,16 @@ class ConstDictVariable(VariableTracker):
             self._checking_python_constant = False
 
     def as_python_constant(self) -> dict[Any, Any]:
-        return {
-            k.vt.as_python_constant(): v.as_python_constant()
-            for k, v in self.items.items()
-        }
+        items = {}
+        for k, v in self.items.items():
+            is_constant, key = k.vt.try_as_python_constant()
+            if not is_constant:
+                raise AsPythonConstantNotImplementedError(self)
+            is_constant, value = v.try_as_python_constant()
+            if not is_constant:
+                raise AsPythonConstantNotImplementedError(self)
+            items[key] = value
+        return items
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         items = [
@@ -456,7 +463,11 @@ class ConstDictVariable(VariableTracker):
             return
 
         contains = args[0] in self
-        if args[0].source is None and args[0].is_python_constant():
+        if (
+            args[0].source is None
+            and args[0].is_python_constant()
+            and (constant := args[0].try_as_python_constant())[0]
+        ):
             guard_fn = (
                 type(self).CONTAINS_GUARD if contains else type(self).NOT_CONTAINS_GUARD
             )
@@ -464,7 +475,7 @@ class ConstDictVariable(VariableTracker):
                 self.make_guard(
                     functools.partial(
                         guard_fn,
-                        key=args[0].as_python_constant(),
+                        key=constant[1],
                     )
                 )
             )
