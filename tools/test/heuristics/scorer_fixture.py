@@ -130,8 +130,8 @@ PATHS_CASE: dict[str, Any] = {
     },
 }
 
-CUT_CASE: dict[str, Any] = {
-    "td_order": ["h", "b", "d", "c", "a", "e", "f", "g"],
+BUDGET_CUT_CASE: dict[str, Any] = {
+    "tests": ["a", "b", "c", "d", "e", "f", "g", "h"],
     "p": {
         "a": 0.3,
         "b": 0.2,
@@ -152,9 +152,11 @@ CUT_CASE: dict[str, Any] = {
         "g": 18.0,
         "h": 380.0,
     },
-    "percent": 25,
-    "expected_exponent": 0.2,
-    "expected_include": ["b", "a", "d"],
+    "budget_share": 0.25,
+    "expected_selected": ["b", "d", "e", "g", "a"],
+    "expected_selected_seconds": 528.0,
+    "expected_total_seconds": 1243.0,
+    "expected_budget_seconds": 310.75,
 }
 
 NUMSTAT_CASE: dict[str, Any] = {

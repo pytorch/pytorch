@@ -2724,9 +2724,7 @@ def main():
         print_to_stderr(describe_cut(cut_info))
         if IS_CI and which_shard == 1:
             try:
-                emit_metric(
-                    "td_scorer_cut", cut_metric(cut_info, len(include) + len(exclude))
-                )
+                emit_metric("td_scorer_cut", cut_metric(cut_info))
             except Exception:
                 print_to_stderr(
                     f"Failed to emit td_scorer_cut:\n{traceback.format_exc()}"
