@@ -1,7 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import gc
 import itertools
+import weakref
 from typing import cast
 
 import torch
@@ -658,6 +660,24 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         self.assertTrue(root_state._is_root)
         self.assertFalse(multi_module_state._is_root)
         self.assertFalse(model0_in_proj_state._is_root)
+
+    def test_fully_shard_enclosing_state_does_not_extend_lifetime(self):
+        """
+        Tests that keeping a nested module alive before lazy initialization
+        does not keep its enclosing module alive, and that the nested module
+        then becomes its own root.
+        """
+        model = nn.Sequential(MLP(8), MLP(8))
+        fully_shard(model[0])
+        fully_shard(model)
+        model0 = model[0]
+        model_ref = weakref.ref(model)
+        del model
+        gc.collect()
+        self.assertIsNone(model_ref())
+        model0_state = fully_shard.state(model0)
+        model0_state._lazy_init()
+        self.assertTrue(model0_state._is_root)
 
     def test_fully_shard_double_lazy_init(self):
         model = nn.Sequential(MLP(8), MLP(8))

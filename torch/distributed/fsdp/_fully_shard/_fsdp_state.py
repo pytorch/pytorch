@@ -3,6 +3,7 @@
 import functools
 import logging
 import warnings
+import weakref
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
@@ -75,8 +76,9 @@ class FSDPState(_State):
         self._fsdp_param_groups: list[FSDPParamGroup] = []
         self._is_root: bool | None = None  # root set during lazy init
         # State of the nearest ``fully_shard`` call enclosing this state's
-        # modules; lazy init walks up these to find the root
-        self._enclosing_state: FSDPState | None = None
+        # modules, held weakly so that it does not extend that state's
+        # lifetime; lazy init walks up these to find the root
+        self._enclosing_state: weakref.ref[FSDPState] | None = None
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
@@ -90,6 +92,9 @@ class FSDPState(_State):
     def _get_state_for_module(self, module: nn.Module) -> "FSDPState | None":
         """Get the state for a module. Subclasses can override to use different state getters."""
         return _get_module_fsdp_state(module)
+
+    def _get_enclosing_state(self) -> "FSDPState | None":
+        return None if self._enclosing_state is None else self._enclosing_state()
 
     @property
     def _fsdp_param_group(self) -> FSDPParamGroup | None:
@@ -128,9 +133,10 @@ class FSDPState(_State):
         for module in modules:
             for submodule in module.modules():
                 state = self._get_state_for_module(submodule)
-                if state is None or state is self or state._enclosing_state is not None:
+                if state is None or state is self:
                     continue
-                state._enclosing_state = self
+                if state._get_enclosing_state() is None:
+                    state._enclosing_state = weakref.ref(self)
         self._device = device
         self._device_handle = _get_device_handle(device.type)
         self._mp_policy = replace(mp_policy, param_dtype_override_fn=None)
@@ -199,11 +205,11 @@ class FSDPState(_State):
             return  # no-op: already initialized
         # Multi-module states cannot be the root, so skip them
         root_state = None
-        state = self._enclosing_state
+        state = self._get_enclosing_state()
         while state is not None:
             if len(state._modules) == 1:
                 root_state = state
-            state = state._enclosing_state
+            state = state._get_enclosing_state()
         if root_state is not None:
             root_state._lazy_init()
             if self._is_root is not None:
