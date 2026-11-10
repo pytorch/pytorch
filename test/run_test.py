@@ -2738,6 +2738,7 @@ def main():
         test_class_times_dict,
         td_enabled=options.enable_td,
         which_shard=which_shard,
+        budget_cut=cut_info["fallback"] is None,
     )
     explored, skipped = exploration.explored, exploration.skipped
     explored_names = {str(test) for test in explored}

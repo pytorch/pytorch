@@ -330,8 +330,17 @@ block = {
 }
 times = {n: float(5 + (i * 37) % 200) for i, n in enumerate(names)}
 include, exclude, info = select.select_tests(tp, block, 25, times, {})
-info["order"] = [str(t) for t in info["order"]]
-print(json.dumps([[str(t) for t in include], [str(t) for t in exclude], info]))
+out = [[str(t) for t in include], [str(t) for t in exclude], dict(info)]
+out[2]["order"] = [str(t) for t in info["order"]]
+if len(sys.argv) > 1:
+    from tools.testing.target_determination import exploration
+    explored = exploration.select_exploration(
+        tp, include, exclude, times, {}, td_enabled=True,
+        which_shard=int(sys.argv[1]), budget_cut=info["fallback"] is None,
+    )
+    out.append([str(t) for t in explored.explored])
+    out.append([str(t) for t in explored.skipped])
+print(json.dumps(out))
 """
 
 
@@ -365,6 +374,46 @@ class TestShards(SelectTestCase):
         include, exclude, info = json.loads(outputs.pop())
         self.assertIsNone(info["fallback"])
         self.assertTrue(include and exclude)
+
+
+class TestShardsWithExploration(SelectTestCase):
+    def test_every_shard_explores_alike(self) -> None:
+        tp, block, times = fixture_inputs()
+        include, exclude, info = select.select_tests(tp, block, 25, times, {})
+        shards = []
+        with mock.patch.dict(os.environ, {"SHA1": "a" * 40}):
+            for which_shard in (1, 2):
+                shards.append(
+                    exploration.select_exploration(
+                        tp,
+                        include,
+                        exclude,
+                        times,
+                        {},
+                        td_enabled=True,
+                        which_shard=which_shard,
+                        budget_cut=info["fallback"] is None,
+                    )
+                )
+        first, second = shards
+        self.assertTrue(first.explored)
+        self.assertEqual(first.explored, second.explored)
+        self.assertEqual(first.skipped, second.skipped)
+        if first.info is None:
+            self.fail("no td_exploration info on shard 1")
+        self.assertEqual(first.info["base"], "budget")
+        self.assertIsNone(second.info)
+
+    def test_same_draw_on_any_shard_and_hash_seed(self) -> None:
+        env = {"SHA1": "b" * 40, "BUILD_ENVIRONMENT": "env", "TEST_CONFIG": "default"}
+        with mock.patch.dict(os.environ, env):
+            outputs = {
+                run_shard(hash_seed, shard)
+                for hash_seed, shard in ((0, "1"), (1, "2"), (2, "1"), (3, "2"))
+            }
+        self.assertEqual(len(outputs), 1, outputs)
+        explored = json.loads(outputs.pop())[3]
+        self.assertTrue(explored)
 
 
 class TestImportScorer(SelectTestCase):
@@ -402,12 +451,24 @@ class TestWithExploration(SelectTestCase):
         self.assertEqual(exclude, td_order)
         with mock.patch.dict(os.environ, {"SHA1": "a" * 40}):
             result = exploration.select_exploration(
-                tp, include, exclude, times, {}, td_enabled=True, which_shard=1
+                tp,
+                include,
+                exclude,
+                times,
+                {},
+                td_enabled=True,
+                which_shard=1,
+                budget_cut=info["fallback"] is None,
             )
         self.assertTrue(result.explored)
         exploration.check_disjoint(result.explored, include, exclude)
         if result.info is None:
             self.fail("no td_exploration info")
+        self.assertEqual(result.info["base"], "budget")
+        self.assertAlmostEqual(
+            result.info["budget_seconds"],
+            exploration.EXPLORATION_SHARE * info["total_seconds"],
+        )
         positions = {str(t): i for i, t in enumerate(tp.get_all_tests())}
         for explored in result.info["explored"]:
             self.assertEqual(explored["position"], positions[explored["test"]])

@@ -1,11 +1,13 @@
 """Seeded exploration of the tests TD skips.
 
-On top of TD's own picks, a job spends EXPLORATION_SHARE of the test time of
-those picks on skipped tests, drawn without replacement with probability that
-grows with TD's score. The draw depends only on its seed and on inputs every
-shard of a job shares, so all shards draw the same tests and each runs its own
-pieces of them. Each explored test's inclusion probability is estimated by
-repeating the draw REPLICATES times.
+On top of the tests a job runs, it spends EXPLORATION_SHARE of a base test
+time on skipped tests, drawn without replacement with probability that grows
+with TD's score. The base is the test time of the picks under TD's own cut,
+and the job's total test time under the learned scorer's budget cut, whose
+selection already scales with the change's risk. The draw depends only on its
+seed and on inputs every shard of a job shares, so all shards draw the same
+tests and each runs its own pieces of them. Each explored test's inclusion
+probability is estimated by repeating the draw REPLICATES times.
 """
 
 from __future__ import annotations
@@ -38,6 +40,8 @@ OVERHEAD_SECONDS = 15.0
 MAX_FILE_SECONDS = 600.0
 REPLICATES = 1000
 WEIGHT_SCHEME = "score_half_uniform_half"
+BASE_TD_CUT = "td_cut"
+BASE_BUDGET = "budget"
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,7 @@ class ExplorationSplit:
     skipped_seconds: float
     replicates: int
     explored: list[ExploredTest]  # in TD's order
+    base: str = BASE_TD_CUT
 
     def tests(self) -> list[TestRun]:
         return [explored.test for explored in self.explored]
@@ -164,10 +169,12 @@ def plan_exploration(
     seed_prefix: str,
     share: float = EXPLORATION_SHARE,
     replicates: int = REPLICATES,
+    base: str = BASE_TD_CUT,
 ) -> ExplorationSplit | None:
-    """Draws the tests to explore from `candidates` (TD's skipped tests, in
-    TD's order) with a budget of `share` of the seconds `top` takes. Returns
-    None when there is nothing to draw or no recorded test times."""
+    """Draws the tests to explore from `candidates` (the skipped tests, in
+    TD's order) with a budget of `share` of the seconds `top` takes, or with
+    `base` BASE_BUDGET of the seconds `top` and `candidates` take together.
+    Returns None when there is nothing to draw or no recorded test times."""
     if share <= 0 or not top or not candidates:
         return None
     costs = estimate_costs(
@@ -177,7 +184,12 @@ def plan_exploration(
         return None
     top_seconds = math.fsum(costs[: len(top)])
     candidate_costs = costs[len(top) :]
-    budget = share * top_seconds
+    if base == BASE_BUDGET:
+        budget = share * math.fsum(costs)
+    elif base == BASE_TD_CUT:
+        budget = share * top_seconds
+    else:
+        raise ValueError(f"unknown exploration base: {base}")
     cap = min(budget, MAX_FILE_SECONDS)
     in_frame = [i for i, cost in enumerate(candidate_costs) if cost <= cap]
     frame = [candidates[i] for i in in_frame]
@@ -220,6 +232,7 @@ def plan_exploration(
         skipped_seconds=math.fsum(candidate_costs),
         replicates=replicates,
         explored=explored,
+        base=base,
     )
 
 
@@ -261,6 +274,7 @@ def exploration_info(
         "sha": sha,
         "pr_number": pr_number,
         "call": split.call,
+        "base": split.base,
         "num_tests": num_tests,
         "top_tests": len(include),
         "top_seconds": split.top_seconds,
@@ -304,10 +318,12 @@ def select_exploration(
     *,
     td_enabled: bool,
     which_shard: int,
+    budget_cut: bool = False,
 ) -> Exploration:
-    """The tests to explore on top of TD's `include`. Exploration is on when
-    TD is, SHA1 is set and EXPLORATION_SHARE > 0; any error is logged and
-    leaves TD's selection as it is."""
+    """The tests to explore on top of `include`, the budget cut's selection
+    when `budget_cut` is set, else TD's. Exploration is on when TD is, SHA1
+    is set and EXPLORATION_SHARE > 0; any error is logged and leaves the
+    selection as it is."""
     sha = os.environ.get("SHA1", "")
     enabled = td_enabled and bool(sha) and EXPLORATION_SHARE > 0
     nothing = Exploration(enabled, [], exclude, None)
@@ -329,6 +345,7 @@ def select_exploration(
             test_class_times,
             seed_prefix,
             EXPLORATION_SHARE,
+            base=BASE_BUDGET if budget_cut else BASE_TD_CUT,
         )
         if split is None:
             return nothing
@@ -346,7 +363,7 @@ def select_exploration(
                 num_tests=len(include) + len(exclude),
             )
         print(
-            f"TD exploration: budget {split.budget_seconds:.0f}s, "
+            f"TD exploration: budget {split.budget_seconds:.0f}s ({split.base}), "
             f"frame {split.frame}, out of frame {split.out_of_frame}, "
             f"explored {[str(test) for test in explored]}",
             file=sys.stderr,

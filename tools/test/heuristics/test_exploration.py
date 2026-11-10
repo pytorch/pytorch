@@ -128,6 +128,42 @@ class TestPlanExploration(unittest.TestCase):
         self.assertIsNone(exploration.estimate_costs(tests, {"other": 1.0}, {}))
         self.assertIsNone(plan(make_tp([0.0] * 40), {}))
 
+    def test_budget_base_is_a_share_of_the_total(self) -> None:
+        # 40 tests of 185 s + 15 s: the total is 8000 s, so the budget base
+        # gives 5% of it, 400 s, where TD's cut (11 tests) gives 110 s
+        times = uniform_times(40, 185.0)
+        tp = make_tp([1 - i / 40 for i in range(40)])
+        td_cut = must_plan(tp, times)
+        budget = must_plan(tp, times, base=exploration.BASE_BUDGET)
+        self.assertEqual(td_cut.base, exploration.BASE_TD_CUT)
+        self.assertEqual(budget.base, exploration.BASE_BUDGET)
+        self.assertAlmostEqual(td_cut.budget_seconds, 110.0)
+        self.assertAlmostEqual(budget.budget_seconds, 400.0)
+        self.assertEqual(budget.top_seconds, td_cut.top_seconds)
+        self.assertEqual(len(td_cut.explored), 0)
+        self.assertEqual(len(budget.explored), 2)
+        self.assertEqual(budget.frame, 29)
+        include, exclude = tp.get_top_per_tests(25)
+        exploration.check_disjoint(budget.tests(), include, exclude)
+        with self.assertRaises(ValueError):
+            plan(tp, times, base="other")
+
+    def test_budget_base_keeps_the_frame_cap_and_seed(self) -> None:
+        times = uniform_times(400, 30.0)
+        tp = make_tp([1 - i / 400 for i in range(400)])
+        budget = must_plan(tp, times, base=exploration.BASE_BUDGET)
+        self.assertAlmostEqual(budget.budget_seconds, 0.05 * 400 * 45.0)
+        self.assertEqual(budget.out_of_frame, 0)
+        self.assertEqual(
+            budget.tests(),
+            must_plan(tp, times, base=exploration.BASE_BUDGET).tests(),
+        )
+        big = uniform_times(400, 30.0)
+        big["test_399"] = exploration.MAX_FILE_SECONDS
+        capped = must_plan(tp, big, base=exploration.BASE_BUDGET)
+        self.assertGreater(capped.budget_seconds, exploration.MAX_FILE_SECONDS)
+        self.assertEqual(capped.out_of_frame, 1)
+
     def test_share_zero_changes_nothing(self) -> None:
         tp = make_tp([1 - i / 200 for i in range(200)])
         self.assertIsNone(plan(tp, uniform_times(200, 30.0), share=0))
@@ -253,7 +289,11 @@ ENV = {
 
 class TestSelectExploration(unittest.TestCase):
     def select(
-        self, env: dict[str, str] = ENV, td_enabled: bool = True, which_shard: int = 1
+        self,
+        env: dict[str, str] = ENV,
+        td_enabled: bool = True,
+        which_shard: int = 1,
+        **kwargs: bool,
     ) -> tuple[list[TestRun], list[TestRun], exploration.Exploration]:
         tp = make_tp([1 - i / 200 for i in range(200)])
         include, exclude = tp.get_top_per_tests(25)
@@ -270,6 +310,7 @@ class TestSelectExploration(unittest.TestCase):
                 {},
                 td_enabled=td_enabled,
                 which_shard=which_shard,
+                **kwargs,
             )
         self.stderr = stderr.getvalue()
         return include, exclude, selected
@@ -298,6 +339,19 @@ class TestSelectExploration(unittest.TestCase):
             [e["test"] for e in info.get("explored", [])],
             [str(t) for t in first.explored],
         )
+
+    def test_metric_records_the_base(self) -> None:
+        _, _, td_cut = self.select()
+        _, _, budget = self.select(budget_cut=True)
+        if td_cut.info is None or budget.info is None:
+            self.fail("no td_exploration info")
+        self.assertEqual(td_cut.info["base"], "td_cut")
+        self.assertEqual(budget.info["base"], "budget")
+        self.assertAlmostEqual(budget.info["budget_seconds"], 0.05 * 200 * 45.0)
+        self.assertAlmostEqual(
+            td_cut.info["budget_seconds"], 0.05 * td_cut.info["top_seconds"]
+        )
+        self.assertIn("(budget)", self.stderr)
 
     def test_disabled_cases_leave_td_as_is(self) -> None:
         no_sha = {k: v for k, v in ENV.items() if k != "SHA1"}
@@ -382,6 +436,7 @@ class TestExplorationInfo(unittest.TestCase):
                 "sha": "deadbeef",
                 "pr_number": 123,
                 "call": "abc",
+                "base": "td_cut",
                 "num_tests": 40,
                 "top_tests": 2,
                 "top_seconds": 1000.0,
