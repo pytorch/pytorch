@@ -1572,6 +1572,8 @@ class ProcessGroupNCCL2TimingTest(_ProcessGroupNCCL2OptionsTest):
         # _sleep counts shader clock cycles, which can tick faster than during
         # the calibration, so compare against the measured sleep.
         sleep_ms = sleep_start.elapsed_time(sleep_end)
+        # A much shorter sleep would put the gap check within launch noise.
+        self.assertGreater(sleep_ms, 10)
         # Compare against the last op rather than a fixed bound: rank skew
         # lengthens the last op's wait for its peer, not the gap before it.
         self.assertGreater(
