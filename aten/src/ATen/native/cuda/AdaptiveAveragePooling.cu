@@ -545,7 +545,10 @@ namespace {
         int64_t isizeH = input_.size(-2);
         int64_t isizeW = input_.size(-1);
 
-        int64_t istrideD = input_.stride(-3);
+        // For 4D input the kernel flattens batch and channel and steps them by
+        // istrideD. With size(1) == 1, a contiguous input's stride(1) need not
+        // be H * W (see AdaptiveMaxPooling2d.cu).
+        int64_t istrideD = input.ndimension() == 4 ? isizeH * isizeW : input_.stride(-3);
         int64_t istrideH = input_.stride(-2);
         int64_t istrideW = input_.stride(-1);
 
