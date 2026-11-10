@@ -15,14 +15,15 @@ from typing_extensions import TypeIs
 
 from torch._higher_order_ops.cutedsl_kernel_wrap import (
     _may_overlap,
+    CUTEDSL_CONSTANT_RULES,
     cutedsl_kernel_name,
     cutedsl_kernel_side_table,
     cutedsl_kernel_wrapper_mutation,
     CuteDSLHOPifier,
-    is_dsl_runtime_object,
     MutatesArgs,
     TraceableCuteDSLKernelWrapper,
 )
+from torch._higher_order_ops.user_kernel_hop import _subclass_error
 
 from .. import graph_break_hints
 from ..exc import unimplemented
@@ -47,17 +48,14 @@ def _is_dict(val: VariableTracker) -> "TypeIs[ConstDictVariable]":
 
 
 def _held_error(cls: type, is_tensor: bool, where: str) -> TypeError | None:
-    """The TypeError of the side table's walk (see constant_key) for a tensor at
-    ``where`` inside a constant argument, or its like for a DSL runtime object of
-    type ``cls`` there; None for another value."""
+    """The TypeError of the side table's walk (see constant_key) for a tensor, or a
+    value of type ``cls`` that the DSL refuses (ConstantRules.refusal), at ``where``
+    inside a constant argument; None for another value."""
+    fix = CUTEDSL_CONSTANT_RULES.refusal(cls)
     if is_tensor:
         held, fix = "a tensor", "pass each tensor as its own argument"
-    elif is_dsl_runtime_object(cls):
+    elif fix is not None:
         held = f"a {cls.__name__}"
-        fix = (
-            "a cute tensor, pointer or stream cannot be nested inside a constant "
-            "argument"
-        )
     else:
         return None
     return TypeError(f"a constant kernel argument holds {held} at {where}: {fix}")
@@ -124,6 +122,10 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
             val: VariableTracker, where: str, containers: dict[int, str]
         ) -> list[VariableTracker]:
             realized = val.realize()
+            cls = realized.python_type()
+            subclass = _subclass_error(cls, issubclass(cls, (tuple, list, dict)))
+            if subclass is not None:
+                raise subclass
             if isinstance(realized, BaseListVariable):
                 steps = [(f"[{i!r}]", item) for i, item in enumerate(realized.items)]
             elif _is_dict(realized):
@@ -162,7 +164,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         if isinstance(val, BaseListVariable):
             items = [self.specialize_nested(variable, item) for item in val.items]
             if isinstance(val, UserDefinedObjectVariable):
-                # A namedtuple or a list subclass, whose variable clone() cannot copy.
+                # A namedtuple or a deque subclass, whose variable clone() cannot copy.
                 return type(val)(val.value, items=items, source=val.source)
             return val.clone(items=items)
         return specialize_symbolic_variable(val)
