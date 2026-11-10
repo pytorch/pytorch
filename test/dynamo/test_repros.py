@@ -3868,14 +3868,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(v, Subclass)
 
     @parametrize("call", ["overload", "packet"])
-    def test_inplace_view_on_input_via_ops_api(self, call):
+    @parametrize("op", ["unsqueeze_", "squeeze_"])
+    def test_inplace_view_on_input_via_ops_api(self, call, op):
         # `torch.ops.aten.*` does not go through the is_tensor_method() path, so
         # an inplace view op on a graph input needs the same guard here.
+        # squeeze_ has multiple overloads, so its packet form exercises the
+        # packet-level check rather than a single-overload shortcut.
         def fn(x):
             if call == "overload":
-                torch.ops.aten.unsqueeze_.default(x, 0)
+                if op == "unsqueeze_":
+                    torch.ops.aten.unsqueeze_.default(x, 0)
+                else:
+                    torch.ops.aten.squeeze_.dim(x, 0)
             else:
-                torch.ops.aten.unsqueeze_(x, 0)
+                getattr(torch.ops.aten, op)(x, 0)
             return x
 
         x = torch.arange(24).reshape(4, 6)
@@ -3886,6 +3892,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(torch.compile(fn, backend="eager")(opt_x), fn(ref_x))
         self.assertEqual(opt_x.shape, ref_x.shape)
 
+    def test_inplace_view_rank_preserving_on_input_via_ops_api(self):
+        # transpose_ preserves rank but is still an inplace view; it compiled
+        # before this guard and now graph-breaks like the tensor-method path.
+        def fn(x):
+            torch.ops.aten.transpose_.default(x, 0, 1)
+            return x
+
+        x = torch.arange(24).reshape(4, 6)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "inplace view"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x.clone())
+
     def test_inplace_view_on_copy_via_ops_api(self):
         def fn(x):
             v = x.clone()
@@ -3894,6 +3911,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         x = torch.arange(24).reshape(4, 6)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_inplace_non_view_on_input_via_ops_api(self):
+        # add_ is inplace but not a view; the inplace_view guard must not fire.
+        def fn(x):
+            torch.ops.aten.add_(x, 1)
+            return x
+
+        x = torch.arange(24).reshape(4, 6)
+        ref_x, opt_x = x.clone(), x.clone()
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(opt_x), fn(ref_x))
+        self.assertEqual(opt_x, ref_x)
 
     def test_inplace_unsqueeze_input(self):
         def backend(gm, example_inputs):
