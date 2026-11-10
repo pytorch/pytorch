@@ -8,7 +8,7 @@ import cutlass
 import cutlass.cute as cute
 
 from . import kernel, ops
-from ._limits import _MIN_ALIGNMENT, _THREADS_PER_BLOCK, _TMA_ALIGNMENT, _TMA_BOX_SIDE
+from ._limits import _MIN_ALIGNMENT, _TMA_ALIGNMENT
 
 
 class _AotTma:
@@ -21,12 +21,16 @@ class _AotTma:
         vector_bytes: int,
         vector_ept: int,
         scalar_type: Any,
+        box: int,
+        block: int,
+        stages: int,
     ) -> None:
         self.comp_type = cutlass.Float32
-        box, block = _TMA_BOX_SIDE, _THREADS_PER_BLOCK
         if vector_bytes != 0:
             box = max(1, vector_bytes // (dtype.width // 8))
-        config = kernel._TmaConfig(mask, box, block, (), ((), ()), vector_ept)
+        config = kernel._TmaConfig(
+            mask, box, block, (), ((), ()), ept=vector_ept, stages=stages
+        )
         executor = (
             kernel._ElementwiseScalarVector
             if vector_bytes != 0
@@ -114,6 +118,9 @@ def build(spec: dict[str, Any]) -> dict[str, Any]:
         vector_bytes=vector_bytes,
         vector_ept=spec["vector_ept"],
         scalar_type=common_type,
+        box=spec["box"],
+        block=spec["block"],
+        stages=spec["stages"],
     )
     box = op.op.box
     shapes = (
@@ -191,7 +198,9 @@ def build(spec: dict[str, Any]) -> dict[str, Any]:
     if spec["scalar_dtype"]:
         tag += f"_{spec['scalar_dtype']}"
     if vector_bytes != 0:
-        tag += f"_vec{vector_bytes}_ept{spec['vector_ept']}"
+        tag += f"_vec{vector_bytes}_ept{spec['vector_ept']}_b{spec['block']}"
+    else:
+        tag += f"_box{box}_b{spec['block']}_s{spec['stages']}"
     return {
         "kind": "cutedsl",
         "fn": (op.unary, op.binary, op.ternary)[len(mask) - 1],

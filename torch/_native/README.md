@@ -388,6 +388,9 @@ other broadcasts, in-place operations, and unsupported layouts or output
 buffers fall back to ATen.
 Outputs retain ATen's dense physical dimension order. TMA eligibility is checked
 relative to that order, rather than requiring a contiguous output.
+Tile size, threads and pipeline depth depend on architecture and operand
+orientation, with a 32-element fallback for smaller layouts. Normal input rows
+remain contiguous in shared memory; transposed inputs use a bank swizzle.
 No general CuTeDSL vector, conversion, fill/range, or RNG kernel is included.
 The registry scalar-coercion fix is retained so calls with Python-number
 operands can still fall back to ATen correctly.
@@ -401,8 +404,9 @@ parameters such as `alpha` remain host scalars.
 
 Contiguous inputs with CUDA scalar operands use a separate vector kernel that
 shares the TMA operation math, launch wrappers and plan cache. Aligned complete
-vectors follow ATen's vector-width and elements-per-thread heuristics, including
-the larger-work-per-thread policy for large inputs on compute capability 10.7.
+vectors use architecture-specific launch sizes, including the larger byte budget
+per thread for large inputs on compute capability 10.7. BF16 work per thread
+scales with its smaller element size.
 Pointer alignment selects narrower vectors; partial blocks use scalar loads.
 
 Pointwise AOT declarations cover floating arithmetic, rounding, transcendental

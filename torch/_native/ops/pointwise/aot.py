@@ -149,6 +149,9 @@ def _axes(inputs: tuple[Any, ...], out: Any, boolean: bool) -> dict[str, Any]:
         "common_dtype": common_dtype,
         "scalar_dtype": next((t.dtype for t in inputs if t.numel() == 1), None),
         "transposed": config.transposed,
+        "box": 0 if vector else config.box,
+        "block": config.block,
+        "stages": 0 if vector else config.stages,
         "vector_ept": config.ept if vector else 0,
         "vector_bytes": (config.box * ref.element_size() if config.box != 1 else 1)
         if vector
@@ -195,7 +198,12 @@ class _Declaration:
                     )
                     for common_dtype in common_dtypes:
                         out_dtype = "bool" if self.boolean else common_dtype
-                        configs = [(0, 0)]
+                        geometries = dict.fromkeys(
+                            geometry
+                            for cc in ((10, 0), (10, 7))
+                            for geometry in _limits._tma_configs(mask, cc, sizes[dtype])
+                        )
+                        configs = [(0, 0, *geometry) for geometry in geometries]
                         if None in mask and True not in mask:
                             # Emit every alignment fallback used by ATen, plus
                             # the larger-work-per-thread variant for SM107.
@@ -211,6 +219,24 @@ class _Declaration:
                                             _limits._UNROLLED_EPT
                                             if vec == 1
                                             else _limits._DEFAULT_VECTOR_EPT,
+                                            0,
+                                            _limits._THREADS_PER_BLOCK,
+                                            0,
+                                        )
+                                    )
+                            for vec in (2, 4, 8):
+                                if vec <= max_vec:
+                                    configs.append(
+                                        (
+                                            vec * sizes[dtype],
+                                            max(
+                                                _limits._DEFAULT_VECTOR_EPT,
+                                                _limits._SM100_VECTOR_BYTES_PER_THREAD
+                                                // max(sizes[dtype], sizes[out_dtype]),
+                                            ),
+                                            0,
+                                            _limits._SM100_VECTOR_THREADS,
+                                            0,
                                         )
                                     )
                             configs.append(
@@ -218,9 +244,12 @@ class _Declaration:
                                     _limits._MAX_VECTOR_ELEMENTS * sizes[dtype],
                                     _limits._VECTOR_INPUT_BYTES_PER_THREAD
                                     // sizes[dtype],
+                                    0,
+                                    _limits._THREADS_PER_BLOCK,
+                                    0,
                                 )
                             )
-                        for vector_bytes, vector_ept in configs:
+                        for vector_bytes, vector_ept, box, block, stages in configs:
                             points.append(
                                 {
                                     "dtype": dtype,
@@ -233,6 +262,9 @@ class _Declaration:
                                     "eligible": True,
                                     "vector_bytes": vector_bytes,
                                     "vector_ept": vector_ept,
+                                    "box": box,
+                                    "block": block,
+                                    "stages": stages,
                                 }
                             )
         return points
@@ -289,7 +321,7 @@ if (cfg.mask < 0) return false;
         out_type = "at::kBool" if self.boolean else _DTYPES[spec["out_dtype"]]
         return (
             result
-            + f" && out.scalar_type() == {out_type} && cfg.common_dtype == {_DTYPES[spec['common_dtype']]} && cfg.vector_bytes == {spec['vector_bytes']} && cfg.vector_ept == {spec['vector_ept']}"
+            + f" && out.scalar_type() == {out_type} && cfg.common_dtype == {_DTYPES[spec['common_dtype']]} && cfg.vector_bytes == {spec['vector_bytes']} && cfg.vector_ept == {spec['vector_ept']} && cfg.box == {spec['box']} && cfg.block == {spec['block']} && cfg.stages == {spec['stages']}"
         )
 
     def cpp_launch(self, spec: dict[str, Any], launch_fn: str) -> str:
@@ -349,7 +381,18 @@ constexpr int kPointwiseUnrolledEpt = {_limits._UNROLLED_EPT};
 constexpr int kPointwiseInputBytesPerThread = {_limits._VECTOR_INPUT_BYTES_PER_THREAD};
 constexpr int64_t kPointwiseSm107MinIOBytes = {_limits._SM107_MIN_IO_BYTES};
 constexpr int kPointwiseBox = {_limits._TMA_BOX_SIDE};
-constexpr int kPointwiseStages = {_limits._TILES_PER_BLOCK};
+constexpr int kPointwiseThreads = {_limits._THREADS_PER_BLOCK};
+constexpr int kPointwiseBf16MinStages = {_limits._TMA_BF16_MIN_STAGES};
+constexpr int64_t kPointwiseLargeInputBytes = {_limits._TMA_LARGE_INPUT_BYTES};
+constexpr int kPointwiseSm107LargeBox = {_limits._TMA_SM107_LARGE_BOX};
+constexpr int kPointwiseLargeBytesPerThread = {_limits._TMA_LARGE_BYTES_PER_THREAD};
+constexpr int kPointwiseSm100VectorThreads = {_limits._SM100_VECTOR_THREADS};
+constexpr int kPointwiseSm100VectorBytesPerThread = {_limits._SM100_VECTOR_BYTES_PER_THREAD};
+constexpr int kPointwiseSm100Transpose[] = {{{", ".join(map(str, _limits._TMA_SM100_TRANSPOSE))}}};
+constexpr int kPointwiseSm107Transpose[] = {{{", ".join(map(str, _limits._TMA_SM107_TRANSPOSE))}}};
+constexpr int kPointwiseSm100Pointwise[] = {{{", ".join(map(str, _limits._TMA_SM100_POINTWISE))}}};
+constexpr int kPointwiseSm100LargePointwise[] = {{{", ".join(map(str, _limits._TMA_SM100_LARGE_POINTWISE))}}};
+constexpr int kPointwiseSm107Pointwise[] = {{{", ".join(map(str, _limits._TMA_SM107_POINTWISE))}}};
 constexpr int kPointwiseSmemAlignment = {_limits._SMEM_ALIGNMENT};
 constexpr int kPointwiseBarrierBytes = {_limits._BARRIER_BYTES};
 constexpr int kPointwiseMaxGridYZ = {_limits._MAX_GRID_YZ};
@@ -364,6 +407,7 @@ struct PointwiseTmaConfig {
   at::ScalarType common_dtype = at::kFloat;
   int vector_bytes = 0;
   int vector_ept = 0;
+  int box = 0, block = kPointwiseThreads, stages = 0;
   int fast = 1;
   int64_t rows = 0, cols = 0;
 };
@@ -407,11 +451,8 @@ PointwiseTmaConfig pointwise_tma_config(
   }
   cfg.rows = vector ? 1 : ref.size(1 - cfg.fast);
   cfg.cols = vector ? ref.numel() : ref.size(cfg.fast);
-  int box = kPointwiseBox;
-  if (!vector && (cfg.rows % box != 0 || cfg.cols % box != 0 || cfg.rows / box > kPointwiseMaxGridYZ ||
-      ntma * (kPointwiseStages * box * box * ref.element_size() + kPointwiseSmemAlignment) +
-      kPointwiseStages * kPointwiseBarrierBytes > smem_limit)) return cfg;
   int mask = 0, i = 0;
+  bool transpose_only = true;
   for (const auto& t : inputs) {
     if (!t.is_cuda() || t.layout() != at::kStrided || t.device() != ref.device() ||
         t.is_neg() || t.is_conj()) return cfg;
@@ -424,6 +465,7 @@ PointwiseTmaConfig pointwise_tma_config(
     if (t.sizes() != ref.sizes() || t.scalar_type() != dt) return cfg;
     if (vector) { ++i; continue; }
     bool transposed = t.stride(cfg.fast) != 1;
+    transpose_only = transpose_only && transposed;
     int inner = transposed ? 1 - cfg.fast : cfg.fast;
     int64_t pitch = t.stride(1 - inner);
     if (t.stride(inner) != 1 || pitch < t.size(inner) || pitch > INT32_MAX ||
@@ -431,6 +473,28 @@ PointwiseTmaConfig pointwise_tma_config(
         reinterpret_cast<uintptr_t>(t.const_data_ptr()) % (transposed ? kPointwiseTmaAlignment : kPointwiseMinAlignment) != 0 ||
         (t.size(0) - 1) * t.stride(0) + (t.size(1) - 1) * t.stride(1) > INT32_MAX) return cfg;
     mask |= (transposed ? 1 : 0) << (2 * i++);
+  }
+  if (!vector) {
+    // Same ordered candidates as _tma_configs, including its 32-element fallback.
+    const int* tuning = minor == 7
+        ? (transpose_only ? kPointwiseSm107Transpose : kPointwiseSm107Pointwise)
+        : (transpose_only ? kPointwiseSm100Transpose : kPointwiseSm100Pointwise);
+    if (minor != 7 && !transpose_only && cfg.rows * cfg.cols * ref.element_size() >= kPointwiseLargeInputBytes)
+      tuning = kPointwiseSm100LargePointwise;
+    cfg.box = tuning[0]; cfg.block = tuning[1]; cfg.stages = tuning[2];
+    if (ref.element_size() == 2) cfg.stages = std::max(cfg.stages, kPointwiseBf16MinStages);
+    if (minor == 7 && transpose_only && cfg.rows * cfg.cols * ref.element_size() >= kPointwiseLargeInputBytes &&
+        cfg.rows % kPointwiseSm107LargeBox == 0 && cfg.cols % kPointwiseSm107LargeBox == 0) {
+      cfg.box = kPointwiseSm107LargeBox;
+      cfg.block = cfg.box * cfg.box * ref.element_size() / kPointwiseLargeBytesPerThread;
+      cfg.stages = 1;
+    } else if (cfg.rows % cfg.box != 0 || cfg.cols % cfg.box != 0) {
+      cfg.box = kPointwiseBox; cfg.block = kPointwiseThreads;
+      if (cfg.rows % cfg.box != 0 || cfg.cols % cfg.box != 0) return cfg;
+    }
+    if (cfg.rows / cfg.box > kPointwiseMaxGridYZ ||
+        ntma * (cfg.stages * cfg.box * cfg.box * ref.element_size() + kPointwiseSmemAlignment) +
+        cfg.stages * kPointwiseBarrierBytes > smem_limit) return cfg;
   }
   cfg.mask = mask;
   if (vector) {
@@ -449,6 +513,11 @@ PointwiseTmaConfig pointwise_tma_config(
     while (vec > 1 && !aligned(vec)) vec /= 2;
     cfg.vector_bytes = vec == 1 ? 1 : vec * ref.element_size();
     cfg.vector_ept = vec == 1 ? kPointwiseUnrolledEpt : kPointwiseVectorEpt;
+    if (vec > 1 && minor != 7) {
+      cfg.block = kPointwiseSm100VectorThreads;
+      cfg.vector_ept = std::max<int>(kPointwiseVectorEpt,
+          kPointwiseSm100VectorBytesPerThread / std::max<size_t>(ref.element_size(), output_bytes));
+    }
     if (large && vec == kPointwiseMaxVectorElements) {
       size_t rounded = 1;
       while (rounded < input_bytes) rounded *= 2;

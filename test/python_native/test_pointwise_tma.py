@@ -16,6 +16,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skipIfNoCuteDSL,
@@ -41,6 +42,82 @@ def _execution_route(route: str) -> Iterator[None]:
         _native.set_aot_enabled(aot_enabled)
         if jit_enabled:
             controller.enable()
+
+
+@instantiate_parametrized_tests
+@unittest.skipUnless(IS_SM10X, "pointwise kernels require compute capability 10.x")
+class TestPointwiseLaunchConfig(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @parametrize("cc", ((10, 0), (10, 3), (10, 7)))
+    @parametrize("dtype", (torch.bfloat16, torch.float32))
+    @parametrize(
+        "layout",
+        (
+            "transpose",
+            "mixed",
+            "small",
+            "scalar",
+            "unaligned",
+            "large_transpose",
+            "large_mixed",
+        ),
+    )
+    def test_aot_grid(
+        self, cc: tuple[int, int], dtype: torch.dtype, layout: str
+    ) -> None:
+        from torch._native.ops.pointwise._layout import _layout_config, _OperandLayout
+
+        shape = (32, 96) if layout == "small" else (128, 256)
+        if layout.startswith("large"):
+            shape = (16384, 16384)
+        mask = (
+            (False, None)
+            if layout in ("scalar", "unaligned")
+            else (True, not layout.endswith("mixed"))
+        )
+        inputs = tuple(
+            _OperandLayout((), (), dtype.itemsize, 0, True)
+            if value is None
+            else _OperandLayout(
+                shape,
+                (1, shape[0]) if value else (shape[1], 1),
+                dtype.itemsize,
+                0,
+                not value,
+            )
+            for value in mask
+        )
+        config = _layout_config(
+            inputs,
+            shape,
+            4 if layout == "unaligned" else 0,
+            228 * 1024,
+            (shape[1], 1),
+            cc,
+            dtype.itemsize,
+        )
+        if config is None:
+            self.fail("expected an admitted pointwise layout")
+        vector = config.ept != 0
+        axes = dict(
+            dtype=str(dtype).removeprefix("torch."),
+            transposed=config.transposed,
+            box=0 if vector else config.box,
+            block=config.block,
+            stages=0 if vector else config.stages,
+            vector_ept=config.ept,
+            vector_bytes=(1 if config.box == 1 else config.box * dtype.itemsize)
+            if vector
+            else 0,
+        )
+        grid = next(
+            d for d in declarations() if d.ATEN_OP == "add"
+        ).kernel_precompile_grid()
+        self.assertTrue(
+            any(all(point[k] == value for k, value in axes.items()) for point in grid),
+            axes,
+        )
 
 
 @unittest.skipUnless(IS_SM10X, "pointwise kernels require compute capability 10.x")
