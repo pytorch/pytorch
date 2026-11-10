@@ -9,11 +9,8 @@ signature, which is: the compute capability of the device; the dtype, shape, str
 and alignment of every tensor; for every runtime scalar, the cutlass Numeric
 annotation of its parameter, or the Python type python_scalar converts it to (bool,
 int or float) if the parameter is unannotated; and the constant_key of every
-constant, which keys lists, tuples, dicts, dataclass instances, plain objects and
-kernel objects (whose class's __call__ is @cute.jit) by type and content, and an
-object with state in __slots__ (dataclass fields aside) or in a built-in base, or any
-other callable object that is not a dataclass instance, as itself, by identity unless
-its class hashes by value (see _object_state in user_kernel_hop.py).
+constant (see _object_state in user_kernel_hop.py for the objects it keys by content
+and those it keys as themselves).
 
 The signature has no device index: devices of one capability share a compile.
 cute.compile returns a CudaDialectJitCompiledFunction, which loads its cubin as a
