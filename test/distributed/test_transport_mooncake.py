@@ -218,9 +218,13 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
     def test_registration_reuse_and_validation(self):
         first, _ = self.make_transport_pair()
         tensor = torch.zeros(32, dtype=torch.uint8)
-        memory = first.register_memory(tensor)
+        with patch.object(_Engine, "register_memory", return_value=0) as native:
+            memory = first.register_memory(tensor)
+            self.assertIs(
+                memory._registration, first.register_memory(tensor)._registration
+            )
+        native.assert_called_once_with(tensor.data_ptr(), 32, "*")
         self.assertIsInstance(memory, MooncakeMemory)
-        self.assertIs(memory._registration, first.register_memory(tensor)._registration)
         with self.assertRaises(ValueError):
             first.register_memory(torch.empty(0))
         with self.assertRaises(ValueError):

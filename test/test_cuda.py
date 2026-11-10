@@ -3105,7 +3105,7 @@ raise RuntimeError("device assert did not fire")
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
         with self.assertRaisesRegex(
             RuntimeError,
-            r"value cannot be safely converted without overflow: output\.numel\(\)",
+            r"value cannot be converted to type int32_t without overflow",
         ):
             y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
 
