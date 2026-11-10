@@ -144,13 +144,16 @@ jobs:
     runs-on: ${{ matrix.runner }}
     container:
       image: ${{ inputs.docker-image }}
-      options: "--gpus all"
+      options: ${{ startsWith(matrix.runner, 'linux.dgx.b200') && '--gpus all --cap-add=SYS_PTRACE' || '--gpus all' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       id-token: write
       contents: read
       actions: read
     steps:
+      - name: Check container capabilities
+        if: startsWith(matrix.runner, 'linux.dgx.b200')
+        run: grep Cap /proc/self/status
       - name: Setup Linux
         id: setup-linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
