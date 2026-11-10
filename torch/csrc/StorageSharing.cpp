@@ -17,11 +17,6 @@
 #include <torch/csrc/Storage.h>
 #include <torch/csrc/StorageSharing.h>
 
-#ifdef USE_CUDA
-#include <cuda.h>
-#include <cuda_runtime.h>
-#endif
-
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/MapAllocator.h>
 #include <ATen/StorageUtils.h>
@@ -400,11 +395,8 @@ static std::string THPStorage_bytesAsHandleString(PyObject* handle) {
   HANDLE_TH_ERRORS
   char* buffer = nullptr;
   Py_ssize_t handle_size = 0;
-  if (PyBytes_AsStringAndSize(handle, &buffer, &handle_size) == -1) {
-#ifdef USE_CUDA
-    TORCH_CHECK(handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle");
-#endif
-  }
+  TORCH_CHECK_PYTHON(
+      PyBytes_AsStringAndSize(handle, &buffer, &handle_size) != -1);
   return std::string(buffer, handle_size);
   END_HANDLE_TH_ERRORS_RET("")
 }
