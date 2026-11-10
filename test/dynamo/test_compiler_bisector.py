@@ -214,6 +214,7 @@ class TestCompilerBisectorDevice(TestCase):
                     "run",
                     "python",
                     str(test_file),
+                    device,
                 ],
                 stdout=subprocess.PIPE,
                 check=True,
