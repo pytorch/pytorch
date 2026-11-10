@@ -512,6 +512,61 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
+    @parametrize("persistent", (False, True))
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_mm_epilogue_single_axis_loads(
+        self, persistent: bool, dynamic: bool
+    ):
+        if persistent and not torch.version.hip:
+            self.skipTest("the non-TMA persistent mm template is ROCm only")
+
+        def fn(a, b, bias, scale):
+            return torch.addmm(bias, a, b) * scale[:, None]
+
+        # N is not a multiple of any BLOCK_N, so the N mask matters.
+        M, N, K = 300, 257, 64
+        a = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+        bias = torch.randn(N, device=GPU_TYPE)
+        scale = torch.randn(M, device=GPU_TYPE)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "benchmark_template_fusion": False,
+                "triton.enable_persistent_tma_matmul": persistent,
+                "triton.native_matmul": False,
+                "test_configs.autotune_choice_name_regex": "mm_persistent"
+                if persistent
+                else r"^triton_mm_\d+$",
+            }
+        ):
+            out, code = run_and_get_code(
+                torch.compile(fn, dynamic=dynamic), a, b, bias, scale
+            )
+
+        # The bias varies along N only and the scale along M only, so each is
+        # loaded once per tile row/column rather than once per output element.
+        FileCheck().check("triton_tem_fused").check_regex(
+            r"tl\.load\(in_ptr\d+ \+ \(idx_n\), _tmp_var\d+"
+        ).run(code[0])
+        FileCheck().check_regex(r"tl\.load\(in_ptr\d+ \+ \(idx_m\), _tmp_var\d+").run(
+            code[0]
+        )
+        FileCheck().check_not("broadcast_to(idx_n,").check_not(
+            "broadcast_to(idx_m,"
+        ).run(code[0])
+        # Each 1D load must use the mask of its own axis.
+        for idx in ("idx_n", "idx_m"):
+            mask_var = re.search(
+                rf"tl\.load\(in_ptr\d+ \+ \({idx}\), (_tmp_var\d+)", code[0]
+            ).group(1)
+            self.assertRegex(code[0], rf"{mask_var} = {idx} < ")
+
+        ref = fn(a.double(), b.double(), bias.double(), scale.double())
+        self.assertLess(((out.double() - ref).norm() / ref.norm()).item(), 1e-5)
+
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))
