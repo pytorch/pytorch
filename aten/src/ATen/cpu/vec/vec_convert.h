@@ -2,6 +2,7 @@
 
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec_n.h>
+#include <c10/util/irange.h>
 
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
@@ -20,6 +21,10 @@ struct VecConvert {
     __at_align__ src_t src_buf[VectorizedN<src_t, src_n>::size()];
     src.store(src_buf);
     __at_align__ dst_t dst_buf[VectorizedN<dst_t, dst_n>::size()];
+    // Keep the `i < count` exit test. With an equality exit test, including
+    // `for (const auto i : c10::irange(count))`, clang 21 crashes building for
+    // aarch64 ("Don't know how to widen the operands for INSERT_SUBVECTOR"),
+    // first seen in the BFloat16/double instantiation of cpu_flash_attention.
     for (int i = 0; i < count; i++) {
       dst_buf[i] = static_cast<dst_t>(src_buf[i]);
     }
@@ -49,7 +54,7 @@ struct VecRoundConvert {
         static_cast<src_t>(std::numeric_limits<dst_t>::min());
     constexpr auto max_val =
         static_cast<src_t>(std::numeric_limits<dst_t>::max());
-    for (int i = 0; i < count; i++) {
+    for (const auto i : c10::irange(count)) {
       dst_buf[i] = static_cast<dst_t>(
           std::clamp(std::round(src_buf[i]), min_val, max_val));
     }

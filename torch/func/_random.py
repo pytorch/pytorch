@@ -886,3 +886,45 @@ def bits(
     if dtype is None:
         dtype = torch.int32
     return randint(key, *shape, low=None, high=None, dtype=dtype)
+
+
+def dropout(
+    key: torch.Tensor, input: torch.Tensor, p: float = 0.5, training: bool = True
+) -> torch.Tensor:
+    r"""Randomly zero elements of ``input`` with probability ``p`` using a PRNG key.
+
+    Surviving elements are scaled by ``1 / (1 - p)``, as in
+    :func:`torch.nn.functional.dropout`. The mask is fully
+    determined by the key and the shape of ``input``: an element is kept iff
+    the matching element of ``uniform(key, input.shape, dtype=dtype)`` is
+    ``>= p``, where ``dtype`` is ``torch.float64`` for float64 inputs and
+    ``torch.float32`` otherwise. Inputs of the same shape thus share a mask
+    regardless of dtype, apart from float64.
+
+    Supports batched keys: if ``key`` has shape ``(*batch, K)``, the leading
+    dimensions of ``input`` must be broadcastable with ``*batch`` and each key
+    independently generates the mask for its slice.
+
+    Args:
+        key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
+            :func:`fold_in`.
+        input (Tensor): The floating point input tensor.
+        p (float): Probability of an element being zeroed. Default: ``0.5``.
+        training (bool): Apply dropout if ``True``; otherwise return ``input``
+            unchanged. Default: ``True``.
+
+    Returns:
+        A new tensor with the same shape, dtype and device as ``input``, or
+        ``input`` itself if ``training`` is ``False``.
+
+    Example::
+
+        >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
+        >>> x = torch.randn(8, 1024, device="cuda")  # doctest: +SKIP
+        >>> torch.func._random.dropout(key, x, p=0.1)  # doctest: +SKIP
+    """
+    if p < 0.0 or p > 1.0:
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+    if not training:
+        return input
+    return torch.ops.aten._philox_dropout(input, key, p)
