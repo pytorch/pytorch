@@ -3663,7 +3663,7 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
             self.skipTest(f8_grouped_msg)
         if not wrap_v2 and not (PLATFORM_SUPPORTS_FP8_GROUPED_GEMM or IS_SM10X):
             self.skipTest("legacy grouped GEMM requires a supported device")
-        a = torch.ones(16, 64, device=device, dtype=torch.float8_e4m3fn)
+        a = torch.ones(16, 64, device=device, dtype=e4m3_type)
         scale = torch.ones(16 * groups, device=device)
         values = [64, 0] if groups == 1 else [32, 0, 64, 0]
         offs = torch.tensor(values, device=device, dtype=torch.int32)[::2]
