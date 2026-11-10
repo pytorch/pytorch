@@ -120,6 +120,19 @@ device_module = torch.get_device_module(device)
 
 
 class TestFSDPCommContext(TestCase):
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_comm_streams_high_priority(self):
+        comm_ctx = FSDPCommContext()
+        comm_ctx.lazy_init(torch.device("cuda"))
+        high_priority = torch.cuda.Stream(priority=-1).priority
+        for stream in (
+            comm_ctx.all_gather_copy_in_stream,
+            comm_ctx.all_gather_stream,
+            comm_ctx.reduce_scatter_stream,
+            comm_ctx.all_reduce_stream,
+        ):
+            self.assertEqual(stream.priority, high_priority)
+
     def test_release_all_gather_state_for_comm_reuse_before_lazy_init(self):
         comm_ctx = FSDPCommContext()
         comm_ctx.all_gather_state = AllGatherState(MagicMock(), MagicMock())
