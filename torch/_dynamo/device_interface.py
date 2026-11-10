@@ -94,6 +94,11 @@ class DeviceInterface:
                 "Stream should be inherited from torch.Stream, otherwise, it couldn't be captured by dynamo."
             )
 
+    # Raw handle attribute on this device's Stream objects ("cuda_stream").
+    # Read when deriving a StreamVariable subclass; the accessor falls back
+    # to native_handle, and None means the device exposes no such attribute.
+    stream_handle_attr: str | None = None
+
     class Worker:
         """
         Worker API to query device properties that will work in multi processing
@@ -225,7 +230,9 @@ class DeviceInterface:
         so stream-capable backends must override it. The override must be a
         real, instantiable torch.Stream subclass: a placeholder that raises on
         construction is still reported as stream-capable here and fails later,
-        at guard time.
+        at guard time. It must also accept being rebuilt from the keyword
+        arguments ``stream_id=``, ``device_index=`` and ``device_type=``:
+        Dynamo reconstructs streams that way when comparing two streams.
         """
         return cls.Stream is not DeviceInterface.Stream
 
@@ -373,6 +380,7 @@ class CudaInterface(DeviceInterface):
     # make sure Event and Stream are implemented and inherited from the torch.Event and torch.Stream
     Event = torch.cuda.Event  # type: ignore[assignment]
     Stream = torch.cuda.Stream  # type: ignore[assignment]
+    stream_handle_attr = "cuda_stream"  # mirror CudaStreamVariable's attr
 
     @staticmethod
     def supports_pad_mm(device: torch.types.Device = None) -> bool:
@@ -640,6 +648,7 @@ class XpuInterface(DeviceInterface):
     device = torch.xpu.device  # type: ignore[assignment]
     Event = torch.xpu.Event  # type: ignore[assignment]
     Stream = torch.xpu.Stream  # type: ignore[assignment]
+    stream_handle_attr = "sycl_queue"  # mirror XpuStreamVariable's attr
 
     @staticmethod
     def supports_pad_mm(device: torch.types.Device = None) -> bool:
@@ -918,6 +927,12 @@ def register_interface_for_device(
     from .variables.user_defined import UserDefinedClassVariable
 
     UserDefinedClassVariable._in_graph_classes.cache_clear()
+    try:
+        from .variables.torch import TorchInGraphFunctionVariable
+    except ImportError:  # torch.py still importing: no snapshot to clear
+        pass
+    else:
+        TorchInGraphFunctionVariable._get_handlers.cache_clear()
 
 
 def get_interface_for_device(device: str | torch.device) -> type[DeviceInterface]:
