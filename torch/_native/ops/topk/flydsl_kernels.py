@@ -2,8 +2,8 @@
 
 ``TopKSpec`` is the compile-time specialization (dtype and ``largest``). It is
 closed over by the builders; it is not a kernel argument. Ordinals are signed
-int32 so the existing ``maxsi`` compares stay put. Narrow values sit in the
-high bits, sign at bit 31. ``largest=False`` complements that int32.
+int32 so ``maxsi`` can compare them directly. Narrow values sit in the high
+bits, sign at bit 31. ``largest=False`` complements that int32.
 
 ``topk_radix`` - one CTA per row, ``max(sort_len, _N_HIST_BINS)``
 threads (``sort_len`` = K rounded up to a power of 2; the bin floor lets
