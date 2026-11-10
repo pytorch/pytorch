@@ -364,13 +364,13 @@ class CuteDSLHOPTests(TestCase):
         self.assertEqual(compile_spy.call_count, 2)
 
     def test_signed_zero_constants(self):
-        # Float constants are keyed by their bits in the eager compile cache too, as
-        # in the side table (test/test_hop_infra.py): -0.0 and 0.0 are different
-        # constants (x * alpha has the sign of alpha for x > 0).
+        # Float constants, np.float32 ones too, are keyed by their bits in the eager
+        # compile cache, as in the side table (test/test_hop_infra.py): -0.0 and 0.0
+        # are different constants (x * alpha has the sign of alpha for x > 0).
         from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
 
         x = torch.rand(1000, device=DEVICE) + 1
-        for alpha in (0.0, -0.0):
+        for alpha in (0.0, -0.0, np.float32(0.0), np.float32(-0.0)):
             out = torch.empty_like(x)
             launch_cutedsl_kernel(
                 mul_const_kernel, {"mX": x, "mOut": out, "n": 1000, "alpha": alpha}

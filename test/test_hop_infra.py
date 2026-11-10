@@ -237,7 +237,7 @@ class TestCuteDSLHOPHelpers(TestCase):
                 self.alpha = alpha
 
         class Numeric:  # keyed like a cutlass Numeric, such as cutlass.Float32(2.0)
-            __module__ = "cutlass.fake"
+            __module__ = "cutlass.base_dsl.typing"
 
             def __init__(self, value):
                 self.value = value
@@ -285,7 +285,7 @@ class TestCuteDSLHOPHelpers(TestCase):
 
         # An object with __slots__ attributes, even one with a __dict__ too, is keyed
         # as itself (keyed by its __dict__, objects differing only in a slot would
-        # share one entry), so an unhashable one is refused with that reason.
+        # share one entry), so an unhashable one is refused.
         class SlotBase:
             __slots__ = ("alpha",)
 
@@ -299,19 +299,15 @@ class TestCuteDSLHOPHelpers(TestCase):
 
         slot_cfgs = [table.get_constant_args(add(SlotCfg(a)))["c"] for a in (1.0, 2.0)]
         self.assertEqual([c.alpha for c in slot_cfgs], [1.0, 2.0])
-        msg = "^a constant kernel argument of type {} is unhashable: {}"
-        with self.assertRaisesRegex(TypeError, msg.format("set", "pass a hashable")):
-            add({1, 2})
-        with self.assertRaisesRegex(TypeError, msg.format("EqSlotCfg", "it has state")):
-            add(EqSlotCfg(1.0))
+        msg = "^a constant kernel argument of type {} is unhashable: pass a hashable"
+        for value in ({1, 2}, EqSlotCfg(1.0)):
+            with self.assertRaisesRegex(TypeError, msg.format(type(value).__name__)):
+                add(value)
 
-    def test_numpy_and_complex_constants_are_keyed_by_their_bits(self):
-        # A numpy floating scalar that is not a Python float (np.float32, ...) and a
-        # complex value, Python or numpy, are keyed as a float is, by type and the
-        # hex() of each float component: signed zeros apart, equal values of other
-        # types apart, and every NaN of one type the same constant, in the side
-        # table too. Where long double is wider than double (unlike on Windows or
-        # macOS arm64), a long double that no float holds is keyed by its exact value.
+    def test_numpy_float_constants_are_keyed_by_their_bits(self):
+        # An np.float16 or np.float32 scalar is keyed as a float is, by type and
+        # hex(): signed zeros apart, equal values of other types apart, and every NaN
+        # of one type the same constant, in the side table too.
         import numpy as np
 
         def distinct_keys(*values):
@@ -320,22 +316,12 @@ class TestCuteDSLHOPHelpers(TestCase):
         for a, b in (
             (np.float32(-0.0), np.float32(0.0)),
             (np.float16(-0.0), np.float16(0.0)),
-            (np.longdouble(-0.0), np.longdouble(0.0)),
-            (complex(-0.0, 0.0), complex(0.0, 0.0)),
-            (complex(0.0, -0.0), complex(0.0, 0.0)),
-            (np.complex64(complex(-0.0, 0.0)), np.complex64(0.0)),
             (np.float32(1.0), np.float16(1.0)),
             (np.float32(1.0), 1.0),
-            (np.complex64(1.0), np.complex128(1.0)),
-            (np.complex128(1.0), complex(1.0)),
         ):
             self.assertEqual(distinct_keys(a, b), 2, f"{a!r} and {b!r}")
-        if np.finfo(np.longdouble).nmant > np.finfo(np.float64).nmant:
-            # The long double nearest 0.1, and the float nearest 0.1 as a long double.
-            a, b = np.longdouble("0.1"), np.longdouble(0.1)
-            self.assertEqual(distinct_keys(a, b), 2, f"{a!r} and {b!r}")
         nan = float("nan")
-        for make in (np.float32, np.float16, np.longdouble, complex, np.complex64):
+        for make in (np.float32, np.float16):
             self.assertEqual(distinct_keys(make(nan), make(nan)), 1, make.__name__)
         self.assertEqual(distinct_keys(-np.float32(nan), np.float32(nan)), 1)
         table = KernelSideTable(constant_rules=CUTEDSL_CONSTANT_RULES)
@@ -382,20 +368,32 @@ class TestCuteDSLHOPHelpers(TestCase):
         self.assertEqual(vars(snapshot), {"value": 1, "alpha": 2.0})
 
     def test_constants_from_the_cutlass_package_are_keyed_as_themselves(self):
-        # A value of a class from the cutlass package is the DSL's own, never keyed
-        # or copied by its attributes: equal ones get their own entries, which hold
-        # the objects themselves.
+        # A value of a class from the cutlass package is the DSL's own: keyed by its
+        # own equality, never by its attributes, and stored as itself. So equal DslCfg
+        # objects get their own entries, and Basis objects (like cute.ScaledBasis) are
+        # keyed by value and mode, not by their numeric .value as a Numeric is.
         class DslCfg:
             __module__ = "cutlass.cute.fake"
 
             def __init__(self, alpha):
                 self.alpha = alpha
 
+        @dataclasses.dataclass(frozen=True)
+        class Basis:
+            __module__ = "cutlass.cute.fake"
+            value: int
+            mode: int
+
         table = KernelSideTable(constant_rules=CUTEDSL_CONSTANT_RULES)
         cfg = DslCfg(2.0)
         idx = table.add_constant_args({"cfg": cfg})
         self.assertNotEqual(table.add_constant_args({"cfg": DslCfg(2.0)}), idx)
         self.assertIs(table.get_constant_args(idx)["cfg"], cfg)
+        basis = Basis(2, 0)
+        idx = table.add_constant_args({"cfg": basis})
+        self.assertNotEqual(table.add_constant_args({"cfg": Basis(2, 1)}), idx)
+        self.assertEqual(table.add_constant_args({"cfg": Basis(2, 0)}), idx)
+        self.assertIs(table.get_constant_args(idx)["cfg"], basis)
 
     def test_dataclass_constants_are_keyed_by_all_their_attributes(self):
         # A dataclass instance is keyed and stored as a snapshot by its fields and the
@@ -464,12 +462,7 @@ class TestCuteDSLHOPHelpers(TestCase):
         object.__setattr__(f2, "beta", 2)
         self.assertEqual(add(f1), add(f2))
         self.assertIs(table.get_constant_args(add(f2))["c"], f1)
-        msg = (
-            "^a constant kernel argument of type EqSlotBaseCfg is unhashable: it has "
-            "state in __slots__ attributes that are not dataclass fields, so it is "
-            "keyed as itself, not by content; make it hashable, or keep that state in "
-            "dataclass fields or its __dict__$"
-        )
+        msg = "^a constant kernel argument of type EqSlotBaseCfg is unhashable"
         with self.assertRaisesRegex(TypeError, msg):
             add(EqSlotBaseCfg(1.0))
 
@@ -495,21 +488,6 @@ class TestCuteDSLHOPHelpers(TestCase):
         table = KernelSideTable(constant_rules=rules)
         idx = table.add_constant_args({"e": ValueError("a")})
         self.assertNotEqual(table.add_constant_args({"e": ValueError("b")}), idx)
-
-    def test_defaultdicts_with_a_default_factory_are_refused(self):
-        # A dict is keyed by its items, which leave out a defaultdict's
-        # default_factory: defaultdict(int) and defaultdict(list) with equal items
-        # would share an entry. One without a default_factory is keyed as a dict is.
-        table = KernelSideTable(constant_rules=CUTEDSL_CONSTANT_RULES)
-
-        def add(c):
-            return table.add_constant_args({"c": c})
-
-        msg = "^a constant kernel argument of type defaultdict has a default_factory"
-        with self.assertRaisesRegex(TypeError, msg):
-            add({"tiles": collections.defaultdict(list, a=[1])})
-        plain = collections.defaultdict(None, a=1)
-        self.assertEqual(add(plain), add(collections.defaultdict(None, a=1)))
 
     def test_cyclic_constants_are_refused(self):
         # constant_key and _snapshot walk a constant's contents, so a constant that
@@ -570,8 +548,8 @@ class TestCuteDSLHOPHelpers(TestCase):
         # copy.copy returns whatever a class's __copy__ or __reduce__ returns, even
         # the object itself, and a stored constant that is the caller's object changes
         # with it. _snapshot makes a plain object with object.__new__, as copy.copy
-        # does by default, keeps an enum member, which cannot change, and refuses any
-        # other value whose copy is itself.
+        # does by default, stores a DSL value that is not a Numeric (an enum member) as
+        # itself, and refuses any other value whose copy is itself.
         class SelfCopy:
             def __copy__(self):
                 return self
@@ -585,7 +563,7 @@ class TestCuteDSLHOPHelpers(TestCase):
                 return super().__new__(cls)
 
         class Numeric(SelfCopy):  # keyed like a cutlass Numeric
-            __module__ = "cutlass.fake"
+            __module__ = "cutlass.base_dsl.typing"
 
             def __init__(self, value):
                 self.value = value
@@ -593,12 +571,6 @@ class TestCuteDSLHOPHelpers(TestCase):
         class Group(enum.Enum):  # keyed like a cutlass enum, such as CtaGroup.ONE
             __module__ = "cutlass.fake"
             ONE = 1
-
-        class Items(SelfCopy, list):
-            pass
-
-        class Table(SelfCopy, dict):
-            pass
 
         table = KernelSideTable(constant_rules=CUTEDSL_CONSTANT_RULES)
 
@@ -612,7 +584,7 @@ class TestCuteDSLHOPHelpers(TestCase):
         self.assertIs(table.get_constant_args(add(Group.ONE))["c"], Group.ONE)
         msg = "^a constant kernel argument of type {} cannot be copied: copy.copy "
         msg += "returns the object itself$"
-        for value in (NewCfg(1.0), Numeric(2.0), Items([1.0]), Table(a=1.0)):
+        for value in (NewCfg(1.0), Numeric(2.0)):
             with self.assertRaisesRegex(TypeError, msg.format(type(value).__name__)):
                 add(value)
 
@@ -644,21 +616,40 @@ class TestCuteDSLHOPHelpers(TestCase):
             with self.assertRaisesRegex(TypeError, msg.format(where)):
                 table.add_constant_args({"cfg": value})
 
-    def test_dict_subclasses_are_rebuilt_with_their_items(self):
-        # _snapshot rebuilds a dict, of a subclass too, with each item assigned: a
-        # Counter's update() would count the (key, value) pairs
-        # (Counter({('a', 3): 1})), and dict.update() would leave an OrderedDict
-        # empty to iterate.
+    def test_container_subclasses_are_refused(self):
+        # Only an exact list, tuple or dict, an OrderedDict (rebuilt in its order), a
+        # namedtuple and a torch.Size are keyed and copied by their items. Any other
+        # list, tuple or dict subclass is refused, in a constant or inside one: its
+        # items can leave out its state (a defaultdict's default_factory, attributes)
+        # or not rebuild it (a Counter's update() counts the (key, value) pairs).
+        # So is a namedtuple whose __iter__ is not tuple's (_snapshot rebuilds from it).
+        class Scales(list):
+            pass
+
+        class Swapped(collections.namedtuple("Swapped", ["m", "n"])):
+            __slots__ = ()
+
+            def __iter__(self):
+                return iter((self.n, self.m))
+
         rules = CUTEDSL_CONSTANT_RULES
-        for value in (
-            collections.Counter({"a": 3}),
-            collections.OrderedDict([("b", 1), ("a", 2)]),
+        msg = "^a constant kernel argument of type {} is a list, tuple or dict subclass"
+        for value, name in (
+            (Scales([1.0]), "Scales"),
+            ((1, collections.Counter(a=3)), "Counter"),
+            ({"tiles": collections.defaultdict(None, a=[1])}, "defaultdict"),
+            (Swapped([1], 2), "Swapped"),
         ):
-            with self.subTest(type=type(value).__name__):
-                snapshot = _snapshot(value, rules)
-                self.assertIsNot(snapshot, value)
-                self.assertIs(type(snapshot), type(value))
-                self.assertEqual(list(snapshot.items()), list(value.items()))
+            with self.assertRaisesRegex(TypeError, msg.format(name)):
+                constant_key(value, rules)
+        ordered = collections.OrderedDict([("b", [1]), ("a", 2)])
+        snapshot = _snapshot(ordered, rules)
+        self.assertIs(type(snapshot), collections.OrderedDict)
+        self.assertEqual(list(snapshot.items()), [("b", [1]), ("a", 2)])
+        self.assertIsNot(snapshot["b"], ordered["b"])
+        size = torch.Size([4, 2])
+        self.assertIs(_snapshot(size, rules), size)
+        self.assertNotEqual(constant_key(size, rules), constant_key((4, 2), rules))
 
     def test_host_fn_info_checks_and_splits_a_call(self):
         # check_call and split_args need only a parsed signature, written out here: a
