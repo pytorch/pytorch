@@ -564,14 +564,16 @@ class CodeGen:
             return global_name
 
         # Placeholders become the parameters of the generated function, and a
-        # parameter shadows any global of the same name inside the body. Reserve
-        # their names first so that a colliding global, e.g. the ``nan`` or
-        # ``inf`` builtin, is given a different one.
+        # parameter shadows any global of the same name inside the body. For the
+        # builtins that the body refers to by their assigned global name, reserve
+        # a colliding parameter name so the global is given a different one.
+        # torch, pytree and fx_pytree are emitted as literal text, so renaming
+        # them would break the generated code instead.
         # See https://github.com/pytorch/pytorch/issues/198072
         for node in nodes:
             if node.op == "placeholder" and isinstance(node.target, str):
                 raw_name = node.target.replace("*", "")
-                if raw_name != node.name:
+                if raw_name in ("nan", "inf", "device"):
                     namespace.reserve_name(raw_name)
 
         # Pre-fill the globals table with registered builtins.
