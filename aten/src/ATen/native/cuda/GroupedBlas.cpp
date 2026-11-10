@@ -390,7 +390,7 @@ bool should_use_cublaslt_scaled_grouped_gemm(
     return false;
   }
   if (batch_count < 1 || batch_count > kMaxCublasGroupedBatchCount) {
-    TORCH_WARN_ONCE("cuBLASLt grouped GEMM requires 1 <= group count <= 1024");
+    TORCH_WARN_ONCE("cuBLASLt grouped GEMM requires 1 <= group count <= ", kMaxCublasGroupedBatchCount);
     return false;
   }
   if (out_dtype != kBFloat16 && out_dtype != kHalf && out_dtype != kFloat) {
@@ -776,8 +776,6 @@ std::optional<c10::ScalarType> out_dtype) {
   const bool b_is_2d = mat_b.dim() == 2;
   const int64_t batchCount64 = (a_is_2d || b_is_2d)
       ? offs->size(0) : mat_a.size(0);
-  TORCH_CHECK(batchCount64 > 0 && batchCount64 <= kMaxCublasGroupedBatchCount,
-      "batchCount must be in [1, 1024], got ", batchCount64);
   const int batchCount = static_cast<int>(batchCount64);
 
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
@@ -813,7 +811,8 @@ static void scaled_grouped_mm_cublaslt(
   const int64_t min_batch_count = empty_out ? 0 : 1;
   TORCH_CHECK_VALUE(
       batchCount >= min_batch_count && batchCount <= kMaxCublasGroupedBatchCount,
-      "cuBLASLt grouped GEMM batchCount must be in [", min_batch_count, ", 1024], got ", batchCount);
+      "cuBLASLt grouped GEMM batchCount must be in [", min_batch_count, ", ",
+      kMaxCublasGroupedBatchCount, "], got ", batchCount);
   const auto scaling_a = recipe_a[0];
   const auto scaling_b = recipe_b[0];
   const bool fp32_block = is_fp32_block_impl(gemm_impl);
