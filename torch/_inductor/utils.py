@@ -6020,9 +6020,9 @@ def _gfx1250_scale_swizzle_cached(rocm_version: str) -> tuple[bool, bool]:
 def _gfx1250_scale_swizzle() -> tuple[bool, bool]:
     """Whether gfx1250 accepts SWIZZLE_128 for MX and for NVFP4.
 
-    The MX count is rows * round_up(K/32, 4). The NVFP4 count is
-    rows * round_up(K/16, 8). Both equal the unswizzled count on some
-    legal shapes, so the caller must test them before NO_SWIZZLE.
+    The MX count is rows * round_up(K/32, 4). It equals the unswizzled count
+    on some legal shapes, so the caller must test it before NO_SWIZZLE. The
+    NVFP4 count is rows * round_up(K/16, 8).
     """
     if not torch.version.hip or not torch.cuda.is_available():
         return False, False
@@ -6085,8 +6085,7 @@ def _infer_scale_swizzle_impl(
             ):
                 return ScalingType.BlockWise1x16, SwizzleType.NO_SWIZZLE
         elif _gfx1250_scale_swizzle()[1]:
-            # gfx1250: rows * round_up(K/16, 8). Checked before the 128-padded
-            # count, which is equal for some aligned shapes.
+            # gfx1250: rows * round_up(K/16, 8).
             expected_numel_a = mat_size[0] * _round_up(
                 ceildiv(K_multiplier * mat_size[1], 16), 8
             )

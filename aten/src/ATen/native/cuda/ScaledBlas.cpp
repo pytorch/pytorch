@@ -223,7 +223,7 @@ static void check_mx_swizzle(const at::Tensor& t, SwizzleType swizzle_a, Swizzle
     TORCH_CHECK_NOT_IMPLEMENTED(
         swizzle_a == SwizzleType::SWIZZLE_128,
         "gfx1250 MX block scaling requires SWIZZLE_128 scales. "
-        "torch._scaled_mm has no swizzle argument; use torch.nn.functional.scaled_mm");
+        "Pass swizzle_a=swizzle_b=SwizzleType.SWIZZLE_128 and scales in the gfx1250 order.");
     return;
   }
   TORCH_CHECK_NOT_IMPLEMENTED(
@@ -1583,7 +1583,7 @@ _scaled_nvfp4_nvfp4(
   TORCH_CHECK_NOT_IMPLEMENTED(
       swizzle_a == SwizzleType::SWIZZLE_128 && swizzle_b == SwizzleType::SWIZZLE_128,
       "gfx1250 NVFP4 block scaling requires SWIZZLE_128 scales. "
-      "torch._scaled_mm has no swizzle argument; use torch.nn.functional.scaled_mm");
+      "Pass swizzle_a=swizzle_b=SwizzleType.SWIZZLE_128 and scales in the gfx1250 order.");
   const int64_t k_unpacked_a = mat_a.size(1) * 2;
   const int64_t k_unpacked_b = mat_b.size(0) * 2;
   // gfx1250 NVFP4 requires even M and N and K % 16.

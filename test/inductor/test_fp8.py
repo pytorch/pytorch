@@ -2489,7 +2489,7 @@ class TestFP8Lowering(TestCase):
         use_32_8 = rocm_mx_swizzle(torch.float8_e4m3fn)
         if torch.version.hip and not use_32_8:
             raise unittest.SkipTest(
-                "SWIZZLE_32_8 MX FP8 requires gfx950 or gfx1250 and ROCm 7.14"
+                "MX FP8 block swizzle requires gfx950 or gfx1250 and ROCm 7.14"
             )
         if use_32_8 and evaluate_gfx_arch_within(["gfx1250"]):
             swizzle = SwizzleType.SWIZZLE_128

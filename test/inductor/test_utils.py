@@ -2406,6 +2406,7 @@ class TestScaleSwizzleInference(TestCase):
             scale_dtype = torch.float8_e8m0fnu
         with (
             mock.patch.object(torch.version, "hip", "7.14.0"),
+            mock.patch("torch.xpu._is_compiled", return_value=False),
             mock.patch(
                 "torch._inductor.utils._prefers_swizzle_32_8",
                 return_value=prefers_32_8,
@@ -2465,16 +2466,15 @@ class TestScaleSwizzleInference(TestCase):
             (ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_128),
         )
 
-    def test_gfx1250_nvfp4_wins_the_padded_tie(self):
-        # M=128, unpacked K=128: gfx1250 holds 1024 scales, the same as the
-        # 128-padded NVFP4 layout, but the swizzle is SWIZZLE_128.
+    def test_gfx1250_nvfp4_is_swizzle_128(self):
+        # M=128, unpacked K=128: rows * round_up(K/16, 8) = 1024 scales.
         self.assertEqual(
             self._infer(
                 (128, 64),
                 (1024,),
                 torch.float4_e2m1fn_x2,
                 prefers_32_8=False,
-                gfx1250=(False, True),
+                gfx1250=(True, True),
                 scale_dtype=torch.float8_e4m3fn,
             ),
             (ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_128),

@@ -9,7 +9,6 @@
 
 #include <ATen/BlasBackend.h>
 #include <ATen/Context.h>
-#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/GroupedMMUtils.h>
@@ -414,19 +413,15 @@ void validate_scaled_mm_v2_inputs(
 
   // NVFP4 (BlockWise1x16) blockwise scale element count for a given outer
   // dim, shared by the single- and two-level NVFP4 recipes. XPU uses the
-  // unpadded shape. gfx1250 uses rows * round_up(K/16, 8). The remaining case is the padded
-  // SWIZZLE_32_4_4 shape.
-#if defined(USE_ROCM) && ROCM_VERSION >= 100000
-  const bool gfx1250_nvfp4 = !is_xpu && at::globalContext().hasROCM() &&
-      at::detail::getCUDAHooks().isGPUArch({"gfx1250"});
-#else
-  const bool gfx1250_nvfp4 = false;
-#endif
+  // unpadded shape. ROCm has a single NVFP4 layout, rows * round_up(K/16, 8).
+  // The remaining case is the padded SWIZZLE_32_4_4 shape. The arch gate stays
+  // in the kernel, which can query the device.
+  const bool rocm_nvfp4 = !is_xpu && at::globalContext().hasROCM();
   auto nvfp4_scale_elems = [&](const c10::SymInt& dim) {
     if (is_xpu) {
       return dim * sym_ceil_div(K_unpacked, 16);
     }
-    if (gfx1250_nvfp4) {
+    if (rocm_nvfp4) {
       return dim * sym_round_up(sym_ceil_div(K_unpacked, 16), 8);
     }
     return sym_round_up(dim, 128) * sym_round_up(sym_ceil_div(K_unpacked, 16), 4);
@@ -475,9 +470,6 @@ void validate_scaled_mm_v2_inputs(
   const bool is_nv_1x16 = is_single_recipe(
       recipe_a, recipe_b, ScalingType::BlockWise1x16, ScalingType::BlockWise1x16);
   const bool is_nv_2lvl = is_two_level_nvfp4(recipe_a, recipe_b);
-  if ((is_nv_1x16 || is_nv_2lvl) && at::globalContext().hasROCM() && !gfx1250_nvfp4) {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "NVFP4 scaling is only supported on gfx1250 with ROCm 10.0 or above");
-  }
   // BlockWise1x128/128x128 combinations (DeepSeek-style) are deliberately
   // not validated here: they require SM90 and fail with NotImplementedError
   // from the kernel on other archs, which tests rely on.
@@ -544,15 +536,13 @@ void validate_scaled_mm_v2_inputs(
     // Layout the count belongs to. ROCm accepts two layouts that differ only
     // in padding, so the count alone is ambiguous without naming one.
     [[maybe_unused]] const char* scale_layout = "";
-    // The arch/version gate for SWIZZLE_32_8 lives in the kernel, which can
-    // query the device, so a request for it on an unsupported arch reaches this
-    // size check first whenever the two layouts' counts differ. Name the
-    // requirement, in `check_mx_swizzle`'s words, so that case is not
-    // misdiagnosed as a plain size mismatch. gfx1250 supports the enum, so it
-    // does not get that hint.
+    // A size mismatch is reported before the kernel's arch gate. Name the
+    // requirement, in check_mx_swizzle's words, so it is not a plain size error.
     [[maybe_unused]] const char* scale_layout_hint =
         is_mx_32_8
         ? "; SWIZZLE_32_8 block scales require gfx950 with ROCm 7.13 (MX FP4) or ROCm 7.14 (MX FP8)"
+        : is_mx_128
+        ? "; SWIZZLE_128 block scales require gfx1250"
         : "";
     // ROCm and NVIDIA use different blockwise scale shapes; detect at runtime
     // to keep aten-cpu free of GPU-conditional compilation. Formulas mirror
