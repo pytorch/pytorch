@@ -2100,7 +2100,7 @@ class TestSDPAFailureModes(NNTestCase):
     @onlyAccelerator
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support fused SDPA or pre-SM80 hardware")
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3126")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6080")
     def test_flash_fail_fp32(self, device):
         dtype = torch.float
         size = SdpaShape(16, 16, 32, 32)
@@ -2290,7 +2290,7 @@ class TestSDPAFailureModes(NNTestCase):
     @onlyAccelerator
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention")
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3126")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6080")
     def test_flash_attention_fail_with_non_square_causal_attention(self, device):
         dtype = torch.bfloat16
         q_shape = SdpaShape(1, 1, 8, 16)
