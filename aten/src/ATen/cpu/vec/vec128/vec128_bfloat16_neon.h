@@ -649,7 +649,8 @@ Vectorized<c10::BFloat16> inline fmadd(
     const Vectorized<c10::BFloat16>& b,
     const Vectorized<c10::BFloat16>& c) {
   // There is no FMA that accumulates into BF16, and BF16 arithmetic would
-  // round the product: compute in float, where the product is exact.
+  // round the product: compute in float, where the product is exact (unless
+  // it overflows or underflows).
   const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
   const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
   const auto [c_float_low, c_float_high] = convert_bfloat16_float(c);

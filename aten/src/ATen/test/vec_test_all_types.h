@@ -559,10 +559,15 @@ std::enable_if_t<!is_complex<T>::value, void>
 filter_mult_overflow(T& val1, T& val2) {
     if constexpr (std::is_integral_v<T> == false) return;
     if (!is_zero(val2)) {
+        // Clamp |val1| to (max - 1) / |val2|, keeping its sign, so that their
+        // product fits. This only ever shrinks |val1|, as tests filter it
+        // against several values.
         T c = (std::numeric_limits<T>::max() - 1) / val2;
-        if (std::abs(val1) >= c) {
-            // correct first;
+        c = c < 0 ? -c : c;
+        if (val1 > c) {
             val1 = c;
+        } else if (val1 < -c) {
+            val1 = -c;
         }
     }  // is_zero
 }
@@ -1336,7 +1341,11 @@ std::enable_if_t<!is_complex<T>::value, T> local_division(T x, T y) {
 
 template <typename T>
 std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Complex<T> x, Complex<T> y) {
-#if defined(TEST_AGAINST_DEFAULT)
+#if defined(TEST_AGAINST_DEFAULT) || \
+    !(defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_VSX))
+    // Only VSX and ZVECTOR vectorize complex division; the others use
+    // c10::complex's operator/, which scales, unlike the formulas below, and so
+    // rounds differently (by many ulps where bc - ad cancels).
     return x / y;
 #else /* defined(TEST_AGAINST_DEFAULT) */
     //re = (ac + bd)/abs_2()
@@ -1377,22 +1386,12 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
 
     return Complex<T>(rr, ii);
 #else /* defined(CPU_CAPABILITY_ZVECTOR) */
-#if defined(CPU_CAPABILITY_VSX)
-    //check multiplication considering swap and fma
+    // VSX: check multiplication considering swap and fma
     T rr = x_real * y_real;
     T ii = x_imag * y_real;
     T neg_imag = -y_imag;
     rr = fma(x_imag, y_imag, rr);
     ii = fma(x_real, neg_imag, ii);
-    //b.abs_2
-#else /* defined(CPU_CAPABILITY_VSX) */
-    T ac = x_real * y_real;
-    T bd = x_imag * y_imag;
-    T ad = x_real * y_imag;
-    T bc = x_imag * y_real;
-    T rr = noFma.add(ac, bd);
-    T ii = noFma.sub(bc, ad);
-#endif /* defined(CPU_CAPABILITY_VSX) */
     //b.abs_2()
     T abs_rr = y_real * y_real;
     T abs_ii = y_imag * y_imag;
@@ -1405,8 +1404,21 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
 }
 
 
+// With FP16 vector arithmetic on aarch64 (outside SVE256 builds, which use
+// generic code), Vectorized<Half>'s fmadd and fmsub are native fp16 FMAs, which
+// round once; the others compute in float and round to float first.
+#if defined(__aarch64__) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) && \
+    !defined(CPU_CAPABILITY_SVE256)
+constexpr bool kNativeHalfFma = true;
+#else
+constexpr bool kNativeHalfFma = false;
+#endif
+
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
+    if constexpr (std::is_same_v<T, c10::Half> && kNativeHalfFma) {
+        return static_cast<T>(std::fma(double(a), double(b), double(c)));
+    }
     PreventFma noFma;
     using op_math_t = typename OpMathType<T>::type;
     auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
@@ -1415,6 +1427,9 @@ std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
 
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_fmsub(T a, T b, T c) {
+    if constexpr (std::is_same_v<T, c10::Half> && kNativeHalfFma) {
+        return static_cast<T>(std::fma(double(a), double(b), -double(c)));
+    }
     PreventFma noFma;
     using op_math_t = typename OpMathType<T>::type;
     auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
