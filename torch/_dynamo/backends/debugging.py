@@ -155,7 +155,7 @@ def torchscript(
 ) -> torch.jit.ScriptModule:
     from torch.fx._lazy_graph_module import _unwrap_lazy_graph_module
 
-    return torch.jit.script(_unwrap_lazy_graph_module(gm))
+    return torch.jit._script.script(_unwrap_lazy_graph_module(gm))
 
 
 def invoke_subgraph_inner_compiler(

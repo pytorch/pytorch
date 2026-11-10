@@ -9,6 +9,8 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
 #include <ATen/native/mps/operations/GemmHeuristics.h>
+#include <ATen/native/mps/operations/MatmulUtils.h>
+#include <utility>
 
 #include <fmt/format.h>
 
@@ -20,7 +22,6 @@
 #include <ATen/ops/_int_mm_native.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
-#include <ATen/ops/addr_native.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/mm_native.h>
@@ -28,8 +29,8 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-#include <c10/util/TypeCast.h>
 #include <c10/util/env.h>
+#include <c10/util/safe_conv.h>
 #include <algorithm>
 #include <limits>
 #include <string>
@@ -349,14 +350,19 @@ Tensor& int_mm_out_mps_impl(const Tensor& self, const Tensor& mat2, Tensor& resu
     return result.zero_();
   }
 
-  const auto m = c10::checked_convert<uint32_t>(self.size(0), "self.size(0)");
-  const auto k = c10::checked_convert<uint32_t>(self.size(1), "self.size(1)");
-  const auto n = c10::checked_convert<uint32_t>(mat2.size(1), "mat2.size(1)");
-  constexpr auto int_max = static_cast<uint32_t>(std::numeric_limits<int32_t>::max());
+  // The kernels tile the output, so its threads cover m and n rounded up to the tile size.
+  TORCH_CHECK(std::in_range<int32_t>(self.size(0)) && std::in_range<int32_t>(mat2.size(1)),
+              func_name,
+              ": MPS does not support output of size ",
+              result.sizes());
+  const auto m = c10::safe_conv<uint32_t>(self.size(0), "uint32_t");
+  const auto k = c10::safe_conv<uint32_t>(self.size(1), "uint32_t");
+  const auto n = c10::safe_conv<uint32_t>(mat2.size(1), "uint32_t");
   constexpr const char* mpp_kernel = "int_mm_mpp_64_64_4";
   // MPP integer matmul requires operands with matching signedness, while _int_mm permits uint8 only for self.
-  const bool use_mpp = self.scalar_type() == at::kChar && self.stride(1) == 1 && mat2.stride(1) == 1 && m <= int_max &&
-      k <= int_max && n <= int_max && self.stride(0) <= int_max && mat2.stride(0) <= int_max && has_mpp() &&
+  const bool use_mpp = self.scalar_type() == at::kChar && self.stride(1) == 1 && mat2.stride(1) == 1 &&
+      std::in_range<int32_t>(m) && std::in_range<int32_t>(k) && std::in_range<int32_t>(n) &&
+      std::in_range<int32_t>(self.stride(0)) && std::in_range<int32_t>(mat2.stride(0)) && has_mpp() &&
       lib.hasFunction(mpp_kernel);
   const auto kernel_name = use_mpp ? mpp_kernel : self.scalar_type() == at::kByte ? "int_mm_uchar" : "int_mm_char";
   auto stream = getCurrentMPSStream();
@@ -629,6 +635,59 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
 }
 
 } // anonymous namespace
+
+void metal_mm_out(const Tensor& a, const Tensor& b, const Tensor& out) {
+  check_mm_shapes(a, b, "metal_mm_out");
+  checkSize("metal_mm_out", TensorArg(out, "out", 3), {a.size(0), b.size(1)});
+  const auto scalar_type = out.scalar_type();
+  TORCH_CHECK_TYPE(a.scalar_type() == scalar_type && b.scalar_type() == scalar_type,
+                   "metal_mm_out: expected matching dtypes, got ",
+                   a.scalar_type(),
+                   ", ",
+                   b.scalar_type(),
+                   " and ",
+                   scalar_type);
+  TORCH_CHECK_TYPE(supportedFloatingType(scalar_type), "metal_mm_out: unsupported dtype ", scalar_type);
+  if (out.numel() == 0) {
+    return;
+  }
+  if (a.size(1) == 0) {
+    out.zero_();
+    return;
+  }
+  const auto params = matmul_params<uint64_t>(a, b, out);
+  const auto bm = matmul_tile_rows(params.m);
+  const bool use_mpp = has_mpp() && params.out_stride_n == 1 && (params.a_stride_m == 1 || params.a_stride_k == 1) &&
+      (params.b_stride_k == 1 || params.b_stride_n == 1) && matmul_mpp_indices_fit(params, bm, kMatmulTileN);
+  const bool use_u32 = !use_mpp && offsetsFitIn<int32_t>(a, b, out);
+  const auto dtype = scalarToMetalTypeString(out);
+  const auto name = use_mpp ? fmt::format("matmul_mpp_{}{}_{}_bm{}",
+                                          params.a_stride_k == 1 ? 'n' : 't',
+                                          params.b_stride_k == 1 ? 't' : 'n',
+                                          dtype,
+                                          bm)
+                            : fmt::format("matmul_simd_{}_bm{}{}", dtype, bm, mtlIdxSuffix(use_u32));
+  const auto pso = lib.getPipelineStateForFunc(name);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, "metal_mm", {a, b}, stream);
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      if (use_u32) {
+        mtl_setArgs(encoder, a, b, out, matmul_params<uint32_t>(a, b, out));
+      } else {
+        mtl_setArgs(encoder, a, b, out, params);
+      }
+      const auto grid_size_x = at::ceil_div<NSUInteger>(params.n, kMatmulTileN);
+      const auto grid_size_y = at::ceil_div<NSUInteger>(params.m, bm);
+      [encoder
+           dispatchThreadgroups:MTLSizeMake(grid_size_x, grid_size_y, 1)
+          threadsPerThreadgroup:MTLSizeMake(matmul_simdgroups(bm, kMatmulTileN) * c10::metal::simdgroup_size, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+}
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
@@ -1176,136 +1235,6 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
 }
 
 } // namespace mps
-
-Tensor addr_mps(const Tensor& self, const Tensor& vec1, const Tensor& vec2, const Scalar& beta, const Scalar& alpha) {
-  // The reference builds a TensorIterator, so the result takes the promoted dtype, not self's.
-  const auto dtype = c10::promoteTypes(c10::promoteTypes(self.scalar_type(), vec1.scalar_type()), vec2.scalar_type());
-  Tensor result = at::empty({0}, self.options().dtype(dtype));
-  addr_out_mps(self, vec1, vec2, beta, alpha, result);
-  return result;
-}
-
-Tensor& addr_out_mps(const Tensor& self,
-                     const Tensor& vec1,
-                     const Tensor& vec2,
-                     const Scalar& beta,
-                     const Scalar& alpha,
-                     Tensor& result) {
-  using namespace mps;
-
-  TORCH_CHECK(result.is_mps());
-  TORCH_CHECK(vec1.dim() == 1 && vec2.dim() == 1, "tensors must be 1-D");
-  TORCH_CHECK(supportedFloatingOrComplexType(vec1), "MPS device does not support addr for non-float input");
-
-  TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {vec1, "vec1", 2}, {vec2, "vec2", 3}};
-  checkAllSameGPU(__func__, args);
-
-  // The reference computes at the promoted input dtype and only then casts into `result`.
-  const auto opmathType =
-      c10::promoteTypes(c10::promoteTypes(self.scalar_type(), vec1.scalar_type()), vec2.scalar_type());
-  TORCH_CHECK(c10::canCast(opmathType, result.scalar_type()),
-              "result type ",
-              opmathType,
-              " can't be cast to the desired output type ",
-              result.scalar_type());
-
-  IntArrayRef vec1_sizes = vec1.sizes();
-  IntArrayRef vec2_sizes = vec2.sizes();
-  IntArrayRef self_sizes;
-
-  c10::MaybeOwned<Tensor> self_;
-  if (&result != &self) {
-    self_ = expand_size(self, {vec1_sizes[0], vec2_sizes[0]}, "addr");
-    self_sizes = self_->sizes();
-  } else {
-    self_ = c10::MaybeOwned<Tensor>::borrowed(self);
-    self_sizes = self_->sizes();
-    TORCH_CHECK(result.dim() == 2, "tensors must be 2-D");
-    TORCH_CHECK(self_sizes[0] == vec1_sizes[0], "vec1_ dim 0 must match vec1 dim 0");
-    TORCH_CHECK(self_sizes[1] == vec2_sizes[0], "vec1_ dim 1 must match vec2 dim 0");
-  }
-
-  if (&result != &vec1) {
-    result.resize_(self_sizes);
-    if (beta.toComplexDouble() != 0.0) {
-      result.copy_(*self_);
-    }
-  }
-
-  IntArrayRef result_sizes = result.sizes();
-  if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {
-    return result;
-  }
-
-  MPSStream* stream = getCurrentMPSStream();
-  bool is_beta_non_zero = beta.toDouble() != 0.0;
-  MPSShape* inputShape = @[ @(vec1.numel()), @(1) ];
-  MPSShape* otherShape = @[ @(1), @(vec2.numel()) ];
-
-  struct CachedGraph : public mps::MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* vec1Tensor_ = nil;
-    MPSGraphTensor* vec2Tensor_ = nil;
-    MPSGraphTensor* selfTensor_ = nil;
-    MPSGraphTensor* resultTensor_ = nil;
-  };
-
-  @autoreleasepool {
-    std::string key = "addr_out_mps_impl" + getTensorsStringKey({vec1, vec2, *self_, result}) + ":" +
-        std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
-    const auto computeType = getMPSDataType(opmathType);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      auto vec1Placeholder = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec1), inputShape);
-      auto vec2Placeholder = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec2), otherShape);
-      auto selfPlaceholder = mps::mpsGraphRankedPlaceHolder(mpsGraph, *self_);
-      auto t1 = castMPSTensor(mpsGraph, vec1Placeholder, computeType);
-      auto t2 = castMPSTensor(mpsGraph, vec2Placeholder, computeType);
-      auto selfTensor = castMPSTensor(mpsGraph, selfPlaceholder, computeType);
-
-      // Intermediate as placeholder
-      MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:t1
-                                                                      secondaryTensor:t2
-                                                                                 name:@"MM/(vec1Xvec2)"];
-
-      // Intermediates for beta and alpha
-      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta.toDouble() dataType:computeType];
-      MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble() dataType:computeType];
-
-      // Intermediates for multiplying by beta and alpha
-      MPSGraphTensor* productTimesAlphaTensor = [mpsGraph multiplicationWithPrimaryTensor:productTensor
-                                                                          secondaryTensor:alphaTensor
-                                                                                     name:@"MM/alpha*(vec1Xvec2)"];
-      MPSGraphTensor* selfTimesBetaTensor = selfTensor;
-      if (is_beta_non_zero) {
-        selfTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:selfTensor
-                                                        secondaryTensor:betaTensor
-                                                                   name:@"MM/beta*input"];
-      }
-
-      MPSGraphTensor* resultTensor = productTimesAlphaTensor;
-      if (is_beta_non_zero) {
-        resultTensor = [mpsGraph additionWithPrimaryTensor:productTimesAlphaTensor
-                                           secondaryTensor:selfTimesBetaTensor
-                                                      name:@"MM/beta*input+alpha*(vec1@vec2)"];
-      }
-
-      newCachedGraph->vec1Tensor_ = vec1Placeholder;
-      newCachedGraph->vec2Tensor_ = vec2Placeholder;
-      newCachedGraph->selfTensor_ = selfPlaceholder;
-      newCachedGraph->resultTensor_ = castMPSTensor(mpsGraph, resultTensor, getMPSDataType(result));
-    });
-
-    Placeholder vec1Placeholder = Placeholder(cachedGraph->vec1Tensor_, vec1, inputShape);
-    Placeholder vec2Placeholder = Placeholder(cachedGraph->vec2Tensor_, vec2, otherShape);
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->selfTensor_, *self_);
-    Placeholder resultPlaceholder = Placeholder(cachedGraph->resultTensor_, result);
-
-    auto feeds = dictionaryFromPlaceholders(vec1Placeholder, vec2Placeholder, selfPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, resultPlaceholder);
-  }
-
-  return result;
-}
 
 TORCH_IMPL_FUNC(mm_out_mps)(const Tensor& self, const Tensor& mat2, const Tensor& result) {
   mps::mm_out_mps_impl(self, mat2, const_cast<Tensor&>(result));

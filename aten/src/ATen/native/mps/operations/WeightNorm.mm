@@ -1,5 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/OpMathType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -7,81 +10,27 @@
 #else
 #include <ATen/ops/_weight_norm_interface_backward_native.h>
 #include <ATen/ops/_weight_norm_interface_native.h>
+#include <ATen/ops/norm_except_dim.h>
 #endif
 
 namespace at::native {
 
 using namespace at::native::mps;
+using namespace std::string_view_literals;
 
-// Derive from MPSCachedGraph
-struct WeightNormCachedGraph : public MPSCachedGraph {
-  WeightNormCachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-  MPSGraphTensor* g_ = nil;
-  MPSGraphTensor* v_ = nil;
-  MPSGraphTensor* norms_ = nil;
-  MPSGraphTensor* w_ = nil;
-};
-
-struct WeightNormBackwardCachedGraph : public MPSCachedGraph {
-  WeightNormBackwardCachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-  MPSGraphTensor* grad_w = nil;
-  MPSGraphTensor* saved_v = nil;
-  MPSGraphTensor* saved_g = nil;
-  MPSGraphTensor* saved_norms = nil;
-  MPSGraphTensor* grad_g = nil;
-  MPSGraphTensor* grad_v = nil;
-};
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/WeightNorm_metallib.h>
+#endif
 
 std::tuple<Tensor, Tensor> weight_norm_mps(const Tensor& v, const Tensor& g, int64_t dim) {
   TORCH_CHECK(dim == 0 || dim == v.dim() - 1, "fused kernels can only be applied for first or last dim")
-
-  MPSStream* mpsStream = getCurrentMPSStream();
-
-  auto w = at::empty_like(v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto norms = at::empty_like(g, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-  std::string key = "weight_norm_mps_" + std::to_string(dim) + getTensorsStringKey({v, g});
-
-  NSMutableArray* reduction_dims = [NSMutableArray array];
-  for (int i = 0; i < v.dim(); ++i) {
-    if (i != dim) {
-      [reduction_dims addObject:@(i)];
-    }
+  if (v.numel() == 0) {
+    return {at::empty_like(v), at::zeros_like(g)};
   }
-
-  @autoreleasepool {
-    auto cachedGraph = LookUpOrCreateCachedGraph<WeightNormCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      // Placeholders
-      newCachedGraph->v_ = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(v.scalar_type()), getMPSShape(v));
-      newCachedGraph->g_ = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(g.scalar_type()), getMPSShape(g));
-
-      // Compute the L2 norm for each column of v
-      MPSGraphTensor* squared = [mpsGraph squareWithTensor:newCachedGraph->v_ name:nil];
-      MPSGraphTensor* sum_squared = [mpsGraph reductionSumWithTensor:squared axes:reduction_dims name:nil];
-      newCachedGraph->norms_ = [mpsGraph squareRootWithTensor:sum_squared name:nil];
-
-      // Divide each column of v by its L2 norm
-      MPSGraphTensor* unit_v = [mpsGraph divisionWithPrimaryTensor:newCachedGraph->v_
-                                                   secondaryTensor:newCachedGraph->norms_
-                                                              name:nil];
-
-      // Multiply each columb of vNormalized by the corresponding element of g
-      newCachedGraph->w_ = [mpsGraph multiplicationWithPrimaryTensor:unit_v
-                                                     secondaryTensor:newCachedGraph->g_
-                                                                name:nil];
-    });
-
-    Placeholder v_placeholder = Placeholder(cachedGraph->v_, v, nil, true);
-    Placeholder g_placeholder = Placeholder(cachedGraph->g_, g, nil, true);
-    Placeholder norms_placeholder = Placeholder(cachedGraph->norms_, norms);
-    Placeholder w_placeholder = Placeholder(cachedGraph->w_, w);
-
-    auto feeds = dictionaryFromPlaceholders(v_placeholder, g_placeholder);
-    auto results = dictionaryFromPlaceholders(norms_placeholder, w_placeholder);
-    runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
-  }
-
-  return std::tuple<Tensor, Tensor>{w, norms};
+  auto norms = at::norm_except_dim(v, 2, dim);
+  return {v.mul(g.div(norms)), norms};
 }
 
 std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
@@ -89,86 +38,102 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
                                                     const Tensor& saved_g,
                                                     const Tensor& saved_norms,
                                                     int64_t dim) {
-  // These checks should always succeed, because weight_norm_fused_backward should only
-  // ever be recorded in the autograd graph via weight_norm, which passes contiguous v and g.
-  TORCH_CHECK(saved_v.is_contiguous(), "saved_v must be contiguous");
-  TORCH_CHECK(saved_g.is_contiguous(), "saved_g must be contiguous");
-  TORCH_CHECK(saved_norms.is_contiguous(), "saved_norms must be contiguous");
   TORCH_CHECK(dim == 0 || dim == saved_v.dim() - 1, "fused kernels can only be applied for first or last dim")
-
-  MPSStream* mpsStream = getCurrentMPSStream();
-
+  TORCH_CHECK_NOT_IMPLEMENTED(supportedFloatingType(saved_v),
+                              "weight_norm backward is not implemented for '",
+                              toString(saved_v.scalar_type()),
+                              "' on MPS");
+  TORCH_CHECK_VALUE(
+      grad_w.is_contiguous() && saved_v.is_contiguous() && saved_g.is_contiguous() && saved_norms.is_contiguous(),
+      "weight_norm backward expects contiguous tensors");
+  TORCH_CHECK_VALUE(grad_w.sizes() == saved_v.sizes() && saved_g.numel() == saved_v.size(dim) &&
+                        saved_norms.numel() == saved_v.size(dim),
+                    "weight_norm backward expects grad_w shaped like v, and one g and one norm per slice");
+  // MPS saves norms in v's dtype, unlike CPU and CUDA which keep float for half/bfloat16.
+  TORCH_CHECK_TYPE(grad_w.scalar_type() == saved_v.scalar_type() && saved_g.scalar_type() == saved_v.scalar_type() &&
+                       saved_norms.scalar_type() == saved_v.scalar_type(),
+                   "weight_norm backward expects grad_w, v, g and norms of one dtype, got ",
+                   grad_w.scalar_type(),
+                   ", ",
+                   saved_v.scalar_type(),
+                   ", ",
+                   saved_g.scalar_type(),
+                   ", ",
+                   saved_norms.scalar_type());
   auto grad_v = at::empty_like(saved_v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto grad_g = at::empty_like(saved_g, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-  std::string key =
-      "weight_norm_backward_mps_" + std::to_string(dim) + getTensorsStringKey({grad_w, saved_v, saved_g, saved_norms});
-
-  NSMutableArray* reduction_dims = [NSMutableArray array];
-  for (int i = 0; i < saved_v.dim(); ++i) {
-    if (i != dim) {
-      [reduction_dims addObject:@(i)];
+  if (saved_v.numel() == 0) {
+    grad_g.zero_();
+    return {std::move(grad_v), std::move(grad_g)};
+  }
+  const auto slices = c10::safe_conv<uint32_t>(saved_v.size(dim), "uint32_t");
+  const auto len = c10::safe_conv<uint32_t>(saved_v.numel() / saved_v.size(dim), "uint32_t");
+  const auto dtype = scalarToMetalTypeString(saved_v);
+  constexpr auto simd = c10::metal::simdgroup_size;
+  const auto col_groups = at::ceil_div(slices, simd);
+  const auto splits = std::clamp<uint32_t>(occupancy_threadgroups() / col_groups, 1, at::ceil_div(len, simd));
+  const auto partial = dim == 0
+      ? Tensor()
+      : at::empty({splits, slices}, saved_v.options().dtype(at::toOpMathType(saved_v.scalar_type())));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto encoder = stream->commandEncoder();
+      auto run = [&](const std::string& kernel, MTLSize grid, MTLSize threads, const auto&... args) {
+        auto pso = lib.getPipelineStateForFunc(kernel);
+        getMPSProfiler().beginProfileKernel(pso, kernel, {grad_w, saved_v, saved_g, saved_norms}, stream);
+        [encoder setComputePipelineState:pso];
+        mtl_setArgs(encoder, args...);
+        [encoder dispatchThreads:grid threadsPerThreadgroup:threads];
+        getMPSProfiler().endProfileKernel(pso, stream);
+      };
+      if (dim == 0) {
+        constexpr auto ilp = c10::metal::ILP_PER_THREAD;
+        const auto threads = std::min(at::ceil_div(len, ilp), c10::metal::max_threadgroup_size);
+        const auto variant = threads * ilp < len ? "looped"sv : "single_row"sv;
+        run(fmt::format("weight_norm_backward_{}_{}", variant, dtype),
+            MTLSizeMake(threads, slices, 1),
+            MTLSizeMake(threads, 1, 1),
+            grad_w,
+            saved_v,
+            saved_g,
+            saved_norms,
+            grad_v,
+            len,
+            grad_g);
+      } else {
+        const auto tile = MTLSizeMake(simd, simd, 1);
+        const std::array<uint32_t, 2> rows_cols = {len, slices};
+        run(fmt::format("weight_norm_backward_cols_dot_{}", dtype),
+            MTLSizeMake(col_groups * simd, splits * simd, 1),
+            tile,
+            grad_w,
+            saved_v,
+            partial,
+            rows_cols);
+        run("weight_norm_backward_cols_sum",
+            MTLSizeMake(slices, 1, 1),
+            MTLSizeMake(simd, 1, 1),
+            partial,
+            std::array<uint32_t, 2>{splits, slices});
+        // Every thread of a tile writes simd rows of one contiguous block, so reads and writes stay close in memory.
+        constexpr auto rows_per_tile = simd * simd;
+        run(fmt::format("weight_norm_backward_cols_{}{}", dtype, mtlIdxSuffix(offsetsFitIn<uint32_t>(saved_v))),
+            MTLSizeMake(slices, at::ceil_div(len, rows_per_tile) * simd, 1),
+            tile,
+            grad_w,
+            saved_v,
+            saved_g,
+            saved_norms,
+            grad_v,
+            grad_g,
+            partial,
+            rows_cols,
+            rows_per_tile);
+      }
     }
-  }
-
-  @autoreleasepool {
-    auto cachedGraph =
-        LookUpOrCreateCachedGraph<WeightNormBackwardCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-          // Placeholders
-          newCachedGraph->grad_w =
-              mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(grad_w.scalar_type()), getMPSShape(grad_w));
-          newCachedGraph->saved_v =
-              mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(saved_v.scalar_type()), getMPSShape(saved_v));
-          newCachedGraph->saved_g =
-              mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(saved_g.scalar_type()), getMPSShape(saved_g));
-          newCachedGraph->saved_norms = mpsGraphRankedPlaceHolder(
-              mpsGraph, getMPSScalarType(saved_norms.scalar_type()), getMPSShape(saved_norms));
-
-          // Compute Graph
-          MPSGraphTensor* grad_w_v = [mpsGraph multiplicationWithPrimaryTensor:newCachedGraph->grad_w
-                                                               secondaryTensor:newCachedGraph->saved_v
-                                                                          name:nil];
-          MPSGraphTensor* result = [mpsGraph reductionSumWithTensor:grad_w_v axes:reduction_dims name:nil];
-
-          newCachedGraph->grad_g = [mpsGraph divisionWithPrimaryTensor:result
-                                                       secondaryTensor:newCachedGraph->saved_norms
-                                                                  name:nil];
-
-          MPSGraphTensor* grad_w_divided_by_norm = [mpsGraph divisionWithPrimaryTensor:newCachedGraph->grad_w
-                                                                       secondaryTensor:newCachedGraph->saved_norms
-                                                                                  name:nil];
-          MPSGraphTensor* three = [mpsGraph constantWithScalar:3.0 dataType:newCachedGraph->saved_norms.dataType];
-          MPSGraphTensor* norm_cubed = [mpsGraph powerWithPrimaryTensor:newCachedGraph->saved_norms
-                                                        secondaryTensor:three
-                                                                   name:nil];
-          MPSGraphTensor* v_result = [mpsGraph multiplicationWithPrimaryTensor:newCachedGraph->saved_v
-                                                               secondaryTensor:result
-                                                                          name:nil];
-          MPSGraphTensor* v_result_divided_by_norm_cubed = [mpsGraph divisionWithPrimaryTensor:v_result
-                                                                               secondaryTensor:norm_cubed
-                                                                                          name:nil];
-          MPSGraphTensor* diff = [mpsGraph subtractionWithPrimaryTensor:grad_w_divided_by_norm
-                                                        secondaryTensor:v_result_divided_by_norm_cubed
-                                                                   name:nil];
-          newCachedGraph->grad_v = [mpsGraph multiplicationWithPrimaryTensor:diff
-                                                             secondaryTensor:newCachedGraph->saved_g
-                                                                        name:nil];
-        });
-
-    Placeholder grad_w_placeholder = Placeholder(cachedGraph->grad_w, grad_w, nil, true);
-    Placeholder v_placeholder = Placeholder(cachedGraph->saved_v, saved_v, nil, true);
-    Placeholder g_placeholder = Placeholder(cachedGraph->saved_g, saved_g, nil, true);
-    Placeholder norms_placeholder = Placeholder(cachedGraph->saved_norms, saved_norms, nil, true);
-
-    Placeholder grad_g_placeholder = Placeholder(cachedGraph->grad_g, grad_g);
-    Placeholder grad_v_placeholder = Placeholder(cachedGraph->grad_v, grad_v);
-
-    auto feeds = dictionaryFromPlaceholders(grad_w_placeholder, norms_placeholder, v_placeholder, g_placeholder);
-    auto results = dictionaryFromPlaceholders(grad_g_placeholder, grad_v_placeholder);
-    runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
-  }
-
-  return std::tuple<Tensor, Tensor>{grad_v, grad_g};
+  });
+  return {std::move(grad_v), std::move(grad_g)};
 }
 
 } // namespace at::native
