@@ -723,9 +723,10 @@ static bool has_dense_order(const Tensor& t, IntArrayRef ref_strides) {
 }
 
 // The fast path copies the i-th memory-order chunk of self to the i-th chunk
-// of each output, one flat byte range per split, ignoring layout inside the range. That is exact when
-// every tensor is dense with the same dim order and splits start where the
-// kernel puts them, at multiples of slice_numel. Empty outputs never matter.
+// of each output, one flat byte range per split, ignoring layout inside the
+// range. That is exact when every tensor is dense with the same dim order and
+// splits start where the kernel puts them, at multiples of slice_numel. Empty
+// outputs never matter.
 static bool has_dense_matching_slices(
     const Tensor& self,
     TensorList out,
