@@ -41,8 +41,8 @@ from types import (
     MethodType,
     ModuleType,
 )
-from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
-from typing_extensions import override, Self, TypedDict
+from typing import Any, cast, Generic, Literal, NoReturn, Self, TYPE_CHECKING, TypeVar
+from typing_extensions import override, TypedDict
 
 import torch
 import torch._library.opaque_object as opaque_object
@@ -673,6 +673,15 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     if not hasattr(t, "_is_inductor_static"):
         meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
 
+    # compile-on-one-rank: the index is the compiling rank's, and every rank is on
+    # its own accelerator, so keeping it here means no rank can ever hit another's
+    # cache entry. This is the only place the device index reaches the key -- the
+    # graph hashed alongside it is the AOT one, which is already device-agnostic.
+    from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
+    if _coor_device_index_is_current(meta.device):
+        meta = dataclasses.replace(meta, device=torch.device(meta.device.type))
+
     return meta
 
 
@@ -1066,16 +1075,6 @@ def torch_key() -> bytes:
         from libfb.py import parutil
 
         return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
-
-
-# Bound at import so tests that mock.patch torch_key/triton_key don't break it.
-_cache_key_prefetchers = (torch_key.prefetch, triton_key.prefetch)  # type: ignore[attr-defined]
-
-
-def prefetch_cache_keys() -> None:
-    """Start computing torch_key and triton_key in a background thread."""
-    for prefetch in _cache_key_prefetchers:
-        prefetch()
 
 
 def get_inductor_root() -> str:
@@ -1711,6 +1710,7 @@ class FxGraphHashDetails:
         self.provenance_tracking_to_timeline = (
             config.trace.provenance_tracking_to_timeline
         )
+        self.provenance_profiler_markers = config.trace.provenance_profiler_markers
 
         # Factory ops with dtype=None are lowered using the ambient default dtype,
         # so cached code compiled under one default dtype is not valid under another.
@@ -4039,12 +4039,16 @@ class CppCodeCache:
     # Shared by subclasses and never cleared: a key hashes the source and build
     # command, and every miss rewrites its entry for the current cache directory.
     _binary_paths: dict[str, str] = {}
+    # Each kernel's relocatable key, by its host key: computed only for a capture or
+    # a replay, once per kernel.
+    _relocatable_keys: dict[str, str] = {}
 
     @staticmethod
     def cache_clear() -> None:
         from torch.compiler._runtime_cache import clear_cpp_kernels
 
         CppCodeCache.cache.clear()
+        CppCodeCache._relocatable_keys.clear()
         clear_cpp_kernels()
 
     cpp_compile_command_flags: dict[str, Any] = {}
@@ -4156,9 +4160,29 @@ class CppCodeCache:
         main_cmd_line = get_hashable_command_line(main_build_option)
         optimized_cmd_line = get_hashable_command_line(optimized_build_option)
 
-        key, main_path = write(
-            main_code, "main.cpp", extra=f"{optimized_code} {main_cmd_line}"
+        from torch.compiler._runtime_cache import (
+            capturing,
+            has_frozen_cpp_kernel,
+            has_frozen_cpp_kernels,
+            record_cpp_kernel,
+            restore_cpp_kernel,
         )
+
+        # Both keys come from here; only the command line passed in differs.
+        def kernel_key(cmd_line: str) -> str:
+            return get_hash(main_code.strip(), f"{optimized_code} {cmd_line}")
+
+        key, main_path = write(main_code, "main.cpp", key=kernel_key(main_cmd_line))
+
+        # The key a capture freezes this kernel's binary under, and a replay finds it
+        # by, on a host that may put torch elsewhere. The source and any cache-dir
+        # path in the command stay in it (see _relocatable_command_line). The binary
+        # itself stays under key, which this host's paths tell apart.
+        def relocatable_key() -> str:
+            if key not in cls._relocatable_keys:
+                relocated = _relocatable_command_line(main_cmd_line)
+                cls._relocatable_keys[key] = kernel_key(relocated)
+            return cls._relocatable_keys[key]
 
         # Don't bother writing if the argument is empty.
         if optimized_code:
@@ -4170,12 +4194,9 @@ class CppCodeCache:
             optimized_path = os.devnull
 
         if key not in cls.cache:
-            from torch.compiler._runtime_cache import (
-                has_frozen_cpp_kernel,
-                restore_cpp_kernel,
-            )
             from torch.utils._filelock import FileLock
 
+            replaying = has_frozen_cpp_kernels()
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             future: Future[Any] | None = None
             lib = None
@@ -4185,7 +4206,7 @@ class CppCodeCache:
             if (
                 config.cpp_cache_precompile_headers
                 and not _IS_WINDOWS
-                and not has_frozen_cpp_kernel(key)
+                and not (replaying and has_frozen_cpp_kernel(relocatable_key()))
             ):
                 if header := cls._get_uncompiled_header(device_type):
                     main_build_option.precompiled_header = _precompile_header(
@@ -4251,7 +4272,8 @@ class CppCodeCache:
                 )
 
             cls._binary_paths[key] = binary_path
-            restore_cpp_kernel(key, binary_path)
+            if replaying:
+                restore_cpp_kernel(relocatable_key(), binary_path)
 
             def load_fn() -> Any:
                 nonlocal lib
@@ -4277,14 +4299,61 @@ class CppCodeCache:
 
             cls.cache[key] = load_fn
 
-        from torch.compiler._runtime_cache import record_cpp_kernel
-
-        record_cpp_kernel(key, cls._binary_paths[key], cls.cache[key])
+        # Checked only now, so a capture that opened while the kernel loaded has it.
+        if capturing():
+            record_cpp_kernel(relocatable_key(), cls._binary_paths[key], cls.cache[key])
         return cls.cache[key]
 
     @classmethod
     def load(cls, *args: Any, **kwargs: Any) -> Any:
         return cls.load_async(*args, **kwargs)()
+
+
+def _relocatable_command_line(cmd: str) -> str:
+    """Key a C++ build by what it compiles, not by where this host put torch.
+
+    A precompile replay looks a frozen binary up by this key on a host that may
+    extract torch somewhere else. The torch trees are the ones torch's own -I and -L
+    flags point into: cpp_extension's, which follows torch_parent, and
+    cpp_builder's, which follows this package, when they differ. A tree is only
+    replaced as whole path components. The install path also told torch builds
+    apart, so torch_key() stands in for it. torch_key() hashes the version and the
+    Python sources but not the C++ headers or libraries, which is why this key only
+    names a frozen binary: what this host builds is stored under the key with its
+    own paths. A replay restores a frozen binary to that location too, so the
+    capture and replay hosts must run the same torch build.
+
+    Only these trees move. The Inductor cache dir stays in the key, and so does
+    the kernel's source, which the key also hashes. A path into the cache dir is
+    recorded as is in the binary, whether the command links a library there (the
+    Halide runtime, CUTLASS or CK kernels) or the source names a file there (a GPU
+    cpp_wrapper wrapper's cubin path). So a replay whose cache dir is at the same
+    path restores such a kernel, which then needs those files there, and one whose
+    cache dir is elsewhere rebuilds it. The Python, compiler, CUDA and other SDK
+    paths stay too, even when they sit next to torch, so the hosts must keep those
+    at the same paths, as a packaged job whose torch is extracted per launch next
+    to a fixed interpreter does.
+    """
+    from torch._inductor import cpp_builder
+    from torch.utils import cpp_extension
+
+    # get_command_line() normalizes the separators, so normalize the roots the same.
+    torch_trees = OrderedSet(
+        normalize_path_separator(path)
+        for path in (cpp_extension._TORCH_PATH, cpp_builder._TORCH_PATH)
+    )
+    # A tree starts a path (after a separator, a quote, or a -I or -L flag) and ends
+    # a path component.
+    start = r"(?:^|(?<=[\s'\":;,=])|(?<=-I)|(?<=-L))"
+    end = r"(?=[/\\\s'\":;,=]|$)"
+    # Longest first, so a tree nested in another is replaced before its parent.
+    for tree in sorted(torch_trees, key=len, reverse=True):
+        if len(tree) > 1:
+            cmd = re.sub(start + re.escape(tree) + end, "<torch>", cmd)
+    # The builder quotes a path only when it needs quoting, which says where this
+    # host put torch, not what it builds.
+    cmd = re.sub(r"(['\"])(<torch>[^'\"\s]*)\1", r"\2", cmd)
+    return f"{cmd} torch_key={torch_key().hex()}"
 
 
 def _worker_compile_cpp(

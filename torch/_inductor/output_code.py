@@ -194,17 +194,14 @@ def maybe_handle_backward_generation(
             raise AssertionError("boxed_forward_device_index must not be None")
         if boxed_forward_device_index.value is None:
             raise AssertionError("boxed_forward_device_index.value must not be None")
+        from torch._inductor.cudagraph_trees import mark_running_backward
+
         compiled_graph_callable = compiled_graph.current_callable
+        device_index = boxed_forward_device_index.value
 
-        manager = torch._inductor.cudagraph_trees.get_manager(
-            boxed_forward_device_index.value, create_if_none_exists=False
-        )
-        # should already exist from forward
-        if manager is None:
-            raise AssertionError("CUDAGraph manager must not be None")
-
+        # The manager is looked up when the backward runs (see mark_running_backward).
         def compiled_artifact(new_inputs: Sequence[InputType]) -> object:
-            manager.set_to_running_backward()  # type: ignore[union-attr]
+            mark_running_backward(device_index)
             return compiled_graph_callable(new_inputs)
 
         compiled_graph.current_callable = compiled_artifact
@@ -224,7 +221,7 @@ def prepare_cudagraph_post_compile(
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
     if boxed_forward_device_index is not None and not is_inference and not is_backward:
-        boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
+        boxed_forward_device_index.set(compiled_graph.device_index())
 
 
 def cudagraph_post_compile(
@@ -281,7 +278,7 @@ def cudagraph_post_compile(
             k: v for k, v in constants.items() if isinstance(v, torch.Tensor)
         }
 
-        device_index = next(iter(compiled_graph.device_idxs))
+        device_index = compiled_graph.device_index()
         cudagraphify_kwargs = dict(
             device_index=device_index,
             stack_traces=stack_traces,
@@ -372,7 +369,7 @@ def cudagraph_partition_post_compile(
     is_backward = compiled_graph.fx_kwargs["is_backward"]
     static_input_idxs = OrderedSet(compiled_graph.fx_kwargs["static_input_idxs"] or ())
     mutated_input_idxs = compiled_graph.mutated_input_idxs
-    device_index = next(iter(compiled_graph.device_idxs))
+    device_index = compiled_graph.device_index()
 
     # Filter to only tensor constants (exclude opaque value type classes)
     tensor_constants = {
@@ -573,6 +570,10 @@ class CompiledFxGraph(OutputCode):
     # (including aliasing) from the input shapes.
     _original_gm: torch.fx.GraphModule | None = None
     _serialized_original_gm: bytes | None = None
+    # Enter the "## Call CompiledFxGraph ##" range without the Python profiler
+    # flag check, so on-demand profiling sessions also scope the provenance
+    # markers of this graph's calls.
+    _always_enter_call_range: bool = False
 
     def __init__(
         self,
@@ -614,7 +615,10 @@ class CompiledFxGraph(OutputCode):
         self.kernel_sources = graph.wrapper_code.kernel_sources
         # TODO - ordered set
         self.device_types = OrderedSet(graph.device_types)
-        self.device_idxs = OrderedSet(graph.device_idxs)
+        # Under compile-on-one-rank the index is the compiling rank's, and this
+        # artifact is shared across ranks; see device_index().
+        coor = torch.compiler.config.compile_on_one_rank
+        self.device_idxs = OrderedSet() if coor else OrderedSet(graph.device_idxs)
         self.mutated_inputs = OrderedSet(graph.mutated_inputs)
         self.mutated_input_idxs = OrderedSet(graph.mutated_input_idxs)
 
@@ -749,6 +753,7 @@ class CompiledFxGraph(OutputCode):
         self.inputs_to_check = inputs_to_check
         self.fx_kwargs = fx_kwargs
         self._set_compile_context_for_autotune_cache()
+        self._always_enter_call_range = config.trace.provenance_profiler_markers
 
         # aot autograd needs to know to pass in inputs as a list
         self._boxed_call = True
@@ -823,7 +828,10 @@ class CompiledFxGraph(OutputCode):
             with autotune_cache_context:
                 try:
                     # Checking the profiler directly is faster than nullcontext
-                    if torch.autograd.profiler._is_profiler_enabled:
+                    if (
+                        torch.autograd.profiler._is_profiler_enabled
+                        or self._always_enter_call_range
+                    ):
                         with torch._C._profiler._RecordFunctionFast(
                             f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
                             keyword_values={"scope": "user_scope"},
@@ -843,6 +851,11 @@ class CompiledFxGraph(OutputCode):
                 )
             ):
                 self._compile_context = None
+
+    def device_index(self) -> int:
+        if torch.compiler.config.compile_on_one_rank:
+            return torch.cuda.current_device()
+        return next(iter(self.device_idxs))
 
     def post_compile(
         self,
