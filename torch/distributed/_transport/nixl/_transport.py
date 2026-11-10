@@ -3,16 +3,25 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from concurrent.futures import Future as _ThreadFuture
 from contextlib import asynccontextmanager, contextmanager
 from datetime import timedelta
 from importlib import import_module
-from threading import RLock
+from threading import Condition, current_thread, RLock, Thread
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
 
-from .._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
-from .._work import _validate_timeout, wait_all
+from .._api import (
+    MemoryView,
+    MutableMemoryView,
+    Notification,
+    PeerId,
+    RemoteBuffer,
+    Transport,
+    Work,
+)
+from .._work import _FutureWork, _validate_timeout, wait_all
 from ._memory import (
     _Registration,
     NIXLMemory,
@@ -25,6 +34,11 @@ from ._work import _live_transports, _NIXLWork
 
 if TYPE_CHECKING:
     from .._api import Memory
+
+
+# UCX sends notifications as active messages without a fixed size limit; this
+# keeps them small control messages.
+_MAX_NOTIFICATION_SIZE = 64 << 10
 
 
 def _load_backend() -> Any:
@@ -48,6 +62,13 @@ class NIXLTransport(Transport):
     to NIXL's ``create_backend``. NIXL is an optional dependency, imported only
     when selected. Transfers require registered views; raw tensors are rejected
     rather than allocated or registered implicitly.
+
+    Notifications are supported with the UCX plugin; peer ids are agent names.
+    Through NIXL 1.5.2, UCX sends a transfer's notification only when the
+    initiator checks the transfer (ai-dynamo/nixl#2439; later versions also send
+    it from NIXL's progress thread), and NIXL cannot signal arriving
+    notifications, so a thread polls transfers that carry a notification, and
+    incoming notifications while a ``wait_notifications`` Work is pending.
     """
 
     def __init__(
@@ -102,6 +123,15 @@ class NIXLTransport(Transport):
         self._transfers: dict[int, Any] = {}
         self._pending: dict[int, _NIXLWork] = {}
         self._operation_lock = RLock()
+        self._name: str = self._agent.name
+        # Notification state, guarded by _operation_lock.
+        self._progress_cv = Condition(self._operation_lock)
+        self._progress_thread: Thread | None = None
+        self._notifying: set[_NIXLWork] = set()
+        self._received: list[Notification] = []
+        # Pending wait_notifications Works share this future; it is replaced
+        # once it fires.
+        self._available: _ThreadFuture[None] | None = None
         # Lifecycle: open -> closing -> closed. Closing rejects new operations and
         # is terminal; a failed or timed-out close retains unreleased resources
         # and retrying close only finishes cleanup. Failed transfer-handle or
@@ -168,6 +198,108 @@ class NIXLTransport(Transport):
 
     def connected(self) -> bool:
         return bool(self._peers) and not self._closed and not self._closing
+
+    @property
+    def peer_id(self) -> PeerId:
+        return self._name
+
+    def max_notification_size(self) -> int:
+        return _MAX_NOTIFICATION_SIZE if self._plugin == "UCX" else 0
+
+    def send_notification(
+        self, peer: PeerId, payload: bytes, *, timeout: float | None = None
+    ) -> Work:
+        self._check_notification(payload)
+
+        def send() -> _FutureWork:
+            if peer not in self._peers:
+                raise ValueError("peer is not connected")
+            # No backend argument: NIXL's send_notif fails with one
+            # (ai-dynamo/nixl#2484), and this agent has only the one backend.
+            self._agent.send_notif(peer, payload)
+            future: _ThreadFuture[None] = _ThreadFuture()
+            future.set_result(None)
+            return _FutureWork(future, None)
+
+        return self._call(send, timeout)
+
+    def poll_notifications(self) -> list[Notification]:
+        with self._locked(None):
+            self._check_receive()
+            self._drain_notifications()
+            received, self._received = self._received, []
+        return received
+
+    def wait_notifications(self, *, timeout: float | None = None) -> Work:
+        with self._locked(timeout):
+            self._check_receive()
+            self._drain_notifications()
+            if self._received:
+                future: _ThreadFuture[None] = _ThreadFuture()
+                future.set_result(None)
+            else:
+                if self._available is None:
+                    self._available = _ThreadFuture()
+                future = self._available
+                self._start_progress()
+        return _FutureWork(future, self._timeout if timeout is None else timeout)
+
+    def _check_receive(self) -> None:
+        self._ensure_open()
+        if not self.max_notification_size():
+            raise NotImplementedError("transport does not support notifications")
+
+    def _drain_notifications(self) -> None:
+        # Caller holds _operation_lock.
+        notifications = self._agent.get_new_notifs(backends=[self._plugin])
+        for name, messages in notifications.items():
+            peer = _agent_name(name)
+            self._received += [Notification(peer, message) for message in messages]
+
+    def _start_progress(self) -> None:
+        # Caller holds _operation_lock.
+        if self._progress_thread is None:
+            self._progress_thread = Thread(
+                target=self._progress, name="nixl-progress", daemon=True
+            )
+            self._progress_thread.start()
+
+    def _progress(self) -> None:
+        delay = 0.0
+        try:
+            while True:
+                available, error = None, None
+                with self._progress_cv:
+                    if delay:
+                        self._progress_cv.wait(delay)
+                    if self._closed or (
+                        not self._notifying and self._available is None
+                    ):
+                        self._progress_thread = None
+                        return
+                    done = [work for work in self._notifying if work._poll()]
+                    self._notifying.difference_update(done)
+                    if self._available is not None:
+                        try:
+                            self._drain_notifications()
+                        except Exception as failure:
+                            error = failure
+                        if error is not None or self._received:
+                            available, self._available = self._available, None
+                # Outside the lock: completion runs Work callbacks, which may
+                # call back into this transport.
+                for work in done:
+                    work.is_completed()
+                if available is not None:
+                    if error is None:
+                        available.set_result(None)
+                    else:
+                        available.set_exception(error)
+                delay = 0.0 if done or available else min(max(delay * 2, 1e-6), 1e-3)
+        finally:
+            with self._operation_lock:
+                if self._progress_thread is current_thread():
+                    self._progress_thread = None
 
     def register_memory(
         self, tensor: torch.Tensor, *, timeout: float | None = None
@@ -284,9 +416,14 @@ class NIXLTransport(Transport):
         *,
         mutable: bool,
         timeout: float,
+        notification: bytes | None,
     ) -> _NIXLWork:
         agent = self._ensure_open()
         self._check_transfer(local_buffer, remote_buffer, mutable=mutable)
+        if notification is not None:
+            self._check_notification(notification)
+            if local_buffer.size() == 0:
+                raise ValueError("zero-byte transfers cannot carry notifications")
         local_buffer = cast(NIXLMemoryView, local_buffer)
         remote_buffer = cast(NIXLRemoteBuffer, remote_buffer)
         registration = local_buffer._memory._registration
@@ -336,11 +473,14 @@ class NIXLTransport(Transport):
         self._pending[id(work)] = work
         _live_transports.add(self)
         try:
-            work._state = agent.transfer(work._handle)
+            work._state = agent.transfer(work._handle, notif_msg=notification or b"")
         except BaseException as error:
             # Dispatch may have started DMA before raising. Keep polling and
             # retain buffers until a native terminal state establishes safety.
             work._error = error
+        if notification is not None:
+            self._notifying.add(work)
+            self._start_progress()
         return work
 
     def _start(
@@ -352,13 +492,19 @@ class NIXLTransport(Transport):
         mutable: bool,
         async_op: bool,
         timeout: float | None,
+        notification: bytes | None,
     ) -> int | Work:
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
         with self._locked(timeout):
             work = self._submit(
-                operation, local_buffer, remote_buffer, mutable=mutable, timeout=timeout
+                operation,
+                local_buffer,
+                remote_buffer,
+                mutable=mutable,
+                timeout=timeout,
+                notification=notification,
             )
         if async_op:
             return work
@@ -376,8 +522,6 @@ class NIXLTransport(Transport):
         timeout: float | None = None,
         notification: bytes | None = None,
     ) -> int | Work:
-        if notification is not None:
-            self._check_notification(notification)
         return self._start(
             "WRITE",
             local_buffer,
@@ -385,6 +529,7 @@ class NIXLTransport(Transport):
             mutable=False,
             async_op=async_op,
             timeout=timeout,
+            notification=notification,
         )
 
     def read(
@@ -396,8 +541,6 @@ class NIXLTransport(Transport):
         timeout: float | None = None,
         notification: bytes | None = None,
     ) -> int | Work:
-        if notification is not None:
-            self._check_notification(notification)
         return self._start(
             "READ",
             local_buffer,
@@ -405,6 +548,7 @@ class NIXLTransport(Transport):
             mutable=True,
             async_op=async_op,
             timeout=timeout,
+            notification=notification,
         )
 
     async def _transfer_async(
@@ -415,13 +559,19 @@ class NIXLTransport(Transport):
         *,
         mutable: bool,
         timeout: float | None,
+        notification: bytes | None,
     ) -> None:
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
         async with self._locked_async(deadline):
             work = self._submit(
-                operation, local_buffer, remote_buffer, mutable=mutable, timeout=timeout
+                operation,
+                local_buffer,
+                remote_buffer,
+                mutable=mutable,
+                timeout=timeout,
+                notification=notification,
             )
         await wait_all([work], timeout=max(0.0, deadline - time.monotonic()))
 
@@ -433,10 +583,13 @@ class NIXLTransport(Transport):
         timeout: float | None = None,
         notification: bytes | None = None,
     ) -> None:
-        if notification is not None:
-            self._check_notification(notification)
         await self._transfer_async(
-            "WRITE", local_buffer, remote_buffer, mutable=False, timeout=timeout
+            "WRITE",
+            local_buffer,
+            remote_buffer,
+            mutable=False,
+            timeout=timeout,
+            notification=notification,
         )
 
     async def read_async(
@@ -447,16 +600,23 @@ class NIXLTransport(Transport):
         timeout: float | None = None,
         notification: bytes | None = None,
     ) -> None:
-        if notification is not None:
-            self._check_notification(notification)
         await self._transfer_async(
-            "READ", local_buffer, remote_buffer, mutable=True, timeout=timeout
+            "READ",
+            local_buffer,
+            remote_buffer,
+            mutable=True,
+            timeout=timeout,
+            notification=notification,
         )
 
     def _begin_close(self, timeout: float) -> list[_NIXLWork]:
         self._closing = True
         with self._locked(timeout):
-            return list(self._pending.values())
+            available, self._available = self._available, None
+            pending = list(self._pending.values())
+        if available is not None:
+            available.set_exception(RuntimeError("transport is closed"))
+        return pending
 
     def close(self, *, timeout: float | None = None) -> None:
         self._close_cuda_streams()
@@ -494,7 +654,10 @@ class NIXLTransport(Transport):
         deadline = time.monotonic() + timeout
         self._closing = True
         async with self._locked_async(deadline):
+            available, self._available = self._available, None
             pending = list(self._pending.values())
+        if available is not None:
+            available.set_exception(RuntimeError("transport is closed"))
         error: BaseException | None = None
         try:
             await wait_all(pending, timeout=max(0.0, deadline - time.monotonic()))
@@ -524,6 +687,7 @@ class NIXLTransport(Transport):
             agent.remove_remote_agent(name)
             self._remote_agents.remove(name)
         self._peers.clear()
+        self._notifying.clear()
         self._agent = None
         self._closed = True
         _live_transports.discard(self)
