@@ -840,6 +840,17 @@ class TestKernelGeneral(TestCase):
         self.assertEqual(got, want, atol=0, rtol=0)
         self.assertEqual(len([k for k in kg._REPLAYS if k[0] == "replay_keys"]), 3)
 
+    def test_replay_keys_on_normalized_dims(self):
+        trait = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
+        x = torch.randn(4, 8, 16, device="cuda")
+        for dims in (-1, 2, [2, 0], [0, -1]):
+            got = kg.replay_reduce(trait, "replay_dims", x, dims, torch.float32)
+            with torch.backends.python_native.cutedsl.disabled():
+                want = x.sum(dim=dims)
+            self.assertEqual(got, want)
+        # -1 and 2 share one entry, and [2, 0] and [0, -1] another.
+        self.assertEqual(len([k for k in kg._REPLAYS if k[0] == "replay_dims"]), 2)
+
     def test_offset_views_share_a_general_plan(self):
         base = torch.randn(3, 8, 16, 16, device="cuda")
         trait = T.SumOps(acc=cutlass.Float32)
@@ -887,6 +898,14 @@ class TestReplayRecords(TestCase):
         self.assertIsNotNone(record.finish([buf]))
         # A torch-op result returned without a launch writing it.
         self.assertIsNone(record.finish([buf.clone()]))
+        # Outputs must view distinct buffers.
+        record = _L.LaunchRecord(x)
+        record.add(None, 0, x, (buf,))
+        self.assertIsNone(record.finish([buf, buf[:4]]))
+        # A storage first seen as both input and output of one launch.
+        record = _L.LaunchRecord(x)
+        record.add(None, 0, [buf], (buf,))
+        self.assertIsNone(record.finish([buf]))
         cases = {
             # A launch reads a torch-op result before any launch writes it.
             "torch_op_input": (x * 2, ()),
