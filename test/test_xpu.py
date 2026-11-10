@@ -293,14 +293,36 @@ if __name__ == "__main__":
         with self.assertRaisesRegex(ValueError, "Unsupported ZE_AFFINITY_MASK format"):
             _parse_visible_devices("one, two", strict=True)
 
-        # ONEAPI_DEVICE_SELECTOR is not honored by Sysman; return [] even in strict mode
+        # ONEAPI_DEVICE_SELECTOR is not honored by Sysman; it overrides
+        # ZE_AFFINITY_MASK, returning [] or raising ValueError in strict mode
         with patch.dict(
             os.environ,
             {"ZE_AFFINITY_MASK": "0, 1", "ONEAPI_DEVICE_SELECTOR": "level_zero:0"},
             clear=True,
         ):
             self.assertEqual(torch.xpu._parse_visible_devices(), [])
-            self.assertEqual(torch.xpu._parse_visible_devices(strict=True), [])
+            with self.assertRaisesRegex(
+                ValueError, "Unsupported ONEAPI_DEVICE_SELECTOR format"
+            ):
+                torch.xpu._parse_visible_devices(strict=True)
+
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
+    def test_device_info_api_raises_with_oneapi_device_selector(self):
+        torch.xpu._cached_zes_device_infos.clear()
+        with patch.dict(os.environ, {"ONEAPI_DEVICE_SELECTOR": "level_zero:0"}):
+            for api in (
+                torch.xpu.temperature,
+                torch.xpu.clock_rate,
+                torch.xpu.power_draw,
+                torch.xpu.utilization,
+                torch.xpu.memory_usage,
+                torch.xpu.device_memory_used,
+                torch.xpu.list_gpu_processes,
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "Unsupported ONEAPI_DEVICE_SELECTOR format"
+                ):
+                    api()
 
     def test_device_info_api_raises_import_error_without_pyzes(self):
         with unittest.mock.patch.dict("sys.modules", {"pyzes": None}):
