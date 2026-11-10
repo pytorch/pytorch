@@ -444,17 +444,13 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
     }
   };
 
-  // The host branch of round_to_odd_float in
-  // torch/headeronly/util/floating_point_utils.h
-  // (portable, as hiprtc also compiles this).
+  // The device branch of round_to_odd_float in
+  // torch/headeronly/util/floating_point_utils.h (NVRTC and hiprtc both have
+  // __double2float_rz).
   inline float round_to_odd_float(double x) {
-    const float f = static_cast<float>(x);
-    const double back = static_cast<double>(f);
-    uint32_t bits = __float_as_uint(f);
-    const uint32_t step = (back != x) & (x == x) & ~bits & 1u;
-    const uint32_t up = fabs(back) < fabs(x);
-    bits += step * (2 * up - 1);
-    return __uint_as_float(bits);
+    const float t = __double2float_rz(x);
+    return __uint_as_float(
+        __float_as_uint(t) | ((static_cast<double>(t) != x) & (x == x)));
   }
 
   // Mirrors detail::rounds_through_float in TypeCast.h. The jiterator's Half
