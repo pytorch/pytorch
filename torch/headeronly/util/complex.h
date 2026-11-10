@@ -244,8 +244,7 @@ struct alignas(sizeof(T) * 2) complex {
 #define FORCE_INLINE_APPLE
 #endif
   template <typename U>
-  constexpr FORCE_INLINE_APPLE complex<T>& operator/=(const complex<U>& rhs)
-      __ubsan_ignore_float_divide_by_zero__ {
+  constexpr FORCE_INLINE_APPLE complex<T>& operator/=(const complex<U>& rhs) {
     // (a + bi) / (c + di) = (ac + bd)/(c^2 + d^2) + (bc - ad)/(c^2 + d^2) i
     // the calculation below follows numpy's complex division
     T a = real_;
