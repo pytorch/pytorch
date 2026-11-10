@@ -1318,11 +1318,11 @@ def index_reduce(
             f"and (source) {src.device}"
         ),
     )
-    torch._check(
+    torch._check_index(
         index.dim() <= 1,
         lambda: (
             f"index_reduce_(): Index is supposed to be a vector, but got dim: "
-            f"{index.dim()} with type: {index.dtype} and size: {index.shape}"
+            f"{index.dim()} with type: {index.dtype} and size: {list(index.shape)}"
         ),
     )
     torch._check(
@@ -1339,36 +1339,40 @@ def index_reduce(
             f"must have the same scalar type"
         ),
     )
-    dim_ = dim + self.dim() if dim < 0 else dim
     torch._check(
-        dim_ == 0 or dim_ < src.dim(),
+        reduction_type in ("prod", "mean", "amax", "amin"),
         lambda: (
-            f"index_reduce_(): Indexing dim {dim} is out of bounds of the "
-            f"source tensor with dim {src.dim()}"
+            "index_reduce(): Expected reduce to be one of prod, mean, amax or "
+            f"amin but got {reduction_type}."
         ),
     )
+    dim = utils.canonicalize_dim(self.dim(), dim)
     numel = index.numel()
     torch._check(
-        numel == (1 if src.dim() == 0 else src.shape[dim_]),
+        numel == (1 if src.dim() == 0 else src.shape[dim]),
         lambda: (
             f"index_reduce_(): Number of indices ({numel}) should be equal to "
-            f"source.size(dim): ({src.shape[dim_]}), for dim: {dim}"
+            f"source.size(dim): ({src.shape[dim]}), for dim: {dim}"
         ),
     )
-    if src.dim() != 0 and self.dim() != 0:
-        shape_matches = all(
-            self.shape[d] == src.shape[d] for d in range(self.dim()) if d != dim_
-        )
-    else:
-        shape_matches = self.dim() == src.dim() and all(
-            self.shape[d] == src.shape[d] for d in range(self.dim())
-        )
     torch._check(
-        shape_matches,
+        self.dim() == src.dim(),
         lambda: (
             "source tensor shape must match self tensor shape, excluding the "
-            f"specified dimension. Got self.shape = {tuple(self.shape)} "
-            f"source.shape = {tuple(src.shape)}"
+            f"specified dimension. Got self.shape = {list(self.shape)} "
+            f"source.shape = {list(src.shape)}"
+        ),
+    )
+    self_sliced_shape = (
+        self.shape[:dim] + self.shape[dim + 1 :] if self.dim() > 0 else ()
+    )
+    src_sliced_shape = src.shape[:dim] + src.shape[dim + 1 :] if src.dim() > 0 else ()
+    torch._check(
+        sym_eq(self_sliced_shape, src_sliced_shape),
+        lambda: (
+            "source tensor shape must match self tensor shape, excluding the "
+            f"specified dimension. Got self.shape = {list(self.shape)} "
+            f"source.shape = {list(src.shape)}"
         ),
     )
     if reduction_type == "mean" and not needs_fallback_due_to_atomic_add_limitations(

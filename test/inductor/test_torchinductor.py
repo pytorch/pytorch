@@ -20872,20 +20872,51 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         index = torch.tensor([0], dtype=torch.int64, device=self.device)
         source = torch.randn(1, device=self.device)
 
-        with self.assertRaises(RuntimeError) as compiled_error:
+        with self.assertRaisesRegex(
+            RuntimeError, "source tensor shape must match self tensor shape"
+        ):
             torch.compile(fn, backend="inductor")(
                 torch.tensor(2.0, device=self.device), index, source
             )
-        self.assertIn(
-            "source tensor shape must match self tensor shape",
-            str(compiled_error.exception),
-        )
+
+        # rank mismatches must also be rejected, as in eager, instead of
+        # passing the check and crashing later in lowering; the index numel
+        # matches source.size(dim) so the shape check is what fires
+        index4 = torch.tensor([0, 1, 2, 3], dtype=torch.int64, device=self.device)
+        with self.assertRaisesRegex(
+            RuntimeError, "source tensor shape must match self tensor shape"
+        ):
+            torch.compile(fn, backend="inductor")(
+                torch.randn(4, device=self.device),
+                index4,
+                torch.randn(4, 4, device=self.device),
+            )
+        with self.assertRaisesRegex(
+            RuntimeError, "source tensor shape must match self tensor shape"
+        ):
+            torch.compile(fn, backend="inductor")(
+                torch.randn(3, 4, device=self.device),
+                index4,
+                torch.randn(4, device=self.device),
+            )
+
+        # an invalid reduction type is rejected, as in eager
+        def fn_sum(self_, index, source):
+            return self_.index_reduce(0, index, source, "sum", include_self=True)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected reduce to be one of"):
+            torch.compile(fn_sum, backend="inductor")(
+                torch.tensor([2.0], device=self.device), index, source
+            )
 
         # a scalar self with a scalar source is still valid, as in eager
-        both_scalar = torch.compile(fn, backend="inductor")(
-            torch.tensor(2.0, device=self.device), index, torch.tensor(5.0, device=self.device)
+        scalar_source = torch.tensor(5.0, device=self.device)
+        self.assertEqual(
+            torch.compile(fn, backend="inductor")(
+                torch.tensor(2.0, device=self.device), index, scalar_source
+            ),
+            fn(torch.tensor(2.0, device=self.device), index, scalar_source),
         )
-        self.assertEqual(both_scalar.item(), 3.5)
 
         # a 1-dim self with a matching source still works and matches eager
         x = torch.tensor([2.0], device=self.device)
