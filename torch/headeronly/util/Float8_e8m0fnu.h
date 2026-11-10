@@ -71,48 +71,18 @@ inline C10_HOST_DEVICE uint8_t fp8e8m0fnu_from_fp32_value(float f) {
     return exponent;
   }
 
-  // next, we use guard, round, sticky bits and the LSB to implement round to
-  // nearest, with ties to even
+  // Round to nearest, with ties going up, as e8m0 has no mantissa bits to be
+  // even. The midpoint between 2^e and 2^(e+1) is 1.5 * 2^e, so normal float32
+  // values round up when the top bit of their mantissa (g) is set. float32
+  // subnormals (exponent 0) are below 2^-126: those from 1.5 * 2^-127 (top two
+  // mantissa bits g and r set) round up to it, and the others become 2^-127,
+  // the smallest e8m0 value (biased exponent 0, as e8m0 has no zero).
+  const uint32_t g = (f_bits >> 22) & 1;
+  const uint32_t r = (f_bits >> 21) & 1;
+  const uint32_t round_up = exponent == 0 ? (g & r) : g;
 
-  // guard bit - bit 23, or 22 zero-indexed
-  uint8_t g = (f_bits & 0x400000) > 0;
-  // round bit - bit 22, or 21 zero-indexed
-  uint8_t r = (f_bits & 0x200000) > 0;
-  // sticky bit - bits 21 to 1, or 20 to 0 zero-indexed
-  uint8_t s = (f_bits & 0x1FFFFF) > 0;
-  // in casting to e8m0, LSB is the implied mantissa bit. It equals to 0 if the
-  // original float32 is denormal, and to 1 if the original float32 is normal.
-  uint8_t lsb = exponent > 0;
-
-  // implement the RNE logic
-  bool round_up = false;
-
-  if (exponent == 0) {
-    // float32 subnormals lie between the two smallest e8m0 values, 2^-127
-    // (g set) and 2^-126: round up from their midpoint (g and r set), with
-    // ties going up as they do for normals
-    round_up = g == 1 && r == 1;
-  } else if (g == 1) {
-    if ((r == 1) || (s == 1)) {
-      // round up
-      round_up = true;
-    } else {
-      if (lsb == 1) {
-        // round up
-        round_up = true;
-      }
-      // if lsb == 0, round down (no-op)
-    }
-  }
-
-  if (round_up) {
-    // adjust exponent
-    // note that if exponent was 255 we would have already returned earlier, so
-    // we know we can add one safely without running out of bounds
-    exponent++;
-  }
-
-  return exponent;
+  // Rounding up from exponent 254 gives 255, e8m0's NaN.
+  return static_cast<uint8_t>(exponent + round_up);
 }
 
 } // namespace detail
