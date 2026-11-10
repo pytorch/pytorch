@@ -920,6 +920,22 @@ class TestOrderedColDevice(TestCase):
         want = x.sum(dim=0, dtype=torch.float32)
         self.assertEqual(got[0], want, atol=1e-2, rtol=1e-3)
 
+    @largeTensorTest("8GB", device="cuda")
+    def test_batch_offsets_pass_int32(self, device):
+        # R * C < 2**31 keeps Int32 row offsets, but batch 2 starts past 2**31.
+        rows, columns = 8192, (1 << 17) + 1
+        flat = torch.randn(3 * rows * columns + 1, device=device, dtype=torch.bfloat16)
+        x = flat[1:].view(3, rows, columns)
+        trait, f32 = T.SumOps(acc=cutlass.Float32), [torch.float32]
+        got = ct.reduce_ordered_col(trait, "ordered_batch_offsets", x, f32, 1)
+        self.assertIsNotNone(got)
+        # Each batch alone replays the same tree from a 64-bit base offset.
+        for b in range(3):
+            want = ct.reduce_ordered_col(trait, "ordered_batch_offsets", x[b], f32, 1)
+            self.assertEqual(got[0][b].view(torch.uint8), want[0].view(torch.uint8))
+        want = x.sum(dim=1, dtype=torch.float32)
+        self.assertEqual(got[0], want, atol=1e-2, rtol=1e-3)
+
     def _reduce(self, device, trait, key, x, dim, outputs, *, route):
         """Inner-tree _reduce with the column route on (this device), off, or as shipped
         (None); also return whether this call compiled an ordered column plan."""
