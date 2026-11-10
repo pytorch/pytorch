@@ -470,6 +470,7 @@ class Tensor {
    * @return true if the conjugate bit is set, false otherwise.
    *
    * Minimum compatible version: PyTorch 2.16.
+   * Build time minimum version: PyTorch 2.16.
    */
   bool is_conj() const {
     bool result = false;
@@ -483,6 +484,7 @@ class Tensor {
    * @return true if the negative bit is set, false otherwise.
    *
    * Minimum compatible version: PyTorch 2.16.
+   * Build time minimum version: PyTorch 2.16.
    */
   bool is_neg() const {
     bool result = false;
@@ -496,6 +498,7 @@ class Tensor {
    * @return true if the tensor is an inference tensor, false otherwise.
    *
    * Minimum compatible version: PyTorch 2.16.
+   * Build time minimum version: PyTorch 2.16.
    */
   bool is_inference() const {
     bool result = false;
