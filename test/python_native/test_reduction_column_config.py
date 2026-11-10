@@ -65,6 +65,8 @@ class TestColumnConfig(TestCase):
             welford_outs=_WELFORD_OUTS.get(key, 0),
         )
         args.update(kwargs)
+        structure = (args["trait_type"], args["nfields"], args["nouts"])
+        args.setdefault("out_dtypes", kg._sm107_outputs(dtype, *structure))
         return ct.select_col_config(**args)
 
     def test_default_geometry(self):
@@ -328,7 +330,9 @@ class TestColumnConfig(TestCase):
         cfg = self._sm107_ordered(dtype, key, rows, columns, partials, fields, outputs)
         self.assertIsNone(cfg)
 
-    def _sm107_ordered(self, dtype, key, rows, columns, partials, fields, outputs):
+    def _sm107_ordered(
+        self, dtype, key, rows, columns, partials, fields, outputs, full_tiles=True
+    ):
         return ct.select_ordered_col_config(
             (10, 7),
             dtype,
@@ -342,7 +346,7 @@ class TestColumnConfig(TestCase):
             acc_bits=32,
             out_dtypes=outputs,
             rows=rows,
-            full_tiles=True,
+            full_tiles=full_tiles,
         )
 
     @parametrize(
@@ -359,6 +363,10 @@ class TestColumnConfig(TestCase):
             (torch.float32, 2048, 256, "mean", 1, "inner_tree"),
             (torch.bfloat16, 64, 256, "mean", 1, "inner_tree"),
             (torch.bfloat16, 64, 256, "amax", 1, "inner_tree"),
+            # Linear: fp32 64 MiB mean, bf16 16 MiB non-Welford, bf16 2 GiB at 1024.
+            (torch.float32, 64, 256, "mean", 1, "linear"),
+            (torch.bfloat16, 16, 256, "sum", 1, "linear"),
+            (torch.bfloat16, 2048, 1024, "sum", 1, "linear"),
             # 4096 columns: fp32 64 MiB and bf16 16 MiB one-output Welford views stay
             # linear; the other traits take the inner tree.
             (torch.float32, 64, 4096, "sum", 1, "inner_tree"),
@@ -441,6 +449,38 @@ class TestColumnConfig(TestCase):
             full_tiles=True,
         )
         self.assertIsNone(cfg)
+
+    def test_sm107_ordered_skips_fp16(self):
+        """Map no fp16 view on SM107, even for traits with an entry."""
+        args = (65536, 1024, 8, 1, (torch.float32,))
+        self.assertIsNotNone(self._sm107_ordered(torch.float32, "sum", *args))
+        self.assertIsNone(self._sm107_ordered(torch.float16, "sum", *args))
+
+    @parametrize(
+        "dtype,key,rows,columns,partials,fields,outputs,expected",
+        [
+            # A mean anchor (no entry), 65536 x 1024, a 4096-column anchor, the 256-column
+            # band, and the bf16 Welford mapping.
+            (torch.float32, "mean", 2097152, 256, 256, 1, (torch.float32,), None),
+            (torch.float32, "sum", 65536, 1024, 8, 1, (torch.float32,), 32),
+            (torch.float32, "sum", 16384, 4096, 2, 1, (torch.float32,), 32),
+            (torch.float32, "sum", 65536, 256, 8, 1, (torch.float32,), 32),
+            (torch.bfloat16, "var0", 8192, 4096, 1, 3, (torch.bfloat16,), 64),
+        ],
+    )
+    def test_sm107_ordered_needs_full_tiles(
+        self, dtype, key, rows, columns, partials, fields, outputs, expected
+    ):
+        """Without full_tiles, SM107 skips the mean-anchor seed and the full-tile remaps,
+        leaving views their table entry (min_blocks expected) or None."""
+        view = (dtype, key, rows, columns, partials, fields, outputs)
+        remapped = self._sm107_ordered(*view)
+        self.assertTrue(remapped.full_tiles)
+        cfg = self._sm107_ordered(*view, full_tiles=False)
+        if expected is None:
+            self.assertIsNone(cfg)
+        else:
+            self.assertEqual(cfg, ct.OrderedColConfig(expected, out_dtypes=outputs))
 
     @parametrize("key,nouts", [("var0", 1), ("varmean0", 2)])
     def test_sm107_ordered_welford_outputs(self, key, nouts):

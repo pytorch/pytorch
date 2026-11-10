@@ -407,8 +407,8 @@ _SM107_ONE_FIELD = tuple(_SM107_ONE_FIELD_NAMES)
 def _sm107_outputs(
     dtype: torch.dtype, trait_type: type, nfields: int, nouts: int
 ) -> tuple[torch.dtype, ...]:
-    """The outputs SM107's policies were measured with: int64 indices, the input dtype
-    for amax and Welford, and fp32 otherwise."""
+    """The outputs SM107's column and full-reduction policies were measured with: int64
+    indices, the input dtype for amax and Welford, and fp32 otherwise."""
     natural = torch.int64 if nfields == 2 else torch.float32
     if nfields == 3 or trait_type is AMaxOps:
         natural = dtype
@@ -418,8 +418,9 @@ def _sm107_outputs(
 _ORDERED_COL_DTYPES = _B200_DTYPES
 # Routing ccs, deliberately separate from the launch-policy _B200_CCS: the route and the
 # policies are measured and extended independently. kernel_coltile._ORDERED_COL_CONFIGS
-# (10, 7) entries are reached through select_col_config hand-offs; other architectures'
-# entries serve direct reduce_ordered_col calls only.
+# (10, 0) entries are reached through _reduce and the b200_ragged_c4095_ordered hand-off,
+# (10, 7) entries through select_col_config hand-offs; entries for architectures outside
+# _ORDERED_COL_CCS, _B200_CCS and (10, 7) serve direct reduce_ordered_col calls only.
 _ORDERED_COL_CCS = ((10, 0),)
 _ORDERED_COL_MIN_R = 128
 _ORDERED_COL_MAX_R = 8192

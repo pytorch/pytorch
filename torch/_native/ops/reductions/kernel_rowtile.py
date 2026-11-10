@@ -137,8 +137,8 @@ class _ItreeArch(NamedTuple):
     # Per-thread width for ragged 16-bit sum-like rows wider than _ITREE_LOWP_MIN_N;
     # 0 keeps _ITREE_THREAD_ELEMS.
     lowp_thread_elems: int = 0
-    # Derive Welford partial counts from the plan where tile.uniform_combine_ok holds, and
-    # skip staging the count field.
+    # Derive Welford partial counts from the plan where the caller passes a trait,
+    # tile.uniform_combine_ok holds and the combine stages a tile; skip staging the count.
     uniform_count: bool = False
     # With uniform_count, stage each partial's precomputed Chan weight in one row shared
     # by the block; weights depend only on the partial index.
@@ -255,7 +255,7 @@ def select_full_itree_arch(
     fp32_sum = nfields == 1 and trait_type is SumOps and dtype == torch.float32
     if fp32_sum or nfields == 2 and trait_type is ArgMaxOps:
         return _SM107_FULL_ITREE_ARCH
-    if nfields != 3 or not welford_outs:
+    if nfields != 3:
         return None
     return _SM107_FULL_ITREE_ARCH._replace(
         combine_unroll=64, uniform_count=True, combine_weights=True
@@ -266,10 +266,11 @@ def _full_itree_arch(
     trait: Any, x: torch.Tensor, out_dtypes: Sequence[torch.dtype]
 ) -> _ItreeArch | None:
     M, N = x.shape
-    if M != 1:
+    cc = _hw.caps(x.device).cc
+    if M != 1 or cc not in _SM107_CCS:
         return None
     return select_full_itree_arch(
-        _hw.caps(x.device).cc,
+        cc,
         x.dtype,
         N,
         M,
@@ -675,9 +676,10 @@ def itree_combine_plan(
     `itemsize` is the widest partial field's size, so each field's copy group stays within
     `combine_group_bytes` and each staged field's footprint is bounded by it. Uniform
     counts stage one field fewer per row, and their weights add one row shared by the
-    block. A given `trait` supplies nfields (default 1) and may enable uniform counts;
-    without one, arch.uniform_count does nothing. `arch` replaces the device's policy:
-    SM107's full-reduction profile (select_full_itree_arch) and tests pass one.
+    block. A given `trait` supplies nfields, which must match any given nfields, and may
+    enable uniform counts; without one, arch.uniform_count does nothing and nfields
+    defaults to 1. `arch` replaces the device's policy: SM107's full-reduction profile
+    (select_full_itree_arch) and tests pass one.
     """
     if trait is not None:
         if nfields is not None and nfields != trait.nfields:
