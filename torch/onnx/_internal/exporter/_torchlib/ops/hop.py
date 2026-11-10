@@ -4,19 +4,20 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import onnx_ir as ir
+
 import torch
-from torch.onnx._internal._lazy_import import onnx_ir as ir
-from torch.onnx._internal.exporter import _core
-from torch.onnx._internal.exporter._torchlib._torchlib_registry import (
-    _legacy_onnx_impl as onnx_impl,
-)
+from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from torch.onnx._internal.exporter._ir_builder import TranslationContext
+
 
 def call_op(
+    op: TranslationContext,
     op_type: str,
     *args: ir.Value | None,
     _num_outputs: int = 1,
@@ -27,44 +28,24 @@ def call_op(
 
     Arguments are always inputs, while keyword arguments are attributes.
     """
-    # This is a wrapper around the IR node creation that hooks into the _builder.OpRecorder
-    # tracer so that all nodes created are recorded the same way as if we were to use
-    # onnxscript ops directly.
-    from onnxscript.ir import convenience as ir_convenience
-
-    if _core.current_tracer is None:
-        raise AssertionError("current_tracer must be non-None")
-    tracer = _core.current_tracer
-
-    inputs = list(args)
-
-    # If final inputs are None, strip them from the node inputs
-    for input in reversed(inputs):
-        if input is not None:
-            break
-        inputs.pop()
-
-    # Construct and filter out None attributes
-    attributes = [
-        attr
-        for attr in ir_convenience.convert_attributes(kwargs)
-        if attr.value is not None  # type: ignore[union-attr]
-    ]
-    tracer.nodes.append(
-        node := ir.Node(
-            _domain,
-            op_type,
-            inputs=inputs,
-            attributes=attributes,
-            num_outputs=_num_outputs,
-            version=tracer.opset.version,
-        )
+    # Use the explicit context so subgraph nodes and ordinary native calls share
+    # recording, optional-input trimming, and opset import handling.
+    builder = op.builder
+    return builder.node(
+        op_type,
+        args,
+        domain=_domain,
+        version=builder.graph.opset_imports.get(_domain, 1)
+        if _domain
+        else builder.opset,
+        attributes=kwargs,
+        output_types=[None] * _num_outputs,
     )
-    return node.outputs
 
 
-@onnx_impl(torch.ops.higher_order.cond, no_compile=True)
+@onnx_impl(torch.ops.higher_order.cond)
 def higher_order_cond(
+    op: TranslationContext,
     cond: ir.Value,
     true_func: ir.Function,
     false_func: ir.Function,
@@ -85,6 +66,7 @@ def higher_order_cond(
         out.name = f"{func_out.name}_{false_func.name}"
 
     return call_op(
+        op,
         "If",
         cond,
         _num_outputs=len(true_func.outputs),
@@ -97,8 +79,9 @@ def higher_order_cond(
     )
 
 
-@onnx_impl(torch.ops.higher_order.scan, no_compile=True)
+@onnx_impl(torch.ops.higher_order.scan)
 def higher_order_scan(
+    op: TranslationContext,
     body_func: ir.Function,
     scan_inits: Sequence[ir.Value],
     scan_inputs: Sequence[ir.Value],
@@ -144,6 +127,7 @@ def higher_order_scan(
 
     n_outputs = len(body_func.outputs) - len(scan_inits)
     return call_op(
+        op,
         "Scan",
         *scan_inits,
         *scan_inputs,
@@ -160,8 +144,9 @@ def higher_order_scan(
     )
 
 
-@onnx_impl(torch.ops.higher_order.while_loop, no_compile=True)
+@onnx_impl(torch.ops.higher_order.while_loop)
 def higher_order_while_loop(
+    op: TranslationContext,
     cond_func: ir.Function,
     body_func: ir.Function,
     carried_inputs: Sequence[ir.Value | int | float],
@@ -295,10 +280,10 @@ def higher_order_while_loop(
         if isinstance(inp, ir.Value):
             carried_inputs_values.append(inp)
         elif isinstance(inp, int):
-            const = call_op("Constant", value=ir.tensor(inp))[0]
+            const = op.builder.constant(inp, dtype=ir.DataType.INT64)
             carried_inputs_values.append(const)
         elif isinstance(inp, float):
-            const = call_op("Constant", value=ir.tensor(inp))[0]
+            const = op.builder.constant(inp, dtype=ir.DataType.FLOAT)
             carried_inputs_values.append(const)
         else:
             raise NotImplementedError(
@@ -307,12 +292,11 @@ def higher_order_while_loop(
             )
 
     # Get initial condition by calling cond_func with initial inputs
-    initial_outputs = call_op(
-        cond_func.name,
+    initial_outputs = op.builder.call_function(
+        cond_func,
         *carried_inputs_values,
         *additional_inputs,
-        _num_outputs=len(cond_func.outputs),
-        _domain=cond_func.domain,
+        version=1,
     )
 
     if len(initial_outputs) != 1:
@@ -321,6 +305,7 @@ def higher_order_while_loop(
     # Create the Loop operator call
     # Loop(M, cond, v_initial) where M is empty (no trip count limit)
     loop_outputs = call_op(
+        op,
         "Loop",
         # M (trip count) - empty string means no limit
         None,
@@ -335,8 +320,9 @@ def higher_order_while_loop(
     return loop_outputs
 
 
-@onnx_impl(torch.ops.higher_order.invoke_subgraph, no_compile=True)
+@onnx_impl(torch.ops.higher_order.invoke_subgraph)
 def higher_order_invoke_subgraph(
+    op: TranslationContext,
     subgraph: ir.Function,
     identifier: str | None,
     *operands: ir.Value,
@@ -364,9 +350,8 @@ def higher_order_invoke_subgraph(
     )
 
     # Create the function call node
-    return call_op(
-        subgraph.name,
+    return op.builder.call_function(
+        subgraph,
         *operands,
-        _num_outputs=len(subgraph.outputs),
-        _domain=subgraph.domain,
+        version=1,
     )
