@@ -437,6 +437,7 @@ class TestPublicBindings(TestCase):
                 "torch._native.ops.linear_cross_entropy.fused_grad_logits_kernel",
                 "torch._native.ops.norm.rmsnorm_kernels",
                 "torch._native.ops.polar.",
+                "torch._native.ops.pointwise.aot_kernels",
                 "torch._native.ops.pointwise.kernel",
                 "torch._native.ops.pointwise.ops",
                 "torch._native.ops.reductions.kernel_general",
