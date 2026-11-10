@@ -242,24 +242,6 @@ def _uniform_tree_issue(
     return None
 
 
-def uniform_tree_ok(
-    trait,
-    count,
-    threads_per_block,
-    npairs_red,
-    *,
-    flat_tail=False,
-    ragged_chunk=False,
-):
-    """Whether general-axis threads can fold count values per output as Welford trees.
-
-    TileReduce also needs a linear-order general-axis fold of inputs (not partials) indexed
-    by r, which ReduceBlock's defaults give, and a block of a power-of-two warp count.
-    """
-    args = (trait, count, threads_per_block, npairs_red, flat_tail, ragged_chunk)
-    return _uniform_tree_issue(*args) is None
-
-
 @cute.jit
 def fold_uniform_tree(
     trait,
