@@ -16,6 +16,14 @@ test fits in 40 GB.
 The forward test is x (B * M, K) @ w (B, N, K)^T with jagged M. The gradient test
 times backward through both inputs (dX and dW). Each test first checks the output, dX
 and dW against per-group matmuls with Primus-Turbo's tolerances.
+
+On ROCm, the CK-Tile numbers need ROCM_ALLOW_GROUP_GEMM_CK_TILE=1; without it grouped_mm
+runs hipBLASLt.
+
+The timed backward also includes DenseGrad's copy of the full (B * M, N) output gradient,
+which the runner's stride-0 out.mean() gradient needs. The copy is memory-bound and costs
+most at small K (roughly 10% of backward at K = 2048 in bf16 on MI300X), so don't compare
+the backward numbers one-to-one with Primus-Turbo's.
 """
 
 # (n_routed_experts, moe_intermediate_size, hidden_size), in Primus-Turbo's order
