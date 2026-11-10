@@ -21,7 +21,7 @@ from ... import config
 from ...autows_utils import has_two_ctas, meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
-    blackwell_ws_persistent_device_tma_main_loop_scaling_template,
+    blackwell_ws_persistent_tma_main_loop_scaling_template,
     blackwell_ws_persistent_tma_mm_template,
     main_loop_sw_scaled_mm_template,
     mm_template,
@@ -3830,7 +3830,7 @@ class CUDAScaledBlackwellTMATemplateConfigHeuristic(
 
 
 @register_template_heuristic(
-    blackwell_ws_persistent_device_tma_main_loop_scaling_template.uid,
+    blackwell_ws_persistent_tma_main_loop_scaling_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="scaled_mm",
@@ -3872,10 +3872,15 @@ class CUDAScaledBlackwellTMAMainLoopScalingTemplateConfigHeuristic(
 
     # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        # The autoWS sweep adds TWO_CTAS configs, but this template has no
+        # cta_group::2 path.
         configs = [
             c
             for c in configs
-            if c.block_k % 128 == 0 and c.block_m == 128 and c.block_n % 128 == 0
+            if c.block_k % 128 == 0
+            and c.block_m == 128
+            and c.block_n % 128 == 0
+            and not (isinstance(c, BlackwellGPUGemmConfig) and c.two_ctas)
         ]
         return super()._filter_configs(configs)
 
@@ -3891,10 +3896,9 @@ class CUDAScaledMainLoopSoftwareScalingTemplateConfigHeuristic(
 ):
     """Small-tile main-loop scaling template heuristic: fp8 tl.dot plus register scaling.
 
-    Built on the plain MM mixin rather than BaseScaledMMConfigMixin because the
-    scaled-MM mixin's scale checks assume the fp32 recipes' layouts, not the
-    K-block-major UE8M0 codes this template reads. The MM mixin already emits
-    ACC_TYPE (fp32 for the bf16 output this path requires).
+    The template takes no bias and only packed MN x K4 block scales, so it
+    needs none of BaseScaledMMConfigMixin's input adjustments. The MM mixin's
+    ACC_TYPE is fp32 for the bf16/fp16/fp32 outputs this path accepts.
     """
 
     def __init__(self) -> None:

@@ -10,12 +10,10 @@
     stride_ak = {{stride("A", 1)}}
     stride_bk = {{stride("B", 0)}}
     stride_bn = {{stride("B", 1)}}
-    # One UE8M0 code per (SCALE_BLOCK_ROWS rows, K128 block), K block fastest:
-    # A is [ceil(M / rows), K blocks], B is [ceil(N / rows), K blocks].
-    stride_scale_am = {{stride("A_inverse_scale", 0)}}
-    stride_scale_ak = {{stride("A_inverse_scale", 1)}}
-    stride_scale_bn = {{stride("B_inverse_scale", 0)}}
-    stride_scale_bk = {{stride("B_inverse_scale", 1)}}
+    # Packed MN x K4 UE8M0 scales: rows padded to a multiple of 4, one 4-byte
+    # word per (row, group of four K128 blocks), rows fastest within a group.
+    scale_group_stride_a = (M + 3) // 4 * 16
+    scale_group_stride_b = (N + 3) // 4 * 16
 
     # based on triton.ops.matmul
     pid = tl.program_id(0).to(INDEX_DTYPE)
@@ -69,11 +67,13 @@
 
         # One UE8M0 scale per K128 block.
         scale_block = (k_idx * BLOCK_K) // 128
+        scale_group, scale_lane = scale_block // 4, scale_block % 4
         scale_a = _e8m0_to_fp32(
             tl.load(
                 A_inverse_scale
-                + (scale_a_rows // SCALE_BLOCK_ROWS_A) * stride_scale_am
-                + scale_block * stride_scale_ak,
+                + scale_group * scale_group_stride_a
+                + scale_a_rows * 4
+                + scale_lane,
                 mask=scale_a_mask,
                 other=127,
             )
@@ -81,8 +81,9 @@
         scale_b = _e8m0_to_fp32(
             tl.load(
                 B_inverse_scale
-                + scale_block * stride_scale_bk
-                + (scale_b_rows // SCALE_BLOCK_ROWS_B) * stride_scale_bn,
+                + scale_group * scale_group_stride_b
+                + scale_b_rows * 4
+                + scale_lane,
                 mask=scale_b_mask,
                 other=127,
             )
