@@ -1311,7 +1311,7 @@ class TestOrderedColDevice(TestCase):
             rows=rows,
             full_tiles=True,
         )
-        # The C 128-257 band: 4 or 5 partials, so 16-column tiles.
+        # 257 columns at R 32768-65536 sit in the C 128-257 band of 16-column tiles.
         self.assertEqual({f["tile_columns"] for f in ops}, {16})
         # A ragged last partition keeps every partition's clamps.
         ragged = plan.split[1] != plan.split[2]
@@ -1492,9 +1492,34 @@ class TestOrderedColDevice(TestCase):
             # given or from the device query.
             got = ct.reduce_ordered_col(T.SumOps(), "select_cc2", x, f32, 1, cc=(2, 0))
             self.assertIsNone(got)
+            # Without an entry, a split view on _ORDERED_COL_CCS takes the selector's
+            # 32-column fallback.
+            mean = T.MeanOps()
+            got = ct.reduce_ordered_col(mean, "select_mean", x, f32, 1)
             if cc not in kg._ORDERED_COL_CCS:
-                got = ct.reduce_ordered_col(T.MeanOps(), "select_none", x, f32, 1)
                 self.assertIsNone(got)
+            else:
+                plan = ct.trait_itree_plan(mean, rows, cols, 4, stage=False)
+                fallback = ct.select_ordered_col_config(
+                    cc,
+                    x.dtype,
+                    cols,
+                    1,
+                    plan.split[0],
+                    trait_type=T.MeanOps,
+                    nfields=mean.nfields,
+                    nouts=1,
+                    welford_outs=0,
+                    acc_bits=32,
+                    out_dtypes=tuple(f32),
+                    rows=rows,
+                    full_tiles=True,
+                )
+                self.assertEqual(fallback.tile_columns, ct.WARP)
+                workers = min(fallback.worker_warps, plan.wpr)
+                ops = [_ordered_fields(k) for k in ct._CACHE if k[1] == "select_mean"]
+                launched = {tuple(map(f.get, names)) for f in ops}
+                self.assertEqual(launched, {(workers, ct.WARP, fallback.full_tiles)})
             # It also declines outputs the entry was not measured with.
             got = ct.reduce_ordered_col(T.ArgMaxOps(), "select_argmax", x, [_I32], 1)
             self.assertIsNone(got)

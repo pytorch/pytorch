@@ -32,10 +32,13 @@ from .kernel_general import (
     _ORDERED_COL_DTYPES,
     _SM107_CCS,
     _SM107_DTYPES,
+    _SM107_LARGE_SIZE,
     _SM107_LARGE_SIZES,
     _SM107_MAX_SIZE,
+    _SM107_MID_SIZE,
     _SM107_MIN_SIZE,
     _SM107_ONE_FIELD,
+    _SM107_ONE_FIELD_NAMES,
     ReduceBlock,
 )
 from .kernel_rowtile import trait_itree_plan
@@ -125,8 +128,6 @@ def _check_ordered_mapping(worker_warps: int, tile_columns: int) -> None:
 
 
 _SM107_MEAN_AMAX = (MeanOps, AMaxOps)
-# Rule names of the _SM107_ONE_FIELD traits.
-_SM107_ONE_FIELD_NAMES = {SumOps: "sum", MeanOps: "mean", AMaxOps: "amax"}
 
 
 def _sm107_welford_columns(dtype: torch.dtype, rows: int | None, columns: int) -> bool:
@@ -137,7 +138,7 @@ def _sm107_mean_columns(bf16: bool, size: int, columns: int) -> bool:
     """Whether SM107 hands one mean or amax column view of this size to the ordered
     kernel, beyond the rules every trait shares."""
     if bf16:
-        return size == 64 << 20 and columns in (256, 1024)
+        return size == _SM107_MID_SIZE and columns in (256, 1024)
     return size in _SM107_LARGE_SIZES and columns == 256
 
 
@@ -177,9 +178,18 @@ def select_ordered_col_config(
     _ORDERED_COL_DTYPES views with 32-bit accumulators and, if the mapping has
     out_dtypes, only to those outputs; SM107 mappings have _sm107_outputs. full_tiles
     requests full tiles; ragged splits are clamped regardless. With rows, B200
-    single-field views whose mapping has full tiles (cfg.full_tiles) take measured tile
-    widths, and C 128-257 a band of widths. Views that fill fewer than the mapping's
-    min_blocks useful 32-column blocks get None.
+    single-field views whose mapping has full tiles (cfg.full_tiles) take 16-column
+    tiles at measured shapes and, at C 128-257, over a band of rows: R 32768-65536, or
+    to 131072 below 192 columns. On SM107, with full_tiles, bf16 one-output Welford
+    views of 8192 rows and 1024 or 4096 columns take a fixed full-tile mapping. A
+    column anchor is a 1024- or 4096-column view of 256 MiB or 2 GiB. MeanOps and
+    AMaxOps views without an entry take OrderedColConfig(32) at 1024-column column
+    anchors and, with full_tiles, at mean anchors (_sm107_mean_columns), which get full
+    tiles 16 columns wide at 256 MiB and 32 otherwise. Other mapped views with
+    full_tiles get 16-column full tiles at 65536 x 1024 unless nfields == 2, full tiles
+    at column anchors, and, replacing the mapping, 16-column full tiles at 256 columns
+    and 32768-131072 rows.
+    Views that fill fewer than the mapping's min_blocks useful 32-column blocks get None.
     """
     # In-tree routing reaches SM107 entries only through select_col_config's hand-offs.
     sm107 = cc in _SM107_CCS and dtype in _SM107_DTYPES
@@ -214,7 +224,7 @@ def select_ordered_col_config(
         return None
     if mean_anchor:
         cfg = cfg._replace(
-            tile_columns=16 if size == 256 << 20 else WARP, full_tiles=True
+            tile_columns=16 if size == _SM107_LARGE_SIZE else WARP, full_tiles=True
         )
     elif sm107 and full_tiles and rows is not None:
         # select_col_config hands SM107 views off at 256, 1024 or 4096 columns only.
@@ -223,23 +233,26 @@ def select_ordered_col_config(
         elif column_anchor:
             cfg = cfg._replace(full_tiles=True)
         elif 32768 <= rows <= 131072 and columns == 256:
-            # bf16 hand-offs here are 16 MiB one-output WelfordOps (var or std, any
-            # correction; minimum 0) or 64 MiB, 16 partials.
+            # min_blocks: 0 for one-output WelfordOps (var or std, any correction), else
+            # 16, or 8 for bf16, which never rejects 256 columns (partials * 256 >= 32 * 8).
+            # bf16 hand-offs here are 16 MiB WelfordOps or 64 MiB views with 16 partials;
+            # 64 MiB mean and amax views are mean anchors, handled above.
             minimum = 0 if nfields == 3 else 16
             if bf16:
                 minimum //= 2
             cfg = OrderedColConfig(minimum, tile_columns=16, full_tiles=True)
     # B200 rows are measured on routed split views only (one field, B = 1, C >= 128).
     elif cc in _B200_CCS and cfg.full_tiles and rows is not None and nfields == 1:
+        band_max_rows = 131072 if columns < 192 else 65536
         if rows == 65536 and columns == 1024:
             cfg = cfg._replace(tile_columns=16)
         # A band of shapes rather than measured anchors. The default route reaches C
         # 128-191 from R = 32768 (kg._ORDERED_SPLIT_NARROW_MIN_R) and C >= 192 from
-        # R = 24577. On ragged (clamped) splits, R 32769-49153 and C 128-256, the band
-        # widths ran up to 1.7x the default mapping (fp32/bf16 sum, count_nonzero, all).
-        elif 32768 <= rows <= 131072 and 128 <= columns <= 257:
-            width = WARP if partials >= 16 and columns == 257 else 16
-            cfg = cfg._replace(tile_columns=width)
+        # R = 24577. Against 32-column tiles (fp32/bf16 sum, count_nonzero, all; ragged
+        # and exact splits), 16-column tiles ran 0.97-1.4x to R = 65536 and, below 192
+        # columns, to R = 131072; wider views ran 0.64-0.98x from R = 81921.
+        elif 32768 <= rows <= band_max_rows and 128 <= columns <= 257:
+            cfg = cfg._replace(tile_columns=16)
         bf16_amax = dtype == torch.bfloat16 and trait_type is AMaxOps
         if bf16_amax and rows == 32768 and columns == 4096:
             cfg = cfg._replace(tile_columns=16)
@@ -427,7 +440,7 @@ def select_col_config(
     inner = False
     if columns == 256:
         inner = (size == _SM107_MIN_SIZE and bf16 and welford) or (
-            size == 64 << 20 and trait_type not in _SM107_MEAN_AMAX
+            size == _SM107_MID_SIZE and trait_type not in _SM107_MEAN_AMAX
         )
     elif columns == 1024:
         if size in _SM107_LARGE_SIZES:
@@ -435,7 +448,7 @@ def select_col_config(
     elif columns == 4096:
         if size == _SM107_MIN_SIZE:
             inner = not bf16 or not welford
-        elif size == 64 << 20:
+        elif size == _SM107_MID_SIZE:
             inner = trait_type in (SumOps, MeanOps) if bf16 else not welford
     if trait_type in _SM107_MEAN_AMAX and _sm107_mean_columns(bf16, size, columns):
         inner = True

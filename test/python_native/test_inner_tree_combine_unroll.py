@@ -126,7 +126,12 @@ class TestInnerTreeCombineUnroll(TestCase):
         split = rt._ItreePlan(
             "split", 4, 16, 1, 2, (), (), (1024, 8192, 8192, 512, 512)
         )
-        arch = rt._ITREE_ARCH[(10, 0)]._replace(combine_max=512)
+        arch = rt._ITREE_ARCH["default"]._replace(
+            combine_rpb=32,
+            combine_group_bytes=16,
+            combine_async=8,
+            combine_max=512,
+        )
         uniform = arch._replace(uniform_count=True, combine_weights=weights)
         kwargs = dict(nrows=32, trait=trait)
         # 32 rows of 516 staged floats: three fields exceed the budget and two fit it, and two
@@ -169,7 +174,9 @@ class TestInnerTreeCombineUnroll(TestCase):
             ({"split": (1024, 2**25, 2**25, 512, 512), "combine_count": 2**25}, "FP32"),
             ({"split": (1024, 6144, 6144, 512, 512), "combine_count": 6144}, "FP32"),
             ({"split": (1024, 8192, 8191, 512, 512)}, "FP32"),
-            ({"rows_per_block": 64}, "rows_per_block <= 32"),
+            ({"rows_per_block": 64}, "at most 32 threads per block, got 64"),
+            ({"wpr": 2}, "at most 32 threads per block, got 64"),
+            ({"stage_e": 4, "rows_per_block": 2}, "at most 32 threads per block"),
         ],
         name_fn=lambda updates, msg: "_".join(
             f"{k}_{v}" for k, v in updates.items()
@@ -177,7 +184,7 @@ class TestInnerTreeCombineUnroll(TestCase):
     )
     def test_uniform_count_tile_rejects(self, updates, msg):
         """Reject weights without counts, plans that stage no complete combine tile,
-        counts outside complete FP32 Welford partials, and staged blocks of more rows
+        counts outside complete FP32 Welford partials, and staged blocks of more threads
         than a warp has lanes."""
         import cutlass
 
@@ -343,7 +350,8 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         self.assertEqual(general, {combine.sig})
         if col_combine is not None:
             # Split columns fold their partials through the general genitree2 combine.
-            self.assertGreater(col_combine.split[0] // col_combine.combine_tile, 1)
+            col_tile = max(col_combine.combine_tile, 1)
+            self.assertGreater(col_combine.split[0] // col_tile, 1)
             self.assertEqual(bool(col_combine.combine_count), uniform != "off")
             self.assertEqual(col_combine.combine_weights, uniform == "weights")
             col_key = ("genitree2", f"{key}_col")

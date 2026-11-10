@@ -223,6 +223,25 @@ class TestColumnConfig(TestCase):
                 "rubin_argmax_c4096_tiled",
                 (512, 4, "partition", 8, "linear"),
             ),
+            # fp32 mean and amax 256-column anchors take the ordered kernel.
+            (
+                torch.float32,
+                256,
+                256,
+                "mean",
+                1,
+                "rubin_c256_ordered",
+                (4096, 4, "column", 0, "inner_tree"),
+            ),
+            (
+                torch.float32,
+                2048,
+                256,
+                "amax",
+                1,
+                "rubin_c256_ordered",
+                (4096, 4, "column", 0, "inner_tree"),
+            ),
         ],
         name_fn=lambda dtype, size, columns, key, fields, rule, expected: (
             f"{rule}_{str(dtype)[6:]}_{size}mib"
@@ -330,6 +349,18 @@ class TestColumnConfig(TestCase):
             (torch.bfloat16, 64, 4096, "mean", 1, "inner_tree"),
             (torch.bfloat16, 64, 4096, "amax", 1, "linear"),
             (torch.float32, 2048, 1024, "sum", 1, "inner_tree"),
+            # Mean and amax at 256 columns: fp32 256 MiB and 2 GiB, bf16 64 MiB.
+            (torch.float32, 256, 256, "amax", 1, "inner_tree"),
+            (torch.float32, 2048, 256, "mean", 1, "inner_tree"),
+            (torch.bfloat16, 64, 256, "mean", 1, "inner_tree"),
+            (torch.bfloat16, 64, 256, "amax", 1, "inner_tree"),
+            # 4096 columns: fp32 64 MiB and bf16 16 MiB one-output Welford views stay
+            # linear; the other traits take the inner tree.
+            (torch.float32, 64, 4096, "sum", 1, "inner_tree"),
+            (torch.float32, 64, 4096, "var0", 3, "linear"),
+            (torch.bfloat16, 16, 4096, "sum", 1, "inner_tree"),
+            (torch.bfloat16, 16, 4096, "argmaxi32", 2, "inner_tree"),
+            (torch.bfloat16, 16, 4096, "var0", 3, "linear"),
             # 8192-row bf16 Welford views.
             (torch.bfloat16, 16, 1024, "var0", 3, "inner_tree"),
             (torch.bfloat16, 64, 4096, "var0", 3, "inner_tree"),
@@ -465,6 +496,14 @@ class TestColumnConfig(TestCase):
             (torch.float32, T.SumOps, 65536, 1024, 8, True, (0, 16)),
             (torch.float32, T.SumOps, 32768, 257, 4, True, (0, 16)),
             (torch.float32, T.SumOps, 131072, 257, 16, True, (0, 32)),
+            # The band stops at 65536 rows from 192 columns, 131072 rows below.
+            (torch.float32, T.SumOps, 65536, 256, 8, True, (0, 16)),
+            (torch.float32, T.SumOps, 65537, 256, 9, True, (0, 32)),
+            (torch.float32, T.SumOps, 131072, 191, 16, True, (0, 16)),
+            # It starts at 32768 rows and spans 128-257 columns.
+            (torch.float32, T.SumOps, 32767, 256, 4, True, (0, 32)),
+            (torch.float32, T.SumOps, 32768, 127, 4, True, (0, 32)),
+            (torch.float32, T.SumOps, 32768, 258, 4, True, (0, 32)),
             (torch.bfloat16, T.AMaxOps, 32768, 4096, 4, True, (0, 16)),
             (torch.bfloat16, T.AMaxOps, 262144, 4096, 32, True, (0, 32)),
             (torch.bfloat16, T.AMinOps, 32768, 4096, 4, True, (0, 32)),
