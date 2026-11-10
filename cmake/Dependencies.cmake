@@ -1279,8 +1279,6 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
     endif()
     set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
-    add_compile_definitions(TORCH_USE_LIBUV)
-    include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/tensorpipe/third_party/libuv/include)
     set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     # Tensorpipe uses cuda_add_library
@@ -1294,12 +1292,6 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     if(USE_CUDA)
       target_compile_options_if_supported(tensorpipe_cuda -Wno-missing-template-arg-list-after-template-kw)
     endif()
-    # Workaround for relocation truncated to fit: R_AARCH64_CALL26 against symbol __aarch64_swp4_relax'
-    # When compiling for ARMv8.0, build uv with embedded atomics, which are slightly slower
-    # But are used only once during shutdown
-    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
-      target_compile_options_if_supported(tensorpipe_uv -mno-outline-atomics)
-    endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
     list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)
@@ -1312,6 +1304,51 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       # list(APPEND Caffe2_HIP_DEPENDENCY_LIBS tensorpipe_hip)
     endif()
   endif()
+endif()
+
+# libuv for the TCPStore server. Windows uses libuv_ROOT, the same libuv Gloo
+# uses; elsewhere use the TensorPipe submodule copy.
+if(USE_DISTRIBUTED)
+  if(WIN32)
+    find_library(
+      libuv_LIBRARY
+      NAMES uv libuv
+      HINTS ${libuv_ROOT} ENV libuv_ROOT
+      PATH_SUFFIXES lib/release lib/debug lib
+      REQUIRED
+      NO_DEFAULT_PATH)
+    find_path(
+      libuv_INCLUDE_DIR
+      NAMES uv.h
+      HINTS ${libuv_ROOT} ENV libuv_ROOT
+      PATH_SUFFIXES include
+      REQUIRED
+      NO_DEFAULT_PATH)
+    include_directories(SYSTEM ${libuv_INCLUDE_DIR})
+    list(APPEND Caffe2_DEPENDENCY_LIBS ${libuv_LIBRARY})
+  else()
+    set(_libuv_dir ${PROJECT_SOURCE_DIR}/third_party/tensorpipe/third_party/libuv)
+    # TensorPipe builds libuv as tensorpipe_uv and links it into tensorpipe.
+    if(TARGET tensorpipe_uv)
+      set(_libuv_target tensorpipe_uv)
+    else()
+      if(NOT EXISTS "${_libuv_dir}/CMakeLists.txt")
+        message(FATAL_ERROR "third_party/tensorpipe/third_party/libuv is missing. Please run: git submodule update --init --recursive")
+      endif()
+      add_subdirectory(${_libuv_dir} ${PROJECT_BINARY_DIR}/third_party/libuv EXCLUDE_FROM_ALL)
+      set_target_properties(uv_a PROPERTIES POSITION_INDEPENDENT_CODE ON)
+      list(APPEND Caffe2_DEPENDENCY_LIBS uv_a)
+      set(_libuv_target uv_a)
+    endif()
+    # Workaround for relocation truncated to fit: R_AARCH64_CALL26 against symbol __aarch64_swp4_relax'
+    # When compiling for ARMv8.0, build uv with embedded atomics, which are slightly slower
+    # But are used only once during shutdown
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+      target_compile_options_if_supported(${_libuv_target} -mno-outline-atomics)
+    endif()
+    include_directories(BEFORE SYSTEM ${_libuv_dir}/include)
+  endif()
+  add_compile_definitions(TORCH_USE_LIBUV)
 endif()
 
 if(USE_GLOO)
