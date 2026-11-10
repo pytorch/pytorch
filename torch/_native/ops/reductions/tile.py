@@ -232,12 +232,12 @@ def _uniform_tree_issue(
     threads_per_block,
     npairs_red,
     *,
-    axis="general",
-    order="linear",
-    combine=False,
-    gidx_from="r",
-    flat_tail=False,
-    ragged_chunk=False,
+    axis,
+    order,
+    combine,
+    gidx_from,
+    flat_tail,
+    ragged_chunk,
 ) -> str | None:
     # The tree indexes one run with Int32 r, which the load cap keeps in range. It bounds
     # the tail by the unclamped rb (no flat_tail or ragged_chunk clamp), and masked lanes
@@ -250,7 +250,7 @@ def _uniform_tree_issue(
     if gidx_from != "r":
         return f"indices from r, got {gidx_from=}"
     if not getattr(trait, "has_combine_equal", False):
-        return f"a trait with combine_equal, got {type(trait).__name__}"
+        return f"a trait with has_combine_equal, got {type(trait).__name__}"
     if npairs_red != 1:
         return f"one reduced run, got {npairs_red}"
     if flat_tail or ragged_chunk:
@@ -311,6 +311,7 @@ def fold_uniform_tree(
         valid = r < count
         safe = r if valid else Int32(0)
         leaf = trait.leaf(trait.acc(mX[obase + Int64(safe) * stride]), safe)
+        # Not trait.reduce: tree folds merge leaves via combine, not the online update.
         merged = trait.combine(acc, leaf)
         acc = tuple(
             merged[f] if valid else acc[f] for f in range(const_expr(trait.nfields))
