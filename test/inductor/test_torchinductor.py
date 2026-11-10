@@ -8121,7 +8121,7 @@ for dtype in (torch.int32, torch.int64):
         # prims.var takes correction positionally, so the traced node can pass it
         # positionally; the lowering has to accept that form.
         def fn(x):
-            return torch.ops.prims.var.default(x, [-1], 1)
+            return torch.ops.prims.var.default(x, [1], 1)
 
         self.common(fn, (torch.randn([2, 8]),))
 
