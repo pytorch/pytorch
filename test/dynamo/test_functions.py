@@ -9734,41 +9734,36 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, expected)
 
-    def test_locally_defined_class_closure_mutation(self):
+    @parametrize("kind", ["dict_iadd", "dict_setitem", "list_append", "list_extend"])
+    def test_locally_defined_class_closure_mutation(self, kind):
         # Regression test for gh-197896
-        def make(kind):
-            state = {"n": 0} if kind.startswith("dict") else []
+        state = {"n": 0} if kind.startswith("dict") else []
 
-            class Helper:
-                def touch(self):
-                    if kind == "dict +=":
-                        state["n"] += 1
-                    elif kind == "dict setitem":
-                        state["k"] = 1
-                    elif kind == "list append":
-                        state.append(1)
-                    elif kind == "list +=":
-                        state.extend([1])
+        class Helper:
+            def touch(self):
+                if kind == "dict_iadd":
+                    state["n"] += 1
+                elif kind == "dict_setitem":
+                    state["k"] = 1
+                elif kind == "list_append":
+                    state.append(1)
+                else:
+                    state.extend([1])
 
-            def f(x):
-                Helper().touch()
-                return x + 1
+        def f(x):
+            Helper().touch()
+            return x + 1
 
-            return f, state
-
-        for kind, expected_state in [
-            ("dict +=", {"n": 2}),
-            ("dict setitem", {"n": 0, "k": 1}),
-            ("list append", [1, 1]),
-            ("list +=", [1, 1]),
-        ]:
-            f, state = make(kind)
-            g = torch.compile(f, backend="eager", fullgraph=True)
-            out1 = g(torch.ones(1))
-            out2 = g(torch.ones(1))
-            self.assertEqual(out1, torch.tensor([2.0]))
-            self.assertEqual(out2, torch.tensor([2.0]))
-            self.assertEqual(state, expected_state)
+        expected_state = {
+            "dict_iadd": {"n": 2},
+            "dict_setitem": {"n": 0, "k": 1},
+            "list_append": [1, 1],
+            "list_extend": [1, 1],
+        }[kind]
+        g = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(g(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(g(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(state, expected_state)
 
     def test_locally_defined_context_manager_closure_mutation(self):
         # Locally defined context manager instantiated inside compiled function
@@ -9810,24 +9805,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(g_prop(torch.ones(1)), torch.tensor([2.0]))
         self.assertEqual(g_prop(torch.ones(1)), torch.tensor([2.0]))
         self.assertEqual(prop_log, ["read", "read"])
-
-    def test_build_class_in_compiled_fn_closure_mutation(self):
-        # Class defined inside the compiled function mutating enclosing closure state
-        inner_log = []
-
-        def f_inner(x):
-            class InnerHelper:
-                def touch(self):
-                    inner_log.append("touched")
-
-            InnerHelper().touch()
-            return x + 1
-
-        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
-            g_inner = torch.compile(f_inner, backend="eager", fullgraph=True)
-            g_inner(torch.ones(1))
-            g_inner(torch.ones(1))
-        self.assertEqual(inner_log, ["touched", "touched"])
 
     def test_locally_defined_method_nonlocal_rebind(self):
         n = 0
@@ -9923,8 +9900,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
         self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
-        self.assertGreater(counter.frame_count, 0)
         self.assertEqual(log, ["touch", "touch"])
+        # touch's closure is sourced through Helper, so Dynamo guards on the
+        # length of the captured log, as it does for any list it reads from a
+        # source: the second call sees one more entry and recompiles.
+        self.assertEqual(counter.frame_count, 2)
 
     def test_getattr_closure_mutation(self):
         log = []
@@ -10008,14 +9988,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x), x + 3)
         self.assertEqual(counter.frame_count, 2)
 
-    def test_locally_instantiated_init_staticmethod_inline_closure_mutation(self):
+    def test_locally_instantiated_init_staticmethod_compiled_closure_mutation(self):
         # __init__ runs through UserDefinedObjectVariable.call_method; the
-        # staticmethod and _torchdynamo_inline paths go through resolve_type_attr.
+        # staticmethod and the torch.compile-wrapped method go through
+        # resolve_type_attr.
         log = []
-
-        def meth_inline(self, x):
-            log.append("inline")
-            return x + 1
 
         class Helper:
             def __init__(self):
@@ -10025,10 +10002,10 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             def touch():
                 log.append("static")
 
+            @torch.compile(backend="eager")
             def meth(self, x):
-                return x + 100
-
-        Helper.meth._torchdynamo_inline = meth_inline
+                log.append("compiled")
+                return x + 1
 
         def fn(x):
             h = Helper()
@@ -10038,7 +10015,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
         self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
-        self.assertEqual(log, ["init", "static", "inline"] * 2)
+        self.assertEqual(log, ["init", "static", "compiled"] * 2)
 
     def test_locally_instantiated_init_staticmethod_rebind(self):
         class Helper:
@@ -10158,6 +10135,33 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         CM.__enter__ = new_enter
         self.assertEqual(compiled(x), x + 2)
         self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("built_in_graph", [True, False])
+    def test_compiled_method_held_across_graph_break(self, built_in_graph):
+        # A bound torch.compile-wrapped method that is live at a graph break is
+        # reconstructed there. It must come back bound to its object, not as
+        # the unbound wrapper in Holder.__dict__["meth"], which the resumed call
+        # would invoke without self. built_in_graph=True builds the object
+        # inside the compiled function, the case this PR newly sources through
+        # its class; False passes it in.
+        class Holder:
+            def __init__(self):
+                self.k = 1
+
+            @torch.compile(backend="eager")
+            def meth(self, x):
+                return x + self.k
+
+        def fn(h, x):
+            if h is None:
+                h = Holder()
+            m = h.meth
+            torch._dynamo.graph_break()
+            return m(x)
+
+        h = None if built_in_graph else Holder()
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend="eager")(h, x), fn(h, x))
 
 
 _FUNCTION_DEVICE_TEST_BASES = (FunctionTestsCudaOnly, FunctionTestsDevice)

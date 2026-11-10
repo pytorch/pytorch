@@ -17491,25 +17491,63 @@ fn
         self.assertEqual(ref, res)
 
     def _make_sourceless_cls_getter(self, cls):
+        # The tests below cover a method whose closure Dynamo reaches with no
+        # source. A plain A().method(x) no longer does that: an instance built
+        # inside the compiled function is sourced through its class, which has
+        # a source (_compile_local_instance_call covers that path). The getter
+        # returned here reaches cls.method with no source instead. If Dynamo
+        # learns to source a class dict behind a metaclass like _Meta (see
+        # gh-202448), these tests stop reaching the sourceless path and their
+        # graph-break assertions fail rather than pass silently.
+        #
+        # _Meta shadows __dict__ with a property, so Dynamo cannot source the
+        # class dict of _Holder.
         class _Meta(type):
             __dict__ = property(lambda c: type.__dict__["__dict__"].__get__(c))
 
+        # _Holder keeps cls.method in that unsourceable class dict.
         class _Holder(metaclass=_Meta):
             target = cls.method
 
+        # type's own __dict__ descriptor reads _Holder's dict past the property
+        # and returns the raw function, with no source.
         _get_dunder_dict = type.__dict__["__dict__"].__get__
 
+        # _Proxy keeps the get_A()().method(x) call shape and passes a fresh
+        # cls() as self, as A().method(x) does.
         class _Proxy:
             def method(self, x):
                 return _get_dunder_dict(_Holder)["target"](cls(), x)
 
         return lambda: _Proxy
 
+    def _compile_local_instance_call(self, cls, x, fullgraph=True):
+        # The call _make_sourceless_cls_getter stands in for: cls().method(x) on
+        # an instance built inside the compiled function. cls has a source, so
+        # the method is sourced through its MRO and its closure cells are
+        # tracked, which avoids the graph break the sourceless path takes.
+        def fn(x):
+            return cls().method(x)
+
+        torch._dynamo.reset()
+        return torch.compile(fn, backend="eager", fullgraph=fullgraph)(x)
+
+    @parametrize("local_instance", [False, True])
     @parametrize(
         "grad_mode_decorator",
         ["no_grad", "enable_grad", "dual_level"],
     )
-    def test_sourceless_bound_method_in_closure(self, grad_mode_decorator):
+    def test_sourceless_bound_method_in_closure(
+        self, grad_mode_decorator, local_instance
+    ):
+        # local_instance=True calls A().method(x) on an instance built inside the
+        # compiled function, which is sourced through A; False reaches A.method
+        # with no source (see _make_sourceless_cls_getter).
+        def getter(cls):
+            if local_instance:
+                return lambda: cls
+            return self._make_sourceless_cls_getter(cls)
+
         # Each case makes the decorator's state change observable.
         if grad_mode_decorator == "no_grad":
 
@@ -17518,7 +17556,7 @@ fn
                 def method(self, x):
                     return x + 1
 
-            get_A = self._make_sourceless_cls_getter(A)
+            get_A = getter(A)
 
             def fn(x):
                 return get_A()().method(x)
@@ -17530,7 +17568,7 @@ fn
                 def method(self, x):
                     return x + 1
 
-            get_A = self._make_sourceless_cls_getter(A)
+            get_A = getter(A)
 
             def fn(x):
                 with torch.no_grad():
@@ -17543,7 +17581,7 @@ fn
                 def method(self, x):
                     return x + torch.autograd.forward_ad._current_level
 
-            get_A = self._make_sourceless_cls_getter(A)
+            get_A = getter(A)
 
             def fn(x):
                 return get_A()().method(x)
@@ -17584,6 +17622,17 @@ fn
             "Sourceless _DecoratorContextManager method reconstruction unsupported",
         )
 
+        res = self._compile_local_instance_call(A, x, fullgraph=False)
+        self.assertEqual(ref, res)
+        self.assertEqual(ref.requires_grad, res.requires_grad)
+        # Sourced, the decorator's ctx_factory still calls set_grad_enabled.clone,
+        # which lives in a module Dynamo skips.
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            self._compile_local_instance_call(A, x)
+        self.assertEqual(
+            ctx.exception.gb_type, "Attempted to call function marked as skipped"
+        )
+
     @parametrize("mode", [True, False])
     def test_sourceless_bound_method_in_closure_inference_mode_graph_breaks(self, mode):
         # inference_mode.clone() needs a source to guard self.mode.
@@ -17612,6 +17661,10 @@ fn
             ctx.exception.gb_type,
             "Sourceless _DecoratorContextManager method reconstruction unsupported",
         )
+
+        res = self._compile_local_instance_call(A, x)
+        self.assertEqual(ref, res)
+        self.assertEqual(torch.is_inference(ref), torch.is_inference(res))
 
     def test_sourced_inference_mode_clone_guards_on_mode(self):
         im = torch.inference_mode(True)
@@ -17680,6 +17733,10 @@ fn
             "Sourceless context manager without mutation support",
         )
 
+        res = self._compile_local_instance_call(A, x)
+        self.assertEqual(ref, res)
+        self.assertEqual((cm.entered, cm.exited), (3, 3))
+
     def test_sourceless_generic_ctx_manager_method_call_graph_breaks(self):
         class Counter:
             def __init__(self):
@@ -17727,6 +17784,9 @@ fn
             ctx.exception.gb_type,
             "Sourceless context manager without mutation support",
         )
+
+        res = self._compile_local_instance_call(A, x)
+        self.assertEqual((res.item(), counter.log), (4.0, [1, 1, 1]))
 
     def test_sourceless_decorator_ctx_manager_other_method_graph_breaks(self):
         class MyCM(torch.utils._contextlib._DecoratorContextManager):
@@ -17776,6 +17836,9 @@ fn
             "Sourceless _DecoratorContextManager method reconstruction unsupported",
         )
 
+        res = self._compile_local_instance_call(A, x)
+        self.assertEqual((res.item(), cm.log), (4.0, [1, 1, 1]))
+
     def test_sourceless_decorator_ctx_manager_inherited_clone_graph_breaks(self):
         class MyCM(torch.utils._contextlib._DecoratorContextManager):
             def __enter__(self):
@@ -17814,6 +17877,8 @@ fn
             ctx.exception.gb_type,
             "Sourceless _DecoratorContextManager method reconstruction unsupported",
         )
+
+        self.assertEqual(self._compile_local_instance_call(A, x), ref)
 
     def test_sourceless_decorator_ctx_manager_mutating_method_graph_breaks(self):
         class MyCM(torch.utils._contextlib._DecoratorContextManager):
@@ -17863,6 +17928,9 @@ fn
             "Sourceless _DecoratorContextManager method reconstruction unsupported",
         )
 
+        res = self._compile_local_instance_call(A, x)
+        self.assertEqual((res.item(), cm.n), (4.0, 3))
+
     @parametrize("delete", [False, True])
     def test_sourceless_bound_clone_self_mutation_graph_breaks(self, delete):
         def make_method(bound):
@@ -17910,6 +17978,14 @@ fn
             ctx.exception.gb_type,
             "Attribute mutation on an untracked user-defined object",
         )
+
+        if not delete:
+            del ctx_manager.foo
+        self.assertEqual(self._compile_local_instance_call(A, x), ref)
+        if delete:
+            self.assertFalse(hasattr(ctx_manager, "foo"))
+        else:
+            self.assertEqual(ctx_manager.foo, 1)
 
     def test_sourced_untracked_mutation_reports_dynamo_bug(self):
         @dataclasses.dataclass
