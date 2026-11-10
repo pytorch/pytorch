@@ -285,7 +285,7 @@ class TestReductionConfig(TestCase):
             )
             self.assertTrue(cfg.uniform_tree)
             self.assertTrue(tile.uniform_tree_ok(T.WelfordOps(), count, cfg.block, 1))
-        # TileReduce rejects general-axis blocks of a non-power-of-two warp count.
+        # The block check shared with TileReduce rejects a non-power-of-two warp count.
         self.assertFalse(tile.uniform_tree_ok(T.WelfordOps(), 4096, 96, 1))
 
     @parametrize(
@@ -362,17 +362,19 @@ class TestReductionConfig(TestCase):
         self.assertEqual(cfg.rule, expected_rule)
 
     @parametrize(
-        "dtype,trait,size,expected",
+        "dtype,trait,columns,size,expected",
         [
             (
                 torch.bfloat16,
                 "sum",
+                4095,
                 256 << 20,
                 ct.ColConfig("b200_ragged_c4095", 64, 512, 1, "partition", 8, 16),
             ),
             (
                 torch.float32,
                 "argmax",
+                4095,
                 16 << 20,
                 ct.ColConfig(
                     "b200_ragged_argmax_c4095_small", 32, 8, 1, "column", 0, 64
@@ -381,12 +383,14 @@ class TestReductionConfig(TestCase):
             (
                 torch.bfloat16,
                 "argmax",
+                4095,
                 2 << 30,
                 ct.ColConfig("b200_ragged_argmax_c4095", 64, 1024, 1, "column"),
             ),
             (
                 torch.float16,
                 "mean",
+                4095,
                 16 << 20,
                 ct.ColConfig(
                     "b200_ragged_c4095_ordered",
@@ -400,6 +404,7 @@ class TestReductionConfig(TestCase):
             (
                 torch.bfloat16,
                 "var",
+                4095,
                 64 << 20,
                 ct.ColConfig(
                     "b200_ragged_welford_c4095", 64, 128, 1, "column", col_group=8
@@ -408,21 +413,69 @@ class TestReductionConfig(TestCase):
             (
                 torch.float32,
                 "var",
+                4095,
                 2 << 30,
                 ct.ColConfig(
                     "b200_ragged_welford_c4095", 64, 1928, 1, "column", col_group=8
                 ),
             ),
+            (
+                torch.float32,
+                "sum",
+                4095,
+                64 << 20,
+                ct.ColConfig("b200_ragged_c4095", 64, 256, 1, "column"),
+            ),
+            (
+                torch.float32,
+                "sum",
+                4095,
+                2 << 30,
+                ct.ColConfig("b200_ragged_c4095", 64, 512, 1, "column"),
+            ),
+            (
+                torch.float16,
+                "sum",
+                4095,
+                2 << 30,
+                ct.ColConfig("b200_ragged_c4095", 64, 512, 1, "column"),
+            ),
+            (
+                torch.float32,
+                "argmax",
+                257,
+                64 << 20,
+                ct.ColConfig("b200_ragged_c257", 64, 2048, 1, "column"),
+            ),
+            (
+                torch.float16,
+                "sum",
+                257,
+                2 << 30,
+                ct.ColConfig("b200_ragged_c257", 64, 16384, 1, "column"),
+            ),
+            (
+                torch.float16,
+                "var",
+                257,
+                256 << 20,
+                ct.ColConfig(
+                    "b200_ragged_welford_c257", 64, 1024, 1, "column", col_group=16
+                ),
+            ),
         ],
-        name_fn=lambda dtype, trait, size, cfg: f"{cfg.rule}_{size >> 20}mib",
+        name_fn=lambda d, t, c, size, cfg: f"{cfg.rule}_{str(d)[6:]}_{size >> 20}mib",
     )
-    def test_b200_ragged_column_values(self, dtype, trait, size, expected):
-        """Pin every field of the B200 C = 4095 ragged column rules, not just names."""
+    def test_b200_ragged_column_values(self, dtype, trait, columns, size, expected):
+        """Pin every ColConfig field at sampled anchors of each B200 ragged column arm:
+        C = 4095 one-field (with bf16's 256 MiB partition layout), small and large argmax,
+        ordered and Welford; C = 257 one-field (with fp16's 2 GiB npar), argmax, and
+        narrow Welford (col_group=16)."""
         itemsize = dtype.itemsize
-        rows = size // (4095 * itemsize)
+        rows = size // (columns * itemsize)
         contract = _contract(_TRAITS[trait])
         nfields = contract.pop("nfields")
-        args = ((10, 0), dtype, rows, 4095, 1, nfields)
+        args = ((10, 0), dtype, rows, columns, 1, nfields)
         cfg = ct.select_col_config(*args, itemsize=itemsize, acc_bits=32, **contract)
         self.assertEqual(cfg, expected)
 
