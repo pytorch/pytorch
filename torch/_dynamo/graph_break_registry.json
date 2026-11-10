@@ -2593,6 +2593,16 @@
       "Hints": []
     }
   ],
+  "GB1891": [
+    {
+      "Gb_type": "Unsafe value live across comprehension graph break",
+      "Context": "{value}, frame skipped: {format_frame_info(tx.f_code)}",
+      "Explanation": "A context manager or local generator cannot be reconstructed safely after a comprehension graph break, so the frame falls back to eager.",
+      "Hints": [
+        "Close the generator first, or move the comprehension into a helper."
+      ]
+    }
+  ],
   "GB0150": [
     {
       "Gb_type": "Unsupported hasattr call",

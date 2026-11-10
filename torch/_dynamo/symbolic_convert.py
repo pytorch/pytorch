@@ -94,6 +94,7 @@ from .bytecode_transformation import (
     Instruction,
     is_generator,
     is_jump_absolute,
+    UNCOVERED_IN_BLOCK_OPNAMES,
     unique_id_unbound_in,
 )
 from .code_context import code_context
@@ -2022,11 +2023,7 @@ class InstructionTranslatorBase(
             # are still in the same block. It is probably safe to do
             # this in 3.11, even though we haven't encountered this case before.
             # In 3.14+, NOT_TAKEN might also not be covered by an exn table entry.
-            if self.block_stack and inst.opname not in (
-                "NOP",
-                "JUMP_BACKWARD",
-                "NOT_TAKEN",
-            ):
+            if self.block_stack and inst.opname not in UNCOVERED_IN_BLOCK_OPNAMES:
                 # If we really escape from a block and the current
                 # instruction is not in another block, then there
                 # should be no other nested blocks that we are in.
@@ -6343,7 +6340,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def _can_speculate_comprehension_nested(self) -> bool:
         """Check if comprehension speculation is allowed in this inlined context.
 
-        Unlike should_compile_partial_graph(), this skips the exception table entry check.
+        Unlike should_compile_partial_graph(), this skips the exception table entry
+        check for this frame; maybe_setup_comprehension_speculation does that check at
+        the comprehension's first prefix instruction instead.
         """
         if not config.nested_graph_breaks:
             return False
