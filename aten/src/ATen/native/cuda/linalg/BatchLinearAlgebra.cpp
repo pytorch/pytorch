@@ -423,43 +423,33 @@ void ldl_factor_kernel(
     const Tensor& info,
     bool upper,
     bool hermitian) {
-#if !defined(USE_ROCM)
-  _warn_once_magma_deprecation("linalg.ldl_factor");
-#endif
+#if defined(USE_ROCM)
+  _warn_once_magma_deprecation("linalg.eig", /*force_cusolver=*/false);
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver: {
-      #if !defined(USE_ROCM)
-      if (hermitian && LD.is_complex()) {
-        return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, upper);
+      return ldl_factor_cusolver(LD, pivots, info, upper, hermitian);
+    }
+    case at::LinalgBackend::Magma: {
+      return ldl_factor_magma(LD, pivots, info, upper, hermitian);
+    }
+    default: {
+      // If cusolver and magma 2.5.4+ are both available and hermitian=true (on ROCm),
+      // call magma for complex inputs
+      #if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 20504)
+      if (LD.is_complex() && hermitian) {
+        return ldl_factor_magma(LD, pivots, info, upper, hermitian);
       }
       #endif
       return ldl_factor_cusolver(LD, pivots, info, upper, hermitian);
     }
-    #if defined(USE_ROCM)
-    case at::LinalgBackend::Magma: {
-      return ldl_factor_magma(LD, pivots, info, upper, hermitian);
-    }
-    #endif
-    default: {
-      #if defined(USE_ROCM)
-      // If cusolver and magma 2.5.4+ are both available and hermitian=true (on ROCm),
-      // call magma for complex inputs
-        #if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 20504)
-        if (LD.is_complex() && hermitian) {
-          return ldl_factor_magma(LD, pivots, info, upper, hermitian);
-        }
-        #endif
-      return ldl_factor_cusolver(LD, pivots, info, upper, hermitian);
-      #else
-      // cuSOLVER has no Hermitian LDL for complex inputs, so the custom kernel takes them.
-      // For real inputs, where hermitian=true is sytrf too, the custom kernel is faster, yet
-      // they are still dispatched to cuSOLVER.
-      return hermitian && LD.is_complex() ? ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, upper)
-                                          : ldl_factor_cusolver(LD, pivots, info, upper, hermitian);
-      #endif
-    }
   }
+#endif
+    // cuSOLVER has no Hermitian LDL for complex inputs, so the custom kernel takes them.
+    // For real inputs, where hermitian=true is sytrf too, the custom kernel is faster, yet
+    // they are still dispatched to cuSOLVER.
+    return hermitian && LD.is_complex() ? ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, upper)
+                                          : ldl_factor_cusolver(LD, pivots, info, upper, hermitian);
 }
 
 void ldl_solve_kernel(
