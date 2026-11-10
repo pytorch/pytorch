@@ -16,11 +16,14 @@
 #include <type_traits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_philox_dropout_native.h>
 #include <ATen/ops/_philox_normal_native.h>
 #include <ATen/ops/_philox_randint_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
+#include <ATen/ops/empty_like.h>
 #endif
 
 namespace at::native {
@@ -340,6 +343,34 @@ Tensor& _philox_uniform_tensor_cuda_(
     });
   });
   return self;
+}
+
+Tensor _philox_dropout_cuda(const Tensor& self, const Tensor& key, double p) {
+  TORCH_CHECK(self.is_floating_point(),
+      "_philox_dropout: self must be a floating point tensor, got ",
+      self.scalar_type());
+  TORCH_CHECK(p >= 0 && p <= 1, "_philox_dropout: p must be in [0, 1], got ", p);
+  auto result = at::empty_like(self);
+  auto input = self.contiguous();
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_dropout", [&] {
+    using compute_t = dist_acctype<scalar_t>;
+    auto sample_func = [] __device__ (uint64_t seed, uint64_t offset) {
+      return uniform_sample<compute_t>(seed, offset);
+    };
+    const scalar_t* in_ptr = input.const_data_ptr<scalar_t>();
+    auto threshold = static_cast<compute_t>(p);
+    auto scale = static_cast<compute_t>(p == 1 ? 0.0 : 1.0 / (1.0 - p));
+    auto param_func = [in_ptr, threshold, scale] __device__ (auto rand, int64_t idx) {
+      compute_t u = at::transformation::uniform_real(rand, compute_t(0), compute_t(1));
+      // Multiply rather than select so NaN and inf propagate, like native dropout.
+      return static_cast<scalar_t>(
+          static_cast<compute_t>(in_ptr[idx]) * (u >= threshold ? scale : compute_t(0)));
+    };
+    philox_distribution_kernel<scalar_t>(
+        "_philox_dropout", result, key, sample_func, param_func);
+  });
+  return result;
 }
 
 Tensor& _philox_normal_cuda_(
