@@ -128,8 +128,8 @@ class _ItreeArch(NamedTuple):
     # Per-thread width for ragged 16-bit sum-like rows wider than _ITREE_LOWP_MIN_N;
     # 0 keeps _ITREE_THREAD_ELEMS.
     lowp_thread_elems: int = 0
-    # Derive Welford partial counts from the plan where tile.uniform_combine_ok holds, and
-    # skip staging the count field.
+    # Derive Welford partial counts from the plan where the caller passes a trait,
+    # tile.uniform_combine_ok holds and the combine stages a tile; skip staging the count.
     uniform_count: bool = False
     # With uniform_count, stage each partial's precomputed Chan weight in one row shared
     # by the block; weights depend only on the partial index.
@@ -532,9 +532,10 @@ def itree_combine_plan(
     `itemsize` is the widest partial field's size, so each field's copy group stays within
     `combine_group_bytes` and each staged field's footprint is bounded by it. Uniform
     counts stage one field fewer per row, and their weights add one row shared by the
-    block. A given `trait` supplies nfields (default 1) and may enable uniform counts;
-    without one, arch.uniform_count does nothing. `arch` replaces the device's policy:
-    a workload-specific profile and tests pass one.
+    block. A given `trait` supplies nfields, which must match any given nfields, and may
+    enable uniform counts; without one, arch.uniform_count does nothing and nfields
+    defaults to 1. `arch` replaces the device's policy: a workload-specific profile and
+    tests pass one.
     """
     if trait is not None:
         if nfields is not None and nfields != trait.nfields:
