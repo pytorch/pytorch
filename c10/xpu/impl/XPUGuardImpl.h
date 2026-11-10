@@ -42,13 +42,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   void uncheckedSetDevice(Device d) const noexcept override {
-    // set_device() throws on an out-of-range index; warn instead of
-    // std::terminate when restoring the device from a guard destructor.
-    try {
-      c10::xpu::set_device(d.index());
-    } catch (const std::exception& e) {
-      TORCH_WARN("uncheckedSetDevice() ignoring error: ", e.what());
-    }
+    c10::xpu::set_device(d.index());
   }
 
   DeviceCapability getDeviceCapability(Device d) const override {
