@@ -86,7 +86,9 @@ calculate_swa(int window_size_left,
               int max_seqlen_k,
               bool is_causal,
               bool is_varlen) {
-  // A negative window size means that side is unbounded, as in FA2 and CK.
+  // Every negative window size is treated as -1. A lone -1 side is not
+  // unbounded: FA2 substitutes max_seqlen_k for it (left = -1 with right = 0
+  // is plain causal instead), and so does the AOTriton >= 0.15 branch below.
 #if AOTRITON_V3_API  // SWA is exposed through V3 API
   using aotriton::v3::flash::WindowValue;
 #if AOTRITON_PRINCIPAL_DIAGONAL_API
