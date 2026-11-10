@@ -157,6 +157,7 @@ class TestStream(TestCase):
     def test_default_stream(self, device):
         m = torch.get_device_module(device)
         self.assertEqual(m.current_stream(), m.default_stream())
+        self.assertNotEqual(m.Stream(), m.default_stream())
 
     # Check that two separate workloads run on separate streams gives the same
     # result as running them on one stream.
