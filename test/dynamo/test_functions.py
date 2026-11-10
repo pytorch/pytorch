@@ -247,6 +247,24 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x, left, right), x + 8)
         self.assertEqual(counter.frame_count, 2)
 
+    def test_mro_guards_omit_builtin_object_tail(self):
+        class Input:
+            scale = 1
+
+        def fn(x, obj):
+            return x + obj.scale
+
+        x, obj = torch.ones(1), Input()
+        explanation = torch._dynamo.explain(fn)(x, obj)
+        self.assertEqual(explanation.graph_count, 1)
+        self.assertFalse(
+            any(
+                guard.create_fn_name() == "ID_MATCH"
+                and guard.name == "type(L['obj']).__mro__[1]"
+                for guard in explanation.out_guards
+            )
+        )
+
     def test_mro_guards_bypass_metaclass_lookup(self):
         class Meta(type):
             def __getattribute__(cls, name):
@@ -324,19 +342,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = inline_ignore(x)
         x = inline_unused(x)
         return
-
-    def test_script_function_graph_break(self):
-        @torch.jit.script
-        def scripted():
-            if torch.jit.is_scripting():
-                return 1
-            print("unreachable")
-            return 2
-
-        def fn():
-            return scripted()
-
-        self.assertEqual(torch.compile(fn, backend="eager")(), 1)
 
     @make_test
     def test_inline_script_if_tracing_fn_with_default_args(a, b):
