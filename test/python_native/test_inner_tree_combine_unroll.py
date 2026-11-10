@@ -6,7 +6,10 @@ from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    largeTensorTest,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -165,15 +168,21 @@ class TestInnerTreeCombineUnroll(TestCase):
             ({"shape": "split"}, "staged combine plan"),
             ({"combine_tile": 0}, "staged combine plan"),
             ({"split": (1024, 4096, 8192, 512, 512)}, "staged combine plan"),
-            ({"trait": "sum"}, "FP32"),
-            ({"trait": "fp64"}, "FP32"),
+            ({"trait": "sum"}, "combine_uniform, got SumOps"),
+            ({"trait": "fp64"}, "an FP32 accumulator"),
             ({"split": (1024,)}, "staged combine plan"),
             ({"split": (1024, 8192, 8192)}, "staged combine plan"),
-            ({"split": (0, 8192, 8192, 512, 512)}, "FP32"),
-            ({"split": (2**25, 8192, 8192, 512, 512)}, "FP32"),
-            ({"split": (1024, 2**25, 2**25, 512, 512), "combine_count": 2**25}, "FP32"),
-            ({"split": (1024, 6144, 6144, 512, 512), "combine_count": 6144}, "FP32"),
-            ({"split": (1024, 8192, 8191, 512, 512)}, "FP32"),
+            ({"split": (0, 8192, 8192, 512, 512)}, "partials, got 0$"),
+            ({"split": (2**25, 8192, 8192, 512, 512)}, "partials, got 33554432"),
+            (
+                {"split": (1024, 2**25, 2**25, 512, 512), "combine_count": 2**25},
+                "two count up to .*, got 33554432",
+            ),
+            (
+                {"split": (1024, 6144, 6144, 512, 512), "combine_count": 6144},
+                "two count up to .*, got 6144",
+            ),
+            ({"split": (1024, 8192, 8191, 512, 512)}, "one count, got 8192 and 8191"),
             ({"rows_per_block": 64}, "at most 32 threads per block, got 64"),
             ({"wpr": 2}, "at most 32 threads per block, got 64"),
             ({"stage_e": 4, "rows_per_block": 2}, "at most 32 threads per block"),
@@ -338,7 +347,8 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         )
         key = f"multitile_{unroll}_{uniform}_{name}"
         combine, col_combine, got = run(arch, key)
-        self.assertGreater(combine.split[0] // max(combine.combine_tile, 1), 1)
+        self.assertEqual(combine.combine_tile, 128)
+        self.assertGreater(combine.split[0] // combine.combine_tile, 1)
         self.assertEqual(combine.combine_unroll, unroll)
         self.assertEqual(bool(combine.combine_count), uniform != "off")
         self.assertEqual(combine.combine_weights, uniform == "weights")
@@ -360,6 +370,75 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             self.assertEqual(col_sigs, {col_combine.sig})
         for g, w in zip(got, want):
             self.assertEqual(g.view(torch.int32), w.view(torch.int32))
+
+    @parametrize("key", ["sum", "var1"])
+    @largeTensorTest("1GB", device="cuda")
+    def test_sm107_profile_reaches_every_plan(self, device, key):
+        """Thread the SM107 profile through both row entry points' split and combine
+        builders, bitwise equal to the default profile."""
+        import cutlass
+
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
+
+        real_arch, real_plan, real_combine = (
+            rt._full_itree_arch,
+            rt.itree_plan,
+            rt.itree_combine_plan,
+        )
+        sm107 = mock.Mock(cc=(10, 7))
+        profiles, archs, plans = [], [], []
+
+        def full_arch(*args):
+            with mock.patch.object(rt._hw, "caps", return_value=sm107):
+                profiles.append(real_arch(*args))
+            return profiles[-1]
+
+        def recorded(real):
+            def plan(*args, **kwargs):
+                archs.append(kwargs.get("arch"))
+                plans.append(real(*args, **kwargs))
+                return plans[-1]
+
+            return plan
+
+        welford = key == "var1"
+        trait = (T.WelfordOps if welford else T.SumOps)(acc=cutlass.Float32)
+        x = torch.randn(1, (256 << 20) // 4, device=device)
+        with (
+            mock.patch.object(rt, "_full_itree_arch", full_arch),
+            mock.patch.object(rt, "itree_plan", recorded(real_plan)),
+            mock.patch.object(rt, "itree_combine_plan", recorded(real_combine)),
+        ):
+            (got,) = rt.reduce_row_tile(
+                trait, key, x, [torch.float32], order="inner_tree"
+            )
+            # The ordered entry point takes the same profile and plans, compiling its own
+            # kernels under a distinct key.
+            ordered = torch.empty(1, device=device)
+            self.assertTrue(rt.reduce_row_itree(trait, key + "_ordered", x, ordered))
+        self.assertEqual(len(profiles), 2)
+        self.assertIsNotNone(profiles[0])
+        self.assertTrue(all(arch == profiles[0] for arch in archs))
+        split, c, ordered_split, ordered_c = plans
+        self.assertEqual((ordered_split.sig, ordered_c.sig), (split.sig, c.sig))
+        self.assertEqual(ordered.view(torch.int32), got.view(torch.int32))
+        staged = (split.shape, split.rows_per_block, split.stage_e)
+        self.assertEqual(staged, ("split", 4, 32))
+        folded = (c.combine_tile, c.combine_unroll, c.combine_count, c.combine_weights)
+        # Welford partials come from uniform 8192-element batches, so they are weighted.
+        want = (2048, 64, 8192, True) if welford else (2048, 128, 0, False)
+        self.assertEqual(folded, want)
+        # Each stage's cache key ends with its plan's sig.
+        for tag, plan in (("rowitree1", split), ("rowitree2", c)):
+            self.assertIn(plan.sig, {k[-1] for k in rt._CACHE if k[:2] == (tag, key)})
+        # Every _ItreeArch knob is bit-neutral, so the default profile gives the same bits.
+        default = rt._ITREE_ARCH["default"]
+        ref_plan = rt.trait_itree_plan(trait, x.shape[1], 1, 4, arch=default)
+        self.assertNotEqual(ref_plan.sig, split.sig)
+        (want,) = rt._run_itree(
+            trait, key + "_ref", x, [torch.float32], ref_plan, arch=default
+        )
+        self.assertEqual(got.view(torch.int32), want.view(torch.int32))
 
     @parametrize("weights", [False, True])
     @parametrize("rpb", [1, 4])

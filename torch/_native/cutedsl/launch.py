@@ -137,9 +137,10 @@ class LaunchRecord:
     appeared in a launch's output position, before any input position, and every output
     views a distinct such buffer. Torch-op results that a launch reads, or that are
     returned without a launch writing them, therefore decline, as do operands that view
-    a buffer at another dtype than its first sighting; the write-only-scratch
-    contract is what protects tensors first passed as launch outputs. Buffers are keyed
-    by storage, since views made below autograd do not record their base.
+    `x` at another dtype than `x.dtype`, or a buffer at another dtype than its first
+    sighting; the write-only-scratch contract is what protects tensors first passed as
+    launch outputs. Buffers are keyed by storage, since views made below autograd do not
+    record their base.
     """
 
     def __init__(self, x: torch.Tensor) -> None:

@@ -251,29 +251,40 @@ def uniform_tree_ok(
     flat_tail=False,
     ragged_chunk=False,
 ):
-    """Whether general-axis threads can fold count values per output as Welford trees.
+    """Whether TileReduce accepts a general-axis uniform Welford tree of count values per
+    output on a block of threads_per_block threads.
 
-    TileReduce also needs a linear-order general-axis fold of inputs (not partials) indexed
-    by r, which ReduceBlock's defaults give, and a block of a power-of-two warp count.
+    TileReduce also needs a linear-order fold of inputs (not partials) indexed by r, which
+    ReduceBlock's defaults give.
     """
+    nwg = threads_per_block // WARP
+    if threads_per_block % WARP or nwg & (nwg - 1):
+        return False
     args = (trait, count, threads_per_block, npairs_red, flat_tail, ragged_chunk)
     return _uniform_tree_issue(*args) is None
 
 
-def uniform_combine_ok(trait, split):
-    """Whether combine_uniform can fold a split plan's partials with derived counts."""
+def _uniform_combine_issue(trait, split) -> str | None:
     if not getattr(trait, "has_combine_uniform", False):
-        return False
-    if trait.acc is not cutlass.Float32 or len(split) != 5:
-        return False
+        return f"a trait with combine_uniform, got {type(trait).__name__}"
+    if trait.acc is not cutlass.Float32:
+        return f"an FP32 accumulator, got {trait.acc}"
+    if len(split) != 5:
+        return f"a split plan, got {split=}"
     nbatch, count, last = split[:3]
     # Equal power-of-two counts keep every index * count exact in fp32.
-    return (
-        0 < nbatch <= 2**24
-        and 0 < count <= 2**24
-        and count == last
-        and not count & (count - 1)
-    )
+    if not 0 < nbatch <= 2**24:
+        return f"1 to 2**24 partials, got {nbatch}"
+    if count != last:
+        return f"partials of one count, got {count} and {last}"
+    if not 0 < count <= 2**24 or count & (count - 1):
+        return f"a power-of-two count up to 2**24, got {count}"
+    return None
+
+
+def uniform_combine_ok(trait, split):
+    """Whether combine_uniform can fold a split plan's partials with derived counts."""
+    return _uniform_combine_issue(trait, split) is None
 
 
 @cute.jit
@@ -737,6 +748,8 @@ def _fold_welford_equal_group(
         row = mX[Int64(row0 + Int32(i)), None]
         leaf = leaf_fn(acc_dt(row[col]), idx0 + Int32(i))
         _equal_count_push(tree, leaf, i, combine_equal_fn)
+    if const_expr(len(tree) != 1):
+        raise ValueError(f"col_group must be a power of two, got {group}")
     return tree[0]
 
 
@@ -883,10 +896,10 @@ class TileReduce:
                 raise ValueError(
                     f"uniform combine counts need a staged combine plan of {itree.combine_count}-value partials, got {itree.shape=} {itree.combine_tile=} {itree.split=}"
                 )
-            if itree.combine_count and not uniform_combine_ok(trait, itree.split):
-                raise ValueError(
-                    f"uniform combine counts fail uniform_combine_ok (an FP32 trait with combine_uniform and 1 to 2**24 partials of one power-of-two count up to 2**24), got {type(trait).__name__} acc={trait.acc} {itree.split=}"
-                )
+            if itree.combine_count:
+                issue = _uniform_combine_issue(trait, itree.split)
+                if issue is not None:
+                    raise ValueError(f"uniform combine counts need {issue}")
             # The plan maps wpr chunks to wpr // kchunk warps and rows_per_block rows.
             threads_per_row = WARP * (itree.wpr // itree.kchunk) if itree.wpr else 1
             if itree.stage_e:
