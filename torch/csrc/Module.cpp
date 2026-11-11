@@ -612,7 +612,7 @@ namespace {
 
 template <class T>
 void DLPack_Capsule_Destructor(PyObject* data) {
-  if (C10_LIKELY(!PyCapsule_IsValid(data, at::DLPackTraits<T>::capsule))) {
+  if (!PyCapsule_IsValid(data, at::DLPackTraits<T>::capsule)) [[likely]] {
     // early out, see DLPack spec: if a consuming library sets the capsule
     // name to something else, they own it and we don't need to do anything
     return;
@@ -3555,7 +3555,7 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "TensorWise",
           at::blas::ScalingType::TensorWise,
-          "Single scale per-tensor")
+          "Single scale per tensor or per group for grouped GEMM")
       .value(
           "RowWise", at::blas::ScalingType::RowWise, "Scale per-row of tensor")
       .value(
@@ -3790,6 +3790,21 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def(
       "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
+  // True iff x has a storage with a non-null data pointer, i.e. False for
+  // wrapper subclasses at any storage offset. Never raises and never
+  // materializes COW storages. See Note [Invalid Python Storages].
+  py_module.def("_has_storage_data", [](const at::Tensor& x) {
+    if (!x.has_storage()) {
+      return false;
+    }
+    auto* storage =
+        x.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl();
+    // Nothing is mutated here: the pointer is only read. Unlike the checked
+    // accessors, _mutable_data_ptr_no_checks() neither materializes a COW
+    // storage nor raises for storages whose data access is forbidden (e.g.
+    // FakeTensor storages).
+    return storage->_mutable_data_ptr_no_checks().get() != nullptr;
+  });
 
   // See Note [C++ in_kernel_invocation].
   torch::impl::py_context_manager<c10::impl::InKernelInvocationGuard>(
