@@ -5,6 +5,7 @@ import functools
 import logging
 import random
 import re
+import tempfile
 import unittest
 from contextlib import contextmanager
 from datetime import timedelta
@@ -27,7 +28,7 @@ from torch._dynamo.backends.distributed import DDPOptimizer
 from torch._dynamo.comptime import comptime
 from torch._dynamo.device_interface import CudaInterface, DeviceGuard
 from torch._dynamo.testing import collect_results, CompileCounter
-from torch._dynamo.utils import same
+from torch._dynamo.utils import counters, same
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.compiler import set_enable_guard_collectives
 from torch.distributed._functional_collectives import _maybe_wrap_tensor
@@ -2936,8 +2937,10 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         self.assertEqual(actual, input @ w)
 
 
-@unittest.skipIf(not dist.is_available(), "requires distributed")
-class TestObjectCollectives(DynamoDistributedSingleProcTestCase):
+@unittest.skipIf(
+    not dist.is_available() or not dist.is_gloo_available(), "requires Gloo"
+)
+class TestObjectCollectives(torch._dynamo.test_case.TestCase):
     def test_object_collectives(self):
         def fn(x):
             gathered = [None]
@@ -2948,12 +2951,30 @@ class TestObjectCollectives(DynamoDistributedSingleProcTestCase):
             dist.scatter_object_list(scattered, [0], src=0)
             return x + gathered[0] + gathered_at_root[0] + scattered[0]
 
-        x = torch.ones(1, device=self.device)
-        expected = fn(x)
-        counter = CompileCounter()
-        actual = torch.compile(fn, backend=counter)(x)
-        self.assertEqual(actual, expected)
-        self.assertGreater(counter.frame_count, 0)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dist.init_process_group(
+                "gloo", store=dist.FileStore(f"{tmpdir}/store", 1), rank=0, world_size=1
+            )
+            try:
+                x = torch.ones(1)
+                expected = fn(x)
+                counter = CompileCounter()
+                compiled = torch.compile(fn, backend=counter)
+                counters.clear()
+                actual = compiled(x)
+                self.assertEqual(actual, expected)
+                self.assertTrue(
+                    any(
+                        "_get_object_coll_device" in reason
+                        and "marked as skipped" in reason
+                        for reason in counters["graph_break"]
+                    )
+                )
+                frame_count = counter.frame_count
+                self.assertEqual(compiled(x), expected)
+                self.assertEqual(counter.frame_count, frame_count)
+            finally:
+                dist.destroy_process_group()
 
     def test_object_collective_device_update(self):
         from torch._C._distributed_c10d import Backend
@@ -2969,7 +2990,7 @@ class TestObjectCollectives(DynamoDistributedSingleProcTestCase):
         def fn(x):
             return dist.distributed_c10d._get_object_coll_device(pg), x + 1
 
-        x = torch.ones(1, device=self.device)
+        x = torch.ones(1)
         compiled = torch.compile(fn, backend="eager")
         self.assertEqual(compiled(x)[0], "cuda")
 
