@@ -245,7 +245,6 @@
   "test/distributed/test_transport_registry.py",
   "test/distributed/test_watchdog.py",
   "test/distributions/test_distributions.py",
-  "test/dynamo/test_activation_checkpointing.py",
   "test/dynamo/test_activation_offloading.py",
   "test/dynamo/test_after_aot.py",
   "test/dynamo/test_aot_autograd.py",
