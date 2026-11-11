@@ -254,9 +254,14 @@ void TuningResultsManager::ClearUntuned() {
 }
 
 void TuningResultsManager::ClearAll() {
-  std::scoped_lock l{lock_};
-  results_.clear();
-  untuned_results_.clear();
+  {
+    std::scoped_lock l{lock_};
+    results_.clear();
+    untuned_results_.clear();
+  }
+  // The results file may be deleted after this, so reopen it on the next result
+  // instead of appending to the unlinked file.
+  CloseRealtimeAppend();
 }
 
 void TuningResultsManager::InitRealtimeAppend(const std::string& filename, const std::unordered_map<std::string, std::string>& validators) {

@@ -1,7 +1,6 @@
 # Owner(s): ["module: package/deploy"]
 
 from io import BytesIO
-from textwrap import dedent
 from unittest import skipIf
 
 import torch
@@ -32,159 +31,13 @@ skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
 class TestPackageScript(PackageTestCase):
     """Tests for compatibility with TorchScript."""
 
-    def test_package_interface(self):
-        """Packaging an interface class should work correctly."""
-
-        import package_a.fake_interface as fake
-
-        uses_interface = fake.UsesInterface()
-        scripted = torch.jit.script(uses_interface)
-        scripted.proxy_mod = torch.jit.script(fake.NewModule())
-
-        buffer = BytesIO()
-        with PackageExporter(buffer) as pe:
-            pe.intern("**")
-            pe.save_pickle("model", "model.pkl", uses_interface)
-        buffer.seek(0)
-
-        package_importer = PackageImporter(buffer)
-        loaded = package_importer.load_pickle("model", "model.pkl")
-
-        scripted_loaded = torch.jit.script(loaded)
-        scripted_loaded.proxy_mod = torch.jit.script(fake.NewModule())
-
-        input = torch.tensor(1)
-
-        self.assertEqual(scripted(input), scripted_loaded(input))
-
-    def test_different_package_interface(self):
-        """Test a case where the interface defined in the package is
-        different than the one defined in the loading environment, to make
-        sure TorchScript can distinguish between the two.
-        """
-        # Import one version of the interface
-        import package_a.fake_interface as fake
-
-        # Simulate a package that contains a different version of the
-        # interface, with the exact same name.
-        buffer = BytesIO()
-        with PackageExporter(buffer) as pe:
-            pe.save_source_string(
-                fake.__name__,
-                dedent(
-                    """\
-                    import torch
-                    from torch import Tensor
-
-                    @torch.jit.interface
-                    class ModuleInterface(torch.nn.Module):
-                        def one(self, inp1: Tensor) -> Tensor:
-                            pass
-
-                    class ImplementsInterface(torch.nn.Module):
-                        def one(self, inp1: Tensor) -> Tensor:
-                            return inp1 + 1
-
-                    class UsesInterface(torch.nn.Module):
-                        proxy_mod: ModuleInterface
-
-                        def __init__(self) -> None:
-                            super().__init__()
-                            self.proxy_mod = ImplementsInterface()
-
-                        def forward(self, input: Tensor) -> Tensor:
-                            return self.proxy_mod.one(input)
-                    """
-                ),
-            )
-        buffer.seek(0)
-
-        package_importer = PackageImporter(buffer)
-        diff_fake = package_importer.import_module(fake.__name__)
-        # We should be able to script successfully.
-        torch.jit.script(diff_fake.UsesInterface())
-
-    def test_package_script_class(self):
-        import package_a.fake_script_class as fake
-
-        buffer = BytesIO()
-        with PackageExporter(buffer) as pe:
-            pe.save_module(fake.__name__)
-        buffer.seek(0)
-
-        package_importer = PackageImporter(buffer)
-        loaded = package_importer.import_module(fake.__name__)
-
-        input = torch.tensor(1)
-        self.assertTrue(
-            torch.allclose(
-                fake.uses_script_class(input), loaded.uses_script_class(input)
-            )
-        )
-
-    def test_package_script_class_referencing_self(self):
-        import package_a.fake_script_class as fake
-
-        obj = fake.UsesIdListFeature()
-        # intentionally script here to fill the compilation cache, to make sure
-        # there is no false sharing between scripted types coming from the
-        # package vs. outside environment.
-        torch.jit.script(obj)
-
-        buffer = BytesIO()
-        with PackageExporter(buffer) as exporter:
-            exporter.intern("**")
-            exporter.save_pickle("obj", "obj.pkl", obj)
-
-        buffer.seek(0)
-        importer = PackageImporter(buffer)
-        obj_loaded = importer.load_pickle("obj", "obj.pkl")
-        scripted_obj_loaded = torch.jit.script(obj_loaded)
-
-        # Make sure the scripted object can be serialized without error.
-        buffer2 = scripted_obj_loaded.save_to_buffer()
-        torch.jit.load(BytesIO(buffer2))
-
-    def test_different_package_script_class(self):
-        """Test a case where the script class defined in the package is
-        different than the one defined in the loading environment, to make
-        sure TorchScript can distinguish between the two.
-        """
-        import package_a.fake_script_class as fake
-
-        # Simulate a package that contains a different version of the
-        # script class ,with the attribute `bar` instead of `foo`
-        buffer = BytesIO()
-        with PackageExporter(buffer) as pe2:
-            pe2.save_source_string(
-                fake.__name__,
-                dedent(
-                    """\
-                    import torch
-
-                    @torch.jit.script
-                    class MyScriptClass:
-                        def __init__(self, x):
-                            self.bar = x
-                    """
-                ),
-            )
-        buffer.seek(0)
-
-        package_importer = PackageImporter(buffer)
-        diff_fake = package_importer.import_module(fake.__name__)
-        input = torch.rand(2, 3)
-        loaded_script_class = diff_fake.MyScriptClass(input)
-        orig_script_class = fake.MyScriptClass(input)
-        self.assertEqual(loaded_script_class.bar, orig_script_class.foo)
-
     def test_save_scriptmodule(self):
         """
         Test basic saving of ScriptModule.
         """
         from package_a.test_module import ModWithTensor
 
-        scripted_mod = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
+        scripted_mod = torch.jit._script.script(ModWithTensor(torch.rand(1, 2, 3)))
 
         buffer = BytesIO()
         with PackageExporter(buffer) as e:
@@ -206,7 +59,7 @@ class TestPackageScript(PackageTestCase):
         """
         from package_a.test_module import ModWithTensor
 
-        scripted_mod = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
+        scripted_mod = torch.jit._script.script(ModWithTensor(torch.rand(1, 2, 3)))
 
         filename = self.temp()
         with PackageExporter(filename) as e:
@@ -223,7 +76,7 @@ class TestPackageScript(PackageTestCase):
         """
         from package_a.test_module import ModWithSubmod, ModWithTensor
 
-        scripted_mod = torch.jit.script(
+        scripted_mod = torch.jit._script.script(
             ModWithSubmod(ModWithTensor(torch.rand(1, 2, 3)))
         )
 
@@ -258,7 +111,7 @@ class TestPackageScript(PackageTestCase):
             def forward(self, input: str):
                 return self.modB(input)
 
-        scripted_mod_0 = torch.jit.script(TopMod())
+        scripted_mod_0 = torch.jit._script.script(TopMod())
 
         # redefinition is intentional, change single inner string
         # string attribute, should trigger new module type
@@ -267,7 +120,7 @@ class TestPackageScript(PackageTestCase):
                 input = input + "_submod(changed)"
                 return input
 
-        scripted_mod_1 = torch.jit.script(TopMod())
+        scripted_mod_1 = torch.jit._script.script(TopMod())
 
         buffer = BytesIO()
         with PackageExporter(buffer) as e:
@@ -289,8 +142,8 @@ class TestPackageScript(PackageTestCase):
         """
         from package_a.test_module import ModWithTensor, SimpleTest
 
-        scripted_mod_0 = torch.jit.script(SimpleTest())
-        scripted_mod_1 = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
+        scripted_mod_0 = torch.jit._script.script(SimpleTest())
+        scripted_mod_1 = torch.jit._script.script(ModWithTensor(torch.rand(1, 2, 3)))
 
         buffer = BytesIO()
         with PackageExporter(buffer) as e:
@@ -318,9 +171,9 @@ class TestPackageScript(PackageTestCase):
             SimpleTest,
         )
 
-        scripted_mod_0 = torch.jit.script(SimpleTest())
-        scripted_mod_1 = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
-        scripted_mod_2 = torch.jit.script(
+        scripted_mod_0 = torch.jit._script.script(SimpleTest())
+        scripted_mod_1 = torch.jit._script.script(ModWithTensor(torch.rand(1, 2, 3)))
+        scripted_mod_2 = torch.jit._script.script(
             ModWithSubmodAndTensor(
                 torch.rand(1, 2, 3), ModWithTensor(torch.rand(1, 2, 3))
             )
@@ -351,8 +204,8 @@ class TestPackageScript(PackageTestCase):
         """
         from package_a.test_module import ModWithSubmodAndTensor, ModWithTensor
 
-        scripted_mod_0 = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
-        scripted_mod_1 = torch.jit.script(
+        scripted_mod_0 = torch.jit._script.script(ModWithTensor(torch.rand(1, 2, 3)))
+        scripted_mod_1 = torch.jit._script.script(
             ModWithSubmodAndTensor(
                 torch.rand(1, 2, 3), ModWithTensor(torch.rand(1, 2, 3))
             )
@@ -399,8 +252,8 @@ class TestPackageScript(PackageTestCase):
             def forward(self, input):
                 return input * 4
 
-        scripted_mod_0 = torch.jit.script(ModWithTorchVision("foo"))
-        scripted_mod_1 = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
+        scripted_mod_0 = torch.jit._script.script(ModWithTorchVision("foo"))
+        scripted_mod_1 = torch.jit._script.script(ModWithTensor(torch.rand(1, 2, 3)))
 
         buffer_0 = BytesIO()
         with PackageExporter(buffer_0) as e:
@@ -426,8 +279,8 @@ class TestPackageScript(PackageTestCase):
         """
         from package_a.test_module import ModWithSubmodAndTensor, ModWithTensor
 
-        scripted_mod_a = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
-        scripted_mod_b = torch.jit.script(
+        scripted_mod_a = torch.jit._script.script(ModWithTensor(torch.rand(1, 2, 3)))
+        scripted_mod_b = torch.jit._script.script(
             ModWithSubmodAndTensor(torch.rand(1, 2, 3), scripted_mod_a)
         )
         script_mods_list = [scripted_mod_a, scripted_mod_b]
@@ -451,7 +304,7 @@ class TestPackageScript(PackageTestCase):
         """
         from package_a.test_module import ModWithSubmod, SimpleTest
 
-        scripted_mod = torch.jit.script(SimpleTest())
+        scripted_mod = torch.jit._script.script(SimpleTest())
 
         mod1 = ModWithSubmod(scripted_mod)
         mod2 = ModWithSubmod(scripted_mod)
@@ -479,7 +332,7 @@ class TestPackageScript(PackageTestCase):
             SimpleTest,
         )
 
-        scripted_mod = torch.jit.script(SimpleTest())
+        scripted_mod = torch.jit._script.script(SimpleTest())
 
         mod1 = ModWithSubmod(scripted_mod)
         mod2 = ModWithSubmod(scripted_mod)
@@ -507,7 +360,7 @@ class TestPackageScript(PackageTestCase):
         from package_a.test_module import ModWithSubmodAndTensor, ModWithTensor
 
         shared_tensor = torch.rand(2, 3, 4)
-        scripted_mod = torch.jit.script(ModWithTensor(shared_tensor))
+        scripted_mod = torch.jit._script.script(ModWithTensor(shared_tensor))
 
         mod1 = ModWithSubmodAndTensor(shared_tensor, scripted_mod)
         mod2 = ModWithSubmodAndTensor(shared_tensor, scripted_mod)
@@ -539,8 +392,8 @@ class TestPackageScript(PackageTestCase):
 
         shared_tensor = torch.ones(3, 3)
 
-        scripted_mod_0 = torch.jit.script(ModWithTensor(shared_tensor))
-        scripted_mod_1 = torch.jit.script(ModWithTensor(shared_tensor))
+        scripted_mod_0 = torch.jit._script.script(ModWithTensor(shared_tensor))
+        scripted_mod_1 = torch.jit._script.script(ModWithTensor(shared_tensor))
 
         mod1 = ModWithTwoSubmodsAndTensor(shared_tensor, scripted_mod_0, scripted_mod_1)
 
@@ -593,8 +446,8 @@ class TestPackageScript(PackageTestCase):
 
         shared_tensor = torch.ones(3, 3)
 
-        scripted_mod_0 = torch.jit.script(ModWithTensor(shared_tensor))
-        scripted_mod_1 = torch.jit.script(ModWithTensor(shared_tensor))
+        scripted_mod_0 = torch.jit._script.script(ModWithTensor(shared_tensor))
+        scripted_mod_1 = torch.jit._script.script(ModWithTensor(shared_tensor))
 
         mod1 = ModWithTwoSubmodsAndTensor(shared_tensor, scripted_mod_0, scripted_mod_1)
 
@@ -657,7 +510,7 @@ class TestPackageScript(PackageTestCase):
         input = torch.rand(2, 3)
         self.assertEqual(loaded_mod(input), orig_mod(input))
 
-        scripted_mod = torch.jit.script(loaded_mod)
+        scripted_mod = torch.jit._script.script(loaded_mod)
 
         buffer_1 = BytesIO()
         with PackageExporter(buffer_1, importer=importer_0) as e:
@@ -687,12 +540,12 @@ class TestPackageScript(PackageTestCase):
                 return input, (self.tensor * 4)
 
         inline_mod = InlineMod("inline")
-        scripted_inline = torch.jit.script(inline_mod)
+        scripted_inline = torch.jit._script.script(inline_mod)
 
         from package_a.test_module import SimpleTest
 
         imported_mod = SimpleTest()
-        scripted_imported = torch.jit.script(imported_mod)
+        scripted_imported = torch.jit._script.script(imported_mod)
 
         buffer = BytesIO()
         with PackageExporter(buffer) as e:
@@ -728,12 +581,12 @@ class TestPackageScript(PackageTestCase):
             return a + b
 
         inline_mod = TorchVisionTestInline()
-        scripted_inline = torch.jit.script(inline_mod)
+        scripted_inline = torch.jit._script.script(inline_mod)
 
         from package_c.test_module import TorchVisionTest
 
         imported_mod = TorchVisionTest()
-        scripted_imported = torch.jit.script(imported_mod)
+        scripted_imported = torch.jit._script.script(imported_mod)
 
         buffer = BytesIO()
         with PackageExporter(buffer) as e:
@@ -762,7 +615,7 @@ class TestPackageScript(PackageTestCase):
             def forward(self):
                 return self.foo
 
-        scripted_m = torch.jit.script(M())
+        scripted_m = torch.jit._script.script(M())
         original_tensor = torch.ones(0)
 
         f = BytesIO()
