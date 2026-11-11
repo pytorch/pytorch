@@ -25,6 +25,12 @@
 # guard. When absent, the declaration is emitted ungated, which would signify that the op was
 # available since torch 2.9. ALL NEWLY ADDED OPS MUST INCLUDE A "since" KEY WITH THE VALUE SET
 # TO THE CURRENT TORCH VERSION (the version when the op was added).
+# A backend added later can override this with "since_<device>" (e.g. "since_cuda")
+# on the base op or a vN entry without changing other backends' availability.
+# The base op's backend version is a lower bound for all variants on that backend;
+# a variant's own version can raise this bound but cannot lower it.
+
+AOTI_SUPPORTED_DEVICES = frozenset({"cpu", "cuda", "mps", "xpu", "aten"})
 
 inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = {
     "aten._adaptive_avg_pool2d_backward.default": {},
@@ -62,7 +68,7 @@ inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = 
     "aten._fused_moving_avg_obs_fq_helper.default": {},
     "aten._fused_rms_norm.default": {},
     "aten._grouped_mm.default": {"since": "TORCH_VERSION_2_12_0"},
-    "aten._histogramdd_from_bin_cts.default": {},
+    "aten._histogramdd_from_bin_cts.default": {"since_cuda": "TORCH_VERSION_2_16_0"},
     "aten._int_mm.out": {},
     "aten._pdist_backward.default": {},
     "aten._pdist_forward.default": {},
@@ -134,7 +140,7 @@ inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = 
     "aten.grid_sampler_3d_backward.default": {"since": "TORCH_VERSION_2_13_0"},
     "aten.hann_window.default": {},
     "aten.histc.default": {},
-    "aten.histogram.bin_ct": {},
+    "aten.histogram.bin_ct": {"since_cuda": "TORCH_VERSION_2_16_0"},
     "aten.index_put.default": {},
     "aten.index_reduce.default": {},
     "aten.index.Tensor": {},

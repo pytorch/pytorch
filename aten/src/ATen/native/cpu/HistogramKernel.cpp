@@ -110,12 +110,16 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
     std::vector<const input_t*> bin_seq(D);
     std::vector<int64_t> num_bin_edges(D);
     std::vector<input_t> leftmost_edge(D), rightmost_edge(D);
+    std::vector<input_t> bin_scales(algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH ? D : 0);
 
     for (const auto dim : c10::irange(D)) {
         bin_seq[dim] = bin_edges[dim].const_data_ptr<input_t>();
         num_bin_edges[dim] = bin_edges[dim].numel();
         leftmost_edge[dim] = bin_seq[dim][0];
         rightmost_edge[dim] = bin_seq[dim][num_bin_edges[dim] - 1];
+        if (algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
+            bin_scales[dim] = (num_bin_edges[dim] - 1) / (rightmost_edge[dim] - leftmost_edge[dim]);
+        }
     }
 
     int64_t GRAIN_SIZE = std::max(int64_t(1), HISTOGRAM_GRAIN_SIZE / D);
@@ -166,19 +170,31 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
                     /* When bin_edges is known to be a linear progression, maps elt to
                      * the appropriate bin via simple division.
                      */
-                    pos = static_cast<int64_t>((elt - leftmost_edge[dim])
-                            * (num_bin_edges[dim] - 1)
-                            / (rightmost_edge[dim] - leftmost_edge[dim]));
+                    const input_t estimate = algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH
+                            ? (elt - leftmost_edge[dim]) * bin_scales[dim]
+                            : (elt - leftmost_edge[dim]) * (num_bin_edges[dim] - 1)
+                                    / (rightmost_edge[dim] - leftmost_edge[dim]);
+                    if (algorithm == LINEAR_INTERPOLATION ||
+                            (estimate >= 0 && estimate < num_bin_edges[dim])) {
+                        pos = static_cast<int64_t>(estimate);
+                    }
 
                     /* Ensures consistency with bin_edges by checking the bins to the left and right
                      * of the selected position. Necessary for cases in which an element very close
                      * to a bin edge may be misclassified by simple division.
                      */
                     if (algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
-                        int64_t pos_min = std::max(static_cast<int64_t>(0), pos - 1);
-                        int64_t pos_max = std::min(pos + 2, num_bin_edges[dim]);
-                        pos = std::upper_bound(bin_seq[dim] + pos_min, bin_seq[dim] + pos_max, elt)
-                                - bin_seq[dim] - 1;
+                        const int64_t pos_min = pos >= 0 ? std::max(int64_t(0), pos - 1) : 0;
+                        const int64_t pos_max = pos >= 0 ? std::min(pos + 2, num_bin_edges[dim]) : num_bin_edges[dim];
+                        const auto* first = bin_seq[dim] + pos_min;
+                        const auto* last = bin_seq[dim] + pos_max;
+                        const auto* upper = std::upper_bound(first, last, elt);
+                        // Expand only when rounding puts the upper bound outside the local window.
+                        if ((upper == first && pos_min > 0) ||
+                                (upper == last && pos_max < num_bin_edges[dim] && elt >= *last)) {
+                            upper = std::upper_bound(bin_seq[dim], bin_seq[dim] + num_bin_edges[dim], elt);
+                        }
+                        pos = upper - bin_seq[dim] - 1;
                     }
                 } else {
                     TORCH_INTERNAL_ASSERT(false);
