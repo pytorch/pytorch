@@ -54,6 +54,7 @@ from torch._subclasses.fake_tensor import (
     run_fallback_kernel,
     UnsupportedOperatorException,
 )
+from torch._subclasses.meta_utils import is_sparse_compressed
 from torch.fx.operator_schemas import _normalize_function_or_error
 from torch.utils._stats import count_label
 
@@ -699,6 +700,51 @@ def sparse_compressed_constructors(
     )
     with in_kernel_invocation_manager(fake_mode), suppress_invariants:
         out = func(**new_kwargs)
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, out, out_device
+    )
+
+
+@register_op_impl(aten.sparse_mask.default)
+def sparse_mask(
+    fake_mode: FakeTensorMode, func: OpOverload, self: FakeTensor, mask: FakeTensor
+) -> FakeTensor:
+    # With a strided self, the kernel recomputes the mask's sparsity pattern
+    # via nonzero, which is data-dependent and whose meta raises by default.
+    # The result has the mask's structure, so build it from the mask's
+    # metadata instead. Other cases keep the existing path; with nnz == 0 or
+    # numel == 0 eager returns mask.to(...), which keeps the mask's index
+    # dtype, so leave those too.
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
+
+    if (
+        self.layout != torch.strided
+        or not is_sparse_compressed(mask)
+        or not guard_or_false(sym_eq(self.shape, mask.shape))
+        or guard_or_false(mask._nnz() == 0)
+        or guard_or_false(mask.numel() == 0)
+    ):
+        return NotImplemented
+    out_device, _ = FakeTensor._find_common_device(func, [self, mask])
+    with (
+        in_kernel_invocation_manager(fake_mode),
+        torch.sparse.check_sparse_tensor_invariants(False),
+    ):
+        if mask.layout in (torch.sparse_csr, torch.sparse_bsr):
+            compressed, plain = mask.crow_indices(), mask.col_indices()
+        else:
+            compressed, plain = mask.ccol_indices(), mask.row_indices()
+        # Eager's plain indices are row 1 of a (2, *plain.shape) buffer.
+        plain_buf = torch.empty((2, *plain.shape), dtype=torch.long, device="meta")
+        out = torch.ops.aten._sparse_compressed_tensor_unsafe.default(
+            torch.empty(compressed.shape, dtype=torch.long, device="meta"),
+            plain_buf[1],
+            torch.empty(mask.values().shape, dtype=self.dtype, device="meta"),
+            self.shape,
+            dtype=self.dtype,
+            layout=mask.layout,
+            device=torch.device("meta"),
+        )
     return fake_mode.fake_tensor_converter.from_meta_and_device(
         fake_mode, out, out_device
     )

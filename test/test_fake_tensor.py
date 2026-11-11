@@ -255,6 +255,53 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
                 self.assertEqual(d.shape, ref.shape)
                 self.assertEqual(d.layout, torch.strided)
 
+    def test_sparse_mask_sparse_compressed(self):
+        def masks(index_dtype):
+            idx = torch.tensor([0, 1, 2], dtype=index_dtype)
+            plain = torch.tensor([0, 1], dtype=index_dtype)
+            blocks = torch.ones(2, 2, 2)
+            return [
+                torch.sparse_csr_tensor(idx, plain, torch.ones(2), (2, 2)),
+                torch.sparse_csc_tensor(idx, plain, torch.ones(2), (2, 2)),
+                torch.sparse_bsr_tensor(idx, plain, blocks, (4, 4)),
+                torch.sparse_bsc_tensor(idx, plain, blocks, (4, 4)),
+                torch.sparse_csr_tensor(
+                    idx.repeat(2, 1), plain.repeat(2, 1), torch.ones(2, 2), (2, 2, 2)
+                ),
+            ]
+
+        def meta(t):
+            if t.layout in (torch.sparse_csr, torch.sparse_bsr):
+                compressed, plain = t.crow_indices(), t.col_indices()
+            else:
+                compressed, plain = t.ccol_indices(), t.row_indices()
+            index_meta = [
+                (i.shape, i.stride(), i.storage_offset(), i.dtype)
+                for i in (compressed, plain)
+            ]
+            t_meta = (t.layout, t.shape, t.dtype, t.device, t._nnz())
+            return t_meta, t.values().shape, index_meta
+
+        for index_dtype in (torch.int64, torch.int32):
+            refs = [
+                meta(torch.ones(m.shape, dtype=torch.float64).sparse_mask(m))
+                for m in masks(index_dtype)
+            ]
+            with FakeTensorMode():
+                for ref, mask in zip(refs, masks(index_dtype)):
+                    out = torch.ones(mask.shape, dtype=torch.float64).sparse_mask(mask)
+                    self.assertTrue(is_fake_tensor(out))
+                    self.assertEqual(meta(out), ref)
+
+    def test_sparse_mask_sparse_compressed_device_mismatch(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("real cuda tensors need an accelerator")
+        with FakeTensorMode():
+            mask = torch.sparse_csr_tensor([0, 1, 2], [0, 1], torch.ones(2), (2, 2))
+            self_cuda = torch.ones(2, 2, device="cuda")
+            with self.assertRaisesRegex(RuntimeError, "same device"):
+                self_cuda.sparse_mask(mask)
+
     def test_sparse_compressed_tensor_creation_pin_memory(self):
         if torch._functorch.config.fake_tensor_propagate_real_tensors:
             self.skipTest("real pin_memory needs an accelerator")
