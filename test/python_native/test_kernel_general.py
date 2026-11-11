@@ -855,13 +855,19 @@ class TestKernelGeneral(TestCase):
         # for an input that records stays a decline.
         y = torch.randn(64, 256, device="cuda")
         sums = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
+        # Drop a decline left by an earlier run in this process so this call records.
+        for k in [k for k in kg._REPLAYS if k[0] == "replay_seeded"]:
+            kg._REPLAYS.pop(k)
         kg.replay_reduce(sums, "replay_seeded", y, 1, torch.float32)
         (seeded,) = [k for k in kg._REPLAYS if k[0] == "replay_seeded"]
-        self.assertIsNotNone(kg._REPLAYS.get(seeded))
-        kg._REPLAYS[seeded] = None
-        got = kg.replay_reduce(sums, "replay_seeded", y, 1, torch.float32)
-        self.assertIn(seeded, kg._REPLAYS)
-        self.assertIsNone(kg._REPLAYS.get(seeded))
+        try:
+            self.assertIsNotNone(kg._REPLAYS.get(seeded))
+            kg._REPLAYS[seeded] = None
+            got = kg.replay_reduce(sums, "replay_seeded", y, 1, torch.float32)
+            self.assertIn(seeded, kg._REPLAYS)
+            self.assertIsNone(kg._REPLAYS.get(seeded))
+        finally:
+            kg._REPLAYS.pop(seeded)
         with torch.backends.python_native.cutedsl.disabled():
             want = y.sum(dim=1)
         self.assertEqual(got, want)
@@ -885,6 +891,8 @@ class TestKernelGeneral(TestCase):
         with _replays_only(self):
             for env in ({}, {rt._INNER_TREE_ENV: ""}, {rt._INNER_TREE_ENV: "0"}):
                 with mock.patch.dict(os.environ, env):
+                    if not env:
+                        os.environ.pop(rt._INNER_TREE_ENV, None)
                     self.assertEqual(call(aligned), got, atol=0, rtol=0)
         # "1" and "strict" both select the inner tree, but strict raises where "1" falls
         # back, so each records its own entry.
@@ -946,6 +954,8 @@ class TestReplayRecords(TestCase):
         cache["c"] = 3
         self.assertEqual(list(cache), ["a", "c"])
         self.assertIsNone(cache.get("b"))
+        self.assertEqual(cache.pop("a"), 1)
+        self.assertEqual(list(cache), ["c"])
 
     def test_launch_record_declines(self):
         """Decline recordings a replay of the launches alone could not reproduce."""

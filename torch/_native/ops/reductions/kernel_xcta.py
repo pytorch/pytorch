@@ -164,7 +164,7 @@ class FusedTwoStage:
 
 # _PLAN caches kernels by vector class and config. _GEOM caches each width's geometry and
 # boxed arguments (~6us), or its decline, keeping the 1024 most recently used; only _GEOM
-# is an LRU.
+# is an LRU (see the cache note above kernel_general._COMPILE_CACHE for why).
 _PLAN = {}
 _GEOM = LRUCache(1024)
 
