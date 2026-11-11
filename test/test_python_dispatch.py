@@ -13,7 +13,11 @@ import torch
 import torch._dynamo
 from torch import SymInt
 from torch._C import DispatchKey, DispatchKeySet
-from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
+    FakeTensorMode,
+    unset_fake_temporarily,
+)
 from torch.cuda.jiterator import _create_jit_fn
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -1935,9 +1939,12 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             "python_fake": FakeTensorMode,
             "cpp_fake": CppFakeTensorMode,
         }[mode_type]
-        with mode_cls():
+        with mode_cls() as mode:
             self.assertTrue(is_in_torch_dispatch_mode())
             self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
+            with mode:
+                self.assertTrue(is_in_torch_dispatch_mode())
+            self.assertTrue(is_in_torch_dispatch_mode())
             with NonInfraMode():
                 self.assertTrue(is_in_torch_dispatch_mode())
                 self.assertTrue(is_in_torch_dispatch_mode(include_infra_modes=False))
@@ -1954,9 +1961,39 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             with _disable_current_modes():
                 self.assertTrue(is_in_torch_dispatch_mode())
                 self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
+            with self.assertRaisesRegex(ValueError, "nested mode"):
+                with mode_cls():
+                    raise ValueError("nested mode")
+            self.assertTrue(is_in_torch_dispatch_mode())
 
         self.assertFalse(is_in_torch_dispatch_mode())
         self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
+        with self.assertRaisesRegex(ValueError, "outer mode"):
+            with mode:
+                raise ValueError("outer mode")
+        self.assertFalse(is_in_torch_dispatch_mode())
+
+    @fake_tensor_modes
+    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
+    def test_mode_detection_without_enter(self, mode_cls):
+        mode = mode_cls()
+        fake_key = torch._C._TorchDispatchModeKey.FAKE
+        self.assertFalse(is_in_torch_dispatch_mode())
+        torch._C._set_dispatch_mode(mode)
+        try:
+            self.assertIs(torch._C._get_dispatch_mode(fake_key), mode)
+            self.assertFalse(is_in_torch_dispatch_mode())
+            # Reentering an installed fake mode does not install it again.
+            with mode:
+                self.assertFalse(is_in_torch_dispatch_mode())
+            with unset_fake_temporarily():
+                self.assertFalse(is_in_torch_dispatch_mode())
+            with _disable_current_modes():
+                self.assertFalse(is_in_torch_dispatch_mode())
+            self.assertIs(torch._C._get_dispatch_mode(fake_key), mode)
+        finally:
+            torch._C._unset_dispatch_mode(fake_key)
+        self.assertFalse(is_in_torch_dispatch_mode())
 
     @skipIfTorchDynamo("uses torch.compile")
     @fake_tensor_modes
