@@ -125,7 +125,12 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import ConstantVariable
+from .constant import (
+    ConstantVariable,
+    FloatConstantVariable,
+    IntConstantVariable,
+    StrConstantVariable,
+)
 from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
@@ -5198,21 +5203,15 @@ _constant_base_methods: dict[type, set[Any]] = {
 }
 
 
-class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
+class UserDefinedConstantVariable(UserDefinedObjectVariable):
     """
-    Represents user-defined objects that subclass immutable constant types
-    (int, float, str).
+    Base for user-defined objects that subclass immutable constant types
+    (int, float, str). Each builtin base has a subclass below that also
+    inherits the builtin's constant VT, so its slots and methods come through
+    the MRO, as for UserDefinedListVariable and ListVariable.
     """
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
-        super().__init__(value, **kwargs)
-        for base in type(value).__mro__:
-            if base in _CONSTANT_BASE_TYPES:
-                self._constant_base = base
-                self._base_methods = _constant_base_methods[base]
-                break
-        else:
-            raise AssertionError(f"No constant base type found in MRO of {type(value)}")
+    _constant_base: type
 
     def as_python_constant(self) -> Any:
         return self.value
@@ -5220,6 +5219,30 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
     def as_proxy(self) -> Any:
         # Put the plain builtin in the graph, not the user subclass instance.
         return self._constant_base(self.value)
+
+    @staticmethod
+    def cls_for(value_type: type) -> "type[UserDefinedConstantVariable]":
+        base = next(b for b in value_type.__mro__ if b in _CONSTANT_BASE_TYPES)
+        return {
+            int: UserDefinedIntVariable,
+            float: UserDefinedFloatVariable,
+            str: UserDefinedStrVariable,
+        }[base]
+
+
+class UserDefinedIntVariable(UserDefinedConstantVariable, IntConstantVariable):
+    _constant_base = int
+    _base_methods = _constant_base_methods[int]
+
+
+class UserDefinedFloatVariable(UserDefinedConstantVariable, FloatConstantVariable):
+    _constant_base = float
+    _base_methods = _constant_base_methods[float]
+
+
+class UserDefinedStrVariable(UserDefinedConstantVariable, StrConstantVariable):
+    _constant_base = str
+    _base_methods = _constant_base_methods[str]
 
 
 class IntWrapperVariable(UserDefinedObjectVariable):
