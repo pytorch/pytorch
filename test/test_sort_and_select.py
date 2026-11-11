@@ -393,6 +393,32 @@ class TestSortAndSelectDevice(TestCase):
         self.assertEqual(indices, indices_cont)
         self.assertEqual(values, values_cont)
 
+    # Each strided output alone must keep sort off the radix path
+    @parametrize("values_step,indices_step", [(2, 1), (1, 2)])
+    def test_sort_1d_output_discontiguous_large_int(
+        self, device, values_step, indices_step
+    ):
+        # Large 1-D integer sorts can take a CPU radix-sort path
+        tensor = torch.randint(0, 1000, (40000,), device=device)
+        expected = tensor.sort(stable=True)
+        values_buf = torch.full(
+            (40000 * values_step,), -1, dtype=torch.long, device=device
+        )
+        indices_buf = torch.full(
+            (40000 * indices_step,), -1, dtype=torch.long, device=device
+        )
+        torch.sort(
+            tensor,
+            stable=True,
+            out=(values_buf[::values_step], indices_buf[::indices_step]),
+        )
+        self.assertEqual(values_buf[::values_step], expected.values)
+        self.assertEqual(indices_buf[::indices_step], expected.indices)
+        # Gaps between strided elements stay untouched
+        for buf, step in ((values_buf, values_step), (indices_buf, indices_step)):
+            if step > 1:
+                self.assertTrue((buf[1::step] == -1).all())
+
     @dtypes(torch.float32)
     def test_topk_1d_output_discontiguous(self, device, dtype):
         tensor = torch.randn(12, device=device, dtype=dtype)
