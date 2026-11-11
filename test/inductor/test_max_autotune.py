@@ -2544,12 +2544,18 @@ class TestMaxAutotune(TestCase):
         #   is replayed on the new kernel, which rebuilds the store-output allowed
         #   inputs from its own indices, and the scheduling-time render receives
         #   the indices through kernel_options.
+        # - kernel_kwargs: templates that pass kernel constructor overrides disable
+        #   generated-code caching, so these values cannot affect a cache hit.
         self.assertEqual(
             generate_and_load_args
-            - {"generate_with_caching", "prefix_inputs_fusion_indices"},
+            - {
+                "generate_with_caching",
+                "kernel_kwargs",
+                "prefix_inputs_fusion_indices",
+            },
             make_key_args,
         )
-        self.assertEqual(len(generate_and_load_args), 22)
+        self.assertEqual(len(generate_and_load_args), 23)
 
     @fresh_cache()
     @config.patch(

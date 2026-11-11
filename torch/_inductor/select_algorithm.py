@@ -463,8 +463,8 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed input."""
         if name not in self.fixed_inputs:
-            index_str = self._process_indexing(index)
-            var = self._add_kernel_input(name)
+            index_str = self.process_indexing(index)
+            var = self.add_kernel_input(name)
             buffer = V.graph.get_buffer(name)
             var_dtype = buffer.dtype
             line = f"tl.load({var} + {index_str})"
@@ -540,19 +540,19 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         # TritonKernel.store, so nothing else would mark the kernel as using them.
         self.kernel.atomic_add_found = True
 
-        buf_name = self._add_kernel_input(name)
+        buf_name = self.add_kernel_input(name)
         index_str = self._broadcast_index(index, f"{value}.shape")
         return f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
 
-    def _add_kernel_input(self, name: str) -> str:
+    def add_kernel_input(self, name: str) -> str:
         return self.kernel.args.input(name)
 
-    def _process_indexing(self, index: sympy.Expr) -> str:
+    def process_indexing(self, index: sympy.Expr) -> str:
         return self.kernel.kexpr(self.kernel.rename_indexing(index))
 
     def _broadcast_index(self, index: sympy.Expr, shape: str) -> str:
         index = sympy.sympify(index)
-        index_str = self._process_indexing(index)
+        index_str = self.process_indexing(index)
         index_shape = TritonSymbols.get_block_shape(index)
         if (
             index_shape
@@ -1317,6 +1317,7 @@ class TritonTemplateKernel(TritonKernel):
         mask: str | None = None,
         input_shapes: dict[str, tuple[str, ...]] | None = None,
         input_dtypes: dict[str, torch.dtype | str] | None = None,
+        emit: Callable[[], list[str]] | None = None,
         **fixed_inputs,
     ) -> str:
         """This creates a modification function for a subgraph.
@@ -1331,6 +1332,8 @@ class TritonTemplateKernel(TritonKernel):
                 block shapes. Used for proper shape propagation during codegen.
             input_dtypes (Optional[dict[str, torch.dtype | str]]): Optional dtype
                 mapping. The string "index" resolves to the template index dtype.
+            emit: Optional callback that emits custom subgraph body lines while
+                using the same ModificationWrapper setup.
         """
         num = 0
         out = None
@@ -1348,12 +1351,15 @@ class TritonTemplateKernel(TritonKernel):
                 input_dtypes,
             )
             with V.set_ops_handler(modification_handler):
-                if not isinstance(subgraph, (ir.ComputedBuffer, list)):
+                emitted = None
+                if emit is not None:
+                    emitted = emit()
+                elif not isinstance(subgraph, (ir.ComputedBuffer, list)):
                     raise AssertionError(
                         f"Expected the subgraph to be a ComputedBuffer or a List[ComputedBuffer], got {type(subgraph)}"
                     )
                 # Handle scatter stores
-                if isinstance(subgraph, list):
+                elif isinstance(subgraph, list):
                     for scatter_graph in subgraph:
                         scatters.append(self._handle_scatter_graph(scatter_graph))
                 elif isinstance(subgraph.data, ir.InputBuffer):
@@ -1362,7 +1368,14 @@ class TritonTemplateKernel(TritonKernel):
                     out = subgraph.data.inner_fn(())
 
             self.codegen_body()
-            if output_name is not None:
+            if emitted is not None:
+                if output_name is not None:
+                    raise AssertionError(
+                        "output_name must be None when emit is provided"
+                    )
+                for line in emitted:
+                    self.body.writeline(line)
+            elif output_name is not None:
                 if not isinstance(output_name, str):
                     raise AssertionError(
                         f"expected output_name to be str, got {type(output_name)}"
@@ -3141,9 +3154,7 @@ class TritonTemplate(KernelTemplate):
             "prologue_loads_all_named_inputs": self.prologue_loads_all_named_inputs,
             "always_freeze_layout": self.always_freeze_layout,
             "index_dtype_override": index_dtype,
-            **(kernel_kwargs or {}),
         }
-
         if HAS_WARP_SPEC:
             kernel_options.update(
                 {
@@ -3151,6 +3162,15 @@ class TritonTemplate(KernelTemplate):
                     "num_buffers_warp_spec": num_buffers_warp_spec,
                 }
             )
+
+        if kernel_kwargs:
+            collisions = kernel_options.keys() & kernel_kwargs.keys()
+            if collisions:
+                raise AssertionError(
+                    "kernel_kwargs must not override Triton template options: "
+                    + ", ".join(sorted(collisions))
+                )
+            kernel_options.update(kernel_kwargs)
 
         def make_kernel():
             return self.kernel_type(

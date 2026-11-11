@@ -42,17 +42,19 @@ from torch.utils._sympy.functions import FloorDiv, Min, Mod, ModularIndexing
 from .. import config, ir
 from ..codegen.common import CSEVariable
 from ..codegen.triton import TritonSymbols
+from ..dependencies import FreeSymbolsOpsHandler
 from ..heuristics.template.triton import (
     ROCmScatterPreaggConfig,
     ScatterPreaggConfig,
     ScatterPreaggTarget,
 )
 from ..lowering import copy_, empty_strided, full, sort_fallback, sort_stable, to_dtype
-from ..ops_handler import DefaultHandler, WrapperHandler
+from ..ops_handler import WrapperHandler
 from ..select_algorithm import (
     AlgorithmSelectorCache,
     autotune_select_algorithm,
     ModificationWrapper,
+    NoValidChoicesError,
     SymbolicGridFn,
     TritonTemplate,
     TritonTemplateKernel,
@@ -124,10 +126,6 @@ def _size_decline(
 ) -> str | None:
     """The skip reason if the template declines a scatter over ``sizes`` into an
     output of ``out_sizes`` for their sizes alone."""
-    # The sorted lowering replaces the eager fallback rather than atomics, so
-    # the size gates do not apply to it.
-    if _use_sorted(dtype):
-        return None
     numel = _hint(sympy_product(sizes))
     if numel < config.scatter_preagg_template_min_numel:
         return "too_small"
@@ -172,7 +170,7 @@ class _Loaded:
     name: str
 
 
-class _RecordingHandler(DefaultHandler):
+class _RecordingHandler(FreeSymbolsOpsHandler):
     """
     Evaluates an index or value function symbolically to find which iteration
     variables it reads through, which buffers it loads, and whether it uses ops
@@ -180,7 +178,7 @@ class _RecordingHandler(DefaultHandler):
     """
 
     def __init__(self) -> None:
-        self.symbols: OrderedSet[sympy.Symbol] = OrderedSet()
+        super().__init__(unbacked_only=False)
         self.read_names: OrderedSet[str] = OrderedSet()
         self.unsupported: OrderedSet[str] = OrderedSet()
         # Buffers loaded straight into indirect_indexing, with the smallest
@@ -196,7 +194,7 @@ class _RecordingHandler(DefaultHandler):
 
     def _note(self, value: Any) -> None:
         if isinstance(value, sympy.Basic):
-            self.symbols |= OrderedSet(value.free_symbols)
+            self.symbols |= self.get_symbols(value)
         elif isinstance(value, _Loaded):
             self.other_reads.add(value.name)
         elif isinstance(value, (list, tuple)):
@@ -228,20 +226,6 @@ class _RecordingHandler(DefaultHandler):
             return x
         self._note(x)
         return None
-
-    def frexp(self, x: Any) -> tuple[None, None]:
-        self._note(x)
-        return None, None
-
-    def scan(self, dtypes: Any, combine_fn: Any, values: tuple[Any, ...]) -> Any:
-        self._default("scan", (values,), {})
-        return (None,) * len(values)
-
-    def sort(
-        self, dtypes: Any, values: tuple[Any, ...], stable: bool, descending: bool
-    ) -> Any:
-        self._default("sort", (values,), {})
-        return (None,) * len(values)
 
     def indirect_indexing(
         self, x: Any, size: sympy.Expr, check: bool = True, wrap_neg: bool = True
@@ -343,7 +327,7 @@ class _TileValueHandler(_TemplateIndexHandler):
             or not (dtype := V.graph.get_buffer(name).dtype).is_floating_point
         ):
             return wrapper.load(name, index)
-        ptr = f"{wrapper._add_kernel_input(name)} + {wrapper._process_indexing(index)}"
+        ptr = f"{wrapper.add_kernel_input(name)} + {wrapper.process_indexing(index)}"
         line = f"tl.load(tl.broadcast_to({ptr}, [{', '.join(self.shape)}]))"
         if (
             dtype in (torch.float16, torch.bfloat16)
@@ -461,17 +445,11 @@ def _guarded(cond: sympy.Basic, *, guard: bool = True) -> bool:
     return bool(hinted) and V.graph.sizevars.guard_or_false(cond)
 
 
-def _plain_max_d(warp_size: int) -> int:
-    """Widest row of the plain path: about one warp's worth of a regular
-    Inductor scatter's elements."""
-    return 4 * warp_size
-
-
-def _block_width(cfg: ScatterPreaggConfig, warp_size: int) -> int:
+def _block_width(cfg: ScatterPreaggConfig, target: ScatterPreaggTarget) -> int:
     """Upper bound on the inner block width a config's kernel loads: BLOCK_D,
     or a plain row widened by a power of two dividing D_ITERS."""
     widened = cfg.block_d * (cfg.d_iters & -cfg.d_iters)
-    return max(cfg.block_d, min(widened, _plain_max_d(warp_size)))
+    return max(cfg.block_d, min(widened, target.plain_max_d()))
 
 
 def _inner_shift(num_inner: sympy.Expr, tile: int, width: int, *, guard: bool) -> bool:
@@ -548,34 +526,6 @@ class ScatterPreaggTemplateKernel(TritonTemplateKernel):
             if not size.is_number
         )
 
-    def _codegen_subgraph(
-        self,
-        prefix: str,
-        fixed_inputs: dict[str, str],
-        input_shapes: dict[str, tuple[str, ...]],
-        emit: Callable[[], list[str]],
-    ) -> str:
-        num = 0
-        while f"{prefix}_{num}" in self.subgraph_bodies:
-            num += 1
-        with self.create_subgraph_body(f"{prefix}_{num}"):
-            handler = ModificationWrapper(
-                self,
-                0,
-                fixed_inputs,
-                None,
-                input_shapes,
-                dict.fromkeys(fixed_inputs, "index"),
-            )
-            with V.set_ops_handler(handler):
-                lines = emit()
-            self.codegen_body()
-            for line in lines:
-                self.body.writeline(line)
-            body = self.body.getvalue()
-            self.cse.invalidate(OrderedSet())
-            return body
-
     @staticmethod
     def _symbol_of(value: Any) -> sympy.Symbol:
         return sympy_index_symbol(str(value))
@@ -606,8 +556,13 @@ class ScatterPreaggTemplateKernel(TritonTemplateKernel):
                 f"{valid_out} = {valid}",
             ]
 
-        return self._codegen_subgraph(
-            "preagg_key", {"tok": tok}, {"tok": (rows,)}, emit
+        return self.modification(
+            0,
+            None,
+            input_shapes={"tok": (rows,)},
+            input_dtypes={"tok": "index"},
+            emit=emit,
+            tok=tok,
         )
 
     def preagg_value(
@@ -637,11 +592,14 @@ class ScatterPreaggTemplateKernel(TritonTemplateKernel):
             # Constants come out rank 1, which broadcast_to rejects.
             return [f"{out} = tl.full([{rows}, {cols}], 0, {acc}) + {converted}"]
 
-        return self._codegen_subgraph(
-            "preagg_value",
-            {"ptok": ptok, "inner": inner},
-            {"ptok": (rows, "1"), "inner": ("1", cols)},
-            emit,
+        return self.modification(
+            0,
+            None,
+            input_shapes={"ptok": (rows, "1"), "inner": ("1", cols)},
+            input_dtypes={"ptok": "index", "inner": "index"},
+            emit=emit,
+            ptok=ptok,
+            inner=inner,
         )
 
     def preagg_addr(self, key: str, inner: str) -> str:
@@ -880,10 +838,10 @@ def maybe_preaggregated_scatter(
     Lower ``out[output_indexer(i)] += value_fn(i)`` over ``iter_sizes`` with the
     pre-aggregating template. ``inputs`` are the IR nodes value_fn and
     output_indexer read. Returns False if the template declines, for the caller
-    to lower the scatter. Planning freezes the layouts of the buffers read and
-    may compute buffers the scheduler removes when unused. Size guards and the
-    fp32 copy come only after the declines that need a plan, so only a codegen
-    failure leaves guards behind.
+    to lower the scatter. Planning may compute key or value buffers that the
+    scheduler removes when unused. Layouts are frozen only after planning and
+    configuration declines have passed; later codegen declines can still leave
+    guards and frozen layouts behind.
     """
     read_names: OrderedSet[str] = OrderedSet()
     for x in inputs:
@@ -904,17 +862,21 @@ def maybe_preaggregated_scatter(
     return False
 
 
-def _output_storage(out: ir.TensorBox) -> tuple[ir.StorageBox, ir.Layout] | None:
+def _output_storage(
+    out: ir.TensorBox, *, freeze: bool = True
+) -> tuple[ir.StorageBox, ir.Layout] | None:
     """Storage and layout a (possibly view) output is scattered through."""
     try:
         view = out.data
         if isinstance(view, ir.BaseView):
             view = ir.ExternKernel.convert_to_reinterpret_view(view)
-        storage, layout = ir.as_storage_and_layout(view, freeze=True)
+        storage, layout = ir.as_storage_and_layout(view, freeze=freeze)
     except NotImplementedError:
         return None
     if not isinstance(storage.data, ir.Buffer):
         return None
+    if isinstance(layout, ir.FlexibleLayout):
+        layout = layout.get_fixed_layout_without_freezing()
     return storage, layout
 
 
@@ -988,20 +950,18 @@ def _try_template(
     if any(buf.get_device() != device for buf in read_bufs):
         _record_skip("input_device")
         return False
-    storage = _output_storage(out)
+    if not out.get_size() or 0 in [_hint(s) for s in (*out.get_size(), *sizes)]:
+        _record_skip("empty")
+        return False
+    # Plan against the layout that decide_layout() would choose, without
+    # committing it while the template can still decline.
+    storage = _output_storage(out, freeze=False)
     if storage is None:
         return _scatter_into_copy(
             "output_copy", out, dtype, value_fn, sizes, output_indexer, read_names
         )
     out_storage, out_layout = storage
     out_buf = out_storage.data
-    if not out_layout.size or 0 in [_hint(s) for s in (*out_layout.size, *sizes)]:
-        _record_skip("empty")
-        return False
-    # Tracing the loaders indexes any realized input directly, which needs a
-    # fixed layout.
-    for buf in read_bufs:
-        buf.freeze_layout()
     planned = _plan(
         out_layout, out_buf.get_name(), sizes, value_fn, output_indexer, device, dtype
     )
@@ -1009,6 +969,35 @@ def _try_template(
         _record_skip(planned)
         return False
     plan, reads = planned
+
+    frozen_storage = _output_storage(out)
+    if frozen_storage is None:
+        _record_skip("output_layout")
+        return False
+    out_storage, frozen_layout = frozen_storage
+    if (
+        frozen_layout.size,
+        frozen_layout.stride,
+        frozen_layout.offset,
+    ) != (out_layout.size, out_layout.stride, out_layout.offset):
+        # Freezing may normalize strides of size-one dimensions or views.
+        # Re-plan with the finalized indexer while reusing any materialized
+        # key/value functions produced by the speculative plan.
+        planned = _plan(
+            frozen_layout,
+            out_storage.data.get_name(),
+            sizes,
+            plan.value_fn,
+            plan.output_indexer,
+            device,
+            dtype,
+        )
+        if isinstance(planned, str):
+            _record_skip(planned)
+            return False
+        plan, reads = planned
+    out_layout = frozen_layout
+    out_buf = out_storage.data
 
     num_tokens, num_inner, num_keys = (
         _hint(plan.num_tokens),
@@ -1038,8 +1027,7 @@ def _try_template(
         num_tokens,
         num_inner,
         copy_dtype,
-        device_type=device.type,
-        target=target,
+        device=device,
         inner_contiguous=plan.inner_contiguous,
         num_keys=num_keys,
         # Deterministic results need the same config on every compile.
@@ -1072,6 +1060,7 @@ def _try_template(
             read_names,
         )
 
+    # Template codegen indexes all realized inputs directly.
     for buf in inputs:
         buf.freeze_layout()
 
@@ -1089,9 +1078,7 @@ def _try_template(
     # autotuning candidates use what those guards establish.
     tile = configs[0].block_d * configs[0].d_iters
     # The sorted kernels load BLOCK_D-wide blocks only.
-    width = (
-        configs[0].block_d if use_sorted else _block_width(configs[0], target.warp_size)
-    )
+    width = configs[0].block_d if use_sorted else _block_width(configs[0], target)
     if not plan.num_inner.is_number and _inner_shift(
         plan.num_inner, tile, width, guard=True
     ):
@@ -1139,18 +1126,23 @@ def _select(
     input_nodes: list[ir.IRNode],
     layout: ir.Layout,
     **kwargs: Any,
-) -> None:
+) -> bool:
     # MultiTemplateBuffer (deferred selection) does not track mutated inputs, so
     # the in-place result would be dropped.
-    node, _ = autotune_select_algorithm(
-        name, choices, input_nodes, layout, return_multi_template=False, **kwargs
-    )
+    try:
+        node, _ = autotune_select_algorithm(
+            name, choices, input_nodes, layout, return_multi_template=False, **kwargs
+        )
+    except NoValidChoicesError:
+        log.warning("all %s autotuning choices failed; using scatter fallback", name)
+        return False
     template_buf = node.data.data
     if not isinstance(template_buf, ir.TemplateBuffer):
         raise AssertionError(f"expected a template buffer, got {template_buf}")
     # The template never stores to its own output, a placeholder that a consumer
     # of the same size could otherwise fuse onto, losing its code.
     template_buf.allow_epilogue_fusion = False
+    return True
 
 
 def _placeholder_layout(
@@ -1292,7 +1284,7 @@ def _lower_atomic(
     dtype = out.get_dtype()
     num_inner, num_keys = _hint(plan.num_inner), _hint(plan.num_keys)
     matrix_preagg = target.matrix_preagg(dtype, num_inner, plan.inner_contiguous)
-    plain_max_d = _plain_max_d(target.warp_size)
+    plain_max_d = target.plain_max_d()
     # Outputs of 2GB or more (64-bit addresses) keep the sort path's atomic
     # width for plain atomics too, to save registers.
     atomic_vec = target.atomic_vec
@@ -1321,7 +1313,7 @@ def _lower_atomic(
             distinct = cfg.block_t
         if distinct <= cfg.block_t * (1 - block_min_saved):
             return {"ADAPTIVE": False}
-        hist_bins = min(2 * cfg.block_t, 2048)
+        hist_bins = min(target.hist_bins_per_token * cfg.block_t, target.max_hist_bins)
         # Linear counting assumes hashed keys collide at random, but few keys
         # hash almost one to a bin and would be overcounted, so they get a bin
         # each instead.
@@ -1336,7 +1328,10 @@ def _lower_atomic(
             # A destination taking 1/32 of the block is hot enough to
             # pre-aggregate. The sort's floor sits above the bin counts
             # uniform keys reach; the product counts keys exactly.
-            "HOT_COUNT": max(2 if dot else 8, cfg.block_t // 32),
+            "HOT_COUNT": max(
+                target.min_dot_hot_count if dot else target.min_sort_hot_count,
+                cfg.block_t // target.hot_count_fraction,
+            ),
         }
         if not dot:
             # The product counts keys exactly from its sort; the others
@@ -1347,7 +1342,9 @@ def _lower_atomic(
                 # Recurring in 1/64 of every block takes a key thousands of
                 # plain atomics, and too few for its bin to stand out from
                 # collisions.
-                "TOP_COUNT": max(4, cfg.block_t // 64),
+                "TOP_COUNT": max(
+                    target.min_top_count, cfg.block_t // target.top_count_fraction
+                ),
                 "LOG_HIST_BINS": hist_bins.bit_length() - 1,
             }
         if not plan.inner_contiguous:
@@ -1365,14 +1362,18 @@ def _lower_atomic(
         widen = 1
         if inner_shift:
             widen = cfg.d_iters & -cfg.d_iters
-            min_chunk = 32 if dot else 1
+            min_chunk = target.min_dot_tokens if dot else 1
 
             def too_wide(widen: int) -> bool:
                 rows, chunk = cfg.block_d * widen, cfg.block_t // widen
                 return (
                     rows > plain_max_d
                     or chunk < min_chunk
-                    or (not dot and rows < 128 and chunk < 128)
+                    or (
+                        not dot
+                        and rows < target.min_plain_rows
+                        and chunk < target.min_plain_tokens
+                    )
                 )
 
             while widen > 1 and too_wide(widen):
@@ -1394,11 +1395,15 @@ def _lower_atomic(
             sympy.Lt(plan.num_keys + 1, 2 ** (31 - log_block_t)), guard=guard
         )
         # The [BLOCK_T, BLOCK_T] matrix outgrows registers past 128 tokens.
-        dot = matrix_preagg and cfg.block_d >= 32 and 16 <= cfg.block_t <= 128
+        dot = (
+            matrix_preagg
+            and cfg.block_d >= target.matrix_min_block_d
+            and target.matrix_min_block_t <= cfg.block_t <= target.matrix_max_block_t
+        )
         inner_shift = _inner_shift(
             plan.num_inner,
             cfg.block_d * cfg.d_iters,
-            _block_width(cfg, target.warp_size),
+            _block_width(cfg, target),
             guard=guard,
         )
         adaptive = adaptive_kwargs(cfg, inner_shift, dot)
@@ -1438,14 +1443,13 @@ def _lower_atomic(
     if not choices:
         return False
     input_nodes = [out, *inputs]
-    _select(
+    return _select(
         "scatter_preagg",
         choices,
         input_nodes,
         layout,
         input_gen_fns=_index_gen_fns(plan, input_nodes),
     )
-    return True
 
 
 def _lower_sorted(
@@ -1503,5 +1507,6 @@ def _lower_sorted(
             return False
         selections.append((name, choices, input_nodes))
     for name, choices, input_nodes in selections:
-        _select(name, choices, input_nodes, layout)
+        if not _select(name, choices, input_nodes, layout):
+            return False
     return True

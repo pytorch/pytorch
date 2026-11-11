@@ -1397,7 +1397,7 @@ _micro_pipeline_tp: bool = False
 
 
 # Adaptive scatter pre-aggregation on ROCm, including the sorted lowering for
-# deterministic mode and 8/16-bit integers.
+# deterministic mode and 8/16-bit integers. This setting is ignored off ROCm.
 scatter_preagg_template: bool = (
     os.environ.get(
         "TORCHINDUCTOR_SCATTER_PREAGG_TEMPLATE",
@@ -1411,8 +1411,8 @@ scatter_preagg_template: bool = (
 )
 
 # Leave scatters of fewer elements (tokens times inner elements) than this to
-# the regular lowering: atomics, or the eager fallback for bf16 and int64. Does
-# not apply to the sorted lowering (deterministic mode, 8/16-bit ints).
+# the regular lowering or eager fallback, including the sorted lowering for
+# deterministic mode and 8/16-bit integers.
 scatter_preagg_template_min_numel: int = 4096
 
 # Base fraction of a block's atomics pre-aggregation must save for the block to
@@ -1424,52 +1424,61 @@ scatter_preagg_template_min_saved: float = 0.125
 
 # Deprecated in 2.16, to be removed in 2.18: the partitioned scatter pass was
 # replaced by scatter_preagg_template.
+_partitioned_scatter_removal = (
+    "Removal planned for 2.18; see https://github.com/pytorch/pytorch/issues/204051"
+)
 partitioned_scatter_enabled: bool = Config(
     alias="torch._inductor.config.scatter_preagg_template",
     deprecated=True,
     deprecation_message="has aliased scatter_preagg_template since 2.16; use that "
-    "instead. The template is ROCm only, so this no longer affects CUDA or XPU",
+    "instead. The template is ROCm only, so this no longer affects CUDA or XPU. "
+    + _partitioned_scatter_removal,
 )
 partitioned_scatter_min_partitions: int = Config(
     default=2,
     deprecated=True,
-    deprecation_message="has done nothing since 2.16",
+    deprecation_message="has done nothing since 2.16. " + _partitioned_scatter_removal,
 )
 partitioned_scatter_max_partitions: int = Config(
     default=64,
     deprecated=True,
-    deprecation_message="has done nothing since 2.16",
+    deprecation_message="has done nothing since 2.16. " + _partitioned_scatter_removal,
 )
 partitioned_scatter_min_index_size: int = Config(
     default=4096,
     deprecated=True,
     deprecation_message="has done nothing since 2.16; "
-    "scatter_preagg_template_min_numel gates on elements rather than indices",
+    "scatter_preagg_template_min_numel gates on elements rather than indices. "
+    + _partitioned_scatter_removal,
 )
 partitioned_scatter_min_contention_ratio: float = Config(
     default=4.0,
     deprecated=True,
-    deprecation_message="has done nothing since 2.16",
+    deprecation_message="has done nothing since 2.16. " + _partitioned_scatter_removal,
 )
 partitioned_scatter_non_model_floor_bytes: int = Config(
     default=1_500_000_000,
     deprecated=True,
-    deprecation_message="has done nothing since 2.16",
+    deprecation_message="has done nothing since 2.16. " + _partitioned_scatter_removal,
 )
 partitioned_scatter_fp32_accumulation: bool = Config(
     default=True,
     deprecated=True,
-    deprecation_message="has done nothing since 2.16",
+    deprecation_message="has done nothing since 2.16. " + _partitioned_scatter_removal,
 )
 partitioned_scatter_force: bool = Config(
     default=False,
     deprecated=True,
     deprecation_message="has done nothing since 2.16: the template decides per "
-    "block at run time (see scatter_preagg_template_min_saved)",
+    "block at run time (see scatter_preagg_template_min_saved). "
+    + _partitioned_scatter_removal,
 )
 
 
 def _warn_deprecated_scatter_env_vars() -> None:
+    if getattr(_warn_deprecated_scatter_env_vars, "_warned", False):
+        return
+    _warn_deprecated_scatter_env_vars._warned = True  # type: ignore[attr-defined]
     for suffix, instead in (
         (
             "ENABLED",
@@ -1490,13 +1499,11 @@ def _warn_deprecated_scatter_env_vars() -> None:
 
             warnings.warn(
                 f"The environment variable {name} is deprecated since 2.16 (removal "
-                f"planned for 2.18) and {instead}.",
+                f"planned for 2.18; see "
+                f"https://github.com/pytorch/pytorch/issues/204051) and {instead}.",
                 FutureWarning,
                 stacklevel=1,
             )
-
-
-_warn_deprecated_scatter_env_vars()
 
 
 class _collective:
@@ -3416,6 +3423,8 @@ _save_config_ignore: list[str] = [
 _cache_config_ignore_prefix: list[str] = [
     # trace functions are not relevant to config caching
     "trace",
+    # Deprecated no-op settings retained only for compatibility.
+    "partitioned_scatter_",
     # uses absolute path
     "cuda.cutlass_dir",
     "cutlass.cutlass_dir",

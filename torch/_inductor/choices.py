@@ -208,8 +208,7 @@ class InductorChoices:
         num_inner: int,
         dtype: torch.dtype,
         *,
-        device_type: str,
-        target: ScatterPreaggTarget,
+        device: torch.device,
         inner_contiguous: bool = True,
         num_keys: int | None = None,
         max_autotune: bool = False,
@@ -218,12 +217,12 @@ class InductorChoices:
         Non-empty: the default config first, which alone guards symbolic sizes
         and serves the sorted lowering, then autotuning candidates.
         """
-        heuristics = self.get_config_heuristics(device_type)
+        heuristics = self.get_config_heuristics(device.type)
         return heuristics.get_scatter_preagg_configs(
             num_tokens,
             num_inner,
             dtype,
-            target=target,
+            target=heuristics.get_scatter_preagg_target(device),
             inner_contiguous=inner_contiguous,
             num_keys=num_keys,
             max_autotune=max_autotune,
@@ -239,9 +238,10 @@ class InductorChoices:
         """
         return (
             config.scatter_preagg_template
-            and IS_ROCM
             and device is not None
-            and device.type == "cuda"
+            and self.get_config_heuristics(
+                device.type
+            ).should_use_scatter_preagg_template(device)
         )
 
     def append_flex_attention_choices(

@@ -3161,9 +3161,12 @@ def compile_fx(
     else:
         get_decomp_fn = select_decomp_table
 
+    from torch._logging._internal import warn_deprecated_artifacts
     from torch.compiler._no_compile import check_compilation_allowed
 
     check_compilation_allowed("Inductor graph compilation")
+    config._warn_deprecated_scatter_env_vars()
+    warn_deprecated_artifacts()
 
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else

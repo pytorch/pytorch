@@ -463,10 +463,28 @@ class ScatterPreaggTarget:
     max_copy_bytes: int = 4 << 20
     min_copy_tokens: int = 1 << 18
     min_copy_tokens_single_column: int = 1 << 14
+    # Adaptive atomic-path tuning knobs, measured on ROCm.
+    max_hist_bins: int = 2048
+    hist_bins_per_token: int = 2
+    hot_count_fraction: int = 32
+    top_count_fraction: int = 64
+    min_dot_hot_count: int = 2
+    min_sort_hot_count: int = 8
+    min_top_count: int = 4
+    min_plain_rows: int = 128
+    min_plain_tokens: int = 128
+    min_dot_tokens: int = 32
+    plain_max_d_per_warp: int = 4
+    matrix_min_block_t: int = 16
+    matrix_max_block_t: int = 128
+    matrix_min_block_d: int = 32
 
     def warps(self, threads: int) -> int:
         """Warps of ``threads`` lanes in all: configs keep per-lane work fixed."""
         return max(1, threads // self.warp_size)
+
+    def plain_max_d(self) -> int:
+        return self.plain_max_d_per_warp * self.warp_size
 
     def matrix_preagg(
         self, dtype: torch.dtype, num_inner: int, inner_contiguous: bool
@@ -1477,6 +1495,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         return flex_decode_configs
 
     # Scatter pre-aggregation helpers
+    def should_use_scatter_preagg_template(self, device: torch.device) -> bool:
+        """Whether this backend supports the scatter pre-aggregation template."""
+        return False
+
     def get_scatter_preagg_target(self, device: torch.device) -> ScatterPreaggTarget:
         """
         The properties of ``device`` the scatter pre-aggregation template uses.
@@ -2504,6 +2526,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             plain_atomic_bytes=4,
             fp16_matrix_preagg=True,
         )
+
+    def should_use_scatter_preagg_template(self, device: torch.device) -> bool:
+        return device.type == "cuda"
 
     def _scatter_preagg_default_config(
         self,

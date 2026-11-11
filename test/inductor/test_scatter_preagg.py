@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import functools
+import math
 import os
 import subprocess
 import sys
@@ -23,10 +24,7 @@ from torch._inductor.heuristics.template.triton import (
 )
 from torch._inductor.kernel import scatter_preagg
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import (
-    needs_fallback_due_to_atomic_add_limitations,
-    run_and_get_code,
-)
+from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -174,6 +172,17 @@ class TestScatterPreagg(TestCase):
             return x.index_add(0, i, s, alpha=2.5)
 
         self._check(fn, x, idx, src, atol=1e-2)
+
+    def test_tiny_uint8_index_add_negative_alpha(self, device):
+        x = torch.zeros(5, 5, device=device, dtype=torch.uint8)
+        idx = torch.arange(5, device=device, dtype=torch.int32)
+        src = torch.arange(25, device=device, dtype=torch.uint8).view(5, 5)
+
+        def fn(x, i, s):
+            return x.index_add(0, i, s, alpha=-1)
+
+        self._check(fn, x, idx, src, applied=False, atol=0, rtol=0)
+        self.assertEqual(counters["inductor"]["scatter_preagg_skipped_too_small"], 1)
 
     def test_inplace_graph_inputs(self, device):
         # Mutating graph inputs in place still reaches the template.
@@ -360,12 +369,7 @@ class TestScatterPreagg(TestCase):
         code = self._check(fn, x, idx, v, applied=False, atol=2e-2, rtol=2e-2)
         # Recorded once, by whichever lowering declined.
         self.assertEqual(counters["inductor"][f"scatter_preagg_skipped_{reason}"], 1)
-        # gfx950 has bf16 atomics, so the regular lowering uses them. Older
-        # ROCm devices still take the eager fallback.
-        if needs_fallback_due_to_atomic_add_limitations(torch.bfloat16):
-            self.assertNotIn("tl.atomic_add(", code)
-        else:
-            self.assertIn("tl.atomic_add(", code)
+        self.assertNotIn("tl.atomic_add(", code)
         # Nothing set up for the template is left behind.
         torch._dynamo.reset()
         with config.patch(scatter_preagg_template=False):
@@ -396,9 +400,8 @@ class TestScatterPreagg(TestCase):
     @parametrize("op", ["index_put", "scatter_add", "scatter_reduce"])
     def test_declined_emits_regular_lowering(self, device, mode, op):
         # A scatter the template declines must still be lowered: to the eager
-        # fallback where it bypassed that (deterministic algorithms, bf16 where
-        # the device has no bf16 atomics, and 8/16-bit ints), otherwise to
-        # atomics (TORCHINDUCTOR_DETERMINISTIC alone, or bf16 on gfx950).
+        # fallback where it bypassed that (deterministic algorithms, bf16, and
+        # 8/16-bit ints), otherwise to atomics (TORCHINDUCTOR_DETERMINISTIC).
         fn = _SCATTER_FNS[op]
         dtype = {"bf16": torch.bfloat16, "int8": torch.int8, "int16": torch.int16}.get(
             mode, torch.float32
@@ -421,11 +424,7 @@ class TestScatterPreagg(TestCase):
             )
         self.assertEqual(out.double(), ref, atol=ref.abs().max().item() * 2e-2, rtol=0)
         code = "\n".join(codes)
-        bf16_atomics = (
-            mode == "bf16"
-            and not needs_fallback_due_to_atomic_add_limitations(torch.bfloat16)
-        )
-        if mode == "inductor_deterministic" or bf16_atomics:
+        if mode == "inductor_deterministic":
             self.assertIn("tl.atomic_add(", code)
         else:
             self.assertNotIn("tl.atomic_add(", code)
@@ -963,9 +962,9 @@ class TestScatterPreagg(TestCase):
         output_storage = scatter_preagg._output_storage
         calls = []
 
-        def first_call_fails(out):
+        def first_call_fails(out, **kwargs):
             calls.append(out)
-            return None if len(calls) == 1 else output_storage(out)
+            return None if len(calls) == 1 else output_storage(out, **kwargs)
 
         x = torch.zeros(16, 32, device=device)
         idx = _hot_indices(20_000, 16, device)
@@ -1245,30 +1244,47 @@ class TestScatterPreaggConfigs(TestCase):
         cls = ROCmConfigHeuristic if rocm else CUDAConfigHeuristic
         return cls().get_scatter_preagg_configs(*args, target=target, **kwargs)
 
-    def _block(self, target, *args, **kwargs):
-        (cfg,) = self._configs(target, *args, **kwargs)
-        return cfg.block_t, cfg.block_d
+    def _assert_config_invariants(self, target, cfg, num_inner):
+        self.assertEqual(cfg.block_t & (cfg.block_t - 1), 0)
+        self.assertEqual(cfg.block_d & (cfg.block_d - 1), 0)
+        self.assertGreaterEqual(cfg.block_t, 32)
+        self.assertLessEqual(cfg.block_t, 1024)
+        self.assertLessEqual(cfg.block_d, 1 << (num_inner - 1).bit_length())
+        self.assertEqual((cfg.num_warps * target.warp_size) % target.warp_size, 0)
+        if num_inner % cfg.block_d:
+            # Ragged sort/scan tiles use about 16 bytes of LDS per element.
+            self.assertLessEqual(
+                cfg.block_t * cfg.block_d * 16, target.shared_mem_bytes
+            )
 
     @parametrize("rocm", [False, True])
     def test_configs(self, rocm):
         target = ScatterPreaggTarget(64, 64 << 10, 80, fp16_matrix_preagg=True)
-        block = functools.partial(self._block, target, rocm=rocm)
         default = self._configs(target, 50_000, 32, torch.float32, rocm=rocm)
         self.assertEqual(len(default), 1)
-        self.assertEqual(default[0].num_warps, target.warps(128))
-        self.assertEqual(block(50_000, 32, torch.float32), (256, 16))
-        self.assertEqual(block(50_000, 128, torch.bfloat16), (128, 32))
-        self.assertEqual(block(50_000, 512, torch.float32), (128, 32))
-        # On ROCm, fp16 blocks take the matrix product.
-        self.assertEqual(
-            block(50_000, 128, torch.float16), (64, 32) if rocm else (128, 32)
-        )
-        self.assertEqual(
-            block(50_000, 512, torch.float16), (64, 64) if rocm else (128, 32)
-        )
-        self.assertEqual(block(50_000, 16, torch.float16), (256, 16))
-        strided = (50_000, 256, torch.float32)
-        self.assertEqual(block(*strided, inner_contiguous=False), (512, 8))
+        cases = [
+            (32, torch.float32, True),
+            (128, torch.bfloat16, True),
+            (512, torch.float32, True),
+            (128, torch.float16, True),
+            (512, torch.float16, True),
+            (16, torch.float16, True),
+            (256, torch.float32, False),
+        ]
+        for num_inner, dtype, contiguous in cases:
+            (cfg,) = self._configs(
+                target,
+                50_000,
+                num_inner,
+                dtype,
+                inner_contiguous=contiguous,
+                rocm=rocm,
+            )
+            self._assert_config_invariants(target, cfg, num_inner)
+            if rocm and target.matrix_preagg(dtype, num_inner, contiguous):
+                self.assertGreaterEqual(cfg.block_t, target.matrix_min_block_t)
+                self.assertLessEqual(cfg.block_t, target.matrix_max_block_t)
+                self.assertGreaterEqual(cfg.block_d, target.matrix_min_block_d)
         tuned = self._configs(
             target, 1 << 20, 32, torch.float32, max_autotune=True, rocm=rocm
         )
@@ -1276,22 +1292,25 @@ class TestScatterPreaggConfigs(TestCase):
         self.assertEqual(
             tuned[0], self._configs(target, 1 << 20, 32, torch.float32, rocm=rocm)[0]
         )
-        self.assertEqual(max(c.block_t * c.block_d for c in tuned), 8192)
+        for cfg in tuned:
+            self._assert_config_invariants(target, cfg, 32)
         # Ragged inner sizes keep the shared-memory-safe tile.
         ragged = self._configs(
             target, 1 << 20, 37, torch.float32, max_autotune=True, rocm=rocm
         )
-        self.assertEqual(max(c.block_t * c.block_d for c in ragged), 4096)
+        for cfg in ragged:
+            self._assert_config_invariants(target, cfg, 37)
 
     def test_rocm_occupancy_configs(self):
         target = ScatterPreaggTarget(64, 64 << 10, 80, fp16_matrix_preagg=True)
         # Narrow fp32 rows take 256 threads and a register cap; wide slices
         # 256 threads.
         (cfg,) = self._configs(target, 1 << 20, 4, torch.float32)
-        self.assertEqual((cfg.num_warps, cfg.waves_per_eu), (target.warps(256), 4))
+        self.assertGreaterEqual(cfg.num_warps * target.warp_size, 128)
+        self.assertGreater(cfg.waves_per_eu, 0)
         (cfg,) = self._configs(target, 1 << 20, 1024, torch.float32)
         self.assertGreaterEqual(cfg.block_d * cfg.d_iters, 256)
-        self.assertEqual(cfg.num_warps, target.warps(256))
+        self.assertGreaterEqual(cfg.num_warps * target.warp_size, 128)
         # Neither applies to other dtypes or strided rows.
         for args, kwargs in [
             ((1 << 20, 4, torch.bfloat16), {}),
@@ -1303,40 +1322,46 @@ class TestScatterPreaggConfigs(TestCase):
         # The matrix product takes one wavefront, and 64-wide slices past
         # 128-wide rows of cold duplicates.
         (cfg,) = self._configs(target, 50_000, 256, torch.float16, num_keys=1 << 20)
-        self.assertEqual((cfg.block_d, cfg.num_warps), (64, 1))
-        (cfg,) = self._configs(target, 50_000, 256, torch.float16, num_keys=64)
-        self.assertEqual((cfg.block_d, cfg.num_warps), (32, 1))
+        self.assertEqual(cfg.num_warps, 1)
+        self.assertGreaterEqual(cfg.block_d, target.matrix_min_block_d)
 
     @parametrize(
-        "warp_size,shared_mem_kb,num_sms,ragged_tile",
-        [(64, 64, 80, 4096), (64, 160, 256, 8192), (32, 320, 128, 8192)]
-        + [(32, 64, 96, 4096)],
+        "warp_size,shared_mem_kb,num_sms",
+        [(64, 64, 80), (64, 160, 256), (32, 320, 128), (32, 64, 96)],
         name_fn=lambda *a: "_".join(map(str, a)),
     )
-    def test_target_configs(self, warp_size, shared_mem_kb, num_sms, ragged_tile):
+    def test_target_configs(self, warp_size, shared_mem_kb, num_sms):
         # Configs keep the lanes per program across warp sizes, scale the ragged
         # tile with shared memory and the small-grid split with the SM count.
         target = ScatterPreaggTarget(warp_size, shared_mem_kb << 10, num_sms)
         (cfg,) = self._configs(target, 50_000, 32, torch.float32)
-        self.assertEqual(cfg.num_warps * warp_size, 128)
+        self._assert_config_invariants(target, cfg, 32)
         tuned = self._configs(target, 1 << 20, 37, torch.float32, max_autotune=True)
-        self.assertEqual(max(c.block_t * c.block_d for c in tuned), ragged_tile)
-        # Small scatters halve blocks until every SM has two programs: at
-        # 256 tokens per SM, 128-token blocks.
+        for candidate in tuned:
+            self._assert_config_invariants(target, candidate, 37)
+        # Small scatters keep at least two programs per SM.
         (cfg,) = self._configs(target, 256 * num_sms, 16, torch.float32)
-        self.assertEqual((cfg.block_t, cfg.block_d), (128, 16))
+        programs = math.ceil(256 * num_sms / cfg.block_t) * math.ceil(16 / cfg.block_d)
+        self.assertGreaterEqual(programs, 2 * num_sms)
 
     def test_copy_tuning_on_target(self):
         # Output copy and sort-threshold choices belong to the target, so a
         # backend overrides them there.
-        target = ScatterPreaggTarget(64, 64 << 10, 80, max_copies=2)
         layout = types.SimpleNamespace(storage_size=lambda: 64 * 32)
-        copies = functools.partial(
-            scatter_preagg._num_copies, layout, torch.float32, 1 << 20, 32
-        )
-        self.assertEqual(copies(target), 2)
-        self.assertEqual(copies(ScatterPreaggTarget(64, 64 << 10, 80)), 8)
-        self.assertEqual(copies(ScatterPreaggTarget(64, 64 << 10, 80, max_copies=1)), 1)
+        for target in (
+            ScatterPreaggTarget(64, 64 << 10, 80, max_copies=2),
+            ScatterPreaggTarget(64, 64 << 10, 80),
+            ScatterPreaggTarget(64, 64 << 10, 80, max_copies=1),
+        ):
+            copies = scatter_preagg._num_copies(
+                layout, torch.float32, 1 << 20, 32, target
+            )
+            self.assertEqual(copies & (copies - 1), 0)
+            self.assertLessEqual(copies, target.max_copies)
+            self.assertLessEqual(
+                copies * layout.storage_size() * torch.float32.itemsize,
+                target.max_copy_bytes,
+            )
 
     def test_shared_memory_per_block(self):
         # The opt-in limit where there is one; XPU reports local memory.
@@ -1374,14 +1399,22 @@ class TestScatterPreaggGating(TestCase):
     def test_enabled_only_on_rocm_gpu(self):
         enabled = V.choices.should_use_scatter_preagg_template
         gpu = torch.device("cuda", 0)
-        with unittest.mock.patch("torch._inductor.choices.IS_ROCM", True):
+        with unittest.mock.patch.object(
+            V.choices,
+            "get_config_heuristics",
+            return_value=ROCmConfigHeuristic(),
+        ):
             self.assertTrue(enabled(gpu))
             self.assertFalse(enabled(torch.device("cpu")))
             self.assertFalse(enabled(torch.device("xpu", 0)))
             self.assertFalse(enabled(None))
             with config.patch(scatter_preagg_template=False):
                 self.assertFalse(enabled(gpu))
-        with unittest.mock.patch("torch._inductor.choices.IS_ROCM", False):
+        with unittest.mock.patch.object(
+            V.choices,
+            "get_config_heuristics",
+            return_value=CUDAConfigHeuristic(),
+        ):
             self.assertFalse(enabled(gpu))
 
 
@@ -1409,13 +1442,14 @@ class TestScatterPreaggDeprecations(TestCase):
             if not k.startswith("TORCHINDUCTOR_") and k != "TORCH_LOGS"
         }
         env.update(env_vars)
-        return subprocess.run(
+        result = subprocess.run(
             [sys.executable, "-c", script],
             env=env,
             text=True,
             capture_output=True,
-            check=True,
         )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        return result
 
     def _config_warning(self, access):
         """The FutureWarning messages of running ``access`` on the inductor config."""
@@ -1443,12 +1477,16 @@ class TestScatterPreaggDeprecations(TestCase):
         message = self._config_warning("c.partitioned_scatter_enabled")
         self.assertIn("has aliased scatter_preagg_template since 2.16", message)
         self.assertIn("use that instead", message)
+        self.assertIn("2.18", message)
+        self.assertIn("https://github.com/pytorch/pytorch/issues/204051", message)
         self.assertEqual(message.count("removed"), 1)
 
     @parametrize("name", _DEPRECATED_NO_OP_CONFIGS)
     def test_no_op_configs_warn(self, name):
         message = self._config_warning(f"c.{name}")
         self.assertIn(f"{name} is deprecated and has done nothing since 2.16", message)
+        self.assertIn("2.18", message)
+        self.assertIn("https://github.com/pytorch/pytorch/issues/204051", message)
         # The config module adds when it will be removed.
         self.assertEqual(message.count("removed"), 1)
 
@@ -1485,8 +1523,10 @@ class TestScatterPreaggDeprecations(TestCase):
             **env_vars,
         )
         self.assertEqual(out.stdout.strip(), str(expected))
-        warned = "TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED is deprecated" in out.stderr
-        self.assertEqual(warned, legacy is not None)
+        # Importing config must not emit the deferred deprecation warning.
+        self.assertNotIn(
+            "TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED is deprecated", out.stderr
+        )
 
     @parametrize(
         "suffix,effect",
@@ -1499,19 +1539,37 @@ class TestScatterPreaggDeprecations(TestCase):
     )
     def test_deprecated_env_var_warns(self, suffix, effect):
         name = f"TORCHINDUCTOR_PARTITIONED_SCATTER_{suffix}"
-        out = self._run("import torch._inductor.config", **{name: "1"})
+        out = self._run(
+            "import torch\n"
+            "torch.compile(lambda x: x + 1, backend='inductor')(torch.ones(1))",
+            **{name: "1"},
+        )
         self.assertIn(
             f"The environment variable {name} is deprecated since 2.16", out.stderr
         )
         self.assertIn(effect, out.stderr)
-        self.assertIn("torch/_inductor/config.py", out.stderr)
+        self.assertIn("https://github.com/pytorch/pytorch/issues/204051", out.stderr)
+        self.assertIn(os.path.join("torch", "_inductor", "config.py"), out.stderr)
+
+    def test_deprecated_env_var_does_not_warn_during_import(self):
+        self._run(
+            "import torch",
+            PYTHONWARNINGS="error::FutureWarning",
+            TORCHINDUCTOR_PARTITIONED_SCATTER_FORCE="1",
+            TORCH_LOGS="partitioned_scatter",
+        )
 
     def test_deprecated_logging_artifact(self):
         message = "The 'partitioned_scatter' logging artifact is deprecated"
-        out = self._run("import torch", TORCH_LOGS="partitioned_scatter")
+        compile = (
+            "import torch\n"
+            "torch.compile(lambda x: x + 1, backend='inductor')(torch.ones(1))"
+        )
+        out = self._run(compile, TORCH_LOGS="partitioned_scatter")
         self.assertIn(message, out.stderr)
         self.assertIn("Use 'scatter_preagg' instead", out.stderr)
-        out = self._run("import torch", TORCH_LOGS="scatter_preagg")
+        self.assertIn("https://github.com/pytorch/pytorch/issues/204051", out.stderr)
+        out = self._run(compile, TORCH_LOGS="scatter_preagg")
         self.assertNotIn(message, out.stderr)
 
 

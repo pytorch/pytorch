@@ -57,7 +57,8 @@
             HIST_BINS - 1
         )
 {% endif %}
-        # ROCm can mis-fold integer histogram-count comparisons.
+        # TODO: Remove the float cast once ROCm correctly folds integer
+        # histogram-count comparisons.
         counts = tl.histogram(bins.to(tl.int32), HIST_BINS, mask=live).to(
             tl.float32
         )
@@ -92,7 +93,8 @@
         # Plain atomics in token order, like regular Inductor. Rows of PLAIN_D
         # put fewer tokens in each atomic instruction than BLOCK_D-wide tiles,
         # which matters when hot keys collide within one.
-        # Keep unrolled: a loop with bounds assertions can miscompile on ROCm.
+        # TODO: Use a regular loop once ROCm correctly compiles loop bounds
+        # assertions; keep this unrolled until then.
         for chunk in tl.static_range(0, BLOCK_T // PLAIN_T):
             chunk_block = tok_block + chunk * PLAIN_T
             chunk_pos = tl.arange(0, PLAIN_T).to(INDEX_DTYPE)

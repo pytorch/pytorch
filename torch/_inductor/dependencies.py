@@ -910,6 +910,7 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         return sympy_index_symbol(f"({str(index_var)})")
 
     def frexp(self, x: object) -> tuple[None, ...]:
+        self._default("frexp", (x,), {})
         return (None,) * 2
 
     def scan(
@@ -918,6 +919,7 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         combine_fn: object,
         values: Sequence[object],
     ) -> tuple[None, ...]:
+        self._default("scan", (values,), {})
         return (None,) * len(values)
 
     def sort(
@@ -927,6 +929,7 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         stable: bool,
         descending: bool,
     ) -> tuple[None, ...]:
+        self._default("sort", (values,), {})
         return (None,) * len(values)
 
     def reduction(
@@ -936,10 +939,12 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         reduction_type: ReductionType,
         value: None | tuple[None, ...],
     ) -> None | tuple[None, ...]:
+        self._default("reduction", (value,), {})
         num_values = reduction_num_outputs(reduction_type)
         return (None,) * num_values if num_values > 1 else None
 
     def masked(self, mask: object, body: Callable[[], object], other: object) -> None:
+        self._default("masked", (mask, other), {})
         if not callable(body):
             raise AssertionError("masked body must always be callable.")
         # The body can make additional calls, for e.g. ops.indirect_indexing

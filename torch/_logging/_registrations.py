@@ -235,7 +235,8 @@ register_artifact(
     off_by_default=True,
     deprecation_message="partitioned scatter was replaced by the scatter "
     "pre-aggregation template in 2.16, so it logs nothing (removal planned for "
-    "2.18). Use 'scatter_preagg' instead.",
+    "2.18; see https://github.com/pytorch/pytorch/issues/204051). Use "
+    "'scatter_preagg' instead.",
 )
 register_artifact(
     "scatter_preagg",

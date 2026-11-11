@@ -695,6 +695,7 @@ def register_artifact(
 
 
 _warned_deprecated_artifacts: set[str] = set()
+_pending_deprecated_artifacts: set[str] = set()
 
 
 def _warn_if_deprecated_artifact(name: str, stacklevel: int) -> None:
@@ -708,6 +709,14 @@ def _warn_if_deprecated_artifact(name: str, stacklevel: int) -> None:
             stacklevel=stacklevel + 1,
         )
         _warned_deprecated_artifacts.add(name)
+
+
+def warn_deprecated_artifacts() -> None:
+    """Emit warnings deferred while parsing TORCH_LOGS during torch import."""
+    pending = tuple(_pending_deprecated_artifacts)
+    _pending_deprecated_artifacts.clear()
+    for name in pending:
+        _warn_if_deprecated_artifact(name, stacklevel=1)
 
 
 def getArtifactLogger(module_qname, artifact_name) -> logging.Logger:
@@ -918,7 +927,8 @@ def _parse_log_settings(settings):
             log_qnames = log_registry.log_alias_to_log_qnames[name]
             log_state.enable_log(log_qnames, level)
         elif log_registry.is_artifact(name):
-            _warn_if_deprecated_artifact(name, stacklevel=1)
+            if name in log_registry.artifact_deprecations:
+                _pending_deprecated_artifacts.add(name)
             log_state.enable_artifact(name)
         elif _is_valid_module(name):
             # Get the module and all its submodules if it's a package
