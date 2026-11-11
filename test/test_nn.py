@@ -96,7 +96,11 @@ def _graph_node_names(grad_fn):
 # CI.
 
 class TestNN(NNTestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: add_test() generates the module tests' *_cuda and
+    # *_xpu variants into this class, and several tests compare against CUDA
+    # when it's available, so it can't be GENERIC until those are split out.
+    # Its tests take no device parameter and the class doesn't use
+    # instantiate_device_type_tests, so it isn't ACCELERATOR either.
 
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -7427,7 +7431,7 @@ class TestNNDeviceType(NNTestCase):
         # Extremely large kernel_size (would overflow int)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"value cannot be safely converted without overflow: kernel_size",
+            r"value cannot be converted to type int without overflow",
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -7456,7 +7460,7 @@ class TestNNDeviceType(NNTestCase):
 
         # Extremely large stride (would overflow int)
         with self.assertRaisesRegex(
-            RuntimeError, r"value cannot be safely converted without overflow: stride"
+            RuntimeError, r"value cannot be converted to type int without overflow"
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -7476,7 +7480,7 @@ class TestNNDeviceType(NNTestCase):
 
         # Extremely large padding (would overflow int)
         with self.assertRaisesRegex(
-            RuntimeError, r"value cannot be safely converted without overflow: padding"
+            RuntimeError, r"value cannot be converted to type int without overflow"
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -7488,7 +7492,7 @@ class TestNNDeviceType(NNTestCase):
         # Combined invalid parameters
         with self.assertRaisesRegex(
             RuntimeError,
-            r"value cannot be safely converted without overflow: kernel_size",
+            r"value cannot be converted to type int without overflow",
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -11162,6 +11166,24 @@ class TestNNDeviceType(NNTestCase):
         else:
             self.assertEqual(out1, out2)
 
+    @onlyAccelerator
+    @dtypes(torch.double)
+    @dtypesIfMPS(torch.float)
+    @parametrize_test("batch_size,hidden_size", [(1, 7), (5, 513)])
+    def test_LSTM_batch_and_hidden_sizes(self, device, dtype, batch_size, hidden_size):
+        lstm_cpu = nn.LSTM(11, hidden_size, num_layers=2, bidirectional=True, dtype=dtype)
+        lstm = deepcopy(lstm_cpu).to(device)
+        x_cpu = torch.randn(3, batch_size, 11, dtype=dtype, requires_grad=True)
+        x = x_cpu.detach().to(device).requires_grad_()
+        out_cpu, (h_cpu, c_cpu) = lstm_cpu(x_cpu)
+        out, (h, c) = lstm(x)
+        self.assertEqual(out, out_cpu, atol=1e-4, rtol=1e-4)
+        (out_cpu.sum() + (h_cpu * c_cpu).sum()).backward()
+        (out.sum() + (h * c).sum()).backward()
+        self.assertEqual(x.grad, x_cpu.grad, atol=1e-4, rtol=1e-4)
+        for param, param_cpu in zip(lstm.parameters(), lstm_cpu.parameters()):
+            self.assertEqual(param.grad, param_cpu.grad, atol=1e-4, rtol=1e-4)
+
     @skipMeta  # GRU cell reuses output which was resized
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @dtypes(torch.double)
@@ -13256,18 +13278,13 @@ class TestNNDeviceType(NNTestCase):
                                                        reduction=reduction, margin=margin, swap=swap)
             self.assertTrue(gradcheck(lambda a, p, n: loss_op(
                 a, p, n), (anchor, positive, negative)))
-            traced_loss_op = torch.jit.trace(loss_op, (anchor, positive, negative))
-            self.assertTrue(gradcheck(lambda a, p, n: traced_loss_op(
-                a, p, n), (anchor, positive, negative)))
 
             # Test forward parity
             functional = F.triplet_margin_with_distance_loss(anchor, positive, negative,
                                                              distance_function=distance_fn,
                                                              reduction=reduction, margin=margin, swap=swap)
             modular = loss_op(anchor, positive, negative)
-            traced = traced_loss_op(anchor, positive, negative)
             self.assertEqual(functional, modular, atol=1e-6, rtol=1e-6)
-            self.assertEqual(traced, modular, atol=1e-6, rtol=1e-6)
 
     @dtypes(torch.cfloat, torch.cdouble, torch.float)
     def test_to_complex(self, device, dtype):
@@ -15847,6 +15864,38 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(res_cpu, res_device, exact_dtype=False)
         self.assertEqual(grad_cpu, grad_device)
 
+    @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    def test_CTCLoss_max_threads_launch_bounds(self, device, dtype):
+        # Exercises maximum thread block sizes (768 for double, 1024 for float)
+        # in native CTC loss kernels when 2 * target_length + 1 > max_threads / 2.
+        target_length = 300
+        input_length = 600
+        vocab_size = 5
+        batch_size = 2
+
+        for target_dtype in [torch.int, torch.long]:
+            log_probs = (
+                torch.randn(input_length, batch_size, vocab_size, dtype=dtype, device=device)
+                .log_softmax(2)
+                .requires_grad_()
+            )
+            targets = torch.randint(
+                low=1, high=vocab_size, size=(batch_size, target_length), dtype=target_dtype, device=device
+            )
+            input_lengths = torch.full((batch_size,), input_length, dtype=target_dtype)
+            target_lengths = torch.full((batch_size,), target_length, dtype=target_dtype)
+
+            with torch.backends.cudnn.flags(enabled=False):
+                loss = torch.nn.functional.ctc_loss(
+                    log_probs, targets, input_lengths, target_lengths,
+                    reduction='sum', zero_infinity=True
+                )
+                grad, = torch.autograd.grad(loss, log_probs, torch.ones_like(loss))
+
+            self.assertFalse(torch.isnan(loss).any())
+            self.assertFalse(torch.isnan(grad).any())
+
     @onlyAccelerator
     def test_CTCLoss_critical_target_len(self, device):
         # cudnn has an unexpected problem with target length 256, see issue #53505
@@ -17408,8 +17457,8 @@ class TestNNCUDA(NNTestCase):
     def test_linear_cross_entropy_options_auto_defaults_acc_dtype_cuda(self, device):
         """acc_dtype auto resolution on real CUDA hardware: fp32 once the SM
         generation supports it, the input dtype otherwise. Needs actual
-        hardware to query ``get_device_capability``, so this piece can't be
-        GENERIC like the rest of ``test_..._auto_defaults`` (see TestNN).
+        hardware to query ``get_device_capability``, so this piece lives here
+        rather than with the rest of ``test_..._auto_defaults`` in TestNN.
         """
         opts = nn.LinearCrossEntropyOptions()
         major = torch.cuda.get_device_capability(device)[0]

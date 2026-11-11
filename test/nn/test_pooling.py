@@ -437,7 +437,7 @@ class TestPoolingNN(NNTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: kernel_size",
+            "value cannot be converted to type int without overflow",
         ):
             avgpool(inp)
 
@@ -967,14 +967,14 @@ class TestPoolingNNDevice(NNTestCase):
         samples = torch.randn(1, 3, 10, 10, 10, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: kernel_size",
+            "value cannot be converted to type int without overflow",
         ):
             nn.MaxPool3d(
                 kernel_size=9223372036854775803,
             )(samples)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: dilation",
+            "value cannot be converted to type int without overflow",
         ):
             nn.MaxPool3d(
                 kernel_size=2,
@@ -992,7 +992,7 @@ class TestPoolingNNDevice(NNTestCase):
         samples = torch.randn(1, 3, 10, 10, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: dilation",
+            "value cannot be converted to type int without overflow",
         ):
             nn.MaxPool2d(
                 kernel_size=2,
@@ -1004,7 +1004,7 @@ class TestPoolingNNDevice(NNTestCase):
         samples = torch.randn(1, 3, 10, 10, 10, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: stride",
+            "value cannot be converted to type int without overflow",
         ):
             nn.AvgPool3d(
                 kernel_size=2,
@@ -1018,7 +1018,7 @@ class TestPoolingNNDevice(NNTestCase):
         indices2d = torch.zeros(1, 1, 2, 2, dtype=torch.long, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: kernel_size",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ops.aten.avg_pool2d_backward(
                 grad2d,
@@ -1032,7 +1032,7 @@ class TestPoolingNNDevice(NNTestCase):
             )
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: dilation",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ops.aten.max_pool2d_with_indices_backward(
                 grad2d,
@@ -1050,7 +1050,7 @@ class TestPoolingNNDevice(NNTestCase):
         indices3d = torch.zeros(1, 1, 2, 2, 2, dtype=torch.long, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: stride",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ops.aten.avg_pool3d_backward(
                 grad3d,
@@ -1064,7 +1064,7 @@ class TestPoolingNNDevice(NNTestCase):
             )
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: dilation",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ops.aten.max_pool3d_with_indices_backward(
                 grad3d,
@@ -1398,6 +1398,15 @@ torch.{device_type}.synchronize()
 
         for mf in (torch.contiguous_format, torch.channels_last, "non_contiguous"):
             helper((2, 3, 6, 6), mf)
+
+    def test_adaptive_avg_pool2d_size_one_channel_stride(self, device):
+        # (B, 1, H, W) is contiguous whatever the stride of the size-1 dim.
+        x = torch.randn(1, 3, 5, 6, device=device).transpose(0, 1)
+        self.assertTrue(x.is_contiguous())
+        expected = F.adaptive_avg_pool2d(
+            x.clone(memory_format=torch.contiguous_format), (2, 3)
+        )
+        self.assertEqual(F.adaptive_avg_pool2d(x, (2, 3)), expected)
 
     def test_adaptive_avg_pool3d_output_size_one(self, device):
         x = torch.randn(
