@@ -625,9 +625,6 @@ class TestBenchmarker(TestCase):
             def zero_(self):
                 pass
 
-            def sum(self):
-                pass
-
         class FakeDeviceInterface:
             def synchronize(self):
                 pass
@@ -665,6 +662,7 @@ class TestBenchmarker(TestCase):
                 ),
                 patch.object(_bench.torch, "empty", return_value=FakeBuffer()),
                 patch.object(_bench, "_rocm_mall_size", return_value=0),
+                patch.object(_bench, "_rocm_read_flush", return_value=lambda: None),
                 patch.object(
                     _bench.inductor_config, "autotune_cudagraph_benchmarking", True
                 ),
@@ -765,8 +763,9 @@ class TestBenchmarker(TestCase):
 
     @parametrize("hip_value", (None, "mock-hip"))
     def test_inductor_benchmarker_flush_reads_on_rocm(self, hip_value):
-        # ROCm flushes by reading a float32 buffer twice (zero_() leaves dirty lines
-        # whose write-back the timed call pays); CUDA keeps the int32 zero_() flush.
+        # ROCm flushes by reading a float32 buffer twice with a Triton kernel (zero_()
+        # leaves dirty lines whose write-back the timed call pays, and ATen's loads
+        # skip the Infinity Cache on MI300); CUDA keeps the int32 zero_() flush.
         from torch._inductor.runtime import benchmarking as _bench
 
         calls = []
@@ -774,9 +773,6 @@ class TestBenchmarker(TestCase):
         class FakeBuffer:
             def zero_(self):
                 calls.append("zero_")
-
-            def sum(self):
-                calls.append("sum")
 
         class FakeDeviceInterface:
             def synchronize(self):
@@ -802,16 +798,26 @@ class TestBenchmarker(TestCase):
             empty_calls.append((args, kwargs))
             return FakeBuffer()
 
+        flush_passes = []
+
+        def fake_read_flush(buffer, passes):
+            flush_passes.append(passes)
+            return lambda: calls.append("read")
+
         with (
             patch.object(
                 _bench, "get_interface_for_device", return_value=FakeDeviceInterface()
             ),
             patch.object(_bench.torch, "empty", side_effect=fake_empty),
             patch.object(_bench, "_rocm_mall_size", return_value=256),
+            patch.object(_bench, "_rocm_read_flush", side_effect=fake_read_flush),
+            patch.object(
+                _bench.inductor_config, "autotune_cudagraph_benchmarking", False
+            ),
             patch.object(torch.version, "hip", hip_value),
         ):
             FakeInductorBenchmarker().benchmark_gpu(
-                lambda: None,
+                lambda: calls.append("call"),
                 estimation_iters=2,
                 memory_warmup_iters=3,
                 benchmark_iters=4,
@@ -822,13 +828,20 @@ class TestBenchmarker(TestCase):
         (size,), kwargs = empty_calls[0]
         if hip_value:
             self.assertEqual((size, kwargs["dtype"]), ((4 + 256) // 4, torch.float32))
-            # two read passes per flush; the warmup runs half as many flushes
-            self.assertEqual(
-                calls, ["zero_"] + ["sum"] * (2 * 2 + 2 * (3 // 2) + 2 * 4)
-            )
+            # two read passes per flush; the warmup runs half as many flushes,
+            # rounded up
+            self.assertEqual(flush_passes, [2])
+            flush, warmup_flushes = "read", 2
         else:
             self.assertEqual((size, kwargs["dtype"]), (4 // 4, torch.int))
-            self.assertEqual(calls, ["zero_"] * (1 + 2 + 3 + 4))
+            flush, warmup_flushes = "zero_", 3
+        self.assertEqual(
+            calls,
+            ["call", "zero_"]
+            + [flush, "call"] * 2
+            + [flush] * warmup_flushes
+            + [flush, "call"] * 4,
+        )
 
 
 class TestGpuBenchmarkDeviceTypes(TestCase):

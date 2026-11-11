@@ -3025,9 +3025,7 @@ class TestMaxAutotune(TestCase):
             return_value=(16, 128 * 1024),
         ):
             _, code = run_and_get_code(compiled_func, a, b)
-        decompose_count = sum(
-            "benchmark_decompose_k_mm" in codegen for codegen in code
-        )
+        decompose_count = sum("benchmark_decompose_k_mm" in codegen for codegen in code)
         self.assertEqual(decompose_count, len(expected_splits))
 
     def test_filter_decompose_k_splits(self):
