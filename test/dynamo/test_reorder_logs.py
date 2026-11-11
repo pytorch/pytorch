@@ -252,7 +252,7 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
             self.assertIn("moo tensor(6.)", captured.output[0])
             self.assertTrue(same(opt_out, torch.full((3,), 4.0)))
 
-    def test_reorder_transformers_warning_once_by_default(self):
+    def test_ignore_transformers_warning_once_by_default(self):
         # Match how Transformers exposes warning_once without importing it.
         hf_logging = types.ModuleType("transformers.utils.logging")
 
@@ -272,11 +272,15 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
         with (
             patch.dict(sys.modules, {hf_logging.__name__: hf_logging}),
             patch.object(logging.Logger, "warning_once", warning_once, create=True),
-            self.assertLogs(logger, logging.WARNING) as captured,
         ):
             opt_f = torch.compile(f, backend=counter, fullgraph=True)
-            self.assertEqual(opt_f(x), torch.full_like(x, 4))
-            self.assertEqual(opt_f(x), torch.full_like(x, 4))
+            with self.assertNoLogs(logger, logging.WARNING):
+                self.assertEqual(opt_f(x), torch.full_like(x, 4))
+                self.assertEqual(opt_f(x), torch.full_like(x, 4))
+            self.assertEqual(warning_once.cache_info().currsize, 0)
+            with self.assertLogs(logger, logging.WARNING) as captured:
+                self.assertEqual(f(x), torch.full_like(x, 4))
+                self.assertEqual(f(x), torch.full_like(x, 4))
 
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(captured.output, [f"WARNING:{logger.name}:constant warning"])

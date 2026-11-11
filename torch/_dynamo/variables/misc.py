@@ -2346,30 +2346,23 @@ class LoggingLoggerVariable(VariableTracker):
             return variables.ConstantVariable.create(None)
 
         reorderable = torch._dynamo.config.reorderable_logging_functions
-        # Transformers adds this cached method to logging.Logger. Replay plain
-        # messages to preserve the warning and its once-per-message behavior.
-        # Consult the loaded module so Dynamo does not import Transformers.
-        transformers_warning_once = (
+        if self.source and (method in reorderable or function in reorderable):
+            fn_var = DebuggingVariable.create_reorderable(
+                method, AttrSource(self.source, name)
+            )
+            return fn_var.call_function(tx, args, kwargs)
+
+        # Transformers installs this method on logging.Logger. Match the
+        # loaded function by identity without importing Transformers.
+        if (
             name == "warning_once"
             and function is not None
             and function
             is getattr(
                 sys.modules.get("transformers.utils.logging"), "warning_once", None
             )
-            and not kwargs
-            and len(args) == 1
-            and isinstance(args[0], variables.ConstantVariable)
-            and type(args[0].as_python_constant()) is str
-        )
-        if self.source and (
-            method in reorderable
-            or function in reorderable
-            or transformers_warning_once
         ):
-            fn_var = DebuggingVariable.create_reorderable(
-                method, AttrSource(self.source, name)
-            )
-            return fn_var.call_function(tx, args, kwargs)
+            return variables.ConstantVariable.create(None)
 
         logger_cls = type(self.value)
         logger_cls_name = f"{logger_cls.__module__}.{logger_cls.__qualname__}"
