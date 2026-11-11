@@ -16,12 +16,17 @@ import sys
 from pathlib import Path
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # .ci/wheel
+from _common import get_env_flag_or_set_default
+
+
 def configure_blas_env() -> None:
     """Tell CMake which BLAS to use, based on architecture and GPU type.
 
     On x86, MKL from /opt/intel is wired in via CMAKE_{INCLUDE,LIBRARY}_PATH.
     On aarch64, CMake otherwise hunts for MKL (which doesn't exist there);
     we explicitly pick OpenBLAS or NVPL and enable ACL for oneDNN.
+    Explicit aarch64 MKLDNN, ACL, and BLAS settings take precedence over these defaults.
     """
     arch = platform.machine()
     gpu_arch_type = os.environ.get("GPU_ARCH_TYPE", "")
@@ -37,33 +42,45 @@ def configure_blas_env() -> None:
         return
 
     elif arch == "aarch64":
-        if not Path("/acl").is_dir():
-            sys.exit("ERROR: ARM Compute Library not found at /acl")
-        os.environ["USE_MKLDNN"] = "1"
-        os.environ["USE_MKLDNN_ACL"] = "1"
-        os.environ["ACL_ROOT_DIR"] = "/acl"
+        use_mkldnn = get_env_flag_or_set_default("USE_MKLDNN", "1")
+        use_acl = get_env_flag_or_set_default(
+            "USE_MKLDNN_ACL", "1" if use_mkldnn else "0"
+        )
+        if use_mkldnn and use_acl:
+            acl_root = os.environ.setdefault("ACL_ROOT_DIR", "/acl")
+            if not Path(acl_root).is_dir():
+                sys.exit(f"ERROR: ARM Compute Library not found at {acl_root}")
+            print("Using ACL for MKLDNN on aarch64")
+
+        if "BLAS" in os.environ:
+            print(f"Using explicitly configured BLAS: {os.environ['BLAS']}")
+            return
 
         if gpu_arch_type == "cuda-aarch64":
             nvpl = Path("/usr/local/lib/libnvpl_blas_lp64_gomp.so.0")
             if not nvpl.is_file():
                 sys.exit(f"ERROR: NVPL BLAS not found at {nvpl}")
-            print("Using NVPL BLAS/LAPACK and ACL for MKLDNN on CUDA aarch64")
+            print("Using NVPL BLAS/LAPACK on CUDA aarch64")
             os.environ["BLAS"] = "NVPL"
         elif gpu_arch_type in ("cpu-aarch64", "cpu"):
             openblas = Path("/opt/OpenBLAS/lib/libopenblas.so.0")
             if not openblas.is_file():
                 sys.exit(f"ERROR: OpenBLAS not found at {openblas}")
-            print("Using OpenBLAS and ACL for MKLDNN on CPU aarch64")
+            print("Using OpenBLAS on CPU aarch64")
             os.environ["BLAS"] = "OpenBLAS"
             os.environ["OpenBLAS_HOME"] = "/opt/OpenBLAS"
 
     elif arch == "riscv64":
-        os.environ["USE_MKLDNN"] = "0"
+        os.environ.setdefault("USE_MKLDNN", "0")
+
+        if "BLAS" in os.environ:
+            print(f"Using explicitly configured BLAS: {os.environ['BLAS']}")
+            return
 
         openblas = Path("/opt/OpenBLAS/lib/libopenblas.so.0")
         if not openblas.is_file():
             sys.exit(f"ERROR: OpenBLAS not found at {openblas}")
-        print("Using OpenBLAS for MKLDNN on CPU riscv64")
+        print("Using OpenBLAS on CPU riscv64")
         os.environ["BLAS"] = "OpenBLAS"
         os.environ["OpenBLAS_HOME"] = "/opt/OpenBLAS"
 
