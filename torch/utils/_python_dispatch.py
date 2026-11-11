@@ -45,18 +45,28 @@ _is_in_any_mode_without_ignore_compile_internals = False
 class _CppFakeModeTLS(threading.local):
     def __init__(self) -> None:
         # Every entry, including reentry of an active or inherited mode.
-        self.stack: list[tuple[CppFakeTensorMode, _FakeModeEnterRecord]] = []
+        self.stack: list[
+            tuple[CppFakeTensorMode, _FakeModeEnterRecord, bool | None]
+        ] = []
 
 
 _cpp_fake_mode_tls = _CppFakeModeTLS()
 
 
 def is_in_torch_dispatch_mode(include_infra_modes: bool = True) -> bool:
-    if not include_infra_modes:
-        return _is_in_non_infra_torch_dispatch_mode
-    if _is_in_torch_dispatch_mode:
-        return True
-    return False
+    return (
+        _is_in_torch_dispatch_mode
+        if include_infra_modes
+        else _is_in_non_infra_torch_dispatch_mode
+    )
+
+
+# Shared by TorchDispatchMode and CppFakeTensorMode.
+def _set_in_torch_dispatch_mode(value: bool, /) -> bool:
+    global _is_in_torch_dispatch_mode
+    prev = _is_in_torch_dispatch_mode
+    _is_in_torch_dispatch_mode = value
+    return prev
 
 
 def is_in_any_mode_without_ignore_compile_internals() -> bool:
@@ -155,7 +165,6 @@ class TorchDispatchMode:
         raise NotImplementedError
 
     def __enter__(self):
-        global _is_in_torch_dispatch_mode
         global _is_in_non_infra_torch_dispatch_mode
         global _is_in_any_mode_without_ignore_compile_internals
 
@@ -164,8 +173,7 @@ class TorchDispatchMode:
         # this will replicate the previous behavior of not strictly needing
         # to call super().__init__()
         self._lazy_init_old_dispatch_mode_flags()
-        self.old_dispatch_mode_flags.append(_is_in_torch_dispatch_mode)
-        _is_in_torch_dispatch_mode = True
+        self.old_dispatch_mode_flags.append(_set_in_torch_dispatch_mode(True))
         self.old_non_infra_dispatch_mode_flags.append(
             _is_in_non_infra_torch_dispatch_mode
         )
@@ -191,8 +199,7 @@ class TorchDispatchMode:
             # Today, mode keys are not used at all in the per-dispatch-key-mode logic (for pre-dispatch)
             # We should probably revisit this.
             mb_dk_or_mode_key = self.__dict__.get("_mode_key", None)
-        global _is_in_torch_dispatch_mode
-        _is_in_torch_dispatch_mode = self.old_dispatch_mode_flags.pop()
+        _set_in_torch_dispatch_mode(self.old_dispatch_mode_flags.pop())
         global _is_in_non_infra_torch_dispatch_mode
         _is_in_non_infra_torch_dispatch_mode = (
             self.old_non_infra_dispatch_mode_flags.pop()
