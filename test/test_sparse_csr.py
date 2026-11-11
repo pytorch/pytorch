@@ -1501,6 +1501,22 @@ class TestSparseCSRDevice(TestCase):
                                                blocksize=tuple(2 * bi for bi in blocksize))
             _check_resize_b_as_a(b, a)
 
+            # b with non-contiguous values, gh-201268: no-op for a's nnz; for
+            # another nnz, resizing the view would overwrite the storage between
+            # its elements, so it raises
+            fill = -99
+            for b_nnz in (nnz, nnz // 2):
+                b_nc, buf = self._with_strided_values(
+                    self.genSparseCompressedTensor(shape, layout=layout, device=device, index_dtype=index_dtype,
+                                                   dtype=dtype, nnz=b_nnz, blocksize=blocksize), fill)
+                if b_nnz == nnz:
+                    values = b_nc.values()
+                    b_nc.resize_as_sparse_(a)
+                    self.assertEqual(b_nc.values().data_ptr(), values.data_ptr())
+                    self.assertEqual(b_nc.values().stride(), values.stride())
+                else:
+                    self._check_nnz_change_rejected(b_nc, buf, lambda o: o.resize_as_sparse_(a), fill)
+
             # cross-device resize is not supported: the template must be on the same device
             if device_type != 'cpu':
                 a_cpu = self.genSparseCompressedTensor(shape,
@@ -2610,9 +2626,11 @@ class TestSparseCSRDevice(TestCase):
             arg_idx = list(range(len(sparse_args)))
             out_idx = arg_idx + [None]
 
-            for idx1, idx2, idx3 in itertools.product(arg_idx, arg_idx, out_idx):
+            for idx1, idx2, idx3, noncontiguous in itertools.product(arg_idx, arg_idx, out_idx, (False, True)):
                 s1 = sparse_args[idx1]
                 s2 = sparse_args[idx2]
+                if noncontiguous:
+                    s1, s2 = (self._with_strided_values(s, -99)[0] for s in (s1, s2))
                 s3 = None if idx3 is None else sparse_args[idx3]
                 d1 = dense_args[idx1]
                 d2 = dense_args[idx2]
@@ -2666,26 +2684,47 @@ class TestSparseCSRDevice(TestCase):
                 self.assertGreater(out._nnz(), nnz_before)
                 self.assertEqual(out.crow_indices().dtype, index_dtype)
 
-    # Helpers for the out= tests below: `out` has values() a stride-2 view
-    # into a buffer twice as long, whose other elements hold `fill`.
-    # https://github.com/pytorch/pytorch/issues/201268
-    def _csr_with_strided_values(self, csr, fill):
-        values = csr.values()
+            # out with non-contiguous values, gh-201268: the result is written
+            # through the values view when it has out's nnz, else add raises
+            fill = -99
+            a, c = gen(7, index_dtype), gen(13, index_dtype)
+            # b has a's sparsity pattern, so a + b has a's nnz
+            b = torch.sparse_csr_tensor(a.crow_indices().clone(), a.col_indices().clone(),
+                                        make_tensor((7,), dtype=dtype, device=device), size=a.shape)
+            expected = a.to_dense() + 0.5 * b.to_dense()
+            for fn, out_like in ((lambda o: torch.add(a, b, alpha=0.5, out=o), gen(7, index_dtype)),
+                                 (lambda o: o.add_(b, alpha=0.5), a)):
+                out, buf = self._with_strided_values(out_like, fill)
+                values = out.values()
+                fn(out)
+                self._check_written_through_view(out, buf, values, expected, fill)
+            out, buf = self._with_strided_values(c, fill)
+            self._check_nnz_change_rejected(out, buf, lambda o: torch.add(a, b, alpha=0.5, out=o), fill)
+            out, buf = self._with_strided_values(a, fill)
+            self._check_nnz_change_rejected(out, buf, lambda o: o.add_(c), fill)
+
+    # Helpers for tests with non-contiguous values, gh-201268: the values of
+    # the returned tensor are a stride-2 view into `buf`, a buffer twice as
+    # long whose other elements hold `fill`.
+    def _with_strided_values(self, t, fill):
+        values = t.values()
         buf = torch.full((2 * values.numel(),), fill, dtype=values.dtype, device=values.device)
-        buf[::2] = values
-        out = torch.sparse_csr_tensor(csr.crow_indices().clone(), csr.col_indices().clone(),
-                                      buf[::2], size=csr.shape)
+        strided_values = buf[::2].view(values.shape)
+        strided_values.copy_(values)
+        compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[t.layout]
+        out = torch.sparse_compressed_tensor(compressed_indices_mth(t).clone(), plain_indices_mth(t).clone(),
+                                             strided_values, size=t.shape, layout=t.layout)
         return out, buf
 
     def _check_written_through_view(self, out, buf, values, expected, fill):
         # `values` is out.values() from before the op: the result must have
-        # been written through that view (same storage, still stride 2), and
-        # the storage between the view's elements must be intact.
+        # been written through that view, and the storage between the view's
+        # elements must be intact.
         self.assertEqual(out.to_dense(), expected)
         self.assertEqual(out.values().data_ptr(), values.data_ptr())
-        self.assertEqual(out.values().stride(), (2,))
+        self.assertEqual(out.values().stride(), values.stride())
         self.assertEqual(out.values().shape, values.shape)
-        self.assertEqual(buf[::2], out.values())
+        self.assertEqual(buf[::2], out.values().flatten())
         self.assertEqual(buf[1::2], torch.full_like(buf[1::2], fill))
 
     def _check_nnz_change_rejected(self, out, buf, fn, fill):
@@ -2696,64 +2735,13 @@ class TestSparseCSRDevice(TestCase):
         with self.assertRaisesRegex(RuntimeError, "resizing the non-contiguous values"):
             fn(out)
         self.assertEqual(out.values().data_ptr(), values.data_ptr())
-        self.assertEqual(out.values().stride(), (2,))
+        self.assertEqual(out.values().stride(), values.stride())
         self.assertEqual(out.values().shape, values.shape)
         self.assertEqual(buf[1::2], torch.full_like(buf[1::2], fill))
-        torch._validate_sparse_csr_tensor_args(out.crow_indices(), out.col_indices(), out.values(), out.shape)
+        compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[out.layout]
+        torch._validate_sparse_compressed_tensor_args(compressed_indices_mth(out), plain_indices_mth(out), out.values(),
+                                                      out.shape, out.layout)
         self.assertEqual(out.to_dense(), before)
-
-    @skipMeta
-    @skipCPUIfNoMklSparse
-    @dtypes(torch.float64)
-    def test_add_out_noncontiguous_values(self, device, dtype):
-        # https://github.com/pytorch/pytorch/issues/201268
-        fill = -99.
-        for index_dtype in (torch.int32, torch.int64):
-            gen = functools.partial(self.genSparseCSRTensor, dtype=dtype, device=device, index_dtype=index_dtype)
-            a = gen((5, 5), 7)
-            # b has a's sparsity pattern, so a + b has a's nnz
-            b = torch.sparse_csr_tensor(a.crow_indices().clone(), a.col_indices().clone(),
-                                        make_tensor((7,), dtype=dtype, device=device), size=a.shape)
-            c = gen((5, 5), 13)
-            expected = a.to_dense() + 0.5 * b.to_dense()
-
-            # out= with a stride-2 values view of the result's nnz
-            out, buf = self._csr_with_strided_values(gen((5, 5), 7), fill)
-            values = out.values()
-            torch.add(a, b, alpha=0.5, out=out)
-            self._check_written_through_view(out, buf, values, expected, fill)
-
-            # in-place add_ on a tensor with such values
-            out, buf = self._csr_with_strided_values(a, fill)
-            values = out.values()
-            out.add_(b, alpha=0.5)
-            self._check_written_through_view(out, buf, values, expected, fill)
-
-            # the result has a different nnz than out
-            out, buf = self._csr_with_strided_values(c, fill)
-            self._check_nnz_change_rejected(out, buf, lambda o: torch.add(a, b, alpha=0.5, out=o), fill)
-            out, buf = self._csr_with_strided_values(a, fill)
-            self._check_nnz_change_rejected(out, buf, lambda o: o.add_(c), fill)
-
-    @skipMeta
-    @skipCPUIfNoMklSparse
-    @dtypes(torch.float64)
-    def test_add_noncontiguous_input_values(self, device, dtype):
-        # https://github.com/pytorch/pytorch/issues/201268
-        # The inputs' values() are stride-2 views: the elements in between
-        # must not be read.
-        fill = -99.
-        for index_dtype in (torch.int32, torch.int64):
-            gen = functools.partial(self.genSparseCSRTensor, dtype=dtype, device=device, index_dtype=index_dtype)
-            a, b = gen((5, 5), 7), gen((5, 5), 9)
-            expected = a.to_dense() + 0.5 * b.to_dense()
-            a_strided, _ = self._csr_with_strided_values(a, fill)
-            b_strided, _ = self._csr_with_strided_values(b, fill)
-            for lhs, rhs in ((a_strided, b), (a, b_strided), (a_strided, b_strided)):
-                self.assertEqual(torch.add(lhs, rhs, alpha=0.5).to_dense(), expected)
-                out = gen((5, 5), 3)
-                torch.add(lhs, rhs, alpha=0.5, out=out)
-                self.assertEqual(out.to_dense(), expected)
 
     @skipMeta
     @skipCPUIfNoMklSparse
@@ -2764,71 +2752,28 @@ class TestSparseCSRDevice(TestCase):
         for index_dtype in (torch.int32, torch.int64):
             gen = functools.partial(self.genSparseCSRTensor, dtype=dtype, device=device, index_dtype=index_dtype)
             a, b = gen((4, 6), 9), gen((6, 5), 11)
-            product = torch.mm(a, b)
-            nnz = product._nnz()
+            nnz = torch.mm(a, b)._nnz()
             expected_mm = a.to_dense() @ b.to_dense()
-            # c has the product's sparsity pattern, so addmm's result has its nnz
-            c = torch.sparse_csr_tensor(product.crow_indices().clone(), product.col_indices().clone(),
-                                        make_tensor((nnz,), dtype=dtype, device=device), size=product.shape)
+            # c has the product's sparsity pattern, so addmm's result has its
+            # nnz. Not taken from mm's result: on CPU, its col_indices are unsorted.
+            spy_a, spy_b = (torch.sparse_csr_tensor(t.crow_indices(), t.col_indices(), torch.ones_like(t.values()),
+                                                    size=t.shape).to_dense() for t in (a, b))
+            pattern = (spy_a @ spy_b).to_sparse_csr()
+            c = torch.sparse_csr_tensor(pattern.crow_indices().to(index_dtype), pattern.col_indices().to(index_dtype),
+                                        make_tensor((nnz,), dtype=dtype, device=device), size=pattern.shape)
             expected_addmm = 0.5 * c.to_dense() + 2 * expected_mm
 
             for fn, expected in ((lambda o: torch.mm(a, b, out=o), expected_mm),
                                  (lambda o: torch.addmm(c, a, b, beta=0.5, alpha=2, out=o), expected_addmm)):
                 # out= with a stride-2 values view of the result's nnz
-                out, buf = self._csr_with_strided_values(gen((4, 5), nnz), fill)
+                out, buf = self._with_strided_values(gen((4, 5), nnz), fill)
                 values = out.values()
                 fn(out)
                 self._check_written_through_view(out, buf, values, expected, fill)
 
                 # the result has a different nnz than out
-                out, buf = self._csr_with_strided_values(gen((4, 5), 2 if nnz != 2 else 3), fill)
+                out, buf = self._with_strided_values(gen((4, 5), 2 if nnz != 2 else 3), fill)
                 self._check_nnz_change_rejected(out, buf, fn, fill)
-
-    @skipMeta
-    @dtypes(torch.float64)
-    def test_sampled_addmm_out_noncontiguous_values(self, device, dtype):
-        # https://github.com/pytorch/pytorch/issues/201268
-        fill = -99.
-        for index_dtype in (torch.int32, torch.int64):
-            gen = functools.partial(self.genSparseCSRTensor, dtype=dtype, device=device, index_dtype=index_dtype)
-            c = gen((4, 5), 7)
-            a = make_tensor((4, 3), dtype=dtype, device=device)
-            b = make_tensor((3, 5), dtype=dtype, device=device)
-            spy_c = torch.sparse_csr_tensor(c.crow_indices(), c.col_indices(), torch.ones_like(c.values()), size=c.shape)
-            expected = (2 * (a @ b) + 0.5 * c.to_dense()) * spy_c.to_dense()
-
-            def fn(o):
-                return torch.sparse.sampled_addmm(c, a, b, beta=0.5, alpha=2, out=o)
-
-            # out= with a stride-2 values view of the result's nnz
-            out, buf = self._csr_with_strided_values(gen((4, 5), 7), fill)
-            values = out.values()
-            fn(out)
-            self._check_written_through_view(out, buf, values, expected, fill)
-
-            # the result has a different nnz than out
-            out, buf = self._csr_with_strided_values(gen((4, 5), 4), fill)
-            self._check_nnz_change_rejected(out, buf, fn, fill)
-
-    @skipMeta
-    @dtypes(torch.float64)
-    def test_resize_as_sparse_noncontiguous_values(self, device, dtype):
-        # https://github.com/pytorch/pytorch/issues/201268
-        # resize_as_sparse_ is where the out= ops resize out to their result.
-        # On a stride-2 values view it is a no-op for the same nnz and must
-        # raise for a different one, since resizing a view restrides it over
-        # the storage between its elements.
-        fill = -99.
-        for index_dtype in (torch.int32, torch.int64):
-            gen = functools.partial(self.genSparseCSRTensor, dtype=dtype, device=device, index_dtype=index_dtype)
-            a = gen((5, 5), 7)
-            out, buf = self._csr_with_strided_values(a, fill)
-            values = out.values()
-            out.resize_as_sparse_(gen((5, 5), 7))
-            self.assertEqual(out.values().data_ptr(), values.data_ptr())
-            self.assertEqual(out.values().stride(), (2,))
-            self.assertEqual(out.values(), a.values())
-            self._check_nnz_change_rejected(out, buf, lambda o: o.resize_as_sparse_(gen((5, 5), 11)), fill)
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add_errors(self, device, dtype):
@@ -2956,6 +2901,30 @@ class TestSparseCSRDevice(TestCase):
             expected = alpha * (a @ b) * spy_c.to_dense() + beta * c.to_dense()
             self.assertEqual(actual.to_dense(), out.to_dense())
             self.assertEqual(actual.to_dense(), expected)
+
+            # out with non-contiguous values, gh-201268
+            if actual._nnz() == 0:
+                return
+            fill = -99
+            out, buf = self._with_strided_values(actual, fill)
+            values = out.values()
+            torch.sparse.sampled_addmm(c, a, b, alpha=alpha, beta=beta, out=out)
+            self._check_written_through_view(out, buf, values, actual.to_dense(), fill)
+            if actual.dim() == 4:
+                # values with permuted batch dims: on CPU, reshaping them to (-1, nnz) copies
+                values = torch.full_like(actual.values(), fill).transpose(0, 1).contiguous().transpose(0, 1)
+                out = torch.sparse_csr_tensor(actual.crow_indices().clone(), actual.col_indices().clone(), values,
+                                              size=actual.shape)
+                torch.sparse.sampled_addmm(c, a, b, alpha=alpha, beta=beta, out=out)
+                self.assertEqual(out.to_dense(), actual.to_dense())
+                self.assertEqual(out.values().data_ptr(), values.data_ptr())
+                self.assertEqual(out.values().stride(), values.stride())
+            # nnz >= 2: a stride-2 view of one element is contiguous
+            other_nnz = 2 if actual._nnz() != 2 else 3
+            other = self.genSparseCSRTensor(actual.shape, other_nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+            out, buf = self._with_strided_values(other, fill)
+            self._check_nnz_change_rejected(
+                out, buf, lambda o: torch.sparse.sampled_addmm(c, a, b, alpha=alpha, beta=beta, out=o), fill)
 
         mnk = list(itertools.product([2, 5], repeat=3))
 

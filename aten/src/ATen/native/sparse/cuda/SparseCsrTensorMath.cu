@@ -340,7 +340,7 @@ Tensor& add_out_sparse_compressed_cuda(
       return out;
     }
 
-    if (out.layout() != kStrided && !out.values().is_contiguous()) {
+    if (at::sparse_csr::has_noncontiguous_values(out)) {
       return at::sparse_csr::run_on_contiguous_clone(out, [&](Tensor& r) { add_out_sparse_compressed_cuda(self, other, alpha, r); });
     }
 

@@ -162,7 +162,9 @@ void SparseCsrTensorImpl::resize_values_(IntArrayRef size) {
       values_.is_contiguous() || values_.sizes().equals(size),
       "resizing the non-contiguous values of a sparse compressed tensor from size ",
       values_.sizes(), " to ", size, " is not supported: the values must be ",
-      "contiguous, or already have the number of elements of the result");
+      "contiguous or already have the same shape as the result. This usually ",
+      "means that out= (or self of an in-place op) has non-contiguous values ",
+      "and a different nnz than the result");
   values_.resize_(size);
 }
 

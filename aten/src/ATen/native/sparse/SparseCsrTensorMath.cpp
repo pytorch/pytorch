@@ -593,7 +593,7 @@ Tensor& addmm_out_sparse_compressed_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  if (result.layout() != kStrided && !result.values().is_contiguous()) {
+  if (at::sparse_csr::has_noncontiguous_values(result)) {
     return at::sparse_csr::run_on_contiguous_clone(result, [&](Tensor& r) { addmm_out_sparse_compressed_cpu(self, mat1, mat2, beta, alpha, r); });
   }
   check_mm_shapes(mat1, mat2, "addmm");
@@ -983,7 +983,7 @@ Tensor& add_out_sparse_compressed_cpu(
       return out;
     }
 
-    if (out.layout() != kStrided && !out.values().is_contiguous()) {
+    if (at::sparse_csr::has_noncontiguous_values(out)) {
       return at::sparse_csr::run_on_contiguous_clone(out, [&](Tensor& r) { add_out_sparse_compressed_cpu(self, other, alpha, r); });
     }
 

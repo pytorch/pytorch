@@ -456,6 +456,14 @@ inline std::tuple<Tensor, Tensor> create_acc_buffer(
   }
 }
 
+// Whether `result` is a sparse compressed tensor with non-contiguous values,
+// which the kernels cannot write through (see run_on_contiguous_clone). The
+// layout is checked first: values() raises on, e.g., an uncoalesced COO
+// tensor, which must reach the kernels' input checks instead.
+inline bool has_noncontiguous_values(const Tensor& result) {
+  return is_sparse_compressed(result) && !result.values().is_contiguous();
+}
+
 // For a `result` whose values are non-contiguous, which the kernels cannot
 // write through: runs `fn` on a clone with contiguous values and copies the
 // result back through the strides of `result.values()`.
