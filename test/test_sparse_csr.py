@@ -1382,19 +1382,52 @@ class TestSparseCSRDevice(TestCase):
             self.assertEqual(a._nnz(), nnz)
             self.assertEqual(a.numel(), numel(a))
 
-            new_shape = (*b, 1, 5)
+            # Resizing to the same shape preserves the number of specified elements.
             a.resize_(new_shape)
 
             self.assertEqual(a.shape, new_shape)
-            # resize to smaller shape trims specified elements
-            self.assertEqual(a._nnz(), 5)
+            self.assertEqual(a._nnz(), nnz)
             self.assertEqual(a.numel(), numel(a))
 
             # trim batched dimensions
             a.resize_(new_shape[-2], new_shape[-1])
             self.assertEqual(a.shape, (new_shape[-2], new_shape[-1]))
-            self.assertEqual(a._nnz(), 5)
+            self.assertEqual(a._nnz(), nnz)
             self.assertEqual(a.numel(), numel(a))
+
+    @skipMeta
+    @dtypes(torch.float)
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @parametrize("batch_shape", [(), (2,), (2, 3)])
+    @parametrize("new_shape", [(0, 2), (1, 2), (2, 2), (2, 4)])
+    @parametrize("nnz", [0, 3])
+    def test_resize_shrink_rows(self, device, dtype, index_dtype, batch_shape, new_shape, nnz):
+        crow = torch.tensor([0, 0, 1, 3] if nnz else [0, 0, 0, 0], dtype=index_dtype, device=device)
+        col = torch.tensor([0, 0, 1] if nnz else [], dtype=index_dtype, device=device)
+        values = torch.tensor([1., 2., 3.] if nnz else [], dtype=dtype, device=device)
+        x = torch.sparse_csr_tensor(
+            crow.expand(*batch_shape, 4).clone(),
+            col.expand(*batch_shape, nnz).clone(),
+            values.expand(*batch_shape, nnz).clone(),
+            size=(*batch_shape, 3, 2),
+            check_invariants=True,
+        )
+        before = x.clone()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Resizing rows of sparse CSR tensors to a smaller value is not supported",
+        ):
+            x.resize_((*batch_shape, *new_shape))
+
+        self.assertEqual(x.shape, before.shape)
+        self.assertEqual(x._nnz(), before._nnz())
+        self.assertEqual(x.crow_indices(), before.crow_indices())
+        self.assertEqual(x.col_indices(), before.col_indices())
+        self.assertEqual(x.values(), before.values())
+        torch.sparse_csr_tensor(
+            x.crow_indices(), x.col_indices(), x.values(), size=x.shape, check_invariants=True,
+        )
 
     @skipMeta
     @dtypes(torch.float, torch.bool)

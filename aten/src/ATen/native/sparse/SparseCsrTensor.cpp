@@ -754,6 +754,12 @@ const Tensor& resize_sparse_csr_(
       "The original number of columns is ",
       self.size(-1),
       " while the requested new number of columns is ", size[size.size() - 1], ".");
+  TORCH_CHECK(
+      self.size(-2) <= size[size.size() - 2],
+      "torch.resize_: Resizing rows of sparse CSR tensors to a smaller value is not supported. ",
+      "The original number of rows is ",
+      self.size(-2),
+      " while the requested new number of rows is ", size[size.size() - 2], ".");
   get_sparse_csr_impl(self)->resize_(self._nnz(), size);
   return self;
 }
