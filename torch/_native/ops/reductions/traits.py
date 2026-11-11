@@ -167,11 +167,11 @@ class WelfordOps:
     # acc = (mean, m2, nf). `reduce` is the ONLINE Welford update and `combine` the PARALLEL Chan
     # merge -- deliberately different formulas. project divides m2 by the clamped dof.
     # has_combine_equal enables combine_equal's closed-form equal-count merges.
-    # has_combine_uniform enables staged inner-tree combines (tile.uniform_combine_ok),
-    # which rely on combine_uniform, uniform_weight, an FP32 accumulator and the count as
-    # the last field: they skip staging it and may stage the weight in its slot. A
-    # subclass that changes leaf, combine or the (mean, m2, nf) layout must set both
-    # flags to False.
+    # has_combine_uniform enables uniform-count staged inner-tree combines
+    # (tile.uniform_combine_ok), which rely on combine_uniform, uniform_weight, an FP32
+    # accumulator and the count as the last field: they skip staging it and may stage
+    # the weight in its slot. A subclass that changes leaf, combine or the
+    # (mean, m2, nf) layout must set both flags to False.
     nfields = 3
     has_combine_equal = True
     has_combine_uniform = True
