@@ -373,6 +373,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
                 cur_kernel_options[k[4:]] = v
             if k.startswith("bwd_"):
                 cur_kernel_options.pop(k)
+        # The decode kernel has no XCD remap.
+        cur_kernel_options.pop("NUM_XCDS", None)
         # Performance tuning
         cur_kernel_options.setdefault(
             "BLOCK_N", min(conf.block_n, SPARSE_KV_BLOCK_SIZE)
