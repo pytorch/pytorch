@@ -34,13 +34,14 @@ import torch.nn as nn
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
 from torch._logging._internal import trace_log
-from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
+from torch.distributed.distributed_c10d import _torchcomms_handles_backend
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     find_free_port,
     IS_SANDCASTLE,
     LazyVal,
+    preserves_unittest_skip_marks,
     retry_on_connect_failures,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
@@ -56,27 +57,6 @@ from torch.testing._internal.distributed.multi_threaded_pg import (
     _uninstall_threaded_pg,
     ProcessLocalGroup,
 )
-
-
-TORCHCOMM_HAS_GLOO = False
-TORCHCOMM_HAS_XCCL = False
-TORCHCOMM_HAS_NCCL = False
-TORCHCOMM_HAS_RCCL = False
-TORCHCOMM_HAS_NCCLX = False
-TORCHCOMM_HAS_RCCLX = False
-if _TORCHCOMM_AVAILABLE:
-    import torchcomms
-
-    for _backend, _flag in [
-        ("gloo", "TORCHCOMM_HAS_GLOO"),
-        ("xccl", "TORCHCOMM_HAS_XCCL"),
-        ("nccl", "TORCHCOMM_HAS_NCCL"),
-        ("rccl", "TORCHCOMM_HAS_RCCL"),
-        ("rcclx", "TORCHCOMM_HAS_RCCLX"),
-        ("ncclx", "TORCHCOMM_HAS_NCCLX"),
-    ]:
-        if torchcomms.is_backend_built(_backend):
-            globals()[_flag] = True
 
 
 def setup_torchcomms_pg(
@@ -99,6 +79,8 @@ def setup_torchcomms_pg(
     ``store_path``) that is unique within the process — duplicates trip
     ``_register_pg_in_world`` and the underlying FileStore.
     """
+    import torchcomms
+
     from torch.distributed.distributed_c10d import (
         _BackendWrapper,
         _register_pg_in_world,
@@ -589,7 +571,7 @@ def requires_multicast_support():
 def evaluate_platform_supports_symm_mem():
     if TEST_CUDA:
         if TEST_WITH_ROCM:
-            arch_list = ["gfx942", "gfx950"]
+            arch_list = ["gfx942", "gfx950", "gfx1250"]
             for arch in arch_list:
                 if arch in torch.cuda.get_device_properties(0).gcnArchName:
                     return True
@@ -903,6 +885,7 @@ else:
 # subprocesses to join.
 
 
+@preserves_unittest_skip_marks("join_or_run")
 class MultiProcessTestCase(TestCase):
     MAIN_PROCESS_RANK = -1
     # This exit code is used to indicate that the test code had an error and
@@ -1463,6 +1446,7 @@ def spawn_threads_and_init_comms(
     return wrapper
 
 
+@preserves_unittest_skip_marks("join_or_run")
 class MultiThreadedTestCase(TestCase):
     """
     Test runner that runs all tests with the in-proc process group using
@@ -1849,6 +1833,7 @@ class DynamoDistributedMultiProcTestCase(DistributedTestBase):
         self.run_test(test_name, parent_pipe)
 
 
+@preserves_unittest_skip_marks("_worker_run_main_wait")
 class MultiProcContinuousTest(TestCase):
     # Class variables:
     MAIN_PROCESS_RANK = -1
@@ -2018,7 +2003,12 @@ class MultiProcContinuousTest(TestCase):
         # it waits for enqueued collectives to finish.
         # Only call this on a clean exit path
         if not raised_exception:
+            cls._cleanup_worker()
             c10d.destroy_process_group()
+
+    @classmethod
+    def _cleanup_worker(cls) -> None:
+        """Hook run in each worker before the process group is destroyed."""
 
     @classmethod
     def _spawn_processes(cls, world_size) -> None:
@@ -2287,18 +2277,10 @@ class C10dTorchCommsTestBase(MultiProcContinuousTest):
         return cls.backend(device_type)
 
     def _skip_if_backend_unavailable(self, device: str) -> None:
-        backend_flags = {
-            "gloo": TORCHCOMM_HAS_GLOO,
-            "xccl": TORCHCOMM_HAS_XCCL,
-            "nccl": TORCHCOMM_HAS_NCCL,
-            "rccl": TORCHCOMM_HAS_RCCL,
-            "ncclx": TORCHCOMM_HAS_NCCLX,
-            "rcclx": TORCHCOMM_HAS_RCCLX,
-        }
         backend_name = self.backend(device)
         if TEST_WITH_ROCM and backend_name == "nccl":
             backend_name = "rccl"
-        if backend_name in backend_flags and not backend_flags[backend_name]:
+        if not _torchcomms_handles_backend(backend_name):
             self.skipTest(f"torchcomms {backend_name} backend is not available")
 
     @classmethod

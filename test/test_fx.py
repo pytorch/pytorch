@@ -73,10 +73,7 @@ from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBI
 from torch.fx._symbolic_trace import PHBase, PHWithMeta
 
 from torch.fx.proxy import TraceError
-from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
-    blas_library_context,
-)
+from torch.testing._internal.common_cuda import blas_library_context
 from torch.testing._internal.common_utils import (
     find_library_location,
     HardwareClassification,
@@ -192,12 +189,6 @@ real_wrapped_via_decorator = wrapped_via_decorator
 real_a_lifed_leaf = a_lifted_leaf
 real_a_lifed_leaf2 = a_lifted_leaf2
 _sqrt = sqrt
-
-wrap("wrapper_fn")
-
-
-def wrapper_fn(x):
-    return torch.foo(x)
 
 
 class Pair(NamedTuple):
@@ -332,8 +323,6 @@ class TestFX(JitTestCase):
 
         m = MyModule()
         gm = symbolic_trace(m)
-
-        ms = torch.jit.script(gm)
 
         class M2(torch.nn.Module):
             def forward(self, A):
@@ -1053,10 +1042,6 @@ class TestFX(JitTestCase):
         #    native callable rather than the original code
         # 3) Run both the original code and native callable wrapper with
         #    equivalent results
-        # 4) TorchScript compile the native callable wrapper and confirm
-        #    equivalent results with the reference
-        # 5) TorchScript serialize and deserialize the native callable
-        #    and confirm equivalent results with the reference
 
         # We use this simple Module as a reference computation
         class MySimpleMod(torch.nn.Module):
@@ -1186,16 +1171,6 @@ class TestFX(JitTestCase):
         ref_out = msm(x)
         test_out = lowered(x)
         torch.testing.assert_close(test_out, ref_out)
-
-        # Test TorchScript compilation
-        scripted_lowered = torch.jit.script(lowered)
-        script_out = scripted_lowered(x)
-        torch.testing.assert_close(script_out, ref_out)
-
-        # Test TorchScript Ser/De
-        import_copy = self.getExportImportCopy(scripted_lowered)
-        imported_out = import_copy(x)
-        torch.testing.assert_close(imported_out, ref_out)
 
     def test_reserved_getattr(self):
         """Ensure that we do not name any nodes with a reserved builtin like `getattr`"""
@@ -1637,18 +1612,6 @@ class TestFX(JitTestCase):
                 lambda msg: f"{msg}\nLine {i + 1} has trailing whitespace: {repr(line)}",
             )
 
-    def test_script_tensor_constant(self):
-        # TorchScript seems to ignore attributes that start with `__`.
-        # We used to call anonymous Tensor values `__tensor_constant*`, but
-        # they were getting ignored by script. Now they're called
-        # `_tensor_constant*`
-        class IHaveATensorConstant(torch.nn.Module):
-            def forward(self, x):
-                return x + torch.rand(3, 4)
-
-        traced = torch.fx.symbolic_trace(IHaveATensorConstant())
-        torch.jit.script(traced)
-
     def test_autowrap_functions(self):
         class AutowrapFnTest(torch.nn.Module):
             def forward(self, x):
@@ -1665,10 +1628,8 @@ class TestFX(JitTestCase):
         traced = GraphModule(tracer.root, graph, "test")
         tracer_2 = Tracer(autowrap_functions=(fx_int, fx_int_x2))
         tracer_2.trace(AutowrapFnTest2())
+        self.assertEqual(traced(torch.rand(4)), 2)
 
-        # Test scriptability
-        traced_scripted = torch.jit.script(traced)
-        self.assertEqual(traced_scripted(torch.rand(4)), 2)
 
     _LAZY = object()
 
@@ -1845,7 +1806,7 @@ class TestFX(JitTestCase):
         def resolve(d):
             double = lazy_wrap_helper.double
             fn = types.FunctionType(double.__code__, double.__globals__)
-            resolved.append(torch.jit.script(fn)(torch.ones(1)).item())
+            resolved.append(torch.jit._script.script(fn)(torch.ones(1)).item())
             return 1
 
         def child_forward(self, x):
@@ -1885,7 +1846,7 @@ class TestFX(JitTestCase):
         from fx import lazy_wrap_helper
 
         helper_src = inspect.getsource(lazy_wrap_helper)
-        body_src = "import torch, types\nimport lazy_wrap_helper\nd = lazy_wrap_helper.double\nSCALE = torch.jit.script(types.FunctionType(d.__code__, d.__globals__))(torch.ones(1)).item()\n"
+        body_src = "import torch, types\nimport lazy_wrap_helper\nd = lazy_wrap_helper.double\nSCALE = torch.jit._script.script(types.FunctionType(d.__code__, d.__globals__))(torch.ones(1)).item()\n"
         files = {
             "lazy_wrap_helper.py": helper_src,
             "lazy_body.py": body_src,
@@ -2084,13 +2045,6 @@ assert torch.equal(gm(torch.ones(2)), torch.full((2,), 4.0))
 
         traced = symbolic_trace(FXLenTest())
         self.assertEqual(traced(torch.rand(3, 4)), 3)
-
-        # Test scriptability
-        scripted = torch.jit.script(FXLenTest())
-        self.assertEqual(scripted(torch.rand(3)), 3)
-
-        traced_scripted = torch.jit.script(traced)
-        self.assertEqual(traced_scripted(torch.rand(3)), 3)
 
         # Test non-proxy len
         class FXLenTest2(torch.nn.Module):
@@ -2488,10 +2442,6 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         traced(torch.rand(4, 5))
         with self.assertRaisesRegex(AssertionError, "assert_foobar"):
             traced(torch.rand(4, 3))
-        # verify the symbolically traced module is scriptable
-        ms = torch.jit.script(m)
-        with self.assertRaisesRegex(torch.jit.Error, "assert_foobar"):
-            ms(torch.rand(4, 3))
 
     def test_fx_create_arg(self):
         class CustomArgObject:
@@ -3057,25 +3007,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         input = torch.randn(3, 4)
         self.assertEqual(new_gm(input), gm(input))
 
-    def test_fn_type_annotations(self):
-        class Foo(torch.nn.Module):
-            def forward(
-                self, p: Pair, z: torch.Tensor, i: int
-            ) -> dict[str, torch.Tensor]:
-                return {"a": p.x + p.y + z + i}
 
-        foo_scripted = torch.jit.script(Foo())
-        foo_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
-
-        fixed = symbolic_trace(Foo())
-        fxed_scripted = torch.jit.script(fixed)
-        fxed_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
-
-    def test_fn_type_annotation_empty(self):
-        def forward(a: list[torch.Tensor]):
-            return a[0]
-
-        torch.jit.script(symbolic_trace(forward))
 
     def test_optional_typing_dict_placeholder_annotation_python314(self):
         class OptionalTypingDictModule(torch.nn.Module):
@@ -3094,7 +3026,6 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         FileCheck().check("value : typing_Union[typing_Dict").check(
             "typing_Tuple"
         ).check("NoneType]").run(traced.code)
-        torch.jit.script(traced)
 
     def test_wrapped_method(self):
         def wrap_with_relu(fn):
@@ -3796,7 +3727,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         class Holder(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.s = torch.jit.script(Scripted())
+                self.s = torch.jit._script.script(Scripted())
 
             def forward(self, x):
                 return self.s(x)
@@ -3861,8 +3792,6 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
 
         traced = symbolic_trace(ReturnTypeModule())
         self.assertIn("-> list[str]", traced._code)
-        scripted = torch.jit.script(traced)
-        self.assertIn("-> List[str]", scripted.code)
 
     def test_return_type_exists_pre_pep585(self):
         class ReturnTypeModule(torch.nn.Module):
@@ -3874,8 +3803,6 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
 
         traced = symbolic_trace(ReturnTypeModule())
         self.assertIn("-> typing_List[str]", traced._code)
-        scripted = torch.jit.script(traced)
-        self.assertIn("-> List[str]", scripted.code)
 
     def getitem_inner(self):
         class GetItemBase(torch.nn.Module):
@@ -3914,32 +3841,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         proc.join()
         self.assertEqual(proc.exitcode, 0)
 
-    def test_user_friendly_call_provenance_with_function(self):
-        def fn(x):
-            return wrapper_fn(x)
 
-        traced = torch.fx.symbolic_trace(fn)
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "'wrapper_fn' is "
-            "being compiled since it was called"
-            " from 'fn.forward'",
-        ):
-            scripted = torch.jit.script(traced)
-
-    def test_user_friendly_call_provenance_with_module(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                return wrapper_fn(x)
-
-        traced = torch.fx.symbolic_trace(M())
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "'wrapper_fn' is " "being compiled since it was called" " from 'M.forward'",
-        ):
-            scripted = torch.jit.script(traced)
 
     def test_snake_case(self):
         class M(torch.nn.Module):
@@ -4439,6 +4341,30 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         gm2.delete_all_unused_submodules()
         torch.testing.assert_close(gm2(inputs), model(inputs))
 
+    def test_delete_unused_submodules_get_attr(self):
+        # A submodule that a get_attr reads, such as the body of a higher order
+        # op, keeps its own submodules.
+        root = torch.nn.Module()
+        root.submod = torch.nn.Sequential(torch.nn.Linear(10, 10), torch.nn.ReLU())
+        graph = torch.fx.Graph()
+        graph.output(graph.get_attr("submod"))
+        gm = torch.fx.GraphModule(root, graph)
+        gm.delete_all_unused_submodules()
+        self.assertEqual(
+            [name for name, _ in gm.named_modules()], ["", "submod", "submod.0", "submod.1"]
+        )
+
+    def test_has_attr_dotted_name(self):
+        root = torch.nn.Module()
+        root.sub = torch.nn.Linear(1, 1)
+        self.assertTrue(torch.fx.graph_module._has_attr(root, "sub.weight"))
+        self.assertFalse(torch.fx.graph_module._has_attr(root, "sub.missing"))
+        self.assertFalse(torch.fx.graph_module._has_attr(root, "missing.weight"))
+        # A prefix that is not a Module is followed too, as _get_attr does.
+        root.t = torch.ones(1)
+        self.assertTrue(torch.fx.graph_module._has_attr(root, "t.shape"))
+        self.assertFalse(torch.fx.graph_module._has_attr(root, "t.missing"))
+
     def test_fx_stateless(self):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -4733,12 +4659,6 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
             "typing_Tuple[str,typing_Tuple[()]]"
         ).run(traced.code)
 
-        scripted = torch.jit.script(traced)
-
-        scripted(x, y)
-
-        FileCheck().check("Tuple[()]").check("Tuple[str, Tuple[()]]").run(scripted.code)
-
     def test_pytree(self):
         # Used to test that you can use your own placeholder class
         class PHTest(PHBase):
@@ -4972,9 +4892,6 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         self.assertEqual(
             nf.graph.process_outputs(bare_fx(*nf.graph.process_inputs(vals))), f(*vals)
         )
-
-        ts_f = torch.jit.script(nf)
-        self.assertEqual(nf(vals), ts_f(vals))
 
     def test_custom_codegen_with_transformer(self):
         class ListCodeGen(CodeGen):
@@ -5528,26 +5445,18 @@ class TestFXCUDA(JitTestCase):
                 },
             )
         else:
-            # cuBLASLt added two internal cudaStreamIsCapturing checks before
-            # launching GEMM kernels starting with CUDA 13.4, which show up
-            # as extra runtime events ahead of each addmm's kernel launch.
-            extra_event = not torch.version.hip and _get_torch_cuda_version() >= (13, 4)
-            capture_1, capture_2 = "", ""
-            if extra_event:
-                capture_1 = (
-                    "event=cudaStreamIsCapturing node=addmm "
-                    "stack_trace=x = self.linear1(x)\n"
-                ) * 2
-                capture_2 = (
-                    "event=cudaStreamIsCapturing node=addmm_1 "
-                    "stack_trace=x = self.linear2(x)\n"
-                ) * 2
+            # cuBLASLt's internal capture checks need not all appear in the trace.
+            actual_traces = "\n".join(
+                line
+                for line in actual_traces.splitlines()
+                if not line.startswith("event=cudaStreamIsCapturing ")
+            )
             expected = f"""\
 event=aten::t node=t stack_trace=x = self.linear1(x)
 event=aten::transpose node=t stack_trace=x = self.linear1(x)
 event=aten::as_strided node=t stack_trace=x = self.linear1(x)
 event=aten::addmm node=addmm stack_trace=x = self.linear1(x)
-{capture_1}event={kernel_event} node=addmm stack_trace=x = self.linear1(x)
+event={kernel_event} node=addmm stack_trace=x = self.linear1(x)
 event=aten::relu node=relu stack_trace=x = self.relu(x)
 event=aten::clamp_min node=relu stack_trace=x = self.relu(x)
 event={kernel_event_relu} node=relu stack_trace=x = self.relu(x)
@@ -5555,7 +5464,7 @@ event=aten::t node=t_1 stack_trace=x = self.linear2(x)
 event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
 event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
 event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
-{capture_2}event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
+event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
             self.assertExpectedInline(actual_traces, expected)
 
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
@@ -6440,10 +6349,6 @@ class TestVisionTracing(JitTestCase):
         )
 
     PROXY_ITERATED = (TraceError, r"Proxy object cannot be iterated")
-    INCONSISTENT_TYPE = (
-        RuntimeError,
-        r"Return value was annotated as having type __torch__.torchvision.models[.\w]+ but is actually of type Tensor",
-    )
 
     UNTRACEABLE_MODELS = {
         "fasterrcnn_resnet50_fpn": PROXY_ITERATED,
@@ -6458,10 +6363,6 @@ class TestVisionTracing(JitTestCase):
         "ssd300_vgg16": PROXY_ITERATED,
         "fcos_resnet50_fpn": PROXY_ITERATED,
         "ssdlite320_mobilenet_v3_large": PROXY_ITERATED,
-    }
-    UNSCRIPTABLE_MODELS = {
-        "googlenet": INCONSISTENT_TYPE,
-        "inception_v3": INCONSISTENT_TYPE,
     }
 
     output_transform = {
@@ -6494,15 +6395,6 @@ class TestVisionTracing(JitTestCase):
                 a = out_transform(model(x))
                 b = out_transform(graph(x))
                 self.assertEqual(a, b)
-
-                if name in self.UNSCRIPTABLE_MODELS:
-                    err, exc = self.UNSCRIPTABLE_MODELS[name]
-                    with self.assertRaisesRegex(err, exc):
-                        script = torch.jit.script(graph)
-                else:
-                    script = torch.jit.script(graph)
-                    c = out_transform(script(x))
-                    self.assertEqual(a, c)
 
         return run_test
 

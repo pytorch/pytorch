@@ -27,6 +27,7 @@ import pathlib
 import platform
 import random
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -103,6 +104,7 @@ except ImportError:
     has_pytest = False
 
 SEED = 1234
+MI450_ARCH = ("gfx1250",)
 MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)
 MI200_ARCH = ("gfx90a",)
@@ -130,16 +132,21 @@ class HardwareClassification(Enum):
     Test classes declare a ``hw_classification`` class attribute to indicate
     the kind of hardware their tests require.  When ``--hw-classification``
     is passed, only tests whose classification matches one of the requested
-    values are executed.  When the flag is not specified, all test discovery
-    and execution paths remain unchanged.
+    values are executed.  ``PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION``, a
+    comma-separated list, instead drops the listed classifications (they are
+    not reported as skipped) and keeps unclassified tests; with both set, both
+    apply.  With neither set, all test discovery and execution paths remain
+    unchanged.
 
     Currently there are three hardware classification categories:
 
     * ``GENERIC`` – tests that exercise shared, device-agnostic logic
       (e.g. Dynamo dispatcher, FX passes, and other framework internals
       that do not depend on a particular accelerator).  These test classes
-      typically do **not** use
+      must **not** use
       :func:`~torch.testing._internal.common_utils.instantiate_device_type_tests`.
+      Most CUDA and ROCm CI jobs skip them, so they must not use an
+      accelerator (see Rule 3 in test/REVIEW.md).
 
     * ``ACCELERATOR`` – tests that verify behavior which must hold
       across every accelerator (e.g. operator semantics, memory profiling).
@@ -209,45 +216,55 @@ def get_hw_classification(
 
 def filter_by_hw_classification(
     items: Iterable[Any],
-    requirement: set[HardwareClassification],
+    requirement: set[HardwareClassification] | None,
     get_class: Callable[[Any], type | None],
     *,
     on_match: Callable[[Any], None],
-) -> None:
-    """Filter items by hardware classification and print a summary.
+    exclude: frozenset[HardwareClassification] = frozenset(),
+) -> int:
+    """Filter items by hardware classification, print a summary, and return the
+    number of items dropped.
 
     For each item, `get_class` extracts the associated test class. Items whose
-    hardware classification is in `requirement` are passed to `on_match`, if
-    provided. Prints a summary of matched, mismatched, unclassified, and
-    classless items.
+    hardware classification is in `requirement` and not in `exclude` are passed
+    to `on_match`. A `requirement` of None accepts every classification,
+    including unclassified and classless items. The summary counts each dropped
+    item once, by the reason it was dropped, and is printed when a requirement
+    is set or something was dropped.
     """
-    total = 0
-    passed = 0
-    no_class = 0
-    unclassified = 0
+    total = passed = excluded = mismatched = unclassified = no_class = 0
     for item in items:
         total += 1
         cls = get_class(item)
-        if cls is None:
-            no_class += 1
-            continue
-        classification = get_hw_classification(cls)
-        if classification is None:
-            unclassified += 1
-        elif classification in requirement:
+        classification = None if cls is None else get_hw_classification(cls)
+        if classification in exclude:
+            excluded += 1
+        elif requirement is None or classification in requirement:
             passed += 1
             on_match(item)
+        elif cls is None:
+            no_class += 1
+        elif classification is None:
+            unclassified += 1
+        else:
+            mismatched += 1
 
-    mismatched = total - passed - unclassified - no_class
-    parts = [
-        f"HW classification mode active ({[e.name for e in requirement]}):",
-        f"total={total}, passed={passed},",
-        f"unclassified={unclassified},",
-    ]
-    if no_class > 0:
-        parts.append(f"no_class={no_class},")
-    parts.append(f"mismatched={mismatched}")
-    print(" ".join(parts))
+    dropped = total - passed
+    if requirement is not None or dropped:
+        header = "HW classification mode active"
+        if requirement is not None:
+            header += f" ({[e.name for e in requirement]})"
+        if exclude:
+            header += f" (exclude={sorted(e.name for e in exclude)})"
+        parts = [f"{header}:", f"total={total}, passed={passed},", f"unclassified={unclassified},"]
+        if no_class > 0:
+            parts.append(f"no_class={no_class},")
+        parts.append(f"mismatched={mismatched}")
+        if exclude:
+            parts[-1] += ","
+            parts.append(f"excluded={excluded}")
+        print(" ".join(parts))
+    return dropped
 
 
 def is_navi3_arch():
@@ -269,11 +286,11 @@ def freeze_rng_state(*args, **kwargs):
 class TestEnvironment:
     # Set of env vars to set for the repro command that is output on test failure.
     # Specifically, this includes env vars that are set to non-default values and
-    # are not implied. Maps from env var name -> value (int)
+    # are not implied. Maps from env var name -> the env var's string value.
     repro_env_vars: dict = {}
-    # Every include_in_repro env var's value as set, unparsed ("" if unset); an unset
-    # flag that's on anyway (by default or implication) is "1". Read by
-    # torchci/environment.py.
+    # The value as set, unparsed ("" if unset), of every include_in_repro flag and
+    # every include_in_report setting; an unset flag that's on anyway (by default
+    # or implication) is "1". Read by torchci/environment.py.
     env_var_values: dict = {}
 
     # Defines a flag usable throughout the test suite, determining its value by querying
@@ -345,8 +362,11 @@ class TestEnvironment:
     #         variable. Default: None
     #     include_in_repro (bool): Indicates whether this setting should be included in the
     #         repro command that is output on test failure (i.e. whether it is possibly
-    #         relevant to reproducing the test failure), and in env_var_values, which test
-    #         run reports record as their flags. Default: True
+    #         relevant to reproducing the test failure). The repro gets the env var's
+    #         string, not the parsed value. Default: True
+    #     include_in_report (bool | None): Indicates whether this setting should be
+    #         included in env_var_values, which test run reports record as their flags.
+    #         Default: None, meaning the same as include_in_repro
     #     parse_fn (Callable): Callable parsing the env var string. Default value just uses
     #         the string itself.
     @staticmethod
@@ -356,13 +376,16 @@ class TestEnvironment:
         default=None,
         include_in_repro=True,
         parse_fn=lambda maybe_val_str: maybe_val_str,
+        *,
+        include_in_report=None,
     ):
-        value = default if env_var is None else os.getenv(env_var)
-        value = parse_fn(value)
-        if include_in_repro and (env_var is not None):
-            TestEnvironment.env_var_values[env_var] = os.getenv(env_var) or ""
-        if include_in_repro and (value != default):
-            TestEnvironment.repro_env_vars[env_var] = value
+        raw = None if env_var is None else os.getenv(env_var)
+        value = parse_fn(default if env_var is None else raw)
+        if include_in_repro if include_in_report is None else include_in_report:
+            if env_var is not None:
+                TestEnvironment.env_var_values[env_var] = raw or ""
+        if include_in_repro and (raw is not None) and (value != default):
+            TestEnvironment.repro_env_vars[env_var] = raw
 
         # export setting globally for convenience
         if name in globals():
@@ -376,7 +399,7 @@ class TestEnvironment:
     # Example: "PYTORCH_TEST_WITH_ASAN=1 PYTORCH_TEST_WITH_ROCM=1"
     @staticmethod
     def repro_env_var_prefix() -> str:
-        return " ".join([f"{env_var}={value}"
+        return " ".join([f"{env_var}={shlex.quote(str(value))}"
                          for env_var, value in TestEnvironment.repro_env_vars.items()])
 
 
@@ -466,6 +489,37 @@ OPINFO_RESTRICT_TO_DSL: str | None = TestEnvironment.def_setting(
     # be queried from the tracked sample input instead
     include_in_repro=True,
     parse_fn=lambda val: None if val is None else str(val),
+)
+
+
+_HW_CLASSIFICATION_EXCLUDE_ENV_VAR = "PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION"
+
+
+def _parse_hw_classification_exclude(val: str | None) -> frozenset[HardwareClassification]:
+    names = [name.strip().upper() for name in (val or "").split(",") if name.strip()]
+    if unknown := [name for name in names if name not in HardwareClassification.__members__]:
+        raise ValueError(
+            f"{_HW_CLASSIFICATION_EXCLUDE_ENV_VAR}: unknown hardware classification(s) {unknown}; "
+            f"expected a comma-separated list of {', '.join(HardwareClassification.__members__)}"
+        )
+    return frozenset(HardwareClassification[name] for name in names)
+
+
+# Comma-separated hw_classification names (e.g. GENERIC) whose test classes are
+# dropped: not loaded under unittest, deselected under pytest. Unclassified
+# classes still run (see filter_by_hw_classification). There is no flag form:
+# test.sh runs some test files directly rather than through run_test.py, and a
+# job-level environment variable reaches those too. It is left out of repro
+# commands, since a test that ran wasn't excluded, but reports record it.
+# Most CUDA and ROCm CI jobs set GENERIC (see .ci/pytorch/test.sh), since CPU
+# jobs run those classes.
+HW_CLASSIFICATION_EXCLUDE: frozenset[HardwareClassification] = TestEnvironment.def_setting(
+    "HW_CLASSIFICATION_EXCLUDE",
+    env_var=_HW_CLASSIFICATION_EXCLUDE_ENV_VAR,
+    default=frozenset(),
+    include_in_repro=False,
+    include_in_report=True,
+    parse_fn=_parse_hw_classification_exclude,
 )
 
 
@@ -1448,9 +1502,14 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
 
 class HardwareClassificationTestLoader(unittest.TestLoader):
     """Unittest TestLoader that filters loaded tests by hw_classification."""
-    def __init__(self, hw_classification):
+    def __init__(self, hw_classification, *, exclude=frozenset()):
         super().__init__()
         self.hw_classification = hw_classification
+        self.exclude = exclude
+        # Tests dropped from whole-module loads. Tests requested by name aren't
+        # counted, so a run of only filtered-out named tests still looks like
+        # "nothing ran" to exit_code.
+        self.dropped_from_modules = 0
 
     @staticmethod
     def iter_test_cases_recursively(
@@ -1464,25 +1523,30 @@ class HardwareClassificationTestLoader(unittest.TestLoader):
         for element in suite_or_case:
             yield from _iter(element)
 
-    def get_filtered_suite(self, tests: unittest.TestSuite) -> unittest.TestSuite:
-        if self.hw_classification is None:
-            return tests
+    def _filter(self, tests: unittest.TestSuite) -> tuple[unittest.TestSuite, int]:
+        if self.hw_classification is None and not self.exclude:
+            return tests, 0
 
         filtered_suite = unittest.TestSuite()
         _iter = HardwareClassificationTestLoader.iter_test_cases_recursively
-        filter_by_hw_classification(
+        dropped = filter_by_hw_classification(
             _iter(tests),
             self.hw_classification,
             get_class=lambda tc: tc.__class__,
             on_match=filtered_suite.addTest,
+            exclude=self.exclude,
         )
-        return filtered_suite
+        return filtered_suite, dropped
+
+    def get_filtered_suite(self, tests: unittest.TestSuite) -> unittest.TestSuite:
+        return self._filter(tests)[0]
 
     def loadTestsFromModule(self, module, *args, pattern=None, **kwargs):
-        suite = super().loadTestsFromModule(
-            module, *args, pattern=pattern, **kwargs
+        suite, dropped = self._filter(
+            super().loadTestsFromModule(module, *args, pattern=pattern, **kwargs)
         )
-        return self.get_filtered_suite(suite)
+        self.dropped_from_modules += dropped
+        return suite
 
     def loadTestsFromName(self, name, module=None, *args, **kwargs):
         suite = super().loadTestsFromName(name, module, *args, **kwargs)
@@ -1495,6 +1559,19 @@ class HardwareClassificationTestLoader(unittest.TestLoader):
         if tests and isinstance(tests[0], unittest.loader._FailedTest):
             return suite
         return self.get_filtered_suite(suite)
+
+    def exit_code(self, result: unittest.TestResult) -> int:
+        """The process exit code for result: 1 on any failure (including a
+        setUpClass error before any test ran), else 5 if nothing ran and the
+        filter dropped nothing (a -k typo, or only named tests the filter
+        dropped) on Python 3.12+, like unittest.main(), else 0. So a run the
+        filter emptied succeeds, as on the pytest path; test.sh runs some files
+        directly, where Python 3.12+'s unittest.main() would exit 5."""
+        if not result.wasSuccessful():
+            return 1
+        if result.testsRun == 0 and not result.skipped and not self.dropped_from_modules and sys.version_info >= (3, 12):
+            return 5
+        return 0
 
 
 def run_tests(argv=None):
@@ -1530,9 +1607,16 @@ def run_tests(argv=None):
     if not lint_test_case_extension(suite):
         sys.exit(1)
 
-    testLoader = unittest.loader.defaultTestLoader
-    if HW_CLASSIFICATION is not None:
-        testLoader = HardwareClassificationTestLoader(HW_CLASSIFICATION)
+    hw_loader = None
+    if HW_CLASSIFICATION is not None or HW_CLASSIFICATION_EXCLUDE:
+        hw_loader = HardwareClassificationTestLoader(HW_CLASSIFICATION, exclude=HW_CLASSIFICATION_EXCLUDE)
+    testLoader = unittest.loader.defaultTestLoader if hw_loader is None else hw_loader
+
+    def unittest_main(**kwargs):
+        if hw_loader is None:
+            unittest.main(testLoader=testLoader, **kwargs)
+        else:
+            sys.exit(hw_loader.exit_code(unittest.main(testLoader=hw_loader, exit=False, **kwargs).result))
 
     if SHOWLOCALS:
         argv = [
@@ -1667,16 +1751,17 @@ def run_tests(argv=None):
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
             print(f'Test results will be stored in {test_report_path}')
-        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+        unittest_main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
             output=test_report_path,
             verbosity=2 if verbose else 1,
-            resultclass=XMLTestResultVerbose), testLoader=testLoader)
+            resultclass=XMLTestResultVerbose))
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv, testLoader=testLoader).result.wasSuccessful():
                 sys.exit(-1)
     else:
-        unittest.main(argv=argv, testLoader=testLoader)
+        unittest_main(argv=argv)
+
 
 IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
@@ -1917,11 +2002,18 @@ TEST_CONFIG: str | None = TestEnvironment.def_setting(
     "TEST_CONFIG",
     env_var="TEST_CONFIG",
 )
-# Enables tests that run only in the periodic-strict CI workflow (disabled by default)
+# Enables @periodic tests, which CI runs only in periodic-strict and in periodic
+# jobs that set this (disabled by default)
 TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
     "TEST_WITH_PERIODIC",
     env_var="PYTORCH_TEST_WITH_PERIODIC",
     implied_by_fn=lambda: TEST_CONFIG == "periodic",
+)
+# Runs inductor's RUN_CPU test classes even when ONLY_FOR leaves out cpu (unless
+# EXCEPT_FOR excludes it); see inductor_utils.RUN_CPU
+TEST_INDUCTOR_RUN_CPU: bool = TestEnvironment.def_flag(
+    "TEST_INDUCTOR_RUN_CPU",
+    env_var="PYTORCH_TEST_INDUCTOR_RUN_CPU",
 )
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW: bool = TestEnvironment.def_flag(
@@ -2024,6 +2116,22 @@ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
 requires_xpu = unittest.skipUnless(TEST_XPU, "Requires XPU")
 
 
+def add_skip_condition(fn, predicate, reason):
+    r"""Record on ``fn`` that it skips when ``predicate(test_cls)`` is true.
+
+    Skip decorators can call this on the wrapper they return so the decision can
+    be made at collection time (skip_reason_at_collection) without running
+    the test; the wrapper still decides at run time. ``predicate`` receives
+    the test class and returns True, False, or None when it cannot tell
+    before the test runs. Predicates must have no side effects, and a true
+    result must remain valid through fixtures, setup, and outer decorators.
+    Stored as a tuple because functools.wraps copies
+    ``__dict__`` across wrapper layers, so a shared list would leak conditions
+    between tests.
+    """
+    fn._skip_conditions = (*getattr(fn, "_skip_conditions", ()), (predicate, reason))
+
+
 def lazy_skip_if(condition_fn, reason):
     """Skip a test (function or class) when ``condition_fn()`` is true.
 
@@ -2054,6 +2162,21 @@ def lazy_skip_if(condition_fn, reason):
         return wrapper
     return decorator
 
+
+def _static_skip_if(condition_fn, reason):
+    r"""Like ``lazy_skip_if``, for conditions that cannot change before a test runs.
+
+    Use only for fixed environment or build properties. Arbitrary callbacks
+    belong in ``lazy_skip_if`` and are evaluated at run time.
+    """
+    def decorator(fn):
+        wrapped = lazy_skip_if(condition_fn, reason)(fn)
+        if not isinstance(fn, type):
+            add_skip_condition(wrapped, lambda cls: condition_fn(), reason)
+        return wrapped
+    return decorator
+
+
 requires_accelerator = lazy_skip_if(
     lambda: not torch.accelerator.is_available(),
     "requires accelerator",
@@ -2061,7 +2184,7 @@ requires_accelerator = lazy_skip_if(
 
 
 def skipIfCrossRef(fn):
-    return lazy_skip_if(lambda: TEST_WITH_CROSSREF, "test doesn't currently with crossref")(fn)
+    return _static_skip_if(lambda: TEST_WITH_CROSSREF, "test doesn't currently with crossref")(fn)
 
 class CrossRefMode(torch.overrides.TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
@@ -2203,6 +2326,8 @@ def xfailIfNoAcceleratorTriton(test_func):
         device_info = f" (device={spec!r})" if spec is not None else ""
         pytest.xfail(f"Triton not available{device_info}")
 
+    # The xfail can take precedence over a skip inside the wrapped test.
+    wrapper._skip_conditions = ()
     return wrapper
 
 
@@ -2249,6 +2374,7 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
                     raise unittest.SkipTest(msg)
                 else:
                     fn(*args, **kwargs)
+            add_skip_condition(wrapper, lambda cls: TEST_WITH_TORCHDYNAMO, msg)
             return wrapper
 
         if not isinstance(fn, type):
@@ -2271,6 +2397,7 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
                     raise unittest.SkipTest(msg)
                 else:
                     fn(*args, **kwargs)
+            add_skip_condition(wrapper, lambda cls: condition, msg)
             return wrapper
 
         if not isinstance(fn, type):
@@ -2372,6 +2499,7 @@ def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT exe
                     raise unittest.SkipTest(msg)
                 else:
                     fn(*args, **kwargs)
+            add_skip_condition(wrapper, lambda cls: GRAPH_EXECUTOR == ProfilingMode.LEGACY if GRAPH_EXECUTOR else None, msg)
             return wrapper
 
         if not isinstance(fn, type):
@@ -2507,6 +2635,7 @@ def skipIfNNModuleInlined(
                 else:
                     fn(*args, **kwargs)
 
+            add_skip_condition(wrapper, lambda cls: condition, msg)
             return wrapper
 
         if not isinstance(fn, type):
@@ -2520,7 +2649,7 @@ def skipIfNNModuleInlined(
     return decorator
 
 def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
-    decorator = lazy_skip_if(lambda: TEST_WITH_ROCM, f"skipIfRocm: {msg}")
+    decorator = _static_skip_if(lambda: TEST_WITH_ROCM, f"skipIfRocm: {msg}")
     return decorator(func) if func is not None else decorator
 
 def skipIfRocm_BUGGY(func=None, *, msg="test doesn't currently work on the ROCm stack"):
@@ -2561,6 +2690,7 @@ def runOnRocm(fn):
             fn(*args, **kwargs)
         else:
             raise unittest.SkipTest("test currently only works on the ROCm stack")
+    add_skip_condition(wrapper, lambda cls: not TEST_WITH_ROCM, "test currently only works on the ROCm stack")
     return wrapper
 
 def runOnRocmArch(arch: tuple[str, ...]):
@@ -2586,7 +2716,7 @@ def xfailIf(condition):
     return wrapper
 
 def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
-    decorator = lazy_skip_if(lambda: TEST_XPU, f"skipIfXpu: {msg}")
+    decorator = _static_skip_if(lambda: TEST_XPU, f"skipIfXpu: {msg}")
     return decorator(func) if func is not None else decorator
 
 def skipIfXpu_BUGGY(func=None, *, msg="test doesn't currently work on the XPU stack"):
@@ -2640,11 +2770,20 @@ def skipIfMPS(fn):
             raise unittest.SkipTest(reason)
         return fn(*args, **kwargs)
 
+    def would_skip(cls):
+        if not has_device_arg:
+            return TEST_MPS
+        from torch.testing._internal.common_device_type import _device_type_at_collection
+
+        device_type = _device_type_at_collection(cls)
+        return None if device_type is None else device_type == "mps"
+
+    add_skip_condition(wrapper, would_skip, reason)
     return wrapper
 
 
 def skipIfHpu(fn):
-    return lazy_skip_if(lambda: TEST_HPU, "test doesn't currently work with HPU")(fn)
+    return _static_skip_if(lambda: TEST_HPU, "test doesn't currently work with HPU")(fn)
 
 def skipIfHpu_BUGGY(fn):
     """Old skipIfHpu that silently drops classes from discovery. Migrate to skipIfHpu."""
@@ -2699,13 +2838,13 @@ def skipIfRocmVersionInRange(first_bad, first_good, reason):
     return lazy_skip_if(_should_skip, f"{reason} ({window})")
 
 def skipIfNotMiopenSuggestNHWC(fn):
-    return lazy_skip_if(
+    return _static_skip_if(
         lambda: not TEST_WITH_MIOPEN_SUGGEST_NHWC,
         "test doesn't currently work without MIOpen NHWC activation",
     )(fn)
 
 def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows stack"):
-    decorator = lazy_skip_if(lambda: IS_WINDOWS, f"skipIfWindows: {msg}")
+    decorator = _static_skip_if(lambda: IS_WINDOWS, f"skipIfWindows: {msg}")
     return decorator(func) if func is not None else decorator
 
 def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windows stack"):
@@ -2953,13 +3092,13 @@ def _test_function(fn, device):
     return run_test_function
 
 def skipIfNoXNNPACK(fn):
-    return lazy_skip_if(
+    return _static_skip_if(
         lambda: not torch.backends.xnnpack.enabled,  # type: ignore[attr-defined]
         "XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.",
     )(fn)
 
 def skipIfNoLapack(fn):
-    return lazy_skip_if(lambda: not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
+    return _static_skip_if(lambda: not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
 
 def skipIfNoNativeAot(op, *, device="cuda"):
     """Skip unless this op has native-AOT kernels embedded for the given device."""
@@ -2992,7 +3131,7 @@ def skipIfNotRegistered(op_name, message):
     return unittest.skip("Pytorch is compiled without Caffe2")
 
 def skipIfNoSciPy(fn):
-    return lazy_skip_if(lambda: not TEST_SCIPY, "test require SciPy, but SciPy not found")(fn)
+    return _static_skip_if(lambda: not TEST_SCIPY, "test require SciPy, but SciPy not found")(fn)
 
 def skip_if_pytest(fn):
     return lazy_skip_if(
@@ -3000,7 +3139,7 @@ def skip_if_pytest(fn):
     )(fn)
 
 def skipIfNoXPU(fn):
-    return lazy_skip_if(lambda: not TEST_XPU, "test required PyTorched compiled with XPU")(fn)
+    return _static_skip_if(lambda: not TEST_XPU, "test required PyTorched compiled with XPU")(fn)
 
 def skipIfCachingAllocatorDisabled(fn):
     """Skip if the CUDA/HIP caching allocator is not active. Covers both the
@@ -3049,16 +3188,18 @@ def periodic(fn):
     """Marks a test that CI runs only in periodic test mode.
 
     The periodic test configuration selects the corresponding pytest marker
-    and sets PYTORCH_TEST_WITH_PERIODIC. Tests in files outside the default
-    Python test sweep (e.g. distributed or quantization) never run in CI.
+    and sets PYTORCH_TEST_WITH_PERIODIC. Other periodic jobs can also run the
+    @periodic tests in their own files by setting PYTORCH_TEST_WITH_PERIODIC.
+    Tests in files outside the default Python test sweep (e.g. distributed or
+    quantization) never run in CI unless such a job runs those files.
 
     Gated only in CI and on Sandcastle (which has no periodic config);
     elsewhere the marker is attached and the test runs normally.
 
     Composes with @slowTest: periodic-strict sets PYTORCH_TEST_WITH_SLOW, so
     slow gating (static or dynamic) does not block @periodic tests there,
-    while the periodic gate keeps a test marked both out of the slow shards;
-    it runs only in periodic-strict.
+    while the periodic gate keeps a test marked both out of the slow shards.
+    Such a test runs only in jobs that set both flags, like periodic-strict.
     """
     reason = "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test"
     skip = (IS_CI or IS_SANDCASTLE) and not TEST_WITH_PERIODIC
@@ -3088,6 +3229,7 @@ def slowTest(fn):
         else:
             fn(*args, **kwargs)
     wrapper.__dict__['slow_test'] = True
+    add_skip_condition(wrapper, lambda cls: not TEST_WITH_SLOW, "test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
     return wrapper
 
 
@@ -3504,33 +3646,55 @@ def remove_device_and_dtype_suffixes(test_name: str) -> str:
     return test_name
 
 
+def _matches_test(target: str, classname: str, test_name: str, sanitized_name: str) -> bool:
+    # target is "test_name (module.ClassName)", the key format of slow_tests_dict
+    # and disabled_tests_dict.
+    target_test_parts = target.split()
+    if len(target_test_parts) < 2:
+        # poorly formed target test name
+        return False
+    target_testname = target_test_parts[0]
+    target_classname = target_test_parts[1][1:-1].split(".")[-1]
+    # if test method name or its sanitized version exactly matches the disabled
+    # test method name AND allow non-parametrized suite names to disable
+    # parametrized ones (TestSuite disables TestSuiteCPU)
+    return classname.startswith(target_classname) and (target_testname in (test_name, sanitized_name))
+
+
+def _slow_test_skip_reason(classname: str, test_name: str, sanitized_name: str, test_fn) -> str | None:
+    # Marks the function as slow as a side effect, which _fast_test_skip_reason reads.
+    if any(_matches_test(x, classname, test_name, sanitized_name) for x in slow_tests_dict):
+        if test_fn is not None:
+            vars(test_fn)['slow_test'] = True
+        if not TEST_WITH_SLOW:
+            return "test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test"
+    return None
+
+
+def _fast_test_skip_reason(test_fn) -> str | None:
+    if TEST_SKIP_FAST and test_fn is not None and not vars(test_fn).get('slow_test', False):
+        return "test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST"
+    return None
+
+
 def check_if_enable(test: unittest.TestCase):
     classname = str(test.__class__).split("'")[1].split(".")[-1]
-    sanitized_testname = remove_device_and_dtype_suffixes(test._testMethodName)
+    test_name = test._testMethodName
+    sanitized_testname = remove_device_and_dtype_suffixes(test_name)
+    # Absent when a TestCase is built with the default methodName and setUp()
+    # is called directly, as some test helpers do.
+    test_fn = getattr(test, test_name, None)
 
-    def matches_test(target: str):
-        target_test_parts = target.split()
-        if len(target_test_parts) < 2:
-            # poorly formed target test name
-            return False
-        target_testname = target_test_parts[0]
-        target_classname = target_test_parts[1][1:-1].split(".")[-1]
-        # if test method name or its sanitized version exactly matches the disabled
-        # test method name AND allow non-parametrized suite names to disable
-        # parametrized ones (TestSuite disables TestSuiteCPU)
-        return classname.startswith(target_classname) and (target_testname in (test._testMethodName, sanitized_testname))
-
-    if any(matches_test(x) for x in slow_tests_dict):
-        getattr(test, test._testMethodName).__dict__['slow_test'] = True
-        if not TEST_WITH_SLOW:
-            raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
+    reason = _slow_test_skip_reason(classname, test_name, sanitized_testname, test_fn)
+    if reason is not None:
+        raise unittest.SkipTest(reason)
 
     if not IS_SANDCASTLE:
         should_skip = False
         skip_msg = ""
 
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
-            if matches_test(disabled_test):
+            if _matches_test(disabled_test, classname, test_name, sanitized_testname):
                 platform_to_conditional: dict = {
                     "mac": IS_MACOS,
                     "macos": IS_MACOS,
@@ -3577,9 +3741,158 @@ def check_if_enable(test: unittest.TestCase):
                 " disabled tests are run"
             raise unittest.SkipTest(skip_msg)
 
-    if TEST_SKIP_FAST:
-        if hasattr(test, test._testMethodName) and not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
-            raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
+    reason = _fast_test_skip_reason(test_fn)
+    if reason is not None:
+        raise unittest.SkipTest(reason)
+
+
+# Keep in sync with overridable hooks used before TestCase.setUp, including __init__.
+_PRE_TEST_HOOKS = (
+    "__new__", "__getattribute__", "__setattr__", "wrap_with_policy",
+    "wrap_with_cuda_policy", "wrap_method_with_policy", "_run_custom",
+    "_reset_dynamo_if_imported", "id", "addTypeEqualityFunc",
+)
+
+
+def _uses_default_test_setup(cls):
+    if not all(
+        inspect.getattr_static(cls, name, None) is inspect.getattr_static(TestCase, name)
+        for name in ("__init__", "setUp", "_callSetUp", "_callTestMethod") + _PRE_TEST_HOOKS
+    ):
+        return False
+    if (TEST_WITH_TORCHDYNAMO or TEST_WITH_AOT_EAGER or TEST_WITH_TORCHINDUCTOR) and not all(
+        inspect.getattr_static(cls, name, None) is inspect.getattr_static(TestCase, name)
+        for name in ("compile_fn", "_dynamo_test_key")
+    ):
+        return False
+    setup_class = inspect.getattr_static(cls, "setUpClass", None)
+    if setup_class is inspect.getattr_static(TestCase, "setUpClass"):
+        return True
+    setup = vars(cls).get("_default_test_setup_at_collection")
+    if setup is None:
+        return False
+    generic_cls, native_base, generated_setup, native_setup = setup
+    return (
+        setup_class is generated_setup
+        and inspect.getattr_static(native_base, "setUpClass", None) is native_setup
+        and _uses_default_test_setup(generic_cls)
+    )
+
+
+def preserves_unittest_skip_marks(*binders):
+    """Declare an audited constructor that preserves static unittest skip marks.
+
+    Name every overridable method that binds a test wrapper. The guarantee is
+    tied to the constructor and those methods, and excludes runtime conditions.
+    """
+    def decorate(cls):
+        constructor = inspect.getattr_static(cls, "__init__")
+        names = binders + _PRE_TEST_HOOKS + ("compile_fn", "_dynamo_test_key")
+        for parent in cls.__mro__[1:]:
+            contract = vars(parent).get("_unittest_skip_mark_contract")
+            if contract is not None and contract[1] is parent:
+                names += tuple(name for name, _ in contract[2])
+        bindings = tuple((name, inspect.getattr_static(cls, name, None)) for name in dict.fromkeys(names))
+        defaults = tuple(
+            (base, base.__init__, inspect.getattr_static(base, "run", None))
+            for base in cls.__mro__ if base in (TestCase, unittest.TestCase, object)
+        )
+        cls._unittest_skip_mark_contract = (constructor, cls, bindings, cls.__mro__, defaults)
+        return cls
+
+    return decorate
+
+
+def _preserves_unittest_skip_marks(cls):
+    constructor = inspect.getattr_static(cls, "__init__")
+    for owner in cls.__mro__:
+        contract = vars(owner).get("_unittest_skip_mark_contract")
+        if contract is not None:
+            break
+    else:
+        return False
+    original, declared_owner, bindings, mro, defaults = contract
+    if declared_owner is not owner or owner.__mro__ is not mro:
+        return False
+    constructors = {base: init for base, init, _ in defaults}
+    for parent in cls.__mro__:
+        parent_contract = vars(parent).get("_unittest_skip_mark_contract")
+        if parent_contract is not None:
+            parent_constructor, parent_owner, parent_bindings, parent_mro, parent_defaults = parent_contract
+            if parent_owner is not parent or parent.__mro__ is not parent_mro or not all(
+                inspect.getattr_static(parent, name, None) is method
+                for name, method in parent_bindings
+            ) or not all(
+                base.__init__ is init and inspect.getattr_static(base, "run", None) is run
+                for base, init, run in parent_defaults
+            ):
+                return False
+            if parent in mro:
+                constructors[parent] = parent_constructor
+    return constructor is original and all(
+        inspect.getattr_static(cls, name, None) is method for name, method in bindings
+    ) and all(
+        parent.__dict__["__init__"] is constructors.get(parent)
+        for parent in cls.__mro__ if "__init__" in parent.__dict__
+    )
+
+
+def skip_reason_at_collection(test_cls, test_fn, test_name: str) -> str | None:
+    r"""Why ``test_name`` would skip before its body runs, or None when that is
+    not knowable without running it.
+
+    Mirrors the run-time order: unittest's static marks on the method or the
+    class, then the slow-tests list and PYTORCH_TEST_SKIP_FAST (check_if_enable
+    in TestCase.setUp), then the conditions skip decorators recorded with
+    add_skip_condition. Disabled-by-issue skips are left to run time on purpose
+    so they keep being reported. A predicate that raises or returns None keeps
+    the test. Slow and fast list decisions require unmodified TestCase setup;
+    overrides may bypass check_if_enable or change its inputs before calling it.
+    """
+    custom_constructor = False
+    if isinstance(test_cls, type) and issubclass(test_cls, unittest.TestCase):
+        # Custom runners and constructors can reinterpret or wrap runtime skips.
+        custom_constructor = (
+            test_cls.__init__ not in (TestCase.__init__, unittest.TestCase.__init__)
+            or any(vars(base).get("_unittest_skip_mark_contract") is not None for base in test_cls.__mro__)
+        )
+        if custom_constructor and not _preserves_unittest_skip_marks(test_cls):
+            return None
+        runners = {base.__dict__["run"] for base in test_cls.__mro__ if "run" in base.__dict__}
+        runners.difference_update((TestCase.run, unittest.TestCase.run))
+        if runners:
+            from torch.testing._internal.common_device_type import DeviceTypeTestBase
+
+            if runners != {DeviceTypeTestBase.run}:
+                return None
+    for obj in (test_fn, test_cls):
+        if getattr(obj, "__unittest_skip__", False):
+            return getattr(obj, "__unittest_skip_why__", None) or "skipped"
+    if custom_constructor:
+        # Constructor-installed wrappers can reinterpret runtime exceptions.
+        return None
+    if test_cls is None or test_fn is None:
+        return None
+    if (isinstance(test_cls, type) and issubclass(test_cls, TestCase)
+            and (slow_tests_dict or TEST_SKIP_FAST)
+            and _uses_default_test_setup(test_cls) and hasattr(test_fn, "__dict__")):
+        sanitized_name = remove_device_and_dtype_suffixes(test_name)
+        reason = _slow_test_skip_reason(test_cls.__name__, test_name, sanitized_name, test_fn)
+        if reason is None:
+            reason = _fast_test_skip_reason(test_fn)
+        if reason is not None:
+            return reason
+    # Custom dispatch can bypass the wrapper that recorded the condition.
+    if (isinstance(test_cls, type) and issubclass(test_cls, unittest.TestCase)
+            and inspect.getattr_static(test_cls, "_callTestMethod") is not unittest.TestCase._callTestMethod):
+        return None
+    for predicate, reason in getattr(test_fn, "_skip_conditions", ()):
+        try:
+            if predicate(test_cls) is True:
+                return reason
+        except Exception:
+            return None
+    return None
 
 
 # `TestCase.assertEqual` is very permissive and coerced the inputs into a format that could be compared. This is very
@@ -3879,6 +4192,7 @@ class TestCase(expecttest.TestCase):
     _ignore_not_implemented_error = False
 
     def __init__(self, method_name='runTest', methodName='runTest'):
+        # Keep _PRE_TEST_HOOKS in sync when adding overridable test-binding hooks.
         # methodName is the correct naming in unittest and testslide uses keyword arguments.
         # So we need to use both to 1) not break BC and, 2) support testslide.
         if methodName != "runTest":
@@ -6149,6 +6463,7 @@ def skip_but_pass_in_sandcastle(reason):
         def wrapper(*args, **kwargs):
             print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
             return
+        wrapper._skip_conditions = ()
         return wrapper
 
     return decorator
@@ -6259,6 +6574,7 @@ def skip_but_pass_in_sandcastle_if(condition, reason):
                 @wraps(func)
                 def wrapper(*args, **kwargs):
                     print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
+                wrapper._skip_conditions = ()
                 return wrapper
             else:
                 func.__unittest_skip__ = True
@@ -6540,8 +6856,6 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Op doesn't support autograd for this dtype.")
         if not op.supports_autograd and not op.supports_forward_ad:
             self.skipTest("Skipped! autograd not supported.")
-
-
 
 
 # Base TestCase for NT tests; used to define common helpers, etc.
@@ -6867,6 +7181,8 @@ def patch_test_members(updates: dict[str, Any]):
                 for member, original_value in original_values.items():
                     setattr(self, member, original_value)
 
+        # Member updates can change the conditions of inner skip decorators.
+        wrapper._skip_conditions = ()
         return wrapper
     return decorator
 

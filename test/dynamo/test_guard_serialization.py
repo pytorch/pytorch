@@ -33,6 +33,7 @@ import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.bytecode_transformation import transform_code_object
+from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import (
     _Missing,
@@ -1564,9 +1565,247 @@ if isinstance(_generic_class_getitem, types.ClassMethodDescriptorType):
     _RAW_DESCRIPTORS.append(_generic_class_getitem)
 
 
+class _ODictSubclass(collections.OrderedDict):
+    __slots__ = ("slot",)
+
+    def __setattr__(self, name, value):
+        if name == "__dict__":
+            raise AssertionError("State restoration must bypass __setattr__")
+        super().__setattr__(name, value)
+
+
+class _NormalizingODict(collections.OrderedDict):
+    def __setitem__(self, key, value):
+        super().__setitem__(key.lower() if isinstance(key, str) else key, value)
+
+
+class _ODictGetState(collections.OrderedDict):
+    def __init__(self):
+        super().__init__(constructor=0)
+        self.__dict__ = _DictState(recreated="constructor", saved=0)
+
+    def __getstate__(self):
+        return {"saved": self.saved} if self.saved is not None else None
+
+
+class _ODictTupleState(tuple):
+    __slots__ = ()
+
+    def __len__(self):
+        raise AssertionError("State inspection must bypass tuple overrides")
+
+    def __getitem__(self, index):
+        raise AssertionError("State inspection must bypass tuple overrides")
+
+
+class _ODictCustomState(_ODictGetState):
+    def __getstate__(self):
+        return self.saved
+
+
+class _ODictSetState(_ODictGetState):
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.state_restored = tuple(self)
+        self.move_to_end("b")
+
+
+class _ODictMeta(type):
+    def __call__(cls):
+        result = super().__call__()
+        result["constructor"] = 0
+        result.recreated, result.saved = "constructor", 0
+        return result
+
+
+class _ODictWithMeta(collections.OrderedDict, metaclass=_ODictMeta):
+    __getstate__ = _ODictGetState.__getstate__
+
+
+class _DictState(dict):
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value * 2 if isinstance(value, int) else value)
+
+    def setdefault(self, *args):
+        raise AssertionError("State restoration must bypass dictionary overrides")
+
+
+class _ODictStateHooks(collections.OrderedDict):
+    def __getstate__(self):
+        return self.saved
+
+    def __setstate__(self, state):
+        self.saved = state
+        self.state_restored = (tuple(dict.keys(self)), tuple(self))
+
+
+class _ODictSlotsState(_ODictSubclass):
+    def __getstate__(self):
+        return {"saved": self.saved}, {"slot": self.slot}
+
+
 @instantiate_parametrized_tests
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    class NestedOrderedDict(collections.OrderedDict):
+        pass
+
+    def _roundtrip_ordered_dict(self, value, *tracked):
+        buf = io.BytesIO()
+        objects = {id(obj): obj for obj in tracked}
+        GuardsStatePickler(objects, {}, {}, {}, buf).dump(value)
+        return load_guards_state(buf.getvalue())
+
+    @parametrize(
+        "state",
+        [
+            None,
+            0,
+            "",
+            (),
+            {},
+            {"saved": 3},
+            ({}, {}),
+            ({"saved": 3}, {}),
+            _ODictTupleState(({"saved": 3}, {})),
+        ],
+    )
+    def test_ordered_dict_custom_state_matches_pickle(self, state):
+        mapping = _ODictCustomState()
+        mapping.saved = state
+        try:
+            expected = pickle.loads(pickle.dumps(mapping))
+        except pickle.UnpicklingError as error:
+            with self.assertRaisesRegex(type(error), str(error)):
+                self._roundtrip_ordered_dict(mapping, mapping)
+            return
+        loaded, saved = self._roundtrip_ordered_dict((mapping, state), mapping, state)
+        self.assertEqual(vars(loaded), vars(expected))
+        if isinstance(state, _ODictTupleState):
+            self.assertIs(type(saved), _ODictTupleState)
+            self.assertEqual(tuple(iter(saved)), tuple(iter(state)))
+        else:
+            self.assertEqual(saved, state)
+        if type(state) is dict:
+            self.assertIsNot(vars(loaded), saved)
+
+    @parametrize("mapping_type", [collections.OrderedDict, _ODictCustomState])
+    def test_ordered_dict_instance_state_preserves_alias(self, mapping_type):
+        mapping = mapping_type()
+        if mapping_type is _ODictCustomState:
+            mapping.__dict__ = _DictState()
+            mapping.saved = vars(mapping)
+        loaded, attrs = self._roundtrip_ordered_dict((mapping, vars(mapping)), mapping)
+        self.assertIs(vars(loaded), attrs)
+
+    def test_ordered_dict_unlinked_storage_uses_native_pickle(self):
+        mapping = collections.OrderedDict(a=1)
+        dict.__setitem__(mapping, "unlinked", 2)
+        expected = pickle.loads(pickle.dumps(mapping))
+        self.assertEqual(self._roundtrip_ordered_dict(mapping), expected)
+
+    @parametrize("local", [False, True])
+    def test_ordered_dict_requires_global_class(self, local):
+        class LocalOrderedDict(collections.OrderedDict):
+            pass
+
+        mapping_type = LocalOrderedDict if local else self.NestedOrderedDict
+        mapping = mapping_type(a=1)
+        with self.assertRaisesRegex(
+            PackageError, "Please define the class at global scope"
+        ):
+            self._roundtrip_ordered_dict(mapping, mapping)
+
+    @parametrize(
+        "mapping_type",
+        [collections.OrderedDict, _ODictSubclass, _ODictStateHooks, _ODictSlotsState],
+    )
+    @parametrize("nan_key", [False, True])
+    def test_ordered_dict_storage_order_and_aliases(self, mapping_type, nan_key):
+        shared = []
+        key = float("nan") if nan_key else "A"
+        mapping = mapping_type()
+        collections.OrderedDict.__setitem__(mapping, key, shared)
+        mapping["b"] = shared
+        mapping.saved = mapping.slot = shared
+        mapping["self"] = mapping
+        mapping.alias = mapping
+        mapping.move_to_end(key)
+        loaded, attrs = self._roundtrip_ordered_dict((mapping, vars(mapping)), mapping)
+        self.assertIs(type(loaded), mapping_type)
+        loaded_key = list(loaded)[-1]
+        if nan_key:
+            self.assertTrue(math.isnan(loaded_key))
+        else:
+            self.assertEqual(loaded_key, "A")
+        raw_order, linked_order = [loaded_key, "b", "self"], ["b", "self", loaded_key]
+        self.assertEqual(list(loaded), linked_order)
+        self.assertEqual(list(dict.keys(loaded)), raw_order)
+        self.assertIs(loaded.saved, loaded[loaded_key])
+        self.assertIs(loaded.saved, loaded["b"])
+        self.assertIs(loaded["self"], loaded)
+        if mapping_type is _ODictStateHooks:
+            self.assertEqual(
+                loaded.state_restored, (tuple(raw_order), tuple(linked_order))
+            )
+        else:
+            self.assertIs(loaded.slot, loaded.saved)
+        if mapping_type in (collections.OrderedDict, _ODictSubclass):
+            self.assertIs(loaded.alias, loaded)
+            self.assertIs(loaded.__dict__, attrs)
+
+    @parametrize("mapping_type", [_ODictGetState, _ODictSetState, _ODictWithMeta])
+    @parametrize("saved", [None, 3])
+    def test_ordered_dict_state_hooks(self, mapping_type, saved):
+        mapping = mapping_type()
+        mapping.clear()
+        mapping.update(a=1, b=2)
+        mapping.saved = saved
+        mapping.recreated = "overwritten"
+        expected = pickle.loads(pickle.dumps(mapping))
+        loaded = self._roundtrip_ordered_dict(mapping, mapping)
+        self.assertEqual(list(loaded), list(expected))
+        self.assertEqual(list(dict.keys(loaded)), list(dict.keys(expected)))
+        self.assertEqual(vars(loaded), vars(expected))
+        self.assertEqual(loaded.recreated, "constructor")
+
+    @parametrize(
+        "mapping_type",
+        [_ODictGetState, _NormalizingODict, _ODictWithMeta],
+    )
+    @parametrize("tracked", [False, True])
+    def test_reordered_ordered_dict_overrides(self, mapping_type, tracked):
+        mapping = mapping_type()
+        mapping.clear()
+        mapping.update(a=1, b=2)
+        mapping.move_to_end("a")
+        if tracked:
+            with self.assertRaisesRegex(
+                PackageError, "Cannot preserve OrderedDict storage order"
+            ):
+                self._roundtrip_ordered_dict(mapping, mapping)
+        else:
+            expected = pickle.loads(pickle.dumps(mapping))
+            loaded = self._roundtrip_ordered_dict(mapping)
+            self.assertIs(type(loaded), mapping_type)
+            self.assertEqual(list(loaded.items()), list(expected.items()))
+            self.assertEqual(vars(loaded), vars(expected))
+
+    @parametrize("reducer", ["registered", "__reduce__", "__reduce_ex__"])
+    def test_ordered_dict_registered_reducer(self, reducer):
+        mapping = _ODictSubclass(a=1)
+        if reducer != "registered":
+            setattr(mapping, reducer, lambda *args: (dict, ()))
+        with mock.patch.dict(
+            copyreg.dispatch_table,
+            {_ODictSubclass: lambda value: (dict, ())}
+            if reducer == "registered"
+            else {},
+        ):
+            loaded = self._roundtrip_ordered_dict(mapping, mapping)
+        self.assertIs(type(loaded), dict)
+        self.assertEqual(loaded, {})
 
     # Pickler-level: these drive GuardsStatePickler, or the loader it feeds,
     # directly rather than through a capture, so none of
@@ -2996,6 +3235,31 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
 class TestGuardSerialization(TestGuardSerializationBase):
+    @parametrize("reordered", [False, True])
+    def test_native_ordered_dict_order(self, reordered):
+        def install_order_guard(ctx):
+            from torch._dynamo.guards import GuardBuilder, install_guard
+
+            mapping = ctx.get_local(
+                "mapping"
+            )._i_will_not_complain_if_bc_breaks_VariableTracker()
+            install_guard(mapping.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
+
+        def fn(x, mapping):
+            comptime(install_order_guard)
+            return x + len(mapping)
+
+        mapping = collections.OrderedDict(a=1, b=2)
+        if reordered:
+            mapping.move_to_end("a")
+        x = torch.ones(1)
+        ref, loaded = self._test_serialization(
+            "ORDERED_DICT_ORDER_MATCH", fn, x, mapping
+        )
+        self._test_check_fn(ref, loaded, {"x": x, "mapping": mapping}, True)
+        mapping.move_to_end("b" if reordered else "a")
+        self._test_check_fn(ref, loaded, {"x": x, "mapping": mapping}, False)
+
     hw_classification = HardwareClassification.GENERIC
 
     def test_function_locals(self):
@@ -3461,71 +3725,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"x": torch.randn(2, dtype=torch.float64)}, False
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    @torch.compiler.config.patch(compile_on_one_rank=True)
-    def test_tensor_match_current_device(self):
-        # The relative-device decision must survive a load on a rank whose current
-        # device differs from the saving one. The derivation ignores the saved
-        # tensor's index -- the one piece of the artifact that is rank-specific --
-        # and reads compile_on_one_rank off the saved graph state rather than the
-        # loading process's config, so the guard that is rebuilt is the one that
-        # was saved.
-        from torch._dynamo.package import load_guard_manager, load_guards_state
-
-        def f(x: torch.Tensor):
-            return x + 1
-
-        with torch.cuda.device(0):
-            ref, _ = self._test_serialization(
-                "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
-            )
-
-        with mock.patch("torch.accelerator.current_device_index", return_value=1):
-            state = load_guards_state(self._cached_guards_state)
-            loaded = load_guard_manager(state, self._cached_f_code, f.__globals__)
-
-        self.assertIn("device=current", "\n".join(loaded.code_parts))
-
-        with torch.cuda.device(0):
-            inputs = {"x": torch.randn(4, device="cuda:0")}
-            self._test_check_fn(ref, loaded, inputs, True)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_tensor_match_current_device_survives_config_change_on_load(self):
-        # Whether the index is pinned or relative belongs to the saved guard, not to
-        # the loading process. Rebuilding from the loader's own compile_on_one_rank
-        # would flip the guard either way: a relaxed one reloaded without CooR would
-        # be rebuilt pinned and reject the device it was saved to accept, and a
-        # pinned one reloaded with CooR on would be rebuilt relaxed and accept one it
-        # was saved to reject.
-        from torch._dynamo.package import load_guard_manager, load_guards_state
-
-        def f(x: torch.Tensor):
-            return x + 1
-
-        for saved_with_coor in (True, False):
-            with (
-                torch.compiler.config.patch(compile_on_one_rank=saved_with_coor),
-                torch.cuda.device(0),
-            ):
-                torch._dynamo.reset()
-                self._test_serialization(
-                    "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
-                )
-                saved_state = self._cached_guards_state
-                saved_code = self._cached_f_code
-
-            # Load under the opposite setting.
-            with torch.compiler.config.patch(compile_on_one_rank=not saved_with_coor):
-                state = load_guards_state(saved_state)
-                loaded = load_guard_manager(state, saved_code, f.__globals__)
-
-            code = "\n".join(loaded.code_parts)
-            if saved_with_coor:
-                self.assertIn("device=current", code)
-            else:
-                self.assertNotIn("device=current", code)
 
     def test_not_present_in_generic_dict(self):
         class Module(torch.nn.Module):
@@ -5892,6 +6091,76 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # Round-trip through pickle should work even with init=False fields
         restored = pickle.loads(pickle.dumps(source))
         self.assertEqual(source, restored)
+
+
+@torch._dynamo.config.patch({"strict_precompile": True})
+class TestGuardSerializationCUDA(TestGuardSerializationBase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    def test_tensor_match_current_device(self):
+        # The relative-device decision must survive a load on a rank whose current
+        # device differs from the saving one. The derivation ignores the saved
+        # tensor's index -- the one piece of the artifact that is rank-specific --
+        # and reads compile_on_one_rank off the saved graph state rather than the
+        # loading process's config, so the guard that is rebuilt is the one that
+        # was saved.
+        from torch._dynamo.package import load_guard_manager, load_guards_state
+
+        def f(x: torch.Tensor):
+            return x + 1
+
+        with torch.cuda.device(0):
+            ref, _ = self._test_serialization(
+                "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
+            )
+
+        with mock.patch("torch.accelerator.current_device_index", return_value=1):
+            state = load_guards_state(self._cached_guards_state)
+            loaded = load_guard_manager(state, self._cached_f_code, f.__globals__)
+
+        self.assertIn("device=current", "\n".join(loaded.code_parts))
+
+        with torch.cuda.device(0):
+            inputs = {"x": torch.randn(4, device="cuda:0")}
+            self._test_check_fn(ref, loaded, inputs, True)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_tensor_match_current_device_survives_config_change_on_load(self):
+        # Whether the index is pinned or relative belongs to the saved guard, not to
+        # the loading process. Rebuilding from the loader's own compile_on_one_rank
+        # would flip the guard either way: a relaxed one reloaded without CooR would
+        # be rebuilt pinned and reject the device it was saved to accept, and a
+        # pinned one reloaded with CooR on would be rebuilt relaxed and accept one it
+        # was saved to reject.
+        from torch._dynamo.package import load_guard_manager, load_guards_state
+
+        def f(x: torch.Tensor):
+            return x + 1
+
+        for saved_with_coor in (True, False):
+            with (
+                torch.compiler.config.patch(compile_on_one_rank=saved_with_coor),
+                torch.cuda.device(0),
+            ):
+                torch._dynamo.reset()
+                self._test_serialization(
+                    "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
+                )
+                saved_state = self._cached_guards_state
+                saved_code = self._cached_f_code
+
+            # Load under the opposite setting.
+            with torch.compiler.config.patch(compile_on_one_rank=not saved_with_coor):
+                state = load_guards_state(saved_state)
+                loaded = load_guard_manager(state, saved_code, f.__globals__)
+
+            code = "\n".join(loaded.code_parts)
+            if saved_with_coor:
+                self.assertIn("device=current", code)
+            else:
+                self.assertNotIn("device=current", code)
 
 
 class TestGuardSerializationAccelerator(TestGuardSerializationBase):
