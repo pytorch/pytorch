@@ -437,7 +437,7 @@ class TestPoolingNN(NNTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: kernel_size",
+            "value cannot be converted to type int without overflow",
         ):
             avgpool(inp)
 
@@ -967,14 +967,14 @@ class TestPoolingNNDevice(NNTestCase):
         samples = torch.randn(1, 3, 10, 10, 10, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: kernel_size",
+            "value cannot be converted to type int without overflow",
         ):
             nn.MaxPool3d(
                 kernel_size=9223372036854775803,
             )(samples)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: dilation",
+            "value cannot be converted to type int without overflow",
         ):
             nn.MaxPool3d(
                 kernel_size=2,
@@ -992,7 +992,7 @@ class TestPoolingNNDevice(NNTestCase):
         samples = torch.randn(1, 3, 10, 10, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: dilation",
+            "value cannot be converted to type int without overflow",
         ):
             nn.MaxPool2d(
                 kernel_size=2,
@@ -1004,7 +1004,7 @@ class TestPoolingNNDevice(NNTestCase):
         samples = torch.randn(1, 3, 10, 10, 10, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: stride",
+            "value cannot be converted to type int without overflow",
         ):
             nn.AvgPool3d(
                 kernel_size=2,
@@ -1018,7 +1018,7 @@ class TestPoolingNNDevice(NNTestCase):
         indices2d = torch.zeros(1, 1, 2, 2, dtype=torch.long, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: kernel_size",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ops.aten.avg_pool2d_backward(
                 grad2d,
@@ -1032,7 +1032,7 @@ class TestPoolingNNDevice(NNTestCase):
             )
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: dilation",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ops.aten.max_pool2d_with_indices_backward(
                 grad2d,
@@ -1050,7 +1050,7 @@ class TestPoolingNNDevice(NNTestCase):
         indices3d = torch.zeros(1, 1, 2, 2, 2, dtype=torch.long, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: stride",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ops.aten.avg_pool3d_backward(
                 grad3d,
@@ -1064,7 +1064,7 @@ class TestPoolingNNDevice(NNTestCase):
             )
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: dilation",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ops.aten.max_pool3d_with_indices_backward(
                 grad3d,
