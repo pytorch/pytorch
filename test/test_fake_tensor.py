@@ -153,6 +153,20 @@ def expectedFailurePropagateRealTensors(fn):
     return fn
 
 
+def _unavailable_device_type():
+    """An accelerator type that is not usable on this machine."""
+    for device_type in ("cuda", "xpu"):
+        try:
+            if not torch.get_device_module(device_type).is_available():
+                return device_type
+        except (RuntimeError, AttributeError):
+            return device_type
+    return None
+
+
+UNAVAILABLE_DEVICE = _unavailable_device_type()
+
+
 class _TestFakeTensorHelpers:
     """Assertions shared by TestFakeTensor and TestFakeTensorDevice."""
 
@@ -2114,6 +2128,119 @@ def forward(self, x_1):
         finally:
             delattr(torch, backend_name)
             del sys.modules[f"torch.{backend_name}"]
+
+    @skipIfTorchDynamo(
+        "TorchDynamo exposes https://github.com/pytorch/pytorch/issues/166696"
+    )
+    @unittest.skipIf(
+        TEST_ACCELERATOR, "Only execute when an accelerator is not present"
+    )
+    def test_to_unavailable_device_with_privateuse1_backend(self):
+        # With an available privateuse1 backend, avoid_device_init is False,
+        # but device conversion to an *unavailable* backend (cuda here) must
+        # still produce a fake tensor instead of running the real kernel.
+        class _DummyPrivateUse1Module:
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+        backend_name = "privateuseone"
+        try:
+            torch._register_device_module(backend_name, _DummyPrivateUse1Module)
+            x = torch.zeros(2)
+            with FakeTensorMode(allow_non_fake_inputs=True):
+                y = x.to("cuda:0")
+                self.assertEqual(y.device, torch.device("cuda:0"))
+        finally:
+            delattr(torch, backend_name)
+            del sys.modules[f"torch.{backend_name}"]
+
+    @skipIfCppFakeTensor("device availability check lives in Python dispatch")
+    @unittest.skipIf(UNAVAILABLE_DEVICE is None, "no unavailable device to target")
+    def test_to_unavailable_device(self):
+        x = torch.zeros(2)
+        with FakeTensorMode(allow_non_fake_inputs=True) as mode:
+            y = x.to(f"{UNAVAILABLE_DEVICE}:0")
+            self.assertEqual(y.device.type, UNAVAILABLE_DEVICE)
+            if mode.propagate_real_tensors:
+                self.assertIsNone(y.real_tensor)
+
+    @skipIfCppFakeTensor("device availability check lives in Python dispatch")
+    @unittest.skipIf(UNAVAILABLE_DEVICE is None, "no unavailable device to target")
+    def test_factory_op_on_unavailable_device(self):
+        with FakeTensorMode() as mode:
+            y = torch.zeros(2, device=f"{UNAVAILABLE_DEVICE}:0")
+            self.assertEqual(y.device.type, UNAVAILABLE_DEVICE)
+            if mode.propagate_real_tensors:
+                self.assertIsNone(y.real_tensor)
+
+    @skipIfCppFakeTensor("device availability check lives in Python dispatch")
+    @unittest.skipIf(UNAVAILABLE_DEVICE is None, "no unavailable device to target")
+    def test_constant_to_unavailable_device(self):
+        with FakeTensorMode():
+            y = torch.tensor(2.0).to(f"{UNAVAILABLE_DEVICE}:0")
+            self.assertEqual(y.device.type, UNAVAILABLE_DEVICE)
+
+    @skipIfCppFakeTensor("device availability check lives in Python dispatch")
+    def test_to_available_device_keeps_real_propagation(self):
+        x = torch.zeros(2)
+        expected = x.to(torch.float64)
+        with FakeTensorMode(allow_non_fake_inputs=True) as mode:
+            y = x.to("cpu", torch.float64)
+        self.assertEqual(y.device.type, "cpu")
+        self.assertEqual(y.dtype, torch.float64)
+        if mode.propagate_real_tensors:
+            self.assertEqual(y.real_tensor, expected)
+
+    @skipIfCppFakeTensor("device availability check lives in Python dispatch")
+    def test_string_arg_named_device_is_not_a_device(self):
+        if UNAVAILABLE_DEVICE is None:
+            self.skipTest("no unavailable device to target")
+
+        with torch.library._scoped_library(
+            "fake_tensor_string_device_arg", "FRAGMENT"
+        ) as lib:
+            lib.define("moo(*, str device) -> Tensor")
+
+            @torch.library.impl(
+                "fake_tensor_string_device_arg::moo",
+                "CompositeExplicitAutograd",
+                lib=lib,
+            )
+            def moo(*, device):
+                return torch.full((2,), float(len(device)))
+
+            expected = torch.full((2,), float(len(UNAVAILABLE_DEVICE)))
+            with FakeTensorMode() as mode:
+                y = torch.ops.fake_tensor_string_device_arg.moo(
+                    device=UNAVAILABLE_DEVICE
+                )
+            self.assertEqual(y.device.type, "cpu")
+            if mode.propagate_real_tensors:
+                self.assertIsNotNone(y.real_tensor)
+                self.assertEqual(y.real_tensor, expected)
+
+    @skipIfCppFakeTensor("device availability check lives in Python dispatch")
+    @unittest.skipIf(not torch.backends.mps.is_available(), "requires MPS")
+    def test_to_mps_keeps_real_propagation(self):
+        x = torch.randn(3)
+        with FakeTensorMode(allow_non_fake_inputs=True) as mode:
+            y = x.to("mps")
+        self.assertEqual(y.device.type, "mps")
+        if mode.propagate_real_tensors:
+            self.assertIsNotNone(y.real_tensor)
+            self.assertEqual(y.real_tensor.cpu(), x)
+
+    @skipIfCppFakeTensor("device availability check lives in Python dispatch")
+    def test_device_availability_cache_is_per_mode(self):
+        if UNAVAILABLE_DEVICE is None:
+            self.skipTest("no unavailable device to target")
+        device_type = UNAVAILABLE_DEVICE
+        with FakeTensorMode() as mode:
+            self.assertFalse(mode._is_device_available(device_type))
+            self.assertIn(device_type, mode._device_availability)
+        with FakeTensorMode() as other:
+            self.assertNotIn(device_type, other._device_availability)
 
     def test_unique_output_dtype(self):
         shape_env = ShapeEnv()
