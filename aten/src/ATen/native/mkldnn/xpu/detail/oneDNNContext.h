@@ -30,6 +30,14 @@ inline dnnl::memory make_onednn_memory(
   return make_onednn_memory(md, engine, const_cast<void*>(ptr));
 }
 
+// This version is used for grouped matmul.
+// see https://uxlfoundation.github.io/oneDNN/dev_guide_grouped_mem.html
+dnnl::memory make_onednn_grouped_memory(
+    dnnl::memory::desc md,
+    dnnl::engine& engine,
+    void* ptr,
+    void* offs_ptr);
+
 // Keep non-static and non-inline
 bool set_onednn_verbose(int level);
 

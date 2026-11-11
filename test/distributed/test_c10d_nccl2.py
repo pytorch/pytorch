@@ -1556,18 +1556,29 @@ class ProcessGroupNCCL2TimingTest(_ProcessGroupNCCL2OptionsTest):
         first = torch.ones(4, device=self.device)
         last = torch.ones(4, device=self.device)
         sleep_cycles = int(100 * get_cycles_per_ms())
+        sleep_start = torch.cuda.Event(enable_timing=True)
+        sleep_end = torch.cuda.Event(enable_timing=True)
         self._check_all_reduce()
         pg._start_coalescing(self.device)
         dist.all_reduce(first, async_op=True)
         # Delay the last op so the window starts well before it does.
+        sleep_start.record()
         torch.cuda._sleep(sleep_cycles)
+        sleep_end.record()
         last_work = dist.all_reduce(last, async_op=True)
         window = pg._end_coalescing(self.device)
         window.wait()
         torch.cuda.synchronize(self.device)
+        # _sleep counts shader clock cycles, which can tick faster than during
+        # the calibration, so compare against the measured sleep.
+        sleep_ms = sleep_start.elapsed_time(sleep_end)
+        # A much shorter sleep would put the gap check within launch noise.
+        self.assertGreater(sleep_ms, 10)
         # Compare against the last op rather than a fixed bound: rank skew
         # lengthens the last op's wait for its peer, not the gap before it.
-        self.assertGreater(window._get_duration() - last_work._get_duration(), 50)
+        self.assertGreater(
+            window._get_duration() - last_work._get_duration(), sleep_ms / 2
+        )
 
 
 class ProcessGroupNCCLLazyTimingTest(ProcessGroupNCCL2TimingTest):
