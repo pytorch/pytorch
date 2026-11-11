@@ -1008,7 +1008,7 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
     # Hence __slots__; a subclass could add a __dict__, so it is final, which
     # getCppFakeTensorModeHandle enforces by accepting only this exact type. See
     # Note [C++ FakeTensorMode handle] in torch/csrc/FakeTensorMode.cpp.
-    __slots__ = ()
+    __slots__ = ("_creation_traceback",)
 
     def __init__(
         self, *, shape_env: ShapeEnv | None = None, allow_non_fake_inputs: bool = False
@@ -1017,7 +1017,16 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
         super().__init__(FakeTensorConverter(copy_data=copy_data), shape_env)
+        self._creation_traceback = CapturedTraceback.extract()
         self.allow_non_fake_inputs = allow_non_fake_inputs
+
+    # Where the mode was created, like FakeTensorMode.stack. Unlike it, this is
+    # formatted on each access (only error messages read it), and its source
+    # lines are looked up then, without the module's globals, so they can be
+    # missing for a module loaded through a loader (e.g. from a zip).
+    @property
+    def stack(self) -> str:
+        return "".join(self._creation_traceback.format())
 
     # Same as FakeTensorMode.avoid_device_init
     @property

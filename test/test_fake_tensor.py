@@ -6080,6 +6080,7 @@ class TestCppFakeTensorModeBindings(TestCase):
             mode = CppFakeTensorMode(shape_env=shape_env)
         self.assertTrue(mode.fake_tensor_converter.meta_converter.copy_data)
         self.assertIs(mode.shape_env, shape_env)
+        self.assertIn("test_cpp_fake_tensor_mode_init", mode.stack)
         defaults = CppFakeTensorMode()
         self.assertFalse(defaults.fake_tensor_converter.meta_converter.copy_data)
         self.assertIsNone(defaults.shape_env)
