@@ -472,6 +472,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         # Masks of the enclosing ops.masked() bodies, outermost first.
         self.load_masks: list[CSEVariable] = []
         self.accumulator_count = 0
+        self.has_fp32_dot = False
         # Buffer -> value stored outside the current reduction loop; see
         # disable_reduction().
         self.outer_stores: dict[str, CSEVariable] = {}
@@ -834,17 +835,18 @@ class HelionKernel(SIMDKernel[CSEVariable]):
                 "",
             ]
         )
+        settings = (
+            f'backend="{config.helion.backend}", static_shapes=True, '
+            f'autotune_effort="{config.helion.autotune_effort}"'
+        )
         # FP32 dots follow torch.backends.cuda.matmul.fp32_precision, like
         # Inductor's Triton dots. With Helion's default, TF32, an FP32
         # [40, 72] @ [72, 136] differs from eager by up to 3e-2 instead of 1e-5.
-        precision = (
-            "tf32" if torch.backends.cuda.matmul.fp32_precision == "tf32" else "ieee"
-        )
-        code.writeline(
-            f'@helion.kernel(backend="{config.helion.backend}", static_shapes=True, '
-            f'autotune_effort="{config.helion.autotune_effort}", '
-            f'dot_precision="{precision}")'
-        )
+        # dot_precision only affects FP32 dots, so other kernels omit it.
+        if self.has_fp32_dot:
+            tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
+            settings += f', dot_precision="{"tf32" if tf32 else "ieee"}"'
+        code.writeline(f"@helion.kernel({settings})")
         signature = ", ".join(f"{arg.name}: torch.Tensor" for arg in self.kernel_args())
         code.writeline(f"def kernel({signature}) -> None:")
         with code.indent():
@@ -1135,6 +1137,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
                 tmp2 = in2[tile_r, tile_x]
                 acc1 = torch.addmm(acc1, tmp0, tmp2)
         """
+        self.has_fp32_dot |= torch.float32 in (lhs.dtype, rhs.dtype)
         acc = self.accumulator(0, torch.float32)
         op = "baddbmm" if "z" in self.numels else "addmm"
         self.compute.writeline(f"{acc} = torch.{op}({acc}, {lhs}, {rhs})")

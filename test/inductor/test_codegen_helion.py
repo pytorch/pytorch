@@ -59,7 +59,13 @@ class TestHelionNativeMatmul(TestCase):
     def setUp(self):
         super().setUp()
         self.enterContext(
-            config.patch({"helion.enabled": True, "helion.native_matmul": True})
+            config.patch(
+                {
+                    "helion.enabled": True,
+                    "helion.native_matmul": True,
+                    "helion.autotune_effort": "none",
+                }
+            )
         )
 
     def compile(
@@ -101,7 +107,7 @@ import torch
 import helion
 import helion.language as hl
 
-@helion.kernel(backend="triton", static_shapes=True, autotune_effort="none", dot_precision="ieee")
+@helion.kernel(backend="triton", static_shapes=True, autotune_effort="none")
 def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.Tensor) -> None:
     for tile_y, tile_x in hl.tile([40, 136]):
         acc = hl.zeros([tile_y, tile_x], dtype=torch.float32)
@@ -141,6 +147,11 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         self.assertIn(
             store if dtype == torch.float32 else f"{store}.to({dtype})", source
         )
+        # dot_precision only affects FP32 dots.
+        if dtype == torch.float32:
+            self.assertIn('dot_precision="ieee"', source)
+        else:
+            self.assertNotIn("dot_precision", source)
 
     def test_fp32_precision(self):
         with fp32_precision("tf32"):
@@ -574,6 +585,8 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             randn(72, 136),
         )
         self.assertIn("hl.full([], 1.25, dtype=torch.float32)", source)
+        # BF16 operands with an FP32 accumulator and output have no FP32 dot.
+        self.assertNotIn("dot_precision", source)
 
     @config.patch(max_autotune=True)
     def test_mm_plus_mm(self):
@@ -675,7 +688,7 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             )
         self.assertIn(
             '@helion.kernel(backend="triton", static_shapes=True, '
-            f'autotune_effort="{effort}", dot_precision="ieee")',
+            f'autotune_effort="{effort}")',
             code,
         )
 
@@ -689,7 +702,9 @@ class TestHelionReduction(TestCase):
 
     def setUp(self):
         super().setUp()
-        self.enterContext(config.patch({"helion.enabled": True}))
+        self.enterContext(
+            config.patch({"helion.enabled": True, "helion.autotune_effort": "none"})
+        )
 
     def compile(self, fn, *args, tol=None):
         """Run compiled `fn`, check it against eager, and return the Helion kernel modules."""
@@ -712,7 +727,7 @@ import torch
 import helion
 import helion.language as hl
 
-@helion.kernel(backend="triton", static_shapes=True, autotune_effort="none", dot_precision="ieee")
+@helion.kernel(backend="triton", static_shapes=True, autotune_effort="none")
 def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
     for tile_x in hl.tile(64):
         acc = hl.zeros([tile_x], dtype=torch.float32)
@@ -791,7 +806,7 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         )
         self.assertRegex(source, r"hl\.load\(in1, \[\], extra_mask=tmp\d+\)")
 
-    @config.patch({"triton.native_matmul": True})
+    @config.patch({"triton.native_matmul": True, "helion.native_matmul": False})
     def test_triton_native_matmul_stays_triton(self):
         # Without helion.native_matmul, a Triton native matmul is a Triton
         # kernel, also with an operand that only the Helion lowering realizes.
