@@ -4647,7 +4647,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @skip_on_mps
     @skip_on_xpu
-    @unittest.skipUnless(TEST_WITH_ROCM, "ROCm-specific autotuning")
+    @unittest.skipUnless(TEST_WITH_ROCM, "ROCm-specific configurations")
     @dtypes(torch.float16, torch.bfloat16)
     @toleranceOverride(
         {
@@ -4656,18 +4656,21 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         }
     )
     @common_utils.parametrize(
-        "head_dim,seq_len", [(64, 512), (64, 2048), (128, 512), (256, 512)]
+        "head_dim,seq_len",
+        [(64, 512), (64, 2048), (128, 512), (128, 2048), (256, 512), (256, 2048)],
     )
+    @common_utils.parametrize("max_autotune", [False, True])
     @config.patch(
         {
-            "max_autotune": True,
             "max_autotune_flex_search_space": "DEFAULT",
             "compile_threads": 1,
             "force_disable_caches": True,
             "autotune_in_subproc": False,
         }
     )
-    def test_gfx1250_autotune_pipelined_prefill(self, device, dtype, head_dim, seq_len):
+    def test_gfx1250_pipelined_prefill(
+        self, device, dtype, head_dim, seq_len, max_autotune
+    ):
         import triton
 
         from torch._inductor.utils import rocm_gfx_arch
@@ -4708,11 +4711,20 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     )
             return result
 
-        with patch.object(triton, "compile", side_effect=capture_configs):
-            kernel_options = {} if head_dim == 64 else {"BLOCK_N": 64}
+        with (
+            config.patch({"max_autotune": max_autotune}),
+            patch.object(triton, "compile", side_effect=capture_configs),
+        ):
+            kernel_options = {"BLOCK_N": 64} if max_autotune and head_dim != 64 else {}
             output = compiled(q, k, v, kernel_options=kernel_options)
-        self.assertTrue(any(stages == 1 for _, _, stages, _ in captured_configs))
-        if head_dim == 64 and seq_len < 2048:
+        if not max_autotune:
+            expected = (
+                (64, 64, 2, 2)
+                if head_dim == 128 and seq_len >= 2048
+                else (128, 64, 1, 4)
+            )
+            self.assertEqual(set(captured_configs), {expected})
+        elif head_dim == 64 and seq_len < 2048:
             self.assertNotIn((64, 64, 2, 2), captured_configs)
             self.assertNotIn((128, 128, 2, 4), captured_configs)
         elif head_dim == 64:
@@ -4721,6 +4733,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         else:
             self.assertIn((64, 64, 2, 2), captured_configs)
             self.assertIn((128, 64, 2, 4), captured_configs)
+        if max_autotune:
+            self.assertTrue(any(stages == 1 for _, _, stages, _ in captured_configs))
         qc, kc, vc = (x.cpu().double() for x in (q, k, v))
         reference = (qc @ kc.transpose(-2, -1) / math.sqrt(head_dim)).softmax(-1) @ vc
         self.assertEqual(output.cpu().double(), reference)

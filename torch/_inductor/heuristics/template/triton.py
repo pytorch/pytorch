@@ -2231,6 +2231,15 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                     default_config = self.rdna3_default_flex_config.get(
                         (dtype, head_dim), default_config
                     )
+            elif (
+                rocm_gfx_arch() == "gfx1250"
+                and dtype in (torch.float16, torch.bfloat16)
+                and head_dim == 128
+                and v_head_dim in (None, head_dim)
+                and V.graph.sizevars.statically_known_geq(seq_len, 2048)
+                and V.graph.sizevars.statically_known_leq(seq_len, 8192)
+            ):
+                default_config = ROCmFlexConfig(64, 64, 2, 2, kpack=default_kpack)
             else:
                 default_config = self.flex_fwd_config_by_arch.get(
                     rocm_gfx_arch(), {}
