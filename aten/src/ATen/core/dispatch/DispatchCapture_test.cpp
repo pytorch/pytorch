@@ -3,7 +3,10 @@
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/DispatchCapture.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/record_function.h>
+#include <torch/library.h>
 
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -67,6 +70,39 @@ c10::OperatorHandle addTensor() {
   return c10::Dispatcher::singleton().findSchemaOrThrow("aten::add", "Tensor");
 }
 
+// What RecordFunction observers are told while a sink is installed.
+int observed_starts = 0;
+size_t observed_outputs = 0;
+
+std::unique_ptr<at::ObserverContext> onStart(const at::RecordFunction& /*fn*/) {
+  observed_starts++;
+  return nullptr;
+}
+
+void onEnd(const at::RecordFunction& fn, at::ObserverContext* /*ctx*/) {
+  observed_outputs += fn.outputs().size();
+}
+
+at::CallbackHandle observe(bool needs_outputs) {
+  observed_starts = 0;
+  observed_outputs = 0;
+  return at::addThreadLocalCallback(at::RecordFunctionCallback(onStart, onEnd)
+                                        .needsOutputs(needs_outputs)
+                                        .scopes({at::RecordScope::FUNCTION}));
+}
+
+// Takes three values and returns two.
+void variadicKernel(const c10::OperatorHandle& /*op*/, torch::jit::Stack* stack) {
+  torch::jit::drop(*stack, 3);
+  torch::jit::push(*stack, 1, 2);
+}
+
+TORCH_LIBRARY(_test_dispatch_capture, m) {
+  m.def(
+      "_test_dispatch_capture::variadic(...) -> (...)",
+      torch::CppFunction::makeFromBoxedFunction<&variadicKernel>());
+}
+
 TEST(DispatchCaptureTest, CallReportsEveryStepOfTheChain) {
   const auto x = at::ones({3});
   const auto y = at::ones({3});
@@ -103,11 +139,16 @@ TEST(DispatchCaptureTest, BoxedCallIsReported) {
     Installed installed(&sink);
     addTensor().callBoxed(&stack);
   }
-  ASSERT_FALSE(sink.enters.empty());
-  EXPECT_EQ(sink.enters.front().op, "aten::add.Tensor");
-  EXPECT_FALSE(sink.enters.front().is_redispatch);
-  EXPECT_EQ(sink.enters.front().num_inputs, 3u);
+  ASSERT_EQ(sink.enters.size(), 2u);
+  EXPECT_EQ(sink.enters[0].op, "aten::add.Tensor");
+  EXPECT_EQ(sink.enters[0].key, c10::DispatchKey::AutogradCPU);
+  EXPECT_FALSE(sink.enters[0].is_redispatch);
+  EXPECT_EQ(sink.enters[0].num_inputs, 3u);
+  EXPECT_EQ(sink.enters[1].key, c10::DispatchKey::CPU);
+  EXPECT_TRUE(sink.enters[1].is_redispatch);
+  ASSERT_EQ(sink.exits.size(), 2u);
   EXPECT_EQ(sink.exits.back().num_outputs, 1u);
+  EXPECT_EQ(sink.depth, 0);
   ASSERT_EQ(stack.size(), 1u);
   EXPECT_TRUE(stack[0].toTensor().equal(at::full({3}, 2.0)));
 }
@@ -128,6 +169,21 @@ TEST(DispatchCaptureTest, BoxedRedispatchIsReported) {
   EXPECT_EQ(sink.exits[0].num_outputs, 1u);
 }
 
+TEST(DispatchCaptureTest, BoxedCallOfAVariadicSchemaReportsTheWholeStack) {
+  const auto op = c10::Dispatcher::singleton().findSchemaOrThrow(
+      "_test_dispatch_capture::variadic", "");
+  torch::jit::Stack stack{1, 2, 3};
+  RecordingSink sink;
+  {
+    Installed installed(&sink);
+    op.callBoxed(&stack);
+  }
+  ASSERT_EQ(sink.enters.size(), 1u);
+  EXPECT_EQ(sink.enters[0].num_inputs, 3u);
+  ASSERT_EQ(sink.exits.size(), 1u);
+  EXPECT_EQ(sink.exits[0].num_outputs, 2u);
+}
+
 TEST(DispatchCaptureTest, ThrowingKernelReportsItsExit) {
   const auto x = at::ones({3});
   const auto y = at::ones({4});
@@ -144,6 +200,56 @@ TEST(DispatchCaptureTest, ThrowingKernelReportsItsExit) {
     EXPECT_EQ(e.num_outputs, 0u);
   }
   EXPECT_EQ(sink.depth, 0);
+}
+
+TEST(DispatchCaptureTest, ThrowingBoxedCallReportsItsExit) {
+  torch::jit::Stack stack{at::ones({3}), at::ones({4}), 1};
+  RecordingSink sink;
+  {
+    Installed installed(&sink);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+    EXPECT_THROW(addTensor().callBoxed(&stack), c10::Error);
+  }
+  ASSERT_FALSE(sink.exits.empty());
+  ASSERT_EQ(sink.exits.size(), sink.enters.size());
+  EXPECT_TRUE(sink.exits.back().threw);
+  EXPECT_EQ(sink.exits.back().num_outputs, 0u);
+  EXPECT_EQ(sink.depth, 0);
+}
+
+TEST(DispatchCaptureTest, RecordFunctionObserversStillSeeTheCall) {
+  const auto x = at::ones({3});
+  const auto add = addTensor().typed<at::Tensor(
+      const at::Tensor&, const at::Tensor&, const at::Scalar&)>();
+  for (const bool needs_outputs : {false, true}) {
+    const auto handle = observe(needs_outputs);
+    RecordingSink sink;
+    {
+      Installed installed(&sink);
+      add.call(x, x, 1);
+    }
+    at::removeCallback(handle);
+    EXPECT_EQ(observed_starts, 1);
+    EXPECT_EQ(observed_outputs, needs_outputs ? 1u : 0u);
+    ASSERT_FALSE(sink.enters.empty());
+    EXPECT_FALSE(sink.enters.front().is_redispatch);
+    EXPECT_EQ(sink.exits.size(), sink.enters.size());
+  }
+}
+
+TEST(DispatchCaptureTest, RecordFunctionObserversStillSeeABoxedCall) {
+  const auto x = at::ones({3});
+  torch::jit::Stack stack{x, x, 1};
+  const auto handle = observe(/*needs_outputs=*/true);
+  RecordingSink sink;
+  {
+    Installed installed(&sink);
+    addTensor().callBoxed(&stack);
+  }
+  at::removeCallback(handle);
+  EXPECT_EQ(observed_starts, 1);
+  EXPECT_EQ(observed_outputs, 1u);
+  EXPECT_EQ(sink.enters.size(), 2u);
 }
 
 TEST(DispatchCaptureTest, InstallReturnsThePreviousSink) {
