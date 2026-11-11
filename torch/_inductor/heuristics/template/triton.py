@@ -2775,8 +2775,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 config_key = _origami_config_key(filtered_config)
                 origami_params = origami_triton_configs.get(config_key)
                 if origami_params is None:
-                    # If not found, log a warning about the lookup failure
-                    log.warning(
+                    # Debug only: if every lookup misses, the fallback below bumps the
+                    # origami_fallback counter (and warns once per process).
+                    log.debug(
                         "Config lookup failed for %s. "
                         "This may indicate a config rebuilding issue in _filter_configs.",
                         config_key,
@@ -2807,8 +2808,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 # No valid Origami configs remain; fall back to the regular generator.
                 counters["inductor"]["origami_fallback"] += 1
                 if not origami_error:
-                    log.warning(
-                        "No valid Origami configs remain, falling back to regular config generator"
+                    torch._logging.warning_once(
+                        log,
+                        "No valid Origami configs remain, falling back to regular config generator",
                     )
                 for c in configs(
                     m,
