@@ -5,10 +5,7 @@ import unittest
 import unittest.mock
 
 import torch
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    skipXPUIf,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -109,7 +106,6 @@ class TestGpuTraceDevice(TestCase):
         event.synchronize()
         self.mock.assert_called_once_with(event._as_parameter_.value)
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5238")
     def test_memcpy_synchronization(self, device):
         self.gpu_trace.register_callback_for_stream_synchronization(self.mock)
 
