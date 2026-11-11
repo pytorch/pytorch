@@ -449,9 +449,9 @@ class _SerializedFxCompile(FxCompile):
     boundary.
     """
 
-    # Compiles that fell back to in-process because the graph could not be
-    # serialized (e.g. HOPs, triton kernel wrappers). Tests use this to tell
-    # expected fallbacks apart from unexpected in-process compiles.
+    # Compiles deliberately bypassed before serialization (HOPs, triton kernel
+    # wrappers). Tests use this to tell expected in-process fallbacks apart
+    # from graphs that failed to pickle.
     _stat_serialize_fallbacks: int = 0
 
     @override
@@ -469,7 +469,6 @@ class _SerializedFxCompile(FxCompile):
             gm, example_inputs, inputs_to_check, graph_kwargs
         )
         if not serialized:
-            _SerializedFxCompile._stat_serialize_fallbacks += 1
             eager_compile = _InProcessFxCompile()
             eager_compile.compile_region_name = self.compile_region_name
             return eager_compile.codegen_and_compile(
@@ -506,6 +505,7 @@ class _SerializedFxCompile(FxCompile):
             FxGraphCache._check_for_hop(gm)
         except BypassFxGraphCache as e:
             log.debug("Skipping %s compile: %s", type(self), e)
+            _SerializedFxCompile._stat_serialize_fallbacks += 1
             return None
 
         # Triton kernel wrapper nodes contain references to the kernel_side_table
@@ -514,6 +514,7 @@ class _SerializedFxCompile(FxCompile):
             log.debug(
                 "Skipping %s compile: graph contains triton kernel wrappers", type(self)
             )
+            _SerializedFxCompile._stat_serialize_fallbacks += 1
             return None
 
         context = torch._guards.TracingContext.try_get()

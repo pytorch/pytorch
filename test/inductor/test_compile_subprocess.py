@@ -121,9 +121,9 @@ class TestSubprocess(TestCase):
 
     def tearDown(self):
         # Check that the test didn't instigate an in-process compile - which
-        # would mean that something about the fx graph failed to serialize.
-        # Fallbacks for graphs that cannot serialize (e.g. HOPs, triton
-        # kernel wrappers) are expected, so they are allowed through.
+        # would mean that something about the fx graph failed to pickle.
+        # Deliberate pre-serialization bypasses (e.g. HOPs, triton kernel
+        # wrappers) are expected, so they are allowed through.
         if self._testMethodName not in _EXPECTED_IN_PROCESS_COMPILE:
             self.assertEqual(
                 FxCompile._compile_stats[_InProcessFxCompile].codegen_and_compile,
@@ -286,6 +286,9 @@ class TestSubprocess(TestCase):
                 out = torch.compile(fn)()
                 self.assertTrue(out.is_pinned())
                 self.assertEqual(out, fn())
+                # These graphs must serialize and compile in the subprocess;
+                # a fallback here would hide the pinned-ness regression.
+                self.assertEqual(_SerializedFxCompile._stat_serialize_fallbacks, 0)
 
     @requires_gpu()
     def test_pinned_constants_rebind(self):
