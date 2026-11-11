@@ -28,8 +28,7 @@ import sys
 import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, IO, NewType, Optional, TYPE_CHECKING, Union
-from typing_extensions import Never
+from typing import Any, IO, Never, NewType, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.exc import PackageError
@@ -519,13 +518,18 @@ class _GuardsStateUnpickler(pickle.Unpickler):
 
 
 def load_guards_state(guards_state: bytes) -> Any:
+    from torch._subclasses.fake_tensor import unset_fake_temporarily
+
     try:
         import torch.distributed.fsdp._fully_shard._fully_shard as _fully_shard
 
         ctx = _fully_shard.disable_fsdp_module_new_init()
     except ImportError:
         ctx = nullcontext()  # type: ignore[assignment]
-    with ctx:
+    # Rebuild the meta templates with the fake mode unset so they are plain meta
+    # tensors; from_meta_and_device rejects fakes. Other active dispatch modes
+    # still apply.
+    with ctx, unset_fake_temporarily():
         return _GuardsStateUnpickler(io.BytesIO(guards_state)).load()
 
 
@@ -1162,6 +1166,8 @@ class CompilePackage:
         updates with compiled functions and resume functions.
     """
 
+    records_graph_break_ops = False
+
     def __init__(
         self,
         fn: Callable[..., Any] | None,
@@ -1413,6 +1419,21 @@ class CompilePackage:
 
     def note_compute(self) -> None:
         """Called when the current compile traced a graph, even one bypass_package then drops."""
+
+    def add_backend_graph(self, backend_id: str, gm: torch.fx.GraphModule) -> None:
+        """Called with each graph registered under ``backend_id``, before its backend
+        compiles it."""
+
+    def add_graph_break_op(
+        self,
+        op: object,
+        failed_op: object = None,
+        device_types: frozenset[str] = frozenset(),
+    ) -> None:
+        """Called with the target of an FX node fake tensors could not run, or with
+        an op on the stack of an instruction Dynamo graph-breaks on; either runs
+        eagerly on ``device_types``. Non-operator targets are ignored. ``failed_op``
+        comes only with a data-dependent, dynamic-shape or unsupported-op failure."""
 
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.

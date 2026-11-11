@@ -88,6 +88,7 @@ These APIs are experimental and subject to change without notice.
     has_free_unbacked_symbols
     guard_or_true
     guard_or_false
+    guard_size_oblivious
     sym_and
     sym_eq
     sym_or
