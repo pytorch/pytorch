@@ -99,8 +99,23 @@ test_failures = {
 
 # Tests exempt from tearDown's no-in-process-compile check: they use
 # in-process compilation as part of their expected flow (async compile runs
-# the in-process path first; progressive compilation's fast scheme is one).
-_EXPECTED_IN_PROCESS_COMPILE = frozenset({"test_async", "test_progressive"})
+# the in-process path first; progressive compilation's fast scheme is one),
+# or their graphs reference test-local classes, which GraphPickler cannot
+# pickle, so the in-process fallback is expected.
+_EXPECTED_IN_PROCESS_COMPILE = frozenset(
+    {
+        "test_async",
+        "test_progressive",
+        "test_aoti_eager_dtype_device_layout_cpu",
+        "test_aoti_eager_dtype_device_layout_cuda",
+        "test_device_context_with_python_scalar_cpu",
+        "test_dont_constant_fold_cpu",
+        "test_dont_constant_fold_cuda",
+        "test_inductor_multiple_specializations_cuda",
+        "test_sdpa_unaligned_mask_freezing_cpu",
+        "test_sdpa_unaligned_mask_freezing_cuda",
+    }
+)
 
 
 class TestSubprocess(TestCase):
@@ -120,18 +135,21 @@ class TestSubprocess(TestCase):
         )
 
     def tearDown(self):
-        # Check that the test didn't instigate an in-process compile - which
-        # would mean that something about the fx graph failed to pickle.
-        # Deliberate pre-serialization bypasses (e.g. HOPs, triton kernel
-        # wrappers) are expected, so they are allowed through.
-        if self._testMethodName not in _EXPECTED_IN_PROCESS_COMPILE:
-            self.assertEqual(
-                FxCompile._compile_stats[_InProcessFxCompile].codegen_and_compile,
-                _SerializedFxCompile._stat_serialize_fallbacks,
-            )
-        self._stack.close()
-        TestCase.tearDown(self)
-        torch._dynamo.reset()
+        try:
+            # Check that the test didn't instigate an in-process compile - which
+            # would mean that something about the fx graph failed to pickle.
+            # Deliberate serialization bypasses (e.g. HOPs, triton kernel
+            # wrappers, non pickle-safe ops) are expected, so they are allowed
+            # through.
+            if self._testMethodName not in _EXPECTED_IN_PROCESS_COMPILE:
+                self.assertEqual(
+                    FxCompile._compile_stats[_InProcessFxCompile].codegen_and_compile,
+                    _SerializedFxCompile._stat_serialize_fallbacks,
+                )
+        finally:
+            self._stack.close()
+            TestCase.tearDown(self)
+            torch._dynamo.reset()
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157788")
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157724")

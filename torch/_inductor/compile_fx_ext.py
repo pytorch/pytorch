@@ -449,9 +449,9 @@ class _SerializedFxCompile(FxCompile):
     boundary.
     """
 
-    # Compiles deliberately bypassed before serialization (HOPs, triton kernel
-    # wrappers). Tests use this to tell expected in-process fallbacks apart
-    # from graphs that failed to pickle.
+    # Compiles deliberately bypassed before or during serialization (HOPs,
+    # triton kernel wrappers, non pickle-safe ops). Tests use this to tell
+    # expected in-process fallbacks apart from graphs that failed to pickle.
     _stat_serialize_fallbacks: int = 0
 
     @override
@@ -557,7 +557,14 @@ class _SerializedFxCompile(FxCompile):
                 fake_tensor_mode,
             ).serialize()
             return (input, constants)
-        except (AttributeError, BypassFxGraphCache, PicklingError):
+        except BypassFxGraphCache as e:
+            # The ops filter bypasses graphs with non pickle-safe ops (e.g.
+            # prims.convert_element_type after decompositions); expected, like
+            # the pre-serialization bypasses above.
+            log.debug("Skipping %s compile: %s", type(self), e)
+            _SerializedFxCompile._stat_serialize_fallbacks += 1
+            return None
+        except (AttributeError, PicklingError):
             # For example: AttributeError: Can't pickle local object
             # 'make_opaque_unary_fn.<locals>.OpaqueUnaryFn'
 
