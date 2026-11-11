@@ -6402,6 +6402,16 @@ class TestLinalg(TestCase):
         torch.addmm(bias, a, b, out=out)
         self.assertEqual(out, torch.addmm(bias, a, b))
 
+    @onlyCUDA
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_bmm_out_size_one_dim_stride_zero(self, device, dtype):
+        a = torch.randn(3, 5, 7, device=device, dtype=dtype)
+        b = torch.randn(3, 7, 1, device=device, dtype=dtype)
+        out = torch.empty_strided((3, 5, 1), (5, 1, 0), device=device, dtype=dtype)
+        # Exercise the cuBLAS leading-dimension checks, not the cuBLASLt path
+        with blas_library_context("cublas"):
+            self.assertEqual(torch.bmm(a, b, out=out), torch.bmm(a, b))
+
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,
                         torch.half: 5e-2, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(torch.bfloat16, torch.half))

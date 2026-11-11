@@ -640,7 +640,6 @@ inline void bgemm_internal_cublas_half_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYP
 
 template <typename C_Dtype>
 inline void bgemm_internal_cublas_bfloat16_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, C_Dtype)) {
-  BGEMM_CHECK_ARGVALUES(at::BFloat16);
   auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
@@ -648,6 +647,7 @@ inline void bgemm_internal_cublas_bfloat16_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_
   const float falpha = alpha;
   const float fbeta = beta;
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  BGEMM_CHECK_ARGVALUES(at::BFloat16);
 
 #if defined(USE_ROCM)
   auto compute_type = CUBLAS_COMPUTE_32F;
