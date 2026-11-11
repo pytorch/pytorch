@@ -24,6 +24,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <deque>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -130,6 +131,8 @@ class Sink final : public c10::DispatchCaptureSink {
 
 thread_local Sink tls_sink;
 
+// Raw pointers and PyObject* results below: these functions become entries of
+// the C function table that the Rust runtime calls.
 void captureBegin() {
   auto trace = std::make_unique<TcfgTrace>();
   trace->world = snapshotWorld();
@@ -333,6 +336,15 @@ struct Binder {
         guards(pyop_.n_operands),
         args(call_.inputs.size()),
         operand_bound(pyop_.n_operands, false) {}
+  Binder(const Binder&) = delete;
+  Binder& operator=(const Binder&) = delete;
+  Binder(Binder&&) = delete;
+  Binder& operator=(Binder&&) = delete;
+  ~Binder() {
+    for (auto& g : guards) {
+      Py_XDECREF(g.identity);
+    }
+  }
 
   bool fail(std::string msg) {
     error = std::move(msg);
@@ -631,12 +643,14 @@ bool bindOperands(Binder& b, const c10::FunctionSchema& schema) {
       if (b.bind(0, 0) && b.bind(1, 1)) {
         return true;
       }
-      // Reflected operators (2 - x calls rsub(x, 2)).
+      // Reflected operators (2 - x calls rsub(x, 2)). If neither order binds,
+      // the reason reported is the one of the order tried first.
       Binder reflected(b.pyop, b.call);
       if (reflected.bind(1, 0) && reflected.bind(0, 1)) {
-        b.guards = std::move(reflected.guards);
-        b.args = std::move(reflected.args);
-        b.operand_bound = std::move(reflected.operand_bound);
+        // What b bound so far goes away with reflected.
+        b.guards.swap(reflected.guards);
+        b.args.swap(reflected.args);
+        b.operand_bound.swap(reflected.operand_bound);
         b.error.clear();
         return true;
       }
@@ -718,6 +732,22 @@ at::Tensor wrapNumber(const at::Scalar& s) {
   return t;
 }
 
+// Whether a kernel argument is a tensor or a list with a tensor in it, such as
+// the Tensor?[] indices of aten::index.
+bool holdsTensor(const c10::IValue& v) {
+  if (v.isTensor()) {
+    return true;
+  }
+  if (v.isList()) {
+    for (const auto& e : v.toListRef()) {
+      if (e.isTensor()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 TcfgSite* siteFromTraceImpl(
     const TcfgTrace& trace,
     const TcfgPyOp& pyop,
@@ -769,7 +799,7 @@ TcfgSite* siteFromTraceImpl(
     }
     // Arguments no operand supplies are defaults filled in by the argument
     // parser; they are the same for every call of this shape.
-    if (call.inputs[a].isTensor() || call.inputs[a].isTensorList()) {
+    if (holdsTensor(call.inputs[a])) {
       reason = "a tensor argument does not come from an operand";
       return nullptr;
     }
@@ -866,7 +896,8 @@ void siteFree(TcfgSite* site) {
 }
 
 // Kernels can call back into Python and from there into another site, so each
-// activation takes its own stack. The stacks are kept to reuse their storage.
+// activation takes its own stack. The stacks are kept to reuse their storage,
+// in a deque so that a nested activation does not move the ones below it.
 struct StackLease {
   StackLease() {
     if (depth == pool.size()) {
@@ -883,10 +914,10 @@ struct StackLease {
     depth--;
   }
   torch::jit::Stack* stack;
-  static thread_local std::vector<torch::jit::Stack> pool;
+  static thread_local std::deque<torch::jit::Stack> pool;
   static thread_local size_t depth;
 };
-thread_local std::vector<torch::jit::Stack> StackLease::pool;
+thread_local std::deque<torch::jit::Stack> StackLease::pool;
 thread_local size_t StackLease::depth = 0;
 
 bool pushOperand(torch::jit::Stack& stack, PyObject* o, Conv conv) {
@@ -916,9 +947,12 @@ bool pushOperand(torch::jit::Stack& stack, PyObject* o, Conv conv) {
       list.reserve(n);
       for (Py_ssize_t i = 0; i < n; i++) {
         PyObject* item = PySequence_Fast_GET_ITEM(o, i);
+        if (!PyLong_CheckExact(item)) {
+          return false;
+        }
         int overflow = 0;
         const long long x = PyLong_AsLongLongAndOverflow(item, &overflow);
-        if (!PyLong_CheckExact(item) || overflow != 0) {
+        if (overflow != 0) {
           return false;
         }
         list.push_back(x);
@@ -1179,7 +1213,8 @@ void initCfgBindings(PyObject* module) {
   // records lists (op, dispatch key, depth, is_redispatch) for every kernel
   // the dispatcher invoked.
   // With detail, a record is a dict that also has the rest of what the capture
-  // kept about it.
+  // kept about it. A capture keeps the arguments and results of every
+  // top-level call alive until it ends.
   m.def(
       "_cfg_dispatch_trace",
       [](const py::object& fn, bool detail) -> py::tuple {
