@@ -265,9 +265,8 @@ class PySpyHandler(DebugHandler):
 class FlightRecorderHandler(DebugHandler):
     # Each hooked backend records into its own FlightRecorder instance, so the
     # generic fr_trace_json / fr_dump_file control plane handlers take the
-    # backend to read. "gloo" is the instance ProcessGroupGloo records into and
-    # what those handlers default to, so /fr_trace keeps showing what it always
-    # did; ?backend=<name> selects another one.
+    # backend to read. They default to "gloo", gloo's instance, as /fr_trace
+    # does; ?backend=<name> selects another one.
     default_backend: str = "gloo"
 
     def routes(self) -> list[Route]:
