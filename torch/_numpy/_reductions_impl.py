@@ -129,7 +129,9 @@ def any(
     where: NotImplementedType = None,
 ) -> torch.Tensor:
     axis = _util.allow_only_single_axis(axis)
-    return torch.any(a) if axis is None else torch.any(a, dim=axis)
+    # torch.any returns uint8 for uint8 inputs; NumPy always returns bool
+    result = torch.any(a) if axis is None else torch.any(a, dim=axis)
+    return result.bool()
 
 
 @_deco_axis_expand
@@ -142,7 +144,9 @@ def all(
     where: NotImplementedType = None,
 ) -> torch.Tensor:
     axis = _util.allow_only_single_axis(axis)
-    return torch.all(a) if axis is None else torch.all(a, dim=axis)
+    # torch.all returns uint8 for uint8 inputs; NumPy always returns bool
+    result = torch.all(a) if axis is None else torch.all(a, dim=axis)
+    return result.bool()
 
 
 @_deco_axis_expand
@@ -421,7 +425,9 @@ def quantile(
 
     if axis is None:
         a = a.flatten()
-        q = q.flatten()
+        # Keep a scalar q 0-D so the result is 0-D, as in NumPy
+        if q.ndim > 1:
+            q = q.flatten()
         axis = (0,)
     else:
         axis = _util.normalize_axis_tuple(axis, a.ndim)
