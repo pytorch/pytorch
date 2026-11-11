@@ -267,6 +267,11 @@ def create_flex_decoding_kernel(*args, **kwargs):
             full_kv_indices,
         ]
     )
+    kv_num_blocks = ir.ExternKernel.require_contiguous(kv_num_blocks)
+    kv_indices = ir.ExternKernel.require_contiguous(kv_indices)
+    if full_kv_num_blocks is not None:
+        full_kv_num_blocks = ir.ExternKernel.require_contiguous(full_kv_num_blocks)
+        full_kv_indices = ir.ExternKernel.require_contiguous(full_kv_indices)
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 

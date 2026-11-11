@@ -2693,6 +2693,56 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
+    @skip_on_cpu
+    @common_utils.parametrize("mask_H", [1, H])
+    def test_block_mask_head_stride_one(self, device, mask_H):
+        offsets = torch.arange(B, device=device) * 100
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            return (q_idx >= offsets[b]) == (kv_idx >= offsets[b])
+
+        def restride(t):
+            return t.movedim(1, -1).clone(memory_format=torch.contiguous_format).movedim(-1, 1)
+
+        bm = create_block_mask(mask_mod, B, mask_H, S, S, device=device)
+        bm = BlockMask(
+            bm.seq_lengths,
+            restride(bm.kv_num_blocks),
+            restride(bm.kv_indices),
+            restride(bm.full_kv_num_blocks),
+            restride(bm.full_kv_indices),
+            restride(bm.q_num_blocks),
+            restride(bm.q_indices),
+            restride(bm.full_q_num_blocks),
+            restride(bm.full_q_indices),
+            bm.BLOCK_SIZE,
+            mask_mod,
+        )
+        self.run_test(_identity, torch.float16, device, block_mask=bm)
+
+    @supported_platform
+    @skip_on_cpu
+    @torch._inductor.config.patch(force_layout_optimization=True)
+    def test_block_mask_from_conv_input(self, device):
+        conv = nn.Conv2d(1, 1, 1, device=device)
+        x = torch.randn(2, 1, 1, 512, device=device)
+        x[1, ..., 200:] = 0
+
+        def f(x, q, k, v):
+            valid = x[:, 0, 0] != 0
+
+            def mask_mod(b, h, q_idx, kv_idx):
+                return valid[b, kv_idx]
+
+            bm = create_block_mask(mask_mod, 2, None, 512, 512, device=device)
+            return flex_attention(q, k, v, block_mask=bm) + conv(x).mean()
+
+        qkv = torch.randn(3, 2, 1, 512, 16, device=device, requires_grad=True)
+        out = torch.compile(f)(x, *qkv)
+        ref = f(x, *qkv)
+        self.assertEqual(out, ref, atol=1e-2, rtol=1e-2)
+
+    @supported_platform
     def test_doc_mask_sparse(self, device):
         document_id = torch.zeros(S, dtype=torch.int, device=device)
         for i in range(0, S, 256):

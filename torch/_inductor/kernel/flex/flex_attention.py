@@ -366,6 +366,11 @@ def flex_attention(
             full_q_indices,
         ]
     )
+    kv_num_blocks = ExternKernel.require_contiguous(kv_num_blocks)
+    kv_indices = ExternKernel.require_contiguous(kv_indices)
+    if full_kv_num_blocks is not None:
+        full_kv_num_blocks = ExternKernel.require_contiguous(full_kv_num_blocks)
+        full_kv_indices = ExternKernel.require_contiguous(full_kv_indices)
 
     if _use_flex_flash_attention(
         subgraph,
@@ -910,6 +915,17 @@ def flex_attention_backward(*args, **kwargs):
             dq_kv_order,
         ]
     )
+
+    kv_num_blocks = ExternKernel.require_contiguous(kv_num_blocks)
+    kv_indices = ExternKernel.require_contiguous(kv_indices)
+    if full_kv_num_blocks is not None:
+        full_kv_num_blocks = ExternKernel.require_contiguous(full_kv_num_blocks)
+        full_kv_indices = ExternKernel.require_contiguous(full_kv_indices)
+    q_num_blocks = ExternKernel.require_contiguous(q_num_blocks)
+    q_indices = ExternKernel.require_contiguous(q_indices)
+    if full_q_num_blocks is not None:
+        full_q_num_blocks = ExternKernel.require_contiguous(full_q_num_blocks)
+        full_q_indices = ExternKernel.require_contiguous(full_q_indices)
 
     device = query.get_device()
     dtype = query.get_dtype()

@@ -1702,6 +1702,33 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    def test_block_mask_head_stride_one(self, device):
+        offsets = torch.arange(B, device=device) * 300
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            return kv_idx >= offsets[b]
+
+        def restride(t):
+            return t.movedim(1, -1).clone(memory_format=torch.contiguous_format).movedim(-1, 1)
+
+        bm = create_block_mask(mask_mod, B, Hq, 1, S, device=device)
+        bm = BlockMask(
+            bm.seq_lengths,
+            restride(bm.kv_num_blocks),
+            restride(bm.kv_indices),
+            restride(bm.full_kv_num_blocks),
+            restride(bm.full_kv_indices),
+            bm.q_num_blocks,
+            bm.q_indices,
+            bm.full_q_num_blocks,
+            bm.full_q_indices,
+            bm.BLOCK_SIZE,
+            mask_mod,
+        )
+        self.run_test(block_mask=bm, device=device)
+
+    @supported_platform
+    @skip_on_cpu
     @unittest.skipUnless(PLATFORM_SUPPORTS_FP8, "FP8 is not supported on this platform")
     def test_mixed_dtypes_sqnr_per_tensor(self, device):
         query_ref = torch.testing.make_tensor(
