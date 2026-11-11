@@ -601,9 +601,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.allocated_constant_name: dict[str, str] = (
             const_module.allocated_constant_name if const_module is not None else {}
         )
-        # Allocated constant name -> module attribute name, for constants the
-        # parent process reported as pinned. Used to rebind the parent's own
-        # pinned tensors after subprocess compilation (CompiledFxGraph).
+        # Allocated constant name -> module attribute name, for parent-flagged
+        # pinned constants; unwrap rebinds these to the parent's own tensors.
         self.pinned_constant_names: dict[str, str] = {}
         init_backend_registration()
         self.get_backend_features = functools.lru_cache(None)(get_backend_features)
@@ -1254,8 +1253,9 @@ class GraphLowering(torch.fx.Interpreter):
     def add_tensor_constant(
         self, data: Tensor, name: str | None = None, is_pinned: bool = False
     ) -> TensorBox:
-        is_pinned = is_pinned or _is_cpu_strided_tensor_pinned(data)
         new_name = self.allocate_non_dup_const_name(name, data)
+        # Only parent-flagged names are gm attributes unwrap can resolve;
+        # locally pinned data (e.g. mkldnn's derived 0d views) may not be.
         if is_pinned and name is not None:
             self.pinned_constant_names[new_name] = name
         return TensorBox.create(
@@ -1265,7 +1265,7 @@ class GraphLowering(torch.fx.Interpreter):
                     data.device,
                     data.dtype,
                     *self.static_sizes_strides(data),
-                    is_pinned=is_pinned,
+                    is_pinned=is_pinned or _is_cpu_strided_tensor_pinned(data),
                 ),
             )
         )

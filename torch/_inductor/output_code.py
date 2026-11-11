@@ -58,6 +58,7 @@ from torch._inductor.utils import (
     set_tracing_context_output_strides,
 )
 from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
+from torch.fx.graph_module import _get_attr
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 
@@ -508,10 +509,8 @@ class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
             name: getattr(self.gm, orig_name)
             for name, orig_name in g.frozen_param_names.items()
         }
-        from torch.fx.graph_module import _get_attr as _get_gm_attr
-
         pinned_constants = {
-            name: _get_gm_attr(self.gm, orig_name)
+            name: _get_attr(self.gm, orig_name)
             for name, orig_name in g.pinned_constant_names.items()
         }
         constants = g.constants or {}
@@ -647,8 +646,8 @@ class CompiledFxGraph(OutputCode):
 
         # Constants the parent reported as pinned (allocated name -> module
         # attribute name). CompiledFxGraphConstantsWithGm rebinds these to the
-        # parent's own tensors on deserialization, so the compiled graph keeps
-        # pinned storage without re-pinning.
+        # parent's own tensors, so the compiled graph keeps pinned storage
+        # without re-pinning.
         self.pinned_constant_names = graph.pinned_constant_names
 
         self.torchbind_constants = graph.torchbind_constants

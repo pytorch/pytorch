@@ -26,6 +26,7 @@ from torch._inductor.output_code import (
 )
 from torch._inductor.utils import patch_subprocess_env
 from torch._subclasses import FakeTensorMode
+from torch.fx.graph_module import _get_attr
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
@@ -432,8 +433,6 @@ def _pinned_constant_targets(gm: torch.fx.GraphModule) -> tuple[str, ...]:
     of touching real pinned memory. Only the root graph is scanned; sorted so
     the pickled payload is deterministic.
     """
-    from torch.fx.graph_module import _get_attr
-
     return tuple(
         sorted(
             node.target
@@ -450,6 +449,11 @@ class _SerializedFxCompile(FxCompile):
     boundary.
     """
 
+    # Compiles that fell back to in-process because the graph could not be
+    # serialized (e.g. HOPs, triton kernel wrappers). Tests use this to tell
+    # expected fallbacks apart from unexpected in-process compiles.
+    _stat_serialize_fallbacks: int = 0
+
     @override
     def codegen_and_compile(
         self,
@@ -465,6 +469,7 @@ class _SerializedFxCompile(FxCompile):
             gm, example_inputs, inputs_to_check, graph_kwargs
         )
         if not serialized:
+            _SerializedFxCompile._stat_serialize_fallbacks += 1
             eager_compile = _InProcessFxCompile()
             eager_compile.compile_region_name = self.compile_region_name
             return eager_compile.codegen_and_compile(
@@ -513,9 +518,6 @@ class _SerializedFxCompile(FxCompile):
 
         context = torch._guards.TracingContext.try_get()
         constants = CompiledFxGraphConstantsWithGm(gm)
-        # The compile worker reads this from the unpickled graph module to
-        # reproduce pin_memory codegen. Popped so the caller's gm is unchanged.
-        gm.meta["pinned_constants"] = _pinned_constant_targets(gm)
         logger_state = _LoggerState()
         lowering = _LoweringSerializer()
 
@@ -537,6 +539,9 @@ class _SerializedFxCompile(FxCompile):
         from pickle import PicklingError
 
         try:
+            # Read by the compile worker to reproduce pin_memory codegen;
+            # popped in the finally so the caller's gm is unchanged.
+            gm.meta["pinned_constants"] = _pinned_constant_targets(gm)
             input = _WireProtocolInput(
                 gm,
                 example_inputs,

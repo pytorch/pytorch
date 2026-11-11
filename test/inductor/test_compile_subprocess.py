@@ -16,6 +16,7 @@ from unittest.mock import patch
 import torch
 import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
+from torch._inductor.compile_fx_ext import _SerializedFxCompile
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
@@ -96,11 +97,17 @@ test_failures = {
     ),
 }
 
+# Tests exempt from tearDown's no-in-process-compile check: they use
+# in-process compilation as part of their expected flow (async compile runs
+# the in-process path first; progressive compilation's fast scheme is one).
+_EXPECTED_IN_PROCESS_COMPILE = frozenset({"test_async", "test_progressive"})
+
 
 class TestSubprocess(TestCase):
     def setUp(self):
         torch._dynamo.reset()
         FxCompile._reset_stats()
+        _SerializedFxCompile._stat_serialize_fallbacks = 0
 
         super().setUp()
 
@@ -114,12 +121,14 @@ class TestSubprocess(TestCase):
 
     def tearDown(self):
         # Check that the test didn't instigate an in-process compile - which
-        # would mean that something about the fx graph failed to serialize. If
-        # some tests are expected to fail then we should probably add a list of
-        # expected failures here.
-        self.assertEqual(
-            FxCompile._compile_stats[_InProcessFxCompile].codegen_and_compile, 0
-        )
+        # would mean that something about the fx graph failed to serialize.
+        # Fallbacks for graphs that cannot serialize (e.g. HOPs, triton
+        # kernel wrappers) are expected, so they are allowed through.
+        if self._testMethodName not in _EXPECTED_IN_PROCESS_COMPILE:
+            self.assertEqual(
+                FxCompile._compile_stats[_InProcessFxCompile].codegen_and_compile,
+                _SerializedFxCompile._stat_serialize_fallbacks,
+            )
         self._stack.close()
         TestCase.tearDown(self)
         torch._dynamo.reset()
@@ -272,8 +281,27 @@ class TestSubprocess(TestCase):
             return torch.tensor([[1.0] * 128] * 128, pin_memory=True)
 
         for fn in (inline, buffer):
-            torch._dynamo.reset()
-            self.assertTrue(torch.compile(fn)().is_pinned())
+            with self.subTest(fn=fn.__name__):
+                torch._dynamo.reset()
+                out = torch.compile(fn)()
+                self.assertTrue(out.is_pinned())
+                self.assertEqual(out, fn())
+
+    @requires_gpu()
+    def test_pinned_constants_rebind(self):
+        from torch._inductor.output_code import CompiledFxGraphConstantsWithGm
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        gm._pinned = pinned = torch.tensor([1, 2, 3], pin_memory=True)
+
+        class _G:
+            pinned_constant_names = {"c0": "_pinned"}
+            frozen_param_names = {}
+            constants = {}
+            opaque_value_type_classes = {}
+
+        unwrapped = CompiledFxGraphConstantsWithGm(gm).unwrap(_G())
+        self.assertIs(unwrapped["c0"], pinned)
 
 
 if RUN_CPU:
