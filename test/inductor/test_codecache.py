@@ -2853,7 +2853,7 @@ class TestFxGraphCache(TestCase):
             def fn():
                 return torch.tensor([1, 2, 3], pin_memory=pin, device="cpu")
 
-            reset()
+            self.reset()
             return torch.compile(fn, backend="inductor")()
 
         for first_pin, second_pin in ((True, False), (False, True)):
@@ -2863,6 +2863,7 @@ class TestFxGraphCache(TestCase):
                 o2 = make(second_pin)
                 self.assertEqual(o1.is_pinned(), first_pin)
                 self.assertEqual(o2.is_pinned(), second_pin)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
