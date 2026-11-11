@@ -290,7 +290,7 @@ std::string Metric::Repr(double value) const {
 
 MetricData* Metric::GetData() const {
   MetricData* data = data_.load();
-  if (C10_UNLIKELY(data == nullptr)) {
+  if (data == nullptr) [[unlikely]] {
     // The RegisterMetric() API is a synchronization point, and even if multiple
     // threads enters it, the data will be created only once.
     MetricsArena* arena = MetricsArena::Get();
@@ -307,7 +307,7 @@ Counter::Counter(std::string name) : name_(std::move(name)), data_(nullptr) {}
 
 CounterData* Counter::GetData() const {
   CounterData* data = data_.load();
-  if (C10_UNLIKELY(data == nullptr)) {
+  if (data == nullptr) [[unlikely]] {
     // The RegisterCounter() API is a synchronization point, and even if
     // multiple threads enters it, the data will be created only once.
     MetricsArena* arena = MetricsArena::Get();

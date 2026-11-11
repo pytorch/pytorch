@@ -33,6 +33,7 @@ from torch._inductor.codegen.cpp import (
     LoopNest,
 )
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+from torch._inductor.cpp_builder import CppTorchDeviceOptions
 from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import fresh_cache, timed
@@ -3734,6 +3735,20 @@ class CPUReproTests(TestCase):
                 self.assertTrue(
                     torch.allclose(output_eager, output_compiled, atol=1e-4, rtol=1e-4)
                 )
+
+    @parametrize("enabled", (False, True))
+    def test_force_inline_welford(self, enabled):
+        # use_two_step_variance keeps Welford for a single row. The flag only
+        # changes how the Welford helpers in cpp_prefix.h are compiled.
+        mod = torch.nn.LayerNorm(57).eval()
+        x = torch.randn(1, 57)
+        with config.patch({"cpp.force_inline_welford": enabled}), torch.no_grad():
+            torch._dynamo.reset()
+            actual, code = run_and_get_cpp_code(torch.compile(mod), x)
+            definitions = CppTorchDeviceOptions(device_type="cpu").get_definitions()
+        self.assertEqual(actual, mod(x))
+        self.assertIn("welford_combine", code)
+        self.assertEqual("TORCH_INDUCTOR_FORCE_INLINE_WELFORD" in definitions, enabled)
 
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
