@@ -4154,6 +4154,59 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(len(recomputed), 1)
         self.assertEqual(gm(init, xs), train_step(init, xs))
 
+    def test_plain_checkpoint_in_scan_body_under_non_strict(self):
+        # Plain checkpoint in a scan body recomputes its whole region, as under
+        # torch.compile, with or without an outer preserve_node_meta().
+        import contextlib
+
+        from torch._guards import tracing, TracingContext
+        from torch._higher_order_ops.scan import scan
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.traceback import preserve_node_meta
+
+        def body(c, w):
+            y = checkpoint(
+                lambda c, w: torch.mm(c.relu(), w).tanh(), c, w, use_reentrant=False
+            )
+            y = torch.mm(y, w).sigmoid()
+            return y, y.new_zeros(())
+
+        def train_step(init, xs):
+            out = scan(body, init, xs)[0]
+            return torch.autograd.grad(out.sum(), (init, xs))
+
+        def source(n):
+            # Look through copies to the node that made the value.
+            copies = (torch.ops.aten.alias_copy.default, torch.ops.aten.clone.default)
+            while n.op == "call_function" and n.target in copies:
+                n = n.args[0]
+            return n
+
+        init = torch.randn(2, 4, requires_grad=True)
+        xs = torch.randn(3, 4, 4, requires_grad=True)
+        for preserve in (True, False):
+            fake_mode = FakeTensorMode()
+            with (
+                fake_mode,
+                tracing(TracingContext(fake_mode)),
+                torch.compiler._non_strict_tracing_context(),
+                torch.compiler._patch_autograd_grad(),
+                preserve_node_meta() if preserve else contextlib.nullcontext(),
+            ):
+                fake_args = [fake_mode.from_tensor(t) for t in (init, xs)]
+                gm = make_fx(train_step)(*fake_args)
+            fw = gm.scan_combine_graph_0
+            saved = {
+                source(n).target if source(n).op == "call_function" else "carry"
+                for n in fw.graph.output_node().args[0][2:]
+            }
+            # Nothing inside the checkpoint region (relu, mm, tanh) is saved.
+            self.assertEqual(
+                saved, {"carry", torch.ops.aten.sigmoid.default}, f"{preserve=}"
+            )
+            self.assertEqual(gm(init, xs), train_step(init, xs))
+
 
 class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase):
     @requires_gpu_and_triton

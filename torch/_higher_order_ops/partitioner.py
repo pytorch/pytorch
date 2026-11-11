@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 import torch
+import torch.fx.traceback as fx_traceback
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     create_bw_fn,
@@ -420,8 +421,9 @@ class HopGraphMinCutPartitioner:
 
         # SAC's eager path traces the recompute into the joint graph, and
         # min-cut's CSE merges it back into the forward. Make checkpoint write
-        # recompute tags instead, so min-cut follows the policy.
-        with _tag_recompute_for_partitioner():
+        # recompute tags instead, so min-cut follows the policy. The tags only
+        # survive the functionalize re-trace with node meta preserved.
+        with _tag_recompute_for_partitioner(), fx_traceback.preserve_node_meta():
             joint_graph: HopJointGraph = create_hop_joint_graph(
                 fw_fn, fw_args, functionalize=True
             )
