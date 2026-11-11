@@ -44,15 +44,6 @@ static bool holds_mode(
   }
 }
 
-// The referent of a weakref, or a null py::object if it was collected.
-static py::object weakref_referent(const c10::SafePyObject& weakref) {
-  PyObject* obj = nullptr;
-  if (PyWeakref_GetRef(weakref.ptr(getPyInterpreter()), &obj) < 0) {
-    throw py::error_already_set();
-  }
-  return py::reinterpret_steal<py::object>(obj);
-}
-
 // Note [C++ FakeTensorMode Python object lifetime]
 // Fakes, TLS and saved ThreadLocalState own the C++ mode through shared_ptr.
 // CppFakeTensorMode's pybind11 holder also owns it; the reverse reference is
@@ -110,8 +101,12 @@ py::object getCppFakeTensorModePyObj(
     cached = mode->fake_mode_pyobj_;
   }
   if (cached != nullptr) {
-    if (py::object py_mode = weakref_referent(*cached)) {
-      return py_mode;
+    PyObject* py_mode = nullptr;
+    if (PyWeakref_GetRef(cached->ptr(getPyInterpreter()), &py_mode) < 0) {
+      throw py::error_already_set();
+    }
+    if (py_mode != nullptr) {
+      return py::reinterpret_steal<py::object>(py_mode);
     }
   }
   // The object is gone; see Note [C++ FakeTensorMode Python object lifetime].
@@ -136,8 +131,13 @@ py::object getCppFakeTensorModePyObj(
   std::lock_guard<std::mutex> lock(mode->fake_mode_pyobj_mutex_);
   // Another thread may have cached an object while this one ran Python
   if (mode->fake_mode_pyobj_ != cached) {
-    if (py::object installed = weakref_referent(*mode->fake_mode_pyobj_)) {
-      return installed;
+    PyObject* installed = nullptr;
+    if (PyWeakref_GetRef(
+            mode->fake_mode_pyobj_->ptr(getPyInterpreter()), &installed) < 0) {
+      throw py::error_already_set();
+    }
+    if (installed != nullptr) {
+      return py::reinterpret_steal<py::object>(installed);
     }
   }
   mode->fake_mode_pyobj_.swap(fresh);
