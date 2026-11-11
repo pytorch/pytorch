@@ -12,6 +12,7 @@
 #include <ATen/Dispatch.h>
 #include <c10/macros/Macros.h>
 #include <cmath>
+#include <type_traits>
 
 namespace at::native {
 
@@ -526,6 +527,18 @@ namespace {
       bool align_corners,
       const index_t grad_input_memory_span,
       const bool input_requires_grad) {
+    // The grid gradient sums over channels in acc_t and is scaled before its
+    // single rounding to scalar_t. On ROCm acc_t is opmath_t, and reduced
+    // precision first sums each channel's taps into a partial, so that large
+    // terms cancelling within one channel cannot absorb another channel's
+    // contribution. Elsewhere acc_t is scalar_t, which keeps the original
+    // accumulation; FP32 and FP64 are the same either way.
+#ifdef USE_ROCM
+    using acc_t = at::opmath_type<scalar_t>;
+#else
+    using acc_t = scalar_t;
+#endif
+    constexpr bool kChannelPartials = !std::is_same_v<acc_t, scalar_t>;
 
     index_t C = input.sizes[1];
     index_t inp_H = input.sizes[2];
@@ -589,12 +602,21 @@ namespace {
         scalar_t sw = (ix_ne - ix)    * (iy    - iy_ne);
         scalar_t se = (ix    - ix_nw) * (iy    - iy_nw);
 
-        scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0);
+        acc_t gix = static_cast<acc_t>(0), giy = static_cast<acc_t>(0);
         const scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
         index_t NC_offset = n * gInp_sN;
         const scalar_t *inp_ptr_NC = input.data + n * inp_sN;
         for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
           const scalar_t gOut = *gOut_ptr_NCHW;
+          // Reduced precision sums this channel's taps from zero, then adds
+          // that partial to the running sums.
+          [[maybe_unused]] acc_t gix_prev, giy_prev;
+          if constexpr (kChannelPartials) {
+            gix_prev = gix;
+            giy_prev = giy;
+            gix = static_cast<acc_t>(0);
+            giy = static_cast<acc_t>(0);
+          }
 
           if (input_requires_grad) {
             // calculate and set grad_input. See Note [Passing pointer and offset to fastAtomicAdd].
@@ -605,25 +627,62 @@ namespace {
           }
 
           // calculate grad_grid
-          if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
-            scalar_t nw_val = inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW];
-            gix -= nw_val * (iy_se - iy) * gOut;
-            giy -= nw_val * (ix_se - ix) * gOut;
+          if (kChannelPartials && !input_requires_grad) {
+            // Separate bounds branches serialize the four tap loads on ROCm.
+            // Load every tap from a safe offset so the loads overlap, then
+            // zero each completed out-of-bounds contribution. This keeps the
+            // per-tap rounding and accumulation order of the branches below.
+            const bool in_nw = within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W);
+            const bool in_ne = within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W);
+            const bool in_sw = within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W);
+            const bool in_se = within_bounds_2d(iy_se, ix_se, inp_H, inp_W);
+            const index_t off_nw = in_nw ? iy_nw * inp_sH + ix_nw * inp_sW : 0;
+            const index_t off_ne = in_ne ? iy_ne * inp_sH + ix_ne * inp_sW : 0;
+            const index_t off_sw = in_sw ? iy_sw * inp_sH + ix_sw * inp_sW : 0;
+            const index_t off_se = in_se ? iy_se * inp_sH + ix_se * inp_sW : 0;
+            const scalar_t r_nw = inp_ptr_NC[off_nw], r_ne = inp_ptr_NC[off_ne];
+            const scalar_t r_sw = inp_ptr_NC[off_sw], r_se = inp_ptr_NC[off_se];
+            const auto nw_x = r_nw * (iy_se - iy) * gOut;
+            const auto nw_y = r_nw * (ix_se - ix) * gOut;
+            const auto ne_x = r_ne * (iy_sw - iy) * gOut;
+            const auto ne_y = r_ne * (ix - ix_sw) * gOut;
+            const auto sw_x = r_sw * (iy - iy_ne) * gOut;
+            const auto sw_y = r_sw * (ix_ne - ix) * gOut;
+            const auto se_x = r_se * (iy - iy_nw) * gOut;
+            const auto se_y = r_se * (ix - ix_nw) * gOut;
+            gix -= in_nw ? static_cast<acc_t>(nw_x) : static_cast<acc_t>(0);
+            giy -= in_nw ? static_cast<acc_t>(nw_y) : static_cast<acc_t>(0);
+            gix += in_ne ? static_cast<acc_t>(ne_x) : static_cast<acc_t>(0);
+            giy -= in_ne ? static_cast<acc_t>(ne_y) : static_cast<acc_t>(0);
+            gix -= in_sw ? static_cast<acc_t>(sw_x) : static_cast<acc_t>(0);
+            giy += in_sw ? static_cast<acc_t>(sw_y) : static_cast<acc_t>(0);
+            gix += in_se ? static_cast<acc_t>(se_x) : static_cast<acc_t>(0);
+            giy += in_se ? static_cast<acc_t>(se_y) : static_cast<acc_t>(0);
+          } else {
+            if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
+              scalar_t nw_val = inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW];
+              gix -= nw_val * (iy_se - iy) * gOut;
+              giy -= nw_val * (ix_se - ix) * gOut;
+            }
+            if (within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)) {
+              scalar_t ne_val = inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW];
+              gix += ne_val * (iy_sw - iy) * gOut;
+              giy -= ne_val * (ix - ix_sw) * gOut;
+            }
+            if (within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)) {
+              scalar_t sw_val = inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW];
+              gix -= sw_val * (iy - iy_ne) * gOut;
+              giy += sw_val * (ix_ne - ix) * gOut;
+            }
+            if (within_bounds_2d(iy_se, ix_se, inp_H, inp_W)) {
+              scalar_t se_val = inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW];
+              gix += se_val * (iy - iy_nw) * gOut;
+              giy += se_val * (ix - ix_nw) * gOut;
+            }
           }
-          if (within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)) {
-            scalar_t ne_val = inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW];
-            gix += ne_val * (iy_sw - iy) * gOut;
-            giy -= ne_val * (ix - ix_sw) * gOut;
-          }
-          if (within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)) {
-            scalar_t sw_val = inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW];
-            gix -= sw_val * (iy - iy_ne) * gOut;
-            giy += sw_val * (ix_ne - ix) * gOut;
-          }
-          if (within_bounds_2d(iy_se, ix_se, inp_H, inp_W)) {
-            scalar_t se_val = inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW];
-            gix += se_val * (iy - iy_nw) * gOut;
-            giy += se_val * (ix - ix_nw) * gOut;
+          if constexpr (kChannelPartials) {
+            gix = gix_prev + gix;
+            giy = giy_prev + giy;
           }
         }
 
@@ -632,8 +691,8 @@ namespace {
         //   1. use index with gGrid_sW to directly compute gGrid_ptr_NHW
         //   2. directly assign to gGrid_ptr_NHW[0], gGrid_ptr_NHW[1]
         scalar_t *gGrid_ptr_NHW = grad_grid.data + index * gGrid_sW;
-        gGrid_ptr_NHW[0] = gix_mult * gix;
-        gGrid_ptr_NHW[1] = giy_mult * giy;
+        gGrid_ptr_NHW[0] = static_cast<scalar_t>(static_cast<acc_t>(gix_mult) * gix);
+        gGrid_ptr_NHW[1] = static_cast<scalar_t>(static_cast<acc_t>(giy_mult) * giy);
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
         if (input_requires_grad) {
           index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
@@ -676,8 +735,8 @@ namespace {
         get_cubic_coefficients_grad<scalar_t>(x_coeffs_grad, tx);
         get_cubic_coefficients_grad<scalar_t>(y_coeffs_grad, ty);
 
-        scalar_t gix = static_cast<scalar_t>(0);
-        scalar_t giy = static_cast<scalar_t>(0);
+        acc_t gix = static_cast<acc_t>(0);
+        acc_t giy = static_cast<acc_t>(0);
 
         const scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
         index_t NC_offset = n * gInp_sN;
@@ -685,6 +744,15 @@ namespace {
 
         for (index_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, NC_offset += gInp_sC, inp_ptr_NC+= inp_sC) {
           const scalar_t gOut = *gOut_ptr_NCHW;
+          // Reduced precision sums this channel's taps from zero, then adds
+          // that partial to the running sums.
+          [[maybe_unused]] acc_t gix_prev, giy_prev;
+          if constexpr (kChannelPartials) {
+            gix_prev = gix;
+            giy_prev = giy;
+            gix = static_cast<acc_t>(0);
+            giy = static_cast<acc_t>(0);
+          }
 
           #pragma unroll 4
           for (index_t i = 0; i < 4; ++i) {
@@ -709,11 +777,15 @@ namespace {
               giy -= val * y_coeffs_grad[j] * x_coeffs[i] * gOut;
             }
           }
+          if constexpr (kChannelPartials) {
+            gix = gix_prev + gix;
+            giy = giy_prev + giy;
+          }
         }
 
         scalar_t *gGrid_ptr_NHW = grad_grid.data + index * gGrid_sW;
-        gGrid_ptr_NHW[0] = gix_mult * gix;
-        gGrid_ptr_NHW[1] = giy_mult * giy;
+        gGrid_ptr_NHW[0] = static_cast<scalar_t>(static_cast<acc_t>(gix_mult) * gix);
+        gGrid_ptr_NHW[1] = static_cast<scalar_t>(static_cast<acc_t>(giy_mult) * giy);
       }
     }
   }
