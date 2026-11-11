@@ -1,9 +1,11 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import os
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
+from importlib.util import find_spec
 from types import SimpleNamespace
 from unittest import mock
 
@@ -61,6 +63,15 @@ class _CacheParam:
         return (self.key,)
 
 
+def _vendored_rocm_flydsl_available() -> bool:
+    if torch.version.hip is None or not flydsl_utils.runtime_available():
+        return False
+    try:
+        return find_spec("flydsl._mlir.dialects.rocdl") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 @instantiate_parametrized_tests
 class TestFlyDSLTemplate(TestCase):
     def _grouped_gemm_grid_param_stub(self, **overrides):
@@ -104,7 +115,8 @@ class TestFlyDSLTemplate(TestCase):
             reason = flydsl_utils._flydsl_runtime_unavailable_reason()
         self.assertIn("flydsl._mlir", reason)
 
-    def test_runtime_available_for_supported_version(self):
+    @contextlib.contextmanager
+    def _mock_usable_flydsl_package(self):
         package_spec = SimpleNamespace(submodule_search_locations=["package"])
         with (
             mock.patch.object(flydsl_utils, "find_spec", return_value=package_spec),
@@ -117,8 +129,60 @@ class TestFlyDSLTemplate(TestCase):
                 return_value=SimpleNamespace(release=(0, 3, 0)),
             ),
         ):
+            yield
+
+    def test_runtime_available_for_supported_version(self):
+        with self._mock_usable_flydsl_package():
             reason = flydsl_utils._flydsl_runtime_unavailable_reason()
         self.assertIsNone(reason)
+
+    def test_runtime_available_without_hip(self):
+        self.addCleanup(flydsl_utils._check_runtime_available.cache_clear)
+        with (
+            self._mock_usable_flydsl_package(),
+            mock.patch.object(torch.backends.cuda, "is_built", return_value=False),
+            mock.patch.object(torch.version, "hip", None),
+        ):
+            self.assertTrue(flydsl_utils.runtime_available())
+
+    def test_is_gfx950_device_resolves_cuda_devices_only(self):
+        with mock.patch(
+            "torch._inductor.codegen.flydsl.flydsl_scheduling._get_flydsl_device_arch",
+            side_effect=AssertionError("arch queried for non-cuda device"),
+        ):
+            self.assertFalse(flydsl_utils.is_gfx950_device(None))
+            self.assertFalse(flydsl_utils.is_gfx950_device(torch.device("cpu")))
+            self.assertFalse(flydsl_utils.is_gfx950_device(torch.device("xpu", 0)))
+
+        with mock.patch(
+            "torch._inductor.codegen.flydsl.flydsl_scheduling._get_flydsl_device_arch",
+            side_effect=lambda index: "gfx950" if index == 1 else "gfx942",
+        ) as arch_probe:
+            self.assertFalse(flydsl_utils.is_gfx950_device(torch.device("cuda")))
+            self.assertTrue(flydsl_utils.is_gfx950_device(torch.device("cuda", 1)))
+        calls = [call.args for call in arch_probe.call_args_list]
+        self.assertEqual(calls, [(0,), (1,)])
+
+    def test_tuned_mm_cpu_does_not_probe_flydsl_arch(self):
+        from torch._dynamo.utils import counters
+
+        a = torch.randn(16, 16)
+        b = torch.randn(16, 16)
+        torch._dynamo.reset()
+        counters.clear()
+        with (
+            inductor_config.patch(
+                max_autotune_gemm=True,
+                max_autotune_gemm_backends="ATEN,FLYDSL",
+            ),
+            mock.patch(
+                "torch._inductor.codegen.flydsl.flydsl_scheduling._get_flydsl_device_arch",
+                side_effect=AssertionError("GPU arch probed during CPU mm lowering"),
+            ),
+        ):
+            compiled = torch.compile(torch.mm, backend="inductor")
+            self.assertEqual(compiled(a, b), torch.mm(a, b))
+        self.assertEqual(counters["aten_mm_info"]["aten.mm_16_16_16"], 1)
 
     def test_unavailable_runtime_declines_choice(self):
         template_name = f"flydsl_unavailable_test_{id(self)}"
@@ -394,6 +458,7 @@ class TestFlyDSLTemplate(TestCase):
         with (
             V.set_graph_handler(SimpleNamespace(sizevars=sizevars)),
             mock.patch.object(mm, "use_flydsl_gemm_template", return_value=True),
+            mock.patch.object(mm, "is_gfx950_device", return_value=True),
             mock.patch.object(mm, "is_unaligned", return_value=False),
         ):
             result = mm.get_flydsl_mm_template_kwargs(layout, mat1, mat2, True, True)
@@ -434,6 +499,7 @@ class TestFlyDSLTemplate(TestCase):
         with (
             V.set_graph_handler(SimpleNamespace(sizevars=sizevars)),
             mock.patch.object(mm, "use_flydsl_gemm_template", return_value=True),
+            mock.patch.object(mm, "is_gfx950_device", return_value=True),
             mock.patch.object(mm, "is_unaligned", return_value=False),
             mock.patch.object(
                 flydsl_heuristics, "get_gemm_configs", return_value=[gemm_config]
@@ -515,9 +581,10 @@ class TestFlyDSLTemplate(TestCase):
             expected,
         )
 
-    @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
     @parametrize("exhaustive", (False, True))
     def test_gemm_config_validation(self, exhaustive):
+        if not _vendored_rocm_flydsl_available():
+            self.skipTest("requires ROCm FlyDSL runtime")
         from torch._inductor.heuristics.template import flydsl as h
         from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
             gemm_gfx950 as gemm,
@@ -801,8 +868,8 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(seen, [True])
 
     def test_flydsl_mxfp8_precompile_fake_tensors(self):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
+        if not _vendored_rocm_flydsl_available():
+            self.skipTest("requires ROCm FlyDSL runtime")
         import flydsl.compiler as flyc
         import flydsl.expr as fx
         import jinja2
@@ -876,8 +943,8 @@ class TestFlyDSLTemplate(TestCase):
             )
 
     def test_flydsl_mxfp8_wgrad_precompile_fake_tensors(self):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
+        if not _vendored_rocm_flydsl_available():
+            self.skipTest("requires ROCm FlyDSL runtime")
         import flydsl.compiler as flyc
         import flydsl.expr as fx
 
@@ -919,8 +986,8 @@ class TestFlyDSLTemplate(TestCase):
     def test_flydsl_mxfp8_template_rejects_mismatched_scale_rows(self):
         """The lowering may serve a dynamic token dim without proving A and its
         scales agree, so the template checks it before launching."""
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
+        if not _vendored_rocm_flydsl_available():
+            self.skipTest("requires ROCm FlyDSL runtime")
         import jinja2
 
         from torch._inductor.kernel.mm_common import load_kernel_template
@@ -1279,10 +1346,11 @@ class TestFlyDSLTemplate(TestCase):
                 ("USE_HALF_TILE_INTERLEAVED", False),
             ),
         )
-        if flydsl_utils.runtime_available():
-            self.assertIsNotNone(
-                flydsl_heuristics._make_gemm_param(asdict(default_config))
-            )
+        if _vendored_rocm_flydsl_available():
+            with mock.patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx950"}):
+                self.assertIsNotNone(
+                    flydsl_heuristics._make_gemm_param(asdict(default_config))
+                )
         with (
             mock.patch.object(flydsl_heuristics, "_make_gemm_param"),
             torch._inductor.config.patch(flydsl_enable_autotuning=False),
@@ -1738,8 +1806,8 @@ class TestFlyDSLTemplate(TestCase):
     ):
         from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
 
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
+        if not _vendored_rocm_flydsl_available():
+            self.skipTest("requires ROCm FlyDSL runtime")
 
         valid = flydsl_heuristics.is_mxfp8_grouped_gemm_config_valid_for_shape(
             n, k, g, {"BLOCK_R": block_r, "BLOCK_C": block_c}
@@ -1847,6 +1915,7 @@ class TestFlyDSLTemplate(TestCase):
             statically_known_multiple_of=lambda x, y: x % y == 0,
             optimization_hint=optimization_hint,
         )
+        is_gfx950 = mock.Mock(return_value=True)
         configs = mock.Mock(return_value=[{"BLOCK_R": 256, "BLOCK_C": 256}])
         props = mock.Mock(return_value=SimpleNamespace(multi_processor_count=128))
         with (
@@ -1854,6 +1923,7 @@ class TestFlyDSLTemplate(TestCase):
             mock.patch.object(
                 mm_grouped, "use_flydsl_gemm_template", return_value=True
             ),
+            mock.patch.object(mm_grouped, "is_gfx950_device", is_gfx950),
             mock.patch.object(mm_grouped, "is_unaligned", return_value=False),
             mock.patch.object(
                 flydsl_heuristics, "get_mxfp8_grouped_gemm_configs", configs
@@ -1868,6 +1938,7 @@ class TestFlyDSLTemplate(TestCase):
             result = mm_grouped.get_flydsl_mxfp8_grouped_mm_template_kwargs(
                 mat_a, mat_b, scale_a, scale_b, offs, layout, True
             )
+        is_gfx950.assert_called_once_with(device)
         if case not in ("baseline", "dynamic_m", "dynamic_m_separate_scale_symbol"):
             self.assertEqual(result, [])
             return
@@ -2082,8 +2153,8 @@ class TestFlyDSLTemplate(TestCase):
         """A token dim past the int32 operand limit is split, not truncated."""
         import importlib
 
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
+        if not _vendored_rocm_flydsl_available():
+            self.skipTest("requires ROCm FlyDSL runtime")
 
         module = importlib.import_module(
             "torch._inductor.kernel.vendored_templates.flydsl.kernels."
@@ -2113,8 +2184,8 @@ class TestFlyDSLTemplate(TestCase):
         """B is passed whole, so an (E, N, K) past int32 must fail validation."""
         import importlib
 
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
+        if not _vendored_rocm_flydsl_available():
+            self.skipTest("requires ROCm FlyDSL runtime")
 
         module = importlib.import_module(
             "torch._inductor.kernel.vendored_templates.flydsl.kernels."
@@ -2135,8 +2206,8 @@ class TestFlyDSLTemplate(TestCase):
         """The starvation threshold is the device's CU count, not a constant."""
         import importlib
 
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
+        if not _vendored_rocm_flydsl_available():
+            self.skipTest("requires ROCm FlyDSL runtime")
 
         module = importlib.import_module(
             "torch._inductor.kernel.vendored_templates.flydsl.kernels."
@@ -2155,8 +2226,8 @@ class TestFlyDSLTemplate(TestCase):
         """gfx942 has no MX support; compiling for it must fail loudly."""
         import importlib
 
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
+        if not _vendored_rocm_flydsl_available():
+            self.skipTest("requires ROCm FlyDSL runtime")
 
         module = importlib.import_module(
             "torch._inductor.kernel.vendored_templates.flydsl.kernels."
@@ -2266,18 +2337,21 @@ class TestFlyDSLTemplate(TestCase):
                 _maybe_evaluate_static=lambda e: e if e.is_number else None
             ),
         )
+        is_gfx950 = mock.Mock(return_value=True)
         props = mock.Mock(return_value=SimpleNamespace(multi_processor_count=128))
         with (
             V.set_graph_handler(graph),
             mock.patch.object(
                 mm_grouped, "use_flydsl_gemm_template", return_value=True
             ),
+            mock.patch.object(mm_grouped, "is_gfx950_device", is_gfx950),
             mock.patch.object(mm_grouped, "is_unaligned", return_value=False),
             mock.patch("torch.cuda.get_device_properties", props),
         ):
             kwargs = mm_grouped.get_flydsl_mxfp8_wgrad_template_kwargs(
                 mat_a, mat_b, scale_a, scale_b, offs, layout, True
             )
+        is_gfx950.assert_called_once_with(device)
         operands = (mat_a, mat_b, scale_a, scale_b)
         accepted = (
             "static",
@@ -2301,8 +2375,8 @@ class TestFlyDSLTemplate(TestCase):
                 operand.freeze_layout_with_exact_strides.assert_not_called()
 
     def test_flydsl_mxfp8_wgrad_launch_checks(self):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
+        if not _vendored_rocm_flydsl_available():
+            self.skipTest("requires ROCm FlyDSL runtime")
         from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
             mxfp8_wgrad_gfx950 as module,
         )
@@ -2336,8 +2410,8 @@ class TestFlyDSLTemplate(TestCase):
             compile_.assert_not_called()
 
     def test_flydsl_mxfp8_wgrad_template_rejects_mismatched_operands(self):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
+        if not _vendored_rocm_flydsl_available():
+            self.skipTest("requires ROCm FlyDSL runtime")
         namespace = self._exec_mxfp8_wgrad_template()
         namespace["launch_mxfp8_wgrad_gfx950"] = launch = mock.Mock()
         n, k, m = 256, 384, 512
@@ -2371,8 +2445,8 @@ class TestFlyDSLTemplate(TestCase):
         launch.assert_called_once()
 
     def test_flydsl_mxfp8_wgrad_order(self):
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
+        if not _vendored_rocm_flydsl_available():
+            self.skipTest("requires ROCm FlyDSL runtime")
 
         from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
             make_mxfp8_wgrad_param,

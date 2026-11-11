@@ -24,6 +24,7 @@ from torch.utils._ordered_set import OrderedSet
 from .. import config as inductor_config, distributed_autotune, lowering as L
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.flydsl.flydsl_template import FlyDSLTemplate
+from ..codegen.flydsl.flydsl_utils import is_gfx950_device
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
@@ -341,7 +342,12 @@ def get_flydsl_mm_template_kwargs(
         is_gemm_config_valid_for_shape,
     )
 
-    if not (static_shape and is_nonzero and use_flydsl_gemm_template(layout)):
+    if not (
+        static_shape
+        and is_nonzero
+        and use_flydsl_gemm_template(layout)
+        and is_gfx950_device(layout.device)
+    ):
         return []
 
     if len(mat1.get_size()) != 2 or len(mat2.get_size()) != 2:
@@ -1428,7 +1434,7 @@ def get_flydsl_mxfp_template_kwargs(
 ) -> list[dict[str, Any]]:
     """Return shape-compatible configs for one gfx950 MXFP operand format."""
 
-    if not use_flydsl_gemm_template(layout):
+    if not use_flydsl_gemm_template(layout) or not is_gfx950_device(layout.device):
         return []
 
     nodes = (mat_a, mat_b, scale_a, scale_b)
