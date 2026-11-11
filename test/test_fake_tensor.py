@@ -6411,136 +6411,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertEqual(mismatched, set())
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    @fake_tensor_modes
-    @parametrize("python_cia", [False, True])
-    @parametrize("active", [False, True])
-    @parametrize("raises", [False, True])
-    def test_fake_fallback_cia_mode(self, mode_cls, python_cia, active, raises):
-        from torch.utils._python_dispatch import (
-            _cpp_fake_mode_tls,
-            is_in_torch_dispatch_mode,
-        )
-
-        mode = mode_cls()
-        fake = mode.from_tensor(torch.randn(2, 3))
-        before = self._installed()
-        before_stack = list(_cpp_fake_mode_tls.stack)
-        before_lift = torch._C._only_lift_cpu_tensors()
-        before_detection = is_in_torch_dispatch_mode()
-        seen = []
-
-        def kernel(t):
-            seen.append(torch._guards.active_fake_mode())
-            self.assertFalse(t.is_meta)
-            self.assertTrue(is_in_torch_dispatch_mode())
-            self.assertTrue(torch._C._only_lift_cpu_tensors())
-            with mode_cls() as inner:
-                self.assertIs(torch._guards.active_fake_mode(), inner)
-                if raises:
-                    raise ValueError("raised by the CIA kernel")
-            self.assertIs(torch._guards.active_fake_mode(), mode)
-            return t.sin()
-
-        with (
-            patch.object(mode_cls, "avoid_device_init", True),
-            torch.library._scoped_library("_test_fake_cia_mode", "DEF") as lib,
-            torch.inference_mode(),
-        ):
-            lib.define("probe(Tensor x) -> Tensor")
-            op = torch.ops._test_fake_cia_mode.probe.default
-            if python_cia:
-                op.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(kernel)
-            else:
-                lib.impl("probe", kernel, "CompositeImplicitAutograd")
-            with mode if active else contextlib.nullcontext():
-                installed = self._installed()
-                stack = list(_cpp_fake_mode_tls.stack)
-                if raises:
-                    with self.assertRaisesRegex(ValueError, "raised by the CIA kernel"):
-                        op(fake)
-                else:
-                    self.assertIs(maybe_get_fake_mode(op(fake)), mode)
-                self.assertEqual(self._installed(), installed)
-                self.assertEqual(_cpp_fake_mode_tls.stack, stack)
-        self.assertEqual(seen, [mode])
-        self.assertEqual(self._installed(), before)
-        self.assertEqual(_cpp_fake_mode_tls.stack, before_stack)
-        self.assertEqual(torch._C._only_lift_cpu_tensors(), before_lift)
-        self.assertEqual(is_in_torch_dispatch_mode(), before_detection)
-
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    def test_fake_fallback_rebuilds_mode_for_python_callback(self):
-        mode = CppFakeTensorMode()
-        fake = mode.from_tensor(torch.randn(2, 3))
-        converter = mode.fake_tensor_converter
-        mode.epoch = 7
-        ref = weakref.ref(mode)
-        del mode
-        gc.collect()
-        self.assertIsNone(ref())
-        seen = []
-
-        def kernel(t):
-            active = torch._guards.active_fake_mode()
-            self.assertIs(maybe_get_fake_mode(t), active)
-            self.assertIs(active.fake_tensor_converter, converter)
-            self.assertEqual(active.epoch, 7)
-            seen.append(weakref.ref(active))
-            return t.sin()
-
-        with (
-            torch.library._scoped_library("_test_fake_rebuilt_mode", "DEF") as lib,
-            torch.inference_mode(),
-        ):
-            lib.define("probe(Tensor x) -> Tensor")
-            lib.impl("probe", kernel, "CompositeImplicitAutograd")
-            for _ in range(2):
-                result = torch.ops._test_fake_rebuilt_mode.probe(fake)
-                self.assertEqual(result.shape, fake.shape)
-                self.assertIsNone(seen[-1]())
-                self.assertEqual(self._installed(), (None, False))
-        self.assertEqual(len(seen), 2)
-
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    @fake_tensor_modes
-    @parametrize("declines", [False, True])
-    def test_fake_fallback_cia_override(self, mode_cls, declines):
-        mode = mode_cls()
-        fake = mode.from_tensor(torch.randn(2, 3))
-        seen = []
-
-        def native(t):
-            seen.append(("native", t.is_meta, torch._guards.active_fake_mode()))
-            return t.sin()
-
-        def python(t):
-            seen.append(("python", t.is_meta, torch._guards.active_fake_mode()))
-            return NotImplemented if declines else t.sum()
-
-        with torch.library._scoped_library("_test_fake_cia_decline", "DEF") as lib:
-            lib.define("probe(Tensor x) -> Tensor")
-            lib.impl("probe", native, "CompositeImplicitAutograd")
-            op = torch.ops._test_fake_cia_decline.probe.default
-            # Export writes py_kernels directly, bypassing the PythonCIA table.
-            with (
-                patch.dict(
-                    op.py_kernels,
-                    {torch._C.DispatchKey.CompositeImplicitAutograd: python},
-                ),
-                torch.inference_mode(),
-            ):
-                result = op(fake)
-        # Declining the Python CIA goes on to Meta, without retrying native CIA
-        # under the fake mode. Meta's computed kernel is the native CIA here.
-        expected = [("python", False, mode)]
-        if declines:
-            expected.append(("native", True, None))
-        self.assertEqual(seen, expected)
-        self.assertEqual(result.shape, (2, 3) if declines else ())
-        self.assertIs(maybe_get_fake_mode(result), mode)
-        self.assertEqual(self._installed(), (None, False))
-
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_fake_fallback_decomposition_on_launch_thread(self):
         import functools
         import threading
@@ -6666,23 +6536,55 @@ class TestCppFakeTensorModeBindings(TestCase):
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
     @parametrize("active", [False, True])
+    @parametrize("implementation", ["meta", "python_cia", "declining_python_cia"])
     @fake_tensor_modes
-    def test_fake_fallback_unsets_mode_in_meta_kernel(self, active, mode_cls):
+    def test_fake_fallback_unsets_mode_in_meta_kernel(
+        self, active, implementation, mode_cls
+    ):
         mode = mode_cls()
         fake = mode.from_tensor(torch.randn(2, 3))
+        seen = []
 
         def meta_impl(x):
+            seen.append(("meta", x.is_meta, torch._guards.active_fake_mode()))
             self.assertIsNone(torch._guards.active_fake_mode())
             return x.new_empty(x.shape)
 
+        def python_impl(x):
+            seen.append(("python", x.is_meta, torch._guards.active_fake_mode()))
+            return (
+                NotImplemented if implementation == "declining_python_cia" else x.sum()
+            )
+
         with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
             lib.define("probe(Tensor x) -> Tensor")
-            lib.impl("probe", meta_impl, "Meta")
-            with mode if active else contextlib.nullcontext():
+            lib.impl(
+                "probe",
+                meta_impl,
+                "Meta" if implementation == "meta" else "CompositeImplicitAutograd",
+            )
+            op = torch.ops._test_fake_fallback.probe.default
+            # Export writes py_kernels directly, bypassing the PythonCIA table.
+            overrides = (
+                {}
+                if implementation == "meta"
+                else {torch._C.DispatchKey.CompositeImplicitAutograd: python_impl}
+            )
+            with (
+                patch.dict(op.py_kernels, overrides),
+                torch.inference_mode(),
+                mode if active else contextlib.nullcontext(),
+            ):
                 before = self._installed()
-                result = torch.ops._test_fake_fallback.probe(fake)
+                result = op(fake)
                 self.assertEqual(self._installed(), before)
+        expected = [] if implementation == "meta" else [("python", False, mode)]
+        if implementation != "python_cia":
+            expected.append(("meta", True, None))
+        self.assertEqual(seen, expected)
+        self.assertEqual(result.shape, () if implementation == "python_cia" else (2, 3))
         self.assertIs(maybe_get_fake_mode(result), mode)
+        self.assertEqual(self._installed(), (None, False))
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_fake_fallback_reentrant_mode_release(self):
@@ -6806,7 +6708,8 @@ class TestCppFakeTensorModeBindings(TestCase):
 
     # Dynamo keeps references that stop the mode being collected
     @xfailIfTorchDynamo
-    def test_cpp_fake_tensor_mode_rebuild(self):
+    @parametrize("through_callback", [False, True])
+    def test_cpp_fake_tensor_mode_rebuild(self, through_callback):
         from torch._subclasses.fake_tensor import CppFakeTensorMode
 
         shape_env = ShapeEnv()
@@ -6833,19 +6736,45 @@ class TestCppFakeTensorModeBindings(TestCase):
         with patch.object(CppFakeTensorMode, "_from_cpp_mode", wrong):
             with self.assertRaisesRegex(RuntimeError, "does not hold"):
                 torch._C._maybe_get_fake_mode(fake)
-        rebuilt = torch._C._maybe_get_fake_mode(fake)
-        self.assertIsInstance(rebuilt, CppFakeTensorMode)
-        self.assertIs(rebuilt.fake_tensor_converter, converter)
-        self.assertIs(rebuilt.shape_env, shape_env)
-        self.assertIs(rebuilt._creation_traceback, creation_traceback)
-        self.assertEqual(rebuilt.epoch, epoch)
-        self.assertTrue(rebuilt.static_shapes)
-        self.assertTrue(rebuilt.allow_non_fake_inputs)
-        self.assertFalse(rebuilt.allow_meta)
-        self.assertFalse(rebuilt._allow_unsafe_data_ptr_access)
-        self.assertIs(torch._C._maybe_get_fake_mode(fake), rebuilt)
-        with rebuilt:
-            self.assertEqual(self._installed(), (rebuilt, True))
+
+        def check_mode(rebuilt):
+            self.assertIsInstance(rebuilt, CppFakeTensorMode)
+            self.assertIs(rebuilt.fake_tensor_converter, converter)
+            self.assertIs(rebuilt.shape_env, shape_env)
+            self.assertIs(rebuilt._creation_traceback, creation_traceback)
+            self.assertEqual(rebuilt.epoch, epoch)
+            self.assertTrue(rebuilt.static_shapes)
+            self.assertTrue(rebuilt.allow_non_fake_inputs)
+            self.assertFalse(rebuilt.allow_meta)
+            self.assertFalse(rebuilt._allow_unsafe_data_ptr_access)
+            self.assertIs(torch._C._maybe_get_fake_mode(fake), rebuilt)
+            with rebuilt:
+                self.assertEqual(self._installed(), (rebuilt, True))
+
+        if through_callback:
+            seen = []
+
+            def kernel(t):
+                rebuilt = torch._guards.active_fake_mode()
+                check_mode(rebuilt)
+                self.assertIs(maybe_get_fake_mode(t), rebuilt)
+                seen.append(weakref.ref(rebuilt))
+                return t.sin()
+
+            with (
+                torch.library._scoped_library("_test_fake_rebuilt_mode", "DEF") as lib,
+                torch.inference_mode(),
+            ):
+                lib.define("probe(Tensor x) -> Tensor")
+                lib.impl("probe", kernel, "CompositeImplicitAutograd")
+                for _ in range(2):
+                    result = torch.ops._test_fake_rebuilt_mode.probe(fake)
+                    self.assertEqual(result.shape, fake.shape)
+                    self.assertIsNone(seen[-1]())
+                    self.assertEqual(self._installed(), (None, False))
+            self.assertEqual(len(seen), 2)
+        else:
+            check_mode(torch._C._maybe_get_fake_mode(fake))
         self.assertEqual(self._installed(), (None, False))
 
     def _rebuild_with_nested_lookup(self, keep_inner):
