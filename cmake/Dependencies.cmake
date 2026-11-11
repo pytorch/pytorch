@@ -1154,6 +1154,12 @@ if(USE_ROCM)
     # Use host linker instead of device linker (no relocatable device code by default)
     string(APPEND CMAKE_HIP_FLAGS " -fno-gpu-rdc")
 
+    # gfx1250: affected ROCm releases before 10.1 lack
+    # llvm/llvm-project#209861, so disable packed BF16 instructions.
+    if(ROCM_VERSION_DEV VERSION_LESS "10.1.0" AND PYTORCH_ROCM_ARCH MATCHES "gfx1250|native")
+      string(APPEND CMAKE_HIP_FLAGS " -Xclang -target-feature -Xclang -bf16-pk-insts")
+    endif()
+
     set(Caffe2_HIP_INCLUDE
        $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
 

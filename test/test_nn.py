@@ -11922,6 +11922,59 @@ class TestNNDeviceType(NNTestCase):
                                                      padding_mode=padding_mode, align_corners=False)
             self.assertEqual(sample, torch.zeros([1, 1, 1, 2], device=device, dtype=dtype))
 
+    @onlyCUDA
+    def test_bfloat16_ops_with_packed_constants(self, device):
+        # On gfx1250, LLVM without llvm/llvm-project#209861 miscompiles packed
+        # BF16 arithmetic with an inline constant (such as 1 - x), and the
+        # build disables packed BF16 for gfx1250 on ROCm releases before 10.1
+        # (cmake/Dependencies.cmake). These ops were observed to be
+        # affected. Compare BF16 results with float computations on the same
+        # BF16-rounded inputs; the miscompiled results are off by far more
+        # than BF16 rounding.
+        gen = torch.Generator().manual_seed(0)
+        n = 4096
+
+        def rand(*shape, low=0.0, high=1.0):
+            return (torch.rand(*shape, generator=gen) * (high - low) + low).to(torch.bfloat16)
+
+        grad = torch.randn(n, generator=gen).to(torch.bfloat16)
+        y = rand(n, low=-0.9, high=0.9)
+        p = rand(n, low=0.01, high=0.99)
+        t = rand(n)
+
+        def check(fn, *args):
+            actual = fn(*(a.to(device) for a in args)).cpu()
+            expected = fn(*(a.float() for a in args))
+            self.assertTrue(bool(actual.isfinite().all()))
+            self.assertEqual(actual.float(), expected, atol=2e-2, rtol=2e-2)
+
+        check(torch.ops.aten.tanh_backward, grad, y)
+        check(torch.ops.aten.sigmoid_backward, grad, p)
+        check(lambda a, b: F.binary_cross_entropy(a, b, reduction="none"), p, t)
+        check(lambda g, a, b: torch.ops.aten.binary_cross_entropy_backward(g, a, b, None, 0),
+              grad, p, t)
+
+        # Bicubic grid_sample, one channel: the cubic coefficients use such
+        # constants, and the miscompile zeroed the grid gradient.
+        inp = rand(1, 1, 6, 7, low=-1.0, high=1.0)
+        grid = rand(1, 3, 4, 2, low=-0.9, high=0.9)
+        grad_output = rand(1, 1, 3, 4, low=-1.0, high=1.0)
+
+        def bicubic(grad_output, inp, grid):
+            out = torch.grid_sampler_2d(inp, grid, 2, 0, False)
+            grads = torch.ops.aten.grid_sampler_2d_backward(
+                grad_output, inp, grid, 2, 0, False, [True, True])
+            return out, *grads
+
+        actual = bicubic(*(a.to(device) for a in (grad_output, inp, grid)))
+        expected = bicubic(*(a.float() for a in (grad_output, inp, grid)))
+        for a, e in zip(actual, expected):
+            a = a.cpu().float()
+            self.assertTrue(bool(a.isfinite().all()))
+            # Relative to the largest reference value: a BF16 sum over the 16
+            # taps rounds each product.
+            self.assertLessEqual((a - e).abs().max().item(), 0.05 * e.abs().max().item())
+
     def test_CTCLoss_empty_target(self, device):
         dtype = torch.float if torch.device(device).type == 'mps' else torch.double
 
