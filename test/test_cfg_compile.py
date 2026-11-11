@@ -1,6 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
+import dis
+import importlib
 import math
+import sys
 import traceback
 import unittest
 import warnings
@@ -20,7 +23,14 @@ from torch.testing._internal.common_utils import (
 # These tests look at which kernels the dispatcher runs; the crossref and
 # dynamo test configurations interpose on exactly that.
 UNDISTURBED = not (TEST_WITH_CROSSREF or TEST_WITH_TORCHDYNAMO)
-HAS_RUNTIME = UNDISTURBED and torch.cfg_compile.is_available()
+
+# The Rust runtime is only in builds made with USE_CFG_COMPILE=1, and only
+# understands CPython 3.12 bytecode.
+try:
+    cfg_rs = importlib.import_module("torch._cfg_rs")
+except ImportError:
+    cfg_rs = None
+HAS_RUNTIME = UNDISTURBED and cfg_rs is not None and sys.version_info[:2] == (3, 12)
 
 
 @unittest.skipUnless(UNDISTURBED, "the test configuration changes dispatch")
@@ -211,6 +221,38 @@ class TestCfgFrontend(TestCase):
 
     hw_classification = HardwareClassification.GENERIC
 
+    def test_decoder_matches_dis(self):
+        def loop(x, n):
+            total = 0
+            for i in range(n):
+                if i % 2:
+                    continue
+                total += x[i]
+            return total
+
+        # Enough constants and a long enough body for EXTENDED_ARG prefixes.
+        namespace = {}
+        body = "".join(
+            f"    x = x + {i}.5 if x > {i} else x - {i}.5\n" for i in range(300)
+        )
+        exec(f"def wide(x):\n{body}    return x\n", namespace)
+
+        for fn in (loop, namespace["wide"]):
+            expected = [
+                (
+                    i.offset,
+                    i.opname,
+                    i.arg or 0,
+                    i.argval if i.opcode in dis.hasjrel else None,
+                )
+                for i in dis.get_instructions(fn.__code__)
+                if i.opname != "EXTENDED_ARG"
+            ]
+            self.assertEqual(cfg_rs.decode(fn.__code__), expected)
+        self.assertTrue(
+            any(arg > 255 for _, _, arg, _ in cfg_rs.decode(namespace["wide"].__code__))
+        )
+
     @parametrize("fn", PY_FUNCTIONS, name_fn=lambda fn: fn.__name__)
     @parametrize(
         "args", [(7, 3), (0, 4), (10, 2)], name_fn=lambda args: f"{args[0]}_{args[1]}"
@@ -320,6 +362,7 @@ class TestCfgFrontend(TestCase):
 
         with self.assertRaisesRegex(torch.cfg_compile.Unsupported, "try/except"):
             torch.cfg_compile(f, fallback=False)
+        self.assertTrue(torch.cfg_compile.is_available())
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             self.assertIs(torch.cfg_compile(f), f)
