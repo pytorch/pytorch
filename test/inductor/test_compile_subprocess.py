@@ -90,10 +90,6 @@ test_failures = {
     "test_split_overload_packet_lowering": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
-    # The child fails to codegen the mix order reduction (poisoned
-    # V.interpreter), and codegen_mix_order_reduction is not among the
-    # metrics sent back to the parent.
-    "test_pdl_kernel_after_folded_reduction_waits": TestFailure(("cuda",)),
 }
 
 

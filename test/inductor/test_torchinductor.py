@@ -20846,6 +20846,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_pdl_kernel_after_folded_reduction_waits(self):
         if not config.triton.mix_order_reduction:
             raise unittest.SkipTest("needs a mix order reduction")
+        if torch._inductor.compile_fx.fx_compile_mode == FxCompileMode.SUBPROCESS:
+            # The child fails to codegen the mix order reduction
+            # (https://github.com/pytorch/pytorch/issues/204471), and
+            # codegen_mix_order_reduction is not among the metrics sent back
+            # to the parent.
+            self.skipTest("mix order reduction under subprocess compile")
 
         def f(x, y, w, m=None, k=None):
             nz = None if m is None else torch.nonzero(m).float()
