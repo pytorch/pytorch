@@ -307,10 +307,9 @@ class ConstantVariable(VariableTracker):
 
     def sq_contains_impl(self, tx: InstructionTranslatorBase, item: VariableTracker):
         """Sequence contains for constants."""
-        if item.is_python_constant():
-            search = item.as_python_constant()
+        if item.is_python_constant() and (constant := item.try_as_python_constant())[0]:
             try:
-                result = search in self.value
+                result = constant[1] in self.value
                 return ConstantVariable.create(result)
             except TypeError as e:
                 raise_observed_exception(
@@ -434,9 +433,7 @@ class ConstantVariable(VariableTracker):
 
         if name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             try:
-                return ConstantVariable.create(
-                    round(self.value, args[0].as_python_constant())
-                )
+                return ConstantVariable.create(round(self.value, const_args[0]))
             except Exception as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
         return super().call_method(tx, name, args, kwargs)
@@ -573,8 +570,10 @@ class ConstantVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
         if not other.is_python_constant():
             return ConstantVariable.create(NotImplemented)
-        self_, other_ = (other, self) if reverse else (self, other)
-        v, w = self_.as_python_constant(), other_.as_python_constant()
+        is_constant, other_value = other.try_as_python_constant()
+        if not is_constant:
+            return ConstantVariable.create(NotImplemented)
+        v, w = (other_value, self.value) if reverse else (self.value, other_value)
         try:
             result = op(v, w)
         except (TypeError, ValueError, OverflowError) as e:
@@ -625,8 +624,10 @@ class ConstantVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
         if not other.is_python_constant():
             return ConstantVariable.create(NotImplemented)
-        self_, other_ = (other, self) if reverse else (self, other)
-        v, w = self_.as_python_constant(), other_.as_python_constant()
+        is_constant, other_value = other.try_as_python_constant()
+        if not is_constant:
+            return ConstantVariable.create(NotImplemented)
+        v, w = (other_value, self.value) if reverse else (self.value, other_value)
         try:
             return VariableTracker.build(tx, v // w)
         except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
@@ -646,8 +647,10 @@ class ConstantVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
         if not other.is_python_constant():
             return ConstantVariable.create(NotImplemented)
-        self_, other_ = (other, self) if reverse else (self, other)
-        v, w = self_.as_python_constant(), other_.as_python_constant()
+        is_constant, other_value = other.try_as_python_constant()
+        if not is_constant:
+            return ConstantVariable.create(NotImplemented)
+        v, w = (other_value, self.value) if reverse else (self.value, other_value)
         try:
             return VariableTracker.build(tx, v / w)
         except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
@@ -668,10 +671,12 @@ class ConstantVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
         if not other.is_python_constant():
             return ConstantVariable.create(NotImplemented)
-        self_, other_ = (other, self) if reverse else (self, other)
-        v, w = self_.as_python_constant(), other_.as_python_constant()
+        is_constant, other_value = other.try_as_python_constant()
+        if not is_constant:
+            return ConstantVariable.create(NotImplemented)
+        v, w = (other_value, self.value) if reverse else (self.value, other_value)
         try:
-            return VariableTracker.build(tx, v % w)
+            return VariableTracker.build(tx, operator.mod(v, w))
         except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
 
@@ -689,8 +694,10 @@ class ConstantVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
         if not other.is_python_constant():
             return ConstantVariable.create(NotImplemented)
-        self_, other_ = (other, self) if reverse else (self, other)
-        v, w = self_.as_python_constant(), other_.as_python_constant()
+        is_constant, other_value = other.try_as_python_constant()
+        if not is_constant:
+            return ConstantVariable.create(NotImplemented)
+        v, w = (other_value, self.value) if reverse else (self.value, other_value)
         try:
             return VariableTracker.build(tx, divmod(v, w))
         except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
@@ -745,7 +752,9 @@ class ConstantVariable(VariableTracker):
 
         if not other.is_python_constant():
             return ConstantVariable.create(NotImplemented)
-        other_val = other.as_python_constant()
+        is_constant, other_val = other.try_as_python_constant()
+        if not is_constant:
+            return ConstantVariable.create(NotImplemented)
         # CPython's nb_multiply (e.g. long_mul, float_mul) returns NotImplemented
         # whenever the other operand isn't numeric — sequence repetition is
         # then handled by PyNumber_Multiply's sq_repeat fallback. We mirror that
@@ -753,9 +762,16 @@ class ConstantVariable(VariableTracker):
         # sq_repeat) and would incorrectly short-circuit the dispatch.
         if not isinstance(other_val, (int, float, complex)):
             return ConstantVariable.create(NotImplemented)
-        return self._nb_binary_impl(
-            tx, other, operator.mul, type_implements_nb_multiply, reverse
-        )
+        if not type_implements_nb_multiply(type(self.value)):
+            return ConstantVariable.create(NotImplemented)
+        v, w = (other_val, self.value) if reverse else (self.value, other_val)
+        try:
+            result = operator.mul(v, w)
+        except (TypeError, ValueError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        if result is NotImplemented:
+            return ConstantVariable.create(NotImplemented)
+        return VariableTracker.build(tx, result)
 
     def sq_repeat_impl(
         self,
@@ -860,12 +876,11 @@ class ConstantVariable(VariableTracker):
 
         if not other.is_python_constant():
             return ConstantVariable.create(NotImplemented)
+        is_constant, other_value = other.try_as_python_constant()
+        if not is_constant:
+            return ConstantVariable.create(NotImplemented)
 
-        self_, other_ = (other, self) if reverse else (self, other)
-        v, w = (
-            self_.as_python_constant(),
-            other_.as_python_constant(),
-        )
+        v, w = (other_value, self.value) if reverse else (self.value, other_value)
 
         try:
             return VariableTracker.build(tx, pow(v, w, z))
@@ -884,7 +899,10 @@ class ConstantVariable(VariableTracker):
             return ConstantVariable.create(NotImplemented)
         if not v.is_python_constant() or not w.is_python_constant():
             return ConstantVariable.create(NotImplemented)
-        v_val, w_val = v.as_python_constant(), w.as_python_constant()
+        v_constant = v.try_as_python_constant()
+        if not v_constant[0] or not (w_constant := w.try_as_python_constant())[0]:
+            return ConstantVariable.create(NotImplemented)
+        v_val, w_val = v_constant[1], w_constant[1]
         if not isinstance(v_val, int) or not isinstance(w_val, int):
             return ConstantVariable.create(NotImplemented)
         try:
@@ -1013,8 +1031,10 @@ class FakeIdVariable(VariableTracker):
     def _operand_int(self, other: VariableTracker) -> int | None:
         if isinstance(other, FakeIdVariable):
             return other.value
+        is_constant, val = False, None
         if other.is_python_constant():
-            val = other.as_python_constant()
+            is_constant, val = other.try_as_python_constant()
+        if is_constant:
             if isinstance(val, int):
                 return val
         return None

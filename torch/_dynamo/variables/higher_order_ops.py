@@ -179,8 +179,8 @@ def check_meta_consistency_vt(
             return var.proxy.node.meta["example_value"]
         elif isinstance(var, SymNodeVariable):
             return var.sym_num
-        elif var.is_python_constant():
-            return var.as_python_constant()
+        elif var.is_python_constant() and (constant := var.try_as_python_constant())[0]:
+            return constant[1]
         else:
             unimplemented(
                 gb_type="cannot unwrap variable for check_meta_consistency",
@@ -814,7 +814,8 @@ def _call_while_loop(
             # See NOTE [unspecialize int carry with unbacked symints]
             if (
                 carry.is_python_constant()
-                and isinstance(carry.as_python_constant(), int)
+                and (constant := carry.try_as_python_constant())[0]
+                and isinstance(constant[1], int)
             ) or isinstance(carry, SymNodeVariable):
                 example_value = _create_unbacked_symint(
                     tx.output.fake_mode, ignore_fresh_unbacked_symbols=True
@@ -1218,7 +1219,10 @@ def validate_args_and_maybe_create_graph_inputs(
                 args.append(a)
                 continue
 
+            is_constant, value = False, None
             if a.is_python_constant():
+                is_constant, value = a.try_as_python_constant()
+            if is_constant:
                 # This arg is not used in the body of the higher order op.
                 # Currently, this new input is added to make the calls
                 # happy, which expect a fixed number of arguments. In
@@ -1228,9 +1232,7 @@ def validate_args_and_maybe_create_graph_inputs(
                     if sub_args_names is None
                     else f"const_unused_{sub_args_names[idx]}"
                 )
-                tracer.create_graph_input(
-                    arg_name, a.python_type(), a.as_python_constant()
-                )
+                tracer.create_graph_input(arg_name, a.python_type(), value)
                 new_arg = a
             # Weird special case, we probably want to delete it or fold it
             # into the next case (of `a` being placeable into a graph)
@@ -2565,9 +2567,8 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ],
                 )
             for ret in unpack_iterable(tx, ret_val):
-                if ret.is_python_constant() and not isinstance(
-                    ret.as_python_constant(), int
-                ):
+                is_constant, value = ret.try_as_python_constant()
+                if is_constant and not isinstance(value, int):
                     unimplemented(
                         gb_type="torch.cond: unsupported branch return type (constant non-int)",
                         context=str(ret_val),
@@ -2790,8 +2791,8 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     hints=[*graph_break_hints.USER_ERROR],
                 )
             for ret in ret_val.unpack_var_sequence(tx):
-                if ret.is_python_constant():
-                    const = ret.as_python_constant()
+                is_constant, const = ret.try_as_python_constant()
+                if is_constant:
                     # Python floats in branch outputs are blocked upstream by
                     # validate_subgraph_output_types (shared HOP gate); we
                     # mirror the whitelist here to keep the error specific to
@@ -2921,7 +2922,8 @@ def validate_subgraph_output_types(
                 (isinstance(out, SymNodeVariable) and out.python_type() in (int, bool))
                 or (
                     out.is_python_constant()
-                    and isinstance(out.as_python_constant(), (int, bool))
+                    and (constant := out.try_as_python_constant())[0]
+                    and isinstance(constant[1], (int, bool))
                 )
                 or isinstance(out, CustomClassObjectVariable)
             ):
@@ -4019,7 +4021,8 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         _check_supported_callable_arg(tx, fn_var, "enable_grad_fn")
 
-        with torch.set_grad_enabled(grad_enabled.as_python_constant()):
+        enabled = grad_enabled.as_python_constant()
+        with torch.set_grad_enabled(enabled):
             if self._HOP_NAME is None:
                 raise AssertionError("_HOP_NAME must be set")
             (
@@ -4057,7 +4060,7 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         proxy_args = tuple(
             [
-                grad_enabled.as_python_constant(),
+                enabled,
                 body_node,
             ]
             + [operand.as_proxy() for operand in rest_args]
@@ -4925,7 +4928,11 @@ class FlexAttentionBackwardHighOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         mask_fn = block_mask.items[-1]
-        if mask_fn.is_python_constant() and mask_fn.as_python_constant() is None:
+        if (
+            mask_fn.is_python_constant()
+            and (constant := mask_fn.try_as_python_constant())[0]
+            and constant[1] is None
+        ):
             mask_fn = VariableTracker.build(
                 tx,
                 torch.nn.attention.flex_attention.noop_mask,
@@ -5163,7 +5170,11 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx, query, score_mod, "score_mod"
         )
         mask_fn = block_mask.items[-1]  # type: ignore[attr-defined]
-        if mask_fn.is_python_constant() and mask_fn.as_python_constant() is None:
+        if (
+            mask_fn.is_python_constant()
+            and (constant := mask_fn.try_as_python_constant())[0]
+            and constant[1] is None
+        ):
             mask_fn = VariableTracker.build(
                 tx,
                 torch.nn.attention.flex_attention.noop_mask,

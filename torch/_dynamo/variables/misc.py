@@ -1484,8 +1484,11 @@ class GetAttrVariable(VariableTracker):
         except NotImplementedError:
             resolved = None
         if resolved is None or isinstance(resolved, GetAttrVariable):
+            is_constant, value = False, None
             if self.obj.is_python_constant():
-                val = getattr(self.obj.as_python_constant(), self.name)
+                is_constant, value = self.obj.try_as_python_constant()
+            if is_constant:
+                val = getattr(value, self.name)
                 resolved = VariableTracker.build(tx, val)
             else:
                 unimplemented(
@@ -1655,14 +1658,17 @@ class TypingVariable(VariableTracker):
         key: VariableTracker,
     ) -> VariableTracker:
         # e.g., List[int] → typing.List[int]
-        if not key.is_python_constant():
+        is_constant, value = False, None
+        if key.is_python_constant():
+            is_constant, value = key.try_as_python_constant()
+        if not is_constant:
             unimplemented(
                 gb_type="non-constant typing subscript",
                 context=f"TypingVariable[{key}]",
                 explanation=f"Cannot subscript typing construct {self.value} with a non-constant key.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        new_typing = cast(Any, self.value)[key.as_python_constant()]
+        new_typing = cast(Any, self.value)[value]
         return TypingVariable(new_typing)
 
     def tp_richcompare_impl(
@@ -1702,9 +1708,11 @@ class TypingVariable(VariableTracker):
     ) -> VariableTracker:
         # GenericAlias types (e.g. Callable[[int], bool]) support __or__ for
         # type unions (e.g. Callable[[int], bool] | None).
-        if not other.is_python_constant():
+        is_constant, other_val = False, None
+        if other.is_python_constant():
+            is_constant, other_val = other.try_as_python_constant()
+        if not is_constant:
             return VariableTracker.build(tx, NotImplemented)
-        other_val = other.as_python_constant()
         # pyrefly: ignore[bad-argument-count]
         result = type(self.value).__or__(self.value, other_val)
         if result is NotImplemented:

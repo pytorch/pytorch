@@ -214,7 +214,11 @@ class BaseSetVariable(VariableTracker):
             return
 
         contains = args[0] in self
-        if args[0].source is None and args[0].is_python_constant():
+        if (
+            args[0].source is None
+            and args[0].is_python_constant()
+            and (constant := args[0].try_as_python_constant())[0]
+        ):
             guard_fn = (
                 type(self).CONTAINS_GUARD if contains else type(self).NOT_CONTAINS_GUARD
             )
@@ -222,7 +226,7 @@ class BaseSetVariable(VariableTracker):
                 self.make_guard(
                     functools.partial(
                         guard_fn,
-                        key=args[0].as_python_constant(),
+                        key=constant[1],
                     )
                 )
             )
@@ -1278,8 +1282,11 @@ class FrozensetVariable(BaseSetVariable):
         from .hashable import RawHash
         from .object_protocol import generic_hash_impl
 
+        is_constant, value = False, None
         if self.is_python_constant():
-            return hash(self.as_python_constant()), False
+            is_constant, value = self.try_as_python_constant()
+        if is_constant:
+            return hash(value), False
         is_fake = False
         raw_hashes = []
         for item in self.set_items:

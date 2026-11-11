@@ -733,10 +733,10 @@ class NNModuleVariable(VariableTracker):
         )
         # pyrefly: ignore[missing-attribute]
         if type(module).__getitem__ not in builtin_supported:
-            if not (
-                key.is_python_constant()
-                and isinstance(key.as_python_constant(), (str, int))
-            ):
+            is_constant, value = False, None
+            if key.is_python_constant():
+                is_constant, value = key.try_as_python_constant()
+            if not (is_constant and isinstance(value, (str, int))):
                 unimplemented(
                     gb_type="Invalid or non-const argument in nn.Module __getitem__",
                     context=f"mp_subscript_impl: {self} {key}",
@@ -791,8 +791,8 @@ class NNModuleVariable(VariableTracker):
         key_value = 0
         if isinstance(key, SymNodeVariable):
             key_value = key.evaluate_expr(tx.output)
-        elif key.is_python_constant():
-            key_value = key.as_python_constant()
+        elif key.is_python_constant() and (constant := key.try_as_python_constant())[0]:
+            key_value = constant[1]
         else:
             unimplemented(
                 gb_type="Unsupported key type for nn.Module.__getitem__",
