@@ -1263,6 +1263,7 @@
 # /test/test_cfg_compile.py
 # /test/test_cpython_diff_sync.py
 # /torch/_dynamo/
+# /torch/cfg_compile/
 # /torch/csrc/cfg/
 # /torch/csrc/dynamo/
 # label: module: dynamo, module: tvm
