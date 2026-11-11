@@ -202,29 +202,25 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   cudaStreamCaptureMode capture_mode_{};
 
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
-  struct OwnedCUDAStream {
+  // A stream used by one conditional body capture at a time. Body streams are
+  // returned to a process-wide free list instead of being destroyed, because
+  // allocators keep the streams a block was used on and record events on them
+  // when the block is freed, possibly after the body capture has ended.
+  struct ConditionalBodyStream {
     cudaStream_t stream = nullptr;
-    OwnedCUDAStream() = default;
-    explicit OwnedCUDAStream(cudaStream_t s) : stream(s) {}
-    ~OwnedCUDAStream() {
-      if (stream)
-        C10_CUDA_CHECK_WARN(cudaStreamDestroy(stream));
-    }
-    OwnedCUDAStream(const OwnedCUDAStream&) = delete;
-    OwnedCUDAStream& operator=(const OwnedCUDAStream&) = delete;
-    OwnedCUDAStream(OwnedCUDAStream&& o) noexcept
-        : stream(std::exchange(o.stream, nullptr)) {}
-    OwnedCUDAStream& operator=(OwnedCUDAStream&& o) noexcept {
-      if (stream)
-        C10_CUDA_CHECK_WARN(cudaStreamDestroy(stream));
-      stream = std::exchange(o.stream, nullptr);
-      return *this;
-    }
+    c10::DeviceIndex device = -1;
+    explicit ConditionalBodyStream(c10::DeviceIndex device);
+    ~ConditionalBodyStream();
+    ConditionalBodyStream(const ConditionalBodyStream&) = delete;
+    ConditionalBodyStream& operator=(const ConditionalBodyStream&) = delete;
+    ConditionalBodyStream(ConditionalBodyStream&& o) noexcept
+        : stream(std::exchange(o.stream, nullptr)), device(o.device) {}
+    ConditionalBodyStream& operator=(ConditionalBodyStream&&) = delete;
   };
 
   std::stack<at::cuda::CUDAStreamGuard> conditional_node_streams_;
   std::stack<CaptureId_t> conditional_graph_capture_ids_;
-  std::stack<OwnedCUDAStream> conditional_node_raw_streams_;
+  std::stack<ConditionalBodyStream> conditional_node_raw_streams_;
   std::stack<cudaGraphConditionalHandle> conditional_node_handles_;
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 };

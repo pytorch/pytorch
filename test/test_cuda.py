@@ -7253,6 +7253,54 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        or not torch.version.cuda
+        or tuple(int(x) for x in torch.version.cuda.split(".")) < (12, 4),
+        "CUDA >= 12.4 required for conditional graph nodes",
+    )
+    def test_cuda_graph_conditional_free_after_body_stream_use(self):
+        # Freeing tensors whose allocators recorded a conditional body stream
+        # used to record events on the destroyed stream and crash, so run it in
+        # a subprocess.
+        script = """
+import torch
+
+pred = torch.ones((), device="cuda", dtype=torch.bool)
+out = torch.zeros(1, device="cuda")
+outer = torch.ones(1 << 20, device="cuda")
+inner = torch.zeros(1 << 20, device="cuda")
+host = torch.ones(1 << 20, pin_memory=True)
+torch.cuda.synchronize()
+g = torch.cuda.CUDAGraph()
+with torch.cuda.graph(g):
+    g.begin_capture_to_if_node(pred)
+    out.add_(outer[:1])
+    outer.record_stream(torch.cuda.current_stream())
+    g.begin_capture_to_if_node(pred)
+    inner.copy_(host, non_blocking=True)
+    out.add_(inner[:1])
+    inner.record_stream(torch.cuda.current_stream())
+    g.end_capture_to_conditional_node()
+    g.end_capture_to_conditional_node()
+g.replay()
+torch.cuda.synchronize()
+g.reset()
+del outer, inner, host
+torch.ones(1 << 20, device="cuda")
+torch.ones(1 << 20, pin_memory=True)
+torch.cuda.synchronize()
+print(out.item())
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "2.0")
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     @unittest.skipUnless(
         TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
     )
