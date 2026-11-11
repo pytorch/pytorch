@@ -202,6 +202,12 @@ TORCH_API void enableProfilerWithEventPostProcess(
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 
+// Call only at process exit, before Kineto is destroyed. Permanently stops
+// global sessions (profile_all_threads, KINETO_ONDEMAND) from recording CPU ops
+// or popping correlation ids.
+// Python registers it with atexit; LibTorch users must call it themselves.
+TORCH_API void closeGlobalCallbackSession();
+
 using ActivityFilter = std::unordered_map<
     torch::profiler::impl::ActivityType,
     std::unordered_set<std::string>>;
