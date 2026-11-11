@@ -1122,12 +1122,8 @@ main()
 
         def bytecode_hook(code, out_code):
             import dis
-            import sys
 
-            if sys.version_info < (3, 11):
-                call_op = "CALL_FUNCTION"
-            else:
-                call_op = "CALL"
+            call_op = "CALL"
 
             insts = list(dis.get_instructions(out_code))
             # Find the CALL that invokes the compiled graph function
@@ -1181,6 +1177,67 @@ main()
             handle.remove()
         self.assertEqual(param.grad, active * 2)
 
+    @parametrize("container", ["tensor", "dict", "object"])
+    def test_inputs_aliasing_nested_graph_break(self, container):
+        observed = []
+        input_lists = []
+
+        class SavedTensor:
+            pass
+
+        def get_tensor(payload):
+            if container == "tensor":
+                return payload
+            if container == "dict":
+                return payload["tensor"]
+            return payload.tensor
+
+        @torch._dynamo.disable
+        def record_payload(payload):
+            observed.append(get_tensor(payload))
+
+        def backward_helper(payload, grad):
+            record_payload(payload)
+            return 2 * grad * get_tensor(payload)
+
+        class MySquare(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.square()
+
+            @staticmethod
+            def backward(ctx, grad):
+                (x,) = ctx.saved_tensors
+                if container == "tensor":
+                    payload = x
+                elif container == "dict":
+                    payload = {"tensor": x}
+                else:
+                    payload = SavedTensor()
+                    payload.tensor = x
+                return backward_helper(payload, grad)
+
+        def compile_backward(gm):
+            opt_fn = make_compiler_fn(fullgraph=False)(gm)
+
+            def invoke(inputs, *args):
+                input_lists.append(inputs)
+                return opt_fn(inputs, *args)
+
+            return invoke
+
+        with compiled_autograd._enable(compile_backward):
+            for i in range(2):
+                x = (torch.arange(4.0) + i).requires_grad_()
+                (grad,) = torch.autograd.grad(MySquare.apply(x).sum(), x)
+                self.assertEqual(grad, 2 * x)
+                self.assertEqual(len(observed), i + 1)
+                self.assertIs(observed[-1], x)
+
+        self.assertEqual(input_lists, [[], []])
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
     def test_inputs_aliasing_bytecode_stack_restore(self):
         logging.getLogger().setLevel(logging.WARNING)
         from torch.testing._internal.logging_tensor import LoggingTensor
@@ -1204,7 +1261,6 @@ main()
 
         def bytecode_hook(code, out_code):
             import dis
-            import sys
 
             nonlocal match_done
 
@@ -1212,10 +1268,7 @@ main()
             # graph is tested, we skip the bytecode hook checks for future
             # frames.
             if not match_done:
-                if sys.version_info < (3, 11):
-                    call_op = "CALL_FUNCTION"
-                else:
-                    call_op = "CALL"
+                call_op = "CALL"
 
                 insts = list(dis.get_instructions(out_code))
                 # Find the CALL that invokes the compiled graph function
@@ -5373,6 +5426,10 @@ def wrap_test_class(orig_cls):
             ]
             dct[name] = make_wrapped(fn, ctx_fns)
 
+    # Without a GPU the inductor-backend tests are left unwrapped (see above), so
+    # only GPU jobs run them under compiled autograd. Inheriting a GENERIC label
+    # would make those jobs skip them too.
+    dct["hw_classification"] = None
     cls = type(
         orig_cls.__name__ + "WithCompiledAutograd",
         (orig_cls,),
@@ -5513,6 +5570,12 @@ known_graph_breaks_tests = {
     "test_checkpointing_without_reentrant_memory_savings",  # reentrant .backward
     "test_dtensor_basic",  # torch._dynamo.exc.Unsupported: Failed to convert args/kwargs to proxy
     "test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent",  # subclass constructor
+    # DTensor backward calls torch._C helpers that dynamo skips
+    # (_is_contiguous_or_false, _DTensor_compute_global_tensor_info), so these
+    # graph break once compiled autograd traces the backward.
+    "test_tp_linear_3d_input_dynamic_backward_style_colwise",
+    "test_tp_linear_3d_input_dynamic_backward_style_rowwise",
+    "test_dtensor_unbacked_rebuilt_sym_max_inductor",
     "test_retain_grad",  # retains_grad_hooks
     "test_retain_grad_cycle",  # retains_grad_hooks
     "test_retain_grad_inplace",  # retains_grad_hooks
@@ -5575,7 +5638,6 @@ xfail_by_backend = {
         "test_reentrant_with_callbacks_both_depths",  # queue_callback
         "test_reentrant_with_callbacks_depth_0",  # queue_callback
         "test_reentrant_with_callbacks_depth_1",  # queue_callback
-        "test_checkpoint_graph_execution_group",  # Attempted to call function marked as skipped
         "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
         "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
         "test_post_accumulate_grad_hook_ordering",  # accuracy error
@@ -5678,10 +5740,6 @@ xfail_divergence_from_eager = {
 
 skipped_tests = set()
 skipped_tests.add("test_graph_queue_callback")
-
-if not HAS_GPU_AND_TRITON:
-    # Found Tesla M60 which is too old to be supported by the triton GPU compiler
-    skipped_tests.add("test_type_conversions")
 
 if IS_S390X:
     skipped_tests.add("test_deep_reentrant")

@@ -79,6 +79,7 @@ if is_available():
         _test_python_store,
         _verify_params_across_processes,
         Backend as _Backend,
+        Backend as BackendBase,
         BuiltinCommHookType,
         DebugLevel,
         FileStore,
@@ -94,6 +95,18 @@ if is_available():
         TCPStore,
         Work as _Work,
     )
+
+    def _c10d_getattr(name: str):
+        # FakeProcessGroup moved from C++ to Python; keep the old path working.
+        if name == "FakeProcessGroup":
+            from torch.distributed._backends.fake import FakeProcessGroup
+
+            return FakeProcessGroup
+        raise AttributeError(
+            f"module 'torch._C._distributed_c10d' has no attribute '{name}'"
+        )
+
+    torch._C._distributed_c10d.__getattr__ = _c10d_getattr  # type: ignore[attr-defined]
 
     def _make_distributed_pdb():
         """
@@ -127,6 +140,9 @@ if is_available():
         Args:
             rank (int): Which rank to break on.  Default: ``0``
             skip (int): Skip the first ``skip`` calls to this breakpoint. Default: ``0``.
+            timeout_s (int, optional): Timeout in seconds applied to every process
+                group so waiting ranks don't time out during the debug session.
+                ``None`` leaves timeouts unchanged. Default: ``3600``.
         """
         if skip > 0:
             key = hash(str(traceback.format_exc()))

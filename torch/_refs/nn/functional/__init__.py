@@ -535,7 +535,6 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     return torch.where(torch.abs(a) <= lambd, 0, a)
 
 
-@aten.softshrink.default.py_impl(DispatchKey.Autograd)
 @register_decomposition(aten.softshrink)
 @out_wrapper()
 def softshrink(a: TensorLikeType, lambd: float = 0.5):
@@ -549,10 +548,24 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     )
     if a.dtype in (torch.bfloat16, torch.float16):
         lambd = torch.scalar_tensor(lambd, dtype=a.dtype, device=a.device)  # type: ignore[arg-type]
-    # We implement this in one torch.where to generate better code in the backward
-    # see https://github.com/pytorch/pytorch/pull/107052#discussion_r1293748211
-    # We multiply by 0 for dealing with nans
-    return torch.where(torch.abs(a) > lambd, a - torch.sign(a) * lambd, a * 0)
+    # Match the eager kernels' NaN and signed-zero results. This decomposition
+    # is not registered for Autograd, so the backward is softshrink_backward
+    # rather than the derivative of these wheres, whose accumulation would turn
+    # a -0.0 gradient into +0.0.
+    if a.device.type == "mps":
+        # The MPS kernel computes a * 0: NaN propagates, and the dead zone is
+        # -0.0 for negative inputs
+        return torch.where(
+            a > lambd, a - lambd, torch.where(a < -lambd, a + lambd, a * 0)
+        )
+    # The CUDA kernel returns NaN as is and +0 in the dead zone. The CPU
+    # vectorized path also returns +0, but computes NaN as a - lambd, which
+    # quiets a signaling NaN. (The CPU scalar path, used for loop tails and
+    # non-vectorizable layouts, computes a * 0 like MPS, so CPU eager is not
+    # consistent itself.)
+    result = torch.where(a > lambd, a - lambd, torch.where(a < -lambd, a + lambd, 0))
+    nan = a - lambd if a.device.type == "cpu" else a
+    return torch.where(torch.isnan(a), nan, result)
 
 
 # Losses

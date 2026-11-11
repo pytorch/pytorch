@@ -4,6 +4,7 @@ import gc
 import math
 import sysconfig
 import unittest
+import warnings
 from pathlib import Path
 
 import torch
@@ -21,6 +22,7 @@ from torch.testing._internal.common_utils import (
     install_cpp_extension,
     parametrize,
     run_tests,
+    set_warn_always_context,
     skipIfTorchDynamo,
     skipIfWindows,
     TemporaryFileName,
@@ -66,6 +68,7 @@ class TestLibtorchAgnostic(TestCase):
     - libtorch_agn_2_13: Extension built with TORCH_TARGET_VERSION=2.13.0
     - libtorch_agn_2_14: Extension built with TORCH_TARGET_VERSION=2.14.0
     - libtorch_agn_2_15: Extension built with TORCH_TARGET_VERSION=2.15.0
+    - libtorch_agn_2_16: Extension built with TORCH_TARGET_VERSION=2.16.0
 
     Tests should be decorated with @skipIfTorchVersionLessThan to indicate the
     version that they target.
@@ -150,6 +153,16 @@ class TestLibtorchAgnostic(TestCase):
                 )
         else:
             print(f"Skipping 2.15 extension (running on PyTorch {torch.__version__})")
+
+        if (current_major > 2) or (current_major == 2 and current_minor >= 16):
+            try:
+                import libtorch_agn_2_16  # noqa: F401
+            except Exception:
+                install_cpp_extension(
+                    extension_root=base_dir / "libtorch_agn_2_16_extension"
+                )
+        else:
+            print(f"Skipping 2.16 extension (running on PyTorch {torch.__version__})")
 
     @onlyCPU
     def test_slow_sgd(self, device):
@@ -683,6 +696,24 @@ class TestLibtorchAgnostic(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Not yet supported DeviceType"):
             libtorch_agnostic._interop.device_roundtrip(torch.device("xla"))
 
+    @skipIfTorchVersionLessThan(2, 16)
+    @skipIfTorchDynamo("Dynamo failed to run FX node with fake tensors")
+    def test_my_add(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        a = torch.randn(3, 4, device=device)
+        b = torch.randn(3, 4, device=device)
+
+        result = libtorch_agnostic.ops.my_add(a, b, alpha=2)
+        expected = torch.add(a, b, alpha=2)
+        self.assertEqual(result, expected)
+
+        i = torch.ones(3, 4, dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "argument alpha must not be a floating point number"
+        ):
+            libtorch_agnostic.ops.my_add(i, i)
+
     # TODO: Debug this for Python FakeTensor:
     # torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors:
     # call_function libtorch_agnostic.my_ones_like.default(*(FakeTensor(..., size=(3, 1)), 'cpu'),
@@ -824,6 +855,26 @@ class TestLibtorchAgnostic(TestCase):
         out0 = libtorch_agnostic.ops.my_narrow(t, dim0, start0, length0)
         expected0 = torch.narrow(t, dim0, start0, length0)
         self.assertEqual(out0, expected0)
+
+    def test_my_narrow_conj_neg_view(self, device):
+        import libtorch_agn_2_9 as libtorch_agnostic
+
+        # narrow is backed by a c_shim_aten shim; it should return a view of a
+        # conj/neg view, not of a materialized copy.
+        conj_t = torch.randn(2, 5, dtype=torch.cfloat, device=device).conj()
+        neg_t = torch.randn(2, 5, device=device)._neg_view()
+        for t, fill_value in ((conj_t, 1 + 2j), (neg_t, 3.0)):
+            out = libtorch_agnostic.ops.my_narrow(t, 0, 0, 1)
+            self.assertEqual(out, torch.narrow(t, 0, 0, 1))
+            # only fixed in 2.16+
+            if _torchVersionLessThan(2, 16):
+                self.assertFalse(out.is_conj() or out.is_neg())
+                self.assertNotEqual(out.data_ptr(), t.data_ptr())
+                continue
+            self.assertEqual(out.is_conj(), t.is_conj())
+            self.assertEqual(out.is_neg(), t.is_neg())
+            out.fill_(fill_value)
+            self.assertEqual(t[0], torch.full_like(t[0], fill_value))
 
     @onlyCPU
     def test_my_narrow_symint(self, device):
@@ -1169,6 +1220,97 @@ class TestLibtorchAgnostic(TestCase):
         num_threads = libtorch_agnostic.ops.test_get_num_threads()
         expected_num_threads = torch.get_num_threads()
         self.assertEqual(num_threads, expected_num_threads)
+
+    @skipIfTorchVersionLessThan(2, 15)  # Requires 2.15 for C++ warnings to reach Python
+    @skipIfTorchDynamo("Dynamo also runs the op while tracing")
+    @onlyCPU
+    def test_stable_torch_warn(self, device):
+        import libtorch_agn_2_9 as libtorch_agnostic
+
+        values = (3, 3, -7)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            for value in values:
+                libtorch_agnostic.ops.test_stable_torch_warn(value)
+
+        self.assertEqual(len(w), len(values))
+        for value, warning in zip(values, w):
+            self.assertIs(warning.category, UserWarning)
+            expected = f"test_stable_torch_warn value={value} scale=0.5 1"
+            self.assertIn(expected, str(warning.message))
+
+    def _run_stable_torch_warn_once(self):
+        """Runs in a subprocess so neither STABLE_TORCH_WARN_ONCE call site has warned yet."""
+        import os
+        import subprocess
+        import sys
+
+        test_script = """
+import warnings
+
+import torch
+import libtorch_agn_2_16 as libtorch_agnostic
+
+with warnings.catch_warnings(record=True) as w:
+    warnings.simplefilter("always")
+    for warn_always in (False, True, False):
+        torch.set_warn_always(warn_always)
+        for value in (7, 8, -1):
+            libtorch_agnostic.ops.test_stable_torch_warn_once(value)
+
+for warning in w:
+    print(warning.category.__name__, warning.message)
+"""
+        env = os.environ.copy()
+        # Pass the current sys.path to subprocess so it can find the locally installed extension
+        env["PYTHONPATH"] = os.pathsep.join(sys.path)
+
+        result = subprocess.run(
+            [sys.executable, "-c", test_script],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.splitlines()
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    def test_stable_torch_warn_once(self, device):
+        emitted = self._run_stable_torch_warn_once()
+
+        expected = ("value=7", "negative value", "value=7", "value=8", "negative value")
+        self.assertEqual(len(emitted), len(expected))
+        for message, line in zip(expected, emitted):
+            self.assertIn(f"UserWarning test_stable_torch_warn_once {message}", line)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @parametrize("warn_always", [False, True])
+    def test_is_warn_always_enabled(self, device, warn_always):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with set_warn_always_context(warn_always):
+            enabled = libtorch_agnostic.ops.my_is_warn_always_enabled()
+        self.assertEqual(enabled, warn_always)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @parametrize("flag", ["conj", "neg", "inference"])
+    def test_is_conj_is_neg_is_inference(self, device, flag):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with torch.inference_mode(flag == "inference"):
+            t = torch.ones(2, device=device, dtype=torch.complex64)
+        if flag == "conj":
+            t = t.conj()
+        elif flag == "neg":
+            t = torch._neg_view(t)
+
+        for name in ("conj", "neg", "inference"):
+            actual = getattr(libtorch_agnostic.ops, f"my_is_{name}")(t)
+            self.assertEqual(actual, name == flag)
 
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize("layout", [None, torch.strided, torch.sparse_coo])

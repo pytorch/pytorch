@@ -74,6 +74,9 @@ TORCH_API void waitForNcclChildComm(
     std::chrono::milliseconds timeout,
     std::string_view operation);
 
+// A coalescing window's batch result; defined in ProcessGroupNCCLBackend.cpp.
+struct CoalescedBatchResult;
+
 // Custom exception class for better error handling
 class NCCLException : public std::exception {
  public:
@@ -371,13 +374,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void registerAbortHook(int64_t hook_id, ::c10d::AbortHook hook) override;
   void unregisterAbortHook(int64_t hook_id) override;
 
-  bool supportsCompletionHooks() const override {
-    return true;
-  }
-  void registerCompletionHook(int64_t hook_id, ::c10d::CompletionHook hook)
-      override;
-  void unregisterCompletionHook(int64_t hook_id) override;
-
   // ---- accessors used by friend classes (work) ----
   NcclApi* getNcclApi() const {
     return nccl_api_.get();
@@ -393,7 +389,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   }
   // Underlying host ncclComm_t as an opaque integer pointer.
   int64_t getCommPtr() const;
-  bool collectivesTimingEnabled() const {
+  bool collectivesTimingEnabled() const override {
     return event_pool_->timingEnabled();
   }
   const std::shared_ptr<NCCLEventPool>& getEventPool() const {
@@ -439,6 +435,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   std::atomic<CommState> comm_state_{CommState::NORMAL};
   std::atomic<bool> revoked_{false};
+  // Serializes revokeNcclComm() with reconfigure()'s teardown, so abort() on
+  // another thread cannot still be inside commRevoke when the comm is aborted.
+  std::mutex revoke_mutex_;
 
   ncclDataType_t getNcclDataType(const at::Tensor& tensor);
   c10::intrusive_ptr<WorkNCCL> createWork(
@@ -501,6 +500,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // validate the same device.
   void ensureInitialized(at::Device device);
   void init(at::Device device);
+  // options_c10d_->config with commName resolved for a new communicator.
+  ncclConfig_t commConfig();
   void finalize();
   void initNcclResources();
   // Adopt a child communicator and bring this backend to the INITIALIZED state,
@@ -631,18 +632,16 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void enqueueWork(
       const c10::intrusive_ptr<WorkNCCL>& work,
       cudaStream_t stream);
+  // Folds a *_coalesced op's per-tensor works into the last one.
+  c10::intrusive_ptr<WorkNCCL> coalesceWorks(
+      std::vector<c10::intrusive_ptr<WorkNCCL>> works,
+      std::vector<at::Tensor> outputs);
   bool getGraphCaptureMode();
   cudaStream_t getOperationStream(bool async_op);
   void ensureTensorContiguous(const at::Tensor& tensor);
   void checkTensorDevice(const at::Tensor& tensor) const;
   void checkTensorsDevice(const std::vector<at::Tensor>& tensors) const;
   void runAbortHooks();
-  // Whether anyone is listening, so a work that completes with no hook
-  // registered does not pay for a duration measurement nobody reads.
-  bool hasCompletionHooks();
-  void runCompletionHooks(
-      uint64_t completion_key,
-      std::optional<float> duration_ms);
 
   void attachMemoryHook();
   void detachMemoryHook();
@@ -689,6 +688,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   bool is_high_priority_stream_{false};
   std::string name_;
+  // Backs the default commName; NCCL keeps the pointer for the comm's lifetime.
+  std::string comm_name_;
 
   const ::c10d::ErrorHandlingMode async_error_handling_;
   const bool blocking_wait_;
@@ -745,16 +746,14 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::unordered_map<int64_t, ::c10d::AbortHook> abortHooks_;
   std::mutex abort_hooks_mutex_;
 
-  // Completion hooks (c10d::Backend API). Same guarding rationale as the abort
-  // hooks: the watchdog fires them from checkStatus() while their owner may be
-  // un/registering on another thread.
-  std::unordered_map<int64_t, ::c10d::CompletionHook> completionHooks_;
-  std::mutex completion_hooks_mutex_;
-
   // Active coalescing batch (port of BackendWrapper). Engaged between
   // startCoalescing() and endCoalescing(); send()/recv() append into it.
   std::optional<BatchSendRecv> coalescing_batch_;
-  c10::intrusive_ptr<WorkNCCL> coalesced_work_;
+  // Works enqueued while coalescing_batch_ is engaged; endCoalescing()
+  // returns a work covering all of them.
+  std::vector<c10::intrusive_ptr<WorkNCCL>> coalescing_works_;
+  // Shared by the batch's send()/recv() sentinels; filled in endCoalescing().
+  std::shared_ptr<CoalescedBatchResult> coalescing_result_;
 
   // Configs issued between startTimeEstimate() and endTimeEstimate().
   bool time_estimate_active_ = false;

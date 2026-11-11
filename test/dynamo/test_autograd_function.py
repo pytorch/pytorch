@@ -1946,6 +1946,8 @@ class GraphModule(torch.nn.Module):
                 seen["after_none"] = ctx.needs_input_grad
                 ctx.needs_input_grad = seen["original"]
                 seen["after_restore"] = ctx.needs_input_grad
+                del ctx.needs_input_grad
+                seen["after_del"] = ctx.needs_input_grad
                 return grad_output, None
 
         x = torch.randn(3, requires_grad=True)
@@ -1954,6 +1956,7 @@ class GraphModule(torch.nn.Module):
         self.assertIs(seen["after_set"], sentinel)
         self.assertIsNone(seen["after_none"])
         self.assertIs(seen["after_restore"], seen["original"])
+        self.assertIsNone(seen["after_del"])
         self.assertEqual(x.grad, torch.ones_like(x))
 
     def test_repeated_save_for_backward_calls(self):
@@ -2049,6 +2052,7 @@ class GraphModule(torch.nn.Module):
         self.assertFalse(res2.requires_grad)
 
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    @torch._functorch.config.patch(guess_tangent_strides_as_outputs=True)
     def test_set_output_grad_dtype(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
@@ -2089,6 +2093,7 @@ class GraphModule(torch.nn.Module):
         )
 
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    @torch._functorch.config.patch(guess_tangent_strides_as_outputs=True)
     def test_set_output_grad_dtype_non_tensor_output(self):
         # The traced autograd.Function drops the non-tensor output, so the
         # declarations must be remapped to its remaining outputs.
