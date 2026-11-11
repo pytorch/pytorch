@@ -15,13 +15,19 @@ from torch.distributed._composable import contract
 
 from ._fsdp_api import (
     AllGather,
+    AllReduce,
     DataParallelMeshDims,
     MixedPrecisionPolicy,
     OffloadPolicy,
     ReduceScatter,
 )
-from ._fsdp_collectives import _default_reduce_scatter_input_fn
-from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
+from ._fsdp_collectives import _default_reduce_scatter_input_fn, DefaultAllReduce
+from ._fsdp_common import (
+    _dynamo_disable,
+    DDPMeshInfo,
+    FSDPMeshInfo,
+    ShardPlacementFnResult,
+)
 from ._fsdp_init import (
     _apply_to_module,
     _get_device_from_mesh,
@@ -795,8 +801,7 @@ class FSDPModule:
         """
         Overrides the default ``reduce_scatter`` communication behavior,
         to have better control over the communication and memory usage.
-        See `Comm` and `ReduceScatter` for details. The comm is not used when
-        the reduce-scatter group has size 1 since no reduce-scatter runs.
+        See `Comm` and `ReduceScatter` for details.
 
         Args:
             comm (ReduceScatter): Custom reduce_scatter communication.
@@ -810,6 +815,39 @@ class FSDPModule:
             )
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group._reduce_scatter_comm = comm
+
+    def set_custom_all_reduce(self, comm: AllReduce) -> None:
+        """Override HSDP or ``replicate_with_fsdp`` all-reduce communication.
+
+        See ``AllReduce`` for the in-place reduction and stream contract. The
+        primitive runs on FSDP's internal all-reduce stream, which is distinct
+        from the compute stream. FSDP handles gradient scaling, accumulation,
+        and buffer lifetime, and runs the optional all-reduce hook afterward.
+        ``set_requires_all_reduce(False)`` suppresses this collective.
+
+        This applies to this module's parameter group, not child FSDP modules.
+
+        .. warning::
+            This API is experimental and may change without backward
+            compatibility.
+
+        Args:
+            comm (Optional[AllReduce]): Custom all-reduce communication.
+                ``None`` restores ``DefaultAllReduce``.
+        """
+        state = self._get_fsdp_state()
+        if not state._fsdp_param_groups:
+            return
+        if len(state._fsdp_param_groups) > 1:
+            raise ValueError(
+                "set_custom_all_reduce is not supported with multiple param groups"
+            )
+        for fsdp_param_group in state._fsdp_param_groups:
+            if not isinstance(fsdp_param_group.mesh_info, DDPMeshInfo):
+                raise ValueError("set_custom_all_reduce requires a replication mesh")
+            fsdp_param_group._all_reduce_comm = (
+                DefaultAllReduce() if comm is None else comm
+            )
 
     def set_all_reduce_hook(
         self,
@@ -975,16 +1013,14 @@ class FSDPModule:
         once -- the copy-in (``chunk_cat``) buffer cap-K (experimental).
 
         FSDP keeps **1** such buffer in flight by default, so the compute stream
-        must wait until the previous buffer is no longer in use before the next
-        copy-in can reuse it. When the reduce-scatter is exposed (communication
+        must wait on the previous reduce-scatter before the next copy-in can
+        reuse that buffer. When the reduce-scatter is exposed (communication
         slower than the backward compute meant to hide it), that recycle wait
         stalls the compute stream. Raising the cap lets the next copy-in write a
         **fresh** buffer instead of waiting -- removing the stall -- at the cost
         of extra peak memory for the retained buffers. The copy-in stays on the
         compute stream; there is no extra stream and no ``record_stream``. This
-        helps only when the reduce-scatter is exposed. For a reduce-scatter group
-        of size 1, the buffer is used until the post-reduce ops finish and, when
-        it backs the sharded gradients, retaining it costs no extra memory.
+        helps only when the reduce-scatter is exposed.
 
         Args:
             max_input_buffers (int): Max reduce-scatter input buffers retained in
