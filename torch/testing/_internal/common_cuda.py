@@ -408,6 +408,21 @@ def evaluate_platform_supports_mx_gemm():
         return True
     return False
 
+def evaluate_platform_supports_mxfp8_cast():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            # TODO(future PR): add ROCm support for hardware natively supporting
+            # mxfp8 gemm. While technically the casts can be added on any
+            # hardware with emulation, we have no plans to do so.
+            return False
+        else:
+            # On NVIDIA, we have implementations for CUDA capability 10.0+
+            return SM100OrLater
+    # TODO(future PR): XPU, only on hardware which natively supports mxfp8
+    # gemm. While technically the casts can be added on any hardware
+    # with emulation, we have no plans to do so.
+    return False
+
 def evaluate_platform_supports_mxfp8_grouped_gemm():
     if torch.cuda.is_available() and not torch.version.hip:
         built_with_mslk = "USE_MSLK" in torch.__config__.show()
@@ -449,6 +464,7 @@ def evaluate_platform_supports_fp8_sparse():
     return False
 
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
+PLATFORM_SUPPORTS_MXFP8_CAST: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_cast())
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 PLATFORM_SUPPORTS_FP8_SPARSE: bool = LazyVal(lambda: evaluate_platform_supports_fp8_sparse())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
