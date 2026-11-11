@@ -83,6 +83,15 @@ class OpenRegInterface(DeviceInterface):
         return True
 
     @staticmethod
+    def get_compute_capability(device=None):
+        return ""
+
+    @staticmethod
+    def get_cpp_device_options(aot_mode, compile_only):
+        # Turns on the PrivateUse1 paths of the AOTI runtime headers.
+        return ["USE_PRIVATEUSE1"], [], [], [], [], [], []
+
+    @staticmethod
     def synchronize(device=None):
         pass
 

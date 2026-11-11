@@ -6,8 +6,10 @@ import sys
 from pathlib import Path
 
 import torch
+import torch._inductor.config as inductor_config
 from torch._inductor.codecache import _get_cpp_wrapper_header
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils.cpp_extension import load_inline, TORCH_LIB_PATH
 
@@ -182,6 +184,74 @@ class TestAOTICodegenPrivateUse1(TestCase):
         include_path = CppWrapperCpu.get_device_include_path_aot
         self.assertEqual(include_path("openreg"), aot % "privateuse1")
         self.assertEqual(include_path("cuda"), aot % "cuda")
+
+
+class SmallModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.randn(4, 4))
+        self.b = torch.nn.Parameter(torch.randn(4))
+
+    def forward(self, x):
+        # x @ w exercises proxy-executor tensor args; + 1 exercises a python
+        # scalar bound to a Tensor-typed parameter (add.Tensor). b must stay
+        # small enough for Inductor to consider inlining it as a constant.
+        return torch.relu(x @ self.w + self.b + 1)
+
+
+# See the openreg._inductor docstring for why these options are needed.
+OPENREG_INDUCTOR_CONFIG = {
+    "fallback_by_default": True,
+    "always_keep_tensor_constants": True,
+}
+
+
+def aoti_compile(model, args):
+    ep = torch.export.export(model, args)
+    with inductor_config.patch(OPENREG_INDUCTOR_CONFIG):
+        return torch._inductor.aoti_compile_and_package(ep)
+
+
+class TestOpenRegInductorCompile(InductorTestCase):
+    def test_torch_compile_inductor_backend(self):
+        model = SmallModel().eval().to("openreg")
+        x = torch.randn(2, 4, device="openreg")
+        with inductor_config.patch(OPENREG_INDUCTOR_CONFIG):
+            out = torch.compile(model, backend="inductor")(x)
+        self.assertEqual(out.device.type, "openreg")
+        self.assertEqual(out.cpu(), model(x).cpu())
+
+
+class TestAOTIOpenRegRun(InductorTestCase):
+    """AOTI compile -> load -> run cycle on the openreg device."""
+
+    def test_aoti_compile_load_run(self):
+        model = SmallModel().eval().to("openreg")
+        x = torch.randn(2, 4, device="openreg")
+        loaded = torch._inductor.aoti_load_package(aoti_compile(model, (x,)))
+        out = loaded(x)
+        self.assertEqual(out.device.type, "openreg")
+        self.assertEqual(out.cpu(), model(x).cpu())
+
+    def test_aoti_run_on_second_device(self):
+        model = SmallModel().eval().to("openreg")
+        x = torch.randn(2, 4, device="openreg")
+        package_path = aoti_compile(model, (x,))
+        loaded = torch._inductor.aoti_load_package(package_path, device_index=1)
+        out = loaded(x.to("openreg:1"))
+        self.assertEqual(out.device, torch.device("openreg", 1))
+        self.assertEqual(out.cpu(), model(x).cpu())
+
+    def test_aoti_update_constant_buffer(self):
+        model = SmallModel().eval().to("openreg")
+        x = torch.randn(2, 4, device="openreg")
+        loaded = torch._inductor.aoti_load_package(aoti_compile(model, (x,)))
+
+        new_w = torch.randn(4, 4, device="openreg")
+        new_b = torch.randn(4, device="openreg")
+        loaded.loader.update_constant_buffer({"w": new_w, "b": new_b}, False, False)
+        out = loaded(x)
+        self.assertEqual(out.cpu(), torch.relu(x @ new_w + new_b + 1).cpu())
 
 
 if __name__ == "__main__":
