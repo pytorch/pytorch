@@ -223,6 +223,8 @@ def skip_if_no_gpu(func):
             device_type = acc.type
 
         world_size = int(os.environ["WORLD_SIZE"])
+        if not torch.get_device_module(device_type).is_available():
+            sys.exit(TEST_SKIPS["no_accelerator"].exit_code)
         if torch.get_device_module(device_type).device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
 
