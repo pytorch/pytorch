@@ -2,6 +2,9 @@
 
 #include <ATen/core/operator_name.h>
 #include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
+
+#include <cstdint>
 
 namespace at::impl {
 
@@ -34,8 +37,16 @@ enum class FakeDispatchCategory {
   PythonCIA,
   // for custom op handling registered through
   // torch.library.custom_op(...).register_fake
-  CustomOpImpl
+  CustomOpImpl,
+  NumCategories
 };
+
+static_assert(static_cast<int>(FakeDispatchCategory::NumCategories) <= 32);
+
+inline uint32_t fakeDispatchCategoryBit(FakeDispatchCategory category) {
+  TORCH_INTERNAL_ASSERT(category < FakeDispatchCategory::NumCategories);
+  return 1u << static_cast<int>(category);
+}
 
 // Record/erase that `name` belongs to `category`. Called from the Python
 // registration hooks listed above.
@@ -50,5 +61,15 @@ TORCH_API void fakeDispatchTableRemove(
 TORCH_API bool fakeDispatchTableContains(
     FakeDispatchCategory category,
     const c10::OperatorName& name);
+
+// The categories `name` is registered under, read at once, as a bitmask to
+// test with fakeDispatchCategoriesHave
+TORCH_API uint32_t fakeDispatchTableCategories(const c10::OperatorName& name);
+
+inline bool fakeDispatchCategoriesHave(
+    uint32_t categories,
+    FakeDispatchCategory category) {
+  return categories & fakeDispatchCategoryBit(category);
+}
 
 } // namespace at::impl
