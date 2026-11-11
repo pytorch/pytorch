@@ -998,8 +998,7 @@ An environment variable reaches CMake, as a cache variable of the same name, if 
 
 - starts with `BUILD_`, `USE_`, or `CMAKE_`,
 - ends with `EXITCODE` or `EXITCODE__TRYRUN_OUTPUT`, or
-- appears in the `_ENV_ALIASES`, `_ENV_PASSTHROUGH`, or `_LOW_PRIORITY_ALIASES` lists in that
-  module.
+- appears in the `_ENV_ALIASES` or `_ENV_PASSTHROUGH` lists in that module.
 
 Anything else is not forwarded; set it as a CMake option with `-D` / `cmake.define` instead.
 
@@ -1012,23 +1011,23 @@ environment variable on the build command:
 USE_CUDA=0 BUILD_TEST=0 python -m pip install --no-build-isolation -v -e .
 ```
 
-How a variable reaches CMake decides what happens on the *next* build, which is where the
-surprises are. Both kinds are sticky if you simply drop them from the command line -- the cached
-value stays -- but they differ in whether setting them again works:
+A forwarded variable overrides the cache on every configure, whichever of the three ways it is
+matched by. Environment variables win over `-C` flags (`-D` / `cmake.define`), `-C` flags win
+over `pyproject.toml`, and all three win over what `build/CMakeCache.txt` remembers from the last
+configure. To change one setting for a single command, put the variable in front of the command.
 
-- Variables matched by the prefix rule (`BUILD_*`, `USE_*`, `CMAKE_*`) are re-applied on every
-  configure and **override** the cache, so setting one to a new value takes effect immediately.
-- Everything else -- the alias and passthrough lists, such as `BLAS`, `TORCH_CUDA_ARCH_LIST` and
-  the `CUDNN_*` hints -- only **seeds** a cache entry that does not already exist. Once it is in
-  the cache, changing the environment variable has no further effect: edit the cache with
-  `ccmake build/` or `cmake-gui build/`, or delete `build/CMakeCache.txt` to configure from
-  scratch.
-- Variables a CMake module reads directly are read fresh on every configure, at the location
-  noted in their entry.
+A variable that is no longer in the environment keeps the value the cache remembers, so dropping
+it from the command line does not reset it. To change a cached option without setting its
+variable, run `ccmake build/` or `cmake-gui build/`, or edit `build/CMakeCache.txt` directly. To
+discard the cache and configure from scratch, like `cmake --fresh`, pass `-C cmake.fresh=true`:
 
-The split between the first two cases is an inconsistency rather than a deliberate design, and is
-expected to be resolved in favour of a single rule; this section will change when it is. In the
-meantime, `ccmake build/` shows what the cache actually holds.
+```bash
+python -m pip install --no-build-isolation -v -e . -C cmake.fresh=true
+```
+
+An alias applies only when its canonical name is not in the environment itself, and where several
+aliases name the same variable, the first one listed in `_ENV_ALIASES` wins. Variables a CMake
+module reads directly are read fresh on every configure, at the location noted in their entry.
 
 #### What the annotations mean
 
@@ -1038,12 +1037,13 @@ to take effect:
 - **forwarded by prefix** -- matches the prefix rule above; set as a cache variable of the same
   name, overriding the cache
 - **passthrough** -- does not match the prefix rule, but is listed in `_ENV_PASSTHROUGH` and
-  forwarded under the same name; seeds the cache only
-- **alias** -- forwarded under a *different* CMake name, from `_ENV_ALIASES`; seeds the cache only
+  forwarded under the same name, overriding the cache
+- **alias** -- forwarded under a *different* CMake name, from `_ENV_ALIASES`, overriding the
+  cache unless the canonical name is set as well
 - **read from the environment** -- not forwarded at all; the named CMake module reads `$ENV{...}`
   itself
 - **CMake-native**, or handled via `pyproject.toml` -- consumed by CMake or scikit-build-core
-  directly, not by this module
+  directly, not by the forwarding module
 
 #### Everyday knobs
 
@@ -1095,6 +1095,8 @@ Forwarded by prefix (`USE_*` / `BUILD_*`):
 - `USE_ROCM_KERNEL_ASSERT=1` -- enables kernel assert on ROCm
 - `USE_ROCM_CK_GEMM=1` -- builds the CK GEMM backend on ROCm
 - `USE_ROCM_CK_SDPA=1` -- builds the CK SDPA backend on ROCm
+- `USE_ROCM_CK_SDPA_GFX11=1` -- enables CK SDPA for targeted gfx11 architectures
+- `USE_ROCM_CK_SDPA_GFX12=1` -- enables CK SDPA for targeted gfx12 architectures
 - `USE_LAYERNORM_FAST_RECIPROCAL` -- fast reciprocals for layer norm (default on)
 - `USE_MIMALLOC` -- static-link mimalloc into c10 (default: Windows/AArch64)
 - `USE_CUSTOM_DEBINFO="a.cpp;b.cpp"` -- build debug info only for the listed files
@@ -1114,6 +1116,8 @@ Forwarded by prefix or read from the environment:
 - `TORCH_XPU_ARCH_LIST` -- XPU arches, e.g. `"ats-m150,lnl-m"` (passthrough)
 - `PYTORCH_ROCM_ARCH` -- AMD GPU targets, e.g. `"gfx900;gfx906"` (read from the environment in
   `cmake/public/utils.cmake`)
+- `TORCH_CK_GEMM_ARCH_LIST` -- AMD GPU archs Composable Kernel GEMM is built and enabled for,
+  e.g. `"gfx90a;gfx942;gfx950"` (passthrough)
 
 #### Library and backend selection
 
@@ -1145,11 +1149,39 @@ Passthrough, alias, read from the environment, or CMake-native:
 - `ACL_ROOT_DIR` -- Arm Compute Library location (read from the environment in
   `cmake/Modules/FindACL.cmake`)
 - `LIBRARY_PATH` / `LD_LIBRARY_PATH` -- searched for libraries (compiler/linker native)
+- `CAFFE2_CUSTOM_PROTOC_EXECUTABLE` -- host protoc to use instead of the one built from
+  `third_party/protobuf` (passthrough). Required when cross-compiling, where the built protoc
+  targets an architecture the build host cannot execute (see `cmake/ProtoBuf.cmake`)
 
 #### Handled outside the forwarding module
 
 See also the everyday knobs above, which are all handled via `pyproject.toml` or natively.
 
+- `TORCH_NATIVE_AOT=0` -- disables the native-AOT stage-2 step, which exports the DSL kernels and
+  embeds them into `libtorch_cuda`. Not forwarded: `tools/native_aot/build_stage2.py` and the
+  generated `build/native_aot/native_aot.cmake` both read the environment directly.
+
+  Stage 2 already skips itself if any of the following holds (the module docstring of
+  `tools/native_aot/build_stage2.py` lists them in the order they are checked):
+
+  - the platform is not Linux
+  - the built torch does not import or was built without CUDA
+  - no toolchain targets this backend
+  - CUDA is older than 13 or cannot be determined
+  - the interpreter has no published DSL wheel and none is installed
+  - `BUILD_SHARED_LIBS=OFF` leaves a static `torch_cuda` that cannot take the version script
+  - nothing declares kernels
+  - no op declares a target compatible with a supported arch. With `TORCH_CUDA_ARCH_LIST` unset
+    it exports for whatever GPU is present, so a GPU compatible with a declared target does not
+    hit this one
+
+  Once it decides it *will* export, a missing DSL wheel is a hard error rather than a skip, so
+  this is the switch to use when you want a build without the DSL toolchain installed.
+
+  Native-AOT export for supported Hopper and Blackwell targets requires Triton at
+  build time alongside CuTeDSL. Install the pinned Triton wheel with
+  `bash scripts/install_triton_wheel.sh`. Embedded Triton kernels do not require
+  the Triton Python package at runtime.
 - `PYTORCH_BUILD_VERSION` / `PYTORCH_BUILD_NUMBER` -- wheel version; consumed by the version
   metadata provider (`tools/metadata`)
 
