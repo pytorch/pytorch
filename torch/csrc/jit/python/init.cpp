@@ -3,6 +3,7 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/schema_info.h>
 
+#include <ATen/ScalarOps.h>
 #include <ATen/core/operator_name.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_init.h>
@@ -145,7 +146,7 @@ bool loadPythonClasses() {
 static bool opAllowsNumbersAsTensors(c10::Symbol symbol) {
   return symbol.is_prims() || symbol.is_nvprims() ||
       (symbol.is_aten() &&
-       torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
+       at::should_allow_numbers_as_tensors(symbol.toUnqualString()));
 }
 
 std::optional<IValue> toTypeInferredIValueOptional(py::handle input) {

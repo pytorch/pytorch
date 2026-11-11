@@ -1328,9 +1328,9 @@ class RegionalOutputCode(OutputCode):
         if self._serialized_graph_module is None:
             raise AssertionError("self._serialized_graph_module must not be None")
         # Get fake mode from example inputs
-        from torch._guards import detect_fake_mode
+        from torch._guards import detect_fake_mode, require_python_fake_mode
 
-        fake_mode = detect_fake_mode(example_inputs)
+        fake_mode = require_python_fake_mode(detect_fake_mode(example_inputs))
         if fake_mode is None:
             raise RuntimeError(
                 "Could not detect fake mode from example inputs. "
