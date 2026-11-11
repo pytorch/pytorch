@@ -4,7 +4,6 @@ import math
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import auto, Enum
 from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
@@ -15,6 +14,7 @@ from torch.distributed._composable.contract import _get_registry
 from torch.distributed.tensor import DeviceMesh, DTensor, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
+from .._flex_shard.utils import _cast_fp_tensor, TrainingState  # noqa: F401
 from ._fsdp_api import DataParallelMeshDims
 
 
@@ -112,19 +112,6 @@ class HSDPMeshInfo(FSDPMeshInfo, DDPMeshInfo):
         super().__post_init__()
 
 
-class TrainingState(Enum):
-    """Describes the training state of one FSDP state / parameter group."""
-
-    # Transition to forward starting pre-forward until post-forward
-    FORWARD = auto()
-    # Transition to pre-backward when unsharding in backward
-    PRE_BACKWARD = auto()
-    # Transition to post-backward when resharding and reducing gradients
-    POST_BACKWARD = auto()
-    # Idle before/after forward or before pre-backward/after post-backward
-    IDLE = auto()
-
-
 def _raise_assert_with_print(*args: Any, **kwargs: Any):
     print(f"[Rank {dist.get_rank()}] ", end="")
     print(*args, **kwargs)
@@ -184,24 +171,6 @@ def _from_local_no_grad(
         # pyrefly: ignore [unexpected-keyword]
         requires_grad=local_tensor.requires_grad,
     )
-
-
-def _to_dtype_if_needed(
-    tensor: torch.Tensor, dtype: torch.dtype | None
-) -> torch.Tensor:
-    if dtype is not None and tensor.dtype != dtype:
-        return tensor.to(dtype)
-    return tensor
-
-
-def _cast_fp_tensor(dtype: torch.dtype, x: torch.Tensor) -> torch.Tensor:
-    if (
-        not isinstance(x, torch.Tensor)
-        or not torch.is_floating_point(x)
-        or x.dtype == dtype
-    ):
-        return x
-    return x.to(dtype)
 
 
 def is_bw() -> bool:

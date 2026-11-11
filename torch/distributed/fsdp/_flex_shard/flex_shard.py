@@ -11,16 +11,18 @@ from typing import cast, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
+from torch.distributed._composable_state import _get_module_state
 from torch.distributed.fsdp._fully_shard._fsdp_api import (
     CPUOffloadPolicy,
     MixedPrecisionPolicy,
 )
 
+from . import module_ops
 from .bucket_comm import begin_explicit_bucket_unshard
 from .bucket_runtime import (
+    _bucket_runtimes,
     _EAGER_COMM_CONTEXTS_ATTR,
     _in_backward,
-    _install_bucket_unshard_hooks,
     _MAX_PENDING_REDUCE_GRADS_ATTR,
     GradientReductionHandle,
     ModuleUnshardHandle,
@@ -36,6 +38,7 @@ from .bucket_storage import (
     PlacementFn,
     ShardedBucketStorage,
 )
+from .module_state import BucketGroup, ShardedModuleState
 from .placements.shard import _engine_placements
 from .sharded_param import is_flex_shard_param
 from .utils import (
@@ -50,8 +53,6 @@ from .utils import (
 
 
 if TYPE_CHECKING:
-    from torch.distributed.device_mesh import DeviceMesh
-
     from .bucket_runtime import BucketRuntime
     from .placement_contract import Placement
 
@@ -64,6 +65,7 @@ __all__ = [
 
 _SHARDED_BUCKET_STORAGES_ATTR = "_sharded_bucket_storages"
 _EAGER_HOOKS_INSTALLED_ATTR = "_flex_shard_eager_hooks_installed"
+_MANUAL_FINALIZATION_ATTR = "_flex_shard_manual_backward_finalization"
 
 
 class FlexShardModule:
@@ -129,7 +131,29 @@ class FlexShardModule:
         ):
             return
 
-        _install_bucket_unshard_hooks(bucket_storages)
+        # The buckets unshard on their modules' forwards through the module
+        # lifecycle that fully_shard runs on too
+        state = ShardedModuleState()
+        context = None
+        for runtime, modules, casts in _bucket_runtimes(bucket_storages):
+            group = BucketGroup(runtime, modules)
+            group.named_by_modules = False
+            state.add_group(group, casts)
+            context = runtime.context
+        module = cast(nn.Module, self)
+        state.init(
+            (module,),
+            bucket_storages[0]._compute_device
+            or bucket_storages[0].byte_storage.device,
+            (None, None),
+            auto_reshard_after_forward=False,
+            root_module=module,
+            post_hook_always_call=True,
+        )
+        state._shared_engine_context = context
+        state._state_ctx.manual_backward_finalization = getattr(
+            self, _MANUAL_FINALIZATION_ATTR, False
+        )
         setattr(self, _EAGER_HOOKS_INSTALLED_ATTR, True)
 
     def reshard(self) -> None:
@@ -157,6 +181,9 @@ class FlexShardModule:
             raise RuntimeError(
                 "FlexShard: set_manual_backward_finalization() cannot run in backward."
             )
+        setattr(self, _MANUAL_FINALIZATION_ATTR, enabled)
+        if (state := _get_module_state(cast(nn.Module, self))) is not None:
+            state._state_ctx.manual_backward_finalization = enabled  # type: ignore[attr-defined]
         for context in getattr(self, _EAGER_COMM_CONTEXTS_ATTR, {}).values():
             context.manual_backward_finalization = enabled
 
@@ -283,8 +310,7 @@ class FlexShardModule:
         """Set what ``AVG`` divides this module's FlexShard buckets' summed
         gradients by, like FSDP2's ``set_gradient_divide_factor``. None restores
         the default, each bucket's mesh size."""
-        for bucket_storage in self._bucket_storages(recurse):
-            bucket_storage.set_gradient_divide_factor(factor)
+        module_ops.set_gradient_divide_factor(self._bucket_storages(recurse), factor)
 
     def set_requires_gradient_sync(
         self,
@@ -311,8 +337,9 @@ class FlexShardModule:
         full gradients are large, call ``set_requires_gradient_sync`` on its
         entry in ``sharded_bucket_storages``.
         """
-        for bucket_storage in self._bucket_storages(recurse):
-            bucket_storage.set_requires_gradient_sync(requires_gradient_sync)
+        module_ops.set_requires_gradient_sync(
+            self._bucket_storages(recurse), requires_gradient_sync
+        )
 
     def set_separate_reduce_scatter_group(
         self,
@@ -333,9 +360,9 @@ class FlexShardModule:
         setup, call it on every rank of the buckets' meshes, before the first
         backward. ``False`` goes back to the meshes' groups. 1-D meshes only.
         """
-        reduce_meshes: dict[tuple[str, tuple[int, ...]], DeviceMesh] = {}
-        for bucket_storage in self._bucket_storages(recurse):
-            bucket_storage.set_separate_reduce_scatter_group(enable, reduce_meshes)
+        module_ops.set_separate_reduce_scatter_group(
+            self._bucket_storages(recurse), enable
+        )
 
     def set_reshard_after_backward(
         self,
@@ -356,8 +383,9 @@ class FlexShardModule:
         unsharded params. Entries of ``sharded_bucket_storages`` take the same
         setting per bucket.
         """
-        for bucket_storage in self._bucket_storages(recurse):
-            bucket_storage.set_reshard_after_backward(reshard_after_backward)
+        module_ops.set_reshard_after_backward(
+            self._bucket_storages(recurse), reshard_after_backward
+        )
 
     def set_reduce_scatter_unused_params(
         self,
@@ -378,10 +406,9 @@ class FlexShardModule:
         with zeros for missing grads. Entries of ``sharded_bucket_storages``
         take the same setting per bucket.
         """
-        for bucket_storage in self._bucket_storages(recurse):
-            bucket_storage.set_reduce_scatter_unused_params(
-                reduce_scatter_unused_params
-            )
+        module_ops.set_reduce_scatter_unused_params(
+            self._bucket_storages(recurse), reduce_scatter_unused_params
+        )
 
     def set_max_pending_reduce_grads(
         self,

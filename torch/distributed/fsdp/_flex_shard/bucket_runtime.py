@@ -16,8 +16,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.device_mesh import _get_device_handle
-from torch.distributed.fsdp._fully_shard._fsdp_common import _cast_fp_tensor
-from torch.distributed.utils import _apply_to_tensors
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._pytree import tree_leaves, tree_map_only
 
@@ -48,6 +46,7 @@ if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
 
     from .bucket_storage import ParamInfo, ShardedBucketStorage
+    from .param_homing import ParamHoming
     from .placements.shard_all_gather import ParamAllGatherInputs
 
 
@@ -132,7 +131,36 @@ class ParamRepresentation:
     The engine all-gathers, reduces and stores plain local tensors. This
     default, which ``flex_shard`` uses, exposes them as they are. ``fully_shard``
     wraps them in DTensors. ``index`` is the parameter's position in the bucket.
+
+    A bucket whose parameters keep their data with a ``ParamHoming`` (see
+    ``param_homing.py``) sets ``homing``, which then answers the questions
+    about parameters with storage of their own or all-gather extensions.
     """
+
+    homing: ParamHoming | None = None
+
+    def local_tensor(self, sharded_param: nn.Parameter) -> torch.Tensor:
+        """The local data of a sharded parameter."""
+        return sharded_param
+
+    def set_local_tensor(
+        self, index: int, sharded_param: nn.Parameter, local: torch.Tensor
+    ) -> None:
+        """Point a sharded parameter at new local data."""
+        sharded_param.data = local
+
+    def new_sharded_param(
+        self, index: int, local: torch.Tensor, info: ParamInfo
+    ) -> nn.Parameter:
+        """The sharded parameter to register in modules for local data."""
+        param = nn.Parameter(local, requires_grad=info.requires_grad)
+        if info.has_explicit_grad_dtype:
+            param.grad_dtype = info.grad_dtype_override
+        return param
+
+    def refresh_param(self, index: int, sharded_param: nn.Parameter) -> None:
+        """Re-read what the frontend derives from a sharded parameter that a
+        module may have replaced."""
 
     def local_shard(
         self, index: int, sharded_param: nn.Parameter, *, use_autograd: bool
@@ -185,10 +213,14 @@ class ParamRepresentation:
     def check_post_forward_reshard(self) -> None:
         """Raise if the frontend does not support a reshard after forward to a
         smaller group (see ``BucketRuntime.reshard``)."""
+        if self.homing is not None:
+            self.homing.check_post_forward_reshard()
 
     def check_reduce_unused_params(self) -> None:
         """Raise if the frontend cannot reduce zero grads for unused params
         (``ShardedBucketStorage._reduce_scatter_unused_params``)."""
+        if self.homing is not None:
+            self.homing.check_reduce_unused_params()
 
     def adopt_unsharded_params(self, unsharded_params: list[nn.Parameter]) -> None:
         """Called with the persistent unsharded params once created."""
@@ -196,7 +228,11 @@ class ParamRepresentation:
     def defers_grad_upcast(self, index: int) -> bool | None:
         """Whether the param's grads may stay in the compute dtype until the
         reduce (see ``BucketRuntime._set_unsharded_grad_dtypes``), or None for
-        the engine's rule."""
+        the engine's rule. All-gather extensions run their own compute, which
+        may read grad_dtype to pick the dtype its backward produces, so it
+        stays fixed for them."""
+        if self.homing is not None and self.homing.has_extension(index):
+            return False
         return None
 
     def on_sharded_state(self, state: str) -> None:
@@ -206,20 +242,26 @@ class ParamRepresentation:
     def check_post_forward_unshard(self) -> None:
         """Raise if the frontend does not support an unshard from the chunks a
         reshard after forward kept."""
+        if self.homing is not None:
+            self.homing.check_post_forward_unshard()
 
     def before_unshard(self) -> None:
         """Called before an unshard reads the bucket storage."""
+        if self.homing is not None:
+            self.homing.sync_aliases()
 
     def defines_all_gathers(self) -> bool:
         """Whether some param may define its all-gather inputs or unsharded
         tensor, so that the engine asks each param (``all_gather_inputs``,
         ``post_all_gather``, ``releases_all_gather_outputs``)."""
-        return False
+        return self.homing is not None and self.homing.defines_all_gathers()
 
     def all_gather_inputs(self, index: int) -> ParamAllGatherInputs | None:
         """The param's all-gather inputs for this unshard, or None to
         all-gather its padded local shard (see ``ShardAllGather``)."""
-        return None
+        if self.homing is None:
+            return None
+        return self.homing.all_gather_inputs(index)
 
     def post_all_gather(
         self, index: int, outputs: tuple[torch.Tensor, ...], refill: bool
@@ -229,12 +271,16 @@ class ParamRepresentation:
         output holds the unsharded data. On a ``refill``, rebuild the unsharded
         param that the first unshard built (``adopt_unsharded_params``) in
         place instead."""
-        return None
+        if self.homing is None:
+            return None
+        return self.homing.post_all_gather(index, outputs, refill)
 
     def releases_all_gather_outputs(self, index: int) -> bool:
         """Whether to free the param's outputs once its unsharded tensor is
         built, which then must not view them."""
-        return False
+        return self.homing is not None and self.homing.releases_all_gather_outputs(
+            index
+        )
 
 
 _PLAIN_REPRESENTATION = ParamRepresentation()
@@ -2281,20 +2327,19 @@ def _match_param_grad_layout(
     return grad
 
 
-def _install_bucket_unshard_hooks(
+def _bucket_runtimes(
     bucket_storages: list[ShardedBucketStorage],
-) -> None:
-    """Install each bucket's forward hooks (one collective per bucket), the
-    forward casts of its mixed precision policy, and state-dict hooks that
-    reshard first, as FSDP2 does."""
+) -> list[tuple[BucketRuntime, tuple[nn.Module, ...], tuple[Any, Any]]]:
+    """Create each bucket's runtime, in one context per root module and
+    device, with the modules whose forward unshards it and the forward casts
+    of its mixed precision policy, and install state-dict hooks that reshard
+    first, as FSDP2 does."""
     owner_buckets: dict[nn.Module, dict[int, BucketRuntime]] = {}
-    group_buckets: list[BucketRuntime] = []
-    # Each hooked module's input and output cast dtypes
-    module_casts: dict[nn.Module, tuple[torch.dtype | None, torch.dtype | None]] = {}
     root_module = bucket_storages[0]._module
     module_positions = {
         module: position for position, module in enumerate(root_module.modules())
     }
+    result = []
     for bucket_storage in bucket_storages:
         if not bucket_storage._param_infos:
             raise AssertionError("Expected FlexShard bucket storage to own parameters.")
@@ -2313,93 +2358,24 @@ def _install_bucket_unshard_hooks(
             else [bucket_runtime.forward_hook_module()]
         )
         bucket_runtime.module_position = min(module_positions[m] for m in modules)
-        if len(modules) == 1:
-            pre_hook = bucket_runtime.pre_forward_hook
-            post_hook = bucket_runtime.post_forward_hook
-        else:
+        if len(modules) > 1:
             bucket_runtime.group_modules = tuple(modules)
-            pre_hook = bucket_runtime.group_pre_forward_hook
-            post_hook = bucket_runtime.group_post_forward_hook
-            group_buckets.append(bucket_runtime)
         policy = bucket_storage._mp_policy
         casts = (None, None)
         if policy is not None:
             input_dtype = policy.param_dtype if policy.cast_forward_inputs else None
             casts = (input_dtype, policy.output_dtype)
-        for module in modules:
-            # Prepended so earlier user pre-forward hooks see the unsharded params.
-            module.register_forward_pre_hook(pre_hook, prepend=True, with_kwargs=True)
-            module.register_forward_hook(post_hook, always_call=True)
-            if module_casts.setdefault(module, casts) != casts:
-                fqn = next(n for n, m in root_module.named_modules() if m is module)
-                raise ValueError(
-                    f"Buckets that hook module {fqn!r} must cast its forward "
-                    "inputs and outputs alike (BucketSpec.mp_policy), but cast "
-                    f"to {module_casts[module]} and {casts}."
-                )
         bucket_runtime.context.buckets.append(bucket_runtime)
         for bucket_param in bucket_runtime.bucket_params:
             owner_buckets.setdefault(bucket_param.param_owner.module, {})[
                 id(bucket_runtime)
             ] = bucket_runtime
-
-    if group_buckets:
-        # After the buckets' own hooks on the root module, if any.
-        root_module.register_forward_hook(
-            functools.partial(_complete_group_passes, tuple(group_buckets))
-        )
-    # Inputs are cast before the buckets' pre-forward hooks and outputs after
-    # their post-forward hooks, as in FSDP2
-    for module, (input_dtype, output_dtype) in module_casts.items():
-        if input_dtype is not None:
-            cast_input = functools.partial(_cast_fp_tensor, input_dtype)
-            module.register_forward_pre_hook(
-                functools.partial(_cast_forward_inputs, cast_input),
-                prepend=True,
-                with_kwargs=True,
-            )
-        if output_dtype is not None:
-            cast_output = functools.partial(_cast_fp_tensor, output_dtype)
-            module.register_forward_hook(
-                functools.partial(_cast_forward_output, cast_output)
-            )
+        result.append((bucket_runtime, tuple(modules), casts))
     for module, buckets in owner_buckets.items():
         reshard_hook = functools.partial(_reshard_buckets, tuple(buckets.values()))
         module.register_state_dict_pre_hook(reshard_hook)
         module._register_load_state_dict_pre_hook(reshard_hook)
-
-
-def _cast_forward_inputs(
-    cast: Callable[[torch.Tensor], torch.Tensor],
-    module: nn.Module,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-) -> tuple[tuple[Any, ...], dict[str, Any]]:
-    return _apply_to_tensors(cast, args), _apply_to_tensors(cast, kwargs)
-
-
-def _cast_forward_output(
-    cast: Callable[[torch.Tensor], torch.Tensor],
-    module: nn.Module,
-    args: tuple[Any, ...],
-    output: Any,
-) -> Any:
-    return _apply_to_tensors(cast, output)
-
-
-def _complete_group_passes(
-    buckets: tuple[BucketRuntime, ...], module: nn.Module, args: Any, output: Any
-) -> None:
-    """Root post-forward hook: complete the forward pass of each bucket of
-    several modules that the forward ran only some of, e.g. a norm without the
-    output projection it shares a bucket with, as FSDP2's root post-forward
-    completes such groups."""
-    if torch.compiler.is_compiling() or _in_backward():
-        return
-    with dist._spmd_no_typecheck():
-        for bucket in buckets:
-            if bucket.group_pass is not None:
-                bucket.complete_group_pass(output)
+    return result
 
 
 def _unwrap_checkpoint(module: nn.Module) -> nn.Module:

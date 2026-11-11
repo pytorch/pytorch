@@ -207,6 +207,18 @@ class BucketLayout:
     param_layouts: dict[str, BucketParamLayout]
 
 
+@dataclass(frozen=True)
+class ParamMeta:
+    """The autograd and grad-dtype settings of a parameter whose sharded data
+    is not the parameter itself, e.g. the local tensor of a DTensor parameter
+    that ``fully_shard`` shards. Its Python attributes, outer layout and
+    partial-grad group are not carried over."""
+
+    requires_grad: bool
+    has_explicit_grad_dtype: bool = False
+    grad_dtype_override: torch.dtype | None = None
+
+
 @dataclass
 class ParamInfo:
     """Metadata for a parameter in chunked storage."""
@@ -429,9 +441,12 @@ class ShardedBucketStorage:
         mesh: DeviceMesh,
         param_placements: dict[str, tuple[Placement, ...]],
         mp_policy: MixedPrecisionPolicy | None = None,
+        metas: dict[str, ParamMeta] | None = None,
     ) -> tuple[dict[str, ParamInfo], int]:
         """
         Create ParamInfo for each parameter, computing local layout and byte offsets.
+        ``metas`` gives the settings of parameters whose tensors in
+        ``named_params`` are only their data (see ``ParamMeta``).
 
         The caller validates that each bucket uses compatible placements and a
         uniform dtype. Each placement owns its per-parameter local storage layout;
@@ -473,6 +488,7 @@ class ShardedBucketStorage:
                 bucket_layout,
                 param_dtypes,
                 reduce_dtype,
+                metas or {},
             )
         else:
             param_infos, total_bytes = cls._create_param_infos_from_local_layouts(
@@ -481,6 +497,7 @@ class ShardedBucketStorage:
                 param_placements,
                 param_dtypes,
                 reduce_dtype,
+                metas or {},
             )
 
         # One collective per bucket needs one dtype. Like FSDP2, promote over
@@ -509,6 +526,7 @@ class ShardedBucketStorage:
         param_placements: dict[str, tuple[Placement, ...]],
         param_dtypes: dict[str, torch.dtype | None],
         reduce_dtype: torch.dtype | None,
+        metas: dict[str, ParamMeta],
     ) -> tuple[dict[str, ParamInfo], int]:
         rank = mesh.get_local_rank()
         world_size = mesh.size()
@@ -540,6 +558,7 @@ class ShardedBucketStorage:
                 storage_nbytes=local_storage_layout.storage_nbytes,
                 param_dtype=param_dtypes[fqn],
                 reduce_dtype=reduce_dtype,
+                meta=metas.get(fqn),
             )
 
         return param_infos, current_byte_offset
@@ -579,6 +598,7 @@ class ShardedBucketStorage:
         bucket_layout: BucketStorageLayout,
         param_dtypes: dict[str, torch.dtype | None],
         reduce_dtype: torch.dtype | None,
+        metas: dict[str, ParamMeta],
     ) -> tuple[dict[str, ParamInfo], int]:
         expected_fqns = {fqn for fqn, _ in named_params}
         actual_fqns = set(bucket_layout.param_layouts)
@@ -639,6 +659,7 @@ class ShardedBucketStorage:
                 bucket_layout=layout.bucket_layout,
                 param_dtype=param_dtypes[fqn],
                 reduce_dtype=reduce_dtype,
+                meta=metas.get(fqn),
             )
 
         return param_infos, bucket_layout.total_bytes
@@ -656,7 +677,27 @@ class ShardedBucketStorage:
         bucket_layout: BucketLayout | None = None,
         param_dtype: torch.dtype | None = None,
         reduce_dtype: torch.dtype | None = None,
+        meta: ParamMeta | None = None,
     ) -> ParamInfo:
+        if meta is not None:
+            return ParamInfo(
+                fqn=fqn,
+                global_shape=param.shape,
+                global_stride=tuple(make_contiguous_strides_for(param.shape)),
+                dtype=param.dtype,
+                param_dtype=param_dtype,
+                reduce_dtype=reduce_dtype,
+                requires_grad=meta.requires_grad,
+                placements=placements,
+                local_shape=local_shape,
+                local_numel=local_numel,
+                byte_offset=byte_offset,
+                storage_nbytes=storage_nbytes,
+                global_numel=param.numel(),
+                bucket_layout=bucket_layout,
+                has_explicit_grad_dtype=meta.has_explicit_grad_dtype,
+                grad_dtype_override=meta.grad_dtype_override,
+            )
         has_explicit_grad_dtype = param._has_grad_dtype_override
         return ParamInfo(
             fqn=fqn,
