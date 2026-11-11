@@ -88,6 +88,8 @@ class Sink final : public c10::DispatchCaptureSink {
 
 thread_local Sink tls_sink;
 
+// Raw pointers and PyObject* results below: these functions become entries of
+// the C function table that the Rust runtime calls.
 void captureBegin() {
   auto trace = std::make_unique<TcfgTrace>();
   tls_sink.active.push_back(std::move(trace));
@@ -176,7 +178,8 @@ void initCfgBindings(PyObject* module) {
   // records lists (op, dispatch key, depth, is_redispatch) for every kernel
   // the dispatcher invoked.
   // With detail, a record is a dict that also has the rest of what the capture
-  // kept about it.
+  // kept about it. A capture keeps the arguments and results of every
+  // top-level call alive until it ends.
   m.def(
       "_cfg_dispatch_trace",
       [](const py::object& fn, bool detail) -> py::tuple {
