@@ -982,6 +982,12 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
 
     let mut all_consts = consts;
     all_consts.extend(builder.extra_consts.drain(..));
+    // Constants the optimizer folds to.
+    let const_true = all_consts.len() as u32;
+    unsafe {
+        all_consts.push(PyObj::from_borrowed(ffi::Py_True()));
+        all_consts.push(PyObj::from_borrowed(ffi::Py_False()));
+    }
     let nvalues = builder.forward.len() as u32;
     let value_names = std::mem::take(&mut builder.value_names);
     drop(builder);
@@ -1018,6 +1024,8 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         filename: code.getattr("co_filename")?.extract()?,
         firstlineno: code.getattr("co_firstlineno")?.extract()?,
         consts: all_consts,
+        const_true,
+        const_false: const_true + 1,
         blocks,
         nvalues,
         params,
@@ -1082,7 +1090,9 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::TupleGet(a, _)
         | Op::GetIter(a)
         | Op::IterNext(a)
-        | Op::CheckBound(a, _) => r!(a),
+        | Op::CheckBound(a, _)
+        | Op::TensorSize { t: a, .. }
+        | Op::TensorDim(a) => r!(a),
         Op::Binary(_, a, b)
         | Op::Compare(_, a, b)
         | Op::Is(a, b, _)
@@ -1114,7 +1124,14 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
                 r!(v);
             }
         }
+        Op::CallMethod { recv, args, .. } => {
+            r!(recv);
+            for v in args.iter_mut() {
+                r!(v);
+            }
+        }
         Op::CallEx { callee, args, kwargs } => r!(callee, args, kwargs),
+        Op::Dispatch(_) | Op::Guard(_) => {}
     }
     Ok(())
 }

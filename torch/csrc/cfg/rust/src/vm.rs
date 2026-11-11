@@ -1,14 +1,76 @@
 //! The virtual machine: a register interpreter over the SSA graph.
 //!
-//! The instructions have the semantics of the bytecode they came from and go
-//! through the CPython API, so anything Python can do runs here.
+//! Each basic block runs in one of three tiers:
+//!   - generic: the instructions have the semantics of the bytecode they came
+//!     from and go through the CPython API. Anything Python can do runs here,
+//!     so what other compilers call a graph break is just a block (or an
+//!     instruction) that stays in this tier;
+//!   - profiling: generic, with the dispatcher capture hook installed around
+//!     the operations that may be tensor operations, and with the values that
+//!     flow by being recorded. Real tensors, real kernels: the first run of a
+//!     block is its trace;
+//!   - specialized: a version of the block produced by the pass pipeline from
+//!     the profile. It calls post-dispatch kernels directly and may depend on
+//!     guards; a failed guard resumes the profiling tier, in this block only.
 
 use crate::analysis::{self, Analysis};
+use crate::capi::{self, SiteSlot, TcfgApi, TcfgPyOp, TcfgTensorInfo};
 use crate::ir::*;
 use crate::pyffi::{self, new_ref, py_bool, xdecref, Obj, Shared};
+use crate::spec::{self, PassCx, Pipeline, Unit, ValueObs};
 use pyo3::ffi;
 use std::ffi::CString;
+use std::os::raw::c_char;
 use std::ptr::null_mut;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+
+pub struct Options {
+    /// Run the profiling tier and specialize. Off: generic tier only.
+    pub specialize: bool,
+    /// Let call sites enter below the Autograd kernel when no gradient is
+    /// being tracked.
+    pub skip_autograd: bool,
+    pub max_versions: usize,
+    /// How many times a block may go back to the profiling tier.
+    pub max_respecializations: u32,
+    pub max_site_variants: usize,
+}
+
+impl Default for Options {
+    fn default() -> Options {
+        Options {
+            specialize: true,
+            skip_autograd: true,
+            max_versions: 4,
+            max_respecializations: 6,
+            max_site_variants: 4,
+        }
+    }
+}
+
+pub struct BlockState {
+    pub versions: Vec<Arc<BlockCode>>,
+    pub slots: Vec<Option<Arc<SiteSlot>>>,
+    /// Why an instruction that made dispatcher calls did not become a site.
+    pub reasons: Vec<Option<String>>,
+    pub capture_attempts: Vec<u32>,
+    pub respec_left: u32,
+    pub profile_runs: u32,
+    pub next_version_id: u32,
+    pub execs: u64,
+    pub spec_execs: u64,
+    pub entry_misses: u64,
+    pub deopts: u64,
+    pub rejected: Option<String>,
+}
+
+pub struct State {
+    pub blocks: Vec<BlockState>,
+    pub obs: Vec<ValueObs>,
+    pub calls: u64,
+    pub log: Vec<String>,
+}
 
 /// Inline cache of a global or module attribute load, keyed on the version
 /// tags of the dictionaries involved: as long as a dict's tag is unchanged
@@ -45,11 +107,23 @@ pub struct Compiled {
     plain_name: Vec<bool>,
     pub func: Function,
     pub analysis: Analysis,
-    pub generic: Vec<BlockCode>,
+    pub generic: Vec<Arc<BlockCode>>,
+    pub state: Shared<State>,
+    pub options: Options,
+    pub pipeline: Pipeline,
     frames: Shared<Vec<Vec<Obj>>>,
     name_c: CString,
     filename_c: CString,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Generic,
+    Profile,
+    Spec,
+}
+
+const MAX_CAPTURE_ATTEMPTS: u32 = 8;
 
 type OpResult = Result<Obj, ()>;
 
@@ -166,15 +240,45 @@ unsafe fn do_raise(exc: Obj, cause: Obj) {
 }
 
 impl Compiled {
-    pub fn new(func: Function) -> Compiled {
+    pub fn new(func: Function, options: Options, pipeline: Pipeline) -> Compiled {
         let analysis = analysis::analyze(&func);
         let mut generic = Vec::with_capacity(func.blocks.len());
         for (b, block) in func.blocks.iter().enumerate() {
             let mut insts = block.insts.clone();
             let term_kills =
                 analysis::compute_kills(&mut insts, &block.term, &analysis.live_out[b]);
-            generic.push(BlockCode { insts, term: block.term.clone(), term_kills });
+            generic.push(Arc::new(BlockCode {
+                insts,
+                term: block.term.clone(),
+                term_kills,
+                entry_guards: Vec::new(),
+                id: 0,
+            }));
         }
+        let blocks = func
+            .blocks
+            .iter()
+            .map(|block| BlockState {
+                versions: Vec::new(),
+                slots: vec![None; block.insts.len()],
+                reasons: vec![None; block.insts.len()],
+                capture_attempts: vec![0; block.insts.len()],
+                respec_left: options.max_respecializations,
+                profile_runs: 0,
+                next_version_id: 1,
+                execs: 0,
+                spec_execs: 0,
+                entry_misses: 0,
+                deopts: 0,
+                rejected: None,
+            })
+            .collect();
+        let state = State {
+            blocks,
+            obs: vec![ValueObs::Unseen; func.nvalues as usize],
+            calls: 0,
+            log: Vec::new(),
+        };
         let empty = || LoadCaches(vec![std::cell::Cell::new(LoadCache::EMPTY); func.consts.len()]);
         let plain_name = func
             .consts
@@ -193,6 +297,9 @@ impl Compiled {
             func,
             analysis,
             generic,
+            state: Shared::new(state),
+            options,
+            pipeline,
             frames: Shared::new(Vec::new()),
         }
     }
@@ -728,6 +835,34 @@ impl Compiled {
             Op::Call { callee, args, kwnames } => {
                 checked(self.vectorcall(regs, reg(regs, *callee), args, *kwnames))
             }
+            Op::CallMethod { recv, name, args, kwnames } => {
+                // Looks the method up on the type and calls it with the
+                // receiver, without materializing a bound method object.
+                let mut small: [Obj; 9] = [null_mut(); 9];
+                let mut big: Vec<Obj>;
+                let buf: &mut [Obj] = if args.len() < small.len() {
+                    &mut small[..]
+                } else {
+                    big = vec![null_mut(); args.len() + 1];
+                    &mut big[..]
+                };
+                buf[0] = reg(regs, *recv);
+                for (i, v) in args.iter().enumerate() {
+                    buf[i + 1] = reg(regs, *v);
+                }
+                let (kw, nkw) = if *kwnames == NONE {
+                    (null_mut(), 0)
+                } else {
+                    let kw = f.consts[*kwnames as usize].as_ptr();
+                    (kw, ffi::PyTuple_GET_SIZE(kw) as usize)
+                };
+                checked(ffi::PyObject_VectorcallMethod(
+                    f.consts[*name as usize].as_ptr(),
+                    buf.as_ptr(),
+                    args.len() + 1 - nkw,
+                    kw,
+                ))
+            }
             Op::CallEx { callee, args, kwargs } => {
                 let args = reg(regs, *args);
                 let tuple = if ffi::PyTuple_CheckExact(args) != 0 {
@@ -766,6 +901,444 @@ impl Compiled {
                 }
                 Ok(null_mut())
             }
+            Op::TensorSize { t, dim } => {
+                let mut info = TcfgTensorInfo::empty();
+                let size = match capi::api() {
+                    Some(api) if (api.tensor_info)(reg(regs, *t), &mut info) != 0 => info.size(*dim),
+                    _ => None,
+                };
+                match size {
+                    Some(size) => checked(ffi::PyLong_FromLongLong(size)),
+                    None => {
+                        set_error(
+                            ffi::PyExc_SystemError,
+                            "cfg_compile: tensor_size ran without its guard".to_string(),
+                        );
+                        Err(())
+                    }
+                }
+            }
+            Op::TensorDim(t) => {
+                let mut info = TcfgTensorInfo::empty();
+                match capi::api() {
+                    Some(api) if (api.tensor_info)(reg(regs, *t), &mut info) != 0 => {
+                        checked(ffi::PyLong_FromLong(info.ndim as _))
+                    }
+                    _ => {
+                        set_error(
+                            ffi::PyExc_SystemError,
+                            "cfg_compile: tensor_dim ran without its guard".to_string(),
+                        );
+                        Err(())
+                    }
+                }
+            }
+            Op::Dispatch(d) => match capi::api() {
+                Some(api) => self.exec_dispatch(regs, &d.slot, &d.operands, &d.fallback, api),
+                None => self.exec_op(regs, &d.fallback),
+            },
+            Op::Guard(_) => Ok(null_mut()),
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Dispatch sites
+    // ------------------------------------------------------------------
+
+    /// The receiver of a call whose callee is `x.name` in the generic graph.
+    fn method_receiver(&self, callee: V) -> Option<V> {
+        match self.analysis.def_op(&self.func, callee) {
+            Some(Op::LoadAttr(recv, _)) => Some(*recv),
+            _ => None,
+        }
+    }
+
+    /// The operands a site of the given kind takes for `op`, in the order the
+    /// C++ side expects them.
+    pub fn site_operands(&self, kind: i32, op: &Op) -> Option<Vec<V>> {
+        match (kind, op) {
+            (capi::TCFG_BINARY, Op::Binary(_, a, b)) | (capi::TCFG_BINARY, Op::Compare(_, a, b)) => {
+                Some(vec![*a, *b])
+            }
+            (capi::TCFG_UNARY, Op::Unary(_, a))
+            | (capi::TCFG_UNARY, Op::ToBool(a))
+            | (capi::TCFG_UNARY, Op::LoadAttr(a, _)) => Some(vec![*a]),
+            (capi::TCFG_CALL, Op::Call { callee, args, .. }) => {
+                let mut v = vec![*callee];
+                v.extend(args);
+                Some(v)
+            }
+            (capi::TCFG_METHOD, Op::Call { callee, args, .. }) => {
+                let mut v = vec![self.method_receiver(*callee)?];
+                v.extend(args);
+                Some(v)
+            }
+            (capi::TCFG_METHOD, Op::CallMethod { recv, args, .. }) => {
+                let mut v = vec![*recv];
+                v.extend(args);
+                Some(v)
+            }
+            _ => None,
+        }
+    }
+
+    /// The objects a site takes for the generic `op`. In generic code the
+    /// receiver of a method call is read from the bound method, since its own
+    /// register can be dead by the time of the call. `method` is the bound
+    /// method of a CallMethod. Returns None if an operand is unbound.
+    unsafe fn operand_ptrs(
+        &self,
+        regs: &[Obj],
+        kind: i32,
+        op: &Op,
+        operands: &[V],
+    ) -> Option<Vec<Obj>> {
+        let mut ptrs: Vec<Obj> = operands.iter().map(|v| reg(regs, *v)).collect();
+        if let (capi::TCFG_METHOD, Op::Call { callee, .. }) = (kind, op) {
+            let c = reg(regs, *callee);
+            if c.is_null() || ffi::PyCFunction_Check(c) == 0 {
+                return None;
+            }
+            ptrs[0] = ffi::PyCFunction_GetSelf(c);
+        }
+        ptrs.iter().all(|p| !p.is_null()).then_some(ptrs)
+    }
+
+    /// Decides whether `op`, about to run on the current registers, could be
+    /// a single tensor operation, and of which kind.
+    unsafe fn site_kind(&self, regs: &[Obj], op: &Op, api: &TcfgApi) -> Option<i32> {
+        let is_tensor = |v: V| -> bool {
+            let o = reg(regs, v);
+            let mut info = TcfgTensorInfo::empty();
+            !o.is_null() && (api.tensor_info)(o, &mut info) != 0
+        };
+        match op {
+            Op::Binary(_, a, b) | Op::Compare(_, a, b) => {
+                (is_tensor(*a) || is_tensor(*b)).then_some(capi::TCFG_BINARY)
+            }
+            Op::Unary(UnaryKind::Neg | UnaryKind::Pos | UnaryKind::Invert, a)
+            | Op::ToBool(a)
+            | Op::LoadAttr(a, _) => is_tensor(*a).then_some(capi::TCFG_UNARY),
+            Op::Call { callee, .. } => {
+                let c = reg(regs, *callee);
+                if c.is_null() || ffi::PyCFunction_Check(c) == 0 {
+                    return None;
+                }
+                // x.f(...) on a tensor: the callee is a builtin bound to the
+                // receiver. The receiver's register may already be released
+                // (the bound method keeps the object alive), so ask the
+                // method.
+                let this = ffi::PyCFunction_GetSelf(c);
+                let mut info = TcfgTensorInfo::empty();
+                match self.method_receiver(*callee) {
+                    Some(recv)
+                        if !this.is_null()
+                            && (api.tensor_info)(this, &mut info) != 0
+                            && (reg(regs, recv).is_null() || reg(regs, recv) == this) =>
+                    {
+                        Some(capi::TCFG_METHOD)
+                    }
+                    _ => Some(capi::TCFG_CALL),
+                }
+            }
+            Op::CallMethod { recv, .. } => is_tensor(*recv).then_some(capi::TCFG_METHOD),
+            _ => None,
+        }
+    }
+
+    /// Runs the generic `op` under a dispatch capture and tries to turn what
+    /// was recorded into a call site. Returns the result of the operation and
+    /// the site (or the reason there is none).
+    unsafe fn capture_exec(
+        &self,
+        regs: &mut [Obj],
+        op: &Op,
+        kind: i32,
+        api: &TcfgApi,
+    ) -> (OpResult, *mut capi::TcfgSite, Option<String>) {
+        let Some(operands) = self.site_operands(kind, op) else {
+            return (self.exec_op(regs, op), null_mut(), None);
+        };
+        // Operands are borrowed from the registers, which the operation does
+        // not touch; read them first so a call sees its callee.
+        let ptrs_before = self.operand_ptrs(regs, kind, op, &operands);
+        (api.capture_begin)();
+        // A method call needs the bound method it looked up for the analysis.
+        let mut method: Obj = null_mut();
+        let result = match op {
+            Op::CallMethod { recv, name, args, kwnames } => {
+                method = ffi::PyObject_GetAttr(
+                    reg(regs, *recv),
+                    self.func.consts[*name as usize].as_ptr(),
+                );
+                if method.is_null() {
+                    Err(())
+                } else {
+                    checked(self.vectorcall(regs, method, args, *kwnames))
+                }
+            }
+            _ => self.exec_op(regs, op),
+        };
+        let trace = (api.capture_end)();
+        let mut site = null_mut();
+        let mut reason = None;
+        if !trace.is_null() {
+            if let Ok(obj) = result {
+                if let (false, Some(ptrs)) = (obj.is_null(), ptrs_before) {
+                    let consts: Vec<u8> = operands
+                        .iter()
+                        .map(|v| matches!(self.analysis.def_op(&self.func, *v), Some(Op::Const(_))) as u8)
+                        .collect();
+                    let (callee, kwnames) = match op {
+                        Op::Call { callee, kwnames, .. } => (reg(regs, *callee), *kwnames),
+                        Op::CallMethod { kwnames, .. } => (method, *kwnames),
+                        _ => (null_mut(), NONE),
+                    };
+                    let pyop = TcfgPyOp {
+                        kind,
+                        n_operands: ptrs.len() as i32,
+                        operands: ptrs.as_ptr(),
+                        is_const: consts.as_ptr(),
+                        kwnames: if kwnames == NONE {
+                            null_mut()
+                        } else {
+                            self.func.consts[kwnames as usize].as_ptr()
+                        },
+                        callee,
+                        result: obj,
+                        flags: if self.options.skip_autograd {
+                            capi::TCFG_ALLOW_SKIP_AUTOGRAD
+                        } else {
+                            0
+                        },
+                    };
+                    let mut buf = [0 as c_char; 160];
+                    site = (api.site_from_trace)(trace, &pyop, buf.as_mut_ptr(), buf.len());
+                    if site.is_null() {
+                        reason = Some(
+                            std::ffi::CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned(),
+                        );
+                    }
+                }
+            }
+            (api.trace_free)(trace);
+        }
+        xdecref(method);
+        (result, site, reason)
+    }
+
+    /// Calls the kernel of the first site whose guards accept the operands.
+    /// When none does, the generic operation runs, under a capture so the
+    /// slot can learn the new case.
+    #[inline(always)]
+    unsafe fn exec_dispatch(
+        &self,
+        regs: &mut [Obj],
+        slot: &SiteSlot,
+        operands: &[V],
+        fallback: &Op,
+        api: &TcfgApi,
+    ) -> OpResult {
+        let mut small: [Obj; 12] = [null_mut(); 12];
+        let big: Vec<Obj>;
+        let ptr: *const Obj = if operands.len() <= small.len() {
+            for (i, v) in operands.iter().enumerate() {
+                small[i] = reg(regs, *v);
+            }
+            small.as_ptr()
+        } else {
+            big = operands.iter().map(|v| reg(regs, *v)).collect();
+            big.as_ptr()
+        };
+        self.exec_slot(regs, slot, ptr, fallback, api)
+    }
+
+    unsafe fn exec_slot(
+        &self,
+        regs: &mut [Obj],
+        slot: &SiteSlot,
+        ptr: *const Obj,
+        fallback: &Op,
+        api: &TcfgApi,
+    ) -> OpResult {
+        let n = slot.len();
+        for i in 0..n {
+            let mut status = 0i32;
+            let r = (api.site_call)(slot.get(i), ptr, &mut status);
+            if !r.is_null() {
+                slot.hits.fetch_add(1, Ordering::Relaxed);
+                return Ok(r);
+            }
+            if status != capi::TCFG_MISS {
+                return Err(());
+            }
+        }
+        let misses = slot.misses.fetch_add(1, Ordering::Relaxed);
+        if n < self.options.max_site_variants && misses < MAX_CAPTURE_ATTEMPTS as u64 * 4 {
+            let (result, site, _) = self.capture_exec(regs, fallback, slot.kind, api);
+            if !site.is_null() {
+                slot.push(site);
+            }
+            return result;
+        }
+        self.exec_op(regs, fallback)
+    }
+
+    /// One instruction in the profiling tier.
+    unsafe fn exec_profiled(
+        &self,
+        b: usize,
+        index: usize,
+        inst: &Inst,
+        regs: &mut [Obj],
+        api: &TcfgApi,
+    ) -> OpResult {
+        let (slot, attempts) = {
+            let st = self.state.borrow();
+            let bs = &st.blocks[b];
+            (bs.slots[index].clone(), bs.capture_attempts[index])
+        };
+        let result = if let Some(slot) = slot {
+            let ptrs = self
+                .site_operands(slot.kind, &inst.op)
+                .and_then(|operands| self.operand_ptrs(regs, slot.kind, &inst.op, &operands));
+            match ptrs {
+                Some(ptrs) => self.exec_slot(regs, &slot, ptrs.as_ptr(), &inst.op, api),
+                None => self.exec_op(regs, &inst.op),
+            }
+        } else if attempts >= MAX_CAPTURE_ATTEMPTS {
+            self.exec_op(regs, &inst.op)
+        } else {
+            match self.site_kind(regs, &inst.op, api) {
+                None => self.exec_op(regs, &inst.op),
+                Some(kind) => {
+                    let (result, site, reason) = self.capture_exec(regs, &inst.op, kind, api);
+                    let mut st = self.state.borrow_mut();
+                    let bs = &mut st.blocks[b];
+                    bs.capture_attempts[index] += 1;
+                    if !site.is_null() {
+                        let slot = SiteSlot::new(kind);
+                        slot.push(site);
+                        bs.slots[index] = Some(Arc::new(slot));
+                        bs.reasons[index] = None;
+                    } else if reason.is_some() {
+                        bs.reasons[index] = reason;
+                    }
+                    result
+                }
+            }
+        };
+        if let Ok(obj) = result {
+            if inst.dst != NONE {
+                self.state.borrow_mut().obs[inst.dst as usize].observe(obj);
+            }
+        }
+        result
+    }
+
+    // ------------------------------------------------------------------
+    // Guards, versions, specialization
+    // ------------------------------------------------------------------
+
+    #[inline(always)]
+    unsafe fn guard_holds(cond: &GuardCond, regs: &[Obj], api: Option<&TcfgApi>) -> bool {
+        let Some(api) = api else {
+            return false;
+        };
+        let obj = reg(regs, cond.value());
+        let mut info = TcfgTensorInfo::empty();
+        if obj.is_null() || (api.tensor_info)(obj, &mut info) == 0 {
+            return false;
+        }
+        match cond {
+            GuardCond::TensorRank { min_rank, .. } => info.ndim as u32 >= *min_rank,
+            GuardCond::DimRange { dim, lo, hi, .. } => {
+                matches!(info.size(*dim), Some(size) if size >= *lo && size <= *hi)
+            }
+        }
+    }
+
+    unsafe fn select(
+        &self,
+        b: usize,
+        regs: &[Obj],
+        api: Option<&TcfgApi>,
+    ) -> (Arc<BlockCode>, Mode) {
+        if !self.options.specialize || api.is_none() {
+            return (self.generic[b].clone(), Mode::Generic);
+        }
+        let mut st = self.state.borrow_mut();
+        let bs = &mut st.blocks[b];
+        bs.execs += 1;
+        for version in &bs.versions {
+            if version.entry_guards.iter().all(|g| Self::guard_holds(g, regs, api)) {
+                bs.spec_execs += 1;
+                return (version.clone(), Mode::Spec);
+            }
+        }
+        if !bs.versions.is_empty() {
+            bs.entry_misses += 1;
+        }
+        let mode = if bs.respec_left > 0 { Mode::Profile } else { Mode::Generic };
+        if mode == Mode::Profile {
+            // What the block is entered with is part of its profile.
+            let live: Vec<V> = self.analysis.live_in[b].iter().collect();
+            for v in live {
+                st.obs[v as usize].observe(reg(regs, v));
+            }
+        }
+        (self.generic[b].clone(), mode)
+    }
+
+    /// Called when a block finished a run in the profiling tier: runs the
+    /// pass pipeline over a fresh copy of the block and installs the result
+    /// as a new version.
+    unsafe fn specialize(&self, b: usize) {
+        let (slots, obs, speculate, id) = {
+            let mut st = self.state.borrow_mut();
+            let obs = st.obs.clone();
+            let bs = &mut st.blocks[b];
+            if bs.respec_left == 0 {
+                return;
+            }
+            bs.respec_left -= 1;
+            bs.profile_runs += 1;
+            let id = bs.next_version_id;
+            bs.next_version_id += 1;
+            // The last attempt must hold for every input.
+            (bs.slots.clone(), obs, bs.respec_left > 0, id)
+        };
+        let mut unit = Unit::from_generic(&self.func, b, speculate);
+        let cx = PassCx { cf: self, slots: &slots, obs: &obs };
+        let outcome = match self.pipeline.run(&mut unit, &cx) {
+            Ok(true) => spec::finalize(unit, self, id).map(Some),
+            Ok(false) => Ok(None),
+            Err(err) => {
+                // A failing pass must not take the program down with it: the
+                // block simply stays generic.
+                let msg = pyo3::Python::with_gil(|py| err.value_bound(py).to_string());
+                Err(format!("pass failed: {}", msg))
+            }
+        };
+        let mut st = self.state.borrow_mut();
+        match outcome {
+            Ok(Some(code)) => {
+                let guarded = !code.entry_guards.is_empty()
+                    || code.insts.iter().any(|i| matches!(i.op, Op::Guard(_)));
+                let bs = &mut st.blocks[b];
+                bs.versions.insert(0, Arc::new(code));
+                bs.versions.truncate(self.options.max_versions);
+                if !guarded {
+                    // Nothing can send this version back to profiling.
+                    bs.versions.truncate(1);
+                }
+            }
+            Ok(None) => st.blocks[b].respec_left = 0,
+            Err(msg) => {
+                st.blocks[b].respec_left = 0;
+                st.blocks[b].rejected = Some(msg.clone());
+                st.log.push(format!("b{}: {}", b, msg));
+            }
         }
     }
 
@@ -774,7 +1347,11 @@ impl Compiled {
     // ------------------------------------------------------------------
 
     unsafe fn exec(&self, regs: &mut [Obj]) -> Obj {
+        let api = capi::api();
         let func = &self.func;
+        if self.options.specialize {
+            self.state.borrow_mut().calls += 1;
+        }
         let mut cur: usize = 0;
         let mut pred: usize = usize::MAX;
         let mut back_edges: u32 = 0;
@@ -819,53 +1396,96 @@ impl Compiled {
                 }
             }
 
-            let code = self.generic.get_unchecked(cur);
-            for inst in &code.insts {
-                match self.exec_op(regs, &inst.op) {
-                    Ok(obj) => {
-                        if inst.dst != NONE {
-                            let old =
-                                std::mem::replace(regs.get_unchecked_mut(inst.dst as usize), obj);
-                            xdecref(old);
+            let (mut code, mut mode) = self.select(cur, regs, api);
+            let mut pc: usize = 0;
+            let next: usize = loop {
+                let mut resume: Option<usize> = None;
+                {
+                    let code_ref: &BlockCode = &code;
+                    let insts = &code_ref.insts;
+                    while pc < insts.len() {
+                        let inst = insts.get_unchecked(pc);
+                        let result = match &inst.op {
+                            Op::Guard(g) => {
+                                if Self::guard_holds(&g.cond, regs, api) {
+                                    Ok(null_mut())
+                                } else {
+                                    resume = Some(g.resume as usize);
+                                    break;
+                                }
+                            }
+                            op => {
+                                if mode == Mode::Profile {
+                                    self.exec_profiled(cur, pc, inst, regs, api.unwrap())
+                                } else {
+                                    self.exec_op(regs, op)
+                                }
+                            }
+                        };
+                        match result {
+                            Ok(obj) => {
+                                if inst.dst != NONE {
+                                    let old = std::mem::replace(
+                                        regs.get_unchecked_mut(inst.dst as usize),
+                                        obj,
+                                    );
+                                    xdecref(old);
+                                }
+                                for v in &inst.kills {
+                                    xdecref(take(regs, *v));
+                                }
+                            }
+                            Err(()) => return self.fail(inst.bc),
                         }
-                        for v in &inst.kills {
+                        pc += 1;
+                    }
+                    if resume.is_none() {
+                        if mode == Mode::Profile {
+                            self.specialize(cur);
+                        }
+                        let next = match &code_ref.term {
+                            Term::Jump(b) => *b as usize,
+                            Term::Br { cond, then_, else_ } => {
+                                let c = reg(regs, *cond);
+                                let truth = if c == ffi::Py_True() {
+                                    true
+                                } else if c == ffi::Py_False() {
+                                    false
+                                } else {
+                                    let r = ffi::PyObject_IsTrue(c);
+                                    if r < 0 {
+                                        return self.fail(func.blocks[cur].bc_start);
+                                    }
+                                    r != 0
+                                };
+                                (if truth { *then_ } else { *else_ }) as usize
+                            }
+                            Term::BrNull { v, null, nonnull } => {
+                                (if reg(regs, *v).is_null() { *null } else { *nonnull }) as usize
+                            }
+                            Term::Return(v) => return take(regs, *v),
+                            Term::Raise { exc, cause } => {
+                                let cause = if *cause == NONE { null_mut() } else { reg(regs, *cause) };
+                                do_raise(reg(regs, *exc), cause);
+                                let bc = code_ref.insts.last().map_or(func.blocks[cur].bc_start, |i| i.bc);
+                                return self.fail(bc);
+                            }
+                        };
+                        for v in &code_ref.term_kills {
                             xdecref(take(regs, *v));
                         }
+                        break next;
                     }
-                    Err(()) => return self.fail(inst.bc),
                 }
-            }
-            let next = match &code.term {
-                Term::Jump(b) => *b as usize,
-                Term::Br { cond, then_, else_ } => {
-                    let c = reg(regs, *cond);
-                    let truth = if c == ffi::Py_True() {
-                        true
-                    } else if c == ffi::Py_False() {
-                        false
-                    } else {
-                        let r = ffi::PyObject_IsTrue(c);
-                        if r < 0 {
-                            return self.fail(func.blocks[cur].bc_start);
-                        }
-                        r != 0
-                    };
-                    (if truth { *then_ } else { *else_ }) as usize
-                }
-                Term::BrNull { v, null, nonnull } => {
-                    (if reg(regs, *v).is_null() { *null } else { *nonnull }) as usize
-                }
-                Term::Return(v) => return take(regs, *v),
-                Term::Raise { exc, cause } => {
-                    let cause = if *cause == NONE { null_mut() } else { reg(regs, *cause) };
-                    do_raise(reg(regs, *exc), cause);
-                    let bc = code.insts.last().map_or(func.blocks[cur].bc_start, |i| i.bc);
-                    return self.fail(bc);
-                }
+                // A guard failed: this block goes back to the generic tier,
+                // from the instruction the guard names.
+                let mut st = self.state.borrow_mut();
+                st.blocks[cur].deopts += 1;
+                mode = if st.blocks[cur].respec_left > 0 { Mode::Profile } else { Mode::Generic };
+                drop(st);
+                code = self.generic[cur].clone();
+                pc = resume.unwrap();
             };
-            for v in &code.term_kills {
-                xdecref(take(regs, *v));
-            }
             pred = cur;
             cur = next;
         }
