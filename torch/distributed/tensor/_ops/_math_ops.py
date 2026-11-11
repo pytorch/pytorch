@@ -72,6 +72,7 @@ class _NormPartial(Partial):
     Converting from partial to replicate wants to ultimately get:
         Rank 0/1: [sqrt(t1^2 + t2^2 + t3^2 + t4^2)]
     This is achieved by: x^p -> allreduce sum -> x^(1/p).
+    For fp16/bf16 inputs these steps run in fp32 and the result is cast back.
     """
 
     norm_type: int | float = 2
@@ -108,7 +109,7 @@ class _NormPartial(Partial):
         return self._post_reduce_transform(reduced_tensor).to(dtype)
 
     def _pre_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
-        # Raise fp16/bf16 norms to the power in fp32: 256**2 overflows fp16.
+        # Raise fp16/bf16 norms to the power in fp32 so the power cannot overflow.
         if tensor.dtype in (torch.float16, torch.bfloat16):
             tensor = tensor.float()
         return tensor**self.norm_type
