@@ -42,6 +42,16 @@ using gemm_no_downcast_fn = void(*)(
 
 DECLARE_DISPATCH(gemm_no_downcast_fn, gemm_no_downcast_stub)
 
+TORCH_API void gemm_no_downcast_default(
+    at::ScalarType type,
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    const Scalar& alpha,
+    const void* a, int64_t lda,
+    const void* b, int64_t ldb,
+    const Scalar& beta,
+    void* c, int64_t ldc);
+
 template <typename scalar_t>
 void gemm(
     TransposeType transa, TransposeType transb,

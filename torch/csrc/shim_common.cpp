@@ -1137,11 +1137,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_default_real(
     const auto scalar_type = static_cast<c10::ScalarType>(dtype);
     const c10::Scalar alpha_scalar(alpha);
     const c10::Scalar beta_scalar(beta);
-    auto* default_impl = at::native::cpublas::gemm_no_downcast_stub.DEFAULT;
-    TORCH_CHECK(
-        default_impl != nullptr,
-        "cpublas::gemm_no_downcast_stub.DEFAULT is not registered");
-    default_impl(
+    at::native::cpublas::gemm_no_downcast_default(
         scalar_type,
         static_cast<at::native::TransposeType>(transa),
         static_cast<at::native::TransposeType>(transb),
