@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 # ruff: noqa: F841
 import contextlib
+import copy
 import functools
 import gc
 import importlib
@@ -28,6 +29,7 @@ from torch._inductor.cudagraph_trees import (
     AliasesPriorGraphOutput,
     cudagraphify_impl as tree_cudagraphify_impl,
     ExecutionState,
+    StorageWeakRefWrapper,
 )
 from torch._inductor.cudagraph_utils import PlaceholderInfo
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -35,6 +37,7 @@ from torch._inductor.utils import run_and_get_code
 from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
@@ -239,6 +242,16 @@ class CUDAGraphAPIOnlyTests(TestCase):
         existing_devices = tuple(containers)
         torch.compiler.cudagraph_mark_warmup_incomplete()
         self.assertEqual(tuple(containers), existing_devices)
+
+    def test_swap_weakref_does_not_affect_copies(self):
+        t = torch.empty(4)
+        wrapper = StorageWeakRefWrapper(t)
+        wrapper_copy = copy.deepcopy(wrapper)
+        self.assertIs(wrapper_copy.ref, wrapper.ref)
+        new_storage = torch.empty(4).untyped_storage()
+        wrapper.swap_weakref(new_storage._weak_ref())
+        self.assertEqual(wrapper.ref, StorageWeakRef(new_storage))
+        self.assertEqual(wrapper_copy.ref, StorageWeakRef(t.untyped_storage()))
 
 
 if HAS_CUDA_AND_TRITON:

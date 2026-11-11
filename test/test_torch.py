@@ -11494,6 +11494,35 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del x
         self.assertIsNone(w_x())
 
+    def test_storage_weak_ref_copy_shares_reference(self):
+        from torch.multiprocessing.reductions import StorageWeakRef
+
+        for copy_fn in (copy.copy, copy.deepcopy):
+            with self.subTest(copy_fn=copy_fn.__name__):
+                s = torch.UntypedStorage(2)
+                ref = StorageWeakRef(s)
+                self.assertIs(copy_fn(ref), ref)
+                self.assertIs(copy_fn({ref: 0}).popitem()[0], ref)
+                del s
+                self.assertTrue(ref.expired())
+
+    def test_storage_weak_ref_cdata_is_read_only(self):
+        from torch.multiprocessing.reductions import StorageWeakRef
+
+        ref = StorageWeakRef(torch.UntypedStorage(2))
+        with self.assertRaises(AttributeError):
+            ref.cdata = ref.cdata
+
+    def test_storage_weak_ref_pickle_raises(self):
+        from torch.multiprocessing.reductions import StorageWeakRef
+
+        s = torch.UntypedStorage(2)
+        ref = StorageWeakRef(s)
+        for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+            with self.subTest(protocol=protocol):
+                with self.assertRaisesRegex(TypeError, "cannot be pickled"):
+                    pickle.dumps({ref: 0}, protocol=protocol)
+
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
     def test_storage_dead_weak_ref(self):
         x = torch.UntypedStorage(2)

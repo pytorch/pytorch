@@ -1,11 +1,18 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import multiprocessing
 import os
 import threading
 from multiprocessing import reduction
 from multiprocessing.util import register_after_fork
+from typing import TYPE_CHECKING
 
 import torch
+
+
+if TYPE_CHECKING:
+    from typing import Any, NoReturn, Self
 
 
 try:
@@ -23,37 +30,57 @@ class StorageWeakRef:
     r"""A weak reference to a Storage.
 
     The cdata member is a Python number containing the integer representation of
-    the Storage pointer.
+    the Storage pointer. Each StorageWeakRef owns one weak reference to the
+    Storage and releases it in ``__del__``, so it is immutable: ``cdata`` is
+    read-only and copies return the same object. It cannot be pickled, because
+    ``cdata`` is only meaningful in the process that created it.
     """
 
-    __slots__ = ["cdata", "_free_weak_ref"]
+    __slots__ = ["_cdata", "_free_weak_ref"]
 
     def __init__(self, storage):
-        self.cdata = storage._weak_ref()
+        self._cdata = storage._weak_ref()
         # Save a direct reference to _free_weak_ref because the `torch` module
         # might be cleared during Python shutdown before this module is cleared.
         self._free_weak_ref = torch.Storage._free_weak_ref  # type: ignore[attr-defined]
 
     @classmethod
     def from_weakref(cls, cdata):
+        """Take ownership of ``cdata``, a weak reference returned by ``_weak_ref()``."""
         instance = cls.__new__(cls)
-        instance.cdata = cdata
+        instance._cdata = cdata
         instance._free_weak_ref = torch.Storage._free_weak_ref  # type: ignore[attr-defined]
         return instance
 
+    @property
+    def cdata(self) -> int:
+        return self._cdata
+
     def expired(self):
-        return torch.Storage._expired(self.cdata)  # type: ignore[attr-defined]
+        return torch.Storage._expired(self._cdata)  # type: ignore[attr-defined]
 
     def __del__(self):
-        self._free_weak_ref(self.cdata)
+        self._free_weak_ref(self._cdata)
+
+    def __copy__(self) -> Self:
+        return self
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Self:
+        return self
+
+    def __reduce__(self) -> NoReturn:
+        raise TypeError(
+            "StorageWeakRef cannot be pickled: cdata is a pointer that is only "
+            "valid in the process that created it"
+        )
 
     def __hash__(self):
-        return self.cdata
+        return self._cdata
 
     def __eq__(self, other):
-        if id(self) == id(other):
+        if self is other:
             return True
-        return self.cdata == other.cdata
+        return self._cdata == other._cdata
 
 
 class SharedCache(dict):
