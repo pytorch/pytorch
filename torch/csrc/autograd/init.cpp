@@ -1659,15 +1659,15 @@ static PyObject* get_dispatch_stack_at(
 // (e.g. read its shape_env). The mode stack APIs
 // (push/pop_torch_dispatch_stack, _len_torch_dispatch_stack) do not see it, so
 // a C++ mode is installed and removed only through set/unset_dispatch_mode.
-// The slot holds the mode's handle, so get/unset return the Python object it
-// was set with; see Note [C++ FakeTensorMode handle].
+// The slot owns the C++ mode. Lookups reuse or recreate its Python wrapper;
+// see Note [C++ FakeTensorMode Python object lifetime].
 static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(!Py_IsNone(mode));
 
   if (py::isinstance<c10::FakeTensorMode>(mode)) {
     // Raises for a bare _CppFakeTensorMode or a subclass of CppFakeTensorMode
-    auto handle = torch::fake_tensor::getCppFakeTensorModeHandle(mode);
+    auto cpp_mode = torch::fake_tensor::getCppFakeTensorMode(mode);
     TORCH_CHECK(
         !c10::impl::TorchDispatchModeTLS::get_mode(
              c10::impl::TorchDispatchModeKey::FAKE)
@@ -1676,7 +1676,7 @@ static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
     TORCH_CHECK(
         c10::impl::FakeTensorModeTLS::get_state() == nullptr,
         "trying to set the current C++ FakeTensorMode, but one already exists");
-    c10::impl::FakeTensorModeTLS::set_state(std::move(handle));
+    c10::impl::FakeTensorModeTLS::set_state(std::move(cpp_mode));
     Py_RETURN_NONE;
   }
 
@@ -1728,9 +1728,8 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
       TORCH_CHECK(
           !c10::impl::TorchDispatchModeTLS::get_mode(mode_key).has_value(),
           "both a Python FakeTensorMode and a C++ FakeTensorMode are set");
-      // Get the Python object first, as the slot's handle may hold the last
-      // reference to it. This raises, leaving the slot as it is, for a mode
-      // made in C++.
+      // Rebuild before clearing TLS, so a failed reconstruction leaves the
+      // installed mode and dispatch keys unchanged.
       auto py_mode = torch::fake_tensor::getCppFakeTensorModePyObj(cpp_mode);
       c10::impl::FakeTensorModeTLS::reset_state();
       return py_mode.release().ptr();

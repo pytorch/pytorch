@@ -122,7 +122,7 @@ class UnsetFakeTensorModeGuard {
   UnsetFakeTensorModeGuard& operator=(UnsetFakeTensorModeGuard&&) = delete;
 
  private:
-  std::shared_ptr<c10::FakeTensorModeHandle> mode_;
+  std::shared_ptr<c10::FakeTensorMode> mode_;
   bool fake_included_;
 };
 
@@ -302,13 +302,13 @@ void fakeFallback(
         if (input_mode == nullptr) {
           unsupported(op, "fake tensors without a mode");
         }
-        if (input_mode->mode != mode->mode) {
+        if (input_mode != mode) {
           unsupported(op, "fake tensors of another mode");
         }
         if (impl->real_tensor() != nullptr) {
           unsupported(op, "propagate_real_tensors");
         }
-        if (mode->mode->get_constant(impl) != nullptr) {
+        if (mode->get_constant(impl) != nullptr) {
           unsupported(op, "constant inputs");
         }
         input_impls.insert(impl);
