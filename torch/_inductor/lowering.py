@@ -62,7 +62,6 @@ from torch.utils._sympy.functions import (
     Mod,
     ModularIndexing,
 )
-from torch.utils._sympy.value_ranges import bound_sympy
 from torch.utils._triton import has_triton_reduction_ordering
 
 from .._dynamo.utils import import_submodule
@@ -7700,7 +7699,7 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
         # the accumulator identity, nan from sum / rnumel); eager returns nan.
         # Use value ranges rather than sympy assumptions: under
         # backed_size_oblivious, backed sizes are positive symbols that can be 0.
-        rnumel_range = bound_sympy(rnumel, V.graph.sizevars.shape_env.var_to_range)
+        rnumel_range = V.graph.sizevars.shape_env.bound_sympy(rnumel)
         if rnumel_range.lower <= 0:  # not == 0: the range of s - 1 can start at -1
 
             def empty_mean_fn(data):
