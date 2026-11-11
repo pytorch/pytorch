@@ -2162,6 +2162,21 @@ def lazy_skip_if(condition_fn, reason):
         return wrapper
     return decorator
 
+
+def _static_skip_if(condition_fn, reason):
+    r"""Like ``lazy_skip_if``, for conditions that cannot change before a test runs.
+
+    Use only for fixed environment or build properties. Arbitrary callbacks
+    belong in ``lazy_skip_if`` and are evaluated at run time.
+    """
+    def decorator(fn):
+        wrapped = lazy_skip_if(condition_fn, reason)(fn)
+        if not isinstance(fn, type):
+            add_skip_condition(wrapped, lambda cls: condition_fn(), reason)
+        return wrapped
+    return decorator
+
+
 requires_accelerator = lazy_skip_if(
     lambda: not torch.accelerator.is_available(),
     "requires accelerator",
@@ -2169,7 +2184,7 @@ requires_accelerator = lazy_skip_if(
 
 
 def skipIfCrossRef(fn):
-    return lazy_skip_if(lambda: TEST_WITH_CROSSREF, "test doesn't currently with crossref")(fn)
+    return _static_skip_if(lambda: TEST_WITH_CROSSREF, "test doesn't currently with crossref")(fn)
 
 class CrossRefMode(torch.overrides.TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
@@ -2311,6 +2326,8 @@ def xfailIfNoAcceleratorTriton(test_func):
         device_info = f" (device={spec!r})" if spec is not None else ""
         pytest.xfail(f"Triton not available{device_info}")
 
+    # The xfail can take precedence over a skip inside the wrapped test.
+    wrapper._skip_conditions = ()
     return wrapper
 
 
@@ -2357,6 +2374,7 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
                     raise unittest.SkipTest(msg)
                 else:
                     fn(*args, **kwargs)
+            add_skip_condition(wrapper, lambda cls: TEST_WITH_TORCHDYNAMO, msg)
             return wrapper
 
         if not isinstance(fn, type):
@@ -2379,6 +2397,7 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
                     raise unittest.SkipTest(msg)
                 else:
                     fn(*args, **kwargs)
+            add_skip_condition(wrapper, lambda cls: condition, msg)
             return wrapper
 
         if not isinstance(fn, type):
@@ -2480,6 +2499,7 @@ def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT exe
                     raise unittest.SkipTest(msg)
                 else:
                     fn(*args, **kwargs)
+            add_skip_condition(wrapper, lambda cls: GRAPH_EXECUTOR == ProfilingMode.LEGACY if GRAPH_EXECUTOR else None, msg)
             return wrapper
 
         if not isinstance(fn, type):
@@ -2615,6 +2635,7 @@ def skipIfNNModuleInlined(
                 else:
                     fn(*args, **kwargs)
 
+            add_skip_condition(wrapper, lambda cls: condition, msg)
             return wrapper
 
         if not isinstance(fn, type):
@@ -2628,7 +2649,7 @@ def skipIfNNModuleInlined(
     return decorator
 
 def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
-    decorator = lazy_skip_if(lambda: TEST_WITH_ROCM, f"skipIfRocm: {msg}")
+    decorator = _static_skip_if(lambda: TEST_WITH_ROCM, f"skipIfRocm: {msg}")
     return decorator(func) if func is not None else decorator
 
 def skipIfRocm_BUGGY(func=None, *, msg="test doesn't currently work on the ROCm stack"):
@@ -2669,6 +2690,7 @@ def runOnRocm(fn):
             fn(*args, **kwargs)
         else:
             raise unittest.SkipTest("test currently only works on the ROCm stack")
+    add_skip_condition(wrapper, lambda cls: not TEST_WITH_ROCM, "test currently only works on the ROCm stack")
     return wrapper
 
 def runOnRocmArch(arch: tuple[str, ...]):
@@ -2694,7 +2716,7 @@ def xfailIf(condition):
     return wrapper
 
 def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
-    decorator = lazy_skip_if(lambda: TEST_XPU, f"skipIfXpu: {msg}")
+    decorator = _static_skip_if(lambda: TEST_XPU, f"skipIfXpu: {msg}")
     return decorator(func) if func is not None else decorator
 
 def skipIfXpu_BUGGY(func=None, *, msg="test doesn't currently work on the XPU stack"):
@@ -2748,11 +2770,20 @@ def skipIfMPS(fn):
             raise unittest.SkipTest(reason)
         return fn(*args, **kwargs)
 
+    def would_skip(cls):
+        if not has_device_arg:
+            return TEST_MPS
+        from torch.testing._internal.common_device_type import _device_type_at_collection
+
+        device_type = _device_type_at_collection(cls)
+        return None if device_type is None else device_type == "mps"
+
+    add_skip_condition(wrapper, would_skip, reason)
     return wrapper
 
 
 def skipIfHpu(fn):
-    return lazy_skip_if(lambda: TEST_HPU, "test doesn't currently work with HPU")(fn)
+    return _static_skip_if(lambda: TEST_HPU, "test doesn't currently work with HPU")(fn)
 
 def skipIfHpu_BUGGY(fn):
     """Old skipIfHpu that silently drops classes from discovery. Migrate to skipIfHpu."""
@@ -2807,13 +2838,13 @@ def skipIfRocmVersionInRange(first_bad, first_good, reason):
     return lazy_skip_if(_should_skip, f"{reason} ({window})")
 
 def skipIfNotMiopenSuggestNHWC(fn):
-    return lazy_skip_if(
+    return _static_skip_if(
         lambda: not TEST_WITH_MIOPEN_SUGGEST_NHWC,
         "test doesn't currently work without MIOpen NHWC activation",
     )(fn)
 
 def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows stack"):
-    decorator = lazy_skip_if(lambda: IS_WINDOWS, f"skipIfWindows: {msg}")
+    decorator = _static_skip_if(lambda: IS_WINDOWS, f"skipIfWindows: {msg}")
     return decorator(func) if func is not None else decorator
 
 def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windows stack"):
@@ -3061,13 +3092,13 @@ def _test_function(fn, device):
     return run_test_function
 
 def skipIfNoXNNPACK(fn):
-    return lazy_skip_if(
+    return _static_skip_if(
         lambda: not torch.backends.xnnpack.enabled,  # type: ignore[attr-defined]
         "XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.",
     )(fn)
 
 def skipIfNoLapack(fn):
-    return lazy_skip_if(lambda: not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
+    return _static_skip_if(lambda: not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
 
 def skipIfNoNativeAot(op, *, device="cuda"):
     """Skip unless this op has native-AOT kernels embedded for the given device."""
@@ -3100,7 +3131,7 @@ def skipIfNotRegistered(op_name, message):
     return unittest.skip("Pytorch is compiled without Caffe2")
 
 def skipIfNoSciPy(fn):
-    return lazy_skip_if(lambda: not TEST_SCIPY, "test require SciPy, but SciPy not found")(fn)
+    return _static_skip_if(lambda: not TEST_SCIPY, "test require SciPy, but SciPy not found")(fn)
 
 def skip_if_pytest(fn):
     return lazy_skip_if(
@@ -3108,7 +3139,7 @@ def skip_if_pytest(fn):
     )(fn)
 
 def skipIfNoXPU(fn):
-    return lazy_skip_if(lambda: not TEST_XPU, "test required PyTorched compiled with XPU")(fn)
+    return _static_skip_if(lambda: not TEST_XPU, "test required PyTorched compiled with XPU")(fn)
 
 def skipIfCachingAllocatorDisabled(fn):
     """Skip if the CUDA/HIP caching allocator is not active. Covers both the
@@ -3198,6 +3229,7 @@ def slowTest(fn):
         else:
             fn(*args, **kwargs)
     wrapper.__dict__['slow_test'] = True
+    add_skip_condition(wrapper, lambda cls: not TEST_WITH_SLOW, "test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
     return wrapper
 
 
@@ -6431,6 +6463,7 @@ def skip_but_pass_in_sandcastle(reason):
         def wrapper(*args, **kwargs):
             print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
             return
+        wrapper._skip_conditions = ()
         return wrapper
 
     return decorator
@@ -6541,6 +6574,7 @@ def skip_but_pass_in_sandcastle_if(condition, reason):
                 @wraps(func)
                 def wrapper(*args, **kwargs):
                     print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
+                wrapper._skip_conditions = ()
                 return wrapper
             else:
                 func.__unittest_skip__ = True
@@ -6822,8 +6856,6 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Op doesn't support autograd for this dtype.")
         if not op.supports_autograd and not op.supports_forward_ad:
             self.skipTest("Skipped! autograd not supported.")
-
-
 
 
 # Base TestCase for NT tests; used to define common helpers, etc.
@@ -7149,6 +7181,8 @@ def patch_test_members(updates: dict[str, Any]):
                 for member, original_value in original_values.items():
                     setattr(self, member, original_value)
 
+        # Member updates can change the conditions of inner skip decorators.
+        wrapper._skip_conditions = ()
         return wrapper
     return decorator
 
