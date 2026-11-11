@@ -723,7 +723,7 @@ class DeferredTritonCallWrapper:
         """Generate scratch space allocations with runtime-known sizes."""
         kernel_name = self.kernel_name
         dtype_str = wrapper.codegen_dtype(torch.uint8)
-        device_type, _ = wrapper.codegen_device(torch.device(get_gpu_type())).split(
+        device_type, _ = wrapper.codegen_device(torch.device(wrapper.device)).split(
             ", "
         )
         device_ptr_type = wrapper.device_codegen.cpp_device_ptr()
@@ -1286,10 +1286,18 @@ class DeferredTritonCallWrapper:
 class CppWrapperGpu(CppWrapperCpu):
     """
     Generates cpp wrapper for running on GPU and calls CUDA kernels
+
+    A subclass that declares its own ``device`` (class attribute, or set before
+    ``__init__`` runs) keeps it -- the CppWrapperCpu hasattr pattern -- and the
+    value must name a device with registered op overrides, or
+    ``get_device_op_overrides`` below raises KeyError. ``create()`` returns
+    ``cls()``, so a subclass that inherits it must have an argument-free
+    ``__init__``.
     """
 
     def __init__(self) -> None:
-        self.device = get_gpu_type()
+        if not hasattr(self, "device"):
+            self.device = get_gpu_type()
         self.device_codegen = get_device_op_overrides(self.device)
         super().__init__()
         self.grid_id = count()
@@ -1328,16 +1336,17 @@ class CppWrapperGpu(CppWrapperCpu):
         self.used_cached_devices.add(device_str)
         return f"cached_torch_device_type_{device_str}"
 
-    @staticmethod
+    @classmethod
     def create(
+        cls,
         is_subgraph: bool,
         subgraph_name: str | None,
         parent_wrapper: PythonWrapperCodegen | None,
         partition_signatures: GraphPartitionSignature | None = None,
-    ):
+    ) -> Self:
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
-        return CppWrapperGpu()
+        return cls()
 
     def write_header(self):
         if V.graph.is_const_graph and not V.graph.is_dual_wrapper_mode:
