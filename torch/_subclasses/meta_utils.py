@@ -921,7 +921,7 @@ def _grad_context_compatible(
 # meta storages. This class will hold weak references to cached tensors
 # and tensor storages.
 class MetaConverter(Generic[_TensorT]):
-    def __init__(self, *, copy_data: bool = False) -> None:
+    def __init__(self, *, copy_data: bool = False, cpp_fakes: bool = False) -> None:
         # Maps MetaStorageId to UntypedStorage
         self.storage_memo: weakref.WeakValueDictionary[
             MetaStorageId, torch.UntypedStorage
@@ -940,7 +940,31 @@ class MetaConverter(Generic[_TensorT]):
         # bearing: FakeTensor relies on real tensor being set to exactly this
         # value
         self.copy_data = copy_data
+        # Whether the callback makes C++ fakes, which cannot hold views, sparse
+        # or mkldnn layouts or nested ints yet, so converting those raises
+        # UnsupportedFakeTensorException
+        self.cpp_fakes = cpp_fakes
         self.describer = MetaTensorDescriber(copy_data=copy_data)
+
+    def _check_cpp_fakes_support(self, t: MetaTensorDesc[Any]) -> None:
+        # C++ fakes cannot hold these yet, and making views and sparse tensors
+        # runs ops on the new fake (views under the Python dispatcher). The
+        # whole tensor, its grad and inner tensors included, is checked before
+        # anything is made for it.
+        from torch._subclasses.fake_tensor import UnsupportedFakeTensorException
+
+        is_sparse = t.is_sparse or is_sparse_compressed_layout(t.layout)
+        for kind, applies in (
+            ("views", t.is_view),
+            ("sparse", is_sparse),
+            ("mkldnn", t.is_mkldnn),
+            ("nested ints", t.nested_int is not None),
+        ):
+            if applies:
+                raise UnsupportedFakeTensorException(f"{kind} nyi in C++ fake tensors")
+        for inner in (t.grad, t.unwrapped, *(t.attrs or {}).values()):
+            if inner is not None:
+                self._check_cpp_fakes_support(inner)
 
     def successful(self) -> bool:
         return self.hit > 0 and self.miss == 0
@@ -2240,9 +2264,7 @@ class MetaConverter(Generic[_TensorT]):
                                 in_kernel_invocation_manager,
                             )
 
-                            mb_fake_mode = require_python_fake_mode(
-                                maybe_get_fake_mode(r)
-                            )
+                            mb_fake_mode = maybe_get_fake_mode(r)
                             if mb_fake_mode is not None:
                                 maybe_fake_mgr = in_kernel_invocation_manager(
                                     mb_fake_mode
@@ -2395,6 +2417,8 @@ class MetaConverter(Generic[_TensorT]):
         # Describe the tensor.  NB: do NOT disable ambient modes, we may need
         # to query them when figuring out what to put in here
         t_desc = self.describer.describe_tensor(t, trace=trace)
+        if self.cpp_fakes:
+            self._check_cpp_fakes_support(t_desc)
 
         if trace:
             if source is None:
