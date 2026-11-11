@@ -2313,6 +2313,7 @@ def _set_fake_constant(fake: Tensor, constant: Tensor | None) -> None: ...
 def _fake_tensor_to_list(t: Tensor) -> Any: ...
 
 class _CppFakeTensorMode:
+    static_shapes: _bool
     allow_meta: _bool
     _allow_unsafe_data_ptr_access: _bool
     allow_non_fake_inputs: _bool
@@ -2321,11 +2322,19 @@ class _CppFakeTensorMode:
     def fake_tensor_converter(self) -> FakeTensorConverter: ...
     @property
     def shape_env(self) -> ShapeEnv | None: ...
+    @property
+    def _creation_traceback(self) -> Any: ...
+    @overload
     def __init__(
         self,
         converter: FakeTensorConverter,
         shape_env: ShapeEnv | None,
+        creation_traceback: Any = None,
     ) -> None: ...
+    @overload
+    def __init__(self, capsule: object) -> None: ...
+    def _attach_python_object(self) -> None: ...
+
 
 def _from_meta_and_device(
     meta: Tensor, device: _device, mode: CppFakeTensorMode
