@@ -162,6 +162,7 @@ from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (  # noqa: F401
     clone_preserve_strides_offset,
+    CPU_TESTS_REQUESTED,
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
@@ -171,6 +172,7 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     IS_BIG_GPU,
     requires_block_ptr,
     requires_gpu,
+    RequiresCPUInductor,
     RUN_CPU,
     RUN_GPU,
     RUN_TPU,
@@ -21608,14 +21610,14 @@ def add_test_failures(
             test_failures[name] = new_failure
 
 
-if RUN_CPU:
+if CPU_TESTS_REQUESTED:
 
-    class SweepInputsCpuTest(SweepInputs2, TestCase):
+    class SweepInputsCpuTest(RequiresCPUInductor, SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
 
     SweepInputsCpuTest.populate()
 
-    class CpuTests(TestCase):
+    class CpuTests(RequiresCPUInductor, TestCase):
         common = check_model
         device = "cpu"
 
@@ -24224,9 +24226,9 @@ if RUN_GPU:
                 torch.compile(f)(x)
 
 
-if RUN_CPU:
+if CPU_TESTS_REQUESTED:
 
-    class CheckModelStrideSemanticsTest(TestCase):
+    class CheckModelStrideSemanticsTest(RequiresCPUInductor, TestCase):
         def test_check_model_exact_stride_ignores_insignificant_strides(self):
             def fn(x, y):
                 return torch.einsum("aij,ajk->aik", x, y)
@@ -24256,7 +24258,7 @@ if RUN_CPU:
                     torch.empty_strided((2, 2, 4), (8, 4, 1)),
                 )
 
-    class TestFull(TestCase):
+    class TestFull(RequiresCPUInductor, TestCase):
         def test_full_dtype(self):
             pytypes = (
                 bool,
@@ -24408,5 +24410,5 @@ def _run_and_get_stripped_kernels(
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if RUN_CPU or RUN_GPU or HAS_MPS:
+    if CPU_TESTS_REQUESTED or RUN_GPU or HAS_MPS:
         run_tests(needs="filelock")

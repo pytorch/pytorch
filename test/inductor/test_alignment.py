@@ -15,7 +15,12 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_CPU, RUN_GPU
+from torch.testing._internal.inductor_utils import (
+    CPU_TESTS_REQUESTED,
+    GPU_TYPE,
+    RequiresCPUInductor,
+    RUN_GPU,
+)
 
 
 try:
@@ -335,9 +340,9 @@ class CommonTemplate:
         self.common(dequantize, (data,), check_lowp=False, atol=1e-3, rtol=1e-3)
 
 
-if RUN_CPU:
+if CPU_TESTS_REQUESTED:
 
-    class CpuTests(TestCase):
+    class CpuTests(RequiresCPUInductor, TestCase):
         common = check_model
         device = "cpu"
 
@@ -354,5 +359,5 @@ if RUN_GPU:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if RUN_CPU or RUN_GPU:
+    if CPU_TESTS_REQUESTED or RUN_GPU:
         run_tests()
