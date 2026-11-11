@@ -5193,12 +5193,12 @@ class DefaultDictVariable(ConstDictVariable):
         return super().is_python_constant()
 
     def as_python_constant(self) -> Any:
-        if not self.default_factory.is_python_constant():
+        is_constant, factory = self.default_factory.try_as_python_constant()
+        if not is_constant:
             raise AsPythonConstantNotImplementedError(
                 self,
                 "defaultdict default_factory is not a Python constant",
             )
-        factory = self.default_factory.as_python_constant()
         # pyrefly: ignore[no-matching-overload]
         return collections.defaultdict(factory, super().as_python_constant())
 

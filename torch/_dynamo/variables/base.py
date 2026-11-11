@@ -1975,7 +1975,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         return type_qualified_name(type_)
 
     def as_python_constant(self) -> Any:
-        """For constants"""
+        r"""as_python_constant() -> Any
+
+        Return a compile-time Python value, or raise ``NotImplementedError``.
+        """
         raise AsPythonConstantNotImplementedError(self)
 
     def guard_as_python_constant(self) -> Any:
@@ -1990,12 +1993,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 hints=[],
             )
 
-    def is_python_constant(self) -> bool:
+    def try_as_python_constant(self) -> tuple[bool, Any]:
+        r"""try_as_python_constant() -> tuple[bool, Any]
+
+        Call :meth:`as_python_constant` once, returning ``(True, value)`` on
+        success or ``(False, None)`` for ``NotImplementedError``.
+        """
         try:
-            self.as_python_constant()
-            return True
+            return True, self.as_python_constant()
         except NotImplementedError:
-            return False
+            return False, None
+
+    def is_python_constant(self) -> bool:
+        return self.try_as_python_constant()[0]
 
     def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         # Mirrors CPython's tp_as_number->nb_bool slot.

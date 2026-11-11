@@ -55,6 +55,7 @@ from ..utils import (
     unpack_iterable,
 )
 from .base import (
+    AsPythonConstantNotImplementedError,
     AttributeMutationExisting,
     AttributeMutationNew,
     AttrMutationKind,
@@ -200,10 +201,16 @@ class ConstDictVariable(VariableTracker):
             self._checking_python_constant = False
 
     def as_python_constant(self) -> dict[Any, Any]:
-        return {
-            k.vt.as_python_constant(): v.as_python_constant()
-            for k, v in self.items.items()
-        }
+        items = {}
+        for k, v in self.items.items():
+            is_constant, key = k.vt.try_as_python_constant()
+            if not is_constant:
+                raise AsPythonConstantNotImplementedError(self)
+            is_constant, value = v.try_as_python_constant()
+            if not is_constant:
+                raise AsPythonConstantNotImplementedError(self)
+            items[key] = value
+        return items
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         items = [

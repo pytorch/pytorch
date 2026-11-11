@@ -39,7 +39,14 @@ from ..utils import (
     tracked_repr,
     unpack_iterable,
 )
-from .base import Member, Method, readonly_setter, ValueMutationNew, VariableTracker
+from .base import (
+    AsPythonConstantNotImplementedError,
+    Member,
+    Method,
+    readonly_setter,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable
 
@@ -580,7 +587,13 @@ class SetVariable(BaseSetVariable):
         return set
 
     def as_python_constant(self) -> Any:
-        return {k.vt.as_python_constant() for k in self.set_items}
+        items = set()
+        for item in self.set_items:
+            is_constant, value = item.vt.try_as_python_constant()
+            if not is_constant:
+                raise AsPythonConstantNotImplementedError(self)
+            items.add(value)
+        return items
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
@@ -941,7 +954,13 @@ class OrderedSetVariable(BaseSetVariable):
         return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
 
     def as_python_constant(self) -> OrderedSet[Any]:
-        return OrderedSet([k.vt.as_python_constant() for k in self.items])
+        items = []
+        for item in self.items:
+            is_constant, value = item.vt.try_as_python_constant()
+            if not is_constant:
+                raise AsPythonConstantNotImplementedError(self)
+            items.append(value)
+        return OrderedSet(items)
 
     def python_type(self) -> type[OrderedSet[Any]]:
         return OrderedSet
@@ -1160,7 +1179,13 @@ class FrozensetVariable(BaseSetVariable):
         return frozenset
 
     def as_python_constant(self) -> Any:
-        return frozenset({k.vt.as_python_constant() for k in self.set_items})
+        items = set()
+        for item in self.set_items:
+            is_constant, value = item.vt.try_as_python_constant()
+            if not is_constant:
+                raise AsPythonConstantNotImplementedError(self)
+            items.add(value)
+        return frozenset(items)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
@@ -1299,9 +1324,13 @@ class DictKeySetVariable(BaseSetVariable):
         return dict_keys
 
     def as_python_constant(self) -> Any:
-        return dict.fromkeys(
-            {k.vt.as_python_constant() for k in self.set_items}, None
-        ).keys()
+        items = set()
+        for item in self.set_items:
+            is_constant, value = item.vt.try_as_python_constant()
+            if not is_constant:
+                raise AsPythonConstantNotImplementedError(self)
+            items.add(value)
+        return dict.fromkeys(items, None).keys()
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # dictview_repr in Objects/dictobject.c: the type name around a list repr.
