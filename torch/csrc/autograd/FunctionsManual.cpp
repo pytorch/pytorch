@@ -9050,4 +9050,20 @@ std::tuple<Tensor, Tensor> philox_uniform_bounds_backward(
       grad_input_mask[1] ? at::sum_to(grad * u, high.sym_sizes()) : Tensor()};
 }
 
+std::tuple<Tensor, Tensor> philox_normal_params_backward(
+    const Tensor& grad,
+    const Tensor& key,
+    const Tensor& mean,
+    const Tensor& std,
+    std::array<bool, 2> grad_input_mask) {
+  if (!grad.defined()) {
+    return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
+  }
+  // The standard sample is regenerated from the key rather than saved.
+  auto z = at::empty_like(grad)._philox_normal_(key);
+  return {
+      grad_input_mask[0] ? at::sum_to(grad, mean.sym_sizes()) : Tensor(),
+      grad_input_mask[1] ? at::sum_to(grad * z, std.sym_sizes()) : Tensor()};
+}
+
 } // namespace torch::autograd::generated::details
