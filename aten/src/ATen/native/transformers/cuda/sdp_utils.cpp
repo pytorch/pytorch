@@ -14,9 +14,8 @@
 #include <c10/util/irange.h>
 #include <array>
 #include <c10/util/Exception.h>
-#include <c10/util/string_view.h>
-
 #include <algorithm>
+#include <string_view>
 #include <vector>
 
 #if AT_CUDNN_ENABLED()
@@ -169,7 +168,7 @@ inline int aotriton_max_hdim() {
     // Do not lift the cap on an AOTriton bump alone; hdim > 256 has to be
     // revalidated on gfx11xx hardware first.
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    const c10::basic_string_view<char> arch(dprops->gcnArchName);
+    const std::string_view arch(dprops->gcnArchName);
     if (arch.starts_with("gfx11")) {
       return 256;
     }

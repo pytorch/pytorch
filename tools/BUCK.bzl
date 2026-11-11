@@ -256,15 +256,28 @@ def define_tools_targets(
         ],
     )
 
+    python_library(
+        name = "pyi",
+        srcs = ["pyi/gen_pyi.py"],
+        base_module = "tools",
+        deps = [
+            ":autograd",
+            torchgen_deps,
+        ],
+    )
+
     python_test(
         name = "test_codegen",
         srcs = [
             "test/test_codegen.py",
         ],
+        package_style = "inplace",
         contacts = contacts,
         visibility = ["PUBLIC"],
         deps = [
+            "//xplat/caffe2:codegen_test_utils",
             torchgen_deps,
             ":autograd",
+            ":pyi",
         ],
     )
