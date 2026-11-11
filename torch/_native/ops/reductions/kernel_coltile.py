@@ -658,8 +658,6 @@ def reduce_ordered_col(
             if split:
                 return None
             config = OrderedColConfig(0)
-        else:
-            _check_ordered_mapping(config.worker_warps, config.tile_columns)
     op = _OrderedColReduce(
         trait,
         plan,
