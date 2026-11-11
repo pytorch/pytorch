@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 
+import unittest
 from collections.abc import Callable
 
 import torch
@@ -23,6 +24,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_ROCM,
 )
+from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -326,6 +328,10 @@ class TestNativeMatmulRowReduction(TestCase):
             "local_xindex_mask)"
         ).run(code)
 
+    @unittest.skipIf(
+        GPU_TYPE == "xpu" and not Xe2_Or_Later,
+        "https://github.com/pytorch/pytorch/issues/203499",
+    )
     def test_matmul_output_precision(self):
         def f(x, weight):
             return (x @ weight).sum(-1)
