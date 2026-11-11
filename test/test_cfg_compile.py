@@ -80,6 +80,9 @@ class TestCallSite(TestCase):
         self.rejects(other_tensor, "unary", lambda: -x, y)
         extra_tensor = "a tensor argument does not come from an operand"
         self.rejects(extra_tensor, "unary", lambda: x + y, x)
+        index = torch.tensor([0])
+        indexed = torch.ops.aten.index.Tensor
+        self.rejects(extra_tensor, "unary", lambda: indexed(x, [index]), x)
         not_a_tensor = "unsupported operand type tuple"
         self.rejects(not_a_tensor, "unary", lambda: torch.stack((x, y)), (x, y))
         self.rejects("the result is not the kernel output", "unary", lambda: [-x], x)
@@ -242,6 +245,56 @@ class TestCallSite(TestCase):
         with self.assertRaisesRegex(RuntimeError, "must match"):
             site.call(x, torch.randn(4))
         self.assertEqual(site.call(x, y), x + y)
+
+    def test_site_called_from_inside_another_site(self):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        x, y = torch.ones(3), torch.ones(3)
+        state = {"inner": None, "nest": False}
+
+        class CallsASite(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if state["inner"] is None:
+                    state["inner"] = torch._C._cfg_make_site(
+                        "binary", lambda: x * y, (x, y)
+                    )[1]
+                elif state["nest"]:
+                    state["nest"] = False
+                    state["inner"].call(x, y)
+                return func(*args, **(kwargs or {}))
+
+        with CallsASite():
+            _ = x + y
+            outer = self.site("binary", lambda: x + y, x, y)[1]
+            state["nest"] = True
+            self.assertEqual(outer.call(x, y), torch.full((3,), 2.0))
+        self.assertFalse(state["nest"])
+
+    def test_miss_on_a_sequence_element_leaves_no_error(self):
+        m = torch.randn(2, 3)
+        site = self.site(
+            "method", lambda: m.reshape((3, 2)), m, (3, 2), callee=m.reshape
+        )[1]
+        self.assertEqual(site.call(m, (6, 1)), m.reshape((6, 1)))
+        self.assertIs(site.call(m, (6, 1.0)), NotImplemented)
+
+    def test_rejected_site_releases_its_references(self):
+        import sys
+
+        x = torch.randn(3)
+        before = sys.getrefcount(torch.sum)
+        for _ in range(100):
+            self.rejects(
+                "keyword 'axis' is not a schema argument",
+                "call",
+                lambda: torch.sum(x, axis=0),
+                torch.sum,
+                x,
+                0,
+                callee=torch.sum,
+                kwnames=("axis",),
+            )
+        self.assertLess(sys.getrefcount(torch.sum) - before, 10)
 
     def test_autograd_is_kept_by_default(self):
         x, y = torch.randn(3), torch.randn(3)
