@@ -278,6 +278,16 @@ TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
     return;
   }
 
+  // Duplicate indices race in the copy kernel. Match CUDA/XPU: in deterministic
+  // mode, route through index_put_, whose serial path makes the last write win.
+  if (globalContext().deterministicAlgorithms()) {
+    torch::List<std::optional<Tensor>> indices;
+    indices.resize(dim + 1);
+    indices.set(dim, index.to(at::kLong));
+    result.index_put_(indices, source, /*accumulate=*/false);
+    return;
+  }
+
   const auto use_32 = canUse32BitIndexMath(result) && canUse32BitIndexMath(source) && canUse32BitIndexMath(index);
   auto dense_or_strided = is_dense ? "dense" : "strided";
   auto long_or_int = (index.scalar_type() == ScalarType::Long) ? "long" : "int";
