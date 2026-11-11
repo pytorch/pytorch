@@ -15,9 +15,9 @@ kernel void lstm_cell_forward(
     constant uint& hidden_size,
     uint2 pos [[thread_position_in_grid]]) {
   const idx_t h = hidden_size, col = pos.x, row = pos.y;
-  const idx_t idx = row * h + col, offset = row * 4 * h + col;
+  const idx_t idx = row * h + col, offset = row * kLstmGates * h + col;
   float4 g;
-  for (uint k = 0; k < 4; ++k) {
+  for (uint k = 0; k < kLstmGates; ++k) {
     g[k] = float(gates[offset + k * h]) + float(recurrent[offset + k * h]) +
         float(bias[col + k * h]);
   }
@@ -27,7 +27,7 @@ kernel void lstm_cell_forward(
   const float c = g.y * float(cx[idx]) + g.x * g.z;
   cy[idx] = T(c);
   hy[idx] = T(g.w * precise::tanh(c));
-  for (uint k = 0; k < 4; ++k) {
+  for (uint k = 0; k < kLstmGates; ++k) {
     gates[offset + k * h] = T(g[k]);
   }
 }
@@ -44,9 +44,9 @@ kernel void lstm_cell_backward(
     constant uint& hidden_size,
     uint2 pos [[thread_position_in_grid]]) {
   const idx_t h = hidden_size, col = pos.x, row = pos.y;
-  const idx_t idx = row * h + col, offset = row * 4 * h + col;
+  const idx_t idx = row * h + col, offset = row * kLstmGates * h + col;
   float4 g;
-  for (uint k = 0; k < 4; ++k) {
+  for (uint k = 0; k < kLstmGates; ++k) {
     g[k] = float(gates[offset + k * h]);
   }
   const float grad_h = float(dy[idx]) + float(dh[idx]);
@@ -60,7 +60,7 @@ kernel void lstm_cell_backward(
           g.y * (1.0f - g.y),
           1.0f - g.z * g.z,
           g.w * (1.0f - g.w));
-  for (uint k = 0; k < 4; ++k) {
+  for (uint k = 0; k < kLstmGates; ++k) {
     dg[offset + k * h] = T(grad[k]);
   }
 }

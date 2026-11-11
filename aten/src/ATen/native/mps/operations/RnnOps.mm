@@ -79,37 +79,40 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
   TORCH_CHECK(hx[0].size(2) == hx[1].size(2), "LSTM with projections is not currently supported with MPS.");
   auto layer_input = (batch_first ? input.transpose(0, 1) : input).contiguous();
   const auto seq_len = layer_input.size(0), batch = layer_input.size(1), hidden = hx[0].size(2);
-  const int64_t directions = bidirectional ? 2 : 1, stride = has_biases ? 4 : 2;
+  const int64_t directions = bidirectional ? 2 : 1;
+  const int64_t stride = has_biases ? 4 : 2;
+  const int64_t gate_size = kLstmGates * hidden;
   TORCH_CHECK(seq_len > 0, "Expected sequence length to be larger than 0 in RNN");
   const bool dropout = train && dropout_p > 0 && num_layers > 1;
-  auto gates = at::empty({num_layers * directions, seq_len, batch, 4 * hidden}, input.options());
+  auto gates = at::empty({num_layers * directions, seq_len, batch, gate_size}, input.options());
   // Keep the initial states followed by each recurrent step for backward.
   auto states = at::empty({num_layers * directions, 2, seq_len + 1, batch, hidden}, input.options());
   auto layers = at::empty({(num_layers - 1) * (dropout ? 2 : 1), seq_len, batch, directions * hidden}, input.options());
   auto hy = at::empty(hx[0].sizes(), input.options()), cy = at::empty(hx[1].sizes(), input.options());
-  // A cell step indexes batch rows of 4 * hidden gates, shaped like recurrent_gates.
-  auto recurrent_gates = at::empty({batch, 4 * hidden}, input.options());
+  // A cell step indexes batch rows of gate_size gates, shaped like recurrent_gates.
+  auto recurrent_gates = at::empty({batch, gate_size}, input.options());
   auto pso = lib.getPipelineStateForFunc(fmt::format(
       "lstm_cell_forward_{}{}", scalarToMetalTypeString(input), mtlIdxSuffix(offsetsFitIn<uint32_t>(recurrent_gates))));
   for (const auto layer : c10::irange(num_layers)) {
     std::vector<Tensor> outputs;
+    outputs.reserve(directions);
     for (const auto direction : c10::irange(directions)) {
       const auto index = layer * directions + direction, param = index * stride;
-      TORCH_CHECK_VALUE(params[param].size(0) == 4 * hidden && params[param + 1].size(0) == 4 * hidden,
+      TORCH_CHECK_VALUE(params[param].size(0) == gate_size && params[param + 1].size(0) == gate_size,
                         "LSTM weights must have ",
-                        4 * hidden,
+                        gate_size,
                         " rows, got ",
                         params[param].sizes(),
                         " and ",
                         params[param + 1].sizes());
       auto x = direction ? layer_input.flip({0}) : layer_input;
       auto z = gates[index], h = states[index][0], c = states[index][1];
-      auto z_flat = z.view({seq_len * batch, 4 * hidden});
+      auto z_flat = z.view({seq_len * batch, gate_size});
       lstm_mm(z_flat, x.reshape({seq_len * batch, x.size(2)}), params[param].t());
       h[0].copy_(hx[0][index]);
       c[0].copy_(hx[1][index]);
-      auto bias = has_biases ? params[param + 2].add(params[param + 3]).expand({4 * hidden}).contiguous()
-                             : at::zeros({4 * hidden}, input.options());
+      auto bias = has_biases ? params[param + 2].add(params[param + 3]).expand({gate_size}).contiguous()
+                             : at::zeros({gate_size}, input.options());
       const auto recurrent_weight = params[param + 1].contiguous().t();
       for (const auto step : c10::irange(seq_len)) {
         lstm_mm(recurrent_gates, h[step], recurrent_weight);
@@ -152,11 +155,13 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                                                bool train,
                                                                                bool bidirectional,
                                                                                bool batch_first) {
-  // z_state: activated input, forget, cell and output gates, [layers * directions, seq_len, batch, 4 * hidden].
+  // z_state: activated input, forget, cell and output gates, [layers * directions, seq_len, batch, gate_size].
   // cell_state_fwd: hidden (0) and cell (1) with initial states, [layers * directions, 2, seq_len + 1, batch, hidden].
   auto x = (batch_first ? input.transpose(0, 1) : input).contiguous();
   const auto seq_len = x.size(0), batch = x.size(1), hidden = hx[0].size(2);
-  const int64_t directions = bidirectional ? 2 : 1, stride = has_biases ? 4 : 2;
+  const int64_t directions = bidirectional ? 2 : 1;
+  const int64_t stride = has_biases ? 4 : 2;
+  const int64_t gate_size = kLstmGates * hidden;
   const bool dropout = train && dropout_p > 0 && num_layers > 1;
   auto grad_y = grad_y_opt.value_or(Tensor());
   grad_y = grad_y.defined() ? (batch_first ? grad_y.transpose(0, 1) : grad_y)
@@ -165,7 +170,7 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
   grad_h = grad_h.defined() ? grad_h.clone(MemoryFormat::Contiguous) : at::zeros(hx[0].sizes(), input.options());
   grad_c = grad_c.defined() ? grad_c.clone(MemoryFormat::Contiguous) : at::zeros(hx[1].sizes(), input.options());
   std::vector<Tensor> grad_params(params.size());
-  // A cell step indexes batch rows of 4 * hidden gates.
+  // A cell step indexes batch rows of gate_size gates.
   auto pso = lib.getPipelineStateForFunc(fmt::format(
       "lstm_cell_backward_{}{}", scalarToMetalTypeString(input), mtlIdxSuffix(offsetsFitIn<uint32_t>(z_state[0][0]))));
   for (int64_t layer = num_layers - 1; layer >= 0; --layer) {
@@ -183,14 +188,14 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
         lstm_cell(pso, dc, gates[step], c[step], c[step + 1], dy[step], dh, dc, dg[step]);
         lstm_mm(dh, dg[step], recurrent_weight);
       }
-      auto dg_flat = dg.view({seq_len * batch, 4 * hidden});
+      auto dg_flat = dg.view({seq_len * batch, gate_size});
       const auto input_size = layer_input.size(2);
-      grad_params[param + 1] = at::empty({4 * hidden, hidden}, input.options());
+      grad_params[param + 1] = at::empty({gate_size, hidden}, input.options());
       lstm_mm(grad_params[param + 1], dg_flat.t(), h.narrow(0, 0, seq_len).reshape({seq_len * batch, hidden}));
       if (direction) {
-        dg_flat = dg.flip({0}).view({seq_len * batch, 4 * hidden});
+        dg_flat = dg.flip({0}).view({seq_len * batch, gate_size});
       }
-      grad_params[param] = at::empty({4 * hidden, input_size}, input.options());
+      grad_params[param] = at::empty({gate_size, input_size}, input.options());
       lstm_mm(grad_params[param], dg_flat.t(), layer_input.reshape({seq_len * batch, input_size}));
       auto grad_input_flat = grad_input.view({seq_len * batch, input_size});
       // grad_input starts at zero, so the first direction doesn't need to read it.
