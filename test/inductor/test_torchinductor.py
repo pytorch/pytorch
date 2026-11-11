@@ -68,6 +68,7 @@ from torch._inductor.utils import (
     add_scheduler_init_hook,
     run_and_get_code,
     run_and_get_cpp_code,
+    run_and_get_graph_lowering,
     run_and_get_kernels,
     run_and_get_triton_code,
     run_fw_bw_and_get_code,
@@ -17536,6 +17537,200 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             check_lowp=False,
         )
 
+    @config.patch(implicit_fallbacks=True, force_disable_caches=True)
+    @parametrize("tag", ("needs_fixed_stride_order", "needs_exact_strides"))
+    @parametrize("view_first", (False, True))
+    def test_custom_op_layout_constraint_shares_input_with_transpose(
+        self, tag, view_first
+    ):
+        # See Note [Constrain shared storage inputs first]. needs_exact_strides is
+        # the default for untagged custom ops.
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "add_t(Tensor a, Tensor b) -> Tensor", tags=(getattr(torch.Tag, tag),)
+            )
+            lib.impl("add_t", lambda a, b: a + b.T, "CompositeExplicitAutograd")
+
+            def fn(x):
+                z = (x * 2).relu()
+                a, b = (z.T, z) if view_first else (z, z.T)
+                return torch.ops.mylib.add_t(a, b)
+
+            x = torch.randn(7, 3, device=self.device).T
+            out, (graph,) = run_and_get_graph_lowering(
+                torch.compile(fn, fullgraph=True), x
+            )
+            self.assertEqual(out, fn(x))
+            (kernel,) = [
+                op
+                for op in graph.operations
+                if isinstance(op, torch._inductor.ir.FallbackKernel)
+            ]
+            self.assertEqual(len({inp.get_name() for inp in kernel.inputs}), 1)
+
+    # reorder_for_locality would move read_t, whose result only the output uses,
+    # after zero_add_t_.
+    @config.patch(
+        implicit_fallbacks=True, force_disable_caches=True, reorder_for_locality=False
+    )
+    @parametrize("tag", ("needs_fixed_stride_order", "needs_exact_strides"))
+    @parametrize(
+        "source,copy_kind",
+        (
+            ("pointwise", "clone"),
+            ("mm", "clone"),
+            ("shared", "clone"),
+            ("shared", "mul"),
+            ("shared", "cat"),
+        ),
+    )
+    @parametrize("write", ("copy", "source"))
+    @parametrize("use_v2", (False, True))
+    def test_custom_op_layout_constraint_keeps_a_written_input_apart(
+        self, tag, source, copy_kind, write, use_v2
+    ):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "zero_add_t_(Tensor(a!) x, Tensor y) -> ()",
+                tags=(getattr(torch.Tag, tag),),
+            )
+            lib.define(
+                "read_t(Tensor x, Tensor y) -> Tensor",
+                tags=(getattr(torch.Tag, tag),),
+            )
+            lib.impl("read_t", lambda x, y: x + y.T, "CompositeExplicitAutograd")
+
+            def zero_add_t_(x, y):
+                x.zero_()
+                x.add_(y.T + 1)
+
+            lib.impl("zero_add_t_", zero_add_t_, "CompositeExplicitAutograd")
+
+            def fn(x, y):
+                z = torch.mm(x, y) if source == "mm" else (x * 2).relu()
+                a = (
+                    torch.ops.mylib.read_t(z, z.T)
+                    if source == "shared"
+                    else torch.zeros_like(z)
+                )
+                if copy_kind == "cat":
+                    copied = torch.cat(z.split([3, 4], dim=1), dim=1)
+                else:
+                    copied = z * 1 if copy_kind == "mul" else z.clone()
+                w, wt = (copied, z.T) if write == "copy" else (z, copied.T)
+                torch.ops.mylib.zero_add_t_(w, wt)
+                return a, w + 1
+
+            # cat returns a contiguous tensor, and the layout constraint would copy a
+            # z with other strides to match it, keeping the arguments apart anyway.
+            x = torch.randn(7, 3, device=self.device).T
+            if copy_kind == "cat":
+                x = x.contiguous()
+            y = torch.randn(7, 7, device=self.device)
+            with config.patch(enable_auto_functionalized_v2=use_v2):
+                self.assertEqual(torch.compile(fn, fullgraph=True)(x, y), fn(x, y))
+
+    # reorder_for_locality would move read_t, whose result only the output uses,
+    # after zero_then_read_t_.
+    @config.patch(
+        implicit_fallbacks=True, force_disable_caches=True, reorder_for_locality=False
+    )
+    @parametrize("tag", ("needs_fixed_stride_order", "needs_exact_strides"))
+    @parametrize("inputs", ("clone", "overlap"))
+    @parametrize("use_v2", (False, True))
+    def test_custom_op_layout_constraint_keeps_split_outputs_apart(
+        self, tag, inputs, use_v2
+    ):
+        # The outputs of cat([a, b]).split(...) become a and b. With b = z.clone(),
+        # which remove_noop_ops drops, both become z, and with overlapping slices of
+        # z they overlap. read_t reads z twice, so z is realized before the writer.
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "zero_then_read_t_(Tensor(a!) x, Tensor y) -> Tensor",
+                tags=(getattr(torch.Tag, tag),),
+            )
+            lib.define(
+                "read_t(Tensor x, Tensor y) -> Tensor",
+                tags=(getattr(torch.Tag, tag),),
+            )
+            lib.impl("read_t", lambda x, y: x + y.T, "CompositeExplicitAutograd")
+
+            def zero_then_read_t_(x, y):
+                x.zero_()
+                return y.T + 1
+
+            lib.impl(
+                "zero_then_read_t_", zero_then_read_t_, "CompositeExplicitAutograd"
+            )
+
+            def fn(x):
+                z = (x * 2).relu()
+                a = torch.ops.mylib.read_t(z, z.T)
+                if inputs == "clone":
+                    first, second = z, z.clone()
+                else:
+                    first, second = z[:, :5], z[:, 2:]
+                p, q = torch.cat([first, second]).split([3, 3])
+                return a, torch.ops.mylib.zero_then_read_t_(p, q)
+
+            x = torch.randn(3, 7, device=self.device)
+            with config.patch(enable_auto_functionalized_v2=use_v2):
+                self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+
+    @config.patch(implicit_fallbacks=True, force_disable_caches=True)
+    @parametrize("tag", ("needs_fixed_stride_order", "needs_exact_strides"))
+    def test_custom_op_layout_constraint_never_shares_a_written_input(self, tag):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "zero_add_t_(Tensor(a!) x, Tensor y) -> ()",
+                tags=(getattr(torch.Tag, tag),),
+            )
+
+            def zero_add_t_(x, y):
+                x.zero_()
+                x.add_(y.T + 1)
+
+            lib.impl("zero_add_t_", zero_add_t_, "CompositeExplicitAutograd")
+
+            def fn(x):
+                z = (x * 2).relu()
+                w = z.clone()
+                torch.ops.mylib.zero_add_t_(w, z.T)
+                return w + 1
+
+            written_args = lowering._written_args
+            checked = []
+
+            def check_written_args(node, args, kwargs, fake_kwargs):
+                written = written_args(node, args, kwargs, fake_kwargs)
+                if node.target is torch.ops.mylib.zero_add_t_.default:
+                    x, y = args
+                    self.assertIsInstance(x.data, torch._inductor.ir.StorageBox)
+                    while isinstance(
+                        y, (torch._inductor.ir.TensorBox, torch._inductor.ir.BaseView)
+                    ):
+                        y = y.data
+                    self.assertIs(x.data, y)
+                    self.assertIsInstance(x.data.data, torch._inductor.ir.Pointwise)
+                    self.assertEqual(len(written), 1)
+                    self.assertIs(written[0], x)
+                    checked.append(True)
+                return written
+
+            x = torch.randn(7, 3, device=self.device).T
+            # Drop the clone to isolate the lowering's schema-based write exclusion.
+            with (
+                patch(
+                    "torch._inductor.fx_passes.post_grad._aliased_by_writing_op",
+                    return_value=False,
+                ) as clone_guard,
+                patch.object(lowering, "_written_args", check_written_args),
+            ):
+                out = torch.compile(fn, fullgraph=True)(x)
+            clone_guard.assert_called()
+            self.assertEqual(checked, [True])
+            self.assertEqual(out, fn(x))
+
     @requires_gpu()
     @config.patch(implicit_fallbacks=True)
     @tf32_on_and_off(0.005)
@@ -20996,6 +21191,58 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         expected = fn(torch.zeros(1, device=self.device))
         actual = torch.compile(fn)(torch.zeros(1, device=self.device))
         self.assertEqual(expected, actual)
+
+    def test_clones_of_one_tensor_output_distinct(self):
+        # remove_noop_ops may drop some of these copies, but not all, or the
+        # outputs share one storage while eager returns independent tensors.
+        def clone_twice(x):
+            base = x + 1
+            return base.clone(), base.clone()
+
+        def clone_chain(x):
+            c = (x + 1).clone()
+            return c, c.clone()
+
+        def clone_and_noop_view_clone(x):
+            base = x + 1
+            return base.clone(), base.view(-1).clone()
+
+        def clone_and_noop_view_of_clone(x):
+            c = (x + 1).clone()
+            return c, c.view(-1).clone()
+
+        def three_clones(x):
+            base = x + 1
+            return base.clone(), base.clone(), base.view(-1).clone()
+
+        def clone_and_noop_to_copy(x):
+            base = x + 1
+            return base.clone(), base.to(base.dtype, copy=True)
+
+        def view_of_erased_clone(x):
+            base = x + 1
+            p = base.clone()
+            return base.clone(), p.view(2, 2).clone()
+
+        def view_of_erased_clone_reversed(x):
+            base = x + 1
+            p = base.clone()
+            return p.view(2, 2).clone(), base.clone()
+
+        for fn in (
+            clone_twice,
+            clone_chain,
+            clone_and_noop_view_clone,
+            clone_and_noop_view_of_clone,
+            three_clones,
+            clone_and_noop_to_copy,
+            view_of_erased_clone,
+            view_of_erased_clone_reversed,
+        ):
+            with self.subTest(fn.__name__):
+                outs = torch.compile(fn)(torch.zeros(4, device=self.device))
+                ptrs = [out.untyped_storage().data_ptr() for out in outs]
+                self.assertEqual(len(set(ptrs)), len(ptrs))
 
     def test_no_op_view_output_identity(self):
         # https://github.com/pytorch/pytorch/issues/191449

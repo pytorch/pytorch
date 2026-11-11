@@ -1110,7 +1110,7 @@ class _CurrentFrame:
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         tc = self.tc
         if isinstance(exc, Exception) and not hasattr(exc, "real_stack"):
-            exc.real_stack = tc.extract_stack()
+            exc.real_stack = tc.extract_stack()  # pyrefly: ignore [missing-attribute]
         if self.frame_summary is not None:
             tc.frame_summary_stack.pop()
         tc.loc_in_frame = self.old
