@@ -7,6 +7,7 @@ import torch._dynamo.config as config
 import torch._dynamo.test_case
 from torch._dynamo.testing import same
 from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class Seq(torch.nn.Module):
@@ -60,6 +61,8 @@ def transform(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
 
 @config.patch("verify_correctness", True)
 class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_example_inputs(self):
         def fn(a, bc, d):
             b, c = bc
