@@ -12426,7 +12426,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         "_int_mm only dispatches to oneDNN gemm on x86 with AVX512-VNNI",
     )
     @parametrize("x_dtype", [torch.int8, torch.uint8])
-    def test__int_mm_cpu_operand_layouts(self, device, x_dtype): 
+    def test__int_mm_cpu_operand_layouts(self, device, x_dtype):
         # Operands oneDNN's gemm cannot read in place must be copied for it. The matmul
         # primitive computes with a reference kernel, so check oneDNN's verbose log
         m, k, n = 8, 32, 16
