@@ -4338,20 +4338,19 @@ class TestSparse(TestSparseBase):
                 check(self, x, y)
                 # TODO: uncomment once supported
                 # check_autograd(x, y)
+                if sparse_dim:
+                    x0 = self._gen_sparse(sparse_dim, 0, (0,) + sub_shape[1:], dtype, device, coalesced)[0]
+                    y0 = self._gen_sparse(sparse_dim, 0, (0,) + new_shape[1:], dtype, device, coalesced)[0]
+                    check(self, x0, y0)
 
-    def test_sparse_sparse_mul_sparse_numel_edge_cases(self, device):
-        # The product of the sparse dims is used as a divisor; it was 0 for an
-        # empty sparse dim and wrapped to 0 in int32 for 2**16 * 2**16.
-        a = torch.zeros(0, 3, device=device).to_sparse(sparse_dim=1)
-        b = torch.zeros(0, 1, device=device).to_sparse(sparse_dim=1)
-        self.assertEqual((a * b).to_dense(), torch.zeros(0, 3, device=device))
-
+        # prod(sparse sizes) overflows int32
         i = torch.tensor([[0, 1], [0, 1]], device=device)
-        a = torch.sparse_coo_tensor(i, torch.full((2, 3), 2.0, device=device), (2**16, 2**16, 3))
-        b = torch.sparse_coo_tensor(i, torch.full((2, 1), 3.0, device=device), (2**16, 2**16, 1))
-        res = (a * b).coalesce()
+        v = make_tensor((2, 3), dtype=dtype, device=device)
+        x = torch.sparse_coo_tensor(i, v, (2**16, 2**16, 3))
+        y = torch.sparse_coo_tensor(i, v[:, :1], (2**16, 2**16, 1))
+        res = (x * y).coalesce()
         self.assertEqual(res.indices(), i)
-        self.assertEqual(res.values(), torch.full((2, 3), 6.0, device=device))
+        self.assertEqual(res.values(), v * v[:, :1])
 
     @coalescedonoff
     @expectedFailureMPS
