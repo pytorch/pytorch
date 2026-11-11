@@ -189,46 +189,6 @@ class TORCH_API Dispatcher final {
       const KernelFunction& kernel,
       Args... args);
 
-  // A kernel as call and redispatch invoke it: the invocation is reported to
-  // the DispatchCaptureSink of this thread when one is installed.
-  struct CapturedKernel {
-    template <class Return, class... Args>
-    Return call(
-        const TypedOperatorHandle<Return(Args...)>& op,
-        DispatchKeySet dispatchKeySet,
-        Args... args) const;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-    const KernelFunction& kernel;
-    bool isRedispatch;
-  };
-
-  // Slow path of CapturedKernel taken while a sink is installed: boxes the
-  // arguments and results for it.
-  template <class Return, class... Args>
-  static Return callWithCaptureSink(
-      const TypedOperatorHandle<Return(Args...)>& op,
-      DispatchCaptureSink& sink,
-      DispatchKeySet dispatchKeySet,
-      const KernelFunction& kernel,
-      bool isRedispatch,
-      Args... args);
-
-  // The boxed counterpart of CapturedKernel::call.
-  static void callBoxedKernel(
-      const OperatorHandle& op,
-      DispatchKeySet dispatchKeySet,
-      const KernelFunction& kernel,
-      bool isRedispatch,
-      Stack* stack);
-
-  static void callBoxedWithCaptureSink(
-      const OperatorHandle& op,
-      DispatchCaptureSink& sink,
-      DispatchKeySet dispatchKeySet,
-      const KernelFunction& kernel,
-      bool isRedispatch,
-      Stack* stack);
-
   // Like call, but intended for use in a redispatch in kernels that have
   // explicitly performed the DispatchKey update calculatulation. This will take
   // the DispatchKeySet completely as is and dispatch to the kernel of the
@@ -398,6 +358,46 @@ class TORCH_API Dispatcher final {
 
  private:
   Dispatcher();
+
+  // A kernel as call and redispatch invoke it: the invocation is reported to
+  // the DispatchCaptureSink of this thread when one is installed.
+  struct CapturedKernel {
+    template <class Return, class... Args>
+    Return call(
+        const TypedOperatorHandle<Return(Args...)>& op,
+        DispatchKeySet dispatchKeySet,
+        Args... args) const;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+    const KernelFunction& kernel;
+    bool isRedispatch;
+  };
+
+  // Slow path of CapturedKernel taken while a sink is installed: boxes the
+  // arguments and results for it.
+  template <class Return, class... Args>
+  static Return callWithCaptureSink(
+      const TypedOperatorHandle<Return(Args...)>& op,
+      DispatchCaptureSink& sink,
+      DispatchKeySet dispatchKeySet,
+      const KernelFunction& kernel,
+      bool isRedispatch,
+      Args... args);
+
+  // The boxed counterpart of CapturedKernel::call.
+  static void callBoxedKernel(
+      const OperatorHandle& op,
+      DispatchKeySet dispatchKeySet,
+      const KernelFunction& kernel,
+      bool isRedispatch,
+      Stack* stack);
+
+  static void callBoxedWithCaptureSink(
+      const OperatorHandle& op,
+      DispatchCaptureSink& sink,
+      DispatchKeySet dispatchKeySet,
+      const KernelFunction& kernel,
+      bool isRedispatch,
+      Stack* stack);
 
   static int64_t sequenceNumberForRunningRecordFunction(
       DispatchKey dispatchKey,
