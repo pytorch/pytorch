@@ -1085,6 +1085,25 @@ class TestC10dGroupNameHashSalt(TestCase):
         second = c10d._process_group_name([2, 3], use_hashed_name=True)
         self.assertNotEqual(first, second)
 
+    def test_split_of_subgroup_after_non_member_split_agrees(self):
+        # Four ranks run new_group([2, 3]), then split_group(split_ranks=[[0, 1],
+        # [2]]), where non-member rank 3 names its call after split_ranks[0],
+        # then ranks 2 and 3 split the subgroup into its local ranks [0, 1].
+        # Each rank's world state is replayed in turn.
+        final_names = {}
+        for rank in range(4):
+            c10d._world.group_count = 1
+            c10d._world._hashed_group_counts.clear()
+            c10d._process_group_name([2, 3], use_hashed_name=False)
+            c10d._process_group_name(
+                [2] if rank == 2 else [0, 1], use_hashed_name=True
+            )
+            if rank in (2, 3):
+                final_names[rank] = c10d._process_group_name(
+                    [0, 1], use_hashed_name=True
+                )
+        self.assertEqual(final_names[2], final_names[3])
+
 
 class _FakeComm:
     """Stand-in for a TorchComm whose ``finalize`` is not idempotent.
