@@ -1942,6 +1942,11 @@ def _cfg_dispatch_trace(
     fn: Callable[[], Any],
     detail: Literal[True],
 ) -> tuple[Any, list[dict[str, Any]]]: ...
+@overload
+def _cfg_dispatch_trace(
+    fn: Callable[[], Any],
+    detail: _bool,
+) -> tuple[Any, list[Any]]: ...
 
 class _CfgSite:
     def info(self) -> dict[str, Any]: ...
