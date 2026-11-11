@@ -148,7 +148,7 @@ void set_device(DeviceIndex device, const bool force) {
 
 void device_synchronize() {
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-  if (C10_UNLIKELY(interp)) {
+  if (interp) [[unlikely]] {
     (*interp)->trace_gpu_device_synchronization(c10::kCUDA);
   }
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.cuda_device_synchronize);

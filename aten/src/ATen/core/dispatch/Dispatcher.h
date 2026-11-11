@@ -765,7 +765,7 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(
     runRecordFunction(guard, schema_ref, dispatchKey, dispatchKeySet);
   }
 
-  if (C10_UNLIKELY(guard.needsOutputs())) {
+  if (guard.needsOutputs()) [[unlikely]] {
     // Calls the kernel and capture the output temporarily to pass to
     // RecordFunction.
     detail::CaptureKernelCall<Return> captureKernelCall(
@@ -799,8 +799,8 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
       at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
-  if (C10_UNLIKELY(
-          step_callbacks.has_value() && op.operatorDef_->op.isObserved())) {
+  if (step_callbacks.has_value() && op.operatorDef_->op.isObserved())
+      [[unlikely]] {
     return callWithDispatchKeySlowPath<Return, Args...>(
         op,
         *step_callbacks,
@@ -877,7 +877,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack)
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
       at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
-  if (C10_UNLIKELY(step_callbacks.has_value() && entry.isObserved())) {
+  if (step_callbacks.has_value() && entry.isObserved()) [[unlikely]] {
     at::RecordFunction guard(std::move(*step_callbacks));
     auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
     auto& schema = op.schema();
@@ -894,7 +894,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack)
     // keeping the guard alive while executing the kernel
     kernel.callBoxed(op, dispatchKeySet, stack);
 
-    if (C10_UNLIKELY(guard.needsOutputs())) {
+    if (guard.needsOutputs()) [[unlikely]] {
       guard.setOutputs(*stack);
     }
     return;
