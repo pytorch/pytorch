@@ -595,13 +595,13 @@ void AliasDb::analyzeImpl(Node* node) {
 
     const bool registeredAsSpecialCase =
         analysis == AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
-    if (C10_UNLIKELY(registeredAsSpecialCase && !hasSpecialCase)) {
+    if (registeredAsSpecialCase && !hasSpecialCase) [[unlikely]] {
       TORCH_INTERNAL_ASSERT(
           false,
           "Op ",
           node->kind().toDisplayString(),
           " is registered with AliasAnalysisKind::INTERNAL_SPECIAL_CASE but doesn't have a special case.");
-    } else if (C10_UNLIKELY(!registeredAsSpecialCase && hasSpecialCase)) {
+    } else if (!registeredAsSpecialCase && hasSpecialCase) [[unlikely]] {
       TORCH_INTERNAL_ASSERT(
           false,
           "Op ",

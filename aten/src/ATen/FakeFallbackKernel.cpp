@@ -179,8 +179,8 @@ bool is_tensor_constructor(const c10::FunctionSchema& schema) {
       schema.returns()[0].type() == c10::TensorType::get();
 }
 
-// See fakeHasPythonFakeImpl; categories is the op's fakeDispatchTableCategories
-bool has_python_fake_impl(const c10::OperatorHandle& op, uint32_t categories) {
+// See cppFakeNotImplemented; categories is the op's fakeDispatchTableCategories
+bool cpp_fake_not_implemented(const c10::OperatorHandle& op, uint32_t categories) {
   using at::impl::FakeDispatchCategory;
   for (const auto category :
        {FakeDispatchCategory::OpImpl,
@@ -202,8 +202,8 @@ bool has_python_fake_impl(const c10::OperatorHandle& op, uint32_t categories) {
 
 namespace at::impl {
 
-bool fakeHasPythonFakeImpl(const c10::OperatorHandle& op) {
-  return has_python_fake_impl(op, fakeDispatchTableCategories(op.operator_name()));
+bool cppFakeNotImplemented(const c10::OperatorHandle& op) {
+  return cpp_fake_not_implemented(op, fakeDispatchTableCategories(op.operator_name()));
 }
 
 } // namespace at::impl
@@ -253,7 +253,7 @@ void fakeFallback(
   using at::impl::FakeDispatchCategory;
   const auto categories =
       at::impl::fakeDispatchTableCategories(op.operator_name());
-  if (has_python_fake_impl(op, categories)) {
+  if (cpp_fake_not_implemented(op, categories)) {
     unsupported(op, "ops with a Python fake implementation");
   }
   if (op.hasKernelForDispatchKey(c10::DispatchKey::CompositeImplicitAutograd)) {
