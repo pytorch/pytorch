@@ -1724,7 +1724,8 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
 
 # Archs whose persistent mm grid, config pool and XCD count were measured. Other
-# ROCm archs keep the original behavior (one workgroup per CU, shared pool).
+# ROCm archs keep the original behavior (one workgroup per CU, shared pool). The
+# XCD count assumes the GPU is not partitioned into several devices.
 _ROCM_PERSISTENT_MM_NUM_XCDS = {"gfx950": 8}
 
 
@@ -1806,19 +1807,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 256, 128, 32, self.default_num_stages, 4, group_m=4, waves_per_eu=2
             ),
             ROCmGemmConfig(256, 128, 32, self.default_num_stages, 8, group_m=16),
-            ROCmGemmConfig(256, 128, 64, self.default_num_stages, 8, group_m=4),
-            ROCmGemmConfig(256, 256, 64, self.default_num_stages, 8, group_m=4),
-        ]
-
-        # gfx950 pool for the non-TMA persistent template (persistent_mm_template).
-        # The shared persistent_mm_configs pool is NVIDIA-tuned: large-BLOCK_K tiles
-        # only, every one of which needs 64-128 KB of LDS and so fits one workgroup
-        # per CU. This pool includes BLOCK_K=32 tiles that leave room for two.
-        self.rocm_persistent_mm_configs: list[BaseConfig] = [
-            ROCmGemmConfig(128, 128, 64, self.default_num_stages, 4, group_m=16),
-            ROCmGemmConfig(128, 128, 64, self.default_num_stages, 8, group_m=8),
-            ROCmGemmConfig(128, 256, 32, self.default_num_stages, 4, group_m=16),
-            ROCmGemmConfig(256, 128, 32, self.default_num_stages, 4, group_m=4),
             ROCmGemmConfig(256, 128, 64, self.default_num_stages, 8, group_m=4),
             ROCmGemmConfig(256, 256, 64, self.default_num_stages, 8, group_m=4),
         ]
@@ -3528,16 +3516,41 @@ class CUDAPersistentTMATemplateConfigHeuristic(
         self.mm_configs = self.persistent_mm_configs
 
 
-@register_template_heuristic(
-    persistent_mm_template.uid,
-    "cuda",
-    register=IS_ROCM,
-)
 class PersistentMMTemplateConfigHeuristic(
     MMTemplateConfigMixin,
     ROCmConfigHeuristic,  # type: ignore[misc]
 ):
     """Persistent MM template heuristic (no TMA, standard pointer loads)"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mm_configs = self.persistent_mm_configs
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            yield {**template_kwargs, "NUM_SMS": get_num_sms()}
+
+
+@register_template_heuristic(
+    persistent_mm_template.uid,
+    "cuda",
+    register=IS_ROCM,
+)
+class ROCmPersistentMMTemplateConfigHeuristic(PersistentMMTemplateConfigHeuristic):
+    """
+    Persistent MM template heuristic for ROCm. On archs in
+    _ROCM_PERSISTENT_MM_NUM_XCDS the launch is configured per device: the grid
+    is sized by occupancy, an arch-specific pool is used, and an XCD-local
+    program order (NUM_XCDS) is offered as an extra variant. Other ROCm archs
+    keep the base behavior.
+    """
 
     # A persistent kernel only hides load/store latency across workgroups that
     # are resident on a CU at the same time, so the grid is sized to the number
@@ -3552,7 +3565,17 @@ class PersistentMMTemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        self.mm_configs = self.persistent_mm_configs
+        # Most of the shared persistent_mm_configs pool (BLOCK_K=128, or
+        # 128x256x64) needs >= 96 KB of LDS, so only one workgroup fits per CU.
+        # This pool includes BLOCK_K=32 tiles that leave room for two.
+        self.rocm_persistent_mm_configs: list[BaseConfig] = [
+            ROCmGemmConfig(128, 128, 64, self.default_num_stages, 4, group_m=16),
+            ROCmGemmConfig(128, 128, 64, self.default_num_stages, 8, group_m=8),
+            ROCmGemmConfig(128, 256, 32, self.default_num_stages, 4, group_m=16),
+            ROCmGemmConfig(256, 128, 32, self.default_num_stages, 4, group_m=4),
+            ROCmGemmConfig(256, 128, 64, self.default_num_stages, 8, group_m=4),
+            ROCmGemmConfig(256, 256, 64, self.default_num_stages, 8, group_m=4),
+        ]
 
     def get_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         if (
@@ -3572,15 +3595,14 @@ class PersistentMMTemplateConfigHeuristic(
     ) -> Generator[dict[str, Any], None, None]:
         num_xcds = _ROCM_PERSISTENT_MM_NUM_XCDS.get(rocm_gfx_arch())
         if num_xcds is None:
-            for template_kwargs in super()._get_template_configs_impl(
+            yield from super()._get_template_configs_impl(
                 kernel_inputs, op_name, **kwargs
-            ):
-                yield {**template_kwargs, "NUM_SMS": get_num_sms()}
+            )
             return
 
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(
-                "PersistentMMTemplateConfigHeuristic requires MMKernelInputs"
+                "ROCmPersistentMMTemplateConfigHeuristic requires MMKernelInputs"
             )
         # A pool set by a caller (e.g. a pinned config) is compiled as given; the
         # tile-count skip and the XCD variants only apply to the default pool.
@@ -3595,6 +3617,7 @@ class PersistentMMTemplateConfigHeuristic(
         fallback: tuple[int, dict[str, Any]] | None = None
         kept_any = False
         m_hint, n_hint, _ = kernel_inputs.mnk_hinted()
+        # NUM_SMS from the base class (one program per CU) is replaced per config.
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs, op_name, **kwargs
         ):
@@ -4062,7 +4085,7 @@ class ROCmAddMMTemplateConfigHeuristic(AddMMConfigMixin, ROCmMMTemplateConfigHeu
     op_name="addmm",
 )
 class ROCmAddMMPersistentTemplateConfigHeuristic(
-    AddMMConfigMixin, PersistentMMTemplateConfigHeuristic
+    AddMMConfigMixin, ROCmPersistentMMTemplateConfigHeuristic
 ):
     """Addmm specific mixin for persistent MM on ROCm"""
 

@@ -12,8 +12,9 @@
 
     # persistent kernel: each CTA processes multiple tiles
     start_pid = tl.program_id(0).to(INDEX_DTYPE)
-    {% if NUM_XCDS is defined and NUM_XCDS > 1 %}
-    # Workgroups are dispatched round-robin over the XCDs, which have separate L2s.
+    {#- NUM_XCDS > 1 is only passed by the ROCm heuristic, for archs whose
+        workgroups are dispatched round-robin over XCDs with separate L2s. #}
+    {%- if NUM_XCDS is defined and NUM_XCDS > 1 %}
     # Renumber programs so that consecutive (grouped) tiles run on the same XCD.
     num_pids = tl.num_programs(0).to(INDEX_DTYPE)
     pids_per_xcd = (num_pids + NUM_XCDS - 1) // NUM_XCDS
@@ -26,7 +27,7 @@
         start_pid = (
             tall_xcds * pids_per_xcd + (xcd - tall_xcds) * (pids_per_xcd - 1) + local_pid
         )
-    {% endif %}
+    {%- endif %}
     grid_m = tl.cdiv(M, BLOCK_M)
     grid_n = tl.cdiv(N, BLOCK_N)
     num_tiles = grid_m * grid_n

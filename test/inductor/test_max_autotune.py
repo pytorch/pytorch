@@ -4394,6 +4394,9 @@ class TestTemplateConfigPruning(TestCase):
                     lambda msg: f"{msg}\nEstimated maximum smem should exceed actual smem used for config {pinned}",
                 )
 
+    _ROCM_NUM_CUS = {"gfx942": 304, "gfx950": 256}
+    _ROCM_LDS_PER_CU = {"gfx942": 64 * 1024, "gfx950": 160 * 1024}
+
     def _rocm_mm_choice_descs(self, arch, m, k, n, persistent_filter=None):
         """Compile an ``m x k @ k x n`` bf16 mm with max-autotune while the ROCm
         heuristics see ``arch``, check the result, and return (choice name,
@@ -4406,7 +4409,7 @@ class TestTemplateConfigPruning(TestCase):
         def saver(timings, name, input_nodes, choices, *args):
             seen.extend((c.name, c.description) for c in choices)
 
-        cls = triton_heuristics.PersistentMMTemplateConfigHeuristic
+        cls = triton_heuristics.ROCmPersistentMMTemplateConfigHeuristic
         configs_impl = cls._get_template_configs_impl
 
         def filtered_configs_impl(self, *args, **kwargs):
@@ -4431,6 +4434,18 @@ class TestTemplateConfigPruning(TestCase):
                 mock.patch.object(
                     triton_heuristics, "rocm_gfx_arch", return_value=arch
                 ),
+                # The grid sizing reads the CU count and LDS size of the device
+                # the test runs on; give it the simulated arch's.
+                mock.patch.object(
+                    triton_heuristics,
+                    "get_num_sms",
+                    return_value=self._ROCM_NUM_CUS[arch],
+                ),
+                mock.patch.object(
+                    triton_heuristics,
+                    "_rocm_lds_bytes_per_cu",
+                    return_value=self._ROCM_LDS_PER_CU[arch],
+                ),
                 mock.patch.object(
                     cls,
                     "_get_template_configs_impl",
@@ -4442,17 +4457,13 @@ class TestTemplateConfigPruning(TestCase):
                 out, code = run_and_get_code(torch.compile(torch.mm), a, b)
         finally:
             clear_feedback_savers()
-        # A wrong tile mapping leaves O(10) errors; accumulation order alone stays
-        # well under 1 at these magnitudes.
-        torch.testing.assert_close(
-            out.float(), a.float() @ b.float(), atol=1.0, rtol=0.05
-        )
+        torch.testing.assert_close(out, torch.mm(a, b))
         return seen, "\n".join(code)
 
     @unittest.skipIf(not torch.version.hip, "ROCm persistent mm heuristic")
     def test_rocm_persistent_mm_gated_to_gfx950(self):
-        num_cus = torch.cuda.get_device_properties(0).multi_processor_count
         for arch in ("gfx942", "gfx950"):
+            num_cus = self._ROCM_NUM_CUS[arch]
             with self.subTest(arch=arch):
                 descs = [
                     d
@@ -4480,10 +4491,9 @@ class TestTemplateConfigPruning(TestCase):
             4000,
             1024,
             4100,
-            persistent_filter=lambda kw: kw["NUM_XCDS"] > 1 and "XCD_N" not in kw,
+            persistent_filter=lambda kw: kw["NUM_XCDS"] > 1,
         )
         self.assertIn("NUM_XCDS : tl.constexpr = 8", code)
-        self.assertNotIn("XCD_N", code)
 
     def test_scaled_mm_block_k_pruning_excludes_rdna(self):
         import torch._inductor.heuristics.template.triton as triton_heuristics
