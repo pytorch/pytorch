@@ -14,7 +14,6 @@ Pointwise tails (relu, bias-add, gelu, ...) consume the concatenated output.
 
 import contextlib
 import functools
-import os
 import re
 import unittest
 import warnings
@@ -1995,12 +1994,6 @@ class TestLocalizationTritonEpilogue(TestCase):
         super().setUp()
         torch._dynamo.reset()
         self._restore_decomp = _install_bf16_gelu_decomp()
-        # Cache hits would mask the codegen we want to inspect.
-        import shutil
-
-        shutil.rmtree(
-            "/tmp/torchinductor_" + os.environ.get("USER", "user"), ignore_errors=True
-        )
 
     def tearDown(self):
         self._restore_decomp()
