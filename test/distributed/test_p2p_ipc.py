@@ -22,6 +22,27 @@ from torch.testing._internal.common_utils import (
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
 
+# Values of Expandable_Segments_Handle_Type in c10/cuda/CUDAAllocatorConfig.h.
+_POSIX_FD_HANDLE = 1
+_FABRIC_HANDLE = 2
+
+_skip_unless_fabric_config = unittest.skipUnless(
+    os.environ.get("TEST_CONFIG", "") == "h100-fabric" or TEST_WITH_ROCM,
+    "fabric handle IPC path only exercised on the fabric-capable h100-fabric CI config "
+    "and on ROCm; unconditionally skipped elsewhere (deadlocks on B200, see "
+    "https://github.com/pytorch/pytorch/issues/189879)",
+)
+
+
+def _expandable_handle_type(tensor: torch.Tensor) -> int:
+    ptr = tensor.data_ptr()
+    for segment in torch.cuda.memory._snapshot()["segments"]:
+        if segment["address"] <= ptr < segment["address"] + segment["total_size"]:
+            if not segment["is_expandable"]:
+                raise AssertionError("tensor is not in an expandable segment")
+            return segment["expandable_segment_handle_type"]
+    raise AssertionError("tensor not found in the allocator snapshot")
+
 
 @contextmanager
 def _scoped_env(key: str, value: str):
@@ -66,6 +87,7 @@ class P2PIpcTest(MultiProcContinuousTest):
         *,
         consumer_prealloc: bool = True,
         free_producer_segment: bool = False,
+        expected_handle_type: int | None = None,
     ) -> None:
         """
         Core P2P IPC test implementation.
@@ -93,6 +115,10 @@ class P2PIpcTest(MultiProcContinuousTest):
                         decrements to exactly 0 on release and the producer can
                         reclaim the block (with multiple consumers it never
                         reaches 0).
+            expected_handle_type: Require the expandable segment to be shared
+                        with this handle type. On ROCm the type follows the
+                        device (fabric needs UALink), so the test skips when
+                        the device uses the other type.
         """
         self._init_device(allocate=(self.rank == 0 or consumer_prealloc))
 
@@ -105,15 +131,25 @@ class P2PIpcTest(MultiProcContinuousTest):
         if self.rank == 0:
             tensor = torch.randn(tensor_size, device=self.device)
             tensor_meta = reduce_tensor(tensor)
-            torch.distributed.broadcast_object_list([tensor_meta], src=0)
+            handle_type = (
+                _expandable_handle_type(tensor)
+                if expected_handle_type is not None
+                else None
+            )
+            torch.distributed.broadcast_object_list([tensor_meta, handle_type], src=0)
         else:
-            recv_list = [None]
+            recv_list = [None, None]
             torch.distributed.broadcast_object_list(recv_list, src=0)
-            if is_consumer:
-                func, args = recv_list[0]
-                args = list(args)
-                args[6] = self.rank
-                tensor = func(*args)
+            tensor_meta, handle_type = recv_list
+
+        if expected_handle_type is not None:
+            self._require_handle_type(handle_type, expected_handle_type)
+
+        if is_consumer:
+            func, args = tensor_meta
+            args = list(args)
+            args[6] = self.rank
+            tensor = func(*args)
 
         torch.distributed.barrier()
 
@@ -126,6 +162,11 @@ class P2PIpcTest(MultiProcContinuousTest):
         if self.rank == 0 or is_consumer:
             expected = torch.ones_like(tensor)
             self.assertEqual(tensor, expected, atol=0.0, rtol=0.0)
+            if is_consumer:
+                # assertEqual compares on the GPU. Also check a device-to-host
+                # copy out of the imported mapping, which has no host access
+                # for fabric imports on ROCm.
+                self.assertTrue(tensor.cpu().eq(1).all())
             # Drop the comparison tensor so it doesn't pin the segment that the
             # producer is about to free below.
             del expected
@@ -144,19 +185,17 @@ class P2PIpcTest(MultiProcContinuousTest):
 
         torch.distributed.barrier()
 
+    def _require_handle_type(self, handle_type: int, expected: int) -> None:
+        other = _FABRIC_HANDLE if expected == _POSIX_FD_HANDLE else _POSIX_FD_HANDLE
+        if TEST_WITH_ROCM and handle_type == other:
+            self.skipTest(f"device shares expandable segments with type {other}")
+        self.assertEqual(handle_type, expected)
+
     def test_p2p_ipc(self) -> None:
         """Test P2P IPC with regular cudaMalloc allocations."""
         self._test_p2p_ipc_impl()
 
-    @unittest.skipUnless(
-        os.environ.get("TEST_CONFIG", "") == "h100-fabric",
-        "fabric handle IPC path only exercised on the fabric-capable h100-fabric CI config; "
-        "unconditionally skipped elsewhere (deadlocks on B200, see "
-        "https://github.com/pytorch/pytorch/issues/189879)",
-    )
-    @unittest.skipIf(
-        TEST_WITH_ROCM, "expandable_segments mode is not supported on ROCm"
-    )
+    @_skip_unless_fabric_config
     def test_p2p_ipc_expandable_segments(self) -> None:
         """
         Test P2P IPC with expandable segments enabled. Exercises the
@@ -187,7 +226,55 @@ class P2PIpcTest(MultiProcContinuousTest):
                 tensor_size=2 * 1024 * 1024,
                 consumer_prealloc=False,
                 free_producer_segment=True,
+                expected_handle_type=_FABRIC_HANDLE,
             )
+
+    @unittest.skipUnless(TEST_WITH_ROCM, "POSIX fd variant only runs on ROCm")
+    def test_p2p_ipc_expandable_segments_posix_fd(self) -> None:
+        """
+        test_p2p_ipc_expandable_segments on ROCm devices without fabric handle
+        support, which share expandable segments with POSIX fds.
+        """
+        with _scoped_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC", "1"):
+            torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+            torch.cuda.empty_cache()
+            self._test_p2p_ipc_impl(
+                tensor_size=2 * 1024 * 1024,
+                consumer_prealloc=False,
+                free_producer_segment=True,
+                expected_handle_type=_POSIX_FD_HANDLE,
+            )
+
+    @_skip_unless_fabric_config
+    def test_p2p_ipc_expandable_segments_many_chunks(self) -> None:
+        """
+        Share an expandable segment with more chunks than the process may open
+        file descriptors. POSIX fd handles keep one fd open per chunk; fabric
+        handles keep none.
+        """
+        import resource
+
+        num_chunks = 128
+        chunk_size = 20 * 1024 * 1024
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        with _scoped_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC", "1"):
+            torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+            torch.cuda.empty_cache()
+            self._init_device()
+            probe = torch.empty(chunk_size // 4, device=self.device)
+            self._require_handle_type(_expandable_handle_type(probe), _FABRIC_HANDLE)
+            del probe
+            num_open = len(os.listdir("/proc/self/fd"))
+            # Below num_chunks, so sharing with one POSIX fd per chunk would fail.
+            limit = num_open + num_chunks * 3 // 4
+            resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
+            try:
+                self._test_p2p_ipc_impl(
+                    tensor_size=num_chunks * chunk_size // 4,
+                    free_producer_segment=True,
+                )
+            finally:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
 
     @classmethod
     def tearDownClass(cls):
