@@ -189,8 +189,21 @@ class TORCH_API Dispatcher final {
       const KernelFunction& kernel,
       Args... args);
 
-  // Slow path of call/redispatch taken while a DispatchCaptureSink is
-  // installed on this thread: boxes the arguments and results for the sink.
+  // A kernel as call and redispatch invoke it: the invocation is reported to
+  // the DispatchCaptureSink of this thread when one is installed.
+  struct CapturedKernel {
+    template <class Return, class... Args>
+    Return call(
+        const TypedOperatorHandle<Return(Args...)>& op,
+        DispatchKeySet dispatchKeySet,
+        Args... args) const;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+    const KernelFunction& kernel;
+    bool isRedispatch;
+  };
+
+  // Slow path of CapturedKernel taken while a sink is installed: boxes the
+  // arguments and results for it.
   template <class Return, class... Args>
   static Return callWithCaptureSink(
       const TypedOperatorHandle<Return(Args...)>& op,
@@ -781,13 +794,38 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(
     // Calls the kernel and capture the output temporarily to pass to
     // RecordFunction.
     detail::CaptureKernelCall<Return> captureKernelCall(
-        kernel, op, dispatchKeySet, std::forward<Args>(args)...);
+        CapturedKernel{kernel, /*isRedispatch=*/false},
+        op,
+        dispatchKeySet,
+        std::forward<Args>(args)...);
     guard.setOutputs(captureKernelCall.getOutputs());
     // Releases the captured output to return to caller.
     return std::move(captureKernelCall).release();
   }
 
   // keeping the guard alive while executing the kernel
+  return CapturedKernel{kernel, /*isRedispatch=*/false}
+      .template call<Return, Args...>(
+          op, dispatchKeySet, std::forward<Args>(args)...);
+}
+
+// See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
+template <class Return, class... Args>
+C10_ALWAYS_INLINE Return Dispatcher::CapturedKernel::call(
+    const TypedOperatorHandle<Return(Args...)>& op,
+    DispatchKeySet dispatchKeySet,
+    Args... args) const {
+  if (C10_UNLIKELY(impl::dispatch_capture_enabled())) {
+    if (auto* sink = impl::tls_dispatch_capture_sink()) {
+      return callWithCaptureSink<Return, Args...>(
+          op,
+          *sink,
+          dispatchKeySet,
+          kernel,
+          isRedispatch,
+          std::forward<Args>(args)...);
+    }
+  }
   return kernel.template call<Return, Args...>(
       op, dispatchKeySet, std::forward<Args>(args)...);
 }
@@ -847,17 +885,6 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(
   }
 #endif
   const KernelFunction& kernel = op.operatorDef_->op.lookup(dispatchKeySet);
-  if (C10_UNLIKELY(impl::dispatch_capture_enabled())) {
-    if (auto* sink = impl::tls_dispatch_capture_sink()) {
-      return callWithCaptureSink<Return, Args...>(
-          op,
-          *sink,
-          dispatchKeySet,
-          kernel,
-          /*isRedispatch=*/false,
-          std::forward<Args>(args)...);
-    }
-  }
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
       at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
@@ -889,15 +916,18 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(
       }
       at::RecordFunction::schema_ref_t schema_ref_;
     } event(op.schema(), argsAddresses, argsTypes);
-    return kernel.template call<Return, Args...>(
-        op, dispatchKeySet, std::forward<Args>(args)...);
+    return CapturedKernel{kernel, /*isRedispatch=*/false}
+        .template call<Return, Args...>(
+            op, dispatchKeySet, std::forward<Args>(args)...);
   } else {
-    return kernel.template call<Return, Args...>(
-        op, dispatchKeySet, std::forward<Args>(args)...);
+    return CapturedKernel{kernel, /*isRedispatch=*/false}
+        .template call<Return, Args...>(
+            op, dispatchKeySet, std::forward<Args>(args)...);
   }
 #else
-  return kernel.template call<Return, Args...>(
-      op, dispatchKeySet, std::forward<Args>(args)...);
+  return CapturedKernel{kernel, /*isRedispatch=*/false}
+      .template call<Return, Args...>(
+          op, dispatchKeySet, std::forward<Args>(args)...);
 #endif // FBCODE_CAFFE2
 }
 
@@ -917,19 +947,9 @@ inline Return Dispatcher::redispatch(
 #endif
   const KernelFunction& kernel =
       op.operatorDef_->op.lookup(currentDispatchKeySet);
-  if (C10_UNLIKELY(impl::dispatch_capture_enabled())) {
-    if (auto* sink = impl::tls_dispatch_capture_sink()) {
-      return callWithCaptureSink<Return, Args...>(
-          op,
-          *sink,
-          currentDispatchKeySet,
-          kernel,
-          /*isRedispatch=*/true,
-          std::forward<Args>(args)...);
-    }
-  }
-  return kernel.template call<Return, Args...>(
-      op, currentDispatchKeySet, std::forward<Args>(args)...);
+  return CapturedKernel{kernel, /*isRedispatch=*/true}
+      .template call<Return, Args...>(
+          op, currentDispatchKeySet, std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack)
