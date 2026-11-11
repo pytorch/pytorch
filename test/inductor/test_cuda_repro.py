@@ -352,12 +352,9 @@ class CudaReproTests(TestCase):
                 biases.extend(node.args[3] for node in nodes)
 
             torch._dynamo.reset()
-            with (
-                config.patch(
-                    numerics="strict" if strict else "default",
-                    joint_custom_post_pass=capture_bias,
-                ),
-                sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+            with config.patch(
+                numerics="strict" if strict else "default",
+                joint_custom_post_pass=capture_bias,
             ):
                 compiled = torch.compile(fn, fullgraph=True)
                 actual = compiled(*args)
@@ -378,9 +375,13 @@ class CudaReproTests(TestCase):
         # Only compiler-proven zero masks may be removed; a runtime mask must
         # remain an FX input because its contents can change between calls.
         def runtime_mask_fn(query, key, value, attention_mask):
-            return F.scaled_dot_product_attention(
-                query, key, value, attn_mask=attention_mask
-            )
+            return aten._scaled_dot_product_efficient_attention.default(
+                query,
+                key,
+                value,
+                attention_mask.expand(batch_size, num_heads, seq_len, seq_len),
+                False,
+            )[0]
 
         padding_mask = torch.zeros(
             batch_size,
@@ -399,11 +400,10 @@ class CudaReproTests(TestCase):
 
         # Reuse the same compiled graph with different mask contents.
         padding_mask.zero_()
-        with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
-            self.assertEqual(
-                compiled_runtime_mask_fn(query, key, value, padding_mask),
-                runtime_mask_fn(query, key, value, padding_mask),
-            )
+        self.assertEqual(
+            compiled_runtime_mask_fn(query, key, value, padding_mask),
+            runtime_mask_fn(query, key, value, padding_mask),
+        )
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -1986,6 +1986,11 @@ class CudaReproTests(TestCase):
         not (TEST_CUDA or TEST_XPU),
         "requires CUDA or XPU: the cast runs on every non-CPU device",
     )
+    @skipIfXpu(
+        msg="triton-xpu folds the fp32 -> fp16 precision barrier and the "
+        "compiled-vs-eager check assumes cuDNN rounding; "
+        "intel/intel-xpu-backend-for-triton#7491, torch-xpu-ops: 4358"
+    )
     @config.patch(emulate_precision_casts_on_saved_tensors=True)
     def test_conv_bias_rounds_before_log_softmax(
         self, lowp_dtype, emulate_precision_casts, conv_offset
@@ -3185,6 +3190,25 @@ def foo(x):
     return x + 1
 
 # somehow gives different results.. still, check that it doesn't error
+foo(torch.rand([256], device=\"{device_type}\"))
+"""
+
+        subprocess.run([sys.executable, "-c", script], check=True)
+
+    @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
+    def test_triton_interpret_pdl(self):
+        import subprocess
+
+        script = f"""
+import os
+os.environ["TRITON_INTERPRET"] = "1"
+os.environ["TORCHINDUCTOR_ENABLE_PDL"] = "1"
+import torch
+
+@torch.compile()
+def foo(x):
+    return x + 1
+
 foo(torch.rand([256], device=\"{device_type}\"))
 """
 
