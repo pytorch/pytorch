@@ -2076,7 +2076,7 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
         with self.assertRaisesRegex(RuntimeError, "is not a Tensor"):
             op(x)
 
-    @skipIfXpu(msg="Deprecated torch.custom_ops API")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6049")
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_impl_separate(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
@@ -2101,7 +2101,7 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
         result = op(x_cuda)
         self.assertEqual(result, foo_cuda(x_cuda))
 
-    @skipIfXpu(msg="Deprecated torch.custom_ops API")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6049")
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_impl_multiple(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")

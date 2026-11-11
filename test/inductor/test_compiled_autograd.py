@@ -3273,12 +3273,13 @@ main()
             compiler_fn=make_compiler_fn(fullgraph=False, dynamic=False),
         )
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5338")
+    @requires_gpu_and_triton
     def test_cudagraphs_cpu_division(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
 
-        model = torch.nn.Linear(10, 10, dtype=torch.float16).cuda()
-        inputs = torch.randn(10, 10, dtype=torch.float16).cuda()
+        model = torch.nn.Linear(10, 10, dtype=torch.float16).to(GPU_TYPE)
+        inputs = torch.randn(10, 10, dtype=torch.float16).to(GPU_TYPE)
         out = model(inputs)
         loss = reduce_to_scalar_loss(out)
 
@@ -3319,7 +3320,7 @@ main()
         # (no GPU devices to use cudagraphs with)
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
-    @skipIfXpu(msg="cudagraphs not supported on xpu for now!")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5338")
     @requires_gpu_and_triton
     def test_cudagraphs_sdpa(self):
         query = torch.rand(
@@ -3342,7 +3343,8 @@ main()
             2 if inductor_config.cpp_wrapper else 0,
         )
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5338")
+    @requires_gpu_and_triton
     def test_cudagraphs_cpu_scalar_used_in_python_custom_op(self):
         class MyFn(torch.autograd.Function):
             @staticmethod
@@ -3358,7 +3360,7 @@ main()
                 expand = gO * torch.ones_like(x)
                 return expand * cpu_tensor * ctx.cpu_scalar
 
-        x = torch.randn(10, requires_grad=True, device="cuda")
+        x = torch.randn(10, requires_grad=True, device=GPU_TYPE)
         out = MyFn.apply(x)
         with (
             config.patch(compiled_autograd=True),
@@ -3381,8 +3383,9 @@ main()
             counters["inductor"]["cudagraph_skips"], expected_cudagraph_skips
         )
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5338")
     @scoped_load_inline
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -3428,7 +3431,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             verbose=True,
         )
 
-        x = torch.randn(2, 2, requires_grad=True, device="cuda")
+        x = torch.randn(2, 2, requires_grad=True, device=GPU_TYPE)
         with (
             config.patch(compiled_autograd=True),
             inductor_config.patch("triton.cudagraphs", True),
