@@ -25,6 +25,7 @@ requires_distributed = unittest.skipIf(
 
 
 class BenchmarkRunnerTests(TestCase):
+    @torch.compiler.disable
     def test_fp64_oom_falls_back_to_cosine(self):
         runner = mock.Mock(spec=common.BenchmarkRunner())
         runner.args = types.SimpleNamespace(
