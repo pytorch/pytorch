@@ -580,6 +580,7 @@ def _handle_call_function_node_with_lowering(
             onnx_kwargs[key] = -1
 
     native = False
+    restore = False
     if _is_onnx_op(node.target):
         # Handle torch.ops.onnx.* ops. These ops can be directly added to the graph
         op_type, opset_version = _parse_onnx_op(node.target)  # type: ignore[arg-type]
@@ -679,9 +680,25 @@ def _handle_call_function_node_with_lowering(
                     )
                 model.functions[identifier] = function
         else:
+            from torch.onnx._internal.exporter import _legacy_promotion
+
+            context = _ir_builder.TranslationContext(native_builder)
+            graph = (
+                graph_like.graph if isinstance(graph_like, ir.Function) else graph_like
+            )
+            node_count = len(graph)
+            onnx_args, restore = _legacy_promotion.promote_inputs(
+                context, node.target, onnx_args, onnx_kwargs
+            )
             onnx_nodes, outputs = _call_legacy_translation(
                 onnx_function, onnx_args, onnx_kwargs, opset, constant_farm, model
             )
+            graph_like.extend(onnx_nodes)
+            if restore:
+                outputs = _legacy_promotion.restore_outputs(
+                    context, outputs, node.meta["val"]
+                )
+            onnx_nodes = list(itertools.islice(graph, node_count, None))
 
     # NOTE: Instead of using the output names from node.target._schema,
     # we always use the index if there are more than one outputs so the
@@ -690,7 +707,7 @@ def _handle_call_function_node_with_lowering(
     #
     # When there are multiple outputs, the output names will be
     # node_name__0, node_name__1, etc.
-    packed_complex = native and not (
+    packed_complex = (native or restore) and not (
         isinstance(node.target, torch._ops.OpOverload)
         and node.target.namespace == "onnx_symbolic"
     )
@@ -726,8 +743,8 @@ def _handle_call_function_node_with_lowering(
         # Record the nn.Module stack for the node
         _set_node_metadata(node, ir_node)
 
-    # Native builders already append to the current graph, including subgraphs.
-    if not native:
+    # Native builders and the legacy adapter already append to the current graph.
+    if not native and _is_onnx_op(node.target):
         graph_like.extend(onnx_nodes)
 
 
@@ -1184,8 +1201,6 @@ def _prepare_exported_program_for_export(
         )
 
         graph_module = exported_program.graph_module
-        # Include explicit type promotion nodes
-        _fx_passes.insert_type_promotion_nodes(graph_module)
         graph_module = _fx_passes.remove_assertion_nodes(graph_module)
         # Reassign the graph module to save some runtime.
         exported_program._graph_module = graph_module
@@ -1675,7 +1690,7 @@ def export(
         else:
             verbose_print(f"ExportedProgram has been saved to '{program_path}'.")
 
-    # Step 2: Decompose the exported program and insert type promotion nodes
+    # Step 2: Decompose the exported program
     verbose_print("Run decompositions...")
 
     try:
@@ -1685,7 +1700,7 @@ def export(
                 custom_translations=custom_translations
             )
 
-        # Process the exported program to run decompositions and type promotions etc.
+        # Process the exported program to run decompositions and remove assertions.
         decomposed_program = _prepare_exported_program_for_export(
             program, registry=registry
         )

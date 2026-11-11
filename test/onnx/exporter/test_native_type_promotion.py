@@ -312,7 +312,7 @@ class TestNativePromotion(common_utils.TestCase):
 
     @common_utils.parametrize("optimize", [False, True])
     @common_utils.parametrize("mask_kind", ["unsqueeze", "add"])
-    def test_decomposed_sdpa_lowering_without_promotion_pass(
+    def test_public_sdpa_export_without_promotion_graph_rerun(
         self, device, optimize, mask_kind
     ):
         class Model(torch.nn.Module):
@@ -350,14 +350,22 @@ class TestNativePromotion(common_utils.TestCase):
                 for node in ep.graph.nodes
                 if isinstance(node.meta.get("val"), torch.Tensor)
             }
-            # The prerequisite still runs the pass in public export. Exercise the
-            # already-decomposed graph directly until the dependent cutover.
-            with mock.patch.object(
-                torch.fx.Interpreter,
-                "run",
-                side_effect=AssertionError("promotion graph rerun"),
+            with (
+                mock.patch.object(
+                    _fx_passes, "decompose_with_registry", return_value=ep
+                ),
+                mock.patch.object(
+                    torch.fx.Interpreter,
+                    "run",
+                    side_effect=AssertionError("promotion graph rerun"),
+                ),
             ):
-                program = _core._exported_program_to_onnx_program(ep, registry=registry)
+                program = torch.onnx.export(
+                    ep, opset_version=18, optimize=optimize, verbose=False
+                )
+            public_program = torch.onnx.export(
+                model, (x,), opset_version=18, optimize=optimize, verbose=False
+            )
         self.assertTrue(model.bias.requires_grad)
         self.assertEqual(
             strides,
@@ -367,11 +375,12 @@ class TestNativePromotion(common_utils.TestCase):
                 if isinstance(node.meta.get("val"), torch.Tensor)
             },
         )
-        if optimize:
-            program.optimize()
-        onnx.checker.check_model(program.model_proto, full_check=True)
-        actual = ReferenceEvaluator(program.model_proto).run(None, {"x": x.numpy()})[0]
-        self.assertEqual(torch.from_numpy(actual), expected, rtol=1e-4, atol=1e-5)
+        for result in (program, public_program):
+            onnx.checker.check_model(result.model_proto, full_check=True)
+            actual = ReferenceEvaluator(result.model_proto).run(None, {"x": x.numpy()})[
+                0
+            ]
+            self.assertEqual(torch.from_numpy(actual), expected, rtol=1e-4, atol=1e-5)
 
 
 instantiate_device_type_tests(TestNativePromotion, globals(), only_for="cpu")

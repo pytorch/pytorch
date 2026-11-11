@@ -4,7 +4,6 @@ import torch
 import torch.export
 import torch.fx
 from torch.onnx._internal.exporter import _decomp, _registration
-from torch.onnx._internal.fx import passes
 
 
 def decompose_with_registry(
@@ -17,16 +16,6 @@ def decompose_with_registry(
     onnx_registered_ops = set(_decomp.get_onnx_implemented_overloads(registry))
     decomp_table = _decomp.create_onnx_friendly_decomposition_table(onnx_registered_ops)
     return exported_program.run_decompositions(decomp_table)
-
-
-def insert_type_promotion_nodes(
-    graph_module: torch.fx.GraphModule,
-) -> None:
-    """Inplace pass to insert explicit type promotion nodes, recursively through nested modules."""
-    for module in graph_module.modules():
-        if not isinstance(module, torch.fx.GraphModule):
-            raise AssertionError(f"Expected GraphModule, got {type(module)}")
-        passes.InsertTypePromotion(module).run()
 
 
 def remove_assertion_nodes(graph_module: torch.fx.GraphModule) -> torch.fx.GraphModule:
