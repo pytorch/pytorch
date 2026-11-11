@@ -2,11 +2,14 @@
 # ruff: noqa: F821, F841
 
 import sys
+import unittest
 import warnings
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch.testing._internal.common_utils import NoTest, run_tests, TEST_CUDA, TestCase
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 if not TEST_CUDA:
@@ -131,6 +134,33 @@ class TestCUDAGraphDebugInputs(TestCase):
         self.assertNotIn(empty.data_ptr(), g._tracker._external_inputs)
         del empty
         g.replay()
+
+    def test_wrapper_subclass_with_storage_offset_not_tracked(self):
+        a = torch.arange(12.0, device="cuda")
+        b = torch.arange(12.0, device="cuda")
+        x = TwoTensor(a[4:8], b[4:8])
+        self.assertEqual(x.storage_offset(), 4)
+        g, y = _capture_graph(lambda: x * 2)
+        self.assertEqual(g._tracker._external_inputs, {})
+        g.replay()
+        self.assertEqual(y.a, x.a * 2)
+
+    @unittest.skipIf(not dist.is_available(), "requires torch.distributed")
+    def test_dtensor_with_storage_offset_not_tracked(self):
+        from torch.distributed.device_mesh import init_device_mesh
+        from torch.distributed.tensor import DTensor, Shard
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=1)
+        self.addCleanup(dist.destroy_process_group)
+        mesh = init_device_mesh("cuda", (1,))
+        base = torch.arange(12.0, device="cuda")
+        x = DTensor.from_local(base[2:6], mesh, [Shard(0)], run_check=False)
+        self.assertEqual(x.storage_offset(), 2)
+        g, y = _capture_graph(lambda: x * 2)
+        self.assertEqual(g._tracker._external_inputs, {})
+        g.replay()
+        self.assertEqual(y.to_local(), x.to_local() * 2)
 
     def test_non_capturing_stream_inputs_not_tracked(self):
         capture_stream = torch.cuda.Stream()
