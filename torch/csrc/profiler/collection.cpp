@@ -207,13 +207,13 @@ bool InputOutputEncoder::isSupportedScalarList(
     return false;
   }
   auto list_ref = list_candidate.toListRef();
-  if (C10_UNLIKELY(list_ref.empty())) {
+  if (list_ref.empty()) [[unlikely]] {
     return true;
   }
-  if (C10_UNLIKELY(!list_ref[0].isScalar())) {
+  if (!list_ref[0].isScalar()) [[unlikely]] {
     return false;
   }
-  if (C10_UNLIKELY(list_ref.size() > SCALAR_LIST_LENGTH_LIMIT)) {
+  if (list_ref.size() > SCALAR_LIST_LENGTH_LIMIT) [[unlikely]] {
     return false;
   }
   return true;

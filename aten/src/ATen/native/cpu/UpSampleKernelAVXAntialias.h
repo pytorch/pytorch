@@ -711,7 +711,7 @@ void ImagingResampleHorizontalConvolution8u4x(
       _write_endline_rgb_as_uint32(lineOut1 + out_x_strided, o1);
       _write_endline_rgb_as_uint32(lineOut2 + out_x_strided, o2);
 
-      if (C10_UNLIKELY(is_last_line)) {
+      if (is_last_line) [[unlikely]] {
         // When we handle the last line, we can not access the next 4 bytes
         // as they are out of memory bounds.
         std::memcpy(lineOut3 + out_x_strided, (uint8_t *) &o3, num_channels);
@@ -1032,7 +1032,7 @@ void ImagingResampleHorizontalConvolution8u(
     auto o = _mm_cvtsi128_si32(sss);
     const auto out_x_strided = stride * out_x;
     if (num_channels == 3 && C10_UNLIKELY(out_x_strided + 4 >= max_out_x_strided)) {
-      if (C10_UNLIKELY(is_last_line)) {
+      if (is_last_line) [[unlikely]] {
         // When we handle the last line, we can not access the next 4 bytes
         // as they are out of memory bounds.
         std::memcpy(lineOut + out_x_strided, (uint8_t *) &o, 3);
