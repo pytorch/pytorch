@@ -139,6 +139,7 @@ class TestTorchDeviceAssertTriggerAccelerator(TestCase):
 instantiate_device_type_tests(
     TestTorchDeviceAssertTriggerAccelerator,
     globals(),
+    except_for="cpu",
     allow_xpu=True,
 )
 
