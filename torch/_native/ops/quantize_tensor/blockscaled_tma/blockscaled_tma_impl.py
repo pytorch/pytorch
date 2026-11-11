@@ -1,5 +1,6 @@
 """PyTorch-facing implementation for TMA-based block-scaled quantization."""
 
+from math import prod
 from typing import cast, NamedTuple, TypeAlias
 
 import torch
@@ -37,12 +38,11 @@ class _BlockscaledTmaSpec(NamedTuple):
 
     M: int
     K: int
-    B: int
+    B_product: int
     is_batched: bool
     quant_orientation_id: int
     do_dim_k: bool
     do_dim_m: bool
-    input_transposed: bool
     is_square_scaling: bool
     is_scale_swizzled: bool
     s_num_row_blk_k: int | None
@@ -61,94 +61,351 @@ class _PreparedBlockscaledTmaLaunch(NamedTuple):
     scale_m: torch.Tensor | None
 
 
-def _validate_and_normalize_blockscaled_tma(
+class _MatrixInputLayout(NamedTuple):
+    r"""Planned canonical shape, axis order, and output restoration metadata.
+
+    A view-compatible batched input keeps batch axes around the matrix axes in
+    ``(B_outer, M, B_inner, K)`` (or with ``M`` and ``K`` reversed). When a view
+    is unavailable, a batched ``[*B0, M, *B1, K, *B2]`` input moves its batch
+    axes ahead of ``(M, K)`` in physical stride order and folds them into
+    ``(B_product, M, 1, K)`` after materialization.
+
+    Attributes:
+        shape (tuple[int, ...]): Shape of the planned 2D or 4D TMA input.
+        dim (_SingleQuantDim): Ordered quantization axes in canonical kernel
+          coordinates, not in the caller's tensor.
+        matrix_axes (_SingleQuantDim): Ordered kernel M/K axes in caller
+          coordinates.
+        input_permutation (tuple[int, ...]): Caller axes ordered to keep
+          interleaved batches in a view, or move them ahead for a copy.
+        use_tma_view (bool): Whether the input admits a TMA view before pointer
+          alignment; otherwise the input must be materialized.
+        batch_shape (tuple[int, ...]): Sizes of the caller's batch axes in the
+          planner's physical batch-axis order.
+        inverse_permutation (tuple[int, ...]): Restores the caller's axis order
+          after unfolding the batch axes ahead of the matrix axes.
+        swap_dual_outputs (bool): Whether to swap the two result pairs to return
+          the caller's requested quantization pair first.
+    """
+
+    shape: tuple[int, ...]
+    dim: _SingleQuantDim
+    matrix_axes: _SingleQuantDim
+    input_permutation: tuple[int, ...]
+    use_tma_view: bool
+    batch_shape: tuple[int, ...]
+    inverse_permutation: tuple[int, ...]
+    swap_dual_outputs: bool
+
+
+def _validate_blockscaled_tma_input(
     input: torch.Tensor,
-    *,
     dim: _SingleQuantDim,
-    dual: bool,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
-) -> _BlockscaledTmaSpec:
-    """Validate public arguments and return their canonical host-side form."""
+    *,
+    dual: bool,
+) -> None:
+    r"""Validate caller-visible input metadata before materializing the tensor."""
 
-    ndim = input.dim()
-    if ndim not in (2, 3):
+    if not is_scale_swizzled and is_square_scaling:
+        raise ValueError("compact scales do not support square scaling")
+
+    if input.dtype not in (torch.bfloat16, torch.float16, torch.float32):
+        raise ValueError("blockscaled TMA supports only bf16, fp16, and fp32 input")
+
+    row_axis, quant_axis = dim
+    row_size, quant_size = input.shape[row_axis], input.shape[quant_axis]
+    if is_square_scaling and row_size % 32 != 0:
         raise ValueError(
-            f"blockscaled TMA requires a 2D or 3D input; got {ndim} dimensions"
+            f"32x32 scaling requires input axis {row_axis} to be divisible by 32; "
+            f"got size {row_size}"
         )
+    if dual and row_size % 32 != 0:
+        raise ValueError(
+            f"quantized axis {row_axis} must be divisible by 32; got size {row_size}"
+        )
+    if quant_size % 32 != 0:
+        raise ValueError(
+            f"quantized axis {quant_axis} must be divisible by 32; got size {quant_size}"
+        )
+
+
+def _plan_blockscaled_tma_launch(
+    input: torch.Tensor,
+    layout: _MatrixInputLayout,
+    spec: _BlockscaledTmaSpec,
+) -> BlockscaledTmaPlan | None:
+    r"""Validate the selected TMA launch using caller axes before copying input."""
+
+    if input.numel() == 0:
+        return None
+
+    caller_batch_axes = tuple(
+        axis for axis in range(input.ndim) if axis not in layout.matrix_axes
+    )
+    batch_sizes = tuple(input.shape[axis] for axis in caller_batch_axes)
+    batch_count = spec.B_product
+    if batch_count > _CUDA_GRID_Z_MAX:
+        raise ValueError(
+            f"blockscaled TMA batch axes {caller_batch_axes} have sizes {batch_sizes}; "
+            f"product {batch_count} exceeds CUDA grid.z limit {_CUDA_GRID_Z_MAX}"
+        )
+    for axis in layout.matrix_axes:
+        size = input.shape[axis]
+        if size > _CUDA_TMA_MAX_DIM:
+            raise ValueError(
+                f"blockscaled TMA input axis {axis} has size {size}; "
+                f"maximum TMA dimension size is {_CUDA_TMA_MAX_DIM}"
+            )
+
+    plan = select_blockscaled_tma_plan(
+        spec.M,
+        spec.K,
+        input_dtype=input.dtype,
+        quant_orientation_id=spec.quant_orientation_id,
+        is_square_scaling=spec.is_square_scaling,
+    )
+    if plan.grid_k > _CUDA_GRID_X_MAX or plan.grid_m > _CUDA_GRID_Y_MAX:
+        raise ValueError(
+            f"blockscaled TMA launch grid exceeds CUDA limits for input matrix axes "
+            f"{layout.matrix_axes} with sizes ({spec.M}, {spec.K}): "
+            f"grid=({plan.grid_k}, {plan.grid_m}, {batch_count}), "
+            f"maximum=({_CUDA_GRID_X_MAX}, {_CUDA_GRID_Y_MAX}, {_CUDA_GRID_Z_MAX})"
+        )
+    return plan
+
+
+def _plan_matrix_input(
+    input: torch.Tensor,
+    dim: _SingleQuantDim,
+    is_square_scaling: bool,
+    is_scale_swizzled: bool,
+    *,
+    dual: bool,
+) -> _MatrixInputLayout:
+    r"""Plan matrix and batch axes for the 2D or 4D TMA kernel without copying.
+
+    Choose a 2D or 4D TMA view when the physical strides and recipe permit. For
+    batched input ``[*B0, M, *B1, K, *B2]``, a 4D view has shape
+    ``(B_outer, M, B_inner, K)`` (or with ``M`` and ``K`` reversed), preserving
+    batch axes around the matrix axes. Otherwise, plan a contiguous copy with
+    batch axes ahead of the matrix axes in physical stride order. Batched
+    inputs then fold those axes into ``(B_product, M, 1, K)``; 2D inputs
+    remain 2D. Trailing ``*B2`` axes can prevent a view. For single
+    quantization, the copy places the requested quantized axis last (dim-k);
+    dual quantization keeps both matrix orientations. Return canonical shape,
+    quantization axes and metadata to undo the permutation.
+
+    Args:
+        input (Tensor): Input whose two matrix axes are specified by ``dim``.
+        dim (_SingleQuantDim): Ordered matrix-axis pair. Dual quantization also
+          quantizes the reverse pair.
+        is_square_scaling (bool): Whether square-block scaling is requested.
+        is_scale_swizzled (bool): Whether swizzled scale storage is requested.
+        dual (bool): Whether to quantize both matrix axes.
+    """
+
+    ndim = input.ndim
+    if ndim < 2:
+        raise ValueError(f"blockscaled TMA requires at least 2 dimensions; got {ndim}")
     if not isinstance(dim, tuple) or len(dim) != 2:
         raise ValueError(f"unsupported quantization dim: {dim}")
     first, last = dim
     if type(first) is not int or type(last) is not int:
         raise ValueError(f"unsupported quantization dim: {dim}")
-    matrix_axes = (-2, -1, ndim - 2, ndim - 1)
-    if first not in matrix_axes or last not in matrix_axes:
+    if first < -ndim or first >= ndim or last < -ndim or last >= ndim:
         raise ValueError(f"unsupported quantization dim: {dim}")
-    normalized_dim = (first % ndim - (ndim - 2), last % ndim - (ndim - 2))
-    if normalized_dim not in ((0, 1), (1, 0)):
+    normalized = (first % ndim, last % ndim)
+    if normalized[0] == normalized[1]:
         raise ValueError(f"expected two distinct quantization axes, got {dim}")
-    input_transposed = not input.is_contiguous()
-    if input_transposed:
-        if not input.transpose(-2, -1).is_contiguous():
-            raise ValueError(
-                "blockscaled TMA requires a contiguous or transpose-contiguous input"
-            )
-        # The TMA input is row-major; swap logical axes for transpose-contiguous views.
-        normalized_dim = (1 - normalized_dim[0], 1 - normalized_dim[1])
-    row_axis, col_axis = (
-        (ndim - 1, ndim - 2) if input_transposed else (ndim - 2, ndim - 1)
+    matrix_axes = tuple(sorted(normalized))
+    _validate_blockscaled_tma_input(
+        input, normalized, is_square_scaling, is_scale_swizzled, dual=dual
     )
-    do_dim_k = dual or normalized_dim == (0, 1)
-    do_dim_m = dual or normalized_dim == (1, 0)
-
-    if do_dim_k and do_dim_m:
-        if not is_scale_swizzled:
-            raise ValueError("dual quantization does not support compact scales")
-        if is_square_scaling:
-            raise ValueError("dual quantization does not support square scaling")
-
-    if not is_scale_swizzled:
-        if do_dim_m:
-            raise ValueError(
-                f"compact scales require quantization along contiguous input axis {col_axis}; "
-                f"got dim={dim}"
-            )
-        if is_square_scaling:
-            raise ValueError("compact scales do not support square scaling")
-
-    if input.dtype not in (torch.bfloat16, torch.float16, torch.float32):
-        raise ValueError("blockscaled TMA supports only bf16, fp16, and fp32 input")
-    if input.data_ptr() % _INPUT_ALIGNMENT_BYTES != 0:
-        raise ValueError("blockscaled TMA requires a 16-byte-aligned input")
-
-    if is_square_scaling:
-        if do_dim_m:
-            raise ValueError(
-                f"square scaling requires quantization along contiguous input axis {col_axis}; "
-                f"got dim={dim}"
-            )
-    tma_input = input.transpose(-2, -1) if input_transposed else input
-    M, K = tma_input.shape[-2:]
-    B = input.shape[0] if ndim == 3 else 1
-    if is_square_scaling and M % 32 != 0:
-        raise ValueError(
-            f"32x32 scaling requires input axis {row_axis} to be divisible by 32; "
-            f"got size {M}"
+    physical_axes = tuple(sorted(range(ndim), key=lambda axis: -input.stride(axis)))
+    physical_matrix_axes = tuple(axis for axis in physical_axes if axis in matrix_axes)
+    fast_axis = physical_matrix_axes[-1]
+    fast_pos = physical_axes.index(fast_axis)
+    trailing_batch_axes = physical_axes[fast_pos + 1 :]
+    if trailing_batch_axes and all(
+        input.shape[axis] == 1 for axis in trailing_batch_axes
+    ):
+        # Move trailing singletons before the fast matrix axis without
+        # changing their order relative to the other batch axes. This lets
+        # a shape such as (M, K, B) with B == 1 take the fast path.
+        before_fast = physical_axes[:fast_pos]
+        insert_at = 1 + max(
+            (pos for pos, axis in enumerate(before_fast) if axis not in matrix_axes),
+            default=-1,
         )
-    if do_dim_m:
-        if M % 32 != 0:
-            raise ValueError(
-                f"quantized axis {row_axis} must be divisible by 32; got size {M}"
-            )
-        if K % 16 != 0:
-            raise ValueError(
-                f"input axis {col_axis} must be divisible by 16 when quantizing "
-                f"axis {row_axis}; got size {K}"
-            )
-    if do_dim_k and K % 32 != 0:
-        raise ValueError(
-            f"quantized axis {col_axis} must be divisible by 32; got size {K}"
+        physical_axes = (
+            *before_fast[:insert_at],
+            *trailing_batch_axes,
+            *before_fast[insert_at:],
+            fast_axis,
         )
+    physical_input = (
+        input if physical_axes == tuple(range(ndim)) else input.permute(physical_axes)
+    )
+    batch_axes = tuple(axis for axis in physical_axes if axis not in matrix_axes)
+    quant_axis = normalized[-1]
+    physical_dim_k = quant_axis == fast_axis
+
+    # Determine if we can take a no-copy fast path (unaligned pointer can still
+    # copy later)
+    use_tma_view = (
+        # Physical input must be contiguous and innermost dim must be one of the
+        # requested quantization dims.
+        physical_input.is_contiguous()
+        and physical_axes[-1] == fast_axis
+        # Unswizzled and square scales only support kernel dim-k. If this
+        # view requires dim-m, single quantization materializes dim-k.
+        and (is_scale_swizzled or physical_dim_k)
+        and (not is_square_scaling or physical_dim_k)
+        # Dim-m kernel currently requires K % 16 == 0
+        and (physical_dim_k or input.shape[fast_axis] % 16 == 0)
+    )
+    if use_tma_view:
+        # No-copy fast path, TMA tiles the two matrix axes; batch axes between
+        # them become slice coordinates.
+        slow_axis = physical_matrix_axes[0]
+        slow_pos = physical_axes.index(slow_axis)
+        fast_pos = physical_axes.index(fast_axis)
+        outer_batch = prod(input.shape[axis] for axis in physical_axes[:slow_pos])
+        inner_batch = prod(
+            input.shape[axis] for axis in physical_axes[slow_pos + 1 : fast_pos]
+        )
+        permutation = (*batch_axes, *physical_matrix_axes)
+        slow_size, fast_size = input.shape[slow_axis], input.shape[fast_axis]
+        if batch_axes:
+            matrix_shape = (outer_batch, slow_size, inner_batch, fast_size)
+            single_dim: _SingleQuantDim = (1, 3) if physical_dim_k else (3, 1)
+        else:
+            matrix_shape = (slow_size, fast_size)
+            single_dim = (-2, -1) if physical_dim_k else (-1, -2)
+        input_permutation = physical_axes
+        kernel_axes = (physical_matrix_axes[0], physical_matrix_axes[1])
+        swap_dual_outputs = dual and normalized != physical_matrix_axes
+    else:
+        # Materialization fallback, place the requested quantized axis last
+        # for the dim-k kernel.
+        permutation = (*batch_axes, *normalized)
+        if batch_axes:
+            matrix_shape = (
+                prod(input.shape[axis] for axis in batch_axes),
+                input.shape[normalized[0]],
+                1,
+                input.shape[normalized[1]],
+            )
+            single_dim = (1, 3)
+        else:
+            matrix_shape = (input.shape[normalized[0]], input.shape[normalized[1]])
+            single_dim = (-2, -1)
+        input_permutation = permutation
+        kernel_axes = normalized
+        swap_dual_outputs = False
+    if dual:
+        canonical_dim: _SingleQuantDim = (1, 3) if batch_axes else (-2, -1)
+    else:
+        canonical_dim = single_dim
+    inverse = tuple(permutation.index(axis) for axis in range(ndim))
+    batch_shape = tuple(input.shape[axis] for axis in batch_axes)
+    return _MatrixInputLayout(
+        matrix_shape,
+        canonical_dim,
+        kernel_axes,
+        input_permutation,
+        use_tma_view,
+        batch_shape,
+        inverse,
+        swap_dual_outputs,
+    )
+
+
+def _canonicalize_matrix_input(
+    input: torch.Tensor, layout: _MatrixInputLayout
+) -> torch.Tensor:
+    r"""Apply a planned TMA view or copy and align its input pointer."""
+
+    matrix_input = (
+        input
+        if layout.input_permutation == tuple(range(input.ndim))
+        else input.permute(layout.input_permutation)
+    )
+    if layout.use_tma_view:
+        if layout.batch_shape:
+            matrix_input = matrix_input.view(layout.shape)
+    else:
+        matrix_input = matrix_input.contiguous()
+        if layout.batch_shape:
+            matrix_input = matrix_input.view(layout.shape)
+    if matrix_input.data_ptr() % _INPUT_ALIGNMENT_BYTES:
+        matrix_input = matrix_input.clone()
+    return matrix_input
+
+
+def _restore_matrix_output(
+    output: _BlockscaledTmaOutput, layout: _MatrixInputLayout
+) -> _BlockscaledTmaOutput:
+    r"""Restore result axes after quantizing the canonical matrix input.
+
+    For contiguous ``[*B0, M, *B1, K, *B2]``, unfold each qdata result's
+    leading ``B_product`` axis from ``(B_product, M, K)`` to
+    ``[*B0, *B1, *B2, M, K]``, then permute it to ``[*B0, M, *B1, K, *B2]``.
+    Scale tensors undergo the same axis permutation, but their last two axes
+    hold scale data, not necessarily ``M`` and ``K`` elements; swizzled scales
+    use packed storage. Swap the dual result pairs if the physical matrix axes
+    changed their order.
+    This restores logical axes, not the input's strides.
+
+    Args:
+        output (_BlockscaledTmaOutput): Results with folded batch dimensions.
+        layout (_MatrixInputLayout): Axis order and batch shape to restore.
+    """
+
+    if (
+        len(layout.batch_shape) <= 1
+        and layout.inverse_permutation == tuple(range(len(layout.inverse_permutation)))
+        and not layout.swap_dual_outputs
+    ):
+        return output
+    restored = []
+    for tensor in output:
+        if layout.batch_shape:
+            if tensor.shape[0] == 0:
+                # unflatten infers contiguous strides for empty tensors.
+                batch_strides = tuple(
+                    tensor.stride(0) * prod(layout.batch_shape[axis + 1 :])
+                    for axis in range(len(layout.batch_shape))
+                )
+                tensor = tensor.as_strided(
+                    (*layout.batch_shape, *tensor.shape[1:]),
+                    (*batch_strides, *tensor.stride()[1:]),
+                )
+            else:
+                tensor = tensor.unflatten(0, layout.batch_shape)
+        restored.append(tensor.permute(layout.inverse_permutation))
+    if layout.swap_dual_outputs:
+        restored = restored[2:] + restored[:2]
+    return cast(_BlockscaledTmaOutput, tuple(restored))
+
+
+def _build_blockscaled_tma_spec(
+    layout: _MatrixInputLayout,
+    *,
+    dual: bool,
+    is_square_scaling: bool,
+    is_scale_swizzled: bool,
+) -> _BlockscaledTmaSpec:
+    r"""Build a launch spec from the planned canonical 2D/4D layout."""
+
+    is_batched = len(layout.shape) == 4
+    dim_k = (1, 3) if is_batched else (-2, -1)
+    do_dim_k = dual or layout.dim == dim_k
+    do_dim_m = dual or layout.dim == dim_k[::-1]
+    M, K = (layout.shape[1], layout.shape[3]) if is_batched else layout.shape
+    B_product = layout.shape[0] * layout.shape[2] if is_batched else 1
 
     s_num_row_blk_k = s_num_col_blk_k = None
     if do_dim_k:
@@ -170,12 +427,11 @@ def _validate_and_normalize_blockscaled_tma(
     return _BlockscaledTmaSpec(
         M=M,
         K=K,
-        B=B,
-        is_batched=ndim == 3,
+        B_product=B_product,
+        is_batched=is_batched,
         quant_orientation_id=quant_orientation_id,
         do_dim_k=do_dim_k,
         do_dim_m=do_dim_m,
-        input_transposed=input_transposed,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
         s_num_row_blk_k=s_num_row_blk_k,
@@ -188,38 +444,9 @@ def _validate_and_normalize_blockscaled_tma(
 def _prepare_blockscaled_tma_launch(
     input: torch.Tensor,
     spec: _BlockscaledTmaSpec,
+    plan: BlockscaledTmaPlan | None,
 ) -> _PreparedBlockscaledTmaLaunch:
-    """Select the launch plan and allocate its output storage."""
-
-    plan = None
-    if spec.B != 0 and spec.M != 0 and spec.K != 0:
-        if spec.B > _CUDA_GRID_Z_MAX:
-            raise ValueError(
-                f"blockscaled TMA batch size exceeds CUDA grid.z limit: "
-                f"B={spec.B}, maximum={_CUDA_GRID_Z_MAX}"
-            )
-        if spec.M > _CUDA_TMA_MAX_DIM or spec.K > _CUDA_TMA_MAX_DIM:
-            raise ValueError(
-                "blockscaled TMA requires each nonempty input dimension to be at most "
-                f"{_CUDA_TMA_MAX_DIM}; got shape ({spec.M}, {spec.K})"
-            )
-        plan = select_blockscaled_tma_plan(
-            spec.M,
-            spec.K,
-            input_dtype=input.dtype,
-            quant_orientation_id=spec.quant_orientation_id,
-            is_square_scaling=spec.is_square_scaling,
-        )
-    if plan is not None and (
-        # K <= 2**32 and tile_k_size >= 32 keep grid_k below the X limit.
-        # Large M can still exceed the Y limit.
-        plan.grid_k > _CUDA_GRID_X_MAX or plan.grid_m > _CUDA_GRID_Y_MAX
-    ):
-        raise ValueError(
-            "blockscaled TMA launch grid exceeds CUDA limits: "
-            f"grid=({plan.grid_k}, {plan.grid_m}, {spec.B}), "
-            f"maximum=({_CUDA_GRID_X_MAX}, {_CUDA_GRID_Y_MAX}, {_CUDA_GRID_Z_MAX})"
-        )
+    r"""Allocate output storage for a prevalidated launch plan."""
 
     output_m = scale_m = None
     if spec.do_dim_m:
@@ -232,12 +459,12 @@ def _prepare_blockscaled_tma_launch(
                 f"expected s_num_col_blk_m, got {spec.s_num_col_blk_m}"
             )
         output_m = torch.empty(
-            (spec.B, spec.K, spec.M) if spec.is_batched else (spec.K, spec.M),
+            (spec.B_product, spec.K, spec.M) if spec.is_batched else (spec.K, spec.M),
             dtype=torch.float8_e4m3fn,
             device=input.device,
         )
         scale_m = torch.empty(
-            spec.B * spec.s_num_row_blk_m * spec.s_num_col_blk_m * 32 * 16,
+            spec.B_product * spec.s_num_row_blk_m * spec.s_num_col_blk_m * 32 * 16,
             dtype=torch.uint8,
             device=input.device,
         )
@@ -253,7 +480,7 @@ def _prepare_blockscaled_tma_launch(
                 f"expected s_num_col_blk_k, got {spec.s_num_col_blk_k}"
             )
         output_k = torch.empty(
-            (spec.B, spec.M, spec.K) if spec.is_batched else (spec.M, spec.K),
+            (spec.B_product, spec.M, spec.K) if spec.is_batched else (spec.M, spec.K),
             dtype=torch.float8_e4m3fn,
             device=input.device,
         )
@@ -261,13 +488,13 @@ def _prepare_blockscaled_tma_launch(
         # memset.
         if spec.is_scale_swizzled:
             scale_k = torch.empty(
-                spec.B * spec.s_num_row_blk_k * spec.s_num_col_blk_k * 32 * 16,
+                spec.B_product * spec.s_num_row_blk_k * spec.s_num_col_blk_k * 32 * 16,
                 dtype=torch.uint8,
                 device=input.device,
             )
         else:
             scale_k = torch.empty(
-                spec.B * spec.M * (spec.K // 32),
+                spec.B_product * spec.M * (spec.K // 32),
                 dtype=torch.uint8,
                 device=input.device,
             )
@@ -305,7 +532,7 @@ def _format_blockscaled_tma_output(
             )
         scale_m_shape = (1, spec.s_num_row_blk_m * spec.s_num_col_blk_m * 32 * 16)
         scale_m = scale_m.view(
-            (spec.B, *scale_m_shape) if spec.is_batched else scale_m_shape
+            (spec.B_product, *scale_m_shape) if spec.is_batched else scale_m_shape
         ).view(torch.float8_e8m0fnu)
         scale_m = scale_m.transpose(-2, -1)
         output_m = output_m.transpose(-2, -1)
@@ -327,19 +554,9 @@ def _format_blockscaled_tma_output(
         else:
             scale_k_shape = (spec.M, spec.K // 32)
         scale_k = scale_k.view(
-            (spec.B, *scale_k_shape) if spec.is_batched else scale_k_shape
+            (spec.B_product, *scale_k_shape) if spec.is_batched else scale_k_shape
         )
         scale_k = scale_k.view(torch.float8_e8m0fnu)
-
-    if spec.input_transposed:
-        if output_k is not None:
-            output_k = output_k.transpose(-2, -1)
-            if scale_k is not None:
-                scale_k = scale_k.transpose(-2, -1)
-        if output_m is not None:
-            output_m = output_m.transpose(-2, -1)
-            if scale_m is not None:
-                scale_m = scale_m.transpose(-2, -1)
 
     if spec.do_dim_k and not spec.do_dim_m:
         if output_k is None:
@@ -361,8 +578,6 @@ def _format_blockscaled_tma_output(
         raise AssertionError("expected output_m, got None")
     if scale_m is None:
         raise AssertionError("expected scale_m, got None")
-    if spec.input_transposed:
-        return output_m, scale_m, output_k, scale_k
     return output_k, scale_k, output_m, scale_m
 
 
@@ -374,23 +589,28 @@ def _blockscaled_tma_impl_on_current_device(
     *,
     dual: bool,
 ) -> _BlockscaledTmaOutput:
-    spec = _validate_and_normalize_blockscaled_tma(
-        input,
-        dim=dim,
+    layout = _plan_matrix_input(
+        input, dim, is_square_scaling, is_scale_swizzled, dual=dual
+    )
+    spec = _build_blockscaled_tma_spec(
+        layout,
         dual=dual,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
     )
-    tma_input = input.transpose(-2, -1) if spec.input_transposed else input
-    launch = _prepare_blockscaled_tma_launch(tma_input, spec)
+    plan = _plan_blockscaled_tma_launch(input, layout, spec)
+    input = _canonicalize_matrix_input(input, layout)
+    launch = _prepare_blockscaled_tma_launch(input, spec, plan)
 
     # CUDA cannot launch a zero-sized grid. The preparation step still allocates
     # correctly shaped empty outputs so result formatting remains shared.
     if launch.plan is None:
-        return _format_blockscaled_tma_output(spec, launch)
+        return _restore_matrix_output(
+            _format_blockscaled_tma_output(spec, launch), layout
+        )
 
     fn = _compile_blockscaled_tma(
-        tma_input.dtype,
+        input.dtype,
         launch.plan.tile_m_size,
         launch.plan.tile_k_size,
         launch.plan.cluster_k,
@@ -401,10 +621,20 @@ def _blockscaled_tma_impl_on_current_device(
         spec.is_batched,
     )
     output_k, output_m = launch.output_k, launch.output_m
+    tma_input = input
     if spec.is_batched:
-        tma_input = tma_input.permute(1, 2, 0)
-        output_k = output_k.permute(1, 2, 0) if output_k is not None else None
-        output_m = output_m.permute(1, 2, 0) if output_m is not None else None
+        B0, _, B1, _ = input.shape
+        tma_input = input.permute(1, 3, 2, 0)
+        output_k = (
+            output_k.view(B0, B1, spec.M, spec.K).permute(2, 3, 1, 0)
+            if output_k is not None
+            else None
+        )
+        output_m = (
+            output_m.view(B0, B1, spec.K, spec.M).permute(2, 3, 1, 0)
+            if output_m is not None
+            else None
+        )
     fn(
         tma_input,
         output_k,
@@ -416,7 +646,7 @@ def _blockscaled_tma_impl_on_current_device(
         launch.plan.grid_m,
         launch.plan.grid_k,
     )
-    return _format_blockscaled_tma_output(spec, launch)
+    return _restore_matrix_output(_format_blockscaled_tma_output(spec, launch), layout)
 
 
 def _run_blockscaled_tma(
@@ -468,36 +698,49 @@ def _blockscaled_tma_impl(
 ) -> _TwoTensorOutput:
     r"""_blockscaled_tma_impl(input, dim, is_square_scaling, is_scale_swizzled, **kwargs) -> tuple[Tensor, Tensor]
 
-    Quantize a 2D or 3D tensor to MXFP8 with block scaling along ``dim[-1]``.
+    Quantize an N-D tensor to MXFP8 with block scaling along ``dim[-1]``.
+
+    ``dim`` defines a logical 2D matrix plane; all other axes are batch axes.
+    Layouts admitting a 2D or 4D TMA view can avoid copying. Other layouts,
+    including trailing batch axes that prevent such a view, are made
+    contiguous. For otherwise view-compatible inputs, compact or square
+    scaling copies when ``dim[-1]`` is the physically slower matrix axis.
+    Swizzled scaling also copies in that orientation if the faster matrix
+    axis has size not divisible by 16. Canonical storage with an unaligned
+    pointer is cloned to meet the 16-byte alignment requirement.
+
+    .. note::
+        These copy conditions describe the current kernel. Whether an input
+        uses a view or is materialized is an implementation detail, not a
+        public API guarantee. The output properties below apply to either path.
 
     Args:
-        input (Tensor): Contiguous or transpose-contiguous CUDA tensor of shape
-            ``(M, K)`` or ``(B, M, K)`` on an SM100+ GPU, with dtype float16,
-            bfloat16, or float32.
+        input (Tensor): CUDA tensor with at least two dimensions on an SM100+
+            GPU, with dtype float16, bfloat16, or float32.
         dim (tuple[int, int]): Ordered pair of distinct positive or negative
-            axes among the last two dimensions. The first is the row axis;
-            the second is the quantized axis and determines the first. For 2D
-            input, ``(0, 1)`` or ``(-2, -1)`` quantizes columns, while ``(1, 0)``
-            or ``(-1, -2)`` quantizes rows. For 3D input use ``(1, 2)`` or
-            ``(2, 1)`` instead of ``(0, 1)`` or ``(1, 0)``. Lists are not accepted.
+            axes, outer then inner in the logical matrix plane. The second
+            selects the block-scaled axis and must have size divisible by 32.
+            For 2D input, ``(0, 1)`` or ``(-2, -1)`` quantizes columns, while
+            ``(1, 0)`` or ``(-1, -2)`` quantizes rows. Lists are not accepted.
         is_square_scaling (bool): Use 32x32 instead of 1x32 scale blocks.
-            Requires swizzled scales and a contiguous quantized input axis.
+            Requires swizzled scales and both selected axes divisible by 32.
         is_scale_swizzled (bool): Return swizzled scales if ``True``; compact
             scales otherwise.
         **kwargs: No additional keyword arguments are accepted.
 
     Returns:
         tuple[Tensor, Tensor]: ``(qdata, scales)``. ``qdata`` has dtype
-            ``torch.float8_e4m3fn`` and the input shape, with matrix strides
-            ``(K, 1)`` for the last axis or ``(1, M)`` for the second-to-last.
-            ``scales`` have dtype
-            ``torch.float8_e8m0fnu`` and, when swizzled, shape ``(1, N)`` for
-            the last axis or ``(N, 1)`` for the second-to-last, where
-            ``N = ceil(M / 128) * ceil(K / 128) * 512``. Compact scales have
-            shape ``(M, K // 32)`` when quantizing the last axis of contiguous
-            input or ``(M // 32, K)`` when quantizing the second-to-last axis
-            of transpose-contiguous input. For 3D input, prepend ``B`` to the
-            scale shape.
+            ``torch.float8_e4m3fn`` and the input's logical shape and axis
+            order, but need not retain its strides. For 2D input of shape
+            ``(M, K)``, qdata strides are ``(K, 1)`` for ``dim=(0, 1)`` or
+            ``(1, M)`` for ``dim=(1, 0)``. ``scales`` have dtype
+            ``torch.float8_e8m0fnu`` and, when swizzled, shape ``(1, N)`` or
+            ``(N, 1)``, respectively, where
+            ``N = ceil(M / 128) * ceil(K / 128) * 512``. When supported,
+            compact scales have shape ``(M, K // 32)`` or ``(M // 32, K)``.
+            Batch axes retain their positions in both outputs: for input
+            ``(B0, M, B1, K, B2)`` and ``dim=(1, 3)``, swizzled scales have
+            shape ``(B0, 1, B1, N, B2)``.
 
     Examples::
         >>> x = torch.zeros((128, 256), dtype=torch.bfloat16, device="cuda")
@@ -513,24 +756,33 @@ def _blockscaled_tma_impl(
     )
 
 
-def _blockscaled_tma_impl_dual(input: torch.Tensor) -> _FourTensorOutput:
-    r"""_blockscaled_tma_impl_dual(input) -> tuple[Tensor, Tensor, Tensor, Tensor]
+def _blockscaled_tma_impl_dual(
+    input: torch.Tensor,
+    *,
+    dim: _SingleQuantDim = (-2, -1),
+) -> _FourTensorOutput:
+    r"""_blockscaled_tma_impl_dual(input, *, dim=(-2, -1)) -> tuple[Tensor, Tensor, Tensor, Tensor]
 
-    Quantize both matrix axes of a 2D or 3D tensor in one kernel launch.
+    Quantize both matrix axes of an N-D tensor in one kernel launch.
 
     Uses 1x32 scaling blocks and swizzled scales.
 
     Args:
-        input (Tensor): 2D or 3D CUDA tensor with the layout and dtypes
-            described by :func:`_blockscaled_tma_impl`. Both matrix dimensions
-            must be divisible by 32.
+        input (Tensor): CUDA tensor with the layout and dtypes described by
+            :func:`_blockscaled_tma_impl`. Both selected axes must have sizes
+            divisible by 32. Inputs not admitting a 2D or 4D TMA view are
+            materialized as described by :func:`_blockscaled_tma_impl`.
+        dim (tuple[int, int], optional): Ordered matrix-axis pair. Both this
+            pair and its reverse are quantized. All other axes are batch axes.
+            Default: ``(-2, -1)``.
 
     Returns:
-        tuple[Tensor, Tensor, Tensor, Tensor]: ``(q_k, s_k, q_m, s_m)``.
-            The first pair quantizes the logical last axis (``(-2, -1)``), and
-            the second pair quantizes the second-to-last (``(-1, -2)``),
-            regardless of input layout. Output strides and scale shapes follow
-            :func:`_blockscaled_tma_impl` for each axis.
+        tuple[Tensor, Tensor, Tensor, Tensor]: ``(q_first, s_first, q_reverse,
+            s_reverse)``. The first pair quantizes ``dim[-1]``; the reverse
+            pair quantizes ``dim[0]``. Results retain the input's logical axis
+            order, with batch axes in their original positions, but need not retain its
+            strides. Scale shapes follow :func:`_blockscaled_tma_impl` for
+            each axis, regardless of input layout.
 
     Examples::
         >>> x = torch.zeros((128, 256), dtype=torch.bfloat16, device="cuda")
@@ -540,7 +792,7 @@ def _blockscaled_tma_impl_dual(input: torch.Tensor) -> _FourTensorOutput:
         _FourTensorOutput,
         _run_blockscaled_tma(
             input,
-            (-2, -1),
+            dim,
             False,
             True,
             dual=True,

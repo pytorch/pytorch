@@ -1,5 +1,7 @@
 # Owner(s): ["module: linear algebra"]
 
+from unittest.mock import patch
+
 import torch
 from torch.nn.functional import SwizzleType
 from torch.testing._internal.common_cuda import SM100OrLater
@@ -28,34 +30,6 @@ from torch.testing._internal.mxfp8_test_utils import (
 )
 
 
-def _quantize_mxfp8_reference(
-    input: torch.Tensor,
-    dim: int,
-    is_square_scaling: bool,
-    is_scale_swizzled: bool,
-):
-    if input.ndim == 3:
-        if dim not in (-2, -1, 1, 2):
-            raise ValueError("unsupported MXFP8 reference configuration")
-        matrix_dim = -1 if dim in (-1, 2) else -2
-        outputs = [
-            _quantize_mxfp8_reference_inner(
-                matrix, matrix_dim, is_square_scaling, is_scale_swizzled
-            )
-            for matrix in input
-        ]
-        qdata = torch.stack([output[0] for output in outputs])
-        scales = torch.stack([output[1].view(torch.uint8) for output in outputs])
-        scales = scales.view(torch.float8_e8m0fnu)
-        return qdata, scales
-    elif input.ndim == 2:
-        return _quantize_mxfp8_reference_inner(
-            input, dim, is_square_scaling, is_scale_swizzled
-        )
-    else:
-        raise ValueError("unsupported MXFP8 reference configuration")
-
-
 def _quantize_mxfp8_reference_inner(
     input: torch.Tensor,
     dim: int,
@@ -82,6 +56,102 @@ def _quantize_mxfp8_reference_inner(
     return qdata, scales
 
 
+def _quantize_mxfp8_reference_nd(
+    input: torch.Tensor,
+    dim: tuple[int, int],
+    is_square_scaling: bool,
+    is_scale_swizzled: bool,
+):
+    r"""_quantize_mxfp8_reference_nd(input, dim, is_square_scaling, is_scale_swizzled) -> tuple[Tensor, Tensor]
+
+    Args:
+        input (Tensor): Tensor containing the matrices to quantize.
+        dim (tuple[int, int]): Row and quantized axes, in that order.
+        is_square_scaling (bool): Compute scales per square block before expansion.
+          Requires ``is_scale_swizzled=True``.
+        is_scale_swizzled (bool): Return packed, swizzled scales when true.
+
+    Returns:
+        tuple[Tensor, Tensor]: MXFP8 qdata and E8M0 scales. Each matrix is
+        stored with its quantized axis contiguous, including for batched dim-M.
+
+    Examples::
+
+        # Shape @ stride; is_square_scaling=False in every example.
+        # Compact means is_scale_swizzled=False; swizzled means True.
+        # L = 512 * ceil(M / 128) * ceil(K / 128).
+        input (M, K), dim=(-2, -1):
+            qdata             (M, K) @ (K, 1)
+            scales compact    (M, K//32) @ (K//32, 1)
+            scales swizzled   (1, L) @ (L, 1)
+
+        input (M, K), dim=(-1, -2):
+            qdata             (M, K) @ (1, M)
+            scales compact    (M//32, K) @ (1, M//32)
+            scales swizzled   (L, 1) @ (1, L)
+
+        input (B, M, K), dim=(-2, -1):
+            qdata             (B, M, K) @ (M*K, K, 1)
+            scales compact    (B, M, K//32) @ (M*(K//32), K//32, 1)
+            scales swizzled   (B, 1, L) @ (L, L, 1)
+
+        input (B, M, K), dim=(-1, -2):
+            qdata             (B, M, K) @ (M*K, 1, M)
+            scales compact    (B, M//32, K) @ ((M//32)*K, 1, M//32)
+            scales swizzled   (B, L, 1) @ (L, 1, L)
+
+        input (B0, M, B1, K, B2), dim=(1, 3):
+            qdata             (B0, M, B1, K, B2)
+                              @ (B1*B2*M*K, K, B2*M*K, 1, M*K)
+            scales compact    (B0, M, B1, K//32, B2)
+                              @ (B1*B2*M*(K//32), K//32, B2*M*(K//32), 1,
+                                 M*(K//32))
+            scales swizzled   (B0, 1, B1, L, B2)
+                              @ (B1*B2*L, L, B2*L, 1, L)
+    """
+    # canonicalize quantization axes to positive
+    # for example, if ndim == 3 then dim = (-2, -1) is canonicalized to dim = (1, 2)
+    axes = tuple(axis % input.ndim for axis in dim)
+    # sort the quantization axes
+    matrix_axes = tuple(sorted(axes))
+    # calculate batch axes that do not participate in quantization
+    batch_axes = tuple(axis for axis in range(input.ndim) if axis not in matrix_axes)
+    # canonicalize axis order into (*B, M, K)
+    permutation = (*batch_axes, *matrix_axes)
+    # find the permutation to go from canonicalized axis order back to original axis order
+    inverse = tuple(permutation.index(axis) for axis in range(input.ndim))
+    batch_shape = tuple(input.shape[axis] for axis in batch_axes)
+    # make the canonicalized order contiguous, to keep the reference simple
+    canonical = input.permute(permutation).contiguous()
+    matrices = canonical.reshape(-1, *canonical.shape[-2:])
+    # the line below selects dim-k vs dim-m in the 2d reference
+    matrix_dim = -1 if axes[-1] == matrix_axes[-1] else -2
+    # loop over 2d reference for each flattened batch
+    outputs = [
+        _quantize_mxfp8_reference_inner(
+            matrix, matrix_dim, is_square_scaling, is_scale_swizzled
+        )
+        for matrix in matrices
+    ]
+    if batch_shape:
+        if matrix_dim == -2:
+            qdata = torch.stack([result[0].t() for result in outputs]).transpose(-2, -1)
+            scales = torch.stack(
+                [result[1].t().view(torch.uint8) for result in outputs]
+            ).transpose(-2, -1)
+        else:
+            qdata = torch.stack([result[0] for result in outputs])
+            scales = torch.stack([result[1].view(torch.uint8) for result in outputs])
+        if len(batch_shape) > 1:
+            qdata = qdata.unflatten(0, batch_shape)
+            scales = scales.unflatten(0, batch_shape)
+        scales = scales.view(torch.float8_e8m0fnu)
+    else:
+        qdata, scales = outputs[0]
+    # undo the axis order permutation
+    return qdata.permute(inverse), scales.permute(inverse)
+
+
 def _quantize_mxfp8_tma(
     input: torch.Tensor,
     dim: tuple[int, int],
@@ -95,20 +165,149 @@ def _quantize_mxfp8_tma(
     return _blockscaled_tma_impl(input, dim, is_square_scaling, is_scale_swizzled)
 
 
-def _quantize_mxfp8_tma_dual(input: torch.Tensor):
+def _quantize_mxfp8_tma_dual(input: torch.Tensor, dim: tuple[int, int] = (-2, -1)):
     from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
         _blockscaled_tma_impl_dual,
     )
 
-    return _blockscaled_tma_impl_dual(input)
+    return _blockscaled_tma_impl_dual(input, dim=dim)
 
 
 _NVIDIA_SM100_OR_LATER = torch.version.rocm is None and bool(SM100OrLater)
 
 
 _MXFP8_IMPLEMENTATIONS = (
-    subtest(_quantize_mxfp8_reference, name="reference"),
+    subtest(_quantize_mxfp8_reference_nd, name="reference"),
     subtest(_quantize_mxfp8_tma, name="tma", decorators=[skipIfNoCuteDSL]),
+)
+
+
+def _get_tensor_and_quant_dims(
+    test_case_name: str,
+    device: str,
+) -> tuple[torch.Tensor, tuple[int, int]]:
+    if test_case_name == "leading":
+        data_hp = torch.randn(2, 3, 64, 128, dtype=torch.bfloat16, device=device)
+        axes = (2, 3)
+    elif test_case_name == "leading_reverse":
+        data_hp = torch.randn(2, 3, 64, 128, dtype=torch.bfloat16, device=device)
+        axes = (3, 2)
+    elif test_case_name == "leading_short_tile":
+        # Distinct batches expose aliases in the short dim-K tile's compact scale store.
+        data_hp = torch.empty((2, 1024, 1152), dtype=torch.bfloat16, device=device)
+        data_hp[0].fill_(0.25)
+        data_hp[1].fill_(2.5)
+        axes = (1, 2)
+    elif test_case_name == "trailing":
+        data_hp = torch.randn(2, 64, 128, 3, dtype=torch.bfloat16, device=device)
+        axes = (1, 2)
+    elif test_case_name == "trailing_singleton":
+        data_hp = torch.randn(2, 64, 128, 1, dtype=torch.bfloat16, device=device)
+        axes = (1, 2)
+    elif test_case_name == "trailing_reverse":
+        data_hp = torch.randn(2, 64, 128, 3, dtype=torch.bfloat16, device=device)
+        axes = (2, 1)
+    elif test_case_name == "trailing_short_tile":
+        batched = torch.empty((2, 1024, 1152), dtype=torch.bfloat16, device=device)
+        batched[0].fill_(0.25)
+        batched[1].fill_(2.5)
+        data_hp = batched.permute(1, 2, 0).contiguous()
+        axes = (0, 1)
+    elif test_case_name == "trailing_batch_tile":
+        data_hp = torch.randn(2, 64, 128, 32, dtype=torch.bfloat16, device=device)
+        axes = (1, 2)
+    elif test_case_name == "trailing_batch_partial":
+        data_hp = torch.randn(2, 160, 96, 33, dtype=torch.bfloat16, device=device)
+        axes = (1, 2)
+    elif test_case_name == "interleaved_trailing_batch":
+        data_hp = torch.randn(2, 160, 3, 96, 64, dtype=torch.bfloat16, device=device)
+        axes = (1, 3)
+    elif test_case_name == "interleaved_batch":
+        data_hp = torch.randn(2, 64, 4, 128, dtype=torch.bfloat16, device=device)
+        axes = (1, 3)
+    elif test_case_name == "interleaved_rank3":
+        data_hp = torch.randn(64, 4, 128, dtype=torch.bfloat16, device=device)
+        axes = (0, 2)
+    elif test_case_name == "interleaved_singleton":
+        data_hp = torch.randn(64, 1, 128, dtype=torch.bfloat16, device=device)
+        axes = (0, 2)
+    elif test_case_name == "interleaved_multi_batch":
+        data_hp = torch.randn(2, 3, 64, 4, 5, 128, dtype=torch.bfloat16, device=device)
+        axes = (2, 5)
+    elif test_case_name == "permuted_interleaved_batch":
+        data_hp = torch.randn(
+            2, 3, 64, 4, 128, dtype=torch.bfloat16, device=device
+        ).permute(2, 4, 0, 3, 1)
+        axes = (0, 1)
+    elif test_case_name == "transposed_interleaved_batch":
+        data_hp = torch.randn(
+            2, 64, 4, 128, dtype=torch.bfloat16, device=device
+        ).permute(0, 3, 2, 1)
+        axes = (1, 3)
+    elif test_case_name == "permuted_trailing_batch":
+        data_hp = torch.randn(
+            2, 160, 96, 32, dtype=torch.bfloat16, device=device
+        ).permute(0, 3, 1, 2)
+        axes = (2, 3)
+    elif test_case_name == "sliced_trailing_batch":
+        data_hp = torch.randn(2, 64, 256, 32, dtype=torch.bfloat16, device=device)[
+            :, :, ::2, :
+        ]
+        axes = (1, 2)
+    elif test_case_name == "interleaved":
+        data_hp = torch.randn(2, 64, 3, 128, 4, dtype=torch.bfloat16, device=device)
+        axes = (1, 3)
+    elif test_case_name == "permuted":
+        data_hp = torch.randn(
+            2, 3, 64, 128, dtype=torch.bfloat16, device=device
+        ).permute(0, 2, 3, 1)
+        axes = (1, 2)
+    elif test_case_name == "transposed":
+        data_hp = torch.randn(
+            2, 3, 128, 64, dtype=torch.bfloat16, device=device
+        ).permute(0, 3, 2, 1)
+        axes = (1, 2)
+    else:
+        raise ValueError(f"unknown MXFP8 layout: {test_case_name}")
+    return data_hp, axes
+
+
+_MXFP8_SINGLE_LAYOUTS = (
+    "leading",
+    "leading_short_tile",
+    "trailing",
+    "trailing_singleton",
+    "trailing_short_tile",
+    "trailing_batch_tile",
+    "trailing_batch_partial",
+    "interleaved_trailing_batch",
+    "interleaved_batch",
+    "interleaved_rank3",
+    "interleaved_singleton",
+    "interleaved_multi_batch",
+    "permuted_interleaved_batch",
+    "transposed_interleaved_batch",
+    "permuted_trailing_batch",
+    "sliced_trailing_batch",
+    "interleaved",
+    "permuted",
+    "transposed",
+)
+
+_MXFP8_DUAL_LAYOUTS = (
+    "leading",
+    "leading_reverse",
+    "trailing",
+    "trailing_reverse",
+    "trailing_batch_tile",
+    "interleaved_batch",
+    "interleaved_rank3",
+    "interleaved_singleton",
+    "interleaved_multi_batch",
+    "permuted_interleaved_batch",
+    "transposed_interleaved_batch",
+    "interleaved",
+    "permuted",
 )
 
 
@@ -136,8 +335,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         # copied from
         # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/test/prototype/mx_formats/test_mx_tensor.py#L264
         cases = make_mxfp8_semantic_cases(input_dtype, device=device)
-        dim = -1 if quantize_fn is _quantize_mxfp8_reference else (-2, -1)
-        qdata, scales = quantize_fn(cases.inputs, dim, False, False)
+        qdata, scales = quantize_fn(cases.inputs, (-2, -1), False, False)
         assert_mxfp8_semantics(qdata, scales, cases)
 
     @parametrize(
@@ -182,7 +380,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
                 self.skipTest("3D MXFP8 uses bf16, plus one fp32 case")
         swizzled = swizzle_type == SwizzleType.SWIZZLE_32_4_4
         data_hp = torch.randn(shape, device=device, dtype=input_dtype)
-        qdata_ref, scales_ref = _quantize_mxfp8_reference(data_hp, -1, False, swizzled)
+        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
+            data_hp, (-2, -1), False, swizzled
+        )
         qdata, scales = _quantize_mxfp8_tma(data_hp, (-2, -1), False, swizzled)
         _assert_bitwise_eq(qdata, qdata_ref)
         self.assertEqual(scales.shape, scales_ref.shape)
@@ -224,15 +424,19 @@ class TestMXFP8ReferenceNumerics(TestCase):
             if input_dtype != torch.float32 or shape != (2, 2048, 2080):
                 self.skipTest("3D MXFP8 uses bf16, plus one fp32 case")
         data_hp = torch.randn(shape, device=device, dtype=input_dtype)
-        qdata_ref, scales_ref = _quantize_mxfp8_reference(data_hp, -2, False, True)
+        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
+            data_hp, (-1, -2), False, True
+        )
         qdata, scales = _quantize_mxfp8_tma(data_hp, (-1, -2), False, True)
         _assert_bitwise_eq(qdata, qdata_ref)
         self.assertEqual(qdata.shape, shape)
+        self.assertEqual(qdata.stride(), qdata_ref.stride())
         M, K = shape[-2:]
         self.assertEqual(qdata.stride(), (M * K, 1, M) if len(shape) == 3 else (1, M))
         self.assertEqual(scales.shape, scales_ref.shape)
         self.assertEqual(scales.shape[-1], 1)
         self.assertEqual(scales, scales_ref)
+        self.assertEqual(scales.stride(), scales_ref.stride())
 
     @parametrize("input_dtype", (torch.bfloat16, torch.float16))
     @parametrize(
@@ -245,7 +449,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         data_hp = torch.randn(*shape, device=device, dtype=input_dtype)
-        qdata_ref, scales_ref = _quantize_mxfp8_reference(data_hp, -2, False, True)
+        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
+            data_hp, (-1, -2), False, True
+        )
         qdata, scales = _quantize_mxfp8_tma(data_hp, (-1, -2), False, True)
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
         self.assertEqual(scales, scales_ref)
@@ -269,8 +475,12 @@ class TestMXFP8ReferenceNumerics(TestCase):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         data_hp = torch.randn(shape, device=device, dtype=input_dtype)
-        qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference(data_hp, -1, False, True)
-        qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference(data_hp, -2, False, True)
+        qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference_nd(
+            data_hp, (-2, -1), False, True
+        )
+        qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference_nd(
+            data_hp, (-1, -2), False, True
+        )
         qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(data_hp)
         M, K = shape[-2:]
         m_blocks, k_blocks = (M + 127) // 128, (K + 127) // 128
@@ -324,7 +534,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         if transposed:
             data_hp = data_hp.transpose(-2, -1)
         dim = (-1, -2) if transposed else (-2, -1)
-        qdata_ref, scales_ref = _quantize_mxfp8_reference(data_hp, dim[-1], True, True)
+        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(data_hp, dim, True, True)
         qdata, scales = _quantize_mxfp8_tma(data_hp, dim, True, True)
         _assert_bitwise_eq(qdata, qdata_ref)
         self.assertEqual(scales, scales_ref)
@@ -377,8 +587,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
             self.skipTest("3D MXFP8 coverage uses only bfloat16")
         data_hp = torch.randn(shape, dtype=input_dtype, device=device).transpose(-2, -1)
         axis = dim[-1] % 2
-        qdata_ref, scales_ref = _quantize_mxfp8_reference(
-            data_hp, dim[-1], False, is_scale_swizzled
+        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
+            data_hp, dim, False, is_scale_swizzled
         )
         qdata, scales = _quantize_mxfp8_tma(data_hp, dim, False, is_scale_swizzled)
         self.assertEqual(qdata, qdata_ref)
@@ -413,8 +623,12 @@ class TestMXFP8ReferenceNumerics(TestCase):
         data_hp = torch.randn(shape, dtype=torch.bfloat16, device=device).transpose(
             -2, -1
         )
-        qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference(data_hp, -1, False, True)
-        qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference(data_hp, -2, False, True)
+        qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference_nd(
+            data_hp, (-2, -1), False, True
+        )
+        qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference_nd(
+            data_hp, (-1, -2), False, True
+        )
         qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(data_hp)
         self.assertEqual(qdata_k, qdata_k_ref)
         self.assertEqual(qdata_m, qdata_m_ref)
@@ -452,13 +666,287 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata.shape, data_hp.shape)
         self.assertEqual(qdata.stride(), (1, data_hp.shape[0]))
 
+    @parametrize(
+        "shape,dim",
+        (
+            subtest(((64, 128), (1, 0)), name="matrix"),
+            subtest(((2, 64, 128, 3), (2, 1)), name="trailing_batch"),
+        ),
+    )
+    @parametrize(
+        "is_square_scaling,is_scale_swizzled",
+        (
+            subtest((False, False), name="compact"),
+            subtest((True, True), name="square"),
+        ),
+    )
     @skipIfNoCuteDSL
-    def test_to_mx_rceil_strided_input_rejected(self, device):
+    def test_to_mx_rceil_dim_m_recipe_fallback(
+        self, shape, dim, is_square_scaling, is_scale_swizzled, device
+    ):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        data_hp = torch.randn(shape, dtype=torch.bfloat16, device=device)
+        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
+            data_hp, dim, is_square_scaling, is_scale_swizzled
+        )
+        qdata, scales = _quantize_mxfp8_tma(
+            data_hp, dim, is_square_scaling, is_scale_swizzled
+        )
+        self.assertEqual(qdata, qdata_ref)
+        self.assertEqual(scales, scales_ref)
+        self.assertEqual(qdata.stride(dim[-1]), 1)
+        self.assertEqual(scales.stride(dim[-1]), 1)
+
+    @parametrize("layout", _MXFP8_SINGLE_LAYOUTS)
+    @parametrize("mode", ("k_compact", "k_swizzled", "m_swizzled", "k_square"))
+    @skipIfNoCuteDSL
+    def test_to_mx_rceil_nd(self, layout, mode, device):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        data_hp, axes = _get_tensor_and_quant_dims(layout, device)
+        dim = axes[::-1] if mode == "m_swizzled" else axes
+        square = mode == "k_square"
+        swizzled = mode != "k_compact"
+        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
+            data_hp, dim, square, swizzled
+        )
+        # Protect current no-copy fast paths, not a public API guarantee.
+        expected_view = layout in {
+            "leading",
+            "leading_short_tile",
+            "trailing_singleton",
+            "interleaved_batch",
+            "interleaved_rank3",
+            "interleaved_singleton",
+            "interleaved_multi_batch",
+            "permuted_interleaved_batch",
+            "permuted",
+        } or (
+            layout in {"transposed", "transposed_interleaved_batch"}
+            and mode in {"k_swizzled", "m_swizzled"}
+        )
+        if expected_view:
+            from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
+                _canonicalize_matrix_input,
+                _plan_matrix_input,
+            )
+
+            matrix_layout = _plan_matrix_input(
+                data_hp, dim, square, swizzled, dual=False
+            )
+            with patch.object(
+                torch.Tensor,
+                "contiguous",
+                side_effect=AssertionError("materialized input"),
+            ):
+                matrix_input = _canonicalize_matrix_input(data_hp, matrix_layout)
+            self.assertEqual(matrix_input.data_ptr(), data_hp.data_ptr())
+        qdata, scales = _quantize_mxfp8_tma(data_hp, dim, square, swizzled)
+        self.assertEqual(qdata, qdata_ref)
+        self.assertEqual(scales, scales_ref)
+        self.assertEqual(qdata.shape, data_hp.shape)
+        self.assertEqual(qdata.stride()[dim[-1]], 1)
+        self.assertEqual(scales.shape, scales_ref.shape)
+        batch_axes = tuple(
+            sorted(
+                (axis for axis in range(data_hp.ndim) if axis not in axes),
+                key=lambda axis: -data_hp.stride(axis),
+            )
+        )
+        output_order = (*batch_axes, *dim)
+        self.assertTrue(qdata.permute(output_order).is_contiguous())
+        self.assertTrue(scales.permute(output_order).is_contiguous())
+
+    @parametrize(
+        "dim,is_square_scaling,is_scale_swizzled",
+        (
+            subtest(((1, 2), False, False), name="dim_k_compact"),
+            subtest(((1, 2), False, True), name="dim_k_swizzled"),
+            subtest(((2, 1), False, True), name="dim_m_swizzled"),
+            subtest(((1, 2), True, True), name="dim_k_square"),
+        ),
+    )
+    @skipIfNoCuteDSL
+    def test_to_mx_rceil_batch_axis_transpose_strides(
+        self, dim, is_square_scaling, is_scale_swizzled, device
+    ):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        input = torch.randn(2, 256, 128, 3, dtype=torch.bfloat16, device=device)
+        outputs = _quantize_mxfp8_tma(input, dim, is_square_scaling, is_scale_swizzled)
+        transposed_outputs = _quantize_mxfp8_tma(
+            input.transpose(0, 3), dim, is_square_scaling, is_scale_swizzled
+        )
+        for output, transposed in zip(outputs, transposed_outputs, strict=True):
+            expected = output.transpose(0, 3)
+            self.assertEqual(transposed, expected)
+            self.assertEqual(transposed.stride(), expected.stride())
+
+    @parametrize("layout", _MXFP8_DUAL_LAYOUTS)
+    @skipIfNoCuteDSL
+    def test_to_mx_rceil_nd_dual(self, layout, device):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        data_hp, axes = _get_tensor_and_quant_dims(layout, device)
+        qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference_nd(
+            data_hp, axes, False, True
+        )
+        qdata_m_ref, scales_m_ref = _quantize_mxfp8_reference_nd(
+            data_hp, axes[::-1], False, True
+        )
+        # Protect current no-copy fast paths, not a public API guarantee.
+        if layout in {
+            "leading",
+            "leading_reverse",
+            "interleaved_batch",
+            "interleaved_rank3",
+            "interleaved_singleton",
+            "interleaved_multi_batch",
+            "permuted_interleaved_batch",
+            "transposed_interleaved_batch",
+        }:
+            from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
+                _canonicalize_matrix_input,
+                _plan_matrix_input,
+            )
+
+            matrix_layout = _plan_matrix_input(data_hp, axes, False, True, dual=True)
+            with patch.object(
+                torch.Tensor,
+                "contiguous",
+                side_effect=AssertionError("materialized input"),
+            ):
+                matrix_input = _canonicalize_matrix_input(data_hp, matrix_layout)
+            self.assertEqual(matrix_input.data_ptr(), data_hp.data_ptr())
+        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_tma_dual(
+            data_hp, dim=axes
+        )
+        self.assertEqual(qdata_k, qdata_k_ref)
+        self.assertEqual(scales_k, scales_k_ref)
+        self.assertEqual(qdata_m, qdata_m_ref)
+        self.assertEqual(scales_m, scales_m_ref)
+        self.assertEqual(qdata_k.shape, data_hp.shape)
+        self.assertEqual(qdata_m.shape, data_hp.shape)
+        self.assertEqual(qdata_k.stride()[axes[-1]], 1)
+        self.assertEqual(qdata_m.stride()[axes[0]], 1)
+        batch_axes = tuple(
+            sorted(
+                (axis for axis in range(data_hp.ndim) if axis not in axes),
+                key=lambda axis: -data_hp.stride(axis),
+            )
+        )
+        for output in (qdata_k, scales_k):
+            self.assertTrue(output.permute((*batch_axes, *axes)).is_contiguous())
+        for output in (qdata_m, scales_m):
+            self.assertTrue(output.permute((*batch_axes, *axes[::-1])).is_contiguous())
+
+    @skipIfNoCuteDSL
+    def test_to_mx_rceil_strided_input_fallback(self, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         data_hp = torch.randn(64, 256, dtype=torch.bfloat16, device=device)[:, ::2]
-        with self.assertRaisesRegex(ValueError, "contiguous or transpose-contiguous"):
-            _quantize_mxfp8_tma(data_hp, (-2, -1), False, True)
+        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
+            data_hp, (-2, -1), False, True
+        )
+        qdata, scales = _quantize_mxfp8_tma(data_hp, (-2, -1), False, True)
+        self.assertEqual(qdata, qdata_ref)
+        self.assertEqual(scales, scales_ref)
+
+    @parametrize(
+        "invalid",
+        ("dtype", "size", "alignment", "grid_z", "folded_grid_z", "tma_dim", "grid_y"),
+    )
+    @skipIfNoCuteDSL
+    def test_to_mx_invalid_input_before_materialization(self, invalid, device):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        dim = (0, 1)
+        if invalid == "size":
+            data_hp = torch.empty((64, 96), dtype=torch.bfloat16, device=device)[:, ::2]
+            error = "quantized axis 1 must be divisible by 32; got size 48"
+        elif invalid == "alignment":
+            data_hp = torch.empty(64 * 48 + 1, dtype=torch.bfloat16, device=device)[
+                1:
+            ].view(64, 48)
+            error = "quantized axis 1 must be divisible by 32; got size 48"
+        elif invalid == "grid_z":
+            data_hp = torch.empty(1, dtype=torch.bfloat16, device=device).expand(
+                64, 128, 65536
+            )
+            error = r"batch axes \(2,\) have sizes \(65536,\); product 65536 exceeds CUDA grid.z limit 65535"
+        elif invalid == "folded_grid_z":
+            data_hp = torch.empty(1, dtype=torch.bfloat16, device=device).expand(
+                300, 64, 300, 128
+            )
+            dim = (1, 3)
+            error = r"batch axes \(0, 2\) have sizes \(300, 300\); product 90000 exceeds CUDA grid.z limit 65535"
+        elif invalid == "tma_dim":
+            data_hp = torch.empty(1, dtype=torch.bfloat16, device=device).expand(
+                64, 2**32 + 32, 2
+            )
+            error = "input axis 1 has size 4294967328; maximum TMA dimension size is 4294967296"
+        elif invalid == "grid_y":
+            data_hp = torch.empty(1, dtype=torch.bfloat16, device=device).expand(
+                65536 * 128, 32, 2
+            )
+            error = r"grid=\(1, 65536, 2\)"
+        else:
+            data_hp = torch.empty((64, 128), dtype=torch.float64, device=device)[:, ::2]
+            error = "blockscaled TMA supports only bf16, fp16, and fp32 input"
+        with (
+            patch.object(
+                torch.Tensor, "contiguous", side_effect=AssertionError("copied input")
+            ),
+            patch.object(
+                torch.Tensor, "clone", side_effect=AssertionError("cloned input")
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, error):
+                _quantize_mxfp8_tma(data_hp, dim, False, True)
+
+    @skipIfNoCuteDSL
+    def test_to_mx_rceil_nd_unaligned_fallback(self, device):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        data_hp = torch.randn(2, 64, 128, 33, dtype=torch.bfloat16, device=device)[
+            ..., 1:
+        ]
+        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
+            data_hp, (1, 2), False, True
+        )
+        qdata, scales = _quantize_mxfp8_tma(data_hp, (1, 2), False, True)
+        self.assertEqual(qdata, qdata_ref)
+        self.assertEqual(scales, scales_ref)
+
+    @skipIfNoCuteDSL
+    def test_to_mx_rceil_nd_misaligned_contiguous_input(self, device):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        storage = torch.randn(2 * 64 * 128 + 1, dtype=torch.bfloat16, device=device)
+        data_hp = storage[1:].view(2, 64, 128)
+        self.assertTrue(data_hp.is_contiguous())
+        self.assertNotEqual(data_hp.data_ptr() % 16, 0)
+        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
+            data_hp, (1, 2), False, True
+        )
+        qdata, scales = _quantize_mxfp8_tma(data_hp, (1, 2), False, True)
+        self.assertEqual(qdata, qdata_ref)
+        self.assertEqual(scales, scales_ref)
+
+    @skipIfNoCuteDSL
+    def test_to_mx_rceil_nd_transposed_unaligned_pitch(self, device):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        data_hp = torch.randn(2, 64, 17, dtype=torch.bfloat16, device=device).transpose(
+            -2, -1
+        )
+        qdata_ref, scales_ref = _quantize_mxfp8_reference_nd(
+            data_hp, (1, 2), False, True
+        )
+        qdata, scales = _quantize_mxfp8_tma(data_hp, (1, 2), False, True)
+        self.assertEqual(qdata, qdata_ref)
+        self.assertEqual(scales, scales_ref)
 
     @parametrize(
         "dim,is_square_scaling,is_scale_swizzled",
@@ -471,8 +959,16 @@ class TestMXFP8ReferenceNumerics(TestCase):
     )
     @parametrize(
         "shape",
-        ((0, 32), (32, 0), (0, 0), (0, 32, 64), (2, 0, 32), (2, 32, 0)),
-        name_fn=lambda shape: (f"B{shape[0]}_" if len(shape) == 3 else "")
+        (
+            (0, 32),
+            (32, 0),
+            (0, 0),
+            (0, 32, 64),
+            (2, 0, 32),
+            (2, 32, 0),
+            (2, 0, 64, 128),
+        ),
+        name_fn=lambda shape: "".join(f"B{size}_" for size in shape[:-2])
         + f"M{shape[-2]}_K{shape[-1]}",
     )
     @skipIfNoCuteDSL
@@ -490,8 +986,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         )
         scale_m_shape = (((K + 127) // 128) * ((M + 127) // 128) * 32 * 16, 1)
         scale_shape = scale_k_shape if dim[-1] == -1 else scale_m_shape
-        if len(shape) == 3:
-            scale_shape = (shape[0], *scale_shape)
+        scale_shape = (*shape[:-2], *scale_shape)
         expected_shapes = (shape, scale_shape)
         outputs = _quantize_mxfp8_tma(
             data_hp, dim, is_square_scaling, is_scale_swizzled
@@ -510,8 +1005,16 @@ class TestMXFP8ReferenceNumerics(TestCase):
 
     @parametrize(
         "shape",
-        ((0, 32), (32, 0), (0, 0), (0, 32, 64), (2, 0, 32), (2, 32, 0)),
-        name_fn=lambda shape: (f"B{shape[0]}_" if len(shape) == 3 else "")
+        (
+            (0, 32),
+            (32, 0),
+            (0, 0),
+            (0, 32, 64),
+            (2, 0, 32),
+            (2, 32, 0),
+            (2, 0, 64, 128),
+        ),
+        name_fn=lambda shape: "".join(f"B{size}_" for size in shape[:-2])
         + f"M{shape[-2]}_K{shape[-1]}",
     )
     @skipIfNoCuteDSL
@@ -526,9 +1029,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         scale_bytes = ((M + 127) // 128) * ((K + 127) // 128) * 512
         scale_k_shape = (1, scale_bytes)
         scale_m_shape = (scale_bytes, 1)
-        if len(shape) == 3:
-            scale_k_shape = (shape[0], *scale_k_shape)
-            scale_m_shape = (shape[0], *scale_m_shape)
+        scale_k_shape = (*shape[:-2], *scale_k_shape)
+        scale_m_shape = (*shape[:-2], *scale_m_shape)
         self.assertEqual(scales_k.shape, scale_k_shape)
         self.assertEqual(scales_m.shape, scale_m_shape)
         for output in (qdata_k, scales_k, qdata_m, scales_m):
