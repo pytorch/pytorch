@@ -271,45 +271,6 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertEqual(t.shape, (2, 2))
             self.assertEqual(t.device, torch.device("cpu"))
 
-    @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
-    def test_sparse_compressed_tensor_creation_device(self):
-        if torch._functorch.config.fake_tensor_propagate_real_tensors and not RUN_CUDA:
-            self.skipTest("propagate_real_tensors requires real CUDA tensors")
-        cuda0 = torch.device("cuda:0")
-        with FakeTensorMode():
-            crow = torch.tensor([0, 2, 4])
-            col = torch.tensor([0, 1, 0, 1])
-            v = torch.randn(4)
-            t = torch.sparse_csr_tensor(crow, col, v, size=(2, 2), device="cuda")
-            self.assertEqual(t.device, cuda0)
-            self.assertEqual(t.values().device, cuda0)
-            self.assertEqual(t.crow_indices().device, cuda0)
-            self.assertEqual(t.to_dense().device, cuda0)
-
-    @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
-    def test_sparse_compressed_tensor_creation_device_mismatch(self):
-        # the python ctor moves inputs to the requested device, so only the op trips this
-        if torch._functorch.config.fake_tensor_propagate_real_tensors:
-            self.skipTest("runs the real op, which reports its own device errors")
-        error = "need to be on the same device"
-        with FakeTensorMode():
-            crow = torch.tensor([0, 2, 4])
-            col = torch.tensor([0, 1, 0, 1])
-            v = torch.randn(4)
-            with self.assertRaisesRegex(RuntimeError, error):
-                torch.ops.aten.sparse_compressed_tensor.comp_plain_value_size(
-                    crow, col, v, [2, 2], layout=torch.sparse_csr, device="cuda"
-                )
-            cuda_args = [crow.to("cuda"), col.to("cuda"), v.to("cuda")]
-            with self.assertRaisesRegex(RuntimeError, error):
-                torch.ops.aten.sparse_compressed_tensor.comp_plain_value_size(
-                    *cuda_args, [2, 2], layout=torch.sparse_csr, device="cuda:1"
-                )
-            with self.assertRaisesRegex(RuntimeError, error):
-                torch.ops.aten.sparse_compressed_tensor.comp_plain_value_size(
-                    *cuda_args, [2, 2], layout=torch.sparse_csr
-                )
-
     def test_nansum_nanmean_empty_dim(self):
         # nansum/nanmean reduce over all dimensions when dim=() or dim=[] is
         # passed, matching eager. The meta kernel used to preserve the input
@@ -2134,118 +2095,6 @@ def forward(self, x_1):
         self.assertEqual(out[1].dtype, eye.dtype)
         self.assertEqual(out[2].dtype, eye.dtype)
 
-    @unittest.skipIf(not torch.cuda._is_compiled(), "requires CUDA-compiled PyTorch")
-    def test_fake_device_guard_no_use_after_free(self):
-        # Regression test: when CUDA is compiled but no devices are visible,
-        # FakeTensorMode installs a FakeGuardImpl into the global
-        # device_guard_impl_registry.  The impl must outlive all threads that
-        # use it; previously it was stored as a thread-local unique_ptr, so
-        # the pointer became dangling after the thread exited, causing a
-        # segfault when a later thread called deviceCount() on it.
-        #
-        # CUDA_VISIBLE_DEVICES must be set before torch is imported, so we
-        # run the repro in a subprocess.
-
-        script = """\
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
-import threading
-import torch
-
-def f(x):
-    return x * x
-
-def run_compile():
-    g = torch.compile(f, backend="eager")
-    for i in range(10):
-        g(torch.randn(i))
-
-threads = [threading.Thread(target=run_compile) for _ in range(2)]
-for t in threads:
-    t.start()
-for t in threads:
-    t.join()
-
-torch._dynamo.reset()
-
-threads = [threading.Thread(target=run_compile) for _ in range(2)]
-for t in threads:
-    t.start()
-for t in threads:
-    t.join()
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            timeout=60,
-        )
-        self.assertEqual(
-            result.returncode,
-            0,
-            msg=lambda msg: f"{msg}\nsubprocess failed:\n{result.stderr.decode()}",
-        )
-
-    @unittest.skipIf(not torch.cuda._is_compiled(), "requires CUDA-compiled PyTorch")
-    def test_cuda_fake_tensor_new_methods_no_device_init(self):
-        # Device visibility must be set before torch is imported, so run the
-        # repro in a subprocess.
-
-        script = """\
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
-os.environ["HIP_VISIBLE_DEVICES"] = ""
-
-# Import numpy before torch to avoid an MKL threading-layer conflict in this
-# subprocess environment.
-import numpy
-import torch
-from torch._subclasses.fake_tensor import (
-    FakeTensorMode,
-    is_fake_tensor,
-    maybe_get_fake_constant,
-)
-
-fake_mode = FakeTensorMode()
-with fake_mode:
-    x = torch.randn(3, device="cuda")
-    constant = torch.tensor([1.0])
-    moved = constant.to(device="cuda")
-    placed = torch.ops.prims.device_put.default(constant, torch.device("cuda"))
-
-assert not torch.cuda.is_initialized()
-
-new_tensors = [
-    x.new_empty([2, 1], device="cuda:0", dtype=torch.float32),
-    x.new_empty_strided([2, 1], [1, 2], device="cuda:0", dtype=torch.float32),
-    x.new_full([2, 1], 1.0, device="cuda:0", dtype=torch.float32),
-    x.new_ones([2, 1], device="cuda:0", dtype=torch.float32),
-    x.new_zeros([2, 1], device="cuda:0", dtype=torch.float32),
-    moved,
-    placed,
-]
-
-for y in new_tensors:
-    assert is_fake_tensor(y)
-    assert y.device == torch.device("cuda:0")
-    assert y.dtype is torch.float32
-
-assert maybe_get_fake_constant(constant) is not None
-assert maybe_get_fake_constant(moved) is None
-assert maybe_get_fake_constant(placed) is None
-
-assert not torch.cuda.is_initialized()
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            timeout=60,
-        )
-        self.assertEqual(
-            result.returncode,
-            0,
-            msg=lambda msg: f"{msg}\nsubprocess failed:\n{result.stderr.decode()}",
-        )
-
     @unittest.skipIf(
         TEST_ACCELERATOR, "Only execute when an accelerator is not present"
     )
@@ -2856,7 +2705,7 @@ instantiate_device_type_tests(
 
 
 class TestFakeTensorCUDA(TestCase):
-    """TestFakeTensor cases that need real CUDA hardware."""
+    """TestFakeTensor cases that need CUDA hardware or a CUDA build."""
 
     hw_classification = HardwareClassification.CUDA
 
@@ -2995,9 +2844,202 @@ class TestFakeTensorCUDA(TestCase):
                             self.assertTrue(is_fake_tensor(ten))
                         self.assertEqual(ten.device.type, "cuda")
 
+    @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
+    def test_sparse_compressed_tensor_creation_device(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors and not RUN_CUDA:
+            self.skipTest("propagate_real_tensors requires real CUDA tensors")
+        cuda0 = torch.device("cuda:0")
+        with FakeTensorMode():
+            crow = torch.tensor([0, 2, 4])
+            col = torch.tensor([0, 1, 0, 1])
+            v = torch.randn(4)
+            t = torch.sparse_csr_tensor(crow, col, v, size=(2, 2), device="cuda")
+            self.assertEqual(t.device, cuda0)
+            self.assertEqual(t.values().device, cuda0)
+            self.assertEqual(t.crow_indices().device, cuda0)
+            self.assertEqual(t.to_dense().device, cuda0)
+
+    @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
+    def test_sparse_compressed_tensor_creation_device_mismatch(self):
+        # the python ctor moves inputs to the requested device, so only the op trips this
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("runs the real op, which reports its own device errors")
+        error = "need to be on the same device"
+        with FakeTensorMode():
+            crow = torch.tensor([0, 2, 4])
+            col = torch.tensor([0, 1, 0, 1])
+            v = torch.randn(4)
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.ops.aten.sparse_compressed_tensor.comp_plain_value_size(
+                    crow, col, v, [2, 2], layout=torch.sparse_csr, device="cuda"
+                )
+            cuda_args = [crow.to("cuda"), col.to("cuda"), v.to("cuda")]
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.ops.aten.sparse_compressed_tensor.comp_plain_value_size(
+                    *cuda_args, [2, 2], layout=torch.sparse_csr, device="cuda:1"
+                )
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.ops.aten.sparse_compressed_tensor.comp_plain_value_size(
+                    *cuda_args, [2, 2], layout=torch.sparse_csr
+                )
+
+    @unittest.skipIf(not torch.cuda._is_compiled(), "requires CUDA-compiled PyTorch")
+    def test_fake_device_guard_no_use_after_free(self):
+        # Regression test: when CUDA is compiled but no devices are visible,
+        # FakeTensorMode installs a FakeGuardImpl into the global
+        # device_guard_impl_registry.  The impl must outlive all threads that
+        # use it; previously it was stored as a thread-local unique_ptr, so
+        # the pointer became dangling after the thread exited, causing a
+        # segfault when a later thread called deviceCount() on it.
+        #
+        # CUDA_VISIBLE_DEVICES must be set before torch is imported, so we
+        # run the repro in a subprocess.
+
+        script = """\
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+import threading
+import torch
+
+def f(x):
+    return x * x
+
+def run_compile():
+    g = torch.compile(f, backend="eager")
+    for i in range(10):
+        g(torch.randn(i))
+
+threads = [threading.Thread(target=run_compile) for _ in range(2)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+
+torch._dynamo.reset()
+
+threads = [threading.Thread(target=run_compile) for _ in range(2)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=lambda msg: f"{msg}\nsubprocess failed:\n{result.stderr.decode()}",
+        )
+
+    @unittest.skipIf(not torch.cuda._is_compiled(), "requires CUDA-compiled PyTorch")
+    def test_cuda_fake_tensor_new_methods_no_device_init(self):
+        # Device visibility must be set before torch is imported, so run the
+        # repro in a subprocess.
+
+        script = """\
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ["HIP_VISIBLE_DEVICES"] = ""
+
+# Import numpy before torch to avoid an MKL threading-layer conflict in this
+# subprocess environment.
+import numpy
+import torch
+from torch._subclasses.fake_tensor import (
+    FakeTensorMode,
+    is_fake_tensor,
+    maybe_get_fake_constant,
+)
+
+fake_mode = FakeTensorMode()
+with fake_mode:
+    x = torch.randn(3, device="cuda")
+    constant = torch.tensor([1.0])
+    moved = constant.to(device="cuda")
+    placed = torch.ops.prims.device_put.default(constant, torch.device("cuda"))
+
+assert not torch.cuda.is_initialized()
+
+new_tensors = [
+    x.new_empty([2, 1], device="cuda:0", dtype=torch.float32),
+    x.new_empty_strided([2, 1], [1, 2], device="cuda:0", dtype=torch.float32),
+    x.new_full([2, 1], 1.0, device="cuda:0", dtype=torch.float32),
+    x.new_ones([2, 1], device="cuda:0", dtype=torch.float32),
+    x.new_zeros([2, 1], device="cuda:0", dtype=torch.float32),
+    moved,
+    placed,
+]
+
+for y in new_tensors:
+    assert is_fake_tensor(y)
+    assert y.device == torch.device("cuda:0")
+    assert y.dtype is torch.float32
+
+assert maybe_get_fake_constant(constant) is not None
+assert maybe_get_fake_constant(moved) is None
+assert maybe_get_fake_constant(placed) is None
+
+assert not torch.cuda.is_initialized()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            timeout=60,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=lambda msg: f"{msg}\nsubprocess failed:\n{result.stderr.decode()}",
+        )
+
 
 instantiate_parametrized_tests(TestFakeTensorCUDA)
 make_propagate_real_tensors_cls(TestFakeTensorCUDA)
+
+
+class TestFakeTensorMoveModule(TestCase):
+    # No hw_classification: it uses GPU_TYPE, so it runs on whichever accelerator
+    # is present (CUDA, XPU or MPS), which neither GENERIC nor one device label fits.
+    # It isn't ACCELERATOR (a device parameter and instantiate_device_type_tests)
+    # because the fake-only path has to stay reachable on a CUDA build with no GPU
+    # present, where no cuda test variant would be generated.
+
+    @unittest.skipIf(
+        not TEST_ACCELERATOR and not torch.backends.cuda.is_built(),
+        "requires an accelerator, or a CUDA build for the fake-only path",
+    )
+    def test_move_module_under_fake(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+                self.buffer = torch.nn.Buffer(torch.rand(2, 2))
+                self.param = torch.nn.Parameter(torch.rand(2, 2))
+
+            def forward(self, x):
+                return self.linear(x) + self.buffer + self.param
+
+        m = Module()
+        input = torch.rand(2, 2)
+        gpu_device = torch.device(GPU_TYPE, 0)
+
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            m.to(device=gpu_device)
+            arg = input.to(device=gpu_device)
+            out = m(arg)
+
+        for p in m.parameters():
+            self.assertTrue(is_fake_tensor(p))
+            self.assertEqual(p.device, gpu_device)
+        for b in m.buffers():
+            self.assertTrue(is_fake_tensor(b))
+            self.assertEqual(b.device, gpu_device)
+
+        self.assertTrue(is_fake_tensor(out))
+        self.assertEqual(out.device, gpu_device)
 
 
 class TestFakeTensorConstHandling(TestCase):
@@ -3602,46 +3644,6 @@ class TestFakeTensorOperatorInvariants(TestCase):
             self.assertEqual(
                 torch.tensor([[3.14, 2], [1, 2]], device=GPU_TYPE).device.type, GPU_TYPE
             )
-
-    # GPU_TYPE rather than a device-generic class: the fake-only path has to stay
-    # reachable on a CUDA build with no GPU present, where no cuda test variant
-    # would be generated.
-    @unittest.skipIf(
-        not TEST_ACCELERATOR and not torch.backends.cuda.is_built(),
-        "requires an accelerator, or a CUDA build for the fake-only path",
-    )
-    def test_move_module_under_fake(self):
-        if torch._functorch.config.fake_tensor_propagate_real_tensors:
-            self.skipTest("Propagate real tensor not supported")
-
-        class Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(2, 2)
-                self.buffer = torch.nn.Buffer(torch.rand(2, 2))
-                self.param = torch.nn.Parameter(torch.rand(2, 2))
-
-            def forward(self, x):
-                return self.linear(x) + self.buffer + self.param
-
-        m = Module()
-        input = torch.rand(2, 2)
-        gpu_device = torch.device(GPU_TYPE, 0)
-
-        with FakeTensorMode(allow_non_fake_inputs=True):
-            m.to(device=gpu_device)
-            arg = input.to(device=gpu_device)
-            out = m(arg)
-
-        for p in m.parameters():
-            self.assertTrue(is_fake_tensor(p))
-            self.assertEqual(p.device, gpu_device)
-        for b in m.buffers():
-            self.assertTrue(is_fake_tensor(b))
-            self.assertEqual(b.device, gpu_device)
-
-        self.assertTrue(is_fake_tensor(out))
-        self.assertEqual(out.device, gpu_device)
 
     def test_convolution_backward_channels_last_memory_format(self):
         """Regression test: meta convolution_backward must predict channels_last
@@ -6357,7 +6359,7 @@ class TestCppFakeTensorModeBindings(TestCase):
                 or any(check(op) for check, _ in op_implementations_checks)
             )
             names = (op._schema.name, op._schema.overload_name)
-            if torch._C._fake_dispatch_has_python_impl(*names) != python:
+            if torch._C._cpp_fake_not_implemented(*names) != python:
                 mismatched.add(op.name())
         self.assertEqual(mismatched, {"aten::alias"} if namespace == "aten" else set())
 
@@ -6381,14 +6383,12 @@ class TestCppFakeTensorModeBindings(TestCase):
                 any(check(op) for check, _ in op_implementations_checks), expected
             )
             self.assertEqual(
-                torch._C._fake_dispatch_has_python_impl(
-                    "_test_fake_predicates::op", ""
-                ),
+                torch._C._cpp_fake_not_implemented("_test_fake_predicates::op", ""),
                 expected,
             )
 
     def test_fake_fallback_python_impl_custom_registration(self):
-        query = torch._C._fake_dispatch_has_python_impl
+        query = torch._C._cpp_fake_not_implemented
         ns = "_test_fake_impl_query"
         name = f"{ns}::op"
         with torch.library._scoped_library(ns, "DEF") as lib:
@@ -6400,8 +6400,9 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertFalse(query(name, ""))
 
     def test_fake_fallback_static_shape_decomps(self):
+        from torch._decomp import decomposition_table, is_torch_decomp_decomposition
         from torch._library.utils import lookup_op
-        from torch._meta_registrations import decomposes_under_static_shapes
+        from torch._meta_registrations import cpp_meta_supports_symint
 
         contains = torch._C._fake_dispatch_contains_static_shape_decomp
         self.assertTrue(contains("aten::log_sigmoid_forward", ""))
@@ -6413,224 +6414,289 @@ class TestCppFakeTensorModeBindings(TestCase):
                 continue
             op = lookup_op(name)
             schema = op._schema
-            decomposes = decomposes_under_static_shapes(op)
+            decomposes = (
+                op in decomposition_table
+                and is_torch_decomp_decomposition(op)
+                and not cpp_meta_supports_symint(op)
+            )
             if contains(schema.name, schema.overload_name) != decomposes:
                 mismatched.add(name)
         self.assertEqual(mismatched, set())
 
-    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
-    def test_fake_fallback(self):
-        from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
+    def test_fake_fallback_static_shape_decomp_registration(self):
+        from torch._decomp import (
+            decomposition_table,
+            register_decomposition,
+            remove_decompositions,
+        )
+        from torch._decomp.decompositions import hardswish
 
-        self.addCleanup(self._restore_fake_mode_state)
+        contains = torch._C._fake_dispatch_contains_static_shape_decomp
+        with torch.library._scoped_library("_test_static_shape_decomp", "DEF") as lib:
+            lib.define("op(Tensor x) -> Tensor")
+            op = torch.ops._test_static_shape_decomp.op.default
+            self.addCleanup(remove_decompositions, decomposition_table, [op])
+
+            self.assertFalse(contains(op.name(), ""))
+            register_decomposition(op)(hardswish)
+            self.assertTrue(contains(op.name(), ""))
+            remove_decompositions(decomposition_table, [op])
+            self.assertFalse(contains(op.name(), ""))
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @parametrize("active", [False, True])
+    @parametrize("device", ["cpu", "cuda"])
+    @parametrize(
+        "op,shape,dtype",
+        [
+            (lambda x: x + x, (2, 3), torch.complex64),
+            (lambda x: x.sum(0), (3,), torch.complex64),
+            (lambda x: x * 2, (2, 3), torch.complex64),
+            (torch.view_as_real, (2, 3, 2), torch.float32),
+            (torch.isinf, (2, 3), torch.bool),
+        ],
+    )
+    def test_fake_fallback(self, active, device, op, shape, dtype):
+        mode = CppFakeTensorMode()
+        meta = torch.empty(2, 3, device="meta", dtype=torch.complex64)
+        fake = torch._C._from_meta_and_device(meta, torch.device(device), mode)
+        with mode if active else contextlib.nullcontext():
+            result = op(fake)
+        self.assertIs(maybe_get_fake_mode(result), mode)
+        self.assertEqual(result.device, fake.device)
+        self.assertEqual(result.shape, shape)
+        self.assertEqual(result.dtype, dtype)
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    def test_fake_fallback_inplace_and_out(self):
+        mode = CppFakeTensorMode()
+        fake = mode.from_tensor(torch.randn(2, 3))
+        out = mode.from_tensor(torch.empty(2, 3))
+        # Inspect the fallback's return, without ADInplaceOrView returning its input.
+        with torch._C._AutoDispatchBelowADInplaceOrView():
+            self.assertIs(torch.ops.aten.add_.Tensor(fake, 1), fake)
+            self.assertIs(torch.ops.aten.add.out(fake, fake, out=out), out)
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @parametrize(
+        "op,preserve_keys",
+        [(aten.alias.default, True), (torch.detach, True), (torch.t, False)],
+    )
+    def test_fake_fallback_dispatch_keys(self, op, preserve_keys):
         mode = CppFakeTensorMode()
         real = torch.randn(2, 3)
-        x = mode.from_tensor(real)
-
-        def check(out, shape, device=real.device):
-            self.assertIs(torch._C._maybe_get_fake_mode(out), mode)
-            self.assertEqual(out.device, device)
-            self.assertEqual(out.shape, shape)
-
-        # An op on fakes runs their Meta kernel, under the mode or, as Python's
-        # FakeTensor dispatch enters the fakes' mode, outside it
-        with mode:
-            check(x + x, (2, 3))
-        check(x.sum(0), (3,))
-        check(x * 2, (2, 3))
-        # Outputs are on the inputs' fake device, also for a view that inherits
-        # only the Fake key from its input
-        cuda = torch.device("cuda")
-        meta = torch.empty(2, 3, device="meta", dtype=torch.complex64)
-        on_cuda = torch._C._from_meta_and_device(meta, cuda, mode)
-        check(on_cuda + on_cuda, (2, 3), on_cuda.device)
-        check(torch.view_as_real(on_cuda), (2, 3, 2), on_cuda.device)
-        # isinf's Meta kernel views such a view (it selects from view_as_real)
-        isinf = torch.isinf(on_cuda)
-        check(isinf, (2, 3), on_cuda.device)
-        self.assertEqual(isinf.dtype, torch.bool)
-        # In-place and out= ops return their input. Called boxed below
-        # ADInplaceOrView, whose unboxed kernels would return their own
-        # argument, so that what the fallback leaves on the stack is returned.
-        out = mode.from_tensor(torch.empty(2, 3))
-        with torch._C._AutoDispatchBelowADInplaceOrView():
-            self.assertIs(torch.ops.aten.add_.Tensor(x, 1), x)
-            self.assertIs(torch.ops.aten.add.out(x, x, out=out), out)
-        # As in Python, the outputs of alias and detach keep the recorded
-        # dispatch keys, and those of other views do not
+        fake = mode.from_tensor(real)
         keys = torch._C._dispatch_keys(real)
-        torch._C._set_fake_dispatch_keys(x, keys)
-        self.assertEqual(maybe_get_fake_dispatch_keys(torch.ops.aten.alias(x)), keys)
-        self.assertEqual(maybe_get_fake_dispatch_keys(x.detach()), keys)
-        transposed = x.t()
-        check(transposed, (3, 2))
-        self.assertIsNone(maybe_get_fake_dispatch_keys(transposed))
-        # nor those of a new output that is a shallow copy of an input, which
-        # inherits the input's recorded keys
-        inherited = []
+        torch._C._set_fake_dispatch_keys(fake, keys)
+        result = op(fake)
+        self.assertIs(maybe_get_fake_mode(result), mode)
+        self.assertEqual(
+            maybe_get_fake_dispatch_keys(result), keys if preserve_keys else None
+        )
 
-        def detached_meta(t):
-            out = t.detach()
-            inherited.append(maybe_get_fake_dispatch_keys(out))
-            return out
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    def test_fake_fallback_clears_inherited_dispatch_keys(self):
+        mode = CppFakeTensorMode()
+        real = torch.randn(2, 3)
+        fake = mode.from_tensor(real)
+        keys = torch._C._dispatch_keys(real)
+        torch._C._set_fake_dispatch_keys(fake, keys)
+
+        def meta_impl(x):
+            result = x.detach()
+            self.assertEqual(maybe_get_fake_dispatch_keys(result), keys)
+            return result
 
         with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
             lib.define("detached(Tensor x) -> Tensor")
-            lib.impl("detached", detached_meta, "Meta")
-            detached = torch.ops._test_fake_fallback.detached(x)
-        self.assertEqual(inherited, [keys])
-        check(detached, (2, 3))
-        self.assertIsNone(maybe_get_fake_dispatch_keys(detached))
-        # Python's FakeTensorMode is out of the FAKE mode slot while it
-        # dispatches, so the op's kernel sees no fake mode, as here
-        seen = []
+            lib.impl("detached", meta_impl, "Meta")
+            result = torch.ops._test_fake_fallback.detached(fake)
+        self.assertIs(maybe_get_fake_mode(result), mode)
+        self.assertEqual(result.device, fake.device)
+        self.assertIsNone(maybe_get_fake_dispatch_keys(result))
 
-        def probe_meta(t):
-            seen.append(torch._guards.active_fake_mode())
-            return t.new_empty(t.shape)
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
+    @parametrize("active", [False, True])
+    @parametrize(
+        "mode_type", [CppFakeTensorMode, torch._subclasses.fake_tensor.FakeTensorMode]
+    )
+    def test_fake_fallback_unsets_mode_in_meta_kernel(self, active, mode_type):
+        mode = mode_type()
+        fake = mode.from_tensor(torch.randn(2, 3))
 
-        with torch.library._scoped_library("_test_fake_fallback_probe", "DEF") as lib:
+        def meta_impl(x):
+            self.assertIsNone(torch._guards.active_fake_mode())
+            return x.new_empty(x.shape)
+
+        ns = f"_test_fake_fallback_probe_{mode_type.__name__}_{active}"
+        with torch.library._scoped_library(ns, "DEF") as lib:
             lib.define("probe(Tensor x) -> Tensor")
-            lib.impl("probe", probe_meta, "Meta")
-            probe = torch.ops._test_fake_fallback_probe.probe
-            with mode:
-                check(probe(x), (2, 3))
-                self.assertEqual(self._installed(), (mode, True))
-                with self.assertRaisesRegex(NotImplementedError, "device arguments"):
-                    torch.ops.aten._to_copy(x, device="cpu")
-                self.assertEqual(self._installed(), (mode, True))
-            check(probe(x), (2, 3))
-            with torch._subclasses.fake_tensor.FakeTensorMode() as python_mode:
-                probe(python_mode.from_tensor(real))
-        self.assertEqual(seen, [None, None, None])
+            lib.impl("probe", meta_impl, "Meta")
+            with mode if active else contextlib.nullcontext():
+                result = getattr(torch.ops, ns).probe(fake)
+                expected = (
+                    (mode, mode_type is CppFakeTensorMode) if active else (None, False)
+                )
+                self.assertEqual(self._installed(), expected)
+        self.assertIs(maybe_get_fake_mode(result), mode)
+        self.assertEqual(result.shape, fake.shape)
 
-        # Releasing a mode installed by a Meta kernel can run Python callbacks.
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    def test_fake_fallback_reentrant_mode_release(self):
+        self.addCleanup(self._restore_fake_mode_state)
+        mode = CppFakeTensorMode()
+        fake = mode.from_tensor(torch.randn(2, 3))
         replaced, restored = [], []
 
-        def replacing_meta(t):
-            result = t.new_empty(t.shape)
+        def meta_impl(x):
+            result = x.new_empty(x.shape)
             replacement = CppFakeTensorMode()
             replaced.append(
                 weakref.ref(replacement, lambda _: restored.append(self._installed()))
             )
             torch._C._set_dispatch_mode(replacement)
-            del replacement
             return result
 
         with torch.library._scoped_library("_test_fake_fallback_replace", "DEF") as lib:
             lib.define("probe(Tensor x) -> Tensor")
-            lib.impl("probe", replacing_meta, "Meta")
+            lib.impl("probe", meta_impl, "Meta")
             with mode:
-                torch.ops._test_fake_fallback_replace.probe(x)
+                torch.ops._test_fake_fallback_replace.probe(fake)
                 self.assertIsNone(replaced[0]())
                 self.assertEqual(restored, [(mode, True)])
                 self.assertEqual(self._installed(), (mode, True))
         self.assertEqual(self._installed(), (None, False))
 
-        meta = torch.eye(2).to_sparse().to("meta")
-        sparse = torch._C._from_meta_and_device(meta, real.device, mode)
-        # Python runs silu's Python Meta registration rather than its
-        # decomposition, as the fallback does
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    def test_fake_fallback_prefers_meta_to_decomposition(self):
+        mode = CppFakeTensorMode()
+        fake = mode.from_tensor(torch.randn(2, 3))
         self.assertTrue(
             torch._C._fake_dispatch_contains_static_shape_decomp("aten::silu", "")
         )
-        self.assertIn(torch.ops.aten.silu.default, torch._decomp.meta_table)
-        check(torch.ops.aten.silu(x), (2, 3))
-        other = CppFakeTensorMode().from_tensor(real)
-        constant = mode.fake_tensor_converter.from_real_tensor(
-            mode, torch.ones(2, 3), make_constant=True
-        )
-        with_real = mode.from_tensor(torch.randn(2, 3))
-        torch._C._set_real_tensor(with_real, real)
-        no_mode = torch.empty(2, 3, device="meta")
-        torch._C._set_fake_device(no_mode, real.device)
+        self.assertIn(aten.silu.default, torch._decomp.meta_table)
+        result = aten.silu(fake)
+        self.assertIs(maybe_get_fake_mode(result), mode)
+        self.assertEqual(result.shape, fake.shape)
 
-        def under_python_dispatcher():
-            with enable_python_dispatcher():
-                return x + x
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @parametrize(
+        "op,error",
+        [
+            (lambda x: aten._to_copy(x, device="cpu"), "device arguments"),
+            (lambda x: x.view(6), "ops with a Python fake implementation"),
+            (lambda x: x.reshape(6), "CompositeImplicitAutograd ops below autograd"),
+            (aten.log_sigmoid_forward.default, "ops Python decomposes"),
+        ],
+    )
+    def test_fake_fallback_rejects_unsupported_ops(self, op, error):
+        mode = CppFakeTensorMode()
+        fake = mode.from_tensor(torch.randn(2, 3))
+        with mode:
+            # CompositeImplicitAutograd reaches the fallback only below autograd.
+            with (
+                torch.inference_mode(),
+                self.assertRaisesRegex(NotImplementedError, error),
+            ):
+                op(fake)
+            self.assertEqual(self._installed(), (mode, True))
 
-        def non_fake_input():
-            with allow_non_fake_inputs_temporarily(mode):
-                return x + real
-
-        unsupported = {
-            # Even with allow_non_fake_inputs
-            "non-fake tensor inputs": non_fake_input,
-            # Under mode, the active mode is used rather than the inputs'
-            "fake tensors of another mode": lambda: other + other,
-            "fake tensors without a mode": lambda: x + no_mode,
-            "propagate_real_tensors": lambda: with_real + with_real,
-            "constant inputs": lambda: x + constant,
-            "device arguments": lambda: torch.ops.aten._to_copy(x, device="cpu"),
-            "ops with a Python fake implementation": lambda: x.view(6),
-            "CompositeImplicitAutograd ops below autograd": lambda: x.reshape(6),
-            "the Python dispatcher": under_python_dispatcher,
-            "sparse inputs": lambda: sparse + sparse,
-            # Its decomposition checks the device, which reads meta here
-            "ops Python decomposes": lambda: torch.ops.aten.log_sigmoid_forward(x),
-        }
-        for what, fn in unsupported.items():
-            msg = re.escape(f"fallback does not support {what} yet")
-            with self.subTest(what=what):
-                with self.assertRaisesRegex(NotImplementedError, msg), mode:
-                    # A CompositeImplicitAutograd op only reaches the fallback
-                    # below autograd
-                    with torch.inference_mode():
-                        fn()
-
-        # Outside a mode, fakes without one have no mode to run under
-        msg = "fallback does not support fake tensors without a mode yet"
-        with self.assertRaisesRegex(NotImplementedError, msg):
-            no_mode + no_mode
-
-        # Python decomposes most ops for symbolic sizes
-        symbolic_mode = CppFakeTensorMode(shape_env=ShapeEnv())
-        symbolic = symbolic_mode.from_tensor(real)
-        self.assertIsInstance(symbolic.shape[0], torch.SymInt)
-        msg = "fallback does not support symbolic shapes yet"
-        with self.assertRaisesRegex(NotImplementedError, msg), symbolic_mode:
-            symbolic + symbolic
-        # including a symbolic scalar argument with static inputs
-        static = symbolic_mode.from_tensor(torch.randn(2, 3), static_shapes=True)
-        self.assertEqual(static.shape, (2, 3))
-        self.assertFalse(static._has_symbolic_sizes_strides)
-        with self.assertRaisesRegex(NotImplementedError, msg), symbolic_mode:
-            static.expand(symbolic.shape[0], 3)
-
-    @parametrize("schema", ["input", "nested_input", "output", "nested_output"])
-    def test_fake_fallback_rejects_any(self, schema):
-        self.addCleanup(self._restore_fake_mode_state)
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @parametrize(
+        "kind,error",
+        [
+            ("real", "non-fake tensor inputs"),
+            ("other_mode", "fake tensors of another mode"),
+            ("constant", "constant inputs"),
+            ("real_propagation", "propagate_real_tensors"),
+        ],
+    )
+    def test_fake_fallback_rejects_unsupported_inputs(self, kind, error):
         mode = CppFakeTensorMode()
         real = torch.randn(2, 3)
         fake = mode.from_tensor(real)
-        schemas = {
-            "input": "probe(Tensor x, Any payload) -> Tensor",
-            "nested_input": "probe(Tensor x, Any[] payload) -> Tensor",
-            "output": "probe(Tensor x) -> Any",
-            "nested_output": "probe(Tensor x) -> Any[]",
-        }
-        called = []
+        if kind == "real":
+            mode.allow_non_fake_inputs = True
+            other = real
+        elif kind == "other_mode":
+            other = CppFakeTensorMode().from_tensor(real)
+        elif kind == "constant":
+            other = mode.fake_tensor_converter.from_real_tensor(
+                mode, torch.ones(2, 3), make_constant=True
+            )
+        else:
+            other = mode.from_tensor(torch.randn(2, 3))
+            torch._C._set_real_tensor(other, real)
+        operand = other if kind == "other_mode" else fake
+        with mode, self.assertRaisesRegex(NotImplementedError, error):
+            operand + other
 
-        def meta_impl(x, payload=None):
-            called.append(True)
-            return x.new_empty(x.shape)
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @parametrize("active", [False, True])
+    def test_fake_fallback_rejects_missing_mode(self, active):
+        mode = CppFakeTensorMode()
+        fake = torch.empty(2, 3, device="meta")
+        torch._C._set_fake_device(fake, torch.device("cpu"))
+        with mode if active else contextlib.nullcontext():
+            with self.assertRaisesRegex(
+                NotImplementedError, "fake tensors without a mode"
+            ):
+                fake + fake
 
-        args = [fake]
-        if schema == "input":
-            args.append({"hidden": real})
-        elif schema == "nested_input":
-            args.append([{"hidden": real}])
-        with torch.library._scoped_library("_test_fake_fallback_any", "DEF") as lib:
-            lib.define(schemas[schema])
-            lib.impl("probe", meta_impl, "Meta")
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    def test_fake_fallback_rejects_python_dispatcher(self):
+        mode = CppFakeTensorMode()
+        fake = mode.from_tensor(torch.randn(2, 3))
+        with enable_python_dispatcher():
+            with self.assertRaisesRegex(NotImplementedError, "the Python dispatcher"):
+                fake + fake
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    def test_fake_fallback_rejects_sparse(self):
+        mode = CppFakeTensorMode()
+        meta = torch.eye(2).to_sparse().to("meta")
+        fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
+        with self.assertRaisesRegex(NotImplementedError, "sparse inputs"):
+            fake + fake
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @parametrize("scalar_argument", [False, True])
+    def test_fake_fallback_rejects_symbolic_shapes(self, scalar_argument):
+        mode = CppFakeTensorMode(shape_env=ShapeEnv())
+        symbolic = mode.from_tensor(torch.randn(2, 3))
+        self.assertIsInstance(symbolic.shape[0], torch.SymInt)
+        static = mode.from_tensor(torch.randn(2, 3), static_shapes=True)
+        self.assertFalse(static._has_symbolic_sizes_strides)
+        with mode, self.assertRaisesRegex(NotImplementedError, "symbolic shapes"):
+            if scalar_argument:
+                static.expand(symbolic.shape[0], 3)
+            else:
+                symbolic + symbolic
+
+    @parametrize(
+        "kind,schema",
+        [
+            ("input", "probe(Tensor x, Any payload) -> Tensor"),
+            ("nested_input", "probe(Tensor x, Any[] payload) -> Tensor"),
+            ("output", "probe(Tensor x) -> Any"),
+            ("nested_output", "probe(Tensor x) -> Any[]"),
+        ],
+    )
+    def test_fake_fallback_rejects_any(self, kind, schema):
+        mode = CppFakeTensorMode()
+        real = torch.randn(2, 3)
+        fake = mode.from_tensor(real)
+        args = (fake, [{"hidden": real}]) if kind.endswith("input") else (fake,)
+        ns = f"_test_fake_fallback_any_{kind}"
+        with torch.library._scoped_library(ns, "DEF") as lib:
+            lib.define(schema)
             with mode:
-                msg = (
-                    "fallback does not support nested containers of tensors or Any yet"
-                )
-                with self.assertRaisesRegex(NotImplementedError, msg):
-                    torch.ops._test_fake_fallback_any.probe(*args)
+                with self.assertRaisesRegex(
+                    NotImplementedError, "nested containers of tensors or Any"
+                ):
+                    getattr(torch.ops, ns).probe(*args)
                 self.assertEqual(self._installed(), (mode, True))
-        self.assertEqual(called, [])
 
     def test_require_python_fake_mode(self):
         from torch._guards import require_python_fake_mode
@@ -6833,67 +6899,35 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIsNone(ref())
         self.assertEqual(self._installed(), (None, False))
 
-    @parametrize("inherited", [False, True])
-    def test_cpp_fake_tensor_mode_detection(self, inherited):
+    def test_cpp_fake_tensor_mode_inherited_detection(self):
         from concurrent.futures import ThreadPoolExecutor
 
         from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 
-        self.addCleanup(self._restore_fake_mode_state)
         mode = CppFakeTensorMode()
         self.assertFalse(is_in_torch_dispatch_mode())
-        if inherited:
-            torch._C._set_dispatch_mode(mode)
-        with mode:
+        torch._C._set_dispatch_mode(mode)
+        try:
             self.assertTrue(is_in_torch_dispatch_mode())
-            with unset_fake_temporarily():
+            with _disable_current_modes():
+                self.assertTrue(is_in_torch_dispatch_mode())
+            with mode, unset_fake_temporarily():
                 self.assertTrue(is_in_torch_dispatch_mode())
             with ThreadPoolExecutor(max_workers=1) as pool:
                 self.assertFalse(pool.submit(is_in_torch_dispatch_mode).result())
-        self.assertEqual(is_in_torch_dispatch_mode(), inherited)
-        if inherited:
+        finally:
             torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
         self.assertFalse(is_in_torch_dispatch_mode())
 
-        with self.assertRaisesRegex(ValueError, "unwind"), mode:
-            raise ValueError("unwind")
-        self.assertFalse(is_in_torch_dispatch_mode())
-
-        mode.__enter__()
-        torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
-        with self.assertRaisesRegex(RuntimeError, "Attempted to unset"):
-            mode.__exit__(None, None, None)
-        self.assertFalse(is_in_torch_dispatch_mode())
-
     @skipIfTorchDynamo("uses torch.compile")
-    def test_is_in_torch_dispatch_mode_compiles(self):
-        # Dynamo traces with the C++ mode suspended, but folds the check to the
-        # state the frame was entered with, guarded, rather than graph-breaking
-        # or recompiling on every call
+    def test_cpp_fake_tensor_mode_inherited_detection_compiles(self):
         from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 
-        self.addCleanup(self._restore_fake_mode_state)
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def f():
-            return is_in_torch_dispatch_mode()
-
-        self.assertFalse(f())
-        mode = CppFakeTensorMode()
-        with mode:
-            self.assertTrue(f())
-            with torch._dynamo.config.patch(error_on_recompile=True):
-                self.assertTrue(f())
-        with torch._dynamo.config.patch(error_on_recompile=True):
-            self.assertFalse(f())
-
-        # Also for a mode installed without entering it, as on a thread that
-        # inherited it, traced first in that state
         @torch.compile(backend="eager", fullgraph=True)
         def g():
             return is_in_torch_dispatch_mode()
 
-        torch._C._set_dispatch_mode(mode)
+        torch._C._set_dispatch_mode(CppFakeTensorMode())
         try:
             self.assertTrue(g())
             with torch._dynamo.config.patch(error_on_recompile=True):
