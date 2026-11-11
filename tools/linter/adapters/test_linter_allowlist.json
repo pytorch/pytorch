@@ -607,7 +607,6 @@
   "test/mobile/test_upgraders.py",
   "test/nn/test_convolution.py",
   "test/nn/test_pooling.py",
-  "test/onnx/torchlib/test_ops.py",
   "test/optim/test_swa_utils.py",
   "test/package/test_analyze.py",
   "test/package/test_dependency_api.py",
