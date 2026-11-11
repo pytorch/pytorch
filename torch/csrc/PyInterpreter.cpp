@@ -1199,7 +1199,7 @@ ActiveFakeMode get_active_fake_mode() {
 //
 // This mirrors the decomposition-selection block in
 // FakeTensorMode._dispatch_impl (torch/_subclasses/fake_tensor.py) and must be
-// kept in sync with it, as must decomposes_under_static_shapes in
+// kept in sync with it, as must _register_static_shape_decomps in
 // torch/_meta_registrations.py for its static shape case. This callback handles
 // the meta_table exclusion, the decomposition_table lookup with its
 // symbolic/static-shape and sparse eligibility, and the Python

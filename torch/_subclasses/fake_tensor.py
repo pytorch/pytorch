@@ -3676,7 +3676,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # If there's a Python meta, prefer that over the decomposition.
         # fake_try_decomp in torch/csrc/PyInterpreter.cpp mirrors this block for
-        # C++ FakeTensor, and decomposes_under_static_shapes in
+        # C++ FakeTensor, and _register_static_shape_decomps in
         # torch/_meta_registrations.py its static shape case; keep them in sync.
         from torch._decomp import meta_table
 

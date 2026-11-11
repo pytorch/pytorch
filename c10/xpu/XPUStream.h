@@ -103,7 +103,7 @@ class C10_XPU_API XPUStream {
   void synchronize() const {
     queue().wait_and_throw();
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_stream_synchronization(
           c10::kXPU, reinterpret_cast<uintptr_t>(&queue()));
     }
