@@ -2507,7 +2507,7 @@ class TestROCmReductionHeuristic(TestCase):
             warp_size=64,
         )
 
-    def _outer(self, x, r, num_load=1, enabled=True):
+    def _outer(self, x, r, num_load=1):
         from torch._inductor.heuristics.triton_codegen.reduction import (
             ROCmReductionHeuristic,
         )
@@ -2518,7 +2518,6 @@ class TestROCmReductionHeuristic(TestCase):
             inductor_meta={
                 "reduction_hint": ReductionHint.OUTER,
                 "num_load": num_load,
-                "rocm_reduction_heuristic": enabled,
             },
             triton_meta={"device": self._hip_device()},
         )
@@ -2527,13 +2526,11 @@ class TestROCmReductionHeuristic(TestCase):
         return c.kwargs["XBLOCK"], c.kwargs["R0_BLOCK"], c.num_warps
 
     def test_outer_config(self):
-        # disabled: legacy fixed tile
-        self.assertEqual(self._outer(1048576, 2048, enabled=False), (64, 8, 4))
         # single-load, large x: wide x / short r tile
         self.assertEqual(self._outer(1048576, 2048), (512, 8, 2))
         # single-load, mid-size x: too few programs at 512 wide, keep XBLOCK=64
         self.assertEqual(self._outer(16384, 256), (64, 8, 4))
-        self.assertEqual(self._outer(262144, 2048), (64, 16, 4))
+        self.assertEqual(self._outer(524288, 2048), (64, 8, 4))
         # small x: shrink XBLOCK to keep >= 256 programs, grow RBLOCK
         self.assertEqual(self._outer(2048, 256), (8, 256, 8))
         self.assertEqual(self._outer(256, 4096), (1, 2048, 8))
@@ -2547,22 +2544,18 @@ class TestROCmReductionHeuristic(TestCase):
         )
         from torch._inductor.runtime.hints import ReductionHint
 
-        def cfg(num_load, enabled=True):
+        def cfg(num_load):
             cfgs = ROCmReductionHeuristic().get_persistent_configs(
                 size_hints={"x": 8388608, "r0_": 256},
                 reduction_hint=ReductionHint.INNER,
-                inductor_meta={
-                    "num_load": num_load,
-                    "rocm_reduction_heuristic": enabled,
-                },
+                inductor_meta={"num_load": num_load},
                 triton_meta={"device": self._hip_device()},
             )
-            self.assertEqual(len(cfgs), 1)
-            return cfgs[0].kwargs["XBLOCK"], cfgs[0].num_warps
+            return [(c.kwargs["XBLOCK"], c.num_warps) for c in cfgs]
 
-        self.assertEqual(cfg(11), (1, 2))
-        self.assertEqual(cfg(11, enabled=False), cfg(4))
-        self.assertNotEqual(cfg(4), (1, 2))
+        # many loads: default plus one row per program with two warps, autotuned
+        self.assertEqual(cfg(11), cfg(4) + [(1, 2)])
+        self.assertEqual(len(cfg(4)), 1)
 
     @unittest.skipIf(not (torch.version.hip and HAS_GPU_AND_TRITON), "ROCm only")
     def test_column_sum_dynamic_matches_eager(self):

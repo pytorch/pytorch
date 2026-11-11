@@ -763,20 +763,14 @@ class ROCmReductionHeuristic(ReductionHeuristic):
         num_dynamic,
         register_intensive,
     ):
-        if not inductor_meta.get("rocm_reduction_heuristic", False):
-            # HIP uses simple outer config (no outer_config_opt)
-            return make_config(64, 8, register_intensive=register_intensive)
         # Column reductions are bandwidth bound. Shrink XBLOCK until the grid has at
         # least one program per CU.
         x = size_hints["x"]
         num_load = max(inductor_meta.get("num_load", 1), 1)
-        if num_load == 1 and 64 * 64 <= x < 512 * 1024:
-            # Mid-size x: fewer than 1024 programs at 512 wide is too few waves to
-            # hide latency, so keep XBLOCK=64 (RBLOCK=16 once x reaches 128K).
-            r_block = 16 if x >= 64 * 2048 else 8
-            return make_config(
-                64, r_block, num_warps=4, register_intensive=register_intensive
-            )
+        if num_load == 1 and 64 * 64 <= x < 1024 * 1024:
+            # Mid-size x: fewer than 2048 programs at 512 wide is too few waves to
+            # hide latency, so keep the default tile.
+            return make_config(64, 8, register_intensive=register_intensive)
         if num_load == 1:
             # Wide x tile with RBLOCK=8: stays fast when the runtime number of rows
             # per split is small (a tall RBLOCK would be mostly masked).
@@ -826,18 +820,19 @@ class ROCmReductionHeuristic(ReductionHeuristic):
         reduction_hint,
         warp_size: int = 32,
     ) -> list[Config]:
-        if (
-            inductor_meta.get("rocm_reduction_heuristic", False)
-            and inductor_meta.get("num_load", 0) >= 8
-        ):
+        configs = super()._persistent_inner_config(
+            size_hints, rnumel, xnumel, inductor_meta, reduction_hint, warp_size
+        )
+        if inductor_meta.get("num_load", 0) >= 8:
             from torch._inductor.runtime.triton_heuristics import (
                 triton_config_reduction,
             )
 
             # Rows that read many inputs (e.g. a LayerNorm backward fused with the
-            # sum of several matmul outputs) run out of VGPRs at XBLOCK=4 with one
-            # wave64 warp; one row per program with two warps keeps occupancy up.
-            return [
+            # sum of several matmul outputs) can run out of VGPRs at XBLOCK>1 with
+            # one wave64 warp. Whether one row per program with two warps is faster
+            # depends on the kernel, so autotune it against the default.
+            configs.append(
                 triton_config_reduction(
                     size_hints,
                     1,
@@ -848,10 +843,8 @@ class ROCmReductionHeuristic(ReductionHeuristic):
                     reduction_hint=reduction_hint,
                     warp_size=warp_size,
                 )
-            ]
-        return super()._persistent_inner_config(
-            size_hints, rnumel, xnumel, inductor_meta, reduction_hint, warp_size
-        )
+            )
+        return configs
 
     def _persistent_max_autotune_extras(self, configs, tiny_configs):
         for conf in tiny_configs:
