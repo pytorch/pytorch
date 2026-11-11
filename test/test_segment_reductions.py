@@ -569,30 +569,24 @@ class TestSegmentReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected all rows of lengths along axis"):
             torch._segment_reduce(nd_data, 'sum', lengths=nd_lengths, axis=1, unsafe=False)
 
-    def test_size_one_dim_stride(self, device):
-        # Contiguous data (4, 1, 3) whose size-1 dim has stride 12
-        data = torch.arange(12.0, device=device).view(1, 4, 3).transpose(0, 1)
-        lengths = torch.ones(4, 1, dtype=torch.long, device=device)
-        out = torch._segment_reduce(data, "sum", lengths=lengths, axis=1)
-        self.assertEqual(out, data)
-        # Lengths (3, 1) whose size-1 dim has stride 2; stepping by it reads 2, 2, 9
-        data = torch.randn(3, 2, 5, device=device)
-        lengths = torch.tensor([2, 2, 2, 9, 9], device=device).as_strided((3, 1), (1, 2))
-        out = torch._segment_reduce(data, "sum", lengths=lengths, axis=1)
-        self.assertEqual(out, data.sum(1, keepdim=True))
-        # Backward reads the saved data with the same stride
-        data = torch.randn(1, 4, 3, device=device).transpose(0, 1).requires_grad_()
-        dense = data.detach().clone(memory_format=torch.contiguous_format).requires_grad_()
-        lengths = torch.ones(4, 1, dtype=torch.long, device=device)
-        grad = torch.randn(4, 1, 3, device=device)
-        for reduce in ("sum", "max", "prod"):
-            (actual,) = torch.autograd.grad(
-                torch._segment_reduce(data, reduce, lengths=lengths, axis=1), data, grad
-            )
-            (expected,) = torch.autograd.grad(
-                torch._segment_reduce(dense, reduce, lengths=lengths, axis=1), dense, grad
-            )
-            self.assertEqual(actual, expected)
+    @parametrize("reduce", ["sum", "mean", "max", "prod"])
+    def test_size_one_dim_stride(self, device, reduce):
+        # Contiguous data (4, 1, 3) and lengths (4, 1) whose size-1 dims have
+        # large strides. The buffers are big enough that stepping by those
+        # strides stays in bounds and reads other values.
+        data = torch.randn(48, device=device).as_strided((4, 1, 3), (3, 12, 1)).requires_grad_()
+        lengths = torch.tensor([1] * 4 + [5] * 28, device=device).as_strided((4, 1), (1, 7))
+        dense_data = data.detach().clone(memory_format=torch.contiguous_format).requires_grad_()
+        dense_lengths = torch.ones(4, 1, dtype=torch.long, device=device)
+
+        out = torch._segment_reduce(data, reduce, lengths=lengths, axis=1)
+        expected = torch._segment_reduce(dense_data, reduce, lengths=dense_lengths, axis=1)
+        self.assertEqual(out, expected)
+
+        grad = torch.randn_like(expected)
+        (actual_grad,) = torch.autograd.grad(out, data, grad)
+        (expected_grad,) = torch.autograd.grad(expected, dense_data, grad)
+        self.assertEqual(actual_grad, expected_grad)
 
 
 
