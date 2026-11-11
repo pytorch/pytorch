@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from functools import wraps
 from typing import TypeVar
@@ -9035,10 +9035,15 @@ def _meta_grouped_mm_common(
                 offs.dtype == torch.int32,
                 lambda: f"Offsets tensor must be integer (int32) tensor, but got {offs.dtype}.",
             )
-            torch._check(
-                offs.stride() == (1,),
-                lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
-            )
+            if scaled:
+                torch._check_value(
+                    offs.is_contiguous(), lambda: "Offsets have to be contiguous"
+                )
+            else:
+                torch._check(
+                    offs.stride() == (1,),
+                    lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
+                )
     else:
         torch._check(
             offs is None,
@@ -9130,10 +9135,30 @@ def meta_scaled_grouped_mm_v2(
     contraction_dim: list[int] | None = None,
     use_fast_accum: bool = False,
 ):
-    """Shape inference only, since the structured C++ meta doesn't support
-    dynamic shapes. Input validation lives there; same pattern as meta_mm.
+    r"""Infer output shape without requiring concrete dimensions.
+
+    This Python meta overrides the C++ validator under FakeTensor and compile.
+    It checks recipe-specific output dtype and offset contiguity; bias, offset dtype/rank, and
+    dimension alignment are validated by the eager C++ path at execution.
     """
     _out_dtype = out_dtype or torch.bfloat16
+    torch._check_value(
+        _out_dtype in (torch.bfloat16, torch.float16, torch.float32),
+        lambda: "Only bf16, fp16, and fp32 high precision output types are supported for grouped gemm",
+    )
+    from torch.nn.functional import ScalingType
+
+    rowwise = scale_recipe_a == scale_recipe_b == [ScalingType.RowWise.value]
+    tensorwise = [ScalingType.TensorWise.value]
+    bf16_only = scale_recipe_a != tensorwise or scale_recipe_b != tensorwise
+    message = "Grouped scaling configuration requires BFloat16 output"
+    if rowwise:
+        message = "Rowwise grouped GEMM requires BFloat16 output"
+    torch._check_value(not bf16_only or _out_dtype == torch.bfloat16, lambda: message)
+    if offs is not None:
+        torch._check_value(
+            offs.is_contiguous(), lambda: "Offsets have to be contiguous"
+        )
     return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, _out_dtype)
 
 
@@ -9575,22 +9600,14 @@ def cpp_meta_supports_symint(op: OpOverload) -> bool:
     return torch.Tag.view_copy in op.tags or op in cpp_meta_supports_symint_ops
 
 
-def decomposes_under_static_shapes(op: OpOverload) -> bool:
-    # Default static eligibility, excluding meta_table and sparse-input checks.
-    # Leave FakeTensorMode's first-dispatch classification cache untouched.
-    return (
-        op in decomposition_table
-        and is_torch_decomp_decomposition(op)
-        and not cpp_meta_supports_symint(op)
-    )
-
-
-def _register_static_shape_decomps() -> None:
-    # Our top-level _decomp import finishes registering decompositions and
-    # binding their module names before this snapshot. See StaticShapeDecomp in
-    # FakeTensorDispatchTables.h for the snapshot's mutation assumptions.
-    for op in decomposition_table:
-        if isinstance(op, OpOverload) and decomposes_under_static_shapes(op):
+def _register_static_shape_decomps(ops: Iterable[torch._ops.OperatorBase]) -> None:
+    # Meta membership and sparse inputs are checked at dispatch time.
+    for op in ops:
+        if (
+            isinstance(op, OpOverload)
+            and is_torch_decomp_decomposition(op)
+            and not cpp_meta_supports_symint(op)
+        ):
             schema = op._schema
             torch._C._fake_dispatch_register_static_shape_decomp(
                 schema.name, schema.overload_name
@@ -9598,4 +9615,6 @@ def _register_static_shape_decomps() -> None:
 
 
 activate_meta()
-_register_static_shape_decomps()
+# Initial decorators run before their function names are bound in the module.
+_register_static_shape_decomps(decomposition_table)
+torch._decomp._static_shape_decomps_initialized = True
