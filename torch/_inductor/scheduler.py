@@ -4666,8 +4666,8 @@ class FusedMixOrderReductions(FusedSchedulerNode):
         the element the row half visits in the same iteration (the fused kernel serves
         that read from the value just computed, see check_absorbed_producers). This
         saves the producer's kernel launch and the read of its output, and its store
-        too when nothing outside the kernel reads it. Producers read only by the
-        column half are not absorbed.
+        too when nothing outside the kernel reads it. Producers that are graph outputs,
+        or read only by the column half, are not absorbed.
         """
         why = WhyNoFuse(producer, self)
         if (
@@ -4684,6 +4684,15 @@ class FusedMixOrderReductions(FusedSchedulerNode):
         if not (producer.get_operation_names() & self.node1.ancestors):
             why("mix order reduction: not a producer of the contiguous reduction")
             return False
+        # A producer that is also a graph output keeps its store, and absorbing it
+        # measured slower.
+        for buf in producer.get_outputs():
+            if any(isinstance(user.node, OutputNode) for user in buf.users):
+                why(
+                    "mix order reduction: producer output %s is a graph output",
+                    buf.get_name(),
+                )
+                return False
         if not self.scheduler.can_fuse(
             producer, self.node1, allow_mix_order_reduction=False
         ):
@@ -10715,8 +10724,6 @@ class Scheduler:
                 return False
             return node1.can_fuse_with(node2)
         if isinstance(node2, FusedMixOrderReductions):
-            if not config.triton.mix_order_reduction_fuse_producers:
-                return False
             if self._fusion_blocked_by_placement(node1, node2):
                 return False
             return node2.can_fuse_producer(node1)

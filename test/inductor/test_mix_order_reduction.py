@@ -14,7 +14,7 @@ from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.triton import FixedTritonConfig
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import persistent_reduction
-from torch._inductor.scheduler import MixOrderReduction
+from torch._inductor.scheduler import FusedMixOrderReductions, MixOrderReduction
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
@@ -778,7 +778,11 @@ class MixOrderReductionTest(TestBase):
     def _run_absorbing_producers(self, f, args, absorb=True):
         torch._dynamo.reset()
         metrics.reset()
-        with inductor_config.patch("triton.mix_order_reduction_fuse_producers", absorb):
+        with mock.patch.object(
+            FusedMixOrderReductions,
+            "can_fuse_producer",
+            FusedMixOrderReductions.can_fuse_producer if absorb else lambda *_: False,
+        ):
             out, (code,) = utils.run_and_get_code(torch.compile(f), *args)
         return out, code.count("@triton.jit"), metrics.codegen_mix_order_reduction
 
@@ -836,6 +840,8 @@ class MixOrderReductionTest(TestBase):
         self._assert_close_to_fp32_eager(base, ref)
         self._assert_close_to_fp32_eager(fused, ref)
 
+    # realize_reads_threshold=1 keeps p a separate buffer instead of inlining it
+    @inductor_config.patch(realize_reads_threshold=1)
     def test_absorbed_producer_with_epilogue(self):
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
@@ -843,7 +849,7 @@ class MixOrderReductionTest(TestBase):
         def f(a, b, x):
             p = a + b
             row = (p * x).sum(1, keepdim=True)
-            return row * x, (p * x).sum(0), p
+            return row * x, (p * x).sum(0)
 
         args = [torch.randn(32768, 256, device=GPU_TYPE) for _ in range(3)]
         out, kernels, mix_order_kernels = self._run_absorbing_producers(f, args)
@@ -853,6 +859,7 @@ class MixOrderReductionTest(TestBase):
         self._assert_close_to_fp32_eager(out, f(*args))
 
     @parametrize("read", ("broadcast", "shifted", "transposed", "gathered"))
+    @inductor_config.patch(realize_reads_threshold=1)
     def test_absorbed_producer_read_at_other_index(self, read):
         # The column half reads the producer at an element other than the one the
         # row half visits in the same iteration, so the producer must not be
@@ -870,7 +877,7 @@ class MixOrderReductionTest(TestBase):
                 q = p.t()
             else:
                 q = p[idx]
-            return (p * x).sum(1), (q * x).sum(0), p
+            return (p * x).sum(1), (q * x).sum(0)
 
         M, N = (4096, 4096) if read == "transposed" else (32768, 256)
         args = [torch.randn(M, N, device=GPU_TYPE) for _ in range(3)]
@@ -879,6 +886,40 @@ class MixOrderReductionTest(TestBase):
         self._assert_close_to_fp32_eager(out, f(*args))
         self.assertEqual(mix_order_kernels, 1)
         self.assertEqual(kernels, 2)
+
+    @inductor_config.patch(realize_reads_threshold=1)
+    def test_graph_output_producer_is_not_absorbed(self):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(a, b, x):
+            p = a + b
+            return (p * x).sum(1), (p * x).sum(0), p
+
+        args = [torch.randn(32768, 256, device=GPU_TYPE) for _ in range(3)]
+        out, kernels, mix_order_kernels = self._run_absorbing_producers(f, args)
+        self._assert_close_to_fp32_eager(out, f(*args))
+        self.assertEqual(mix_order_kernels, 1)
+        _, base_kernels, _ = self._run_absorbing_producers(f, args, absorb=False)
+        self.assertEqual(kernels, base_kernels)
+
+    @inductor_config.patch(realize_reads_threshold=1)
+    def test_producer_read_by_other_kernel_is_absorbed(self):
+        # p is also read by a pointwise kernel outside the mix-order kernel, which
+        # does not block absorbing it
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(a, b, x):
+            p = a + b
+            return (p * x).sum(1), (p * x).sum(0), torch.roll(p, 1, 0) * 2
+
+        args = [torch.randn(32768, 256, device=GPU_TYPE) for _ in range(3)]
+        out, kernels, mix_order_kernels = self._run_absorbing_producers(f, args)
+        self._assert_close_to_fp32_eager(out, f(*args))
+        self.assertEqual(mix_order_kernels, 1)
+        _, base_kernels, _ = self._run_absorbing_producers(f, args, absorb=False)
+        self.assertEqual(kernels, base_kernels - 1)
 
     def test_absorbed_producer_cycle_through_unfused_node(self):
         # p -> q (mm, not fused) -> column half. Absorbing p into the mix-order
