@@ -2600,6 +2600,69 @@ class TritonHostSideTMATestCUDA(BlockDescriptorTestBase):
         }
         self.assertEqual(meta_idx, {"in_ptr0": 0, "out_ptr0": 1})
 
+    def test_host_tma_resolve_launch_dims(self):
+        # A dynamic size the kernel takes as an arg (ks0) resolves to launcher
+        # code; unknown names and anything beyond integer arithmetic do not.
+        from torch._inductor.runtime.triton_heuristics import _LaunchDim, _resolve_dims
+
+        args = ["in_ptr0", "ks0", "ks1"]
+        self.assertEqual(_resolve_dims(["ks0", "64"], {}, {}, args), ["ks0", 64])
+        self.assertIsInstance(_resolve_dims(["ks0"], {}, {}, args)[0], _LaunchDim)
+        self.assertEqual(_resolve_dims(["2*ks0 + ks1"], {}, {}, args), ["2*ks0 + ks1"])
+        self.assertEqual(_resolve_dims(["ks0"], {}, {"ks0": 8}, args), [8])
+        self.assertIsNone(_resolve_dims(["ks0"], {}, {}))
+        self.assertIsNone(_resolve_dims(["ks2"], {}, {}, args))
+        self.assertIsNone(_resolve_dims(["ks0.bit_length()"], {}, {}, args))
+        self.assertIsNone(_resolve_dims(["__import__('os')"], {}, {}, args))
+
+    def test_host_tma_launch_dims_in_launcher(self):
+        # A symbolic dim is emitted as an expression over the launcher's args.
+        from types import SimpleNamespace
+
+        from torch._inductor.runtime.triton_heuristics import CompileResult
+
+        desc = {"block_shape": [64, 64], "shape": ["ks0", "256"], "strides": ["256", "1"]}
+        stub = SimpleNamespace(
+            inductor_meta={"host_tma_descriptor_args": {"in_ptr0": desc}},
+            config=SimpleNamespace(kwargs={}),
+            compile_meta={"constants": {}},
+            kernel=SimpleNamespace(tensordesc_meta=[{"elem_size": 2}], tensordesc_arg_names=["in_ptr0"]),
+        )
+        call_args = ["in_ptr0", "ks0"]
+        static_lines, _, _ = CompileResult._host_tma_static_pre_runner_lines(stub, list(call_args), call_args)
+        (expand, ) = [ln for ln in static_lines if "expand_host_tma_descriptor(" in ln]
+        self.assertIn("[ks0, 256], [256, 1]", expand)
+        lines, _ = CompileResult._host_tma_pre_runner_lines(stub, list(call_args), call_args)
+        (build, ) = [ln for ln in lines if "TensorDescriptor(" in ln]
+        self.assertIn("[ks0, 256], [256, 1]", build)
+        # Without the size among the kernel's args the descriptor is skipped.
+        skipped, _, _ = CompileResult._host_tma_static_pre_runner_lines(stub, ["in_ptr0"], ["in_ptr0"])
+        self.assertEqual(skipped, [])
+
+    def test_host_tma_descriptor_cache_keys_on_shape(self):
+        # A dynamic dim can change at the same address; the cached CUtensorMap
+        # must then be re-encoded.
+        from torch._inductor.runtime import static_triton_launcher
+
+        encoded = []
+
+        def make_tensordesc_arg(desc, meta):
+            encoded.append(desc)
+            return [desc]
+
+        tensor = torch.empty(1024, 256, device=self.device, dtype=torch.float16)
+        with mock.patch.object(
+            static_triton_launcher, "_tma_arg_helpers", lambda: (make_tensordesc_arg, lambda *a: a)
+        ):
+            expand = static_triton_launcher.make_host_tma_expander()
+            cache = {}
+            first = expand(cache, 0, tensor, True, [706, 256], [256, 1], [64, 64], None)
+            self.assertIs(expand(cache, 0, tensor, True, [706, 256], [256, 1], [64, 64], None), first)
+            self.assertEqual(len(encoded), 1)
+            second = expand(cache, 0, tensor, True, [300, 256], [256, 1], [64, 64], None)
+        self.assertEqual(len(encoded), 2)
+        self.assertEqual(second[0][1], [300, 256])
+
 
 test_torchinductor.copy_tests(CommonTemplate, TritonHostSideTMATestCUDA, GPU_TYPE)
 
