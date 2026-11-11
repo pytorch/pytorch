@@ -984,7 +984,11 @@ def get_patched_config_dict(
     config_patches: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     with patch_compile_options(config_patches):
-        config_copy = config.get_config_copy()
+        # Entries excluded from saved configs, such as custom passes, can hold
+        # arbitrary state, so they are not deep-copied.
+        config_copy = config.get_serializable_config_copy()
+        for name in config._save_config_ignore:
+            config_copy[name] = getattr(config, name)
         for name in config_patches or {}:
             # core inductor keys take precedence over device namespaces
             if name.replace("-", "_") in config._config:  # type: ignore[attr-defined]
