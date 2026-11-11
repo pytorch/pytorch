@@ -103,9 +103,6 @@ class HashableTracker:
     _MISSING = object()
 
     def __init__(self, vt: VariableTracker) -> None:
-        # We specialize SymNodes
-        vt = specialize_symnode(vt)
-
         # Fast path for unrealized LazyVariableTrackers: check and hash without
         # realizing, to avoid inserting guards.  If the fast-path check fails,
         # fall through to realize the VT and try the full is_hashable check.
@@ -118,6 +115,9 @@ class HashableTracker:
             self._hash_is_identity = False
             self.vt = vt
             return
+
+        # We specialize SymNodes
+        vt = specialize_symnode(vt)
 
         # Compute hash via the tp_hash slot (generic_hash_impl).
         # For unhashable types, hash_impl raises ObservedTypeError.
