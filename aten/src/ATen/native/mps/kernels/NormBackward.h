@@ -34,8 +34,9 @@ kernel void norm_backward_packed(
   using opmath = opmath_t<T>;
   constexpr int reads = ILP_PER_THREAD;
   const uint rows = dims.x, row_size = dims.y, lanes = dims.z;
-  const uint gid = tg.y * tsize.x + pos.x;
-  const uint row = gid / lanes, lane = gid % lanes, base = lane * reads;
+  // Not via a flat thread index, which wraps at 2**32 threads
+  const uint row = tg.y * (tsize.x / lanes) + pos.x / lanes;
+  const uint lane = pos.x % lanes, base = lane * reads;
   const bool active = row < rows;
   const uint stat_row = min(row, rows - 1);
   const ulong offset = ulong(row) * row_size + base;

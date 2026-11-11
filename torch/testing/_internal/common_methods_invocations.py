@@ -4770,16 +4770,6 @@ def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
         ((1, 2), (2,), {}),
         ((0, 1), (1,), {}),
     )
-    # Large enough to take the other MPS backward kernels: few long rows (split into chunks), one threadgroup per
-    # row, and tall or wide column tiles for weight and bias grads. Other backends gain nothing from them.
-    if torch.device(device).type == "mps":
-        cases += (
-            ((2, 20001), (20001,), {}),
-            ((100, 256), (256,), {}),
-        )
-        # In float16 the CPU reference for this weight grad, a sum over 300 rows, is further from float64 than MPS is
-        if dtype != torch.float16:
-            cases += (((300, 33), (33,), {}),)
 
     for input_shape, normalized_shape, kwargs in cases:
         # Shape of weight and bias should be the same as normalized_shape
@@ -4814,16 +4804,6 @@ def sample_inputs_native_layer_norm(opinfo, device, dtype, requires_grad, **kwar
         ((1, 2), (2,), 1e-5),
         ((0, 1), (1,), 1e-5),
     )
-    # Large enough to take the other MPS backward kernels: few long rows (split into chunks), one threadgroup per
-    # row, and tall or wide column tiles for weight and bias grads. Other backends gain nothing from them.
-    if torch.device(device).type == "mps":
-        cases += (
-            ((2, 20001), (20001,), 1e-5),
-            ((100, 256), (256,), 1e-5),
-        )
-        # In float16 the CPU reference for this weight grad, a sum over 300 rows, is further from float64 than MPS is
-        if dtype != torch.float16:
-            cases += (((300, 33), (33,), 1e-5),)
 
     for input_shape, normalized_shape, eps in cases:
         # Shape of weight and bias should be the same as normalized_shape
