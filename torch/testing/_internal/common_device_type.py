@@ -2048,19 +2048,11 @@ def _has_sufficient_memory(device, size):
     device_ = torch.device(device)
     device_type = device_.type
     if device_type in ["cuda", "xpu", "mtia"]:
-        acc = torch.accelerator.current_accelerator()
-        # Case 1: no accelerator found
-        if not acc:
+        device_mod = torch.get_device_module(device_)
+        if not device_mod.is_available():
             return False
-        # Case 2: accelerator found but not matching device type
-        if acc.type != device_type:
-            return True
-        # Case 3: accelerator found and matching device type but not available
-        if not torch.accelerator.is_available():
-            return False
-        # Case 4: accelerator found and matching device type and available
         gc.collect()
-        torch.accelerator.empty_cache()
+        device_mod.empty_cache()
 
         if device_.index is None:
             device_ = torch.device(device_type, 0)
@@ -2129,11 +2121,12 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
     """Skip test if the device has insufficient memory to run the test
 
     size is the test's total memory footprint, and may be a number of bytes, a
-    string of the form "N GB", or a callable. It is not a per-allocation limit;
-    for that see `largeMPSBufferTest`.
+    string of the form "N GB", or a callable returning either. It is not a
+    per-allocation limit; for that see `largeMPSBufferTest`.
 
     If the test is a device generic test, available memory on the primary device will be checked.
-    It can also be overridden by the optional `device=` argument.
+    It can also be overridden by the optional `device=` argument, which checks that device
+    unconditionally (skipping if it is unavailable).
     In other tests, the `device=` argument needs to be specified.
     """
     size = _parse_size(size)
@@ -2141,7 +2134,9 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
     def inner(fn):
         @wraps(fn)
         def dep_fn(self, *args, **kwargs):
-            size_bytes: int = size(self, *args, **kwargs) if callable(size) else size
+            size_bytes: int = (
+                _parse_size(size(self, *args, **kwargs)) if callable(size) else size
+            )
             _device = _test_device(self, device)
 
             # If this is running with GPU cpp_wrapper, the autotuning step will generate
@@ -2174,7 +2169,9 @@ def largeMPSBufferTest(size, device=None):
         def dep_fn(self, *args, **kwargs):
             _device = _test_device(self, device)
             if torch.device(_device).type == "mps":
-                size_bytes = size(self, *args, **kwargs) if callable(size) else size
+                size_bytes = (
+                    _parse_size(size(self, *args, **kwargs)) if callable(size) else size
+                )
                 # The allocator's check is strict, so match it with >=.
                 if size_bytes >= torch._C._mps_maxBufferLength():
                     raise unittest.SkipTest(
