@@ -14647,6 +14647,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (1028, 1028),  # Non-persistent reduction
         ]
         for i, shape in enumerate(shapes, start=2):
+            if (
+                shape == (1028, 1028)
+                and is_mps_backend(self.device)
+                and is_dynamic_shape_enabled()
+            ):
+                # Wrong indices on ties, see test_argmax_argmin_with_duplicates
+                continue
             torch.manual_seed(i)
             t1 = torch.randint(2, size=shape, dtype=torch.bool)
             self.common(fn, (t1,))
