@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import math
 import operator
 from types import SimpleNamespace
 from unittest import mock
@@ -17,6 +18,10 @@ from torch._inductor.kernel.flex.flex_flydsl_backward import (
     _get_flydsl_flex_attention_backward_config,
 )
 from torch._inductor.kernel.flex.flex_flydsl_mask import lower_flydsl_mask_graph
+from torch._inductor.kernel.flex.flex_flydsl_score import (
+    classify_capture_gradient,
+    lower_flydsl_score_graph,
+)
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
@@ -174,6 +179,145 @@ def _evaluate_mask_program(program, b, h, q, kv):
             }[op](lhs, rhs)
         )
     return values[program.output]
+
+
+def _gather(buffer, *indices):
+    # flex_attention traces captured-buffer indexing as aten.index.Tensor;
+    # plain make_fx would instead read 0-d indices as Python integers.
+    return torch.ops.aten.index.Tensor(buffer, list(indices))
+
+
+def _score_graph(fn, *captures):
+    score = torch.tensor(0.0)
+    indices = tuple(torch.tensor(0, dtype=torch.int32) for _ in range(4))
+    return make_fx(fn)(score, *indices, *captures)
+
+
+_SCORE_PROGRAM_OPS = {
+    "i2f": float,
+    "b2f": float,
+    "f2i": int,
+    "b2i": int,
+    "f2b": bool,
+    "i2b": bool,
+    "not": operator.not_,
+    "fneg": operator.neg,
+    "fabs": abs,
+    "exp": math.exp,
+    "exp2": lambda x: 2.0**x,
+    "log": math.log,
+    "log2": math.log2,
+    "tanh": math.tanh,
+    "sigmoid": lambda x: 1.0 / (1.0 + math.exp(-x)),
+    "sqrt": math.sqrt,
+    "rsqrt": lambda x: 1.0 / math.sqrt(x),
+    "recip": lambda x: 1.0 / x,
+    "sin": math.sin,
+    "cos": math.cos,
+    "fadd": operator.add,
+    "fsub": operator.sub,
+    "fmul": operator.mul,
+    "fdiv": operator.truediv,
+    "fmax": max,
+    "fmin": min,
+    "add": operator.add,
+    "sub": operator.sub,
+    "mul": operator.mul,
+    "max": max,
+    "min": min,
+    "floordiv": operator.floordiv,
+    "remainder": operator.mod,
+    "and": operator.and_,
+    "or": operator.or_,
+    **{
+        prefix + name: function
+        for prefix in ("", "f")
+        for name, function in (
+            ("ge", operator.ge),
+            ("gt", operator.gt),
+            ("le", operator.le),
+            ("lt", operator.lt),
+            ("eq", operator.eq),
+            ("ne", operator.ne),
+        )
+    },
+}
+
+
+def _evaluate_score_program(program, score, b, h, q, kv, buffers=()):
+    values = [float(score), b, h, q, kv]
+    for op, *operands in program.instructions:
+        if op == "const_f32":
+            values.append(float.fromhex(operands[0]))
+        elif op in ("const_i32", "const_bool"):
+            values.append(operands[0])
+        elif op in ("load_f32", "load_i32"):
+            index = tuple(values[value] for value in operands[1])
+            loaded = buffers[operands[0]][index].item()
+            values.append(float(loaded) if op == "load_f32" else int(loaded))
+        elif op == "select":
+            condition, lhs, rhs = (values[value] for value in operands)
+            values.append(lhs if condition else rhs)
+        else:
+            values.append(
+                _SCORE_PROGRAM_OPS[op](*(values[value] for value in operands))
+            )
+    return values[program.output]
+
+
+def _score_mod_case(kind, *, device, heads):
+    """Return ``(make_score_mod, captures)``; captures feed ``make_score_mod``."""
+    if kind == "relative":
+        return (lambda: lambda s, b, h, q, kv: s + (q - kv) * 0.01), ()
+    if kind == "alibi":
+        return (
+            lambda: (
+                lambda s, b, h, q, kv: (
+                    s + (kv - q) * torch.exp2(-((h + 1) * 8.0 / heads))
+                )
+            )
+        ), ()
+    if kind == "softcap":
+        return (lambda: lambda s, b, h, q, kv: torch.tanh(s / 2.0) * 2.0), ()
+    if kind == "where_inf":
+        return (
+            lambda: lambda s, b, h, q, kv: torch.where(q >= kv, s * 1.5, float("-inf"))
+        ), ()
+    torch.manual_seed(5)
+    if kind == "head_bias":
+        bias = torch.randn(heads, 256, device=device).bfloat16()
+        return (lambda bias: lambda s, b, h, q, kv: s + bias[h, kv]), (bias,)
+    # Trainable captures, one per gradient accumulation class (seq 256).
+    trainable = {
+        "trainable_slope": (
+            torch.rand(heads, device=device),
+            lambda slope: lambda s, b, h, q, kv: s + slope[h] * (kv - q) * 0.01,
+        ),
+        "trainable_key_bias": (
+            torch.randn(heads, 256, device=device),
+            lambda bias: lambda s, b, h, q, kv: s + bias[h, kv],
+        ),
+        "trainable_query_scale": (
+            torch.rand(heads, 256, device=device) + 0.5,
+            lambda scale: lambda s, b, h, q, kv: s * scale[h, q],
+        ),
+        "trainable_relative_table": (
+            torch.randn(heads, 511, device=device),
+            lambda table: lambda s, b, h, q, kv: s + table[h, q - kv + 255],
+        ),
+        "trainable_full_bias": (
+            torch.randn(1, heads, 256, 256, device=device),
+            lambda bias: lambda s, b, h, q, kv: s + bias[b, h, q, kv],
+        ),
+        "trainable_clamped_table": (
+            torch.randn(8, device=device),
+            lambda table: (
+                lambda s, b, h, q, kv: s + table[torch.clamp(torch.abs(q - kv), max=7)]
+            ),
+        ),
+    }
+    capture, make_score_mod = trainable[kind]
+    return make_score_mod, (capture.requires_grad_(),)
 
 
 def _has_gfx950_flydsl():
@@ -500,6 +644,24 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
         self.assertIsNotNone(config, reason)
         self.assertEqual(config["MASK_PROGRAM"], (("ge", 2, 3),))
         self.assertEqual(config["Q_STRIDE"], (65536, 32768, 128, 1))
+        self.assertEqual(config["SCORE_PROGRAM"], ())
+        self.assertEqual(config["SCORE_PROGRAM_OUTPUT"], 0)
+
+    def test_backward_score_mod_config(self):
+        inputs = _supported_fake_backward_inputs()
+        inputs["fw_subgraph"] = SimpleNamespace(
+            graph_module=torch.fx.symbolic_trace(
+                lambda score, b, h, q, kv: score + (q - kv)
+            )
+        )
+        config, reason = _backward_config_result(inputs)
+        self.assertIsNotNone(config, reason)
+        # float(q - kv) lowers to float(q) - float(kv); the int sub is dead.
+        self.assertEqual(
+            config["SCORE_PROGRAM"],
+            (("sub", 3, 4), ("i2f", 3), ("i2f", 4), ("fsub", 6, 7), ("fadd", 0, 8)),
+        )
+        self.assertEqual(config["SCORE_PROGRAM_OUTPUT"], 9)
 
     @parametrize("dq_accum_fp32", (True, False))
     def test_backward_workspace_bound(self, dq_accum_fp32):
@@ -521,6 +683,26 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
             batch_heads * partitions * sequence_length * head_dim * element_bytes,
             MAX_DQ_WORKSPACE_BYTES,
         )
+
+    def test_block_list_dq_partitions_fill_device(self):
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_utils import (
+            choose_dq_partitions,
+        )
+
+        # (batch * heads, sequence) -> slots; about one CTA per compute unit.
+        for batch_heads, sequence_length, expected in (
+            (64, 4096, 4),
+            (16, 4096, 16),
+            (256, 2048, 2),
+            (4, 256, 2),
+        ):
+            with self.subTest(batch_heads=batch_heads):
+                self.assertEqual(
+                    choose_dq_partitions(
+                        batch_heads, sequence_length, 128, qk_head_dim=128
+                    ),
+                    expected,
+                )
 
     def test_backward_mask_traversal_classification(self):
         from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_utils import (
@@ -614,11 +796,13 @@ class _FlyDSLFlexAttentionRuntimeMixin:
         scale=None,
         enable_gqa=False,
         return_aux=False,
+        score_mod=None,
     ):
         def run(q, k, v, backend, selected_mask):
             kwargs = {
                 "block_mask": selected_mask,
                 "enable_gqa": enable_gqa,
+                "score_mod": score_mod,
                 "kernel_options": {"BACKEND": backend},
             }
             if scale is not None:
@@ -660,7 +844,7 @@ class _FlyDSLFlexAttentionRuntimeMixin:
         self.assertNotIn("build_flex_attn_fwd_module", "\n".join(reference_code))
 
         if not return_aux:
-            # FlyDSL rounds scaled Q to bf16 before QK.
+            # Without score_mod, FlyDSL rounds scaled Q to bf16 before QK.
             self.assertEqual(actual, expected, atol=0.03, rtol=0.02)
             return actual
 
@@ -685,6 +869,9 @@ class _FlyDSLFlexAttentionRuntimeMixin:
         *,
         block_mask,
         dq_accum_fp32,
+        score_mod=None,
+        score_captures=(),
+        expect_flydsl_backward=True,
     ):
         torch.manual_seed(24)
         grad_output = torch.randn_like(value)
@@ -694,6 +881,12 @@ class _FlyDSLFlexAttentionRuntimeMixin:
                 tensor.detach().clone().requires_grad_()
                 for tensor in (query, key, value)
             )
+            # Captures keep their own requires_grad; trainable ones get gradients.
+            captures = tuple(
+                capture.detach().clone().requires_grad_(capture.requires_grad)
+                for capture in score_captures
+            )
+            trainable = inputs + tuple(c for c in captures if c.requires_grad)
             kernel_options = {"BACKEND": backend}
             if backend == "FLYDSL":
                 kernel_options["bwd_FLYDSL_DQ_ACCUM_FP32"] = dq_accum_fp32
@@ -702,6 +895,7 @@ class _FlyDSLFlexAttentionRuntimeMixin:
                     q,
                     k,
                     v,
+                    score_mod=(None if score_mod is None else score_mod(*captures)),
                     block_mask=block_mask,
                     kernel_options=kernel_options,
                 ),
@@ -714,7 +908,7 @@ class _FlyDSLFlexAttentionRuntimeMixin:
                 )
             return (
                 output.detach(),
-                tuple(t.grad.detach().clone() for t in inputs),
+                tuple(t.grad.detach().clone() for t in trainable),
                 "\n".join(code),
                 "\n".join(backward_code),
             )
@@ -725,7 +919,10 @@ class _FlyDSLFlexAttentionRuntimeMixin:
         )
         self.assertIn("flydsl_fused_", code)
         self.assertNotIn("flydsl_fused_", reference_code)
-        self.assertIn("flydsl_fused_flex_attention_backward_", backward_code)
+        if expect_flydsl_backward:
+            self.assertIn("flydsl_fused_flex_attention_backward_", backward_code)
+        else:
+            self.assertNotIn("flydsl_fused_", backward_code)
         self.assertNotIn("flydsl_fused_", reference_backward_code)
         self.assertEqual(output, reference, atol=0.03, rtol=0.02)
         for grad, reference_grad in zip(grads, reference_grads):
@@ -792,8 +989,9 @@ class TestFlyDSLFlexAttentionLowering(TestCase):
     def test_mask_lowering_full_constant_respects_dtype(self):
         program, reason = lower_flydsl_mask_graph(
             _mask_graph(
-                lambda b, h, q, kv: q
-                > torch.full((), 3, dtype=torch.bool, device=q.device)
+                lambda b, h, q, kv: (
+                    q > torch.full((), 3, dtype=torch.bool, device=q.device)
+                )
             ),
             (),
         )
@@ -863,6 +1061,324 @@ class TestFlyDSLFlexAttentionLowering(TestCase):
             _evaluate_mask_program(program, 0, 0, q, kv),
             expected,
         )
+
+    @parametrize(
+        "score_mod,captures",
+        [
+            subtest((lambda s, b, h, q, kv: s + (q - kv), ()), name="relative"),
+            subtest(
+                (
+                    lambda s, b, h, q, kv: (
+                        s + (kv - q) * torch.exp2(-((h + 1) * 8.0 / 8))
+                    ),
+                    (),
+                ),
+                name="alibi",
+            ),
+            subtest(
+                (lambda s, b, h, q, kv: torch.tanh(s / 30.0) * 30.0, ()),
+                name="softcap",
+            ),
+            subtest(
+                (lambda s, b, h, q, kv: torch.where(q >= kv, s, float("-inf")), ()),
+                name="where_inf",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv: (
+                        torch.clamp(s, min=-1.0, max=2.0) ** 2
+                        + torch.maximum(s, s * 0.5)
+                        - torch.minimum(s, torch.abs(-s))
+                    ),
+                    (),
+                ),
+                name="clamp_pow_max",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv: (
+                        torch.sigmoid(s)
+                        + torch.exp(s * 0.1)
+                        + torch.log(torch.abs(s) + 1)
+                        + torch.sqrt(torch.abs(s))
+                        + torch.rsqrt(torch.abs(s) + 1)
+                        + torch.reciprocal(s + 4)
+                        + torch.sin(s) * torch.cos(s)
+                    ),
+                    (),
+                ),
+                name="transcendental",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv: torch.where(
+                        ((q // 3) % 4 == 1) | ((kv - q) % 5 > b),
+                        s * ((q - kv) % 7).float(),
+                        (s * 2).to(torch.int32) - h,
+                    ),
+                    (),
+                ),
+                name="integer",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv, bias, table: (
+                        s * _gather(bias, h) + _gather(table, q - kv + 4)
+                    ),
+                    (
+                        torch.linspace(0.5, 2.0, 4),
+                        torch.arange(-4, 5, dtype=torch.int32),
+                    ),
+                ),
+                name="captured",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv, scale: s * scale,
+                    (torch.tensor(0.25),),
+                ),
+                name="rank0_capture",
+            ),
+        ],
+    )
+    def test_score_lowering_matches_eager(self, score_mod, captures):
+        buffers = [
+            _FakeNode(tuple(capture.shape), capture.stride(), capture.dtype)
+            for capture in captures
+        ]
+        with V.set_graph_handler(_fake_graph()):
+            program, reason = lower_flydsl_score_graph(
+                _score_graph(score_mod, *captures), buffers
+            )
+        self.assertIsNotNone(program, reason)
+        self.assertEqual(program.buffer_count, len(captures))
+        for score, b, h, q, kv in (
+            (1.5, 0, 0, 3, 1),
+            (-0.75, 1, 3, 2, 5),
+            (2.25, 1, 2, 4, 4),
+            (-3.0, 0, 1, 0, 3),
+        ):
+            expected = score_mod(
+                torch.tensor(score),
+                *(torch.tensor(index, dtype=torch.int32) for index in (b, h, q, kv)),
+                *captures,
+            ).item()
+            actual = _evaluate_score_program(program, score, b, h, q, kv, captures)
+            if math.isinf(expected):
+                self.assertEqual(actual, expected)
+            else:
+                self.assertAlmostEqual(actual, expected, places=4)
+
+    @parametrize(
+        "score_mod,captures,dtypes,expected",
+        [
+            subtest(
+                (lambda s, b, h, q, kv: torch.erf(s), (), (), "erf"),
+                name="unsupported_op",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv: torch.floor_divide(s, 2.0),
+                    (),
+                    (),
+                    "floor division supports integers only",
+                ),
+                name="float_floor_divide",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv, table: s + _gather(table, q),
+                    (torch.zeros(8),),
+                    (torch.int64,),
+                    "must be float32, bfloat16, float16, or int32",
+                ),
+                name="int64_capture",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv, table: s * table,
+                    (torch.zeros(8),),
+                    (torch.float32,),
+                    "must be indexed to scalars",
+                ),
+                name="unindexed_capture",
+            ),
+        ],
+    )
+    def test_score_lowering_rejects(self, score_mod, captures, dtypes, expected):
+        buffers = [
+            _FakeNode(tuple(capture.shape), capture.stride(), dtype)
+            for capture, dtype in zip(captures, dtypes)
+        ]
+        with V.set_graph_handler(_fake_graph()):
+            program, reason = lower_flydsl_score_graph(
+                _score_graph(score_mod, *captures), buffers
+            )
+        self.assertIsNone(program)
+        self.assertIn(expected, reason)
+
+    def test_appends_score_mod_choice(self):
+        bias = torch.zeros(64)
+        inputs = _supported_fake_forward_inputs()
+        inputs["subgraph"] = SimpleNamespace(
+            graph_module=_score_graph(
+                lambda s, b, h, q, kv, bias: (
+                    torch.tanh(s / 30.0) * 30.0 + _gather(bias, h)
+                ),
+                bias,
+            )
+        )
+        inputs["score_mod_other_buffers"] = [_FakeNode((64,), (1,), torch.float32)]
+        kwargs, reason = _fake_choice_result(inputs)
+        self.assertIsNotNone(kwargs, reason)
+        self.assertTrue(kwargs["SCORE_PROGRAM"])
+        self.assertEqual(kwargs["SCORE_BUFFER_COUNT"], 1)
+        self.assertEqual(kwargs["SCORE_BUFFER_SHAPES"], ((64,),))
+
+    def test_captured_buffer_slots_are_shared(self):
+        document = torch.zeros(512, dtype=torch.int32)
+        tables = [torch.zeros(64) for _ in range(4)]
+        inputs = _supported_fake_forward_inputs()
+        inputs["mask_graph"] = SimpleNamespace(
+            graph_module=make_fx(lambda b, h, q, kv, doc: _gather(doc, q) >= kv)(
+                *(torch.tensor(0, dtype=torch.int32) for _ in range(4)), document
+            )
+        )
+        inputs["mask_mod_other_buffers"] = [_FakeNode((512,), (1,), torch.int32)]
+        inputs["subgraph"] = SimpleNamespace(
+            graph_module=_score_graph(
+                lambda s, b, h, q, kv, t0, t1, t2, t3: (
+                    s
+                    + _gather(t0, h)
+                    + _gather(t1, h)
+                    + _gather(t2, h)
+                    + _gather(t3, h)
+                ),
+                *tables,
+            )
+        )
+        inputs["score_mod_other_buffers"] = [
+            _FakeNode((64,), (1,), torch.float32) for _ in tables
+        ]
+        kwargs, reason = _fake_choice_result(inputs)
+        self.assertIsNone(kwargs)
+        self.assertIn("at most 4 captured mask_mod/score_mod buffers", reason)
+
+    def test_backward_score_mod_capture_grad_mask(self):
+        def mask(fn, count):
+            return flex_flydsl_backward._score_mod_capture_grad_mask(
+                SimpleNamespace(graph_module=torch.fx.symbolic_trace(fn)), count
+            )
+
+        self.assertEqual(mask(lambda s, g: (s * g, None, None, None, None), 1), [False])
+        self.assertEqual(
+            mask(lambda s, g: (s * g, None, None, None, None, None, g), 2),
+            [False, True],
+        )
+        self.assertIsNone(mask(lambda s, g: (s * g, None, None, None, None, g), 0))
+
+    @parametrize(
+        "score_mod,shape,expected",
+        [
+            subtest(
+                (
+                    lambda s, b, h, q, kv, slope: s + _gather(slope, h) * (kv - q),
+                    (4,),
+                    ("invariant", (("h",),)),
+                ),
+                name="invariant",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv, bias: s + _gather(bias, kv, h),
+                    (256, 4),
+                    ("key", (("kv",), ("h",))),
+                ),
+                name="key",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv, scale: s * _gather(scale, q),
+                    (256,),
+                    ("query", (("q",),)),
+                ),
+                name="query",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv, table: s + _gather(table, h, q - kv + 255),
+                    (4, 511),
+                    ("relative", (("h",), ("rel", 1, 255))),
+                ),
+                name="relative",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv, table: s + _gather(table, 300 - (q - kv)),
+                    (600,),
+                    ("relative", (("rel", -1, 300),)),
+                ),
+                name="relative_flipped",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv, bias: s + _gather(bias, h, q, kv),
+                    (4, 256, 256),
+                    ("full", (("h",), ("q",), ("kv",))),
+                ),
+                name="full",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv, bias: s + _gather(bias, q, kv),
+                    (256, 256),
+                    "indexed by every batch and head dimension",
+                ),
+                name="full_shared_heads",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv, table: s + _gather(table, q // 2),
+                    (128,),
+                    "indices must be b, h, q_idx, kv_idx",
+                ),
+                name="computed_index",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv, table: s + _gather(table, q - kv + 255, q),
+                    (511, 256),
+                    "mixes relative and absolute positions",
+                ),
+                name="mixed",
+            ),
+            subtest(
+                (
+                    lambda s, b, h, q, kv, bias: s + _gather(bias, kv),
+                    (128,),
+                    "must have size 256",
+                ),
+                name="size_mismatch",
+            ),
+        ],
+    )
+    def test_classify_capture_gradient(self, score_mod, shape, expected):
+        capture = torch.zeros(shape)
+        with V.set_graph_handler(_fake_graph()):
+            program, reason = lower_flydsl_score_graph(
+                _score_graph(score_mod, capture),
+                [_FakeNode(shape, _contiguous_stride(shape), torch.float32)],
+            )
+            self.assertIsNotNone(program, reason)
+            capture_grad, reason = classify_capture_gradient(
+                program, 0, batch=1, heads=4, sequence_length=256
+            )
+        if isinstance(expected, str):
+            self.assertIsNone(capture_grad)
+            self.assertIn(expected, reason)
+        else:
+            self.assertIsNotNone(capture_grad, reason)
+            self.assertEqual((capture_grad.kind, capture_grad.dims), expected)
 
     @parametrize(
         "input_kwargs,expected",
@@ -1050,6 +1566,140 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
             value,
             block_mask=block_mask,
             dq_accum_fp32=dq_accum_fp32,
+        )
+
+    @parametrize(
+        "score_kind,mask_kind,qk_dim",
+        [
+            subtest(("relative", "dense", 128), name="relative_dense"),
+            subtest(("alibi", "causal", 128), name="alibi_causal"),
+            subtest(("softcap", "document", 192), name="softcap_document_d192"),
+            subtest(("head_bias", "causal", 192), name="head_bias_causal_d192"),
+            subtest(("where_inf", "dense", 128), name="where_inf_dense"),
+        ],
+    )
+    @torch._inductor.config.patch({"fx_graph_cache": False})
+    def test_gfx950_score_mod_backward(self, device, score_kind, mask_kind, qk_dim):
+        self._require_runtime()
+        query, key, value = _make_qkv(device=device, q_heads=4, qk_dim=qk_dim, seed=31)
+        block_mask = None
+        if mask_kind == "causal":
+            block_mask = create_block_mask(
+                lambda b, h, q, kv: q >= kv, 1, 1, 256, 256, device=device
+            )
+        elif mask_kind == "document":
+            document_ids = torch.arange(256, device=device, dtype=torch.int32) // 96
+            block_mask = create_block_mask(
+                lambda b, h, q, kv: (q >= kv) & (document_ids[q] == document_ids[kv]),
+                1,
+                1,
+                256,
+                256,
+                device=device,
+                BLOCK_SIZE=128,
+            )
+        score_mod, captures = _score_mod_case(score_kind, device=device, heads=4)
+        self._compare_backward(
+            query,
+            key,
+            value,
+            block_mask=block_mask,
+            dq_accum_fp32=True,
+            score_mod=score_mod,
+            score_captures=captures,
+        )
+
+    @parametrize(
+        "score_kind,mask_kind",
+        [
+            subtest(("trainable_slope", "dense"), name="slope_dense"),
+            subtest(("trainable_key_bias", "causal"), name="key_bias_causal"),
+            subtest(("trainable_query_scale", "dense"), name="query_scale_dense"),
+            subtest(("trainable_relative_table", "causal"), name="relative_causal"),
+            subtest(("trainable_full_bias", "dense"), name="full_bias_dense"),
+        ],
+    )
+    @torch._inductor.config.patch({"fx_graph_cache": False})
+    def test_gfx950_trainable_score_mod_capture_backward(
+        self, device, score_kind, mask_kind
+    ):
+        self._require_runtime()
+        query, key, value = _make_qkv(device=device, q_heads=4, seed=32)
+        block_mask = None
+        if mask_kind == "causal":
+            block_mask = create_block_mask(
+                lambda b, h, q, kv: q >= kv, 1, 1, 256, 256, device=device
+            )
+        score_mod, captures = _score_mod_case(score_kind, device=device, heads=4)
+        self._compare_backward(
+            query,
+            key,
+            value,
+            block_mask=block_mask,
+            dq_accum_fp32=True,
+            score_mod=score_mod,
+            score_captures=captures,
+        )
+
+    @torch._inductor.config.patch({"fx_graph_cache": False})
+    def test_gfx950_computed_index_trainable_capture_uses_triton_backward(self, device):
+        self._require_runtime()
+        query, key, value = _make_qkv(device=device, q_heads=4, seed=34)
+        score_mod, captures = _score_mod_case(
+            "trainable_clamped_table", device=device, heads=4
+        )
+        self._compare_backward(
+            query,
+            key,
+            value,
+            block_mask=None,
+            dq_accum_fp32=True,
+            score_mod=score_mod,
+            score_captures=captures,
+            expect_flydsl_backward=False,
+        )
+
+    @parametrize(
+        "score_kind,seq",
+        [
+            subtest(("alibi", 4), name="alibi_decode"),
+            subtest(("softcap", 1), name="softcap_single_query"),
+            subtest(("head_bias", 256), name="head_bias_gqa_prefill"),
+        ],
+    )
+    def test_gfx950_score_mod_forward_gqa(self, device, score_kind, seq):
+        self._require_runtime()
+        query, key, value = _make_qkv(
+            device=device, q_heads=8, kv_heads=2, seq_q=seq, seq_kv=256, seed=33
+        )
+        make_score_mod, captures = _score_mod_case(score_kind, device=device, heads=8)
+        self._compare_forward(
+            query,
+            key,
+            value,
+            enable_gqa=True,
+            score_mod=make_score_mod(*captures),
+        )
+
+    @parametrize("mask_kind", ("causal", "document"))
+    @torch._inductor.config.patch({"fx_graph_cache": False})
+    def test_gfx950_backward_shared_dq_slots(self, device, mask_kind):
+        # 64 batch-heads use 4 dQ slots for 8 key owners, so owners share slots
+        # and skip query blocks that an earlier owner did not write.
+        self._require_runtime()
+        query, key, value = _make_qkv(
+            device=device, batch=4, q_heads=16, seq_q=1024, seed=35
+        )
+        document_ids = torch.arange(1024, device=device, dtype=torch.int32) // 300
+
+        def mask_mod(b, h, q, kv):
+            if mask_kind == "causal":
+                return q >= kv
+            return (q >= kv) & (document_ids[q] == document_ids[kv])
+
+        block_mask = create_block_mask(mask_mod, 1, 1, 1024, 1024, device=device)
+        self._compare_backward(
+            query, key, value, block_mask=block_mask, dq_accum_fp32=True
         )
 
     @parametrize("qk_dim", (128, 192))
@@ -1548,8 +2198,10 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
             ),
             subtest(
                 (
-                    lambda b, h, q, kv: (torch.add(q, 64, alpha=2) >= kv)
-                    & ((torch.add(q, 64, alpha=2) - kv) % (2 + h) == 0),
+                    lambda b, h, q, kv: (
+                        (torch.add(q, 64, alpha=2) >= kv)
+                        & ((torch.add(q, 64, alpha=2) - kv) % (2 + h) == 0)
+                    ),
                     {
                         "batch": 2,
                         "q_heads": 3,

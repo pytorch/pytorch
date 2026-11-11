@@ -7,6 +7,66 @@ MASK_TRAVERSAL_BLOCK_LIST = "block_list"
 DIRECT_RANGE_CAUSAL = "causal"
 
 MAX_DQ_WORKSPACE_BYTES = 16 << 30
+# Block-list backward CTAs to aim for: one per gfx950 compute unit.
+BLOCK_LIST_TARGET_CTAS = 256
+
+# How a trainable score_mod capture's index depends on the score position.
+# The class decides how the backward accumulates its gradient without atomics.
+CAPTURE_GRAD_UNUSED = "unused"
+CAPTURE_GRAD_INVARIANT = "invariant"  # batch/head only, e.g. slope[h]
+CAPTURE_GRAD_KEY = "key"  # kv but not q, e.g. bias[h, kv]
+CAPTURE_GRAD_QUERY = "query"  # q but not kv, e.g. scale[h, q]
+CAPTURE_GRAD_RELATIVE = "relative"  # +-(q - kv) + c, e.g. table[h, q - kv + c]
+CAPTURE_GRAD_FULL = "full"  # one element per (b, h, q, kv), e.g. bias[b, h, q, kv]
+
+# Producer waves of the block-list pipeline, which owns capture gradients.
+PIPELINE_PRODUCER_WAVES = 4
+
+
+def capture_grad_workspace_shape(
+    kind, batch_heads, sequence_length, dq_partitions, buffer_shape
+):
+    """Private fp32 workspace written by the backward for one trainable capture.
+
+    Shapes are [batch * heads, partial rows, columns]. Invariant captures keep
+    one partial per (CTA slot, wave); key captures one value per key; query and
+    relative captures one row per CTA slot, relative columns indexed by
+    ``sign * (q - kv) + sequence_length - 1``. Full captures write the gradient
+    in the buffer's own layout.
+    """
+    if kind == CAPTURE_GRAD_INVARIANT:
+        return (batch_heads, dq_partitions * PIPELINE_PRODUCER_WAVES, 1)
+    if kind == CAPTURE_GRAD_KEY:
+        return (batch_heads, 1, sequence_length)
+    if kind == CAPTURE_GRAD_QUERY:
+        return (batch_heads, dq_partitions, sequence_length)
+    if kind == CAPTURE_GRAD_RELATIVE:
+        return (batch_heads, dq_partitions, 2 * sequence_length - 1)
+    if kind == CAPTURE_GRAD_FULL:
+        return tuple(buffer_shape)
+    raise ValueError(f"capture kind {kind} has no workspace")
+
+
+def capture_grad_reduction_shape(
+    kind, batch_size, num_heads, sequence_length, keep_batch, keep_head
+):
+    """Fixed-order reduction output for a workspace viewed as [B*H, rows, columns].
+
+    The batch and head axes collapse to one when the capture is not indexed by
+    them; partial rows (CTA slots, waves) are always summed.
+    """
+    columns = (
+        1
+        if kind == CAPTURE_GRAD_INVARIANT
+        else 2 * sequence_length - 1
+        if kind == CAPTURE_GRAD_RELATIVE
+        else sequence_length
+    )
+    return (
+        batch_size if keep_batch else 1,
+        num_heads if keep_head else 1,
+        columns,
+    )
 
 
 def choose_dq_partitions(
@@ -31,7 +91,15 @@ def choose_dq_partitions(
             0xFFFFFFFF
             // (sequence_length * 192 * head_group * workspace_element_bytes),
         )
-        return min(owners, max_partitions, 1 << (max_slots.bit_length() - 1))
+        # Each slot is reduced again by the dQ layout kernel, so use only enough
+        # CTAs to fill the device: owners sharing a slot accumulate in place.
+        target = max(2, BLOCK_LIST_TARGET_CTAS // batch_heads)
+        return min(
+            owners,
+            max_partitions,
+            1 << (max_slots.bit_length() - 1),
+            1 << (target.bit_length() - 1),
+        )
     # Keep long owner loops distributed even when heads fill the device.
     target = max(1 if owners <= 8 else 2, (256 + batch_heads - 1) // batch_heads)
     return min(owners, max_partitions, 1 << (target - 1).bit_length())

@@ -967,6 +967,7 @@ def flex_attention_backward(*args, **kwargs):
             SPARSE_KV_BLOCK_SIZE,
             fw_subgraph=fw_graph,
             mask_graph=mask_graph,
+            joint_graph=joint_graph,
             score_mod_other_buffers=list(score_mod_other_buffers),
             mask_mod_other_buffers=list(mask_mod_other_buffers),
             kv_num_blocks=kv_num_blocks,

@@ -9,7 +9,7 @@ from torch.nn.attention.flex_attention import _LARGE_SPARSE_BLOCK_SIZE
 from ...codegen.flydsl import flydsl_utils
 from ...codegen.flydsl.flydsl_template import FlyDSLTemplate
 from ...ir import FixedLayout, Pointwise
-from ...lowering import empty_strided, full
+from ...lowering import empty_strided, full, view
 from ...select_algorithm import autotune_select_algorithm
 from ...virtualized import ops, V
 from .common import (
@@ -24,6 +24,7 @@ from .common import (
 )
 from .flex_flash_attention import is_trivial_mask_graph, is_trivial_score_graph
 from .flex_flydsl_mask import lower_flydsl_mask_graph
+from .flex_flydsl_score import lower_flydsl_score_graph
 
 
 flex_flydsl_forward_template = FlyDSLTemplate(
@@ -32,6 +33,8 @@ flex_flydsl_forward_template = FlyDSLTemplate(
 )
 
 _MAX_BUFFER_BYTES = 1 << 32
+# Mask and score captures share the kernels' four captured-buffer slots.
+_MAX_CAPTURED_BUFFERS = 4
 
 
 def _contiguous_strides(shape):
@@ -169,6 +172,51 @@ def _get_mask_program_config(mask_graph, mask_mod_other_buffers):
     }, ""
 
 
+def _get_score_program_config(subgraph, score_mod_other_buffers):
+    # Unused captures still occupy kernel slots, so only skip lowering without them.
+    if not score_mod_other_buffers and is_trivial_score_graph(subgraph.graph_module):
+        return {
+            "SCORE_PROGRAM": (),
+            "SCORE_PROGRAM_OUTPUT": 0,
+            "SCORE_BUFFER_COUNT": 0,
+            "SCORE_BUFFER_SHAPES": (),
+            "SCORE_BUFFER_STRIDES": (),
+        }, ""
+    score_program, reason = lower_flydsl_score_graph(
+        subgraph.graph_module,
+        score_mod_other_buffers,
+    )
+    if score_program is None:
+        return None, f"unsupported score_mod: {reason}"
+    return {
+        "SCORE_PROGRAM": score_program.instructions,
+        "SCORE_PROGRAM_OUTPUT": score_program.output,
+        "SCORE_BUFFER_COUNT": score_program.buffer_count,
+        "SCORE_BUFFER_SHAPES": score_program.buffer_shapes,
+        "SCORE_BUFFER_STRIDES": score_program.buffer_strides,
+    }, ""
+
+
+def _kernel_capture_buffers(buffers):
+    """Captured tensors as kernel arguments; FlyDSL needs at least one dim."""
+    return [
+        view(buffer, [1]) if not buffer.get_size() else buffer for buffer in buffers
+    ]
+
+
+def _fits_u32_buffer(node) -> bool:
+    try:
+        sizes = [V.graph.sizevars.guard_int(value) for value in node.get_size()]
+        strides = [V.graph.sizevars.guard_int(value) for value in node.get_stride()]
+        element_size = torch._utils._element_size(node.get_dtype())
+    except (AttributeError, TypeError, ValueError):
+        return False
+    storage_elements = 1 + sum(
+        (size - 1) * stride for size, stride in zip(sizes, strides)
+    )
+    return storage_elements * element_size < _MAX_BUFFER_BYTES
+
+
 def _is_gfx950_device(device) -> bool:
     if not flydsl_utils.runtime_available() or not torch.cuda.is_available():
         return False
@@ -188,7 +236,7 @@ def _get_flydsl_common_config(
     extra_strides=(),
     allow_mask_mod_buffers: bool = False,
     allow_strided_bhsd: bool = False,
-) -> tuple[dict[str, tuple[int, ...] | None] | None, str]:
+) -> tuple[dict[str, Any] | None, str]:
     device = query.get_device()
     if device is None or device.type != "cuda" or not _is_gfx950_device(device):
         return None, "requires ROCm gfx950 and the FlyDSL runtime"
@@ -196,12 +244,25 @@ def _get_flydsl_common_config(
         return None, f"supports BF16 only, got {query.get_dtype()}"
     if query.get_dtype() != key.get_dtype() or query.get_dtype() != value.get_dtype():
         return None, "requires query, key, and value to have the same dtype"
-    if not is_trivial_score_graph(subgraph.graph_module):
-        return None, "supports identity score_mod only"
-    if score_mod_other_buffers:
-        return None, "does not support captured score_mod buffers"
     if mask_mod_other_buffers and not allow_mask_mod_buffers:
         return None, "does not support captured mask_mod buffers"
+    score_config, reason = _get_score_program_config(subgraph, score_mod_other_buffers)
+    if score_config is None:
+        return None, reason
+    if (
+        len(mask_mod_other_buffers) + score_config["SCORE_BUFFER_COUNT"]
+        > _MAX_CAPTURED_BUFFERS
+    ):
+        return (
+            None,
+            f"supports at most {_MAX_CAPTURED_BUFFERS} captured "
+            "mask_mod/score_mod buffers",
+        )
+    if score_config["SCORE_BUFFER_COUNT"]:
+        if any(buffer.get_device() != device for buffer in score_mod_other_buffers):
+            return None, "requires captured score_mod buffers on the query device"
+        if not all(_fits_u32_buffer(buffer) for buffer in score_mod_other_buffers):
+            return None, "requires captured score_mod buffers smaller than 4 GiB"
 
     named_tensors = (
         ("Q_STRIDE", query),
@@ -229,7 +290,11 @@ def _get_flydsl_common_config(
         return None, "requires every per-head tensor slice to be smaller than 4 GiB"
 
     return {
-        name: stride for (name, _), stride in zip(named_tensors, strides, strict=True)
+        **{
+            name: stride
+            for (name, _), stride in zip(named_tensors, strides, strict=True)
+        },
+        **score_config,
     }, ""
 
 
@@ -449,6 +514,11 @@ def maybe_append_flydsl_flex_attention_choice(
         if len(mask_mod_other_buffers) != mask_buffer_count:
             return False, "mask_mod capture count changed during lowering"
         input_nodes.extend(mask_mod_other_buffers)
+    score_buffer_count = config["SCORE_BUFFER_COUNT"]
+    if score_buffer_count:
+        if len(score_mod_other_buffers) != score_buffer_count:
+            return False, "score_mod capture count changed during lowering"
+        input_nodes.extend(_kernel_capture_buffers(score_mod_other_buffers))
 
     choices_before = len(choices)
     error = flex_flydsl_forward_template.maybe_append_choice(
@@ -597,6 +667,7 @@ def create_flydsl_flex_attention_kernel(
             full_kv_num_blocks,
             full_kv_indices,
             *mask_mod_other_buffers,
+            *_kernel_capture_buffers(score_mod_other_buffers),
         ],
         layout,
         input_gen_fns={

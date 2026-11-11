@@ -30,6 +30,12 @@ _launcher = LazyFlyDSLLauncher(
         mask_program_output=MASK_PROGRAM_OUTPUT,
         mask_buffer_shapes=MASK_BUFFER_SHAPES,
         mask_buffer_strides=MASK_BUFFER_STRIDES,
+        score_program=SCORE_PROGRAM,
+        score_program_output=SCORE_PROGRAM_OUTPUT,
+        score_buffer_shapes=SCORE_BUFFER_SHAPES,
+        score_buffer_strides=SCORE_BUFFER_STRIDES,
+        capture_grads=CAPTURE_GRADS,
+        capture_reductions=CAPTURE_REDUCTIONS,
         block_mask_is_dense=BLOCK_MASK_IS_DENSE,
         q_stride=Q_STRIDE,
         k_stride=K_STRIDE,
@@ -64,14 +70,23 @@ def _run_flydsl_backward(
     partial_kv_indices,
     full_kv_counts,
     full_kv_indices_transposed,
-{% for index in range(MASK_BUFFER_COUNT) %}
+{% for index in range(MASK_BUFFER_COUNT + SCORE_BUFFER_COUNT) %}
     mask_buffer_{{index}},
+{% endfor %}
+{% for index in range(CAPTURE_GRAD_COUNT) %}
+    capture_grad_{{index}},
+    capture_reduced_{{index}},
 {% endfor %}
     grad_query,
     stream,
 ):
-{% for index in range(MASK_BUFFER_COUNT, 4) %}
+    # Score captures follow mask captures; unused slots alias kv_num_blocks.
+{% for index in range(MASK_BUFFER_COUNT + SCORE_BUFFER_COUNT, 4) %}
     mask_buffer_{{index}} = kv_num_blocks
+{% endfor %}
+{% for index in range(CAPTURE_GRAD_COUNT, 2) %}
+    capture_grad_{{index}} = delta
+    capture_reduced_{{index}} = delta
 {% endfor %}
     dispatch_args = (
         query,
@@ -97,6 +112,10 @@ def _run_flydsl_backward(
         mask_buffer_2,
         mask_buffer_3,
         grad_query_workspace,
+        capture_grad_0,
+        capture_grad_1,
+        capture_reduced_0,
+        capture_reduced_1,
         stream,
     )
     run_flydsl_template(
@@ -117,6 +136,13 @@ def _run_flydsl_backward(
 ] %}
 {% for index in range(MASK_BUFFER_COUNT) %}
 {% set _ = kernel_args.append("mask_buffer_" ~ index) %}
+{% endfor %}
+{% for index in range(SCORE_BUFFER_COUNT) %}
+{% set _ = kernel_args.append("score_buffer_" ~ index) %}
+{% endfor %}
+{% for index in range(CAPTURE_GRAD_COUNT) %}
+{% set _ = kernel_args.append("capture_grad_" ~ index) %}
+{% set _ = kernel_args.append("capture_reduced_" ~ index) %}
 {% endfor %}
 {{def_kernel(*kernel_args)}}
     grad_query = {{get_output()}}
@@ -141,6 +167,13 @@ def _run_flydsl_backward(
         full_kv_indices_transposed,
 {% for index in range(MASK_BUFFER_COUNT) %}
         mask_buffer_{{index}},
+{% endfor %}
+{% for index in range(SCORE_BUFFER_COUNT) %}
+        score_buffer_{{index}},
+{% endfor %}
+{% for index in range(CAPTURE_GRAD_COUNT) %}
+        capture_grad_{{index}},
+        capture_reduced_{{index}},
 {% endfor %}
         grad_query,
         stream,
