@@ -182,6 +182,9 @@ bool check_mxfp4_recipe(
     std::vector<ScalingType>& recipe_b,
     ArrayRef<Tensor>& scales_b);
 
+TORCH_API
+bool is_valid_cublaslt_input_pair(c10::ScalarType type_a, c10::ScalarType type_b);
+
 /**
  * Validate v2 _scaled_mm inputs and per-recipe scale shapes/dtypes.
  * Centralized here so it can be called from both TORCH_META_FUNC (so
@@ -210,6 +213,8 @@ TORCH_API
 void validate_scaled_grouped_mm_v2_inputs(
     const Tensor& mat_a,
     const Tensor& mat_b,
+    ArrayRef<int64_t> recipe_a,
+    ArrayRef<int64_t> recipe_b,
     at::OptionalTensorRef offs,
     at::OptionalTensorRef bias,
     ArrayRef<int64_t> contraction_dim,
