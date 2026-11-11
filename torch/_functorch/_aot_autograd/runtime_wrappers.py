@@ -2376,6 +2376,32 @@ def merge_view_inputs(
             )
             continue
 
+        non_none_bases = [
+            (i, fwd_inputs[i]._base)
+            for i in aliased_input_indices
+            if fwd_inputs[i]._base is not None
+        ]
+        aliases_with_none_bases = [
+            fwd_inputs[i] for i in aliased_input_indices if fwd_inputs[i]._base is None
+        ]
+        # A stale _base is fakified as a standalone tensor. If it shares a
+        # storage with views of their real base, use the common storage rather
+        # than mixing that standalone member with the views' autograd base.
+        has_standalone_alias = bool(non_none_bases) and any(
+            all(alias is not base for _, base in non_none_bases)
+            for alias in aliases_with_none_bases
+        )
+        first_leafness = mutated_input_info[aliased_input_indices[0]].is_leaf
+        consistent_leafness = all(
+            mutated_input_info[i].is_leaf == first_leafness
+            for i in aliased_input_indices
+        )
+        # Synthetic-base metadata requires uniform leafness. Training groups
+        # that violate it must retain the existing differentiable-view error.
+        use_storage_base = has_standalone_alias and (
+            is_inference or consistent_leafness
+        )
+
         # Here, we attempt to do a more complicated check to detect false aliasing
         # (e.g. if all the tensors have the same storage, but don't actually overlap)
         # In theory, we could have a large group of tensors that all share storages, where only *some* of them
@@ -2406,7 +2432,7 @@ def merge_view_inputs(
             view2 = fwd_inputs[idx2]
             # The "inputs that are aliased but have different differentiable bases" case
             # is more complicated and hopefully pretty rare. Not currently handled.
-            if not is_inference:
+            if not is_inference and not use_storage_base:
                 if not _are_differentiable_views(view1, view2):
                     raise AssertionError(
                         f"aot_autograd() does not yet handle non-differentiable view input mutations. "
@@ -2419,18 +2445,10 @@ def merge_view_inputs(
                 raise AssertionError(
                     "aot_autograd() does not yet handle input mutations on views with different dtypes."
                 )
-        non_none_bases = [
-            (i, fwd_inputs[i]._base)
-            for i in aliased_input_indices
-            if fwd_inputs[i]._base is not None
-        ]
-        aliases_with_none_bases = [
-            fwd_inputs[i] for i in aliased_input_indices if fwd_inputs[i]._base is None
-        ]
         synthetic_base_desc: AOTInput
-        if len(non_none_bases) == 0:
-            # Case where none of the aliases have a ._base
-            # we generate a synthetic base without gradients, and generate views off of it
+        if len(non_none_bases) == 0 or use_storage_base:
+            # No shared autograd base represents every alias. Generate a
+            # synthetic base from their storage and regenerate views off it.
             # We hit this case when we have input tensors to the graph that share a storage,
             # but do not have a ._base field.
             # Wondering when we hit this case?
@@ -2462,6 +2480,14 @@ def merge_view_inputs(
             # We don't actually have a convenient way of going from storage -> tensor,
             # So using set_() here (we suffer some minor overhead, but this case is rare).
             synthetic_base.set_(example_alias.untyped_storage())
+            if (
+                use_storage_base
+                and not is_inference
+                and any(fwd_inputs[i].requires_grad for i in aliased_input_indices)
+            ):
+                # Joint tracing clones grad-requiring mutated bases before
+                # regenerating views, keeping those views non-leaf.
+                synthetic_base.requires_grad_(True)
             synthetic_base_desc = SyntheticBaseAOTInput(fwd_inputs_descs[example_idx])
         else:
             # Case where all of the aliases require gradients, and have the same _base.
@@ -2496,6 +2522,13 @@ def merge_view_inputs(
         base_args_descs.append(synthetic_base_desc)
         for curr_view_idx in aliased_input_indices:
             curr_view = fwd_inputs[curr_view_idx]
+            if use_storage_base:
+                # Do not let view replay capture the original fake base as a
+                # graph constant. Storage-based groups regenerate every member
+                # directly from its size, stride, and storage offset.
+                curr_view = curr_view.detach()
+                if fwd_inputs[curr_view_idx].requires_grad:
+                    curr_view.requires_grad_(True)
             base_idx = len(base_args) - 1
             # We store just enough info here so that we can regenerate the view later.
             # Regeneration: curr_view._view_func(args[base_idx])

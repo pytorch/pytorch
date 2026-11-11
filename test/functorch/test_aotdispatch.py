@@ -3330,24 +3330,24 @@ def forward(self, arg0_1, arg1_1):
             """aot_autograd() does not yet handle non-differentiable view input mutations. Aliased inputs share storage but have different autograd ._base tensors: input 0 (a) and input 1 (b) have ._base fields that point to different tensors.""",
         )
 
-    def test_merge_view_inputs_error_mixed_base_states(self):
-        # Inference mode (no requires_grad) skips site-1, reaching site-3.
+    def test_merge_view_inputs_mixed_base_states_storage_fallback(self):
+        # Inference aliases do not need a common autograd base. Rebuild both the
+        # view and the standalone member from their shared storage.
         def make_inputs():
-            x = torch.randn(10)
-            v1 = x[0:5]  # _base = x
+            x = torch.arange(10, dtype=torch.float32)
+            v1 = x[0:5]
             v2 = torch.empty(5)
-            v2.set_(x.untyped_storage(), 0, (5,), (1,))  # _base=None
+            v2.set_(x.untyped_storage(), 0, (5,), (1,))
             return [v1, v2]
 
         def fn(a, b):
             a.mul_(2)
             return a + b
 
-        self._check_merge_view_inputs_error(
-            fn,
-            make_inputs,
-            """aot_autograd() does not yet handle non-differentiable view input mutations. Aliased inputs share storage but have mixed autograd ._base states: ['input 0 (a)'] have ._base set, while ['input 1 (b)'] have ._base=None (and are not the synthetic base).""",
-        )
+        expected = fn(*make_inputs())
+        actual = torch.compile(fn, backend="aot_eager")(*make_inputs())
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual, torch.arange(5, dtype=torch.float32) * 4)
 
     def test_output_aliases_multiple_inputs_get_correct_one(self):
         # a and b are aliased, but have different shapes

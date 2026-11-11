@@ -5070,6 +5070,43 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(src, torch.tensor([10.0, 7.0, 7.0]))
                 self.assertEqual(stale_base, torch.arange(5, dtype=torch.float32))
 
+    def test_stale_base_at_entry_view_source_storage_fallback(self):
+        # Read dest as well as mutating src so Dynamo keeps both aliases in the
+        # graph. Their fake _base states differ, so the wrapper must use their
+        # common storage rather than rejecting the group. Detaching the stale
+        # destination also keeps the eager backward well-defined.
+        def fn(dest, src):
+            src.add_(1)
+            return src * 2 + dest[0].detach()
+
+        for requires_grad in [False, True]:
+            for backend in ["aot_eager", "inductor"]:
+                with self.subTest(backend=backend, requires_grad=requires_grad):
+                    torch._dynamo.reset()
+                    old_base = torch.arange(
+                        3, dtype=torch.float32, requires_grad=requires_grad
+                    )
+                    old = old_base.clone()
+                    y_base = torch.arange(
+                        5, dtype=torch.float32, requires_grad=requires_grad
+                    )
+                    y = y_base.clone()
+                    dest = old[:3]
+                    src = y[2:5]
+                    with torch.no_grad():
+                        dest.set_(src)
+                    out = torch.compile(fn, backend=backend)(dest, src)
+                    self.assertEqual(out, torch.tensor([9.0, 11.0, 13.0]))
+                    self.assertEqual(src, torch.tensor([3.0, 4.0, 5.0]))
+                    self.assertEqual(old, torch.arange(3, dtype=torch.float32))
+                    if requires_grad:
+                        out.sum().backward()
+                        self.assertIsNone(old_base.grad)
+                        self.assertEqual(
+                            y_base.grad,
+                            torch.tensor([0.0, 0.0, 2.0, 2.0, 2.0]),
+                        )
+
     def test_synthetic_base_rebound_between_calls_recompiles_static(self):
         def fn(a, b):
             b[0] = 10.0
