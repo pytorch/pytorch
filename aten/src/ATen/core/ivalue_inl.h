@@ -176,7 +176,7 @@ inline c10::complex<double> IValue::toComplexDouble() const {
   return (*ptr).val;
 }
 inline at::Tensor IValue::toTensor() && {
-  if (C10_UNLIKELY(!isTensor())) {
+  if (!isTensor()) [[unlikely]] {
     reportToTensorTypeError();
   }
   auto result = std::move(payload.as_tensor);
@@ -193,13 +193,13 @@ inline at::Tensor IValue::toTensor() && {
   return result;
 }
 inline at::Tensor& IValue::toTensor() & {
-  if (C10_UNLIKELY(!isTensor())) {
+  if (!isTensor()) [[unlikely]] {
     reportToTensorTypeError();
   }
   return payload.as_tensor;
 }
 inline const at::Tensor& IValue::toTensor() const& {
-  if (C10_UNLIKELY(!isTensor())) {
+  if (!isTensor()) [[unlikely]] {
     reportToTensorTypeError();
   }
   return payload.as_tensor;
