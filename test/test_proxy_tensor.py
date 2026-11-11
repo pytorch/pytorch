@@ -60,7 +60,7 @@ if torch._dynamo.config.use_cpp_fake_tensor:
         mode.allow_non_fake_inputs = allow_non_fake_inputs
         return mode
 
-from torch.utils._pytree import tree_leaves, tree_map
+from torch.utils._pytree import tree_map
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch import nn
 import torch._functorch.config
@@ -1023,7 +1023,7 @@ def forward(self, x_1):
         for _ in range(2):
             gm = trace(x)
             metadata = [node.meta.get("val") for node in gm.graph.nodes]
-            mode = detect_fake_mode(tree_leaves(metadata))
+            mode = detect_fake_mode(metadata)
             self.assertIsNotNone(mode)
             modes.append(mode)
 
@@ -1063,8 +1063,9 @@ def forward(self, x_1):
         gm = make_fx(f)(x, y)
         graph = torch.fx.Graph()
         DecompositionInterpreter(gm, graph).run(x, y)
-        vals = tree_leaves([node.meta.get("val") for node in graph.nodes])
-        self.assertIsNotNone(detect_fake_mode(vals))
+        self.assertIsNotNone(
+            detect_fake_mode([node.meta.get("val") for node in graph.nodes])
+        )
         self.assertEqual(torch.fx.GraphModule(gm, graph)(x, y), f(x, y))
 
 

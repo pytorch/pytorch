@@ -716,6 +716,8 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
 
         fake_args = [n.meta["val"] for n in placeholders]
         self.assertIsNotNone(detect_fake_mode(fake_args))
+        fake_compiled = compile_fx_inner(gm, fake_args)
+        self.assertNotIsInstance(fake_compiled, str)
 
         compile_args = _get_compile_args(gm, args)
         self.assertIs(compile_args, args)

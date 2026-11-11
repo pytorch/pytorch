@@ -723,12 +723,17 @@ def extract_val(
     val: _ExtractValType,
     include_real: bool = False,
     *,
-    metadata_fake_mode: Callable[[], FakeTensorMode] | None = None,
+    get_metadata_fake_mode: Callable[[], FakeTensorMode] | None = None,
 ) -> _ExtractValType:
     """Snapshot a value for FX node metadata.
 
-    If no fake mode is active, metadata_fake_mode can lazily supply a mode
-    shared by the caller's tracer.
+    If ``include_real`` is true, retain the real tensor for placeholder
+    metadata. Otherwise, real dense tensors are replaced by fake tensors. If
+    no fake mode is active, ``get_metadata_fake_mode`` lazily supplies one;
+    repeated calls must return the same mode to share it across metadata values.
+
+    Returns the value in a form suitable for node metadata, or ``None`` for
+    unsupported values such as sparse tensors.
     """
     if is_fake(val):
         return snapshot_fake(val, include_real=include_real)
@@ -742,11 +747,12 @@ def extract_val(
         return val
     elif isinstance(val, (list, tuple)):
         return val.__class__(
-            [extract_val(x, metadata_fake_mode=metadata_fake_mode) for x in val]
+            [extract_val(x, get_metadata_fake_mode=get_metadata_fake_mode) for x in val]
         )
     elif isinstance(val, dict):
         return {
-            k: extract_val(v, metadata_fake_mode=metadata_fake_mode) for k, v in val.items()
+            k: extract_val(v, get_metadata_fake_mode=get_metadata_fake_mode)
+            for k, v in val.items()
         }
     elif isinstance(val, Tensor):
         if not val.is_sparse:
@@ -759,8 +765,8 @@ def extract_val(
             fake_tensor_mode = detect_fake_mode(val)
             if not fake_tensor_mode:
                 fake_tensor_mode = (
-                    metadata_fake_mode()
-                    if metadata_fake_mode is not None
+                    get_metadata_fake_mode()
+                    if get_metadata_fake_mode is not None
                     else FakeTensorMode(allow_fallback_kernels=True)
                 )
             with fake_tensor_mode:
@@ -842,7 +848,7 @@ def set_meta(proxy: Proxy, val: _ExtractValType) -> Proxy:
     proxy.node.meta["val"] = extract_val(
         val,
         include_real=(proxy.node.op == "placeholder"),
-        metadata_fake_mode=tracer._get_metadata_fake_mode,
+        get_metadata_fake_mode=functools.partial(_get_metadata_fake_mode, tracer),
     )
 
     with _enable_thunkify(tracer):
@@ -1691,8 +1697,7 @@ class PythonKeyTracer(Tracer):
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
-    _metadata_fake_mode: FakeTensorMode | None
-    _get_metadata_fake_mode = _get_metadata_fake_mode
+    _metadata_fake_mode: FakeTensorMode | None = None
 
     def __init__(self, *, autowrap_modules: tuple[types.ModuleType, ...] = ()) -> None:
         super().__init__(autowrap_modules=autowrap_modules)
@@ -1840,7 +1845,10 @@ class PythonKeyTracer(Tracer):
             if isinstance(attr, torch.Tensor):
                 with disable_proxy_modes_tracing():
                     node.meta["val"] = extract_val(
-                        attr, metadata_fake_mode=self._get_metadata_fake_mode
+                        attr,
+                        get_metadata_fake_mode=functools.partial(
+                            _get_metadata_fake_mode, self
+                        ),
                     )
 
         def map_fn(v: Any) -> _ExtractValType | None:
@@ -2431,8 +2439,7 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
-    _metadata_fake_mode: FakeTensorMode | None
-    _get_metadata_fake_mode = _get_metadata_fake_mode
+    _metadata_fake_mode: FakeTensorMode | None = None
 
     def __init__(self, graph: fx.graph.Graph) -> None:
         super().__init__(graph)
