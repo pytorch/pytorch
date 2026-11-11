@@ -349,14 +349,30 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
     return False
 
 
-def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
+# Note [Fake mode lookups and CppFakeTensorMode]
+# maybe_get_fake_mode returns a CppFakeTensorMode for a C++ fake or a wrapper of
+# one, active_fake_mode while a C++ mode is installed, and detect_fake_mode in
+# either case. CppFakeTensorMode is not a FakeTensorMode subclass and does not yet
+# have all of its interface, so a caller that needs a Python FakeTensorMode (to
+# call from_tensor on it, or to pass it on to code that uses more of
+# FakeTensorMode) narrows the result with
+# torch._guards.require_python_fake_mode, which raises RuntimeError for a C++
+# mode.
+def maybe_get_fake_mode(t: object) -> FakeTensorMode | CppFakeTensorMode | None:
+    """The fake mode of t, a Python FakeTensorMode or, for a C++ fake or a
+    wrapper of one, a CppFakeTensorMode (see Note [Fake mode lookups and
+    CppFakeTensorMode])."""
     from torch._subclasses.functional_tensor import FunctionalTensor
 
     if isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return t.fake_mode
+    if isinstance(t, Tensor):
+        cpp_mode = torch._C._maybe_get_fake_mode(t)
+        if cpp_mode is not None:
+            return cpp_mode
     if is_traceable_wrapper_subclass(t):
         inner_tensor_names, _ = t.__tensor_flatten__()
-        mode: FakeTensorMode | None = None
+        mode: FakeTensorMode | CppFakeTensorMode | None = None
         for t_name in inner_tensor_names:
             match getattr(t, t_name):
                 case Tensor() as v:
