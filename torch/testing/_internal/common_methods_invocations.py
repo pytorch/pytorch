@@ -215,6 +215,35 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_input((S, S, S)), args=args)
 
 
+def reference_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs)
+
+    make_input = partial(make_tensor, device=device, dtype=dtype,
+                         low=None, high=None, requires_grad=requires_grad)
+
+    # Indices follow slicing semantics: negative indices wrap around, out of
+    # bounds indices are clamped and decreasing indices give empty pieces.
+    args_cases = (
+        ((20,),),
+        ((-2,),),
+        ((-20,),),
+        ((7, 2),),
+        ((3, -3),),
+        ((-1, 20, 2),),
+        ((0, 0, S),),
+        ((2, -1), 1),
+        (torch.tensor([-2, 20]),),
+        (torch.tensor([4, 1]), -1),
+    )
+
+    for args in args_cases:
+        yield SampleInput(make_input((S, S, S)), args=args)
+
+    # Empty dimension
+    yield SampleInput(make_input((0, S)), args=((1, -1),))
+    yield SampleInput(make_input((0, S)), args=(3,))
+
+
 def sample_inputs_hsplit(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device,
                        low=None, high=None, requires_grad=requires_grad)
@@ -8857,6 +8886,10 @@ def reference_inputs_chunk(op, device, dtype, requires_grad, **kwargs):
         ((3, 7), 1, 0),
         ((3, 7), 1, 1),
         ((4, 4), 2, 0),
+        # empty dimension
+        ((0,), 2, 0),
+        ((3, 0), 4, 1),
+        ((0, 5), 1, 0),
     )
 
     for shape, chunks, dim in cases:
@@ -18884,7 +18917,8 @@ op_db: list[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_tensor_split,),
+           sample_inputs_func=sample_inputs_tensor_split,
+           reference_inputs_func=reference_inputs_tensor_split,),
     OpInfo('hsplit',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
