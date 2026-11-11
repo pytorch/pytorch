@@ -1092,7 +1092,6 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
             trace=trace,
         )
 
-    # Same as FakeTensorMode.avoid_device_init
     @property
     def avoid_device_init(self) -> bool:
         return _avoid_device_init()
