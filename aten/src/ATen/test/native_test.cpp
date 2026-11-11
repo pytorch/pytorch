@@ -337,7 +337,8 @@ static std::shared_ptr<c10::FakeTensorModeHandle> make_cpp_fake_mode(
   return std::make_shared<c10::FakeTensorModeHandle>(
       c10::FakeTensorModeHandle{
           std::make_shared<c10::FakeTensorMode>(
-              nullptr, nullptr, allow_meta, allow_unsafe_data_ptr_access)});
+              nullptr, nullptr, allow_meta, allow_unsafe_data_ptr_access),
+          nullptr});
 }
 
 TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {

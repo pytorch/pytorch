@@ -1190,7 +1190,6 @@ ActiveFakeMode get_active_fake_mode() {
   auto mode = c10::impl::FakeTensorModeTLS::get_state();
   TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
   py::object py_fake_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
-  TORCH_CHECK(!py_fake_mode.is_none(), "CppFakeTensorMode must be set on mode");
   return {std::move(mode), std::move(py_fake_mode)};
 }
 
