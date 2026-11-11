@@ -1046,7 +1046,6 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         tb = self._creation_traceback
         return "" if tb is None else "".join(tb.format())
 
-    # Same as FakeTensorMode.avoid_device_init
     @property
     def avoid_device_init(self) -> bool:
         return _avoid_device_init()
