@@ -2286,6 +2286,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def as_python_constant(self) -> types.FunctionType:
         return self.get_function()
 
+    def can_load_const_for_codegen(self) -> bool:
+        return False
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         try:
             return super().tp_repr_impl(tx)
@@ -3621,6 +3624,9 @@ class FunctoolsPartialVariable(VariableTracker):
     def python_type(self) -> type:
         return functools.partial
 
+    def can_load_const_for_codegen(self) -> bool:
+        return False
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen.load_import_from("functools", "partial"))
         codegen(self.func)
@@ -4764,6 +4770,9 @@ class MethodWrapperVariable(VariableTracker):
     def is_python_constant(self) -> bool:
         return self.obj.is_python_constant()
 
+    def can_load_const_for_codegen(self) -> bool:
+        return False
+
     def as_python_constant(self) -> types.MethodWrapperType:
         is_constant, obj_value = self.obj.try_as_python_constant()
         if not is_constant:
@@ -5005,6 +5014,9 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
         return object_richcompare(self, tx, other, op)
 
+    def can_load_const_for_codegen(self) -> bool:
+        return False
+
     def as_python_constant(self) -> Any:
         obj = self.obj.as_python_constant()
         if isinstance(self.descriptor, types.ClassMethodDescriptorType):
@@ -5175,6 +5187,9 @@ class StaticMethodVariable(VariableTracker):
     def as_python_constant(self) -> staticmethod:  # type: ignore[type-arg]
         return staticmethod(self.descriptor.as_python_constant())
 
+    def can_load_const_for_codegen(self) -> bool:
+        return False
+
     def lookup_instance_dict(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker | None:
@@ -5254,6 +5269,9 @@ class ClassMethodVariable(VariableTracker):
 
     def as_python_constant(self) -> classmethod:  # type: ignore[type-arg]
         return classmethod(self.descriptor.as_python_constant())
+
+    def can_load_const_for_codegen(self) -> bool:
+        return False
 
     def lookup_instance_dict(
         self, tx: "InstructionTranslatorBase", name: str

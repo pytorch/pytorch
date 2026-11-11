@@ -2144,6 +2144,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # that as_python_constant() below refuses to build.
         return VariableTracker.is_python_constant(self)
 
+    def can_load_const_for_codegen(self) -> bool:
+        return isinstance(self.value, enum.Enum)
+
+    def _can_load_const_for_codegen_in_tuple(self) -> bool:
+        return (
+            self.can_load_const_for_codegen() and super().can_load_const_for_codegen()
+        )
+
     def as_python_constant(self) -> object:
         from ..utils import is_pybind11_enum_member
 
@@ -4957,6 +4965,9 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
 
     def as_python_constant(self) -> Any:
         return self.value
+
+    def can_load_const_for_codegen(self) -> bool:
+        return True
 
     def as_proxy(self) -> Any:
         # Put the plain builtin in the graph, not the user subclass instance.

@@ -334,7 +334,17 @@ class PyCodegen:
                 self._output.append(create_dup_top())
                 self.add_cache(value)
         elif (
-            value.is_python_constant()
+            # Constant conversion can realize and guard inputs only needed
+            # after a break, e.g. with specialize_int=True:
+            #   def fn(x, n):
+            #       args = (n,)
+            #       y = x + 1
+            #       torch._dynamo.graph_break()
+            #       return y + args[0]
+            # Reconstruct args at runtime to keep the x + 1 graph reusable
+            # when n changes. The resume graph guards n when it uses it.
+            (not self.value_from_source or value.can_load_const_for_codegen())
+            and value.is_python_constant()
             and (const := value.try_as_python_constant())[0]
             and is_safe_constant(const[1])
         ):

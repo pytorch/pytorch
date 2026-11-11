@@ -13,6 +13,47 @@ from torch.testing._internal.common_utils import HardwareClassification
 class LazyConstantVariableTests(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @torch._dynamo.config.patch(specialize_int=True)
+    def test_constructed_constant_containers_do_not_recompile(self):
+        def fn(x, number, token):
+            payload = [number, ({"token": token}, None, False)]
+            return x + 1, payload, payload
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        first = compiled(x, 42, "alpha")
+        second = compiled(-x, 43, "beta")
+        self.assertEqual(first, fn(x, 42, "alpha"))
+        self.assertEqual(second, fn(-x, 43, "beta"))
+        self.assertIs(first[1], first[2])
+        self.assertIs(second[1], second[2])
+        self.assertIsNot(first[1], second[1])
+        self.assertIsNot(first[1][1][0], second[1][1][0])
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_int=True)
+    def test_returned_closures_do_not_recompile(self):
+        def fn(x, number):
+            def inner():
+                return number
+
+            return x + 1, inner, inner
+
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(2)
+        first = compiled(x, 42)
+        second = compiled(-x, 43)
+        eager_first = fn(x, 42)
+        eager_second = fn(-x, 43)
+        self.assertEqual((first[0], first[1]()), (eager_first[0], eager_first[1]()))
+        self.assertEqual((second[0], second[1]()), (eager_second[0], eager_second[1]()))
+        self.assertIs(first[1], first[2])
+        self.assertIs(second[1], second[2])
+        self.assertIsNot(first[1], second[1])
+        self.assertEqual(counter.frame_count, 1)
+
     def _assert_compile_count(self, fn, arg_sets, expected_frames):
         counter = CompileCounter()
         opt_fn = torch.compile(fn, backend=counter)
