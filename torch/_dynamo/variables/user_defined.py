@@ -113,6 +113,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    attr_getset,
     AttrMutationKind,
     GetSet,
     Member,
@@ -244,9 +245,6 @@ def is_forbidden_context_manager(ctx: object) -> bool:
         f_ctxs.append(WarningsChecker)
     except ImportError:
         pass
-
-    if m := sys.modules.get("torch.testing._internal.jit_utils"):
-        f_ctxs.append(m._AssertRaisesRegexWithHighlightContext)
 
     return ctx in f_ctxs
 
@@ -389,6 +387,22 @@ class UserDefinedVariable(VariableTracker):
 class UserDefinedClassVariable(UserDefinedVariable):
     # pyrefly: ignore[bad-override]
     value: type[object]
+
+    tp_getset = {
+        "__name__": attr_getset("__name__", lambda vt: vt.value),
+        "__qualname__": attr_getset("__qualname__", lambda vt: vt.value),
+        "__module__": attr_getset("__module__", lambda vt: vt.value),
+        "__doc__": attr_getset("__doc__", lambda vt: vt.value),
+        # missing:
+        # "__bases__": GetSet(...),
+        # "__mro__": GetSet(...),
+        # "__abstractmethods__": GetSet(...),
+        # "__dict__": GetSet(...),
+        # "__text_signature__": GetSet(...),
+        # "__annotations__": GetSet(...),
+        # "__annotate__": GetSet(...),
+        # "__type_params__": GetSet(...),
+    }
 
     def __init__(self, value: type[object], **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -4304,19 +4318,35 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # the method's closure sourcelessly and SourcelessBuilder fails on
             # a captured tensor (test_modes.py,
             # test_nested_torch_function_mode).
-            # Guard __code__ only via the cls.__dict__ source; a GetAttr accessor
-            # off TypeSource is not tag-safe.
-            if var_source is not None and can_guard_class_function_code(tx, type_attr):
-                im_func = variables.UserFunctionVariable.create_with_source(
-                    type_attr, var_source
-                )
+            fn_source = var_source or (
+                self.source and AttrSource(TypeSource(self.source), name)
+            )
+            # A.m and a.m.__func__ must share one VT, so that a write to
+            # A.m.__defaults__ is seen by a.m, before or after a.m is read.
+            se = tx.output.side_effects
+            if fn_source and type_attr in se:
+                fn_vt = VariableTracker.build(tx, type_attr, fn_source)
             else:
-                im_func = VariableBuilder.create_internal_user_function(
-                    type_attr,
-                    source=var_source
-                    or (self.source and AttrSource(TypeSource(self.source), name)),
-                )
-            return variables.UserMethodVariable(im_func, self, source=source)
+                from .. import trace_rules
+
+                # Guard __code__ only via the cls.__dict__ source; a GetAttr accessor
+                # off TypeSource is not tag-safe.
+                guard_code = can_guard_class_function_code(tx, type_attr)
+                if var_source is not None and guard_code:
+                    fn_vt = variables.UserFunctionVariable.create_with_source(
+                        type_attr, var_source
+                    )
+                else:
+                    fn_vt = VariableBuilder.create_internal_user_function(
+                        type_attr, source=fn_source
+                    )
+                # Track only what the builder would build too, or a later
+                # global read of an allow_in_graph function inlines it.
+                if fn_source and trace_rules.lookup_callable(type_attr) is None:
+                    fn_vt = se.track_object_existing(type_attr, fn_vt)
+            if not isinstance(fn_vt, variables.BaseUserFunctionVariable):
+                raise AssertionError(f"expected a function VT for {name}, got {fn_vt}")
+            return variables.UserMethodVariable(fn_vt, self, source=source)
         # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
@@ -5398,6 +5428,9 @@ class DefaultDictVariable(ConstDictVariable):
 
             default_factory = ConstantVariable.create(None)
         self.default_factory = default_factory
+
+    def python_type(self) -> type:
+        return collections.defaultdict
 
     @staticmethod
     def is_supported_factory(arg: VariableTracker) -> bool:
