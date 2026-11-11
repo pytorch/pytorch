@@ -365,7 +365,7 @@ static Tensor& c2_argmin_out(
 }
 
 static at::Tensor& dequantize_copy_out(Tensor& out, const Tensor& self) {
-  if (C10_UNLIKELY(!self.is_quantized())) {
+  if (!self.is_quantized()) [[unlikely]] {
     // fallback to dequantize_cpu equivalent case: make sure out is at::kFloat
     DCHECK(out.scalar_type() == kFloat);
     return at::native::to_copy_out(out, self, false, false, std::nullopt);
