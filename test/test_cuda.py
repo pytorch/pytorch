@@ -862,6 +862,17 @@ print(t.is_pinned())
         device_properties_no_argument = torch.cuda.get_device_properties()
         self.assertEqual(current_device_properties, device_properties_no_argument)
 
+    def test_cuda_last_level_cache_size(self):
+        for device in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(device)
+            size = props.last_level_cache_size
+            self.assertIsInstance(size, int)
+            self.assertGreaterEqual(size, 0)
+            if not TEST_WITH_ROCM:
+                self.assertEqual(size, props.L2_cache_size)
+            # ROCm may report zero or fall back to L2 on any architecture.
+            self.assertEqual({props.last_level_cache_size for _ in range(1000)}, {size})
+
     @skipIfRocmVersionLessThan((6, 0))
     def test_cuda_shared_memory_per_block_optin(self):
         props = torch.cuda.get_device_properties()

@@ -2435,6 +2435,8 @@ class _CudaDeviceProperties:
     warp_size: _int
     uuid: str
     L2_cache_size: _int
+    # Last-level cache hint in bytes; falls back to L2 when unavailable.
+    last_level_cache_size: _int
     clock_rate: _int
     memory_clock_rate: _int
     memory_bus_width: _int

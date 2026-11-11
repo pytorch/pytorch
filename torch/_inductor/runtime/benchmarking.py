@@ -46,6 +46,15 @@ def _normalize_gpu_device_type(device_type: str | torch.device | None) -> str:
     return torch.device(device_type).type
 
 
+def get_cache_flush_size(props: Any) -> int:
+    """Bytes to touch to evict L2 and any distinct outer cache."""
+    l2 = getattr(props, "L2_cache_size", 0) or 0
+    llc = getattr(props, "last_level_cache_size", 0) or 0
+    # An outer cache adds to the footprint. Equal values describe one cache
+    # (CUDA, XPU, or the ROCm fallback to L2) and must not be counted twice.
+    return (l2 + llc if llc > l2 else max(l2, llc)) or 256 * 1024 * 1024
+
+
 _GpuBenchmarkLockContext = Callable[[], contextlib.AbstractContextManager[None]]
 _gpu_benchmark_lock_context: _GpuBenchmarkLockContext | None = None
 
@@ -626,7 +635,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     def get_device_cache_size(
         self: Self, device_type: str | torch.device | None = None
     ) -> int:
-        """Get the L2/global cache size, in bytes, of the current device."""
+        """Get a cache-flush size hint in bytes, covering both L2 and LLC."""
         if "L2_cache_size" in self.__dict__:
             return self.__dict__["L2_cache_size"]
 
@@ -634,11 +643,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         device_interface = get_interface_for_device(device_type)
         device = device_interface.current_device()
         props = device_interface.get_device_properties(device)
-        for attr in ("L2_cache_size", "last_level_cache_size"):
-            cache_size = getattr(props, attr, None)
-            if cache_size:
-                return cache_size
-        return 256 * 1024 * 1024
+        return get_cache_flush_size(props)
 
     def get_event_pairs(
         self: Self, iters: int, device_type: str | torch.device | None = None
@@ -749,13 +754,17 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         _callable()
         device_interface.synchronize()
 
-        # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
+        # ROCm reads the buffer to avoid dirty lines whose writeback can affect
+        # the timed call. float32 avoids the int64 copy made by an int32 sum.
+        # Other devices retain https://github.com/triton-lang/triton/pull/840.
+        is_rocm = device_type == "cuda" and bool(torch.version.hip)
         buffer = torch.empty(
             self.get_device_cache_size(device_type) // 4,
-            dtype=torch.int,
+            dtype=torch.float32 if is_rocm else torch.int,
             device=device_type,
         )
         buffer.zero_()
+        flush = buffer.sum if is_rocm else buffer.zero_
 
         # estimate the runtime of `_callable`
         event_pairs = self.get_event_pairs(estimation_iters, device_type=device_type)
@@ -764,7 +773,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             if grad_to_none is not None:
                 for x in grad_to_none:
                     x.grad = None
-            buffer.zero_()
+            flush()
             start_event.record()
             _callable()
             end_event.record()
@@ -779,7 +788,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):
-            buffer.zero_()
+            flush()
 
         # benchmark `_callable`
         event_pairs = self.get_event_pairs(benchmark_iters, device_type=device_type)
@@ -788,7 +797,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             if grad_to_none is not None:
                 for x in grad_to_none:
                     x.grad = None
-            buffer.zero_()
+            flush()
             start_event.record()
             _callable()
             end_event.record()
@@ -796,7 +805,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
         # explicitly delete the buffer, sometimes helps memory
         # footprint metrics in OSS Inductor performance benchmarks
-        del buffer
+        del flush, buffer
 
         # Return based on the requested mode
         if return_mode == "all":

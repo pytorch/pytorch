@@ -665,6 +665,9 @@ class TestBenchmarker(TestCase):
             def zero_(self):
                 pass
 
+            def sum(self):
+                pass
+
         class FakeDeviceInterface:
             def synchronize(self):
                 pass
@@ -726,6 +729,75 @@ class TestBenchmarker(TestCase):
         self.assertEqual(cuda_graph_calls, 1)
         self.assertEqual(callable_calls, [])
 
+    @parametrize(
+        "device_type, properties, cached_size, expected",
+        (
+            (
+                "cuda",
+                {"L2_cache_size": 1024, "last_level_cache_size": 4096},
+                None,
+                5120,
+            ),
+            ("cuda", {"L2_cache_size": 1024}, None, 1024),
+            ("xpu", {"last_level_cache_size": 4096}, None, 4096),
+            ("cuda", {"L2_cache_size": 1024, "last_level_cache_size": 0}, None, 1024),
+            ("cuda", {}, None, 256 * 1024 * 1024),
+            ("cuda", {"L2_cache_size": 1024, "last_level_cache_size": 4096}, 512, 512),
+            (
+                "cuda",
+                {"L2_cache_size": 8388608, "last_level_cache_size": 67108864},
+                None,
+                75497472,
+            ),
+            (
+                "cuda",
+                {"L2_cache_size": 4096, "last_level_cache_size": 1024},
+                None,
+                4096,
+            ),
+            (
+                "cuda",
+                {"L2_cache_size": 1024, "last_level_cache_size": 1024},
+                None,
+                1024,
+            ),
+            (
+                "cuda",
+                {"L2_cache_size": 1024, "last_level_cache_size": None},
+                None,
+                1024,
+            ),
+            (
+                "cuda",
+                {"L2_cache_size": 0, "last_level_cache_size": 0},
+                None,
+                256 * 1024 * 1024,
+            ),
+        ),
+    )
+    def test_get_device_cache_size(
+        self, device_type, properties, cached_size, expected
+    ):
+        benchmarker = InductorBenchmarker()
+        if cached_size is not None:
+            benchmarker.__dict__["L2_cache_size"] = cached_size
+        device_interface = unittest.mock.Mock()
+        device_interface.current_device.return_value = 0
+        device_interface.get_device_properties.return_value = types.SimpleNamespace(
+            **properties
+        )
+        with patch(
+            "torch._inductor.runtime.benchmarking.get_interface_for_device",
+            return_value=device_interface,
+        ) as get_interface:
+            self.assertEqual(benchmarker.get_device_cache_size(device_type), expected)
+
+        if cached_size is not None:
+            get_interface.assert_not_called()
+        else:
+            get_interface.assert_called_once_with(device_type)
+            device_interface.get_device_properties.assert_called_once_with(0)
+
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @parametrize(
         "hip_value, expected_buffer_size_bytes",
@@ -769,6 +841,76 @@ class TestBenchmarker(TestCase):
         self.assertGreater(len(captured_buffer_lengths), 0)
         self.assertEqual(captured_buffer_lengths[0], expected_buffer_size_bytes // 4)
         self.assertEqual(captured_buffer_devices[0], device)
+
+    @parametrize("device_type", ("cuda", "xpu"))
+    @parametrize("hip_value", (None, "mock-hip"))
+    def test_inductor_benchmarker_flush_reads_on_rocm(self, device_type, hip_value):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        calls = []
+
+        class FakeBuffer:
+            def zero_(self):
+                calls.append("zero_")
+
+            def sum(self):
+                calls.append("sum")
+
+        class FakeDeviceInterface:
+            def synchronize(self):
+                pass
+
+        class FakeEvent:
+            def __init__(self, kind):
+                self.kind = kind
+
+            def record(self):
+                calls.append(self.kind)
+
+            def elapsed_time(self, other):
+                return 1.0
+
+        class FakeInductorBenchmarker(InductorBenchmarker):
+            def get_device_cache_size(self, device_type=None):
+                return 4
+
+            def get_event_pairs(self, iters, device_type=None):
+                return [(FakeEvent("start"), FakeEvent("end")) for _ in range(iters)]
+
+        empty_calls = []
+
+        def fake_empty(*args, **kwargs):
+            empty_calls.append((args, kwargs))
+            return FakeBuffer()
+
+        with (
+            patch.object(
+                _bench, "get_interface_for_device", return_value=FakeDeviceInterface()
+            ),
+            patch.object(_bench.torch, "empty", side_effect=fake_empty),
+            patch.object(torch.version, "hip", hip_value),
+            patch.object(_bench.inductor_config, "autotune_cudagraph_benchmarking", False),
+        ):
+            FakeInductorBenchmarker().benchmark_gpu(
+                lambda: calls.append("call"),
+                estimation_iters=2,
+                memory_warmup_iters=3,
+                benchmark_iters=4,
+                is_vetted_benchmarking=True,
+                device_type=device_type,
+            )
+
+        (size,), kwargs = empty_calls[0]
+        is_rocm = device_type == "cuda" and hip_value is not None
+        self.assertEqual(size, 4 // 4)
+        self.assertEqual(kwargs["device"], device_type)
+        self.assertEqual(kwargs["dtype"], torch.float32 if is_rocm else torch.int)
+        flush = "sum" if is_rocm else "zero_"
+        timed_call = [flush, "start", "call", "end"]
+        self.assertEqual(
+            calls,
+            ["call", "zero_"] + timed_call * 2 + [flush] * 3 + timed_call * 4,
+        )
 
 
 class TestGpuBenchmarkDeviceTypes(TestCase):
