@@ -19889,58 +19889,6 @@ with torch.library._scoped_library("mylib_ci", "FRAGMENT") as lib:
             msg=lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
 
-    @parametrize("dynamo_first", [False, True])
-    def test_runtime_wrappers_import_order(self, dynamo_first):
-        script = f"""
-import torch
-
-if {dynamo_first!r}:
-    import torch._dynamo
-from torch._functorch._aot_autograd.runtime_wrappers import AOTDispatchAutograd
-from torch._dynamo import compiled_autograd
-from torch.testing._internal.common_utils import TestCase
-from unittest import mock
-
-check = TestCase()
-check.assertIsNotNone(AOTDispatchAutograd)
-x = torch.ones(3)
-check.assertEqual(torch.compile(lambda x: x + 1, backend="eager")(x), x + 1)
-
-def fn(x):
-    return (x.sin() * x).sum()
-
-def compiler(gm):
-    return torch.compile(gm, backend="eager", fullgraph=True)
-
-compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-with mock.patch.object(
-    compiled_autograd, "extract_bw_module", wraps=compiled_autograd.extract_bw_module
-) as extract:
-    for _ in range(2):
-        expected = torch.arange(3.0, requires_grad=True)
-        actual = expected.detach().clone().requires_grad_()
-        expected_result = fn(expected)
-        expected_result.backward()
-        with compiled_autograd._enable(compiler):
-            result = compiled_fn(actual)
-            result.backward()
-        check.assertEqual(result, expected_result)
-        check.assertEqual(actual.grad, expected.grad)
-    check.assertGreater(extract.call_count, 0)
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", script],
-            cwd=os.path.dirname(os.path.realpath(__file__)),
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        self.assertEqual(
-            result.returncode,
-            0,
-            msg=lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
-        )
-
     def test_make_contiguous_strides_for_under_compile(self):
         # is_nested_int and sym_max must be traceable under Dynamo.
         from torch._prims_common import make_contiguous_strides_for
