@@ -1932,9 +1932,16 @@ def _dispatch_get_registrations_for_dispatch_key(
 def _are_functorch_transforms_active() -> _bool: ...
 
 # Defined in torch/csrc/cfg/cfg.cpp
+@overload
 def _cfg_dispatch_trace(
     fn: Callable[[], Any],
+    detail: Literal[False] = False,
 ) -> tuple[Any, list[tuple[str, str, _int, _bool]]]: ...
+@overload
+def _cfg_dispatch_trace(
+    fn: Callable[[], Any],
+    detail: Literal[True],
+) -> tuple[Any, list[dict[str, Any]]]: ...
 
 # Define in torch/csrc/autograd/init.cpp
 def _set_python_dispatcher(dispatcher: object) -> None: ...
