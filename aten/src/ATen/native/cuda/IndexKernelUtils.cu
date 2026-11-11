@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <type_traits>
+#include <c10/util/irange.h>
 
 namespace at::native {
 template <int Alignment, typename index_t>
@@ -78,13 +79,13 @@ __device__ __forceinline__ void atomicAddVec(
 
   if constexpr (std::is_same_v<scalar_t, float>) {
     #pragma unroll
-    for (int i = 0; i < N; i++) {
+    for (const auto i : c10::irange(N)) {
       atomicAdd(dst + i, vec.f32[i]);
     }
   } else if constexpr (std::is_same_v<scalar_t, double>) {
     const double* vals = reinterpret_cast<const double*>(&vec);
     #pragma unroll
-    for (int i = 0; i < N; i++) {
+    for (const auto i : c10::irange(N)) {
       atomicAdd(dst + i, vals[i]);
     }
   } else if constexpr (std::is_same_v<scalar_t, c10::Half>) {
@@ -98,7 +99,7 @@ __device__ __forceinline__ void atomicAddVec(
     __half2* dst2 = reinterpret_cast<__half2*>(dst);
     const __half2* src2 = reinterpret_cast<const __half2*>(&vec);
     #pragma unroll
-    for (int i = 0; i < N / 2; i++) {
+    for (const auto i : c10::irange(N / 2)) {
       atomicAdd(dst2 + i, src2[i]);
     }
 #endif
@@ -113,7 +114,7 @@ __device__ __forceinline__ void atomicAddVec(
     __nv_bfloat162* dst2 = reinterpret_cast<__nv_bfloat162*>(dst);
     const __nv_bfloat162* src2 = reinterpret_cast<const __nv_bfloat162*>(&vec);
     #pragma unroll
-    for (int i = 0; i < N / 2; i++) {
+    for (const auto i : c10::irange(N / 2)) {
       atomicAdd(dst2 + i, src2[i]);
     }
 #endif
@@ -192,7 +193,7 @@ __device__ __forceinline__ void atomicMinVec(
   static_assert(N % 2 == 0, "packed CAS requires pairs of 16-bit values");
   const uint32_t* values = reinterpret_cast<const uint32_t*>(&vec);
   #pragma unroll
-  for (int i = 0; i < N / 2; ++i) {
+  for (const auto i : c10::irange(N / 2)) {
     atomicReducePackedVec2<scalar_t, false>(dst + 2 * i, values[i]);
   }
 }
@@ -206,7 +207,7 @@ __device__ __forceinline__ void atomicMaxVec(
   static_assert(N % 2 == 0, "packed CAS requires pairs of 16-bit values");
   const uint32_t* values = reinterpret_cast<const uint32_t*>(&vec);
   #pragma unroll
-  for (int i = 0; i < N / 2; ++i) {
+  for (const auto i : c10::irange(N / 2)) {
     atomicReducePackedVec2<scalar_t, true>(dst + 2 * i, values[i]);
   }
 }

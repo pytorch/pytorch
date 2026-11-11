@@ -6,6 +6,7 @@
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/util/Gauge.h>
 
+#include <c10/util/irange.h>
 #include <cuda_runtime_api.h>
 #include <future>
 
@@ -213,7 +214,7 @@ struct CUDACachingHostAllocatorImpl
       promises.reserve(numMapThreads);
       futures.reserve(numMapThreads);
 
-      for (size_t i = 0; i < numMapThreads; i++) {
+      for (const auto i : c10::irange(numMapThreads)) {
         promises.emplace_back();
         futures.push_back(promises[i].get_future());
         auto task = [this,

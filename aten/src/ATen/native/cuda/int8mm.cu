@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/irange.h>
 
 namespace at::native {
 
@@ -21,7 +22,7 @@ __global__ void weight_int8pack_mm_kernel(
     return;
 
   float acc = 0.0f;
-  for (int k = 0; k < K; ++k) {
+  for (const auto k : c10::irange(K)) {
     acc += x[b * K + k] * static_cast<float>(w[n * K + k]);
   }
 

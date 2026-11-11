@@ -19,6 +19,7 @@
 #include <ATen/ops/upsample_linear1d_backward_native.h>
 #endif
 
+#include <c10/util/irange.h>
 #include <limits>
 
 namespace at::native {
@@ -44,8 +45,8 @@ __global__ void upsample_linear1d_out_frame(
     // special case: just copy
     if (width1 == width2) {
       const int w1 = w2;
-      for (int n = 0; n < batchsize; n++) {
-        for (int c = 0; c < channels; ++c) {
+      for (const auto n : c10::irange(batchsize)) {
+        for (const auto c : c10::irange(channels)) {
           const scalar_t val = idata[n][c][w1];
           odata[n][c][w2] = val;
         }
@@ -60,8 +61,8 @@ __global__ void upsample_linear1d_out_frame(
     const accscalar_t w1lambda = w1r - w1;
     const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
     //
-    for (int n = 0; n < batchsize; n++) {
-      for (int c = 0; c < channels; ++c) {
+    for (const auto n : c10::irange(batchsize)) {
+      for (const auto c : c10::irange(channels)) {
         const accscalar_t val =
             w0lambda * idata[n][c][w1] + w1lambda * idata[n][c][w1 + w1p];
         odata[n][c][w2] = static_cast<scalar_t>(val);
@@ -139,8 +140,8 @@ __global__ void upsample_linear1d_out_frame_backward(
     // special case: just copy
     if (width1 == width2) {
       const int w1 = w2;
-      for (int n = 0; n < batchsize; n++) {
-        for (int c = 0; c < channels; ++c) {
+      for (const auto n : c10::irange(batchsize)) {
+        for (const auto c : c10::irange(channels)) {
           const scalar_t val = odata[n][c][w1];
           idata[n][c][w2] = val;
         }
@@ -155,8 +156,8 @@ __global__ void upsample_linear1d_out_frame_backward(
     const accscalar_t w1lambda = w1r - w1;
     const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
     //
-    for (int n = 0; n < batchsize; n++) {
-      for (int c = 0; c < channels; ++c) {
+    for (const auto n : c10::irange(batchsize)) {
+      for (const auto c : c10::irange(channels)) {
         const scalar_t d2val = odata[n][c][w2];
         fastAtomicAdd(
             idata, static_cast<scalar_t>(w0lambda * d2val), n, c, w1);

@@ -21,6 +21,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
+#include <c10/util/irange.h>
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 13000
 #include <cuda_fp8.h>
@@ -291,7 +292,7 @@ struct TransposeSliceOffsets {
   // is measurable on small scalar tiles and pure waste for 2D (dims == 0).
   C10_HOST_DEVICE std::array<int64_t, 2> get(uint32_t idx) const {
     std::array<int64_t, 2> off{0, 0};
-    for (int d = 0; d < dims; ++d) {
+    for (const auto d : c10::irange(dims)) {
       const auto dm = sizes[d].divmod(idx);
       idx = dm.div;
       off[0] += dm.mod * strides[d][0];
@@ -352,17 +353,17 @@ __global__ void transpose_copy_tiled_kernel(const T* __restrict__ src, T* __rest
       if (x < width && (y + j) < height) {
         Vec inputs[kVectorSize];
         #pragma unroll
-        for (int i = 0; i < kVectorSize; ++i) {
+        for (const auto i : c10::irange(kVectorSize)) {
           inputs[i] = *reinterpret_cast<const Vec*>(
               src_b + ((y + j) * kVectorSize + i) * src_pitch + x);
         }
         // Transpose each packed 2x2 or 4x4 block in registers. Separate
         // padded planes keep both shared-memory accesses bank-conflict free.
         #pragma unroll
-        for (int k = 0; k < kAccessSize; ++k) {
+        for (const auto k : c10::irange(kAccessSize)) {
           T values[kVectorSize];
           #pragma unroll
-          for (int i = 0; i < kVectorSize; ++i) {
+          for (const auto i : c10::irange(kVectorSize)) {
             values[i] = inputs[i].val[k];
           }
           // Lanes are numbered from the least significant 16 bits / byte.
@@ -386,7 +387,7 @@ __global__ void transpose_copy_tiled_kernel(const T* __restrict__ src, T* __rest
             values[3] = __byte_perm(b, d, 0x7632);
           }
           #pragma unroll
-          for (int i = 0; i < kVectorSize; ++i) {
+          for (const auto i : c10::irange(kVectorSize)) {
             tile[i][threadIdx.y + j][col + threadIdx.x * kAccessSize + k] = values[i];
           }
         }
@@ -404,10 +405,10 @@ __global__ void transpose_copy_tiled_kernel(const T* __restrict__ src, T* __rest
     for (int j = 0; j < kTileSize; j += rows) {
       if (x < height && (y + j) < width) {
         #pragma unroll
-        for (int i = 0; i < kVectorSize; ++i) {
+        for (const auto i : c10::irange(kVectorSize)) {
           Vec output;
           #pragma unroll
-          for (int k = 0; k < kAccessSize; ++k) {
+          for (const auto k : c10::irange(kAccessSize)) {
             output.val[k] = tile[i][col + threadIdx.x * kAccessSize + k][threadIdx.y + j];
           }
           *reinterpret_cast<Vec*>(dst_b + ((y + j) * kVectorSize + i) * dst_pitch + x) = output;
@@ -464,7 +465,7 @@ bool maybe_tiled_transpose_copy(TensorIterator& iter) {
   auto is = iter.strides(1);   // bytes
   if (os[0] != element_size) return false;
   int tdim = -1;
-  for (int d = 1; d < ndim; ++d) {
+  for (const auto d : c10::irange(1, ndim)) {
     if (is[d] == element_size) { tdim = d; break; }
   }
   if (tdim < 0) return false;
@@ -479,7 +480,7 @@ bool maybe_tiled_transpose_copy(TensorIterator& iter) {
   int64_t outer_sizes[MAX_DIMS], outer_dst[MAX_DIMS], outer_src[MAX_DIMS];
   int num_outer = 0;
   int64_t num_slices = 1;
-  for (int d = 1; d < ndim; ++d) {
+  for (const auto d : c10::irange(1, ndim)) {
     if (d == tdim) continue;
     outer_sizes[num_outer] = shape[d];
     outer_dst[num_outer] = os[d];
@@ -540,7 +541,7 @@ bool maybe_tiled_transpose_copy(TensorIterator& iter) {
                          /*src_pitch=*/is[0] / unit, /*dst_pitch=*/os[tdim] / unit,
                          static_cast<uint32_t>(num_slices), {}};
   args.outer.dims = num_outer;
-  for (int i = 0; i < num_outer; ++i) {
+  for (const auto i : c10::irange(num_outer)) {
     args.outer.sizes[i] = at::cuda::detail::IntDivider<uint32_t>(outer_sizes[i]);
     args.outer.strides[i][0] = outer_dst[i] / unit;
     args.outer.strides[i][1] = outer_src[i] / unit;
@@ -579,7 +580,7 @@ bool maybe_strided_chunk_copy(TensorIteratorBase& iter) {
   auto shape = iter.shape();
   uint64_t alignment = (shape[0] * element_size) |
       reinterpret_cast<uintptr_t>(iter.data_ptr(0)) | reinterpret_cast<uintptr_t>(iter.data_ptr(1));
-  for (int d = 1; d < ndim; ++d) {
+  for (const auto d : c10::irange(1, ndim)) {
     if (shape[d] > 1) alignment |= iter.strides(0)[d] | iter.strides(1)[d];
   }
   if (alignment % kChunkBytes != 0) return false;

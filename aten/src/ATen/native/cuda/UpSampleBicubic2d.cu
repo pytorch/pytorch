@@ -47,8 +47,8 @@ __global__ void upsample_bicubic2d_out_frame(
   const int output_y = index / output_width;
 
   if (input_height == output_height && input_width == output_width) {
-    for (int n = 0; n < batchsize; n++) {
-      for (int c = 0; c < channels; c++) {
+    for (const auto n : c10::irange(batchsize)) {
+      for (const auto c : c10::irange(channels)) {
         const scalar_t val = idata[n][c][output_y][output_x];
         odata[n][c][output_y][output_x] = val;
       }
@@ -67,11 +67,11 @@ __global__ void upsample_bicubic2d_out_frame(
   int in_y = floorf(real_y);
   accscalar_t t_y = real_y - in_y;
 
-  for (int n = 0; n < batchsize; n++) {
-    for (int c = 0; c < channels; c++) {
+  for (const auto n : c10::irange(batchsize)) {
+    for (const auto c : c10::irange(channels)) {
       accscalar_t coefficients[4];
 
-      for (int k = 0; k < 4; k++) {
+      for (const auto k : c10::irange(4)) {
         coefficients[k] = cubic_interp1d(
             upsample_get_value_bounded<scalar_t>(
                 idata, n, c, input_height, input_width, in_y - 1 + k, in_x - 1),
@@ -196,8 +196,8 @@ __global__ void upsample_bicubic2d_backward_out_frame(
   const int output_y = index / output_width;
   // special case: output_xust copy
   if (input_height == output_height && input_width == output_width) {
-    for (int n = 0; n < batchsize; n++) {
-      for (int c = 0; c < channels; ++c) {
+    for (const auto n : c10::irange(batchsize)) {
+      for (const auto c : c10::irange(channels)) {
         const scalar_t val = odata[n][c][output_y][output_x];
         idata[n][c][output_y][output_x] = val;
       }
@@ -221,11 +221,11 @@ __global__ void upsample_bicubic2d_backward_out_frame(
   get_cubic_upsampling_coefficients(x_coeffs, t_x);
   get_cubic_upsampling_coefficients(y_coeffs, t_y);
 
-  for (int n = 0; n < batchsize; n++) {
-    for (int c = 0; c < channels; ++c) {
+  for (const auto n : c10::irange(batchsize)) {
+    for (const auto c : c10::irange(channels)) {
       scalar_t out_value = odata[n][c][output_y][output_x];
-      for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 4; j++) {
+      for (const auto i : c10::irange(4)) {
+        for (const auto j : c10::irange(4)) {
           upsample_increment_value_bounded<scalar_t, accscalar_t>(
               idata,
               n,

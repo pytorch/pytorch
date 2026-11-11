@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/cuda/thrust_compat.h>
+#include <c10/util/irange.h>
 #include <thrust/execution_policy.h>
 #include <thrust/sort.h>
 
@@ -13,7 +14,7 @@ std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t d
   std::vector<int64_t> strides = self.strides().vec();
   strides[dim] = -1;
   std::vector<int64_t> original_dim(ndim);
-  for (int64_t i = 0; i < ndim; i++) {
+  for (const auto i : c10::irange(ndim)) {
     original_dim[i] = i;
   }
   thrust::stable_sort_by_key(
@@ -24,12 +25,12 @@ std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t d
   std::vector<int64_t> new_strides(ndim);
   std::vector<int64_t> new_strides_unsort(ndim);
   int64_t cumprod = 1;
-  for (int64_t i = 0; i < ndim; i++) {
+  for (const auto i : c10::irange(ndim)) {
     new_strides[ndim - 1 - i] = cumprod;
     cumprod *= self.sizes()[original_dim[ndim - 1 - i]];
   }
   // unsort new strides
-  for (int64_t i = 0; i < ndim; i++) {
+  for (const auto i : c10::irange(ndim)) {
     new_strides_unsort[original_dim[i]] = new_strides[i];
   }
   return new_strides_unsort;
