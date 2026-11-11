@@ -371,8 +371,8 @@ def geomspace(
     # Compute on the endpoint's device that is not the CPU, if any, so the
     # result doesn't depend on the order of the arguments.
     device = stop.device if start.device.type == "cpu" else start.device
-    start = _util.cast_if_needed(start, comp_dtype).to(device)
-    stop = _util.cast_if_needed(stop, comp_dtype).to(device)
+    start = _util.cast_if_needed(start, comp_dtype)
+    stop = _util.cast_if_needed(stop, comp_dtype)
     out_sign = torch.sgn(start)
     start = start / out_sign
     stop = stop / out_sign
@@ -383,7 +383,7 @@ def geomspace(
         num,
         base=10.0,
         dtype=comp_dtype,
-        device=start.device,
+        device=device,
     )
     # Overwrite the endpoints to avoid log/pow round-off, as NumPy does.
     if num > 0:

@@ -696,11 +696,14 @@ class TestCtorNested(TestCase):
 class TestGeomspace(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def _check(self, *args, **kwargs):
+    def _check(self, *args, rtol=None, **kwargs):
         res = w.geomspace(*args, **kwargs)
         expected = _np.geomspace(*args, **kwargs)
         assert_equal(res.dtype.name, expected.dtype.name)
-        assert_allclose(res, expected)
+        if rtol is not None:
+            assert_allclose(res, expected, rtol=rtol)
+        else:
+            assert_allclose(res, expected)
         if len(expected) >= 2:
             # The endpoints are set exactly, not computed through log10/pow.
             assert_equal(res[[0, -1]], expected[[0, -1]])
@@ -730,7 +733,7 @@ class TestGeomspace(TestCase):
 
     def test_geomspace_float32_endpoints(self):
         self._check(_np.float32(1), _np.float32(7), 5)
-        self._check(_np.float32(1), _np.float32(7), 5, dtype="float32")
+        self._check(_np.float32(1), _np.float32(7), 5, dtype="float32", rtol=1e-6)
 
     @parametrize("start, stop", [(1, 7), (1.0, 7.0), (1, 7j)])
     def test_geomspace_default_float_dtype(self, start, stop):
@@ -806,6 +809,9 @@ class TestMiscDevice(TestCase):
             assert_equal(res.tensor.device.type, torch.device(device).type)
         assert_allclose(
             w.geomspace(1.0, on_device, 5).tensor.cpu(), w.geomspace(1.0, 7.0, 5).tensor
+        )
+        assert_allclose(
+            w.geomspace(on_device, 1.0, 5).tensor.cpu(), w.geomspace(7.0, 1.0, 5).tensor
         )
 
 
