@@ -984,7 +984,8 @@ struct ExpandableSegment {
 #if defined(USE_ROCM) && (ROCM_VERSION >= 70200)
     std::array<CUmemAccessDesc, 2> desc{};
     // HIP rejects host access on memory imported from fabric handles (seen on
-    // ROCm 10.1 through 10.3).
+    // ROCm 10.1 through 10.3). Only fabric imports go without it: POSIX fd
+    // imports accept host access from ROCm 10.2 on.
     // TODO: remove this workaround once ROCM-34167 is fixed.
     const int num_desc = host_access_ ? 2 : 1;
     desc[1].location.type = CU_MEM_LOCATION_TYPE_HOST;

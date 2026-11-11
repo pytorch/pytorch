@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     requires_cuda_p2p_access,
     run_tests,
+    skipIfRocmVersionLessThan,
     TEST_WITH_ROCM,
 )
 
@@ -130,20 +131,19 @@ class P2PIpcTest(MultiProcContinuousTest):
         tensor_meta = None
         if self.rank == 0:
             tensor = torch.randn(tensor_size, device=self.device)
-            tensor_meta = reduce_tensor(tensor)
-            handle_type = (
-                _expandable_handle_type(tensor)
-                if expected_handle_type is not None
-                else None
-            )
-            torch.distributed.broadcast_object_list([tensor_meta, handle_type], src=0)
-        else:
-            recv_list = [None, None]
-            torch.distributed.broadcast_object_list(recv_list, src=0)
-            tensor_meta, handle_type = recv_list
-
         if expected_handle_type is not None:
-            self._require_handle_type(handle_type, expected_handle_type)
+            # Decided on rank 0 before exporting, so all ranks skip together
+            # and a skip never exports under a lowered fd limit.
+            handle_type = [_expandable_handle_type(tensor) if self.rank == 0 else None]
+            torch.distributed.broadcast_object_list(handle_type, src=0)
+            self._require_handle_type(handle_type[0], expected_handle_type)
+        if self.rank == 0:
+            tensor_meta = reduce_tensor(tensor)
+            torch.distributed.broadcast_object_list([tensor_meta], src=0)
+        else:
+            recv_list = [None]
+            torch.distributed.broadcast_object_list(recv_list, src=0)
+            tensor_meta = recv_list[0]
 
         if is_consumer:
             func, args = tensor_meta
@@ -230,6 +230,7 @@ class P2PIpcTest(MultiProcContinuousTest):
             )
 
     @unittest.skipUnless(TEST_WITH_ROCM, "POSIX fd variant only runs on ROCm")
+    @skipIfRocmVersionLessThan((10, 2))
     def test_p2p_ipc_expandable_segments_posix_fd(self) -> None:
         """
         test_p2p_ipc_expandable_segments on ROCm devices without fabric handle
@@ -261,9 +262,6 @@ class P2PIpcTest(MultiProcContinuousTest):
             torch.cuda.memory._set_allocator_settings("expandable_segments:True")
             torch.cuda.empty_cache()
             self._init_device()
-            probe = torch.empty(chunk_size // 4, device=self.device)
-            self._require_handle_type(_expandable_handle_type(probe), _FABRIC_HANDLE)
-            del probe
             num_open = len(os.listdir("/proc/self/fd"))
             # Below num_chunks, so sharing with one POSIX fd per chunk would fail.
             limit = num_open + num_chunks * 3 // 4
@@ -272,6 +270,7 @@ class P2PIpcTest(MultiProcContinuousTest):
                 self._test_p2p_ipc_impl(
                     tensor_size=num_chunks * chunk_size // 4,
                     free_producer_segment=True,
+                    expected_handle_type=_FABRIC_HANDLE,
                 )
             finally:
                 resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
