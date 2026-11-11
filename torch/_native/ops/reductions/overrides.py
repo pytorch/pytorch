@@ -11,11 +11,12 @@ at::sum_out) routes through sum.default to sum.dim_IntList and is served.
 Of the launch policies, these one-field operations reach only the one-field rules;
 index and Welford rules serve direct kernel calls.
 
-Opt out with torch.backends.python_native.cutedsl.disabled(), or per overload with
-disable_operations("sum.dim_IntList", "mean.dim", "prod.dim_int", "amax", "amin").
-Names need the full overload: disable_operations("sum") matches nothing. Disabling
-sum.dim_IntList or prod.dim_int also drops PYTORCH_SUM_INNER_TREE's registration of
-that symbol.
+Opt out with torch.backends.python_native.cutedsl.enabled = False, or per overload with
+disable_operations("sum.dim_IntList", "mean.dim", "prod.dim_int", "amax", "amin"). Names
+need the full overload: disable_operations("sum") matches nothing. Disabling
+sum.dim_IntList or prod.dim_int also drops PYTORCH_SUM_INNER_TREE's registration of that
+symbol. cutedsl.disabled() turns the overrides off only inside its block, along with
+native AOT for every DSL.
 
 PYTORCH_NATIVE_INNER_TREE also orders served calls: a user who asks for the inner-tree
 order gets it, and serving an unordered request in that order is fine. The condition
