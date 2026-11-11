@@ -1079,8 +1079,9 @@ class _CheckpointFrame:
             # see pack hook, x_metadata is 1:1 with weak_holders.
             x_meta = self.x_metadatas[idx]
             recomputed_x = self.recomputed[gid][holder.handles[gid]]
-            if x_meta != self.metadata_fn(recomputed_x):
-                nb_meta_different.append((idx, x_meta, self.metadata_fn(recomputed_x)))
+            recomputed_meta = self.metadata_fn(recomputed_x)
+            if x_meta != recomputed_meta:
+                nb_meta_different.append((idx, x_meta, recomputed_meta))
 
         if len(nb_meta_different) > 0:
             mismatched_tensors = ""
@@ -1271,10 +1272,11 @@ def register_determinism_check(name: str, metadata_fn: Callable[[torch.Tensor], 
     the result should not include autograd metadata such as ``requires_grad``
     or ``grad_fn``.
 
-    ``metadata_fn`` may call operators on the tensor, for example to compare a
-    checksum of its values. Selective activation checkpointing (see
-    :func:`~torch.utils.checkpoint.create_selective_checkpoint_contexts`) does
-    not see these calls, so they don't change what it caches.
+    ``metadata_fn`` may call operators on the tensor. It runs with all
+    ``TorchDispatchMode`` instances disabled, so neither selective activation
+    checkpointing (see
+    :func:`~torch.utils.checkpoint.create_selective_checkpoint_contexts`) nor
+    other dispatch modes, such as ``FlopCounterMode``, see these calls.
 
     Like the built-in checks, a registered check does not run in code that
     :func:`torch.compile` compiles through AOTAutograd, as its default backend

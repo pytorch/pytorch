@@ -8347,9 +8347,15 @@ for shape in [(1,), ()]:
 
             return fn
 
+        calls = [0]
+
+        def shape_and_strides(x):
+            calls[0] += 1
+            return x.shape, x.stride()
+
         name = "test_checkpoint_custom_determinism_check"
         checks = torch.utils.checkpoint._allowed_determinism_checks_to_fns
-        register_determinism_check(name, lambda x: (x.shape, x.stride()))
+        register_determinism_check(name, shape_and_strides)
         self.addCleanup(checks.pop, name)
         a = torch.randn(2, 3, requires_grad=True)
 
@@ -8365,9 +8371,12 @@ for shape in [(1,), ()]:
             r"saved metadata: \(torch.Size\(\[2, 3\]\), \(3, 1\)\)\n"
             r"recomputed metadata: \(torch.Size\(\[2, 3\]\), \(1, 2\)\)"
         )
+        calls[0] = 0
         with self.assertRaisesRegex(CheckpointError, mismatch):
             out = checkpoint(fn, a, use_reentrant=False, determinism_check=name)
             out.sum().backward()
+        # Once for each of the 2 saved tensors and once for each recomputed one
+        self.assertEqual(calls[0], 4)
 
         with self.assertRaisesRegex(ValueError, "already registered"):
             register_determinism_check("default", lambda x: None)
