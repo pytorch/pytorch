@@ -17,11 +17,10 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 import torch
 import torch.nn.functional as F
-import torch.jit
 import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, \
-    run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS, \
+    run_tests, gradcheck, gradgradcheck, IS_WINDOWS, \
     skipIfTorchDynamo, xfailIfTorchDynamo, recover_orig_fp32_precision, \
     parametrize, instantiate_parametrized_tests, HardwareClassification, \
     expectedIfCppFakeTensor
@@ -299,10 +298,7 @@ class TestMkldnn(TestCase):
                     self.assertEqual(y_aten, y_mkldnn, atol=self.precision, rtol=self.precision)
                 else:
                     self.assertEqual(y_aten, y_mkldnn)
-            if not train:
-                self._test_serialization(mkldnn_conv, (x.to_mkldnn(),))
-                self._test_tracing(mkldnn_conv, (x.to_mkldnn(),))
-            elif dim != 1:
+            if train and dim != 1:
                 loss2 = y_mkldnn.sum()
                 loss2.backward()
                 self.assertTrue(x2.grad.is_mkldnn)
@@ -573,34 +569,6 @@ class TestMkldnn(TestCase):
     def test_conv_transpose3d(self):
         self._test_conv_transpose_base(dim=3)
 
-    def test_conv2d_legacy_jit_model(self):
-        """
-        MKLDNN integration used to serialize models with 5d weight for grouped
-        convolutions, we'd like to preserve this behavior
-        """
-        g = 4
-        conv2d = torch.nn.Conv2d(16, 16, 3, groups=g)
-        conv2d_mkldnn = torch.utils.mkldnn.to_mkldnn(conv2d)
-
-        # contrive legacy conv2d module with a 5-d weight
-        o, i, h, w = conv2d.weight.shape
-        weight_5d = conv2d.weight.reshape((g, o // g, i, h, w))
-        conv2d_mkldnn.weight = weight_5d.to_mkldnn()
-
-        x = torch.randn(1, 16, 8, 8)
-
-        with TemporaryFileName() as fname:
-            torch.jit.save(conv2d_mkldnn, fname)
-            conv2d_loaded = torch.jit.load(fname)
-
-            self.assertEqual(conv2d_mkldnn.weight.ndimension(), 5)
-            self.assertEqual(conv2d_loaded.weight.ndimension(), 4)
-            self.assertEqual(
-                conv2d(x),
-                conv2d_loaded(x.to_mkldnn()).to_dense())
-
-    # This test is to check whether 1D conv is supported for mkldnn tensor,
-    # which is exposed by Issue https://github.com/pytorch/pytorch/issues/68034.
     def test_conv1d_functional(self):
         input = torch.randn(2, 3, 10).to_mkldnn()
         weight = torch.randn(3, 3, 3).to_mkldnn()
@@ -1012,8 +980,6 @@ class TestMkldnn(TestCase):
             bn(input),
             mkldnn_bn(input.to_mkldnn()).to_dense())
 
-        self._test_serialization(mkldnn_bn, (input.to_mkldnn(),))
-        self._test_tracing(mkldnn_bn, (input.to_mkldnn(),))
 
     def _test_batch_norm_train_base(self, dim, channels, input):
         # TODO: support 3d batchnorm training.
@@ -1322,8 +1288,6 @@ class TestMkldnn(TestCase):
                 linear(x),
                 mkldnn_linear(x.to_mkldnn()).to_dense())
 
-            self._test_serialization(mkldnn_linear, (x.to_mkldnn(),))
-            self._test_tracing(mkldnn_linear, (x.to_mkldnn(),))
 
     def test_linear_backward(self):
         in_features = torch.randint(3, 10, (1,)).item()
@@ -1412,19 +1376,7 @@ class TestMkldnn(TestCase):
         torch.tanh_(mkldnn_x)
         self.assertEqual(x, mkldnn_x.to_dense())
 
-    def _test_serialization(self, module, inputs):
-        with TemporaryFileName() as fname:
-            torch.jit.save(module, fname)
-            loaded = torch.jit.load(fname)
-            self.assertEqual(
-                module(*inputs).to_dense(),
-                loaded(*inputs).to_dense())
 
-    def _test_tracing(self, module, inputs):
-        traced = torch.jit.trace(module, inputs)
-        self.assertEqual(
-            module(*inputs).to_dense(),
-            traced(*inputs).to_dense())
 
     def test_set_data_tensorimpl_type(self):
         # Dense tensor has impl of type `TensorImpl`, while MKL-DNN tensor has impl
@@ -1464,18 +1416,6 @@ class TestMkldnn(TestCase):
         self.assertRaises(RuntimeError, lambda: x_mkldnn.new(torch.Size([2, 3])))
         self.assertRaises(RuntimeError, lambda: x_mkldnn.new([6]))
 
-    def test_is_mkldnn_jit(self):
-        class EnsureMkldnn(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x):
-                if not x.is_mkldnn:
-                    x = x.to_mkldnn()
-                return x
-
-        m = EnsureMkldnn()
-        x = torch.randn(1, dtype=torch.float32)
-        self.assertTrue(m(x).is_mkldnn)
-        self.assertTrue(m(x.to_mkldnn()).is_mkldnn)
 
     def _test_imagenet_model(self, model):
         model = model.train(False).float()

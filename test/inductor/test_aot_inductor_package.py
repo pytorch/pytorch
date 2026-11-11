@@ -88,7 +88,7 @@ def compile(
         {
             "device": "cpu",
             "package_cpp_only": False,
-            "hw_classification": HardwareClassification.GENERIC,
+            "hw_classification": HardwareClassification.CPU,
         },
     ]
     + (
@@ -97,7 +97,7 @@ def compile(
             {
                 "device": "cpu",
                 "package_cpp_only": True,
-                "hw_classification": HardwareClassification.GENERIC,
+                "hw_classification": HardwareClassification.CPU,
             }
         ]
         if not IS_FBCODE
@@ -775,10 +775,7 @@ model(torch.ones(2))
 
             # Test compiling generated files
             self.cmake_compile_and_run(tmp_dir)
-            tensor_model = torch.load(
-                tmp_dir + "/output_tensor1.pt", weights_only=False
-            )
-            true_res = next(iter(tensor_model.parameters()))
+            true_res = torch.load(tmp_dir + "/output_tensor1.pt", weights_only=True)
             self.assertEqual(expected_res, true_res)
 
     def test_metadata(self):

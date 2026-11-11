@@ -629,24 +629,18 @@ class TestFFT(TestCase):
                 else:
                     numpy_fn = getattr(np.fft, fname)
 
-                def fn(t: torch.Tensor, s: list[int] | None, dim: list[int] = (-2, -1), norm: str | None = None):
-                    return torch_fn(t, s, dim, norm)
-
-                torch_fns = (torch_fn, torch.jit.script(fn))
 
                 # Once with dim defaulted
                 input_np = input.cpu().numpy()
                 expected = numpy_fn(input_np, s, norm=norm)
-                for fn in torch_fns:
-                    actual = fn(input, s, norm=norm)
-                    self.assertEqual(actual, expected)
+                actual = torch_fn(input, s, norm=norm)
+                self.assertEqual(actual, expected)
 
                 # Once with explicit dims
                 dim = (1, 0)
                 expected = numpy_fn(input_np, s, dim, norm)
-                for fn in torch_fns:
-                    actual = fn(input, s, dim, norm)
-                    self.assertEqual(actual, expected)
+                actual = torch_fn(input, s, dim, norm)
+                self.assertEqual(actual, expected)
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
@@ -1315,6 +1309,38 @@ class TestFFT(TestCase):
         half_spectrum_copy = half_spectrum.clone()
         _ = torch.fft.irfftn(half_spectrum_copy, s=(2, 2), dim=(-2, -1))
         self.assertEqual(half_spectrum, half_spectrum_copy)
+
+        # A backend only overwrites its input buffer for large enough
+        # transforms, so the signal above passes whether or not the contract
+        # holds. "prime" forces a Bluestein decomposition, and the strided
+        # layouts reach the backend as embedded strides rather than being
+        # copied to a contiguous buffer first.
+        frames, n_fft, hop = 200, 1024, 256
+        layouts = (
+            ("pow2", 2 ** 15, lambda t: t),
+            ("prime", 32771, lambda t: t),
+            ("overlapping_frames", (frames - 1) * hop + n_fft,
+             lambda t: t.as_strided((frames, n_fft), (hop, 1))),
+            ("stride_2", 2 ** 16, lambda t: t[::2]),
+        )
+        transforms = (
+            ("fft", torch.fft.fft, False),
+            ("rfft", torch.fft.rfft, False),
+            ("fftn", lambda t: torch.fft.fftn(t, dim=(-1,)), False),
+            ("rfftn", lambda t: torch.fft.rfftn(t, dim=(-1,)), False),
+            ("ifft", torch.fft.ifft, True),
+            ("irfft", torch.fft.irfft, True),
+            ("ifftn", lambda t: torch.fft.ifftn(t, dim=(-1,)), True),
+            ("irfftn", lambda t: torch.fft.irfftn(t, dim=(-1,)), True),
+        )
+        for case, size, view in layouts:
+            real = view(torch.randn(size, device=device))
+            cplx = view(torch.randn(size, device=device, dtype=torch.complex64))
+            for name, transform, complex_input in transforms:
+                x = cplx if complex_input else real
+                original = x.clone()
+                transform(x)
+                self.assertEqual(x, original, msg=f"{case}: {name} modified its input")
 
     @onlyNativeDeviceTypes
     @skipCPUIfNoFFT
