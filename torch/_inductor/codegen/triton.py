@@ -8250,6 +8250,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             config_of(
                 signature,
                 skip_cpp_wrapper_input_tensor_alignment=True,
+                guard_size_divisibility=True,
                 pointer_range_override=self.pointer_range_override(),
             )
         ]

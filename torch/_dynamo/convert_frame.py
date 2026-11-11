@@ -2029,6 +2029,8 @@ def _compile(
         return wrap_guarded_code(guarded_code), tracer_output
 
     metrics_context = get_metrics_context()
+    compile_ctx = CompileContext(compile_id)
+    compile_ctx.guards_may_be_skipped = hooks.guard_filter_fn is not None
     package_code_context = (
         package.code_context(code, globals)
         if package is not None
@@ -2036,7 +2038,7 @@ def _compile(
     )
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
-        compile_context(CompileContext(compile_id)),
+        compile_context(compile_ctx),
         chromium_event_timed(
             "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
         ),

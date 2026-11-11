@@ -955,6 +955,7 @@ class ComboKernel(Kernel):
                     else None
                 ),
                 skip_cpp_wrapper_input_tensor_alignment=True,
+                guard_size_divisibility=True,
             )
         ]
 
