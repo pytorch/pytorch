@@ -546,10 +546,14 @@ _extra_pointwise_ops: list[OpOverload] = [
     aten._fused_adam.default,
     aten._fused_adam.tensor_lr,
     aten._fused_adam_.tensor_lr,
+    aten._fused_adam.tensor_lr_betas,
+    aten._fused_adam_.tensor_lr_betas,
     aten._fused_adamw_.default,
     aten._fused_adamw.default,
     aten._fused_adamw.tensor_lr,
     aten._fused_adamw_.tensor_lr,
+    aten._fused_adamw.tensor_lr_betas,
+    aten._fused_adamw_.tensor_lr_betas,
 ]
 
 

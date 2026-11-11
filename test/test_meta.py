@@ -2345,10 +2345,10 @@ class TestMetaKernelConv(TestCase):
 class TestMetaKernelRegistrations(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    @parametrize("tensor_lr", [False, True])
+    @parametrize("overload", ["default", "tensor_lr", "tensor_lr_betas"])
     @parametrize("amsgrad", [False, True])
     @parametrize("fake", [False, True])
-    def test_fused_adamw(self, tensor_lr, amsgrad, fake):
+    def test_fused_adamw(self, overload, amsgrad, fake):
         from contextlib import nullcontext
         from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -2361,12 +2361,11 @@ class TestMetaKernelRegistrations(TestCase):
             exp_avg_sq = torch.empty_like(parameter)
             max_exp_avg_sqs = [torch.empty_like(parameter)] if amsgrad else []
             step = torch.empty((), device=device)
-            lr = torch.empty((), device=device) if tensor_lr else 0.001
-            operation = (
-                torch.ops.aten._fused_adamw_.tensor_lr
-                if tensor_lr
-                else torch.ops.aten._fused_adamw_.default
-            )
+            lr = torch.empty((), device=device) if overload != "default" else 0.001
+            betas = (0.9, 0.999)
+            if overload == "tensor_lr_betas":
+                betas = (torch.empty((), device=device), torch.empty((), device=device))
+            operation = getattr(torch.ops.aten._fused_adamw_, overload)
             result = operation(
                 [parameter],
                 [gradient],
@@ -2375,8 +2374,8 @@ class TestMetaKernelRegistrations(TestCase):
                 max_exp_avg_sqs,
                 [step],
                 lr=lr,
-                beta1=0.9,
-                beta2=0.999,
+                beta1=betas[0],
+                beta2=betas[1],
                 weight_decay=0.01,
                 eps=1e-8,
                 amsgrad=amsgrad,
