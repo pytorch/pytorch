@@ -873,12 +873,17 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
                 ):
                     t.untyped_storage().resize_(size)
 
-    @unittest.skipIf(
-        platform in ("darwin", "win32"),
-        "file descriptor strategy is not supported on this platform",
+    @unittest.skipUnless(
+        "file_descriptor" in mp.get_all_sharing_strategies(),
+        "file descriptor sharing strategy is not supported",
     )
     def test_fd_shared_resize(self):
-        self._test_shared_resize()
+        prev_strategy = mp.get_sharing_strategy()
+        mp.set_sharing_strategy("file_descriptor")
+        try:
+            self._test_shared_resize()
+        finally:
+            mp.set_sharing_strategy(prev_strategy)
 
     def test_fs_shared_resize(self):
         with fs_sharing():
