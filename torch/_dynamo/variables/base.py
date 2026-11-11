@@ -2685,8 +2685,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                         issubclass(derived_py, self_py)
                     )
         # __reduce_ex__ is a C builtin (object.__reduce_ex__) that Dynamo
-        # cannot trace into.  Constant-fold it for VTs backed by a real
-        # Python object so that copy.deepcopy can trace through.
+        # cannot trace into. OrderedDict needs a live items iterator; other
+        # constant-backed VTs can fold the entire reduction.
         if (
             name == "__reduce_ex__"
             and len(args) == 1
@@ -2695,14 +2695,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ):
             protocol = args[0].as_python_constant()
             if type(self) is variables.OrderedDictVariable:
-                # The constant mapping has no instance state. Fall through to
-                # the unsupported-method path if copying it would lose attributes.
-                if not self.has_instance_attributes:
-                    return self.reduce_ex(tx, protocol)
-            else:
-                return VariableTracker.build(
-                    tx, self.as_python_constant().__reduce_ex__(protocol)
-                )
+                return self.reduce_ex(tx, protocol)
+            return VariableTracker.build(
+                tx, self.as_python_constant().__reduce_ex__(protocol)
+            )
 
         hints = [
             f"Avoid calling `{self.python_type_name()}.{name}` in your code.",

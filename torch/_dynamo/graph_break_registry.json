@@ -5174,6 +5174,16 @@
       ]
     }
   ],
+  "GB1943": [
+    {
+      "Gb_type": "Copying an OrderedDict with instance attributes",
+      "Context": "OrderedDict.__reduce_ex__",
+      "Explanation": "The OrderedDict has instance attributes, or a pending dictionary write could have modified them. Dynamo cannot preserve this state when tracing the copy.",
+      "Hints": [
+        "Copy the OrderedDict outside the compiled region."
+      ]
+    }
+  ],
   "GB7685": [
     {
       "Gb_type": "Attribute not found on opaque class",

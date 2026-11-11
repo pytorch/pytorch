@@ -71,6 +71,7 @@ from .base import (
     Method,
     NO_SUCH_SUBOBJ,
     readonly_setter,
+    unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -1048,11 +1049,42 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         super().__init__(items, **kwargs)
         self.has_instance_attributes = has_instance_attributes
 
+    def _get_instance_dict(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker | None:
+        if type(self) is not OrderedDictVariable:
+            return None
+        # The reconstructed constant has a different instance dictionary.
+        # Reconstruct the attribute access on the actual object at runtime.
+        return variables.GetAttrVariable(self, "__dict__", py_type=dict)
+
+    tp_getset = {"__dict__": GetSet(_get_instance_dict, unmodeled_setter)}
+
     def reduce_ex(
         self, tx: "InstructionTranslatorBase", protocol: int
     ) -> VariableTracker:
         from .iter import OrderedDictItemsIterator
 
+        effects = tx.output.side_effects
+        # A pending write to another input dictionary could alias self.__dict__
+        # on a cache hit, even if the inputs did not alias during tracing.
+        if self.has_instance_attributes or (
+            self.source
+            and effects.has_existing_dict_mutation()
+            and any(
+                var is not self
+                and isinstance(var, ConstDictVariable)
+                and var.source is not None
+                and effects.is_modified(var)
+                for var in effects.id_to_variable.values()
+            )
+        ):
+            unimplemented(
+                gb_type="Copying an OrderedDict with instance attributes",
+                context="OrderedDict.__reduce_ex__",
+                explanation="The OrderedDict has instance attributes, or a pending dictionary write could have modified them. Dynamo cannot preserve this state when tracing the copy.",
+                hints=["Copy the OrderedDict outside the compiled region."],
+            )
         if self.source and not is_constant_source(self.source):
             # A later call may add attributes or reorder the linked keys.
             install_guard(
@@ -1060,7 +1092,8 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
                     GuardBuilder.SEQUENCE_LENGTH
                 )
             )
-            install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
+            tx.output.guard_on_key_order.add(self.source)
+            install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
 
         reduced = self.as_python_constant().__reduce_ex__(protocol)
         return variables.TupleVariable(
@@ -1073,7 +1106,6 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
 
     # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
     # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
-    # OrderedDict exposes no tp_getset / tp_members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
 
     def move_to_end(
