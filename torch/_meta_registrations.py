@@ -762,6 +762,14 @@ def meta_philox_uniform_tensor_(self, key, low, high):
     return self
 
 
+@register_meta(aten._philox_normal_.Tensor)
+def meta_philox_normal_tensor_(self, key, mean, std):
+    _check_philox_distribution_args("_philox_normal_", self, key)
+    _check_philox_bound("_philox_normal_", "mean", mean, self)
+    _check_philox_bound("_philox_normal_", "std", std, self)
+    return self
+
+
 @register_meta(aten._philox_dropout.default)
 def meta_philox_dropout(self, key, p):
     _check_philox_distribution_args("_philox_dropout", self, key)

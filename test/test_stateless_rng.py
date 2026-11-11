@@ -742,6 +742,133 @@ class TestStatelessRNGDistribution(TestCase):
         with self.assertRaisesRegex(RuntimeError, "refer to a single memory location"):
             random.uniform_(random.key(42, device=device), out, low=out)
 
+    @parametrize("inplace", [False, True])
+    @dtypes(*all_floating_dtypes)
+    def test_normal_tensor_params_match_scalar(self, device, dtype, inplace):
+        # Tensor parameters must reproduce scalar parameters bit for bit.
+        key = random.key(42, device=device)
+        shape = (8, 33)
+
+        def gen(**params):
+            if inplace:
+                result = torch.empty(shape, dtype=dtype, device=device)
+                return random.normal_(key, result, **params)
+            return random.normal(key, shape, dtype=dtype, **params)
+
+        # float64 keeps the scalar overload's value for a mean no dtype represents.
+        expected = gen(mean=0.1, std=2.5)
+        std = torch.full((8, 1), 2.5, device=device)
+        f64 = {"dtype": torch.float64, "device": device}
+        for mean in (torch.full((8, 1), 0.1, **f64), 0.1):
+            self.assertEqual(gen(mean=mean, std=std), expected, atol=0, rtol=0)
+
+    @parametrize("keys", ["single", "batched"])
+    @parametrize("cols", [subtest(36, name="aligned"), subtest(37, name="unaligned")])
+    @dtypes(*all_floating_dtypes)
+    def test_normal_tensor_params_rows_vary(self, device, dtype, keys, cols):
+        mean_vals, std_vals = [-1000.0, 0.1, 2.5], [0.001, 3.0, 0.0]
+        shape = (3, cols)
+        key = random.key(42, device=device)
+        if keys == "batched":
+            key = random.split(key, 3).unsqueeze(-2)
+        mean = torch.tensor(mean_vals, dtype=torch.float64, device=device).view(3, 1)
+        std = torch.tensor(std_vals, dtype=torch.float64, device=device).view(3, 1)
+        actual = random.normal(key, shape, mean=mean, std=std, dtype=dtype)
+        for i, (m, sd) in enumerate(zip(mean_vals, std_vals)):
+            expected = random.normal(key, shape, mean=m, std=sd, dtype=dtype)
+            self.assertEqual(actual[i], expected[i], atol=0, rtol=0)
+
+    @parametrize("keys", ["single", "batched"])
+    @dtypes(*all_floating_dtypes)
+    def test_normal_tensor_params_cols_vary(self, device, dtype, keys):
+        mean_vals, std_vals = [-1000.0, 0.1, 2.5], [0.001, 3.0, 0.0]
+        shape = (37, 3)
+        key = random.key(42, device=device)
+        if keys == "batched":
+            key = random.split(key, 37).unsqueeze(-2)
+        mean = torch.tensor(mean_vals, dtype=torch.float64, device=device).view(1, 3)
+        std = torch.tensor(std_vals, dtype=torch.float64, device=device).view(1, 3)
+        actual = random.normal(key, shape, mean=mean, std=std, dtype=dtype)
+        for i, (m, sd) in enumerate(zip(mean_vals, std_vals)):
+            expected = random.normal(key, shape, mean=m, std=sd, dtype=dtype)
+            self.assertEqual(actual[:, i], expected[:, i], atol=0, rtol=0)
+
+    @dtypes(*all_floating_dtypes)
+    def test_normal_tensor_params_noncontig(self, device, dtype):
+        # Results must not depend on the memory layout of the parameters or output.
+        shape = (3, 37)
+        key = random.key(42, device=device)
+        mean = torch.tensor([[-1000.0], [0.1], [2.5]], device=device)
+        std = torch.tensor([[0.001], [3.0], [0.0]], device=device)
+        expected = random.normal(key, shape, mean=mean, std=std, dtype=dtype)
+
+        full = mean.expand(shape).contiguous(), std.expand(shape).contiguous()
+        transposed = tuple(p.t().contiguous().t() for p in full)
+        for m, sd in (full, transposed):
+            actual = random.normal(key, shape, mean=m, std=sd, dtype=dtype)
+            self.assertEqual(actual, expected, atol=0, rtol=0)
+
+        opts = {"dtype": dtype, "device": device}
+        noncontiguous = torch.empty(37, 3, **opts).t()
+        # Misaligned for the CUDA kernel's vector stores.
+        unaligned = torch.empty(3 * 37 + 1, **opts)[1:].view(shape)
+        for out in (noncontiguous, unaligned):
+            actual = random.normal_(key, out, mean=mean, std=std)
+            self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    def test_normal_tensor_params_empty(self, device):
+        key = random.key(42, device=device)
+        for shape in ((0, 3), (3, 0)):
+            mean = torch.zeros(shape, device=device)
+            self.assertEqual(random.normal(key, shape, mean=mean).shape, shape)
+
+    def test_normal_tensor_params_grad(self, device):
+        key = random.key(42, device=device)
+        mean = torch.zeros(8, 1, device=device, requires_grad=True)
+        std = torch.full((8, 1), 2.0, device=device, requires_grad=True)
+        grad = torch.randn(8, 33, device=device)
+        random.normal(key, (8, 33), mean=mean, std=std).backward(grad)
+        z = random.normal(key, (8, 33))
+        self.assertEqual(mean.grad, grad.sum(1, keepdim=True))
+        self.assertEqual(std.grad, (grad * z).sum(1, keepdim=True))
+
+        def f(mean, std):
+            return random.normal(key, (8, 5), mean=mean, std=std, dtype=torch.float64)
+
+        f64 = {"dtype": torch.float64, "device": device, "requires_grad": True}
+        params = (torch.zeros(8, 1, **f64), torch.ones(1, 5, **f64))
+        self.assertTrue(gradcheck(f, params, check_forward_ad=True))
+        self.assertTrue(gradgradcheck(f, params))
+
+    @dtypes(*all_floating_dtypes)
+    def test_normal_tensor_params_dtype(self, device, dtype):
+        key = random.key(42, device=device)
+        mean = torch.zeros(4, 1, dtype=dtype, device=device)
+        std = torch.ones(4, 1, dtype=dtype, device=device)
+        actual = random.normal(key, (4, 3), mean=mean, std=std)
+        self.assertEqual(actual.dtype, torch.float32)
+        self.assertEqual(actual, random.normal(key, (4, 3)), atol=0, rtol=0)
+
+    def test_normal_tensor_params_errors(self, device):
+        for mode in (contextlib.nullcontext(), FakeTensorMode()):
+            with mode:
+                key = random.key(42, device=device)
+                mean = torch.zeros(4, 1, device=device)
+                with self.assertRaisesRegex(RuntimeError, "not broadcastable"):
+                    random.normal(key, (4, 3), mean=torch.zeros(5, device=device))
+                for bad_dtype in (torch.complex64, torch.int64, torch.bool):
+                    with self.assertRaisesRegex(RuntimeError, "must be a floating"):
+                        random.normal(key, (4, 3), mean=mean.to(bad_dtype))
+                int_out = torch.empty(4, 3, dtype=torch.int64, device=device)
+                with self.assertRaises(RuntimeError):
+                    random.normal_(key, int_out, mean=mean)
+                if torch.device(device).type == "cuda":
+                    with self.assertRaisesRegex(RuntimeError, "on the same device"):
+                        random.normal(key, (4, 3), mean=torch.zeros(4, 1))
+        out = torch.zeros(4, 3, device=device)
+        with self.assertRaisesRegex(RuntimeError, "refer to a single memory location"):
+            random.normal_(random.key(42, device=device), out, mean=out)
+
     @dtypes(*all_floating_dtypes)
     @parametrize("batched", [False, True])
     @onlyAccelerator
@@ -915,7 +1042,7 @@ class TestStatelessRNGCompile(TestCase):
         # ensure peak ~= output size).
         if torch.device(device).type == "cuda" and not HAS_TRITON:
             self.skipTest("CUDA inductor codegen requires triton")
-        if tensor_bounds and op not in ("uniform",):
+        if tensor_bounds and op not in ("uniform", "normal"):
             self.skipTest(f"{op} doesn't support tensor bounds yet")
         shape = (2048, 2048)  # 16 MiB fp32; an extra clone would ~double peak
         gen_fn = getattr(random, op)
@@ -1023,6 +1150,38 @@ class TestStatelessRNGCompile(TestCase):
             out.backward(grad)
             results.append((out, low.grad, high.grad))
         self.assertEqual(results[1], results[0])
+
+    def test_normal_tensor_params_backward(self, device):
+        if torch.device(device).type == "cuda" and not HAS_TRITON:
+            self.skipTest("CUDA inductor codegen requires triton")
+
+        def f(key, mean, std):
+            return random.normal(key, (8, 33), mean=mean, std=std)
+
+        key = random.key(42, device=device)
+        grad = torch.randn(8, 33, device=device)
+        results = []
+        for fn in (f, torch.compile(f, fullgraph=True)):
+            mean = torch.zeros(8, 1, device=device, requires_grad=True)
+            std = torch.full((8, 1), 2.0, device=device, requires_grad=True)
+            out = fn(key, mean, std)
+            out.backward(grad)
+            results.append((out, mean.grad, std.grad))
+        self.assertEqual(results[1], results[0])
+
+    @dtypes(*all_floating_dtypes)
+    def test_normal_tensor_params_match_scalar(self, device, dtype):
+        if torch.device(device).type == "cuda" and not HAS_TRITON:
+            self.skipTest("CUDA inductor codegen requires triton")
+
+        def f(key, mean, std):
+            return random.normal(key, (8, 33), mean=mean, std=std, dtype=dtype)
+
+        key = random.key(42, device=device)
+        mean, std = (torch.full((8, 1), v, device=device) for v in (-3.0, 5.5))
+        expected = random.normal(key, (8, 33), mean=-3.0, std=5.5, dtype=dtype)
+        actual = torch.compile(f, fullgraph=True)(key, mean, std)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @dtypes(*all_floating_dtypes)
     def test_uniform_tensor_bounds_match_scalar(self, device, dtype):

@@ -348,6 +348,34 @@ Tensor& _philox_normal_cpu_(Tensor& self, const Tensor& key, double mean, double
   return self;
 }
 
+Tensor& _philox_normal_tensor_cpu_(
+    Tensor& self, const Tensor& key, const Tensor& mean, const Tensor& std) {
+  philox_check_bound("_philox_normal_", "mean", mean, self);
+  philox_check_bound("_philox_normal_", "std", std, self);
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_normal_", [&] {
+    using compute_t = std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
+    constexpr auto compute_dtype = c10::CppTypeToScalarType<compute_t>::value;
+    // Sample in compute_t so that half and bfloat16 samples aren't rounded
+    // before scaling, then rescale in a second pass.
+    Tensor z = self.scalar_type() == compute_dtype
+        ? self
+        : at::empty_like(self, self.options().dtype(compute_dtype));
+    _philox_normal_cpu_(z, key, 0.0, 1.0);
+    auto iter = TensorIteratorConfig()
+        .check_all_same_dtype(false)
+        .add_output(self)
+        .add_const_input(z)
+        .add_owned_const_input(mean.to(compute_dtype))
+        .add_owned_const_input(std.to(compute_dtype))
+        .build();
+    cpu_kernel(iter, [](compute_t z, compute_t mu, compute_t sigma) -> scalar_t {
+      return static_cast<scalar_t>(z * sigma + mu);
+    });
+  });
+  return self;
+}
+
 Tensor& _philox_randint_cpu_(
     Tensor& self,
     const Tensor& key,

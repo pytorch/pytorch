@@ -6621,6 +6621,13 @@
     CUDA: _philox_normal_cuda_
   autogen: _philox_normal, _philox_normal.out
 
+- func: _philox_normal_.Tensor(Tensor(a!) self, Tensor key, Tensor mean, Tensor std) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    CPU: _philox_normal_tensor_cpu_
+    CUDA: _philox_normal_tensor_cuda_
+  autogen: _philox_normal.Tensor, _philox_normal.Tensor_out
+
 - func: _philox_uniform_(Tensor(a!) self, Tensor key, float low=0, float high=1) -> Tensor(a!)
   variants: function, method
   dispatch:
