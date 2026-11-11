@@ -45,6 +45,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    IS_CPU_CAPABILITY_ZVECTOR,
     is_iterable_of_tensors,
     noncontiguous_like,
     parametrize,
@@ -531,7 +532,7 @@ class TestOperatorsDevice(TestCase):
                         device_type="cpu",
                     )
                 ]
-                if torch._C._get_cpu_capability() == "Z VECTOR"
+                if IS_CPU_CAPABILITY_ZVECTOR
                 else []
             ),
         ),
@@ -836,7 +837,7 @@ class TestOperatorsDevice(TestCase):
                         device_type="cpu",
                     )
                 ]
-                if torch._C._get_cpu_capability() == "Z VECTOR"
+                if IS_CPU_CAPABILITY_ZVECTOR
                 else []
             ),
         ),
