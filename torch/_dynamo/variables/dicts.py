@@ -27,6 +27,7 @@ from collections.abc import Callable, Iterator
 from typing import Any, cast, TYPE_CHECKING, Union
 from typing_extensions import TypeIs
 
+from torch._guards import GuardSource
 from torch.utils._pytree import MappingKey
 
 from .. import graph_break_hints, polyfills, variables
@@ -44,12 +45,13 @@ from ..exc import (
     unimplemented,
     Unsupported,
 )
-from ..guards import GuardBuilder, install_guard
+from ..guards import GuardBuilder, install_guard, is_safe_dict_key
 from ..source import (
     AttrSource,
     DictGetItemSource,
     is_constant_source,
     is_from_local_source,
+    LocalSource,
     TypeDictSource,
 )
 from ..utils import (
@@ -604,10 +606,51 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         item: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4657-L4668
+        relational_result = self._maybe_relational_dict_contains(tx, item)
+        if relational_result is not None:
+            return relational_result
+
         key = self._lookup_key(tx, item)
         value = self.items.get(key)
         contains = value is not None and type(value) is not variables.DeletedVariable
         self.install_dict_contains_guard(tx, key, key_present=contains)
+        return VariableTracker.build(tx, contains)
+
+    def _maybe_relational_dict_contains(
+        self,
+        tx: "InstructionTranslatorBase",
+        item: VariableTracker,
+    ) -> VariableTracker | None:
+        if (
+            self.source is None
+            or item.source is None
+            or not isinstance(self.source, LocalSource)
+            or not isinstance(item.source, LocalSource)
+            or tx.output.side_effects.is_modified(self)
+            or not isinstance(item, variables.LazyVariableTracker)
+            or item.is_realized()
+        ):
+            return None
+
+        real_dict = tx.output.resolve_source_value(self.source)
+        real_key = item.original_value()
+        if (
+            type(real_dict) is not dict
+            or not is_safe_dict_key(real_key)
+            or not all(is_safe_dict_key(key) for key in real_dict)
+        ):
+            return None
+
+        contains = dict.__contains__(real_dict, real_key)
+        install_guard(
+            item.source.make_guard(
+                functools.partial(
+                    GuardBuilder.RELATIONAL_DICT_CONTAINS,
+                    dict_source=self.source,
+                    expected=contains,
+                )
+            )
+        )
         return VariableTracker.build(tx, contains)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -711,8 +754,42 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 # if default is not given, return None
                 return ConstantVariable.create(None)
             return args[1]
-        # Key guarding - Nothing to do.
+        self._register_lazy_lookup_source(tx, key, value)
         return value
+
+    def _register_lazy_lookup_source(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: HashableTracker,
+        value: VariableTracker,
+    ) -> None:
+        if self.source is None or self.source.guard_source in (
+            GuardSource.CONSTANT,
+            GuardSource.EPHEMERAL,
+            GuardSource.SYNTHETIC_LOCAL,
+            GuardSource.TEMP_LOCAL,
+        ):
+            return
+        if (
+            type(self).install_dict_contains_guard
+            is not ConstDictVariable.install_dict_contains_guard
+        ):
+            return
+        if not isinstance(value, variables.LazyVariableTracker) or value.is_realized():
+            return
+        key_value = _get_literal_key(key.vt)
+        if key_value is NO_SUCH_SUBOBJ:
+            return
+        source = value.source
+        # Only original slots depend on membership at function entry.
+        if source is None or source != DictGetItemSource(self.source, key_value):
+            return
+        guards = tx.output.lazy_source_guarding.setdefault(source, {})
+        guard_key = (self.source, type(self).CONTAINS_GUARD)
+        if guard_key not in guards:
+            guards[guard_key] = self.source.make_guard(
+                functools.partial(type(self).CONTAINS_GUARD, key=key_value)
+            )
 
     def dict_pop(
         self,
@@ -990,8 +1067,16 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if not self.is_mutable():
             return super().mp_ass_subscript_impl(tx, key, value)
 
-        # value=None signals delete (CPython NULL sentinel).
-        self.install_dict_keys_match_guard()
+        # A setitem on a local dict does not need to guard the full key set;
+        # the side-effect replay only updates the changed item. Deletion and
+        # non-local mutations still need the conservative guard because their
+        # replay may clear and rebuild the whole dict.
+        if (
+            value is None
+            or self.source is None
+            or not is_from_local_source(self.source)
+        ):
+            self.install_dict_keys_match_guard()
         if isinstance(self, OrderedDictVariable):
             _guard_nan_key(key)
             hkey = HashableTracker(key)

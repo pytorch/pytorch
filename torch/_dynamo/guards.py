@@ -951,6 +951,23 @@ def uninteresting_files() -> set[str]:
 _CLOSURE_VARS: dict[str, object] | None = None
 
 
+def is_safe_dict_key(value: object) -> bool:
+    value_type = type(value)
+    if value_type in common_constant_types:
+        return True
+    if value_type in (tuple, frozenset, torch.Size):
+        return all(is_safe_dict_key(item) for item in cast(Any, value))
+    return False
+
+
+def relational_dict_contains(key: object, mapping: object) -> bool | None:
+    if type(mapping) is not dict or not is_safe_dict_key(key):
+        return None
+    if not all(is_safe_dict_key(dict_key) for dict_key in mapping):
+        return None
+    return dict.__contains__(mapping, key)
+
+
 def _get_closure_vars() -> dict[str, object]:
     global _CLOSURE_VARS
     if _CLOSURE_VARS is None:
@@ -961,6 +978,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___key_to_id": key_to_id,
             "___dict_version": dict_version,
             "___dict_contains": lambda a, b: dict.__contains__(b, a),
+            "___relational_dict_contains": relational_dict_contains,
             "___tuple_iterator_len": tuple_iterator_len,
             "___normalize_count_iter": normalize_count_iter,
             "___normalize_range_iter": normalize_range_iter,
@@ -2742,6 +2760,32 @@ class GuardBuilder(GuardBuilderBase):
             key,
             get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
+        )
+        self.already_added_code_parts.add(code)
+
+    @skip_guard_check_spec
+    def RELATIONAL_DICT_CONTAINS(
+        self,
+        guard: Guard,
+        *,
+        dict_source: Source,
+        expected: bool,
+    ) -> None:
+        key_ref = self.arg_ref(guard)
+        dict_ref = self.source_ref(dict_source)
+        code = f"___relational_dict_contains({key_ref}, {dict_ref}) is {expected}"
+        if code in self.already_added_code_parts:
+            return
+
+        self._set_guard_export_info(guard, [code])
+        relation = "contain" if expected else "not contain"
+        reason = (
+            f"{dict_ref} must {relation} {key_ref}; Dynamo specialized the compiled "
+            "code on this membership result."
+        )
+        self.add_python_lambda_leaf_guard_to_root(
+            [code],
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
         )
         self.already_added_code_parts.add(code)
 
@@ -5260,16 +5304,21 @@ class GuardsStatePickler(FunctionPicklerBase):
             # Parameter without one carries the Parameter marker. Guards on a
             # live fake (TENSOR_MATCH, TYPE_MATCH) must not use this fallback.
             pytype = type(obj)
+            is_param = isinstance(obj, torch.nn.Parameter)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
-                is_param = isinstance(obj, torch.nn.Parameter)
                 default = torch.nn.Parameter if is_param else torch.Tensor
                 pytype = obj.pytype or default
-            # A fake answers empty_like with another fake through its own
-            # __torch_dispatch__, whether or not its FakeTensorMode is active,
-            # and that fake would drag the mode and its converters into the
-            # pickle; no_dispatch makes the template a plain meta tensor.
+            elif is_fake and is_param and pytype is torch.Tensor:
+                # A C++ fake's own type is the real type, but a C++ fake
+                # Parameter can be a plain Tensor carrying the marker.
+                pytype = torch.nn.Parameter
+            # A fake answers empty_like with another fake (a Python fake through
+            # its own __torch_dispatch__, whether or not its FakeTensorMode is
+            # active), and that fake would drag the mode and its converters into
+            # the pickle; no_dispatch, which also excludes the Fake dispatch key,
+            # makes the template a plain meta tensor.
             with no_dispatch() if is_fake else contextlib.nullcontext():
                 meta = torch.empty_like(
                     obj, device="meta", requires_grad=obj.requires_grad

@@ -638,6 +638,9 @@
   patterns:
   - torch/testing/**
   - test/**
+  - tools/linter/adapters/test_linter.py
+  - tools/linter/adapters/test_linter_allowlist.json
+  - tools/test/test_test_linter.py
   approved_by:
   - fffrog
   mandatory_checks_name:
