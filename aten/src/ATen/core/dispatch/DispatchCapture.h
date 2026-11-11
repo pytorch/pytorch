@@ -11,8 +11,10 @@ namespace c10 {
 
 class TORCH_API OperatorHandle;
 
-// A DispatchCaptureSink observes every kernel invocation the dispatcher makes
-// on the thread it is installed on. Unlike a mode dispatch key, which only
+// A DispatchCaptureSink observes the kernel invocations the dispatcher makes
+// on the thread it is installed on. For now that covers Dispatcher::call and
+// Dispatcher::redispatch; the boxed entry points (callBoxed, redispatchBoxed)
+// do not report yet. Unlike a mode dispatch key, which only
 // sees the entry of a call, a sink sees each step of the resolution chain: a
 // call reports the DispatchKeySet computed by key extraction, and every
 // redispatch made by the kernels underneath (Autograd -> ADInplaceOrView ->

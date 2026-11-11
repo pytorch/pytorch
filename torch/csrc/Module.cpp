@@ -77,7 +77,6 @@
 #include <torch/csrc/autograd/python_sparse_functions.h>
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/cfg/cfg.h>
 #include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/distributed/python_placement.h>
 #include <torch/csrc/dynamo/init.h>
@@ -2607,7 +2606,6 @@ PyObject* initModule() {
   torch::jit::initJITBindings(module);
   torch::monitor::initMonitorBindings(module);
   torch::impl::dispatch::initDispatchBindings(module);
-  torch::cfg::initCfgBindings(module);
   torch::dynamo::initDynamoBindings(module);
   torch::functorch::impl::initFuncTorchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
