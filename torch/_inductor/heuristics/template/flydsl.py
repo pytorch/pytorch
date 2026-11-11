@@ -1,10 +1,22 @@
 import functools
 import logging
+from collections.abc import Generator
 from dataclasses import asdict, dataclass, replace
 from itertools import product
-from typing import cast, Literal, TypedDict
+from typing import Any, cast, Literal, TYPE_CHECKING, TypedDict
 
+import torch
 import torch._inductor.config as config
+from torch._inductor.heuristics.registry import register_template_heuristic
+
+from ...kernel.mm import flydsl_mm_template
+from ...kernel_inputs import MMKernelInputs
+from .base import TemplateConfigHeuristics
+from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
+
+
+if TYPE_CHECKING:
+    from ...kernel_inputs import KernelInputs
 
 
 log = logging.getLogger(__name__)
@@ -638,3 +650,64 @@ def get_mxfp8_grouped_gemm_configs(
         log.warning("No valid FlyDSL MXFP8 grouped GEMM configuration is available")
         return []
     return [asdict(gemm_config) for gemm_config in valid_configs]
+
+
+# ---------------------------------------------------------------------------
+# Dense mm_flydsl template heuristics
+#
+# Admission is opt-in per device: the None-device default contributes nothing,
+# and each device that supports the template registers its own heuristic under
+# flydsl_mm_template.uid. Out-of-tree backends do that from their plugin
+# package; the in-tree gfx950 kernels register under "cuda" on HIP builds only.
+#
+# Plugin contract:
+#   * Register under (flydsl_mm_template.uid, <device_type>, op_name="mm").
+#     _lookup (registry.py) tries (uid, None, op) before (uid, device, None),
+#     so the op_name="mm" tag is required; without it a vendor registration
+#     falls back to the empty default above.
+#   * Yield config dicts carrying every key flydsl_mm.py.jinja renders:
+#     GEMM_M/N/K, GEMM_DTYPE_ID, TILE_M/N/K, STAGES, M_WAVES, N_WAVES,
+#     GROUP_M, USE_HALF_TILE_INTERLEAVED, A_IS_TRANSPOSED, B_IS_TRANSPOSED.
+#   * The shipped flydsl_mm.py.jinja always imports gemm_gfx950, so this uid
+#     only retunes the vendored CDNA4 kernel. A plugin with its own kernel
+#     needs its own FlyDSLTemplate and uid, not just a heuristic here.
+# ---------------------------------------------------------------------------
+
+
+@register_template_heuristic(flydsl_mm_template.uid, None, op_name="mm")
+class FlyDSLMMTemplateConfigHeuristics(TemplateConfigHeuristics):
+    """Default mm_flydsl heuristic; contributes nothing on any device."""
+
+
+@register_template_heuristic(
+    flydsl_mm_template.uid,
+    "cuda",
+    register=torch.version.hip is not None,
+    op_name="mm",
+)
+class HIPFlyDSLMMTemplateConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
+    """Retune the in-tree gfx950 FlyDSL GEMM kernel on HIP builds.
+
+    Only the vendored gemm_gfx950 kernel is rendered, so this feeds tile
+    settings to that CDNA4 kernel rather than admitting a new vendor kernel.
+    """
+
+    def should_run(self, inputs: "KernelInputs") -> bool:
+        from ...codegen.flydsl.flydsl_utils import is_gfx950_device
+
+        return super().should_run(inputs) and is_gfx950_device(inputs.device())
+
+    def _get_template_configs_impl(
+        self, kernel_inputs: "KernelInputs", op_name: str
+    ) -> Generator[dict[str, Any], None, None]:
+        from ...kernel.mm import get_flydsl_mm_template_kwargs
+        from ...kernel.mm_common import _is_static_problem
+
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
+        layout = kernel_inputs.output_layout()
+        mat1, mat2 = kernel_inputs.mat1mat2()
+        static_shape, is_nonzero = _is_static_problem(layout)
+        yield from get_flydsl_mm_template_kwargs(
+            layout, mat1, mat2, static_shape, is_nonzero
+        )

@@ -24,6 +24,7 @@ from torch.utils._ordered_set import OrderedSet
 from .. import config as inductor_config, distributed_autotune, lowering as L
 from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.flydsl.flydsl_template import FlyDSLTemplate
+from ..codegen.flydsl.flydsl_utils import is_gfx950_device
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
@@ -341,7 +342,12 @@ def get_flydsl_mm_template_kwargs(
         is_gemm_config_valid_for_shape,
     )
 
-    if not (static_shape and is_nonzero and use_flydsl_gemm_template(layout)):
+    if not (
+        static_shape
+        and is_nonzero
+        and use_flydsl_gemm_template(layout)
+        and is_gfx950_device(layout.device)
+    ):
         return []
 
     if len(mat1.get_size()) != 2 or len(mat2.get_size()) != 2:
@@ -708,6 +714,14 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
         templates_to_use.append(mm_contiguous_subgraph_template)
 
+    if (
+        out_dtype is None
+        and static_shape
+        and is_nonzero
+        and use_flydsl_gemm_template(layout)
+    ):
+        templates_to_use.append(flydsl_mm_template)
+
     choices.extend(
         V.choices.get_template_configs(
             kernel_inputs,
@@ -731,20 +745,6 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
     if out_dtype is None and is_nonzero and use_ck_tile_gemm_template(layout, m, n, k):
         CKTileGemmTemplate.add_choices(choices, layout, kernel_inputs.nodes())
-
-    if out_dtype is None:
-        flydsl_configs = get_flydsl_mm_template_kwargs(
-            layout, mat1, mat2, static_shape, is_nonzero
-        )
-        if flydsl_configs:
-            flydsl_input_nodes = list(kernel_inputs.nodes())
-            for flydsl_kwargs in flydsl_configs:
-                flydsl_mm_template.maybe_append_choice(
-                    choices,
-                    input_nodes=flydsl_input_nodes,
-                    layout=layout,
-                    **flydsl_kwargs,
-                )
 
     if (
         out_dtype is None
@@ -1428,7 +1428,7 @@ def get_flydsl_mxfp_template_kwargs(
 ) -> list[dict[str, Any]]:
     """Return shape-compatible configs for one gfx950 MXFP operand format."""
 
-    if not use_flydsl_gemm_template(layout):
+    if not use_flydsl_gemm_template(layout) or not is_gfx950_device(layout.device):
         return []
 
     nodes = (mat_a, mat_b, scale_a, scale_b)

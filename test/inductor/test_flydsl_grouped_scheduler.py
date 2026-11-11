@@ -19,8 +19,8 @@ except ImportError:
 class TestFlyDSLGroupedSchedulerPolicy(TestCase):
     def setUp(self):
         super().setUp()
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
+        if not input_factory._vendored_rocm_flydsl_available():
+            self.skipTest("requires ROCm FlyDSL runtime")
 
     def test_grid_cap_and_cache_modes(self):
         import dataclasses

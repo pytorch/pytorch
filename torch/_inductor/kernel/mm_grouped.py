@@ -7,6 +7,7 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
 from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
+from torch._inductor.codegen.flydsl.flydsl_utils import is_gfx950_device
 from torch._inductor.heuristics.template.cutedsl import get_groupgemm_configs
 from torch._inductor.runtime.triton_compat import tl
 from torch._inductor.virtualized import V
@@ -155,7 +156,11 @@ def use_flydsl_grouped_mm_template(
     """Return whether grouped MM can use the FlyDSL gfx950 template."""
     if scaled:
         return False
-    if not is_nonzero or not use_flydsl_gemm_template(layout):
+    if (
+        not is_nonzero
+        or not use_flydsl_gemm_template(layout)
+        or not is_gfx950_device(layout.device)
+    ):
         return False
     if not (a_is_2d and not b_is_2d and offs is not None):
         return False
@@ -766,7 +771,7 @@ _FLYDSL_INT32_MAX = (1 << 31) - 1
 
 
 def _flydsl_device_cu_count(device: torch.device) -> int:
-    # An index-less device resolves to 0, as in use_flydsl_gemm_template.
+    # An index-less device resolves to 0, as in is_gfx950_device.
     return torch.cuda.get_device_properties(
         device.index if device.index is not None else 0
     ).multi_processor_count
@@ -804,7 +809,11 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
         MXFP8_SCALE_BLOCK,
     )
 
-    if not is_nonzero or not use_flydsl_gemm_template(layout):
+    if (
+        not is_nonzero
+        or not use_flydsl_gemm_template(layout)
+        or not is_gfx950_device(layout.device)
+    ):
         return []
     if offs is None:
         return []
@@ -915,7 +924,7 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
     # `_row_windows` splits the token dim so the M-dependent operands always
     # fit, but the weight and its scales are not split and must fit outright.
     # The tile is sized against the grid cap of the device the kernel launches
-    # on; resolve an index-less device the way use_flydsl_gemm_template does.
+    # on; default an index-less device to index 0.
     num_cus = _flydsl_device_cu_count(layout.device)
 
     weight_spans = (
@@ -958,7 +967,12 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
     Group offsets must be multiples of 32 (the MX scale block); they are on the
     device, so the kernel checks them and traps on a violation, as MSLK asserts.
     """
-    if not is_nonzero or not use_flydsl_gemm_template(layout) or offs is None:
+    if (
+        not is_nonzero
+        or not use_flydsl_gemm_template(layout)
+        or not is_gfx950_device(layout.device)
+        or offs is None
+    ):
         return []
     if len(mat_a.get_size()) != 2 or len(mat_b.get_size()) != 2:
         return []

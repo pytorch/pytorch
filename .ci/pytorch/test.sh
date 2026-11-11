@@ -1448,6 +1448,7 @@ test_inductor_flydsl() {
     python3 - <<'PY'
 import importlib
 import importlib.metadata
+import importlib.util
 
 import torch
 from torch._inductor.codegen.flydsl import flydsl_utils
@@ -1463,11 +1464,13 @@ arch = _get_flydsl_device_arch(device_index)
 if arch != "gfx950":
     raise RuntimeError(f"FlyDSL CI requires gfx950, got {arch}")
 if not flydsl_utils.runtime_available():
-    reason = (
-        flydsl_utils._flydsl_runtime_unavailable_reason()
-        or "ROCm runtime support is unavailable"
-    )
+    reason = flydsl_utils._flydsl_runtime_unavailable_reason()
     raise RuntimeError(f"FlyDSL runtime is unavailable: {reason}")
+if importlib.util.find_spec("flydsl._mlir.dialects.rocdl") is None:
+    raise RuntimeError(
+        "FlyDSL CI requires flydsl._mlir.dialects.rocdl (vendored rocdl kernels); "
+        "without it the vendored-rocdl tests silently skip"
+    )
 version = importlib.metadata.version("flydsl")
 print(f"FlyDSL {version} runtime available on {arch}")
 PY
