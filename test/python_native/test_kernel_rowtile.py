@@ -679,10 +679,11 @@ class TestKernelRowTile(TestCase):
         f32 = [torch.float32]
         for n in (4096, 4097):
             x = torch.randn(64, n, device="cuda")
-            with self.assertRaisesRegex(ValueError, "cannot use TMA"):
-                rt.reduce_row_tile(
-                    trait, "ragged_tma", x, f32, use_tma=True, ragged_vector=True
-                )
+            with self.subTest(n=n):
+                with self.assertRaisesRegex(ValueError, "cannot use TMA"):
+                    rt.reduce_row_tile(
+                        trait, "ragged_tma", x, f32, use_tma=True, ragged_vector=True
+                    )
 
     @parametrize(
         "axis,kwargs,msg",
@@ -721,7 +722,7 @@ class TestKernelRowTile(TestCase):
             (base[:, :0], "nonempty rows"),
         )
         for x, msg in cases:
-            with self.assertRaisesRegex(ValueError, msg):
+            with self.subTest(msg=msg), self.assertRaisesRegex(ValueError, msg):
                 rt.reduce_row_tile(
                     trait, "ragged_misaligned", x, [torch.float32], ragged_vector=True
                 )
