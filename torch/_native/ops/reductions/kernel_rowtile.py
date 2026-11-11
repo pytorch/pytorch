@@ -420,8 +420,8 @@ class _ItreePlan(NamedTuple):
     # Staged COMBINE only: the count every partial holds (tile.uniform_combine_ok), or 0. The
     # fold derives counts from it, so the count field is not staged.
     combine_count: int = 0
-    # With combine_count, the count's (last) staged field holds partial j's weight
-    # 1 / (j + 1) in one row shared by the block.
+    # With combine_count, a row shared by the block holds the current tile's weights,
+    # 1 / (index + 1) for each partial's global index, in the count's slot.
     combine_weights: bool = False
 
     @property
@@ -1051,9 +1051,10 @@ def reduce_row_tile(
     """Reduce 2-D `x` rows, returning outputs or raw field partials when `final=False`.
 
     x's device must be current. `ragged_vector` asks for aligned wide loads with scalar
-    edges (one kernel per N) and rejects empty rows, order="inner_tree" and TMA for every
-    N. Rows of whole 16-byte vectors otherwise fall through to normal path selection;
-    ragged rows need a contiguous, 16-byte aligned input.
+    edges (one kernel per N) and rejects empty rows, order="inner_tree" and use_tma=True
+    for every N. Rows of whole 16-byte vectors otherwise fall through to normal path
+    selection; ragged rows need a contiguous, 16-byte aligned input. For ragged N, a
+    row's scalar prefix depends on its index, so identical rows can round differently.
     """
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
@@ -1149,7 +1150,6 @@ def reduce_row_tile(
         final=final,
         unroll=unroll,
         use_tma=use_tma,
-        vec=tile.TRANSFER_ALIGNMENT // isz if ragged_vector else None,
         ragged_vector=ragged_vector,
     )
 
@@ -1166,7 +1166,7 @@ def reduce_row_tile(
     align = (
         tile.TRANSFER_ALIGNMENT
         if use_tma or ragged_vector
-        else _L.supported_alignment(x, tile.align_bytes(N, isz))
+        else min(full_align, tile.align_bytes(N, isz))
     )
 
     def _fake():
