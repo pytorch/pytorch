@@ -166,7 +166,7 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 
 When a PR adds CI (a workflow, job, matrix or matrix entry) or changes a CI runner label, even if only its prefix changes:
 
-- [ ] **Runner naming standard** — PR adds or changes a runner label, or adds CI that inherits one from an input, matrix or dispatch default or option, and the label breaks the runner naming standard in [ci-runner-naming.md](ci-runner-naming.md). If no other CI in this repo uses that label, this always means **Request Changes**; if other CI already uses it, give a short non-blocking heads-up instead (an exception to "Everything is a must-fix")
+- [ ] **Runner naming standard** — PR adds or changes a runner label, or adds CI that inherits one from an input, matrix or dispatch default or option, and the label breaks the runner naming standard in [ci-runner-naming.md](ci-runner-naming.md). If no other CI in this repo uses that label, this always means **Request Changes**; if other CI already uses it, give a short non-blocking heads-up instead
 
 ### CI Dependencies
 
@@ -255,7 +255,7 @@ This is particularly important for PyTorch's autograd, which has multi-threaded 
 
 - [ ] **GIL held for Python object access** - Any code that touches `PyObject*` (incref, decref, attribute access, container mutation) must hold the GIL. When releasing the GIL for long-running C++ work (`Py_BEGIN_ALLOW_THREADS`), verify no Python objects are accessed in that region
 - [ ] **Borrowed references across GIL release** - Borrowed references (`PyTuple_GET_ITEM`, `PyList_GET_ITEM`) become unsafe if the GIL is released and reacquired, since another thread may have mutated the container
-- [ ] **Decref-before-update hazard** - When replacing an item in a container (tuple, list, dict), update the container slot first, then `Py_DECREF` the old value. Decref can trigger `__del__` finalizers that re-enter and observe the container in an inconsistent state. Without the GIL (free-threaded builds), this is also a data race. This is **always** a must-fix — even if "safe in practice" because of refcount guarantees, the pattern is wrong and breaks under NoGIL. The correct pattern costs nothing extra
+- [ ] **Decref-before-update hazard** - When replacing an item in a container (tuple, list, dict), update the container slot first, then `Py_DECREF` the old value. Decref can trigger `__del__` finalizers that re-enter and observe the container in an inconsistent state. Without the GIL (free-threaded builds), this is also a data race. This is **always** blocking — even if "safe in practice" because of refcount guarantees, the pattern is wrong and breaks under NoGIL. The correct pattern costs nothing extra
 
 ### Free-Threaded Python (NoGIL, PEP 703)
 
