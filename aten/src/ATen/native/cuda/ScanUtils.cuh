@@ -1503,7 +1503,12 @@ __host__ void scan_outer_dim(const TensorBase& self, const TensorBase& result,
   check_fits_in_unsigned(num_orows, "num_orows");
   check_fits_in_unsigned(row_size, "row_size");
 #if defined(USE_ROCM)
-  if constexpr (sizeof(scalar_t) <= 8) {
+  // Complex logcumsumexp never wraps the phase of a partial result, so a tiled scan can return
+  // imaginary parts 2*pi*k away from the serial fold below, which matches CPU.
+  constexpr bool kComplexLogAddExp = c10::is_complex<scalar_t>::value &&
+      !std::is_same_v<BinaryFunction, std::plus<scalar_t>> &&
+      !std::is_same_v<BinaryFunction, std::multiplies<scalar_t>>;
+  if constexpr (sizeof(scalar_t) <= 8 && !kComplexLogAddExp) {
     if (outer_scan::should_use<scalar_t>(num_orows, row_size, num_irows)) {
       outer_scan::launch<scalar_t>(
           result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),

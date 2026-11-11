@@ -3286,8 +3286,10 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(shape, dtype=dtype, device=device)
             expected = torch.logcumsumexp(x.cpu().to(ref_dtype), dim).to(dtype)
             tol = {}
-            if not TEST_WITH_ROCM and dtype in (torch.float, torch.complex64) and shape[dim] > 4096:
-                # CUDA scans each column serially, so float32 rounding error grows with the scan length.
+            serial = dtype == torch.complex64 or (dtype == torch.float and not TEST_WITH_ROCM)
+            if serial and shape[dim] > 4096:
+                # These columns are scanned serially (complex64 keeps the serial kernel on ROCm so its
+                # imaginary parts match CPU), so float32 rounding error grows with the scan length.
                 tol = {"atol": 1e-5, "rtol": 2e-5}
             self.assertEqual(torch.logcumsumexp(x, dim), expected, **tol)
 
