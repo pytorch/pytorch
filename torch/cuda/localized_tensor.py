@@ -14,9 +14,10 @@ register additional ops.
 Typical use::
 
     model = MyModel().cuda()
-    torch.cuda.localize(model)  # rewrites Linears in place
-    # or:
-    model = torch.cuda.localize(MyModel().cuda())
+    with torch.inference_mode():
+        torch.cuda.localize(model)  # rewrites Linears in place
+        # or:
+        model = torch.cuda.localize(MyModel().cuda())
 
 The tensor subclass (:class:`_LocalizedTensor`) and the per-device
 handle (:class:`_LocalizationContext`) are internal -- callers should
@@ -50,8 +51,8 @@ __all__ = ["localize", "register_localizable_op"]
 class _StreamSet:
     """One localized tensor's streams plus its fork/join sync events.
 
-    Held directly on the ``_LocalizedTensor`` instance; every tensor (including
-    one produced by ``detach``) gets its own fresh set, never shared.
+    Each tensor, including one produced by ``detach``, owns its events.
+    Stream handles come from shared green-context stream pools.
     """
 
     def __init__(
@@ -77,12 +78,9 @@ class _LocalizationContext:
     This context should *not* be used to cache data as it is intended to have a
     longer lifetime.
 
-    Streams and sync events are *per logical localized tensor*, never shared
-    across tensors -- sharing them would serialize independent sites' work on a
-    common FIFO and risk deadlock if the user relies on inter-stream sync to
-    break a cross-site dependency cycle.  They live directly on each
-    ``_LocalizedTensor`` -- every tensor gets its own fresh set (the context
-    only mints them via :meth:`_make_stream_set`).
+    Each ``_LocalizedTensor`` owns its fork/join events. Stream handles come
+    from each green context's round-robin pool, so different tensors may use
+    the same underlying CUDA stream.
     """
 
     def __init__(
@@ -282,7 +280,7 @@ class _LocalizedTensor(torch.Tensor):
     ``MemPool``s. ``__torch_dispatch__`` runs the ops registered
     in :data:`_LOCALIZABLE_OPS` as parallel branches on green-context-backed
     streams and concatenates the results. Concatenation always happens along
-    dimension 0.
+    dimension -1.
     """
 
     @staticmethod
@@ -383,11 +381,8 @@ class _LocalizedTensor(torch.Tensor):
 
     # ``__torch_dispatch__`` handles the lower-level ops that still touch a
     # _LocalizedTensor: ``detach`` (preserved subclass type) and the slow-path
-    # fallback that reifies by concatenation.  Pushing pointwise tails onto
-    # the per-branch streams (the "packing" optimization) is the
-    # responsibility of a separate post-grad pass --
-    # ``torch._inductor.fx_passes.pack_pointwise_after_cat`` -- not this
-    # subclass.
+    # fallback that reifies by concatenation. Pointwise tails consume the
+    # concatenated output; this subclass does not move them to branch streams.
     @classmethod
     # pyrefly: ignore [bad-override]
     def __torch_dispatch__(
@@ -768,9 +763,10 @@ def localize(
     Example::
 
         model = MyModel().cuda()
-        torch.cuda.localize(model)  # in place
-        # or
-        model = torch.cuda.localize(MyModel().cuda())  # chained
+        with torch.inference_mode():
+            torch.cuda.localize(model)  # in place
+            # or
+            model = torch.cuda.localize(MyModel().cuda())  # chained
     """
     import torch.nn as nn
 
