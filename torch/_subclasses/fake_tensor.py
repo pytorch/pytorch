@@ -52,6 +52,7 @@ from torch.types import IntLikeType, py_sym_types
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     _cpp_fake_mode_tls,
+    _set_in_torch_dispatch_mode,
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
     TraceableWrapperSubclass,
@@ -1102,7 +1103,8 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         if type(self) is not CppFakeTensorMode:
             raise TypeError("Expected a CppFakeTensorMode, not a subclass")
         state = _enter_fake_mode(self, lambda: torch._C._set_dispatch_mode(self))
-        _cpp_fake_mode_tls.stack.append((self, state))
+        prev_in_mode = _set_in_torch_dispatch_mode(True) if state[0] else None
+        _cpp_fake_mode_tls.stack.append((self, state, prev_in_mode))
         return self
 
     def __exit__(
@@ -1122,7 +1124,9 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
             raise RuntimeError(
                 "CppFakeTensorMode exited while another fake mode is installed over it"
             )
-        _, state = stack.pop()
+        _, state, prev_in_mode = stack.pop()
+        if prev_in_mode is not None:
+            _set_in_torch_dispatch_mode(prev_in_mode)
         _exit_fake_mode(state, self._uninstall)
 
     def _uninstall(self) -> None:
