@@ -2070,6 +2070,19 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                         ]
                     )
                     side_effect_occurred = True
+            elif isinstance(var, variables.UserDefinedClassVariable):
+                # Replay type.__delattr__, which is what was traced, so that a
+                # metaclass __delattr__ does not run twice. An entry that only
+                # existed during tracing needs no replay.
+                if name in var.value.__dict__:
+                    cg.load_import_from("builtins", "type")
+                    cg.load_method("__delattr__")
+                    cg(var.source)  # type: ignore[attr-defined]
+                    cg(variables.ConstantVariable.create(name))
+                    ctx.suffixes.append(
+                        [*create_call_method(2), create_instruction("POP_TOP")]
+                    )
+                    side_effect_occurred = True
             # GENERIC_SETATTR deletions on UDOV fall through to the normal
             # DELETE_ATTR path below so descriptor semantics are preserved
             # during replay.

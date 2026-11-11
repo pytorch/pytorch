@@ -412,6 +412,16 @@ class SuperVariable(VariableTracker):
         ):
             # type: ignore[arg-type]
             return self.objvar.method_setattr_standard(tx, *args, **kwargs)
+        elif (
+            isinstance(self.objvar, variables.UserDefinedClassVariable)
+            and inner_fn == type.__delattr__.__get__(self.objvar.value)
+            and len(args) == 1
+            and not kwargs
+            and args[0].is_python_constant()
+        ):
+            # super().__delattr__ inside a metaclass __delattr__ (e.g.
+            # EnumType's) resolves to type.__delattr__ bound to the class.
+            return self.objvar.type_delattr(tx, args[0])
         elif inner_fn is object.__delattr__:
             attr = args[0]
             try:

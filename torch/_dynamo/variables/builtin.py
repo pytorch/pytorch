@@ -3150,6 +3150,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         obj: VariableTracker,
         name_var: VariableTracker,
     ) -> VariableTracker:
+        # `del cls.name` calls type(cls).__delattr__(cls, name). call_method would
+        # look __delattr__ up on cls itself and find the unbound object.__delattr__.
+        if (
+            isinstance(obj, variables.UserDefinedClassVariable)
+            and obj.lookup_metaclass_attr("__delattr__") is type.__delattr__
+            and name_var.is_python_constant()
+        ):
+            return obj.type_delattr(tx, name_var)
         return obj.call_method(tx, "__delattr__", [name_var], {})
 
     def call_type(
