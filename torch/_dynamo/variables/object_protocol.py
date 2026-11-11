@@ -2318,6 +2318,36 @@ def mro_attr_source(
     return None
 
 
+def _is_skipped_constant_property(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: str,
+) -> bool:
+    if type(name) is not str:
+        return False
+    obj = obj.realize()
+    if (
+        not variables.ConstantVariable.is_constant_vt(obj)
+        or tx.output.side_effects.has_pending_mutation_of_attr(obj, name)
+        or obj.lookup_tp_getset_member(name) is not None
+    ):
+        return False
+    type_attr = mro_lookup(obj.python_type(), name)
+    if type(type_attr) is not property:
+        return False
+    # Python getters can have specialized SkipFunctionVariable handlers.
+    if isinstance(type_attr.fget, types.FunctionType):
+        return False
+    prop_source = (
+        mro_attr_source(tx, obj.python_type(), TypeSource(obj.source), name)
+        if obj.source
+        else None
+    )
+    prop_vt = variables.PropertyVariable.create(type_attr, prop_source)
+    fget_vt = prop_vt.tp_getattro_impl(tx, "fget").realize()
+    return isinstance(fget_vt, variables.SkipFunctionVariable)
+
+
 def _resolve_descriptor_get(
     tx: "InstructionTranslatorBase",
     type_attr: object,

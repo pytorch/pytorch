@@ -17,14 +17,14 @@ class DeterminationTest(TestCase):
     # Test determination on a subset of tests
     TESTS = [
         "test_nn",
-        "test_jit_profiling",
-        "test_jit",
+        "test_mkldnn_fusion",
+        "test_tensorexpr",
         "test_torch",
         "test_cpp_extensions_aot_ninja",
         "test_cpp_extensions_aot_no_ninja",
         "test_utils",
         "test_determination",
-        "test_quantization",
+        "quantization/eager/test_quantize_eager_ptq",
     ]
 
     @classmethod
@@ -52,14 +52,14 @@ class DeterminationTest(TestCase):
     def test_classifies_git_style_paths(self):
         """Git-style paths use / even on Windows"""
         self.assertEqual(test_impact_of_file("torch/nn/modules/linear.py"), "TORCH")
-        self.assertEqual(test_impact_of_file("test/test_jit.py"), "TEST")
+        self.assertEqual(test_impact_of_file("test/test_tensorexpr.py"), "TEST")
         self.assertEqual(test_impact_of_file("caffe2/python/core.py"), "CAFFE2")
         self.assertEqual(test_impact_of_file(".ci/pytorch/test.sh"), "CI")
 
     def test_classifies_windows_style_paths(self):
         """Windows-style paths are still accepted"""
         self.assertEqual(test_impact_of_file(r"torch\nn\modules\linear.py"), "TORCH")
-        self.assertEqual(test_impact_of_file(r"test\test_jit.py"), "TEST")
+        self.assertEqual(test_impact_of_file(r"test\test_tensorexpr.py"), "TEST")
         self.assertEqual(test_impact_of_file(r"caffe2\python\core.py"), "CAFFE2")
         self.assertEqual(test_impact_of_file(r".ci\pytorch\test.sh"), "CI")
 
@@ -107,29 +107,25 @@ class DeterminationTest(TestCase):
     def test_test_file(self):
         """Test files trigger themselves and dependent tests"""
         self.assertEqual(
-            self.determined_tests(["test/test_jit.py"]),
-            ["test_jit_profiling", "test_jit"],
+            self.determined_tests(["test/test_tensorexpr.py"]),
+            ["test_mkldnn_fusion", "test_tensorexpr"],
         )
         self.assertEqual(
-            self.determined_tests(["test/jit/test_custom_operators.py"]),
-            ["test_jit_profiling", "test_jit"],
+            self.determined_tests(["test/test_mkldnn_fusion.py"]),
+            ["test_mkldnn_fusion"],
         )
         self.assertEqual(
             self.determined_tests(
                 ["test/quantization/eager/test_quantize_eager_ptq.py"]
             ),
-            ["test_quantization"],
+            ["quantization/eager/test_quantize_eager_ptq"],
         )
 
     def test_test_internal_file(self):
         """testing/_internal files trigger dependent tests"""
         self.assertEqual(
             self.determined_tests(["torch/testing/_internal/common_quantization.py"]),
-            [
-                "test_jit_profiling",
-                "test_jit",
-                "test_quantization",
-            ],
+            ["quantization/eager/test_quantize_eager_ptq"],
         )
 
     def test_torch_file(self):
