@@ -768,6 +768,7 @@ def localize(
             model = torch.cuda.localize(MyModel().cuda())  # chained
     """
     import torch.nn as nn
+    from torch.nn.utils.parametrize import is_parametrized
 
     if not torch.is_inference_mode_enabled():
         raise RuntimeError(
@@ -878,6 +879,13 @@ def localize(
             # reparameterization -- so skip anything not inheriting it verbatim.
             if type(child).forward is not module_type.forward:
                 continue
+            for name in param_names:
+                if is_parametrized(child, name):
+                    raise NotImplementedError(
+                        f"localize() does not support parametrized {name}: "
+                        "the tensor may be recomputed on access, so localizing "
+                        "it would not affect subsequent forwards."
+                    )
             for name in param_names:
                 p = getattr(child, name, None)
                 if p is not None:

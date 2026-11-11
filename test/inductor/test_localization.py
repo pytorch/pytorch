@@ -473,6 +473,15 @@ class TestLocalizeContract(TestCase):
         self.assertIs(ret, m)
 
     @_requires_cuda
+    def test_localize_rejects_weight_norm(self):
+        from torch.nn.utils.parametrizations import weight_norm
+
+        with torch.inference_mode():
+            lin = weight_norm(nn.Linear(8, 8, device="cuda"))
+            with self.assertRaisesRegex(NotImplementedError, "parametrized weight"):
+                torch.cuda.localize(lin)
+
+    @_requires_cuda
     @_requires_green_contexts
     def test_localize_graph_module(self):
         """localize() also accepts a torch.fx.GraphModule (e.g. from
