@@ -30,6 +30,8 @@ class TORCH_API OperatorHandle;
 // Enter/exit calls are properly nested, so a sink can rebuild the call tree.
 // RecordFunction observers see a call as they do without a sink. inputs and
 // outputs are only valid during the callback: a sink copies what it keeps.
+// A boxed call of an operator without a schema, or with variadic arguments,
+// reports its whole stack, which can hold values of the caller underneath.
 // Sinks must not throw and must not call back into the dispatcher.
 class TORCH_API DispatchCaptureSink {
  public:
