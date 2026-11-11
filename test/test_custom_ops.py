@@ -6308,19 +6308,17 @@ class TestLibrarySourceLocation(TestCase):
             calls.append(True)
             return a.new_empty((a.shape[0], b.shape[1]))
 
-        with (
-            torch.library._scoped_library("quantized", "FRAGMENT") as lib,
-            patch.dict(sys.modules, registered),
-        ):
+        with torch.library._scoped_library("quantized", "FRAGMENT") as lib:
             module.__dict__.update(torch=torch, lib=lib, fake=fake)
-            exec(
-                compile(
-                    'torch.library.register_fake("quantized::add", fake, lib=lib)',
-                    filename,
-                    "exec",
-                ),
-                module.__dict__,
-            )
+            with patch.dict(sys.modules, registered):
+                exec(
+                    compile(
+                        'torch.library.register_fake("quantized::add", fake, lib=lib)',
+                        filename,
+                        "exec",
+                    ),
+                    module.__dict__,
+                )
             with torch._subclasses.fake_tensor.FakeTensorMode():
                 a, b = torch.empty(2, 3), torch.empty(3, 5)
                 if caller.startswith("mismatched"):
