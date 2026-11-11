@@ -933,11 +933,147 @@ class TestFlopCounterDevice(TestCase):
         self.assertEqual(gqa_flops, mha_flops)
         self.assertTrue(gqa_flops > 0)
 
+    @requires_capabilities(Capability.attention.flash_attention)
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2853")
+    def test_nested_attention_fake_tensors(self, device):
+        x = torch.randn(123, 4, 16, device=device, dtype=torch.bfloat16)
+        offsets = torch.tensor([0, 30, 60, 90, 123], device=device)
+        max_seqlen = 40
+        with FakeTensorMode() as fake_mode:
+            fake_x = fake_mode.from_tensor(x)
+            fake_offsets = fake_mode.from_tensor(offsets)
+
+            with FlopCounterMode() as fake_flop_counter_mode:
+                torch.ops.aten._flash_attention_forward(
+                    fake_x,
+                    fake_x,
+                    fake_x,
+                    fake_offsets,
+                    fake_offsets,
+                    max_seqlen,
+                    max_seqlen,
+                    0.0,
+                    False,
+                    False,
+                )
+
+        dense_x = torch.randn(4, 40, 4, 16, dtype=torch.bfloat16, device=device)
+
+        with FlopCounterMode() as real_flop_counter_mode:
+            torch.ops.aten._flash_attention_forward(
+                dense_x,
+                dense_x,
+                dense_x,
+                None,
+                None,
+                max_seqlen,
+                max_seqlen,
+                0.0,
+                False,
+                False,
+            )
+
+        self.assertEqual(
+            int(get_total_flops(fake_flop_counter_mode)),
+            int(get_total_flops(real_flop_counter_mode)),
+        )
+
+    @requires_capabilities(Capability.attention.flash_attention)
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2853")
+    def test_varlen_attn(self, device):
+        import torch.nn.attention.varlen
+
+        n_heads = 8
+        head_dim = 64
+        dtype = torch.float16
+        seq_lens = [128, 64]
+        total_tokens = sum(seq_lens)
+        cu_seqs = torch.tensor(
+            [0] + list(torch.tensor(seq_lens).cumsum(0).tolist()),
+            dtype=torch.int32,
+            device=device,
+        )
+        max_s = max(seq_lens)
+
+        query = torch.randn(
+            total_tokens,
+            n_heads,
+            head_dim,
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        key = torch.randn(
+            total_tokens,
+            n_heads,
+            head_dim,
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        value = torch.randn(
+            total_tokens,
+            n_heads,
+            head_dim,
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+
+        mode = FlopCounterMode()
+        with mode:
+            out, _, _ = torch.ops.torch_attn._varlen_attn(
+                query,
+                key,
+                value,
+                cu_seqs,
+                cu_seqs,
+                max_s,
+                max_s,
+                is_causal=True,
+            )
+        fw_flops = int(get_total_flops(mode))
+        expected_fw = sum(
+            sdpa_flop_count(
+                (1, n_heads, s, head_dim),
+                (1, n_heads, s, head_dim),
+                (1, n_heads, s, head_dim),
+            )
+            for s in seq_lens
+        )
+        self.assertEqual(fw_flops, expected_fw)
+        # 2 bmms per sequence, each 2*h*s*d*s; total = 2048*(128^2 + 64^2) = 41943040
+        self.assertExpectedInline(str(fw_flops), """41943040""")
+
+        mode_bw = FlopCounterMode()
+        with mode_bw:
+            out, _, _ = torch.ops.torch_attn._varlen_attn(
+                query,
+                key,
+                value,
+                cu_seqs,
+                cu_seqs,
+                max_s,
+                max_s,
+                is_causal=True,
+            )
+            out.sum().backward()
+        fw_bw_flops = int(get_total_flops(mode_bw))
+        # fw=2 bmms, bw=5 bmms (flash recomputes scores), fw+bw = fw * 7/2
+        self.assertEqual(fw_bw_flops, fw_flops * 7 // 2)
+        self.assertExpectedInline(str(fw_bw_flops), """146800640""")
+
+
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
+)
+class TestFlopCounterCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @requires_capabilities(
         Capability.attention.flash_attention,
         Capability.attention.mem_efficient_attention,
     )
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3093")
     def test_sdpa_nested_tensor(self, device):
         def get_flops(q, k, v, backend, with_backward=False):
             mode = FlopCounterMode()
@@ -1150,143 +1286,6 @@ class TestFlopCounterDevice(TestCase):
                 with_backward=True,
             ),
         )
-
-    @requires_capabilities(Capability.attention.flash_attention)
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2853")
-    def test_nested_attention_fake_tensors(self, device):
-        x = torch.randn(123, 4, 16, device=device, dtype=torch.bfloat16)
-        offsets = torch.tensor([0, 30, 60, 90, 123], device=device)
-        max_seqlen = 40
-        with FakeTensorMode() as fake_mode:
-            fake_x = fake_mode.from_tensor(x)
-            fake_offsets = fake_mode.from_tensor(offsets)
-
-            with FlopCounterMode() as fake_flop_counter_mode:
-                torch.ops.aten._flash_attention_forward(
-                    fake_x,
-                    fake_x,
-                    fake_x,
-                    fake_offsets,
-                    fake_offsets,
-                    max_seqlen,
-                    max_seqlen,
-                    0.0,
-                    False,
-                    False,
-                )
-
-        dense_x = torch.randn(4, 40, 4, 16, dtype=torch.bfloat16, device=device)
-
-        with FlopCounterMode() as real_flop_counter_mode:
-            torch.ops.aten._flash_attention_forward(
-                dense_x,
-                dense_x,
-                dense_x,
-                None,
-                None,
-                max_seqlen,
-                max_seqlen,
-                0.0,
-                False,
-                False,
-            )
-
-        self.assertEqual(
-            int(get_total_flops(fake_flop_counter_mode)),
-            int(get_total_flops(real_flop_counter_mode)),
-        )
-
-    @requires_capabilities(Capability.attention.flash_attention)
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2853")
-    def test_varlen_attn(self, device):
-        import torch.nn.attention.varlen
-
-        n_heads = 8
-        head_dim = 64
-        dtype = torch.float16
-        seq_lens = [128, 64]
-        total_tokens = sum(seq_lens)
-        cu_seqs = torch.tensor(
-            [0] + list(torch.tensor(seq_lens).cumsum(0).tolist()),
-            dtype=torch.int32,
-            device=device,
-        )
-        max_s = max(seq_lens)
-
-        query = torch.randn(
-            total_tokens,
-            n_heads,
-            head_dim,
-            device=device,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        key = torch.randn(
-            total_tokens,
-            n_heads,
-            head_dim,
-            device=device,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        value = torch.randn(
-            total_tokens,
-            n_heads,
-            head_dim,
-            device=device,
-            dtype=dtype,
-            requires_grad=True,
-        )
-
-        mode = FlopCounterMode()
-        with mode:
-            out, _, _ = torch.ops.torch_attn._varlen_attn(
-                query,
-                key,
-                value,
-                cu_seqs,
-                cu_seqs,
-                max_s,
-                max_s,
-                is_causal=True,
-            )
-        fw_flops = int(get_total_flops(mode))
-        expected_fw = sum(
-            sdpa_flop_count(
-                (1, n_heads, s, head_dim),
-                (1, n_heads, s, head_dim),
-                (1, n_heads, s, head_dim),
-            )
-            for s in seq_lens
-        )
-        self.assertEqual(fw_flops, expected_fw)
-        # 2 bmms per sequence, each 2*h*s*d*s; total = 2048*(128^2 + 64^2) = 41943040
-        self.assertExpectedInline(str(fw_flops), """41943040""")
-
-        mode_bw = FlopCounterMode()
-        with mode_bw:
-            out, _, _ = torch.ops.torch_attn._varlen_attn(
-                query,
-                key,
-                value,
-                cu_seqs,
-                cu_seqs,
-                max_s,
-                max_s,
-                is_causal=True,
-            )
-            out.sum().backward()
-        fw_bw_flops = int(get_total_flops(mode_bw))
-        # fw=2 bmms, bw=5 bmms (flash recomputes scores), fw+bw = fw * 7/2
-        self.assertEqual(fw_bw_flops, fw_flops * 7 // 2)
-        self.assertExpectedInline(str(fw_bw_flops), """146800640""")
-
-
-@unittest.skipIf(
-    TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
-)
-class TestFlopCounterCUDA(TestCase):
-    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION
@@ -1938,17 +1937,17 @@ class TestSkipUnsupportedDevice(TestCase):
 
 instantiate_parametrized_tests(TestFlopCounter)
 instantiate_device_type_tests(
-    TestFlopCounterDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+    TestFlopCounterDevice, globals(), except_for=("cpu",), allow_xpu=True
 )
 instantiate_device_type_tests(TestFlopCounterCUDA, globals(), only_for="cuda")
 instantiate_device_type_tests(
     TestFlexAttentionEstimationDevice,
     globals(),
-    only_for=("cuda", "xpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestSkipUnsupportedDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+    TestSkipUnsupportedDevice, globals(), except_for=("cpu",), allow_xpu=True
 )
 
 
