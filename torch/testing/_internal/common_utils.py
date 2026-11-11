@@ -143,8 +143,10 @@ class HardwareClassification(Enum):
     * ``GENERIC`` – tests that exercise shared, device-agnostic logic
       (e.g. Dynamo dispatcher, FX passes, and other framework internals
       that do not depend on a particular accelerator).  These test classes
-      typically do **not** use
+      must **not** use
       :func:`~torch.testing._internal.common_utils.instantiate_device_type_tests`.
+      Most CUDA and ROCm CI jobs skip them, so they must not use an
+      accelerator (see Rule 3 in test/REVIEW.md).
 
     * ``ACCELERATOR`` – tests that verify behavior which must hold
       across every accelerator (e.g. operator semantics, memory profiling).
@@ -509,6 +511,8 @@ def _parse_hw_classification_exclude(val: str | None) -> frozenset[HardwareClass
 # test.sh runs some test files directly rather than through run_test.py, and a
 # job-level environment variable reaches those too. It is left out of repro
 # commands, since a test that ran wasn't excluded, but reports record it.
+# Most CUDA and ROCm CI jobs set GENERIC (see .ci/pytorch/test.sh), since CPU
+# jobs run those classes.
 HW_CLASSIFICATION_EXCLUDE: frozenset[HardwareClassification] = TestEnvironment.def_setting(
     "HW_CLASSIFICATION_EXCLUDE",
     env_var=_HW_CLASSIFICATION_EXCLUDE_ENV_VAR,
