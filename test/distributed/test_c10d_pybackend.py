@@ -15,6 +15,7 @@ from torch._C._distributed_c10d import (
     ErrorType,
     FakeStore,
     ReconfigureOptions,
+    WorkResult,
 )
 from torch.distributed.distributed_c10d import (
     _coalescing_manager,
@@ -695,6 +696,42 @@ class TestPyBackend(TestCase):
         work.synchronize()
         work.block_current_stream()
         self.assertEqual(calls, ["synchronize", "block_current_stream"])
+
+    def test_work_future_result(self) -> None:
+        backend = RecordingBackend(0, 1)
+        group = create_process_group(backend)
+
+        # get_future alone doesn't provide a result.
+        work = group.allreduce([torch.zeros(2)])
+        with self.assertRaisesRegex(
+            NotImplementedError, "getFutureResult not implemented"
+        ):
+            work.get_future_result()
+
+        pending = torch.futures.Future()
+
+        class ResultWork(RecordingWork):
+            def get_future_result(self):
+                return pending
+
+        backend._new_work = lambda result=None: ResultWork(result, backend)
+        result = group.allreduce([torch.zeros(2)]).get_future_result()
+        self.assertFalse(result.done())
+        pending.set_result(int(WorkResult.TIMEOUT))
+        self.assertEqual(WorkResult(result.wait()), WorkResult.TIMEOUT)
+
+        class NoneWork(RecordingWork):
+            def get_future_result(self):
+                return None
+
+        backend._new_work = lambda result=None: NoneWork(result, backend)
+        work = group.allreduce([torch.zeros(2)])
+        with self.assertRaisesRegex(
+            TypeError,
+            r"NoneWork.get_future_result\(\) must return a torch.futures.Future, "
+            "got NoneType",
+        ):
+            work.get_future_result()
 
     def test_collective_returns_none(self) -> None:
         backend = RecordingBackend(0, 1)
