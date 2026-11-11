@@ -38,7 +38,7 @@ void _local_scalar_dense_cuda_impl(const Tensor& self, Scalar& r) {
 #if ROCM_VERSION < 71400
     hipStreamCaptureStatus captureStatus;
     C10_CUDA_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
-    if (C10_LIKELY(captureStatus == hipStreamCaptureStatusNone)) {
+    if (captureStatus == hipStreamCaptureStatusNone) [[likely]] {
       at::cuda::stream_synchronize(stream);
       r = Scalar(*self.template const_data_ptr<scalar_t>());
     } else {
