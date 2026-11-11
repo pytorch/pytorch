@@ -4681,7 +4681,7 @@ def handle_traced_output(
         return EventVariable(proxy, example_value, None, **options)
     elif proxy.node.target == "query" and proxy.node.op == "call_method":
         set_example_value(proxy.node, example_value)
-        return ConstantVariable(example_value, **options)
+        return ConstantVariable.create(example_value, **options)
     elif (
         example_value is not None
         and isinstance(example_value, torch.Event)
@@ -6043,7 +6043,7 @@ class SourcelessBuilder:
             type, Callable[[InstructionTranslatorBase, Any], VariableTracker]
         ] = {}
         for t in common_constant_types:
-            handlers[t] = lambda tx, value: ConstantVariable(value)
+            handlers[t] = lambda tx, value: ConstantVariable.create(value)
         handlers[set] = lambda tx, value: SetVariable(
             [create(tx, x) for x in value], mutation_type=ValueMutationNew()
         )
