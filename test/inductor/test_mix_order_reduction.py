@@ -778,10 +778,16 @@ class MixOrderReductionTest(TestBase):
     def _run_absorbing_producers(self, f, args, absorb=True):
         torch._dynamo.reset()
         metrics.reset()
-        with mock.patch.object(
-            FusedMixOrderReductions,
-            "can_fuse_producer",
-            FusedMixOrderReductions.can_fuse_producer if absorb else lambda *_: False,
+        # the patch is not part of the cache key, so a cached graph would be reused
+        with (
+            mock.patch.object(
+                FusedMixOrderReductions,
+                "can_fuse_producer",
+                FusedMixOrderReductions.can_fuse_producer
+                if absorb
+                else lambda *_: False,
+            ),
+            inductor_config.patch(force_disable_caches=True),
         ):
             out, (code,) = utils.run_and_get_code(torch.compile(f), *args)
         return out, code.count("@triton.jit"), metrics.codegen_mix_order_reduction
