@@ -624,12 +624,12 @@ def reduce_ordered_col(
         return None
     # Single-field traits replay all 32 lanes' leaves statically, compiling in 0.35 s at
     # R = 2048 (fp32/bf16, C = 2048). With per-load stride copies, unmasked replays of
-    # 512 leaves per warp (looped R = 8192, whole split partitions at R = 32768-131072)
-    # compile in 1.5-2.4 s instead of 9.2-10.2 s (B200 fp32/bf16/fp16 sums, fp32/bf16
-    # amax). Multi-field traits roll lanes but replay a static lane tree per load,
-    # taking 1.3 s at R = 8192 and 2.5-3.1 s at R = 8193-16384 (fp32). The indexed tree
-    # takes 0.3-0.75 s, so cap replays at tile.MAX_UNROLL leaves (looped rows up to
-    # 8192).
+    # 512 leaves per warp (looped R = 8192, full-tile split partitions at
+    # R = 32768-131072) compile in 1.5-2.4 s instead of 9.2-10.2 s (B200 fp32/bf16/fp16
+    # sums, fp32/bf16 amax). Multi-field traits roll lanes but replay a static lane tree
+    # per load, taking 1.3 s at R = 8192 and 2.5-3.1 s at R = 8193-16384 (fp32). The
+    # indexed tree takes 0.3-0.75 s, so cap replays at tile.MAX_UNROLL leaves (looped
+    # rows up to 8192).
     # Plans past one planner batch always exceed the cap.
     if sum(b[2] for b in plan.batches) * WARP * plan.vec > tile.MAX_UNROLL:
         return None
@@ -658,6 +658,8 @@ def reduce_ordered_col(
             if split:
                 return None
             config = OrderedColConfig(0)
+        else:
+            _check_ordered_mapping(config.worker_warps, config.tile_columns)
     op = _OrderedColReduce(
         trait,
         plan,
