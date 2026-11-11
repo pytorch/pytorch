@@ -87,6 +87,7 @@ class TileMap:
             )
         self.N = N
         # Fixed DAGs pass an N-independent vec; deriving it from N would change bits.
+        # Ragged vector rows pass the load width of their aligned interior.
         self.vec = vec_size(N, itemsize) if vec is None else vec
         self.threads_per_row = threads_per_row
         self.loads = loads
@@ -99,6 +100,7 @@ class TileMap:
             else exact
         )
         # vec must divide N to align every row and chunk; otherwise load by element.
+        # Ragged vector rows ignore wide_ok and load their aligned interior vec wide.
         self.wide_ok = N % self.vec == 0
 
     @property
