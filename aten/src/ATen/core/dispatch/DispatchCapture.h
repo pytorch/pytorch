@@ -12,9 +12,10 @@ namespace c10 {
 class TORCH_API OperatorHandle;
 
 // A DispatchCaptureSink observes the kernel invocations the dispatcher makes
-// on the thread it is installed on. For now that covers Dispatcher::call and
-// Dispatcher::redispatch; the boxed entry points (callBoxed, redispatchBoxed)
-// do not report yet. Unlike a mode dispatch key, which only
+// on the thread it is installed on. For now that is those of Dispatcher::call
+// and Dispatcher::redispatch: the boxed entry points (callBoxed,
+// redispatchBoxed) do not report yet, so a chain that goes through a boxed
+// fallback ends early. Unlike a mode dispatch key, which only
 // sees the entry of a call, a sink sees each step of the resolution chain: a
 // call reports the DispatchKeySet computed by key extraction, and every
 // redispatch made by the kernels underneath (Autograd -> ADInplaceOrView ->
@@ -24,6 +25,8 @@ class TORCH_API OperatorHandle;
 // torch.cfg_compile).
 //
 // Enter/exit calls are properly nested, so a sink can rebuild the call tree.
+// RecordFunction observers see a call as they do without a sink. inputs and
+// outputs are only valid during the callback: a sink copies what it keeps.
 // Sinks must not throw and must not call back into the dispatcher.
 class TORCH_API DispatchCaptureSink {
  public:
@@ -43,7 +46,8 @@ class TORCH_API DispatchCaptureSink {
 };
 
 // Installs sink on the current thread (nullptr uninstalls) and returns the
-// previously installed one.
+// previously installed one. A thread has to uninstall its sink before it
+// exits: only that takes it out of the count below.
 TORCH_API DispatchCaptureSink* setDispatchCaptureSink(
     DispatchCaptureSink* sink);
 

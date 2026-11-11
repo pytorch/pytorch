@@ -3,7 +3,9 @@
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/DispatchCapture.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/record_function.h>
 
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -63,6 +65,31 @@ struct Installed {
   c10::DispatchCaptureSink* prev;
 };
 
+c10::OperatorHandle addTensor() {
+  return c10::Dispatcher::singleton().findSchemaOrThrow("aten::add", "Tensor");
+}
+
+// What RecordFunction observers are told while a sink is installed.
+int observed_starts = 0;
+size_t observed_outputs = 0;
+
+std::unique_ptr<at::ObserverContext> onStart(const at::RecordFunction& /*fn*/) {
+  observed_starts++;
+  return nullptr;
+}
+
+void onEnd(const at::RecordFunction& fn, at::ObserverContext* /*ctx*/) {
+  observed_outputs += fn.outputs().size();
+}
+
+at::CallbackHandle observe(bool needs_outputs) {
+  observed_starts = 0;
+  observed_outputs = 0;
+  return at::addThreadLocalCallback(at::RecordFunctionCallback(onStart, onEnd)
+                                        .needsOutputs(needs_outputs)
+                                        .scopes({at::RecordScope::FUNCTION}));
+}
+
 TEST(DispatchCaptureTest, CallReportsEveryStepOfTheChain) {
   const auto x = at::ones({3});
   const auto y = at::ones({3});
@@ -107,6 +134,26 @@ TEST(DispatchCaptureTest, ThrowingKernelReportsItsExit) {
     EXPECT_EQ(e.num_outputs, 0u);
   }
   EXPECT_EQ(sink.depth, 0);
+}
+
+TEST(DispatchCaptureTest, RecordFunctionObserversStillSeeTheCall) {
+  const auto x = at::ones({3});
+  const auto add = addTensor().typed<at::Tensor(
+      const at::Tensor&, const at::Tensor&, const at::Scalar&)>();
+  for (const bool needs_outputs : {false, true}) {
+    const auto handle = observe(needs_outputs);
+    RecordingSink sink;
+    {
+      Installed installed(&sink);
+      add.call(x, x, 1);
+    }
+    at::removeCallback(handle);
+    EXPECT_EQ(observed_starts, 1);
+    EXPECT_EQ(observed_outputs, needs_outputs ? 1u : 0u);
+    ASSERT_FALSE(sink.enters.empty());
+    EXPECT_FALSE(sink.enters.front().is_redispatch);
+    EXPECT_EQ(sink.exits.size(), sink.enters.size());
+  }
 }
 
 TEST(DispatchCaptureTest, InstallReturnsThePreviousSink) {
