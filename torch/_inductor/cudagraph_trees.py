@@ -370,12 +370,8 @@ def mark_warmup_incomplete() -> None:
 
 
 # Registry of externally-managed CUDA MemPools that are tracked.
-# Keyed by device index -> {pool_id: (MemPool, stream)}; the MemPool is held so
-# it stays alive while registered, and ``stream`` is the stream cudagraph_trees
-# should use for that pool's allocations during capture (with None implicitly
-# meaning the default capture stream).
-_RegisteredExternal = tuple[torch.cuda.MemPool, torch.cuda.Stream | None]
-_registered_external: dict[int, dict[tuple[int, int], _RegisteredExternal]] = {}
+# Keyed by device index -> {pool_id: MemPool}; holds pools alive while registered.
+_registered_external: dict[int, dict[tuple[int, int], torch.cuda.MemPool]] = {}
 
 
 def _mempool_device_index(device: int | torch.device | None) -> int:
@@ -388,23 +384,19 @@ def _mempool_device_index(device: int | torch.device | None) -> int:
 
 def register_external_mem_pool(
     pool: torch.cuda.MemPool,
-    stream: torch.cuda.Stream | None = None,
     device: int | torch.device | None = None,
 ) -> None:
     """Register ``pool`` so cudagraph_trees manages it like its private pool.
 
     Allocations from a registered pool made inside a cudagraph-captured region are
-    tracked and checkpointed instead of being reported as leaks. ``stream``, if
-    given, is the stream cudagraph_trees uses for this pool's allocations during
-    capture; it must be stable across recordings so the pool's blocks are reused
-    rather than re-created per stream. Registering the same pool again overwrites
-    the prior ``(pool, stream)`` entry.
+    tracked and checkpointed instead of being reported as leaks. Registering the
+    same pool again overwrites the prior entry.
 
     Note: registering a pool creates a strong reference! The corresponding
     ``deregister_external_mem_pool`` can be used to remove that reference.
     """
     dev = _mempool_device_index(device)
-    _registered_external.setdefault(dev, {})[pool.id] = (pool, stream)
+    _registered_external.setdefault(dev, {})[pool.id] = pool
 
 
 def deregister_external_mem_pool(
@@ -424,14 +416,6 @@ def registered_external_pool_ids(device: int) -> list[tuple[int, int]]:
 
 def is_registered_external(device: int, pool_id: tuple[int, int]) -> bool:
     return pool_id in _registered_external.get(device, {})
-
-
-def registered_external_stream(
-    device: int, pool_id: tuple[int, int]
-) -> torch.cuda.Stream | None:
-    "The capture stream registered for ``pool_id`` on ``device``, if any."
-    entry = _registered_external.get(device, {}).get(pool_id)
-    return entry[1] if entry is not None else None
 
 
 def _managed_pool_ids(device: int, primary: tuple[int, int]) -> list[tuple[int, int]]:
