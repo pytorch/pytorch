@@ -58,6 +58,11 @@ def _contract(trait):
 _CONTRACTS = {key: _contract(trait) for key, trait in _TRAITS.items()}
 
 
+def _contract_name(contract):
+    """A stable test name fragment for a selector contract row."""
+    return f"{contract['trait_type'].__name__}_{contract['nouts']}out"
+
+
 def _served(trait_key):
     """Tags of the row and general plans compiled for trait_key."""
     rows = {k[0] for k in rt._CACHE if k[1] == trait_key}
@@ -160,6 +165,9 @@ class TestReductionConfig(TestCase):
             (torch.float32, 4096, 256, _CONTRACTS["sum"], "inner_tree"),
             (torch.bfloat16, 4096, 2048, _CONTRACTS["mean"], "linear"),
         ],
+        name_fn=lambda dtype, width, mib, contract, expected: (
+            f"{_contract_name(contract)}_{str(dtype)[6:]}_{width}_{mib}mib"
+        ),
     )
     def test_sm107_row_profiles(self, dtype, width, mib, contract, expected):
         """Pin each arm of the SM107 row policy."""
@@ -198,6 +206,9 @@ class TestReductionConfig(TestCase):
             (torch.float32, 256, _CONTRACTS["argmax"], "general_default"),
             (torch.float32, 64, _CONTRACTS["argmax"], "general_default"),
         ],
+        name_fn=lambda dtype, mib, contract, rule: (
+            f"{_contract_name(contract)}_{str(dtype)[6:]}_{mib}mib"
+        ),
     )
     def test_sm107_general_profiles(self, dtype, mib, contract, rule):
         """Pin each distinct SM107 strided policy."""
@@ -280,32 +291,33 @@ class TestReductionConfig(TestCase):
         self.assertEqual(rt.select_row_order(**(args | updates)), "linear")
 
     @parametrize(
-        "dtype,mib,trait_type,fields,nouts,unroll",
+        "dtype,mib,trait,unroll",
         [
-            (torch.float32, 256, T.SumOps, 1, 1, 128),
-            (torch.bfloat16, 2048, T.ArgMaxOps, 2, 1, 128),
-            (torch.float32, 256, T.WelfordOps, 3, 1, 64),
-            (torch.bfloat16, 2048, T.VarMeanOps, 3, 2, 64),
+            (torch.float32, 256, "sum", 128),
+            (torch.bfloat16, 2048, "argmax", 128),
+            (torch.float32, 256, "var", 64),
+            (torch.bfloat16, 2048, "var_mean", 64),
         ],
-        name_fn=lambda dtype, mib, trait_type, *_: f"{trait_type.__name__}_{mib}mib",
+        name_fn=lambda dtype, mib, trait, unroll: f"{trait}_{mib}mib",
     )
-    def test_sm107_full_profiles(self, dtype, mib, trait_type, fields, nouts, unroll):
+    def test_sm107_full_profiles(self, dtype, mib, trait, unroll):
         """Pin each distinct SM107 full-reduction policy branch."""
-        natural = {T.SumOps: torch.float32, T.ArgMaxOps: torch.int64}
-        output = natural.get(trait_type, dtype)
+        contract = _CONTRACTS[trait]
+        trait_type, welford_outs = contract["trait_type"], contract["welford_outs"]
+        nfields, nouts = contract["nfields"], contract["nouts"]
         arch = rt.select_full_itree_arch(
             (10, 7),
             dtype,
             (mib << 20) // dtype.itemsize,
             1,
             trait_type=trait_type,
-            field_bits=(32,) * fields,
-            out_dtypes=(output,) * nouts,
-            welford_outs=nouts if fields == 3 else 0,
+            field_bits=tuple(dt.width for dt in _TRAITS[trait].fdtypes),
+            out_dtypes=kg._sm107_outputs(dtype, trait_type, nfields, nouts),
+            welford_outs=welford_outs,
             alignment=16,
             contiguous=True,
         )
-        welford = fields == 3
+        welford = welford_outs > 0
         want = rt._ItreeArch(
             split_stage_rows=4,
             combine_rpb=32,
