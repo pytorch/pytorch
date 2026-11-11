@@ -965,9 +965,11 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
       " and ",
       other.numel(),
       " elements respectively");
+  // A length-1 vector's stride is unused; dot_cuda and vdot_cuda pass increment one
   TORCH_CHECK(
-      (self.numel() <= INT_MAX) && (self.stride(0) <= INT_MAX) &&
-          (other.stride(0) <= INT_MAX),
+      (self.numel() <= INT_MAX) &&
+          (self.numel() == 1 ||
+           (self.stride(0) <= INT_MAX && other.stride(0) <= INT_MAX)),
       "dot only supports n, incx, incy with the bound [val] <= ",
       INT_MAX);
 }
@@ -1093,13 +1095,11 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
       at::native::copy_(const_cast<Tensor&>(result), *self_);
     }
     if (result.numel() != 0) {
-      auto r_stride = result.stride(0);
-      auto vec_stride = vec.stride(0);
-
-      // Check for contiguity of `vec` and update `vec_stride` accordingly
-      const auto vec_contiguous = vec_stride == 0 ? vec.contiguous() : vec;
-      // A vector can be contiguous and have a stride of zero if it has it is of length 1
-      vec_stride = std::max<int64_t>(vec_contiguous.stride(0), 1LL);
+      // A length-1 vector's increment is never stepped, so pass 1 whatever its
+      // stride; a longer expanded (stride 0) vector must be materialized.
+      const int64_t r_stride = result.size(0) == 1 ? 1 : result.stride(0);
+      const auto vec_contiguous = vec.stride(0) == 0 ? vec.contiguous() : vec;
+      const int64_t vec_stride = vec.size(0) == 1 ? 1 : vec_contiguous.stride(0);
 
       AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, mat.scalar_type(), "addmv_impl_cuda", [&] {
         auto beta = beta_.to<scalar_t>();

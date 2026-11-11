@@ -6412,6 +6412,27 @@ class TestLinalg(TestCase):
         with blas_library_context("cublas"):
             self.assertEqual(torch.bmm(a, b, out=out), torch.bmm(a, b))
 
+    @onlyCUDA
+    def test_mv_out_length_one_stride_zero(self, device):
+        mat, vec = torch.randn(1, 4, device=device), torch.randn(4, device=device)
+        out = torch.empty(1, device=device).as_strided((1,), (0,))
+        self.assertEqual(torch.mv(mat, vec, out=out), (mat * vec).sum(-1))
+
+    @onlyCUDA
+    def test_mv_length_one_vector_large_stride(self, device):
+        mat = torch.randn(3, 1, device=device)
+        vec = torch.randn(1, device=device).as_strided((1,), (2**40,))
+        # contiguous() keeps a size-1 tensor's stride, so use a non-BLAS reference
+        self.assertEqual(torch.mv(mat, vec), (mat * vec).sum(-1))
+
+    @onlyCUDA
+    def test_dot_length_one_large_stride(self, device):
+        a = torch.randn(1, device=device).as_strided((1,), (2**40,))
+        b = torch.randn(1, device=device)
+        self.assertEqual(torch.dot(a, b), (a * b).sum())
+        a, b = a.to(torch.complex64), b.to(torch.complex64)
+        self.assertEqual(torch.vdot(a, b), (a.conj() * b).sum())
+
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,
                         torch.half: 5e-2, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(torch.bfloat16, torch.half))
