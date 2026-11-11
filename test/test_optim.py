@@ -49,6 +49,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     serialTest,
     TEST_WITH_TORCHDYNAMO,
+    TEST_XPU,
     TestCase,
 )
 from torch.utils._pytree import tree_leaves, tree_map_only
@@ -1051,7 +1052,7 @@ class TestOptimRenewed(TestCase):
 
     @onlyAccelerator
     @skipMPS
-    @largeTensorTest("72GB", "cuda")
+    @largeTensorTest("72GB")
     @serialTest()
     @optims(
         [optim for optim in optim_db if "foreach" in optim.supported_impls],
@@ -1118,10 +1119,10 @@ class TestOptimRenewed(TestCase):
                 import gc
 
                 gc.collect()
-                torch.cuda.reset_peak_memory_stats()
+                torch.accelerator.reset_peak_memory_stats()
                 optimizer.step()
                 gc.collect()
-                max_mems.append(torch.cuda.max_memory_allocated())
+                max_mems.append(torch.accelerator.max_memory_allocated())
 
             st_max_mem, mt_max_mem = max_mems
             intermediate_size = nparams * param.nelement() * param.element_size()
@@ -1178,6 +1179,12 @@ class TestOptimRenewed(TestCase):
             # memory usage to account for this.
             if TEST_WITH_ROCM:
                 expected_max_mem *= 1.02
+            elif TEST_XPU:
+                # XPU has no small buffer optimization either: every
+                # multi_tensor_apply launch allocates the tensor address table
+                # and the per-work-group chunk map as device tensors, and both
+                # are under the 512 byte minimum allocation block here.
+                expected_max_mem += 2 * 512
 
             self.assertLessEqual(mt_max_mem, expected_max_mem)
 
@@ -3019,7 +3026,9 @@ class TestOptimizerLoadStateDictContext(TestCase):
         self.assertEqual(asyncio.run(load_states()), [torch.float32, torch.bfloat16])
 
 
-instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
+instantiate_device_type_tests(
+    TestOptimRenewed, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
 
 
