@@ -17,10 +17,10 @@ MatmulParams<idx_t> matmul_params(
     const Tensor& b,
     const Tensor& out) {
   return {
-      .m = c10::safe_conv<uint32_t>(a.size(-2), "uint32_t"),
-      .n = c10::safe_conv<uint32_t>(b.size(-1), "uint32_t"),
+      .m = c10::safe_conv<uint32_t>(a.size(-2), "left matrix row count"),
+      .n = c10::safe_conv<uint32_t>(b.size(-1), "right matrix column count"),
       .k = c10::safe_conv<uint32_t>(
-          std::min(a.size(-1), b.size(-2)), "uint32_t"),
+          std::min(a.size(-1), b.size(-2)), "contraction dimension"),
       .a_stride_m = static_cast<idx_t>(a.stride(-2)),
       .a_stride_k = static_cast<idx_t>(a.stride(-1)),
       .b_stride_k = static_cast<idx_t>(b.stride(-2)),

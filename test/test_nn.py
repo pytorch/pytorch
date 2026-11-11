@@ -96,7 +96,11 @@ def _graph_node_names(grad_fn):
 # CI.
 
 class TestNN(NNTestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: add_test() generates the module tests' *_cuda and
+    # *_xpu variants into this class, and several tests compare against CUDA
+    # when it's available, so it can't be GENERIC until those are split out.
+    # Its tests take no device parameter and the class doesn't use
+    # instantiate_device_type_tests, so it isn't ACCELERATOR either.
 
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -11124,6 +11128,24 @@ class TestNNDeviceType(NNTestCase):
         else:
             self.assertEqual(out1, out2)
 
+    @onlyAccelerator
+    @dtypes(torch.double)
+    @dtypesIfMPS(torch.float)
+    @parametrize_test("batch_size,hidden_size", [(1, 7), (5, 513)])
+    def test_LSTM_batch_and_hidden_sizes(self, device, dtype, batch_size, hidden_size):
+        lstm_cpu = nn.LSTM(11, hidden_size, num_layers=2, bidirectional=True, dtype=dtype)
+        lstm = deepcopy(lstm_cpu).to(device)
+        x_cpu = torch.randn(3, batch_size, 11, dtype=dtype, requires_grad=True)
+        x = x_cpu.detach().to(device).requires_grad_()
+        out_cpu, (h_cpu, c_cpu) = lstm_cpu(x_cpu)
+        out, (h, c) = lstm(x)
+        self.assertEqual(out, out_cpu, atol=1e-4, rtol=1e-4)
+        (out_cpu.sum() + (h_cpu * c_cpu).sum()).backward()
+        (out.sum() + (h * c).sum()).backward()
+        self.assertEqual(x.grad, x_cpu.grad, atol=1e-4, rtol=1e-4)
+        for param, param_cpu in zip(lstm.parameters(), lstm_cpu.parameters()):
+            self.assertEqual(param.grad, param_cpu.grad, atol=1e-4, rtol=1e-4)
+
     @skipMeta  # GRU cell reuses output which was resized
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @dtypes(torch.double)
@@ -17397,8 +17419,8 @@ class TestNNCUDA(NNTestCase):
     def test_linear_cross_entropy_options_auto_defaults_acc_dtype_cuda(self, device):
         """acc_dtype auto resolution on real CUDA hardware: fp32 once the SM
         generation supports it, the input dtype otherwise. Needs actual
-        hardware to query ``get_device_capability``, so this piece can't be
-        GENERIC like the rest of ``test_..._auto_defaults`` (see TestNN).
+        hardware to query ``get_device_capability``, so this piece lives here
+        rather than with the rest of ``test_..._auto_defaults`` in TestNN.
         """
         opts = nn.LinearCrossEntropyOptions()
         major = torch.cuda.get_device_capability(device)[0]
