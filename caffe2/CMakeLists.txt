@@ -1317,11 +1317,6 @@ if(USE_XPU)
     endif()
   endif()
   set(TORCH_XPU_OPS_RESOLVED_COMMIT "${TORCH_XPU_OPS_RESOLVED_COMMIT}" PARENT_SCOPE)
-  if(SKBUILD)
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/xpu.txt" "${TORCH_XPU_OPS_RESOLVED_COMMIT}\n")
-    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/xpu.txt"
-            DESTINATION "${SKBUILD_PLATLIB_DIR}/torch")
-  endif()
 
   set(TORCH_XPU_OPS_INCLUDE_DIRS
       ${TORCH_SRC_DIR}/csrc/api

@@ -18,7 +18,7 @@ These are a collection of scripts that are to be used for release activities.
 Create the matching torch-xpu-ops branch from the branch-cut XPU pin before building XPU.
 `apply-release-changes.sh` writes its name into `xpu.txt` and warns but continues if it cannot resolve the branch.
 CMake fetches the full branch ref and checks out its resolved SHA.
-XPU wheels include `torch/xpu.txt`, which records the dependency SHA.
+`torch.version.xpu_ops_commit` records the dependency SHA, or `None` when unavailable.
 
 #### Promoting packages
 
