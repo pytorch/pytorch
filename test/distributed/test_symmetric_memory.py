@@ -3893,7 +3893,15 @@ class SymmMemCleanupTest(TestCase):
             """,
         )
 
-    def _run_cleanup(self, device, backend, body, env_overrides=None):
+    def _run_cleanup(
+        self,
+        device,
+        backend,
+        body,
+        env_overrides=None,
+        *,
+        expected_returncodes=(0,),
+    ):
         if backend == "NCCL" and (
             not dist.is_nccl_available() or torch.cuda.nccl.version() < (2, 27, 0)
         ):
@@ -3926,7 +3934,11 @@ tensor = _SymmetricMemory.empty_strided_p2p((1024,), (1,), torch.float32, device
             text=True,
             timeout=120,
         )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            result.returncode,
+            expected_returncodes,
+            result.stdout + result.stderr,
+        )
         return result
 
     @parametrize("backend", ["CUDA", "NCCL", "NVSHMEM"])
@@ -3956,6 +3968,7 @@ tensor = _SymmetricMemory.empty_strided_p2p((1024,), (1,), torch.float32, device
     @parametrize("backend", ["CUDA", "NCCL", "NVSHMEM"])
     @parametrize("observed", [False, True])
     def test_free_after_device_assert(self, device, backend, observed):
+        expected_returncodes = (0, 255) if backend == "NVSHMEM" else (0,)
         result = self._run_cleanup(
             device,
             backend,
@@ -3979,8 +3992,9 @@ tensor = _SymmetricMemory.empty_strided_p2p((1024,), (1,), torch.float32, device
                 with test.assertRaisesRegex(torch.AcceleratorError, "device-side assert"):
                     torch.cuda.synchronize(device)
             del tensor, handle
-            print("cleanup completed")
+            print("cleanup completed", flush=True)
             """,
+            expected_returncodes=expected_returncodes,
         )
         self.assertIn("skipping cleanup after CUDA error", result.stderr)
         self.assertIn("cleanup completed", result.stdout)

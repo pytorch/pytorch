@@ -79,7 +79,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
             "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
             "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Linux' | "
             "nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | "
-            "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
+            "nvidia-nvshmem-cu13==3.8.0; platform_system == 'Linux'"
         ),
         "windows": (
             "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.2; platform_system == 'Windows' and platform_machine == 'AMD64' | "
@@ -98,7 +98,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
             "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
             "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Linux' | "
             "nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | "
-            "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
+            "nvidia-nvshmem-cu13==3.8.0; platform_system == 'Linux'"
         ),
         "windows": (
             "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.3; platform_system == 'Windows' and platform_machine == 'AMD64' | "
