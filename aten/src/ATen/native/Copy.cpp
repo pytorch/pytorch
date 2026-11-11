@@ -10,6 +10,7 @@
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/vulkan/ops/Copy.h>
+#include <ATen/native/ForeachUtils.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
@@ -394,6 +395,7 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
 }
 
 ::std::vector<at::Tensor> _foreach_copy(at::TensorList self, at::TensorList src, bool non_blocking) {
+  check_foreach_api_restrictions(self, src);
   std::vector<at::Tensor> outs;
   outs.reserve(self.size());
   // This is a very slow implementation, but needs to directly call the copy() kernel above to handle
