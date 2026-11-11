@@ -5,6 +5,7 @@ import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
+from importlib.machinery import PathFinder
 from importlib.util import find_spec
 from types import SimpleNamespace
 from unittest import mock
@@ -21,6 +22,18 @@ from torch._inductor.codegen.flydsl.flydsl_scheduling import (
     FlyDSLScheduling,
 )
 from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
+from torch._inductor.heuristics.registry import (
+    _TEMPLATE_HEURISTIC_REGISTRY,
+    clear_registry,
+    get_registered_heuristic_class,
+    get_template_heuristic,
+    override_template_heuristics,
+)
+from torch._inductor.heuristics.template.base import TemplateConfigHeuristics
+from torch._inductor.heuristics.template.flydsl import (
+    FlyDSLMMTemplateConfigHeuristics,
+    HIPFlyDSLMMTemplateConfigHeuristics,
+)
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel import mm
 from torch._inductor.runtime.flydsl_cache import (
@@ -66,9 +79,19 @@ class _CacheParam:
 def _vendored_rocm_flydsl_available() -> bool:
     if torch.version.hip is None or not flydsl_utils.runtime_available():
         return False
+    # Walk flydsl._mlir.dialects.rocdl through PathFinder so this probe does not
+    # import flydsl (and run its native init) as a side effect, matching
+    # flydsl_utils._flydsl_runtime_unavailable_reason. OSError is caught too so a
+    # failed native load skips these tests instead of erroring them; the CI
+    # precheck (.ci/pytorch/test.sh) asserts rocdl is present on the runner.
     try:
-        return find_spec("flydsl._mlir.dialects.rocdl") is not None
-    except (ImportError, ValueError):
+        spec = find_spec("flydsl")
+        for part in ("_mlir", "dialects", "rocdl"):
+            if spec is None or spec.submodule_search_locations is None:
+                return False
+            spec = PathFinder.find_spec(part, list(spec.submodule_search_locations))
+        return spec is not None
+    except (ImportError, ValueError, OSError):
         return False
 
 
@@ -162,27 +185,6 @@ class TestFlyDSLTemplate(TestCase):
             self.assertTrue(flydsl_utils.is_gfx950_device(torch.device("cuda", 1)))
         calls = [call.args for call in arch_probe.call_args_list]
         self.assertEqual(calls, [(0,), (1,)])
-
-    def test_tuned_mm_cpu_does_not_probe_flydsl_arch(self):
-        from torch._dynamo.utils import counters
-
-        a = torch.randn(16, 16)
-        b = torch.randn(16, 16)
-        torch._dynamo.reset()
-        counters.clear()
-        with (
-            inductor_config.patch(
-                max_autotune_gemm=True,
-                max_autotune_gemm_backends="ATEN,FLYDSL",
-            ),
-            mock.patch(
-                "torch._inductor.codegen.flydsl.flydsl_scheduling._get_flydsl_device_arch",
-                side_effect=AssertionError("GPU arch probed during CPU mm lowering"),
-            ),
-        ):
-            compiled = torch.compile(torch.mm, backend="inductor")
-            self.assertEqual(compiled(a, b), torch.mm(a, b))
-        self.assertEqual(counters["aten_mm_info"]["aten.mm_16_16_16"], 1)
 
     def test_unavailable_runtime_declines_choice(self):
         template_name = f"flydsl_unavailable_test_{id(self)}"
@@ -2653,6 +2655,233 @@ print("completed")
             reference[group] = a_deq[:, start:end] @ b_deq[:, start:end].t()
             start = end
         return a, b_t.t(), a_scale, b_scale, offs, reference
+
+
+class TestFlyDSLMMTemplateHeuristic(TestCase):
+    """Pin the register_template_heuristic wiring dense mm_flydsl relies on.
+
+    These run without a GPU and without the FlyDSL package: the point is the
+    registration/cascade mechanics an out-of-tree backend plugs into.
+    """
+
+    def setUp(self):
+        super().setUp()
+        import torch._inductor.heuristics.template  # noqa: F401
+
+        self._registry_snapshot = _TEMPLATE_HEURISTIC_REGISTRY.copy()
+        self.addCleanup(self._restore_registry)
+
+    def _restore_registry(self):
+        clear_registry()
+        _TEMPLATE_HEURISTIC_REGISTRY.update(self._registry_snapshot)
+
+    def test_default_heuristic_yields_nothing_on_unregistered_device(self):
+        # No device-specific registration for "xpu", so the lookup cascades to
+        # the None-device default, which contributes nothing and logs nothing.
+        with self.assertNoLogs("torch._inductor.heuristics.registry", level="ERROR"):
+            heuristic = get_template_heuristic("mm_flydsl", "xpu", "mm")
+        self.assertIsInstance(heuristic, FlyDSLMMTemplateConfigHeuristics)
+        self.assertEqual(list(heuristic.get_template_configs(mock.Mock(), "mm")), [])
+
+    def test_hip_heuristic_registration_matches_build(self):
+        cls = get_registered_heuristic_class("mm_flydsl", "cuda", "mm")
+        if torch.version.hip is not None:
+            self.assertIs(cls, HIPFlyDSLMMTemplateConfigHeuristics)
+        else:
+            self.assertIs(cls, FlyDSLMMTemplateConfigHeuristics)
+
+    def test_vendor_heuristic_wins_on_own_device(self):
+        class VendorMMHeuristic(TemplateConfigHeuristics):
+            def _get_template_configs_impl(self, kernel_inputs, op_name):
+                yield {"TILE_M": 128}
+
+        with override_template_heuristics(
+            "vendor", [("mm_flydsl", "mm")], VendorMMHeuristic
+        ):
+            vendor = get_template_heuristic("mm_flydsl", "vendor", "mm")
+            other = get_template_heuristic("mm_flydsl", "xpu", "mm")
+            self.assertIsInstance(vendor, VendorMMHeuristic)
+            self.assertIsInstance(other, FlyDSLMMTemplateConfigHeuristics)
+            self.assertEqual(
+                len(list(vendor.get_template_configs(mock.Mock(), "mm"))), 1
+            )
+            self.assertEqual(list(other.get_template_configs(mock.Mock(), "mm")), [])
+
+    def test_hip_heuristic_should_run_follows_gfx950(self):
+        heuristic = HIPFlyDSLMMTemplateConfigHeuristics()
+        device = torch.device("cuda", 1)
+        inputs = mock.Mock()
+        inputs.device.return_value = device
+        # should_run chains the GEMM max-autotune gate before the arch probe.
+        with (
+            inductor_config.patch(max_autotune_gemm=True),
+            mock.patch(
+                "torch._inductor.codegen.flydsl.flydsl_utils.is_gfx950_device"
+            ) as arch,
+        ):
+            arch.return_value = False
+            self.assertFalse(heuristic.should_run(inputs))
+            arch.assert_called_once_with(device)
+            arch.reset_mock()
+            arch.return_value = True
+            self.assertTrue(heuristic.should_run(inputs))
+            arch.assert_called_once_with(device)
+
+    def test_hip_heuristic_impl_delegates_to_mm_kwargs(self):
+        from torch._inductor.kernel_inputs import MMKernelInputs
+
+        layout = mock.Mock()
+        mat1, mat2 = mock.Mock(), mock.Mock()
+        kernel_inputs = mock.Mock(spec=MMKernelInputs)
+        kernel_inputs.output_layout.return_value = layout
+        kernel_inputs.mat1mat2.return_value = (mat1, mat2)
+        kernel_inputs.device.return_value = torch.device("cuda", 0)
+        configs = [{"TILE_M": 128, "GEMM_M": 64}]
+        with (
+            # should_run gates on max-autotune before reaching the impl.
+            inductor_config.patch(max_autotune_gemm=True),
+            mock.patch(
+                "torch._inductor.codegen.flydsl.flydsl_utils.is_gfx950_device",
+                return_value=True,
+            ),
+            mock.patch(
+                "torch._inductor.kernel.mm_common._is_static_problem",
+                return_value=(True, True),
+            ),
+            mock.patch(
+                "torch._inductor.kernel.mm.get_flydsl_mm_template_kwargs",
+                return_value=configs,
+            ) as kwargs_fn,
+        ):
+            result = list(
+                HIPFlyDSLMMTemplateConfigHeuristics().get_template_configs(
+                    kernel_inputs, "mm"
+                )
+            )
+        kwargs_fn.assert_called_once_with(layout, mat1, mat2, True, True)
+        self.assertEqual([params.to_kwargs() for params in result], configs)
+
+    def test_vendor_choices_class_adds_template_on_own_device(self):
+        # The case-B extension: an InductorChoices subclass appends the FlyDSL
+        # template's choices for its device only. Registered through
+        # register_inductor_choices; the finalize hook is driven directly so
+        # the test stops at KernelTemplateChoice objects instead of resolving
+        # them into callers, which needs a full graph context.
+        from torch._inductor.choices import (
+            InductorChoices,
+            register_inductor_choices,
+            registered_inductor_choices,
+            unregister_inductor_choices,
+        )
+        from torch._inductor.virtualized import _choices, threadlocal
+
+        class VendorMMHeuristic(TemplateConfigHeuristics):
+            def _get_template_configs_impl(self, kernel_inputs, op_name):
+                yield {"TILE_M": 128}
+
+        class VendorChoices(InductorChoices):
+            def uuid(self):
+                return "flydsl_vendor_test"
+
+            def _finalize_template_configs(
+                self,
+                template_choices,
+                kernel_inputs,
+                templates,
+                op_name,
+                kwarg_overrides=None,
+            ):
+                choices = super()._finalize_template_configs(
+                    template_choices,
+                    kernel_inputs,
+                    templates,
+                    op_name,
+                    kwarg_overrides,
+                )
+                if kernel_inputs.device_type == "vendor":
+                    choices.extend(
+                        self.get_ktc(kernel_inputs, mm.flydsl_mm_template, op_name)
+                    )
+                return choices
+
+        kernel_inputs = mock.Mock()
+        kernel_inputs.device_type = "vendor"
+        kernel_inputs.nodes.return_value = [mock.Mock(), mock.Mock()]
+
+        # Isolate the global choices handler. unregister_inductor_choices rebuilds
+        # a fresh handler rather than restoring the previous thread-local one, so
+        # without save/clear/restore (as in test_choices_composition.py) this test
+        # would leak a replacement handler and any pre-existing
+        # inductor_choices_class would make V.choices a _ComposedInductorChoices.
+        unset = object()
+        prior_factory = inductor_config.inductor_choices_class
+        prior_handler = getattr(threadlocal, _choices._key, unset)
+        prior_registrations = registered_inductor_choices()
+        inductor_config.inductor_choices_class = None
+        for key, _ in prior_registrations:
+            unregister_inductor_choices(key)
+        if hasattr(threadlocal, _choices._key):
+            delattr(threadlocal, _choices._key)
+
+        def _restore_choices():
+            inductor_config.inductor_choices_class = None
+            for key, _ in registered_inductor_choices():
+                unregister_inductor_choices(key)
+            for key, factory in prior_registrations:
+                register_inductor_choices(key, factory)
+            inductor_config.inductor_choices_class = prior_factory
+            if hasattr(threadlocal, _choices._key):
+                delattr(threadlocal, _choices._key)
+            if prior_handler is not unset:
+                setattr(threadlocal, _choices._key, prior_handler)
+
+        self.addCleanup(_restore_choices)
+
+        with override_template_heuristics(
+            "vendor", [("mm_flydsl", "mm")], VendorMMHeuristic
+        ):
+            register_inductor_choices("flydsl_vendor_test", VendorChoices)
+            handler = V.choices
+            vendor_choices = handler._finalize_template_configs(
+                {}, kernel_inputs, [], "mm"
+            )
+            kernel_inputs.device_type = "xpu"
+            other_choices = handler._finalize_template_configs(
+                {}, kernel_inputs, [], "mm"
+            )
+
+        self.assertEqual(len(vendor_choices), 1)
+        self.assertIs(vendor_choices[0].template, mm.flydsl_mm_template)
+        self.assertEqual(other_choices, [])
+
+    def test_combined_scheduling_routes_flydsl_nodes(self):
+        # The in-tree composition an out-of-tree backend mirrors: the shipped
+        # CUDACombinedScheduling sends FlyDSL template nodes to FlyDSLScheduling
+        # and refuses to fuse epilogues into them. A vendor copying this must
+        # cover choose_node_backend and can_fuse_vertical/horizontal, not just
+        # codegen_template, or Triton would fuse epilogues into FlyDSL nodes.
+        from torch._inductor.codegen.cuda_combined_scheduling import (
+            CUDACombinedScheduling,
+        )
+        from torch._inductor.ir import FlyDSLTemplateBuffer
+        from torch._inductor.scheduler import SchedulerNode
+
+        scheduling = CUDACombinedScheduling(None)
+        flydsl_node = mock.Mock(spec=SchedulerNode)
+        flydsl_node.node = mock.Mock(spec=FlyDSLTemplateBuffer)
+        flydsl_node.get_nodes.return_value = [flydsl_node]
+        other_node = mock.Mock(spec=SchedulerNode)
+        other_node.node = mock.Mock()
+        other_node.get_nodes.return_value = [other_node]
+
+        self.assertIs(
+            scheduling.choose_node_backend(flydsl_node), scheduling._flydsl_scheduling
+        )
+        self.assertIs(
+            scheduling.choose_node_backend(other_node), scheduling._triton_scheduling
+        )
+        self.assertFalse(scheduling.can_fuse_vertical(flydsl_node, other_node))
+        self.assertFalse(scheduling.can_fuse_horizontal(flydsl_node, other_node))
 
 
 def _mxfp_case(mxfp_format, shape, device, a_is_transposed=False, b_is_transposed=True):

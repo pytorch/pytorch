@@ -714,6 +714,14 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
         templates_to_use.append(mm_contiguous_subgraph_template)
 
+    if (
+        out_dtype is None
+        and static_shape
+        and is_nonzero
+        and use_flydsl_gemm_template(layout)
+    ):
+        templates_to_use.append(flydsl_mm_template)
+
     choices.extend(
         V.choices.get_template_configs(
             kernel_inputs,
@@ -737,20 +745,6 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
     if out_dtype is None and is_nonzero and use_ck_tile_gemm_template(layout, m, n, k):
         CKTileGemmTemplate.add_choices(choices, layout, kernel_inputs.nodes())
-
-    if out_dtype is None:
-        flydsl_configs = get_flydsl_mm_template_kwargs(
-            layout, mat1, mat2, static_shape, is_nonzero
-        )
-        if flydsl_configs:
-            flydsl_input_nodes = list(kernel_inputs.nodes())
-            for flydsl_kwargs in flydsl_configs:
-                flydsl_mm_template.maybe_append_choice(
-                    choices,
-                    input_nodes=flydsl_input_nodes,
-                    layout=layout,
-                    **flydsl_kwargs,
-                )
 
     if (
         out_dtype is None
