@@ -6,7 +6,7 @@ from unittest import mock
 
 import torch
 from torch._inductor.codegen.flydsl import flydsl_utils
-from torch._inductor.kernel.flex import flex_flydsl_attention, flex_flydsl_backward
+from torch._inductor.kernel.flex import flex_flydsl_backward
 from torch._inductor.kernel.flex.flex_flydsl_attention import (
     _get_supported_bhsd_stride,
     _is_contiguous_shape_stride,
@@ -139,9 +139,8 @@ def _supported_fake_backward_inputs():
 def _backward_config_result(inputs):
     with (
         V.set_graph_handler(_fake_graph()),
-        mock.patch.object(
-            flex_flydsl_attention, "_is_gfx950_device", return_value=True
-        ),
+        mock.patch.object(flydsl_utils, "runtime_available", return_value=True),
+        mock.patch.object(flydsl_utils, "is_gfx950_device", return_value=True),
     ):
         return _get_flydsl_flex_attention_backward_config(**inputs)
 
@@ -194,10 +193,8 @@ def _fake_choice_result(inputs):
     choices = []
     with (
         V.set_graph_handler(_fake_graph()),
-        mock.patch(
-            "torch._inductor.kernel.flex.flex_flydsl_attention._is_gfx950_device",
-            return_value=True,
-        ),
+        mock.patch.object(flydsl_utils, "runtime_available", return_value=True),
+        mock.patch.object(flydsl_utils, "is_gfx950_device", return_value=True),
         mock.patch.object(
             flex_flydsl_forward_template, "maybe_append_choice"
         ) as append,
@@ -570,9 +567,7 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
 
     def test_unavailable_backward_falls_back_before_allocation(self):
         with (
-            mock.patch.object(
-                flex_flydsl_backward, "runtime_available", return_value=False
-            ),
+            mock.patch.object(flydsl_utils, "runtime_available", return_value=False),
             mock.patch.object(flex_flydsl_backward, "empty_strided") as allocate,
         ):
             result = flex_flydsl_backward.create_flydsl_flex_attention_backward_kernel(
@@ -580,6 +575,34 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
             )
         self.assertIsNone(result)
         allocate.assert_not_called()
+
+    def test_non_gfx950_backward_falls_back_before_realizing(self):
+        query = mock.Mock()
+        query.get_device.return_value = torch.device("cpu")
+        with (
+            mock.patch.object(flydsl_utils, "runtime_available", return_value=True),
+            mock.patch.object(
+                flydsl_utils, "is_gfx950_device", return_value=False
+            ) as is_gfx950,
+            mock.patch.object(flex_flydsl_backward, "maybe_realize") as realize,
+        ):
+            result = flex_flydsl_backward.create_flydsl_flex_attention_backward_kernel(
+                query,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                1.0,
+                128,
+                128,
+                fw_subgraph=mock.Mock(),
+                mask_graph=mock.Mock(),
+            )
+        self.assertIsNone(result)
+        is_gfx950.assert_called_once_with(torch.device("cpu"))
+        realize.assert_not_called()
 
     def test_invalid_dq_accumulation_option(self):
         with self.assertRaisesRegex(ValueError, "DQ_ACCUM_FP32 must be a bool"):
