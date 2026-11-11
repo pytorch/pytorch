@@ -5913,6 +5913,9 @@ class CheckFunctionManager:
                 for keep, g in zip(_guard_filter_fn(guards), guards):
                     if not keep:
                         ret.append(False)
+                    elif g.guard_type == "CLOSURE_MATCH":
+                        # Saving rewrites this guard or bypasses packaging.
+                        ret.append(True)
                     elif g.guard_type not in (
                         "TYPE_MATCH",
                         "BUILTIN_MATCH",
@@ -5920,7 +5923,6 @@ class CheckFunctionManager:
                         g.guard_type
                         in (
                             "ID_MATCH",
-                            "CLOSURE_MATCH",
                             "WEAKREF_ALIVE",
                             "DICT_VERSION",
                         )

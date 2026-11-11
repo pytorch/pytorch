@@ -4322,13 +4322,15 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": x, "cfg": LockDict(lr=2)}, True)
         self._test_check_fn(ref, loaded, {"x": x, "cfg": LockDict(lr=3)}, False)
 
-    def test_closure_match(self):
+    @parametrize("caching_precompile", (False, True))
+    def test_closure_match(self, caching_precompile):
         def fn(x):
             # usage of this global function installs a CLOSURE_MATCH guard
             return global_func(x)
 
         x = torch.randn(3)
-        ref, loaded = self._test_serialization("CLOSURE_MATCH", fn, x)
+        with torch._dynamo.config.patch(caching_precompile=caching_precompile):
+            ref, loaded = self._test_serialization("CLOSURE_MATCH", fn, x)
         self._test_check_fn(ref, loaded, {"x": x}, True)
         # The saved guard compares code by value rather than identity, so it
         # matches the loading process's own copy of the function.
@@ -4340,7 +4342,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with mock.patch.dict(globals(), {"global_func": lambda x: x + 2}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
-    def test_closure_match_without_module_globals(self):
+    @parametrize("caching_precompile", (False, True))
+    def test_closure_match_without_module_globals(self, caching_precompile):
         namespace = {}
         exec("def global_func(x):\n    return x + 1\n", namespace)
 
@@ -4350,6 +4353,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # No importable module owns these globals, so a loading process has no
         # way to find the function's globals again.
         with (
+            torch._dynamo.config.patch(caching_precompile=caching_precompile),
             mock.patch.dict(globals(), {"global_func": namespace["global_func"]}),
             self.assertRaisesRegex(
                 PackageError, "CLOSURE_MATCH guard cannot be serialized."
