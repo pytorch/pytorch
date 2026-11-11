@@ -37,7 +37,7 @@ TD_HEURISTIC_PREVIOUSLY_FAILED = "previous_failures.json"
 TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL = "previous_failures_additional.json"
 
 GENERATED_STATS_URL = (
-    "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats"
+    "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats"  # @lint-ignore
 )
 
 FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds

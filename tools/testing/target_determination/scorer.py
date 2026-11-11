@@ -107,7 +107,9 @@ def build_scorer_block(
     """
     try:
         try:
-            block = _build_block(aggregated, heuristics, fetch_model, changed_files)
+            block: dict[str, Any] = _build_block(
+                aggregated, heuristics, fetch_model, changed_files
+            )
             json.dumps(block, allow_nan=False)
         except Exception as e:
             block = {"model": None, "reason": error_reason(e)}
