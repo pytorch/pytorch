@@ -2304,6 +2304,14 @@ def skipIfFreeThreaded(msg="Test doesn't work with free-threaded python"):
     return unittest.skipIf(sysconfig.get_config_var("Py_GIL_DISABLED") == 1, msg)
 
 
+def fake_tensor_modes(fn):
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
+
+    return parametrize(
+        "mode_cls", [FakeTensorMode, CppFakeTensorMode], name_fn=lambda cls: cls.__name__
+    )(fn)
+
+
 def skipIfCppFakeTensor(reason):
     if not isinstance(reason, str):
         raise AssertionError("please provide a reason")
