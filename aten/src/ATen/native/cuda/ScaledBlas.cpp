@@ -527,7 +527,7 @@ _scaled_gemm(
   }
   TORCH_CHECK(
       !effective_accumulator ||
-          (effective_accumulator->stride(0) == args.result_ld &&
+          (blas_leading_dim(*effective_accumulator, 0) == args.result_ld &&
            effective_accumulator->scalar_type() == out_dtype_),
       "scaled_addmm: input and output must have the same dtype and leading dimension");
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
