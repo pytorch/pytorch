@@ -523,8 +523,10 @@ class TestMaxAutotune(TestCase):
         def fn(a, b, bias, scale, c):
             return torch.addmm(bias, a, b) * scale[:, None] + c
 
-        # N is not a multiple of any BLOCK_N, so the N mask matters.
-        M, N, K = 300, 257, 64
+        # M and N are not multiples of any BLOCK_M/BLOCK_N, so the masks matter.
+        # The small sizes cap the tile at 64x128x16, which keeps every fp32 config
+        # within gfx942's 64 KB of LDS.
+        M, N, K = 50, 100, 16
         a = torch.randn(M, K, device=GPU_TYPE)
         b = torch.randn(K, N, device=GPU_TYPE)
         bias = torch.randn(N, device=GPU_TYPE)
