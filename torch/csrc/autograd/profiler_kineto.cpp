@@ -264,9 +264,9 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 // and frees it on another thread.
 //
 // While the session is active, each callback invocation brackets only its own
-// short critical section - getGlobal() plus the RecordQueue access - with
-// enter()/exit(). Teardown calls drain(), which closes the session to new
-// callbacks and blocks until the in-flight count reaches zero, so finalize
+// short critical section - getGlobal(), RecordQueue access, and correlation
+// pop - with enter()/exit(). Teardown calls drain(), which stops recording and
+// blocks until the in-flight count reaches zero, so finalize
 // never races a live critical section.
 //
 // The enter()/isActive() re-check is a handshake: a callback that joined before
@@ -288,7 +288,8 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 // hot path; the mutex/cv are touched only on the teardown handoff.
 //
 // Because we coordinate across threads that can call it at any arbitrary time,
-// this object must have static lifetime.
+// this object must outlive every callback, so its single instance is
+// intentionally leaked.
 class GlobalCallbackSession {
  public:
   GlobalCallbackSession() = default;
@@ -300,7 +301,7 @@ class GlobalCallbackSession {
   GlobalCallbackSession(GlobalCallbackSession&&) = delete;
   GlobalCallbackSession& operator=(GlobalCallbackSession&&) = delete;
 
-  // Open the session (at enableProfiler time) so callbacks begin participating.
+  // Open the session (at enableProfiler time) unless the exit hook closed it.
   // On a true enable a fresh RecordQueue was just installed, so bump the
   // session generation first: callbacks in the new session stamp the new value
   // and a straddling exit from the prior session detects the mismatch. The
@@ -308,10 +309,35 @@ class GlobalCallbackSession {
   // passes false; bumping there would wrongly drop end-events for ops that
   // straddle the toggle.
   void activate(bool new_session) {
+    // Serialized with markClosed() so the session cannot reopen after the exit
+    // hook has closed and drained it.
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (closed_.load()) {
+      LOG(WARNING) << "Global CPU operation recording was disabled at process "
+                      "exit; this profiling session will not record CPU "
+                      "operations.";
+      return;
+    }
     if (new_session) {
       generation_.fetch_add(1);
     }
     active_.store(true);
+  }
+
+  void markClosed() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const bool was_active = isActive();
+    if (!closed_.exchange(true) && was_active) {
+      LOG(WARNING)
+          << "Process is exiting without stopping the profiler. "
+             "Global CPU operation recording is disabled for any subsequent "
+             "profiling sessions, as exit without cleanup may leave the "
+             "backend's correlation ID stack unbalanced.";
+    }
+  }
+
+  bool isClosed() const {
+    return closed_.load();
   }
 
   // Session generation, stamped into each callback's ObserverContext at enter
@@ -333,7 +359,7 @@ class GlobalCallbackSession {
   }
 
   // Deregister an in-flight callback. When this is the last one and the session
-  // has been closed (drain() in progress), wake the waiting teardown thread.
+  // is inactive (drain() in progress), wake the waiting teardown thread.
   // During normal profiling this is a single lock-free decrement.
   void exit() {
     if (in_flight_.fetch_sub(1) == 1 && !active_.load()) {
@@ -342,21 +368,23 @@ class GlobalCallbackSession {
     }
   }
 
-  // Close the session to new callbacks and block until all in-flight ones have
-  // exited; returns true once drained (also returns true if the session was
-  // never opened; it remained purely thread-local profiling). Closing is fused
-  // with the wait, so the session cannot be closed without waiting out
-  // in-flight callbacks.
+  // Deactivate the session to new callbacks and block until all in-flight ones
+  // have exited; returns true once drained (also returns true if the session
+  // was never opened; it remained purely thread-local profiling). Deactivation
+  // is fused with the wait, so the session cannot be deactivated without
+  // waiting out in-flight callbacks.
   //
   // Returns false if the drain does not complete within kDrainTimeout. A normal
   // drain takes microseconds (the in-flight window is just a callback's
-  // getGlobal() + RecordQueue critical section, never an op body), so a
+  // RecordQueue access and correlation pop, never an op body), so a
   // multi-second wait means a callback's thread was killed or wedged inside
   // that critical section. The caller must then leave the state installed:
   // freeing it under a live callback would reintroduce the use-after-free this
   // session guards against.
   bool drain() {
-    if (!active_.exchange(false)) {
+    // At process exit, late callbacks may still be popping correlations even
+    // if the session is already inactive.
+    if (!active_.exchange(false) && !closed_.load()) {
       return true;
     }
     std::unique_lock<std::mutex> lock(mutex_);
@@ -372,11 +400,16 @@ class GlobalCallbackSession {
   std::atomic<bool> active_{false};
   std::atomic<int64_t> in_flight_{0};
   std::atomic<uint64_t> generation_{0};
+  // Set at process exit. Once closed, the session can't be reopened because the
+  // correlation stack may be imbalanced.
+  std::atomic<bool> closed_{false};
   std::mutex mutex_;
   std::condition_variable cv_; // guarded by mutex_
 };
 
-GlobalCallbackSession global_callback_session;
+// Intentionally leaked: callbacks on other threads still check it during
+// static destruction at exit.
+GlobalCallbackSession& global_callback_session = *new GlobalCallbackSession();
 
 std::unique_ptr<at::ObserverContext> onFunctionEnterGlobal(
     const at::RecordFunction& fn) {
@@ -471,7 +504,9 @@ void onFunctionExitImpl(
 // stale-session early exits that skip event finalization: the correlation stack
 // lives in the device profiling backend (per thread) and is not reset across
 // profiler sessions, so a skipped pop leaks. Safe on those paths because it
-// touches only that stack, never the possibly-freed event_.
+// touches only that stack, never the possibly-freed event_. The exception is a
+// global exit after closeGlobalCallbackSession(), which skips the pop because
+// Kineto may already be destroyed.
 void maybePopCorrelationId(
     const at::RecordFunction& fn,
     at::ObserverContext* ctx_ptr) {
@@ -496,19 +531,22 @@ void onFunctionExitGlobal(
     return;
   }
 
-  // Balance the correlation id pushed at begin_op on every path below,
-  // including the teardown and stale-session early exits that skip event
-  // finalization.
-  auto correlation_guard =
-      c10::make_scope_exit([&] { maybePopCorrelationId(fn, ctx_ptr); });
-
-  // Take this exit's own in-flight ref, paired here because
-  // onFunctionEnterGlobal no longer hands one off. It covers only this exit's
-  // getGlobal() + RecordQueue write, never the op body, so the drain cannot
-  // block on it.
+  // Declare this guard before correlation_guard so the pop runs before the
+  // in-flight count drops and process-exit teardown can finish.
   global_callback_session.enter();
   auto in_flight_guard =
       c10::make_scope_exit([] { global_callback_session.exit(); });
+
+  // Balance the correlation id pushed at begin_op on every path below,
+  // including the teardown and stale-session early exits that skip event
+  // finalization.
+  auto correlation_guard = c10::make_scope_exit([&] {
+    // Kineto isn't a leaky singleton, so it may have been destroyed on process
+    // exit.
+    if (!global_callback_session.isClosed()) {
+      maybePopCorrelationId(fn, ctx_ptr);
+    }
+  });
 
   // Re-check after the increment, mirroring onFunctionEnterGlobal: if teardown
   // began concurrently the queue may already be finalized/freed, so skip the
@@ -864,6 +902,13 @@ void enableProfiler(
     state_info_ptr->state_ptr = std::move(state_ptr);
     state_info_ptr->scopes = scopes;
     profilerStateInfo() = std::move(state_info_ptr);
+  }
+}
+
+void closeGlobalCallbackSession() {
+  global_callback_session.markClosed();
+  if (!global_callback_session.drain()) {
+    LOG(ERROR) << "Timed out draining global profiler callbacks at exit.";
   }
 }
 
