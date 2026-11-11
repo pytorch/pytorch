@@ -450,19 +450,25 @@ class TestOptimRenewed(TestCase):
         dtypes=[torch.float32],
     )
     def test_tensor_betas(self, device, dtype, optim_info, num_dim):
-        # foreach needs capturable for Tensor betas, so the default must fall
-        # back to the for-loop implementation instead of raising (#110205).
-        # optim_inputs_func leaves foreach and fused unset, which is what makes
-        # this exercise the default rather than an explicitly requested impl.
+        # Tensor betas must work without capturable, both when foreach is requested
+        # and when it is only the default (#110205). optim_inputs_func leaves foreach
+        # and fused unset, so foreach=None exercises the default dispatch.
         optim_cls = optim_info.optim_cls
 
         betas_devices = [device]
         if _get_device_type(device) != "cpu":
             betas_devices.append("cpu")
 
-        for optim_input, betas_device in product(
-            optim_info.optim_inputs_func(device), betas_devices
-        ):
+        inputs = optim_info.optim_inputs_func(device)
+        configs = product(inputs, betas_devices, (None, True))
+        for optim_input, betas_device, foreach in configs:
+            kwargs = {k: v for k, v in optim_input.kwargs.items() if k != "betas"}
+            # A Tensor lr still needs capturable for foreach.
+            tensor_lr = isinstance(kwargs.get("lr"), torch.Tensor)
+            if foreach and tensor_lr and not kwargs.get("capturable", False):
+                continue
+            kwargs["foreach"] = foreach
+
             weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
             weight_c = weight.detach().clone().requires_grad_(True)
             bias = Parameter(torch.randn(10, device=device, dtype=dtype))
@@ -470,7 +476,6 @@ class TestOptimRenewed(TestCase):
             inpt = torch.randn(5, device=device, dtype=dtype)
 
             # Some configs already pass Tensor betas; compare against the floats.
-            kwargs = {k: v for k, v in optim_input.kwargs.items() if k != "betas"}
             betas = tuple(
                 float(b) for b in optim_input.kwargs.get("betas", (0.9, 0.999))
             )

@@ -12515,8 +12515,8 @@ class TestCudaOptims(TestCase):
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
 
-            # lr and betas as a Tensor is not supported when capturable=False and foreach=True for torch.optim.adam
-            # and torch.optim.adamw
+            # lr as a Tensor is not supported when capturable=False and foreach=True for torch.optim.adam
+            # and torch.optim.adamw, and CPU Tensor betas cannot be copied to CUDA during graph capture
             kwargs["lr"] = 0.1
             if optim_cls in (torch.optim.Adam, torch.optim.AdamW):
                 kwargs["betas"] = (0.9, 0.99)

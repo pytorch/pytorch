@@ -71,20 +71,10 @@ class Adam(Optimizer):
             or (isinstance(betas[0], Tensor) and isinstance(betas[1], Tensor))
         ):
             raise ValueError("betas must be either both floats or both Tensors")
-        if isinstance(betas[0], Tensor):
-            if not capturable and foreach:
-                raise ValueError(
-                    "betas[0] as a Tensor is not supported for capturable=False and foreach=True"
-                )
-            if betas[0].numel() != 1:
-                raise ValueError("Tensor betas[0] must be 1-element")
-        if isinstance(betas[1], Tensor):
-            if not capturable and foreach:
-                raise ValueError(
-                    "betas[1] as a Tensor is not supported for capturable=False and foreach=True"
-                )
-            if betas[1].numel() != 1:
-                raise ValueError("Tensor betas[1] must be 1-element")
+        if isinstance(betas[0], Tensor) and betas[0].numel() != 1:
+            raise ValueError("Tensor betas[0] must be 1-element")
+        if isinstance(betas[1], Tensor) and betas[1].numel() != 1:
+            raise ValueError("Tensor betas[1] must be 1-element")
         betas = (_to_scalar(betas[0]), _to_scalar(betas[1]))
 
         defaults = {
@@ -319,10 +309,7 @@ Adam.__doc__ = (
             LR if you are not also specifying fused=True or capturable=True.
         betas (tuple[float | Tensor, float | Tensor], optional):
             coefficients used for computing running averages of gradient and
-            its square. If a tensor is provided, must be 1-element. Tensor betas
-            are not yet supported for all our implementations. Please use float
-            betas if you are not also specifying fused=True or capturable=True.
-            (default: (0.9, 0.999))
+            its square. If a tensor is provided, must be 1-element. (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
@@ -587,21 +574,11 @@ def _multi_tensor_adam(
         if lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
 
-    if isinstance(beta1, Tensor):
-        if not capturable:
-            raise ValueError(
-                "beta1 as a Tensor is not supported for capturable=False and foreach=True"
-            )
-        if beta1.numel() != 1:
-            raise ValueError("Tensor beta1 must be 1-element")
+    if isinstance(beta1, Tensor) and beta1.numel() != 1:
+        raise ValueError("Tensor beta1 must be 1-element")
 
-    if isinstance(beta2, Tensor):
-        if not capturable:
-            raise ValueError(
-                "beta2 as a Tensor is not supported for capturable=False and foreach=True"
-            )
-        if beta2.numel() != 1:
-            raise ValueError("Tensor beta2 must be 1-element")
+    if isinstance(beta2, Tensor) and beta2.numel() != 1:
+        raise ValueError("Tensor beta2 must be 1-element")
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:
@@ -626,6 +603,10 @@ def _multi_tensor_adam(
     lr = _to_scalar(lr)
     beta1 = _to_scalar(beta1)
     beta2 = _to_scalar(beta2)
+    if not capturable:
+        # The bias corrections are Python scalars here, so read Tensor betas once per step.
+        beta1 = _get_value(beta1)
+        beta2 = _get_value(beta2)
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
@@ -938,9 +919,8 @@ def adam(
         _, foreach = _default_to_fused_or_foreach(
             params, differentiable, use_fused=False
         )
-        # Do not flip on foreach for the unsupported case where lr or a beta is a Tensor and capturable=False.
-        tensor_hparam = any(isinstance(h, Tensor) for h in (lr, beta1, beta2))
-        if foreach and tensor_hparam and not capturable:
+        # Do not flip on foreach for the unsupported case where lr is a Tensor and capturable=False.
+        if foreach and isinstance(lr, Tensor) and not capturable:
             foreach = False
     if fused is None:
         fused = False
