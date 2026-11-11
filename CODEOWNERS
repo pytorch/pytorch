@@ -1218,7 +1218,6 @@
 #
 # [compiler_export_fx]
 # /test/onnx/exporter/test_exportable_module.py
-# /test/onnx/test_fx_type_promotion.py
 # /test/package/package_bc/test_fx_module.pt
 # label: oncall: export
 # owner: @angelayi @avikchaudhuri @tugsbayasgalan @ydwu4 @zhxchen17

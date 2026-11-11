@@ -683,9 +683,7 @@ def _handle_call_function_node_with_lowering(
             from torch.onnx._internal.exporter import _legacy_promotion
 
             context = _ir_builder.TranslationContext(native_builder)
-            graph = (
-                graph_like.graph if isinstance(graph_like, ir.Function) else graph_like
-            )
+            graph = native_builder.graph
             node_count = len(graph)
             onnx_args, restore = _legacy_promotion.promote_inputs(
                 context, node.target, onnx_args, onnx_kwargs
