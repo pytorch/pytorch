@@ -230,9 +230,16 @@ def fully_shard(
               use cases like Mixture of Experts where expert params use a
               different mesh than regular params.
 
-            If sharding on a nonzero dim, we currently require even sharding,
-            i.e. the tensor dim size on that dim must be divisible by the FSDP
-            shard mesh size.
+            Any dim may be sharded unevenly, as ``torch.chunk`` splits it, so later
+            ranks may hold fewer or no rows. On a nonzero dim, all-gather
+            extensions of such parameters need the 5-argument
+            ``fsdp_pre_all_gather``, must pad their inputs on those ranks, and
+            must drop the padding in ``fsdp_post_all_gather`` (see
+            :class:`~torch.distributed.fsdp.experimental.AllGatherInput`).
+            Inputs left unpadded raise on those ranks only, while the others
+            wait in the all-gather.
+            :func:`~torch.distributed.fsdp.experimental.reduce_scatter_input_fn_with_native_copy`
+            does not support such parameters.
         mp_policy (MixedPrecisionPolicy): This controls the mixed precision
             policy, which offers parameter/reduction mixed precision for this
             module. See :class:`MixedPrecisionPolicy` for details.
@@ -788,7 +795,8 @@ class FSDPModule:
         """
         Overrides the default ``reduce_scatter`` communication behavior,
         to have better control over the communication and memory usage.
-        See `Comm` and `ReduceScatter` for details.
+        See `Comm` and `ReduceScatter` for details. The comm is not used when
+        the reduce-scatter group has size 1 since no reduce-scatter runs.
 
         Args:
             comm (ReduceScatter): Custom reduce_scatter communication.
@@ -967,14 +975,16 @@ class FSDPModule:
         once -- the copy-in (``chunk_cat``) buffer cap-K (experimental).
 
         FSDP keeps **1** such buffer in flight by default, so the compute stream
-        must wait on the previous reduce-scatter before the next copy-in can
-        reuse that buffer. When the reduce-scatter is exposed (communication
+        must wait until the previous buffer is no longer in use before the next
+        copy-in can reuse it. When the reduce-scatter is exposed (communication
         slower than the backward compute meant to hide it), that recycle wait
         stalls the compute stream. Raising the cap lets the next copy-in write a
         **fresh** buffer instead of waiting -- removing the stall -- at the cost
         of extra peak memory for the retained buffers. The copy-in stays on the
         compute stream; there is no extra stream and no ``record_stream``. This
-        helps only when the reduce-scatter is exposed.
+        helps only when the reduce-scatter is exposed. For a reduce-scatter group
+        of size 1, the buffer is used until the post-reduce ops finish and, when
+        it backs the sharded gradients, retaining it costs no extra memory.
 
         Args:
             max_input_buffers (int): Max reduce-scatter input buffers retained in
@@ -1113,6 +1123,48 @@ class FSDPModule:
         state = self._get_fsdp_state()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.set_symm_mem(backend)
+
+    def set_unshard_in_current_stream(
+        self, unshard_in_current_stream: bool, *, recurse: bool = True
+    ) -> None:
+        """
+        Sets whether FSDP issues its pre-forward and pre-backward all-gathers
+        on the current stream instead of on its separate all-gather streams.
+        The current stream is the one that is current when FSDP issues the
+        unshard, normally the one the module's forward and backward run on, so
+        the all-gather buffers share that stream's memory. Defaults to
+        ``False``.
+
+        Setting this to ``True`` avoids inter-stream memory fragmentation: the
+        CUDA caching allocator does not reuse memory freed on one stream for
+        allocations on another. In return, the copy-in and dtype cast before
+        each all-gather run on the current stream and do not overlap with
+        compute.
+
+        With this set, FSDP's own unshards run like your own :meth:`unshard`
+        calls, on the current stream: the pre-forward and pre-backward unshard
+        like ``unshard(async_op=False)``, and a prefetch like
+        ``unshard(async_op=True)``.
+
+        An all-gather issued on the current stream overlaps with compute only
+        if it is issued ahead of time. In forward, configure explicit
+        prefetching with :meth:`set_modules_to_forward_prefetch` or call
+        :meth:`unshard` with ``async_op=True``; otherwise each module's
+        all-gather is exposed. Backward prefetching needs no configuration.
+
+        Args:
+            unshard_in_current_stream (bool): Whether to issue the all-gathers
+                on the current stream.
+            recurse (bool): Whether to set for all FSDP submodules or just the
+                passed-in module.
+        """
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group.unshard_async_op = unshard_in_current_stream
 
     def _set_unshard_async_op(self, async_op: bool):
         """
