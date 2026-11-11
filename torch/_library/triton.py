@@ -544,13 +544,18 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
     The ``wrap_triton`` API wraps a triton kernel into a callable that
     can actually be traced into a graph.
 
-    Use ``wrap_triton`` with :func:`torch.library.triton_op` when
-    defining a custom operator backed by triton kernels. For eager
-    execution or ``torch.compile``, call triton kernels directly
-    when no custom operator is needed. For ``make_fx`` or non-strict
-    ``torch.export``, use ``triton_op`` with ``wrap_triton`` to make
-    kernel calls traceable. Standalone ``wrap_triton`` is supported,
-    but adds dispatch overhead to eager kernel calls.
+    Wrap raw triton kernel calls in ``wrap_triton`` to make them traceable
+    by ``make_fx`` or non-strict ``torch.export``. Standalone
+    ``wrap_triton`` is supported. Use it inside
+    :func:`torch.library.triton_op` when defining a custom operator,
+    for example so an exported program retains a serializable custom-op
+    node instead of a triton higher-order operator. Inside ``triton_op``,
+    eager calls avoid the dispatch overhead of standalone ``wrap_triton``.
+    For eager execution or ``torch.compile`` without custom operator
+    semantics, call the triton kernel directly.
+
+    See :func:`torch.library.triton_op` for a custom operator example.
+
     Examples:
 
         >>> # xdoctest: +SKIP
@@ -558,7 +563,7 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
         >>> import triton
         >>> from triton import language as tl
         >>> from torch.fx.experimental.proxy_tensor import make_fx
-        >>> from torch.library import triton_op, wrap_triton
+        >>> from torch.library import wrap_triton
         >>>
         >>> @triton.jit
         >>> def add_kernel(
@@ -577,8 +582,7 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
         >>>     output = x + y
         >>>     tl.store(out_ptr + offsets, output, mask=mask)
         >>>
-        >>> @triton_op("mylib::add", mutates_args={})
-        >>> def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        >>> def add(x, y):
         >>>     output = torch.empty_like(x)
         >>>     n_elements = output.numel()
         >>>
@@ -591,8 +595,9 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
         >>> x = torch.randn(3, device="cuda")
         >>> y = torch.randn(3, device="cuda")
         >>> gm = make_fx(add)(x, y)
-        >>> result = gm(x, y)
-        >>> assert torch.allclose(result, x + y)
+        >>> print(gm.code)
+        >>> assert "triton_kernel_wrapper_mutation" in gm.code
+        >>> assert torch.allclose(gm(x, y), x + y)
 
     """
     from triton.runtime.autotuner import Autotuner
