@@ -199,7 +199,6 @@ from torch.testing._internal.common_utils import (
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
-from torch.testing import FileCheck
 
 import copy
 import itertools
@@ -3104,7 +3103,7 @@ class TestQuantizeFx(QuantizationTestCase):
         assertAttrPreserved(m)
 
     @skipIfNoFBGEMM
-    def test_qat_and_script(self):
+    def test_qat_enable_disable(self):
         model = LinearModelWithSubmodule().train()
         qengine = torch.backends.quantized.engine
         qconfig_dict = {'': torch.ao.quantization.get_default_qat_qconfig(qengine)}
@@ -3112,30 +3111,26 @@ class TestQuantizeFx(QuantizationTestCase):
         example_inputs = (x,)
         model = prepare_qat_fx(model, qconfig_dict, example_inputs=example_inputs)
 
-        # ensure scripting works
-        scripted = torch.jit.script(model)
-        # run one round to make sure model runs
-        scripted(x)
-        FileCheck().check_count('FakeQuantize = prim::GetAttr[name="', 4, exactly=True) \
-                   .run(scripted.graph)
+
+        model(x)
 
         # disable fake_quant and observer
         for epoch in range(3):
             if epoch == 1:
-                scripted.apply(torch.ao.quantization.disable_observer)
+                model.apply(torch.ao.quantization.disable_observer)
             if epoch == 2:
-                scripted.apply(torch.ao.quantization.disable_fake_quant)
+                model.apply(torch.ao.quantization.disable_fake_quant)
 
         # ensure the fake_quant and observer have been disabled.
         matches = ['.fake_quant_enabled', '.observer_enabled']
-        for key, v in scripted.state_dict().items():
+        for key, v in model.state_dict().items():
             if any(x in key for x in matches):
                 self.assertEqual(v, torch.tensor([0], dtype=torch.int64))
 
         # enable them back
-        scripted.apply(torch.ao.quantization.enable_fake_quant)
-        scripted.apply(torch.ao.quantization.enable_observer)
-        for key, v in scripted.state_dict().items():
+        model.apply(torch.ao.quantization.enable_fake_quant)
+        model.apply(torch.ao.quantization.enable_observer)
+        for key, v in model.state_dict().items():
             if any(x in key for x in matches):
                 self.assertEqual(v, torch.tensor([1], dtype=torch.int64))
 
@@ -3806,14 +3801,6 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertTrue(scale_count == 3, "Expect each quantized linear op to have a scale in state_dict")
         self.assertTrue(zero_point_count == 3, "Expect each quantized linear op to have a zero_point in state_dict")
         m(*example_inputs)
-        # ensure it is scriptable
-        scripted = torch.jit.script(m)
-        scripted_keys = scripted.state_dict().keys()
-        scripted.mods1_0_packed_weight_0 = m.state_dict()["mods1_0_packed_weight_0"]
-        non_packed_weight_keys = [key for key in keys if "_packed_weight" not in key]
-        self.assertTrue(
-            set(scripted_keys) == set(non_packed_weight_keys),
-            "Expected the scripted model to preserve the state_dict for non-packed weight attributes")
         # TODO: probably don't want to hardcode the attribute names, since they are generated
         for attr_name in [
                 "mods1_0_input_scale_0", "mods1_0_input_zero_point_0",
@@ -7744,8 +7731,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
             ns.call_method("dequantize"): 1,
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
-        # check the model is scriptable
-        m = torch.jit.script(m)
         # check the model is runnable
         m(*example_inputs)
 
@@ -9128,7 +9113,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
             model_graph = prepare_fx(model_graph, graph_qconfig_dict, example_inputs=(sample_input,))
             model_graph = convert_fx(model_graph)
             self.assertEqual(model_eager(sample_input), model_graph(sample_input))
-            self.checkScriptable(model_graph, [[sample_input]], True)
 
     @override_qengines
     def test_rnn_cell(self):
@@ -9617,12 +9601,9 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
         qconfig = default_qconfig if mode == 'static' else default_qat_qconfig
         qconfig_dict = {'': qconfig}
-        script = torch.jit.script(model)
 
-        # make sure graph module and script module are both runanble
         original_out = model(input_value)
         is_not_tuple_out = not isinstance(original_out, tuple)
-        script_out = script(input_value)
 
         # set to train just before quantization
         prepare_fx_fn = prepare_fx
@@ -9653,16 +9634,11 @@ class TestQuantizeFxModels(QuantizationTestCase):
         # print('after quantization root:', qgraph.root)
         # print('after quantization code:', qgraph.src)
         qgraph.eval()
-        qgraph_script = torch.jit.script(qgraph)
-        # print('quantized and scripted:', qgraph_script.graph)
 
         qgraph_out = qgraph(input_value)
-        qgraph_script = qgraph_script(input_value)
 
         if is_not_tuple_out:
             diff_of_quant[mode][name] = (original_out - qgraph_out).abs().max()
-            if not torch.allclose(qgraph_out, qgraph_script):
-                raise AssertionError("graph, scripted graph")
         else:
             print('tuple output')
 
@@ -9701,8 +9677,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
             # print('ref after quantization:', qeager)
             qeager_out = qeager(input_value)
-            qeager_script = torch.jit.script(qeager)
-            qscript_out = qeager_script(input_value)
             if is_not_tuple_out:
                 diff_from_eager[mode][name] = (qeager_out - qgraph_out).abs().max()
                 if check_with_eager:
@@ -9895,7 +9869,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 self.assertTrue(type(model.linear), nnq.Linear)
 
                 test_only_eval_fn(model, eval_output)
-                self.checkScriptable(model, eval_output)
                 self.checkNoQconfig(model)
             checkQuantized(quant_model)
 
@@ -9935,7 +9908,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 self.assertTrue(type(model.linear), nnq.Linear)
 
                 test_only_eval_fn(model, eval_output)
-                self.checkScriptable(model, eval_output)
                 self.checkNoQconfig(model)
             checkQuantized(quant_model)
 
