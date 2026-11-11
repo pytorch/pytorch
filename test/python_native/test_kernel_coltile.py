@@ -622,6 +622,26 @@ class TestOrderedColRoute(TestCase):
         wide = ct._OrderedColReduce(trait, plan, 1024, 1 << 21, 1)
         self.assertEqual((narrow.wide, wide.wide), (False, True))
 
+    @parametrize(
+        "name,rows,loads,exact,per_load",
+        [
+            ("sum", 8192, 4, True, True),
+            ("sum", 4096, 2, True, True),
+            ("sum", 2048, 1, True, False),
+            ("sum", 8000, 4, False, False),
+            ("argmax", 8192, 4, True, False),
+        ],
+    )
+    def test_per_load_strides(self, name, rows, loads, exact, per_load):
+        """Only exact single-field replays of several loads copy the stride per load."""
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        trait = T.SumOps() if name == "sum" else T.ArgMaxOps()
+        plan = rt.itree_plan(rows, 64, 4, stage=False)
+        self.assertEqual((plan.batches[0][2], plan.tms[0].exact), (loads, exact))
+        op = ct._OrderedColReduce(trait, plan, rows, 64, 1)
+        self.assertEqual(op.per_load, per_load)
+
 
 @unittest.skipUnless(TEST_CUDA and SM90OrLater, "requires Hopper or later")
 class TestOrderedColDevice(TestCase):
@@ -651,6 +671,8 @@ class TestOrderedColDevice(TestCase):
             ("var_mean", torch.bfloat16, (2, 2048, 40)),
             ("argmax", torch.float32, (8000, 32)),
             ("var_mean", torch.float32, (2, 8000, 32)),
+            # Four exact loads per warp, each through its own stride copy.
+            ("sum", torch.float32, (2, 8192, 32)),
             # Exact multi-group merges and a single masked warp.
             ("sum", torch.float32, (2, 4096, 32)),
             ("argmax", torch.float32, (2, 8192, 32)),
