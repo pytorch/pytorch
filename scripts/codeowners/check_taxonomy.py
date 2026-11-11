@@ -14,42 +14,65 @@ from pathlib import Path
 
 LINTER_CODE = "CODEOWNERS_TAXONOMY"
 HIERARCHY_MARKER = "# Review-surface hierarchy:"
+LABEL_PREFIX = "# label:"
+OWNER_PREFIX = "# owner:"
 SECTION_MARKER = "# Grouped review-surface definitions:"
 GROUP_PREFIX = "# ["
 
 FAILURE_GUIDANCE = {
     "Uncovered paths": (
-        "Under the appropriate `# [surface]` in CODEOWNERS, add `# /path/` if "
-        "owners are unknown or `/path/ @owner` if ownership is known."
+        "In OWNERSHIP.yaml, add the path to an entry in the right section: a bare "
+        "path if owners are unknown, or `/path/: [handle]` to notify someone."
     ),
     "Duplicate patterns": (
-        "Search CODEOWNERS for the exact pattern and keep it under only one "
-        "`# [surface]` section."
+        "Search OWNERSHIP.yaml for the exact pattern and keep it in only one entry."
     ),
     "Stale patterns": (
-        "At the reported CODEOWNERS line, correct or remove the pattern; it matches "
-        "no committed path."
+        "In OWNERSHIP.yaml, correct or remove the reported pattern; it matches no "
+        "committed path."
     ),
     "Ineffective patterns": (
-        "At the reported CODEOWNERS line, move the commented pattern to the winning "
-        "surface, narrow it, or remove it."
+        "In OWNERSHIP.yaml, move the reported pattern to the entry that wins for its "
+        "paths, narrow it, or remove it."
     ),
     "Source-order mismatches": (
-        "In CODEOWNERS, place the broader pattern before the narrower override; "
-        "GitHub applies the last matching rule."
+        "In OWNERSHIP.yaml, put the broader pattern in an earlier section than the "
+        "narrower one; GitHub applies the last matching rule."
     ),
     "Missing effective surfaces": (
-        "Add a matching path under the named `# [surface]` in CODEOWNERS, or remove "
-        "that surface from the hierarchy."
+        "In OWNERSHIP.yaml, give the named section an entry with a path, or remove it "
+        "from `sections`."
     ),
     "Missing grouped sections": (
-        "Below `# Grouped review-surface definitions:`, add the missing "
-        "`# [surface]` section or remove its hierarchy declaration."
+        "In OWNERSHIP.yaml, add an entry for the missing section or remove it from "
+        "`sections`."
     ),
     "Undeclared grouped sections": (
-        "Add the section name to the review-surface hierarchy near the top of "
-        "CODEOWNERS, or rename or remove the section."
+        "In OWNERSHIP.yaml, add the section to `sections` or move its entries to "
+        "another section."
     ),
+    "Invalid owner handles": (
+        "In OWNERSHIP.yaml, list GitHub users, teams, or emails in the entry's "
+        "`owners`."
+    ),
+    "Reviewers missing from owner lists": (
+        "In OWNERSHIP.yaml, add the reported handles to the entry's `owners`, or "
+        "move the path to an entry whose owners include them."
+    ),
+    "Unneeded reviewer exceptions": (
+        "Remove the reported entries from REVIEWERS_NOT_OWNERS in "
+        "scripts/codeowners/check_taxonomy.py; their handles are owners now, no "
+        "longer on the rule, or the rule is gone."
+    ),
+}
+
+# Active rules whose handles are notified without being owners of the rule's label
+# block. These predate the owner lines and are left as they are until the people
+# involved decide; every other rule's handles must be on its block's owner line.
+REVIEWERS_NOT_OWNERS = {
+    "test/functorch/test_aotdispatch.py": frozenset({"@chillee", "@ezyang"}),
+    "torch/_export/serde/schema.py": frozenset({"@sherlocknomad"}),
+    "torch/fx/proxy.py": frozenset({"@zou3519"}),
 }
 
 
@@ -60,6 +83,24 @@ class TaxonomyPattern:
     group: str
     path: str
     line_number: int
+    labels: tuple[str, ...] = ()
+    # Handles on the block's `# owner:` line; None when the block has no owner line.
+    owners: tuple[str, ...] | None = None
+    # Handles on the rule itself, who GitHub asks for review.
+    reviewers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class OwnerLine:
+    line_number: int
+    text: str
+
+
+@dataclass(frozen=True)
+class ParsedCodeowners:
+    patterns: list[TaxonomyPattern]
+    section_groups: list[str]
+    owner_lines: list[OwnerLine]
 
 
 @dataclass
@@ -113,6 +154,24 @@ def is_valid_owner(owner: str) -> bool:
 
 def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
     """Parse grouped rules while preserving their actual CODEOWNERS order."""
+    parsed = parse_codeowners(codeowners)
+    return parsed.patterns, parsed.section_groups
+
+
+def owner_handles(owner_line: str) -> tuple[str, ...]:
+    """Handles on an `# owner:` line; `none` means an empty list."""
+    handles = tuple(owner_line.removeprefix(OWNER_PREFIX).split())
+    return () if handles == ("none",) else handles
+
+
+def has_valid_handles(owner_line: str) -> bool:
+    """An `# owner:` line names valid handles, or `none` on its own."""
+    handles = owner_line.removeprefix(OWNER_PREFIX).split()
+    return handles == ["none"] or (bool(handles) and all(map(is_valid_owner, handles)))
+
+
+def parse_codeowners(codeowners: Path) -> ParsedCodeowners:
+    """Parse grouped rules, label blocks and owner lines in one pass."""
     lines = codeowners.read_text().splitlines()
     try:
         marker = lines.index(SECTION_MARKER)
@@ -128,14 +187,26 @@ def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
     start = marker + 1
     patterns = []
     section_groups = []
+    owner_lines = []
     group = None
+    labels: tuple[str, ...] = ()
+    block_owners: tuple[str, ...] | None = None
     for line_number, raw_line in enumerate(lines[start:], start=start + 1):
         line = raw_line.strip()
         if line.startswith(GROUP_PREFIX) and line.endswith("]"):
             group = line[len(GROUP_PREFIX) : -1]
+            labels = ()
+            block_owners = None
             if group in section_groups:
                 raise ValueError(f"{codeowners}:{line_number}: repeated group: {group}")
             section_groups.append(group)
+        elif line.startswith(LABEL_PREFIX):
+            label_names = line.removeprefix(LABEL_PREFIX).split(",")
+            labels = tuple(label.strip() for label in label_names)
+            block_owners = None
+        elif line.startswith(OWNER_PREFIX):
+            owner_lines.append(OwnerLine(line_number, line))
+            block_owners = owner_handles(line)
         elif line.startswith(("# /", "/")):
             location = f"{codeowners}:{line_number}"
             active = line.startswith("/")
@@ -160,13 +231,73 @@ def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
                     )
             if pattern == "/" or any(character in pattern for character in "?[\\"):
                 raise ValueError(f"{location}: invalid taxonomy path: {pattern!r}")
-            patterns.append(TaxonomyPattern(group, pattern[1:], line_number))
+            reviewers = tuple(owners) if active else ()
+            patterns.append(
+                TaxonomyPattern(
+                    group, pattern[1:], line_number, labels, block_owners, reviewers
+                )
+            )
         elif line and not line.startswith("#"):
             raise ValueError(f"{codeowners}:{line_number}: invalid taxonomy entry")
 
     if not patterns:
         raise ValueError("taxonomy section contains no patterns")
-    return patterns, section_groups
+    return ParsedCodeowners(patterns, section_groups, owner_lines)
+
+
+def find_ownership_errors(
+    parsed: ParsedCodeowners,
+    *,
+    reviewers_not_owners: dict[str, frozenset[str]] = REVIEWERS_NOT_OWNERS,
+) -> dict[str, list[str]]:
+    """Check owner handles, and that each rule's reviewers are on its block's owner line.
+
+    The generator writes one owner line below each label line and rejects repeated
+    label lists, so those are not checked here.
+    """
+    invalid_handles = [
+        f"CODEOWNERS:{line.line_number} {line.text}"
+        for line in parsed.owner_lines
+        if not has_valid_handles(line.text)
+    ]
+    # GitHub handles are case-insensitive, so exceptions are too.
+    exceptions = {
+        path: {handle.casefold() for handle in handles}
+        for path, handles in reviewers_not_owners.items()
+    }
+    missing_reviewers = []
+    used_exceptions = set()
+    for pattern in parsed.patterns:
+        if not pattern.labels or pattern.owners is None:
+            continue
+        owners = {owner.casefold() for owner in pattern.owners}
+        allowed = exceptions.get(pattern.path, set())
+        missing = []
+        for reviewer in pattern.reviewers:
+            if reviewer.casefold() in owners:
+                continue
+            if reviewer.casefold() in allowed:
+                used_exceptions.add((pattern.path, reviewer.casefold()))
+            else:
+                missing.append(reviewer)
+        if missing:
+            missing_reviewers.append(
+                f"CODEOWNERS:{pattern.line_number} /{pattern.path}: "
+                f"{' '.join(missing)} not on the block's owner line"
+            )
+    # Every exception must still be needed, including ones whose rule was removed
+    # or renamed, so a stale entry can't later exempt a new rule unreviewed.
+    unneeded_exceptions = [
+        f"/{path}: {handle}"
+        for path, handles in sorted(exceptions.items())
+        for handle in sorted(handles)
+        if (path, handle) not in used_exceptions
+    ]
+    return {
+        "Invalid owner handles": invalid_handles,
+        "Reviewers missing from owner lists": missing_reviewers,
+        "Unneeded reviewer exceptions": unneeded_exceptions,
+    }
 
 
 def tracked_paths(repo: Path) -> list[str]:
@@ -205,16 +336,39 @@ def pattern_specificity(pattern: TaxonomyPattern) -> tuple[int, int, int]:
     return prefix.count("/"), len(prefix), len(pattern.path)
 
 
+class TaxonomyIndex:
+    """Look up the taxonomy patterns that match a tracked path."""
+
+    def __init__(self, patterns: list[TaxonomyPattern]) -> None:
+        self.patterns_by_path: dict[str, list[TaxonomyPattern]] = defaultdict(list)
+        self.glob_patterns: list[TaxonomyPattern] = []
+        for pattern in patterns:
+            if "*" in pattern.path:
+                self.glob_patterns.append(pattern)
+            else:
+                self.patterns_by_path[pattern.path].append(pattern)
+
+    def matches(self, path: str) -> list[TaxonomyPattern]:
+        """Return the patterns matching the path or one of its parent directories."""
+        parts = path.split("/")
+        candidates = [path]
+        candidates.extend(
+            "/".join(parts[:index]) + "/" for index in range(1, len(parts))
+        )
+        matches: list[TaxonomyPattern] = []
+        for candidate in candidates:
+            matches.extend(self.patterns_by_path.get(candidate, []))
+        matches.extend(
+            pattern
+            for pattern in self.glob_patterns
+            if compile_glob(pattern.path).fullmatch(path)
+        )
+        return matches
+
+
 def analyze(paths: list[str], patterns: list[TaxonomyPattern]) -> Report:
     """Measure coverage and verify that source order preserves specificity."""
-    patterns_by_path: dict[str, list[TaxonomyPattern]] = defaultdict(list)
-    glob_patterns = []
-    for pattern in patterns:
-        if "*" in pattern.path:
-            glob_patterns.append(pattern)
-        else:
-            patterns_by_path[pattern.path].append(pattern)
-
+    index = TaxonomyIndex(patterns)
     matched_patterns: set[TaxonomyPattern] = set()
     effective_patterns: set[TaxonomyPattern] = set()
     effective_groups = set()
@@ -222,19 +376,7 @@ def analyze(paths: list[str], patterns: list[TaxonomyPattern]) -> Report:
     uncovered = []
     overridden = {}
     for path in paths:
-        parts = path.split("/")
-        candidates = [path]
-        candidates.extend(
-            "/".join(parts[:index]) + "/" for index in range(1, len(parts))
-        )
-        matches = []
-        for candidate in candidates:
-            matches.extend(patterns_by_path.get(candidate, []))
-        matches.extend(
-            pattern
-            for pattern in glob_patterns
-            if compile_glob(pattern.path).fullmatch(path)
-        )
+        matches = index.matches(path)
         if not matches:
             uncovered.append(path)
             continue
@@ -256,7 +398,9 @@ def analyze(paths: list[str], patterns: list[TaxonomyPattern]) -> Report:
             )
 
     duplicates = {
-        path: entries for path, entries in patterns_by_path.items() if len(entries) > 1
+        path: entries
+        for path, entries in index.patterns_by_path.items()
+        if len(entries) > 1
     }
     return Report(
         tracked=len(paths),
@@ -289,8 +433,11 @@ def print_report(report: Report) -> None:
     covered = report.tracked - len(report.uncovered)
     percentage = 100 * covered / report.tracked if report.tracked else 100.0
     print("CODEOWNERS taxonomy summary")
-    print("  Edit CODEOWNERS to fix failures reported below.")
-    print("  Use `/path/ @owner` for active ownership or `# /path/` when unresolved.")
+    print("  CODEOWNERS is generated: fix failures in OWNERSHIP.yaml, then run")
+    print(
+        "  scripts/codeowners/generate_codeowners.py. Line numbers refer to CODEOWNERS."
+    )
+    print("  Write `/path/: [handle]` to notify someone or a bare `/path/` otherwise.")
     print(f"  Tracked paths: {report.tracked} (committed paths checked)")
     print(f"  Covered paths: {covered} (matched by at least one pattern)")
     print(f"  Coverage: {percentage:.4f}% (must remain 100%)")
@@ -382,13 +529,18 @@ def main() -> int:
     try:
         codeowners = repo / "CODEOWNERS"
         declared_groups = parse_declared_groups(codeowners)
-        patterns, section_groups = parse_patterns(codeowners)
+        parsed = parse_codeowners(codeowners)
+        patterns = parsed.patterns
+        section_groups = parsed.section_groups
         report = analyze(tracked_paths(repo), patterns)
+        ownership_errors = find_ownership_errors(
+            parsed, reviewers_not_owners=REVIEWERS_NOT_OWNERS
+        )
     except ValueError as error:
         if args.lintrunner:
             emit_lint_error(
                 f"CODEOWNERS taxonomy validation failed: {error}. "
-                "Fix the reported CODEOWNERS syntax or section error, then run "
+                "Fix it in OWNERSHIP.yaml and regenerate CODEOWNERS, then run "
                 "`python scripts/codeowners/check_taxonomy.py` locally."
             )
             return 0
@@ -400,17 +552,23 @@ def main() -> int:
     missing_groups = sorted(declared_group_set - report.groups)
     missing_sections = sorted(declared_group_set - section_group_set)
     undeclared_sections = sorted(section_group_set - declared_group_set)
-    has_errors = bool(missing_groups or missing_sections or undeclared_sections) or any(
-        (
-            report.uncovered,
-            report.duplicates,
-            report.stale,
-            report.ineffective,
-            report.source_order_mismatches,
+    has_errors = (
+        bool(missing_groups or missing_sections or undeclared_sections)
+        or any(ownership_errors.values())
+        or any(
+            (
+                report.uncovered,
+                report.duplicates,
+                report.stale,
+                report.ineffective,
+                report.source_order_mismatches,
+            )
         )
     )
     if not args.lintrunner:
         print_report(report)
+        for title, entries in ownership_errors.items():
+            print_failure_entries(title, entries)
         print_failure_entries("Missing effective surfaces", missing_groups)
         print_failure_entries("Missing grouped sections", missing_sections)
         print_failure_entries("Undeclared grouped sections", undeclared_sections)
@@ -425,6 +583,10 @@ def main() -> int:
             (len(missing_groups), "missing effective surfaces"),
             (len(missing_sections), "missing grouped sections"),
             (len(undeclared_sections), "undeclared grouped sections"),
+            *(
+                (len(entries), title.lower())
+                for title, entries in ownership_errors.items()
+            ),
         ]
         failures = [f"{count} {name}" for count, name in failure_counts if count]
         emit_lint_error(

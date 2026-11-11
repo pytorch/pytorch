@@ -276,6 +276,12 @@ def register_custom_class(
     torch._C._register_opaque_type(name)
 
 
+def unregister_custom_class(cls: Any) -> None:
+    type_info = _OPAQUE_TYPES.pop(cls)
+    _OPAQUE_TYPES_BY_NAME.pop(type_info.class_name, None)
+    torch._C._unregister_opaque_type(type_info.class_name)
+
+
 def register_opaque_type(
     cls: Any,
     *,

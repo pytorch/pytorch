@@ -10,7 +10,7 @@ import operator
 import os
 import sys
 import warnings
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
@@ -29,6 +29,10 @@ from torch._functorch._aot_autograd.descriptors import (
 )
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
+from torch._higher_order_ops.user_kernel_hop import (
+    get_user_kernel_hop_info,
+    is_user_kernel_functional_hop,
+)
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
 from torch._library.utils import get_layout_constraint_tag
@@ -67,6 +71,7 @@ from torch.utils._triton import has_triton_reduction_ordering
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
+from .fx_utils import get_mutated_schema_args
 from .ir import (
     BaseView,
     DtypeView,
@@ -90,6 +95,7 @@ from .utils import (
     ceildiv,
     convert_symint_to_expr,
     decode_device,
+    get_current_backend,
     is_dynamic,
     is_gpu,
     is_nvidia_sm100_or_later,
@@ -730,6 +736,43 @@ def _has_saved_lowp_output_use(node: torch.fx.Node | None) -> bool:
     return False
 
 
+def _has_lowp_pointwise_barrier(node: torch.fx.Node | None) -> bool:
+    return (
+        node is not None
+        and node.meta is not None
+        and node.meta.get("low_precision_pointwise_barrier", False)
+    )
+
+
+def emulate_lowp_output_cast(x: TensorBox) -> TensorBox:
+    """Round a low-precision value in registers without materializing it.
+
+    A lowering that splits one user-visible low-precision op into several IR
+    nodes (e.g. peeling the bias off a convolution) must reproduce the rounding
+    of the op's declared output, else a fused consumer can observe a value
+    eager never produces.  make_pointwise already rounds this value under the
+    emulate_precision_casts barrier or when it is saved for backward; this
+    covers the remaining unsaved case under the same gate
+    (emulate_precision_casts_on_saved_tensors), so the value no longer depends
+    on whether backward saves it.
+    """
+    dtype = x.get_dtype()
+    if dtype not in (torch.bfloat16, torch.float16):
+        return x
+
+    if not config.emulate_precision_casts_on_saved_tensors:
+        # The gate owns the saved-vs-unsaved rounding policy; off means this
+        # rounding is elided for every op, saved or not.
+        return x
+
+    node = getattr(V.graph, "current_node", None) if V.graph is not None else None
+    if _has_lowp_pointwise_barrier(node) or _has_saved_lowp_output_use(node):
+        # make_pointwise already rounds this value for the current node.
+        return x
+
+    return make_pointwise(lambda out: out, force_output_cast=True)(x)
+
+
 def make_pointwise(
     fn: Callable[..., Any],
     override_return_dtype: torch.dtype | None = None,
@@ -739,9 +782,15 @@ def make_pointwise(
     use_fma_for_alpha: bool = False,
     triton_fallback: Callable[..., _T] | None = None,
     round_scalars_to_tensor_dtype: bool = False,
+    force_output_cast: bool = False,
 ) -> Callable[..., TensorBox | _T]:
     """Wraps a pointwise fn and returns a function representing the pointwise in
-    the define-by-run IR."""
+    the define-by-run IR.
+
+    force_output_cast rounds a bf16/fp16 result down and back up in registers,
+    emulating the rounding eager applies at the op's output; see
+    emulate_lowp_output_cast.
+    """
 
     def inner(*inputs: Any, alpha=None) -> TensorBox | _T:  # noqa: docstring_linter
         if triton_fallback is not None and any(
@@ -795,11 +844,7 @@ def make_pointwise(
         current_node = (
             getattr(V.graph, "current_node", None) if V.graph is not None else None
         )
-        emulate_precision_casts = (
-            current_node is not None
-            and current_node.meta is not None
-            and current_node.meta.get("low_precision_pointwise_barrier", False)
-        )
+        emulate_precision_casts = _has_lowp_pointwise_barrier(current_node)
         truncate_saved_output = (
             config.emulate_precision_casts_on_saved_tensors
             and not emulate_precision_casts
@@ -807,7 +852,7 @@ def make_pointwise(
             and _has_saved_lowp_output_use(current_node)
         )
         emulate_output_cast = (
-            emulate_precision_casts or truncate_saved_output
+            emulate_precision_casts or truncate_saved_output or force_output_cast
         ) and dtype in low_pr_fp
 
         def inner_fn(index):
@@ -998,6 +1043,7 @@ for _pointwise_name in (
     "isnan",
     "isinf",
     "signbit",
+    "to_dtype_bitcast",
 ):
     register_pointwise_op(_pointwise_name)
 
@@ -2418,15 +2464,27 @@ def cat(inputs, dim=0):
     exclude: OrderedSet[str] = OrderedSet([recombined]) if recombined else OrderedSet()
     fusable_reduction = any(can_fuse_reduction(t, exclude) for t in inputs)
 
-    def should_lower_cat_input(x) -> bool:
+    def should_lower_cat_input(x, numel=None) -> bool:
+        # The cat input's own numel; unwrapping a view below reaches its base.
+        if numel is None:
+            numel = x.get_numel()
         # Unrealized inputs will not be storage and layouts, and we don't want to realize
         # them in case we want to fuse
         if ir.is_storage_and_layout(x):
             storage, _ = ir.as_storage_and_layout(x, freeze=False)
-            return not ir.ConcatKernel.can_realize_into_without_copy(storage)
+            if ir.ConcatKernel.can_realize_into_without_copy(storage):
+                return False
+            # Copying all of a buffer Inductor computes can fuse into its
+            # producer, which is cheaper than re-reading it in a pointwise cat.
+            return not (
+                config.cat_fuse_computed_input_copies
+                and isinstance(storage.data, ir.ComputedBuffer)
+                and not storage.data.is_no_op()
+                and V.graph.sizevars.statically_known_equals(numel, storage.get_numel())
+            )
 
         if isinstance(x, (TensorBox, ir.StorageBox)):
-            return should_lower_cat_input(unwrap_tensor(x))
+            return should_lower_cat_input(unwrap_tensor(x), numel)
 
         if isinstance(x, ir.Pointwise):
             return True
@@ -2498,6 +2556,11 @@ def cat(inputs, dim=0):
             if any(skip_mask):
                 input_nodes = [n for n, skip in zip(input_nodes, skip_mask) if not skip]
 
+            # A cat input can be consumed by another input to the same cat, for
+            # example cat((rotated, -rotated)).  That use is internal to this
+            # cat and should not make rotated a multi-consumer input.
+            cat_input_nodes = OrderedSet(input_nodes)
+
             def is_unrealized_pointwise(x):
                 if isinstance(x, (TensorBox, ir.StorageBox)):
                     return is_unrealized_pointwise(unwrap_tensor(x))
@@ -2506,9 +2569,16 @@ def cat(inputs, dim=0):
             for arg, ir_input in zip(input_nodes, inputs):
                 if not hasattr(arg, "users") or len(arg.users) <= 1:
                     continue
+                external_users = [
+                    u
+                    for u in arg.users
+                    if u is not current_node and u not in cat_input_nodes
+                ]
+                if not external_users:
+                    continue
                 # input will be computed multiple times because other consumers
                 # (eg. pointwise) will also inline it. So we should realize-in-place via ConcatKernel
-                if any(is_pointwise_use(u) for u in arg.users if u is not current_node):
+                if any(is_pointwise_use(u) for u in external_users):
                     return True
                 # If input is an unrealized Pointwise with multiple consumers, pointwise_cat
                 # will inline input without realizing it to memory, causing separate
@@ -2866,6 +2936,7 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
                 aten.clone.default,
                 aten._scaled_mm.default,
                 aten._scaled_mm_v2.default,
+                aten._scaled_grouped_mm_v2.default,
                 prims.convert_element_type.default,
             )
             or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
@@ -2886,6 +2957,9 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
             aten.clone.default,
             aten._scaled_mm.default,
             aten._scaled_mm_v2.default,
+            # MXFP8 grouped GEMM: the e8m0 scales are consumed by the kernel,
+            # never read arithmetically by generated Triton.
+            aten._scaled_grouped_mm_v2.default,
         ) or is_view(node.target):
             return False
         if node.target == torch.ops.prims.convert_element_type.default:
@@ -2913,6 +2987,14 @@ def unsupported_output_tensor(t: torch.Tensor, node=None):
 
 
 def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=True):
+    # These wrappers must be decomposed regardless of tensor type. The resulting
+    # operators are checked independently for unsupported types during lowering.
+    if node.target in (
+        torch.ops.higher_order.auto_functionalized,
+        torch.ops.higher_order.auto_functionalized_v2,
+    ) or is_user_kernel_functional_hop(node.target):
+        return False
+
     # Custom fallback lowering
     if node.target is aten.view_as_complex.default:
         return False
@@ -3224,12 +3306,7 @@ def inductor_random(
     if config.align_random_eager and device.type == "cuda" and mode == "rand":
         threads_per_round = get_threads_per_round(device)
 
-        def _vec_from_dtype(dt: torch.dtype) -> int:
-            if dt in (torch.float16, torch.bfloat16):
-                return 8
-            return 4
-
-        vec = _vec_from_dtype(align_dtype)
+        vec = inductor_prims.rand_eager_vec(align_dtype)
 
         def inner_fn(index):
             rng_seed = seed_loader([0])
@@ -3502,6 +3579,16 @@ def require_contiguous(_, *args, **kwargs):
     return args, kwargs
 
 
+def require_contiguous_adaptive_max_pool3d_indices(_, *args, **kwargs):
+    # Native adaptive max-pool 3D backward reads indices as packed memory.
+    args = list(args)
+    if len(args) >= 3:
+        args[2] = ir.ExternKernel.require_contiguous(args[2])
+    else:
+        kwargs["indices"] = ir.ExternKernel.require_contiguous(kwargs["indices"])
+    return args, kwargs
+
+
 def require_contiguous_strides(_, *args, **kwargs):
     # TODO: combine this with require_contiguous after
     # https://github.com/pytorch/pytorch/pull/148235 lands.
@@ -3538,7 +3625,88 @@ def constrain_to_fake_tensor(arg, fake_arg):
     return arg
 
 
-def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
+# Note [Constrain shared storage inputs first]
+# require_strides copies an unrealized StorageBox (copy_input), except a 0/1-element
+# tensor under a stride order, so an op that reads one pointwise result through
+# several arguments, e.g. op(z, z) or op(z, z.T), materializes it once per argument.
+# The constraint helpers therefore first realize and constrain an argument that is a
+# storage TensorBox when more than one tensor argument reads its storage: they then
+# share its buffer, and views of it are constrained against its final layout instead
+# of freezing a FlexibleLayout to the default one (convert_to_reinterpret_view).
+# Storage reached only through views, as in op(z.T, z.T), keeps one copy per argument.
+# The constrain callback gets the realized TensorBox and its fake tensor; the
+# per-argument pass applies it again, so it must be idempotent. Storage that the op
+# writes through any argument is left to the per-argument constraints, so this pass
+# never makes a written argument share a buffer with another argument. A storage it
+# realizes stays realized for later ops, which then share it as on any realized
+# input, so a graph pass must not leave an op writing a storage that it also reads
+# through another argument, or a receive writing a storage, where eager had a separate
+# copy. remove_noop_ops, joint_graph.remove_no_ops and the split/cat lowering patterns
+# in post_grad.py check this with _aliased_by_writing_op.
+def _constrain_shared_storage_inputs_first(
+    fx_node, args, kwargs, fake_args, fake_kwargs, constrain
+):
+    def storage_ids(tree):
+        ids = []
+        for x in pytree.tree_leaves(tree):
+            while isinstance(x, (TensorBox, ir.BaseView)):
+                x = x.data
+            if isinstance(x, ir.StorageBox):
+                ids.append(id(x))
+        return ids
+
+    leaves = pytree.tree_leaves((args, kwargs))
+    counts = Counter(storage_ids(leaves))
+    shared = OrderedSet(
+        id(x.data)
+        for x in leaves
+        if isinstance(x, TensorBox)
+        and isinstance(x.data, ir.StorageBox)
+        and counts[id(x.data)] > 1
+    )
+    if shared:
+        written = _written_args(fx_node, args, kwargs, fake_kwargs)
+        shared -= OrderedSet(storage_ids(written))
+    if not shared:
+        return args, kwargs
+
+    def visit(arg, fake_arg):
+        if (
+            isinstance(arg, TensorBox)
+            and id(arg.data) in shared
+            and isinstance(fake_arg, torch.Tensor)
+        ):
+            arg.realize()
+            return constrain(arg, fake_arg)
+        if isinstance(arg, dict) and isinstance(fake_arg, dict):
+            return {k: visit(v, fake_arg[k]) for k, v in arg.items()}
+        if isinstance(arg, (tuple, list)) and isinstance(fake_arg, (tuple, list)):
+            return type(arg)(visit(a, f_a) for a, f_a in zip(arg, fake_arg))
+        return arg
+
+    return visit(args, fake_args), visit(kwargs, fake_kwargs)
+
+
+def _written_args(fx_node, args, kwargs, fake_kwargs):
+    """The arguments that fx_node's op writes; all of them for an unknown op."""
+    target = fx_node.target
+    if (info := get_user_kernel_hop_info(target, "mutation")) is not None:
+        names = info.get_mutated_tensors(kwargs, fake_kwargs["kwargs"])
+        return [kwargs["kwargs"][name] for name in names]
+    if isinstance(target, torch._ops.OpOverload):
+        # A collective's lowering can write tensors that its schema does not mark,
+        # like the irecv tensors of batch_p2p_ops (_c10d_functional_autograd too).
+        if in_namespace(target, "_c10d_functional"):
+            return [args, kwargs]
+        return get_mutated_schema_args(target._schema, args, kwargs)
+    return [args, kwargs]
+
+
+def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs, *, fx_node):
+    # See Note [Constrain shared storage inputs first]
+    args, kwargs = _constrain_shared_storage_inputs_first(
+        fx_node, args, kwargs, fake_args, fake_kwargs, constrain_to_fake_tensor
+    )
     args = tuple(
         constrain_to_fake_tensor(arg, fake_arg)
         for arg, fake_arg in zip(args, fake_args)
@@ -3548,20 +3716,16 @@ def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
 
 
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
-    def get_fake_val(fx_arg):
-        if isinstance(fx_arg, torch.fx.Node):
-            return fx_arg.meta.get("val")
-        return fx_arg
+    def require_fake_stride_order(arg, fake_val):
+        shape_env = V.graph.sizevars.shape_env
+        stride_order = ir.get_stride_order(fake_val.stride(), shape_env)
+        return ir.ExternKernel.require_stride_order(arg, stride_order)
 
-    def apply_constraint(arg, fx_arg):
-        fake_val = get_fake_val(fx_arg)
+    def apply_constraint(arg, fake_val):
         if _is_tensor_irnode(arg):
             if not isinstance(fake_val, torch.Tensor):
                 return arg
-            stride_order = ir.get_stride_order(
-                fake_val.stride(), V.graph.sizevars.shape_env
-            )
-            return ir.ExternKernel.require_stride_order(arg, stride_order)
+            return require_fake_stride_order(arg, fake_val)
         if isinstance(arg, dict):
             if not isinstance(fake_val, dict):
                 return arg
@@ -3569,15 +3733,18 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
         if isinstance(arg, (tuple, list)):
             if not isinstance(fake_val, (tuple, list)):
                 return arg
-            return type(arg)(
-                apply_constraint(a, fx_a) for a, fx_a in zip(arg, fake_val)
-            )
+            return type(arg)(apply_constraint(a, f_a) for a, f_a in zip(arg, fake_val))
         return arg
 
-    args = tuple(
-        apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)
+    fake_args, fake_kwargs = torch.fx.map_arg(
+        (fx_node.args, fx_node.kwargs), lambda n: n.meta.get("val")
     )
-    kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
+    # See Note [Constrain shared storage inputs first]
+    args, kwargs = _constrain_shared_storage_inputs_first(
+        fx_node, args, kwargs, fake_args, fake_kwargs, require_fake_stride_order
+    )
+    args = tuple(apply_constraint(arg, f_a) for arg, f_a in zip(args, fake_args))
+    kwargs = {k: apply_constraint(v, fake_kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
 
 
@@ -3665,6 +3832,11 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             and idx == 3
         )
 
+        # SDPA kernels require 16-byte aligned data pointers, which the stride
+        # checks below do not cover.
+        if ir.is_unaligned(arg):
+            arg = ir.ExternKernel.copy_input(arg)
+            arg = ir.ExternKernel.require_stride_order(arg, stride_order)
         if not (isinstance(arg, TensorBox)):
             raise AssertionError("expected: isinstance(arg, TensorBox)")
         if len(arg.get_size()) not in (3, 4):
@@ -3836,7 +4008,10 @@ make_fallback(aten.max_pool3d_with_indices_backward)
 make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
-make_fallback(aten.adaptive_max_pool3d_backward)
+make_fallback(
+    aten.adaptive_max_pool3d_backward,
+    require_contiguous_adaptive_max_pool3d_indices,
+)
 make_fallback(aten.fractional_max_pool2d_backward)
 make_fallback(aten.fractional_max_pool3d_backward)
 make_fallback(aten.replication_pad1d_backward)
@@ -4459,7 +4634,9 @@ def _full(fill_value, device, dtype, size):
     elif isinstance(value, sympy.Basic):
 
         def inner_fn(index):
-            return ops.index_expr(value, dtype)
+            if dtype in (torch.int32, torch.int64):
+                return ops.index_expr(value, dtype)
+            return ops.value_expr(value, dtype)
 
     else:
         if len(value.get_size()) != 0:
@@ -5838,6 +6015,24 @@ def max_pool_checks(
     return kernel_size, stride, padding, dilation, use_fallback
 
 
+def _pool_argmax_inner_fn(x, kernel_size, inner_fn):
+    # Loop reordering runs after lowering and may permute the reduction ranges, so
+    # the offset is returned as an explicit row-major index into the window.
+    supports_logical_index_argreduce = (
+        is_triton(x)
+        or ir.get_device_type(x) == "mps"
+        or (ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp")
+    )
+    if len(kernel_size) == 1 or not supports_logical_index_argreduce:
+        return inner_fn
+
+    def inner_fn_with_index(idx, reduction_idx):
+        logical_index = inductor_prims._flatten_index(reduction_idx, kernel_size)
+        return inner_fn(idx, reduction_idx), ops.index_expr(logical_index, torch.int64)
+
+    return inner_fn_with_index
+
+
 def _max_pool_with_offsets(
     x,
     kernel_size,
@@ -5899,7 +6094,7 @@ def _max_pool_with_offsets(
         device=x.get_device(),
         dst_dtype=torch.int64,
         src_dtype=dtype,
-        inner_fn=fn_inner,
+        inner_fn=_pool_argmax_inner_fn(x, kernel_size, fn_inner),
         ranges=new_size,
         reduction_ranges=kernel_size,
     )
@@ -6630,7 +6825,7 @@ def _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim):
             device=x.get_device(),
             dst_dtype=torch.int64,
             src_dtype=dtype,
-            inner_fn=fn_inner,
+            inner_fn=_pool_argmax_inner_fn(x, kernel_size, fn_inner),
             ranges=new_size,
             reduction_ranges=kernel_size,
         )
@@ -7327,8 +7522,10 @@ def _make_reduction_inner(
 
     # Loop reordering happens after lowering, so the input IR cannot reliably predict
     # when the physical reduction order will differ from the logical order.
-    supports_logical_index_argreduce = is_triton(x) or (
-        ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
+    supports_logical_index_argreduce = (
+        is_triton(x)
+        or ir.get_device_type(x) == "mps"
+        or (ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp")
     )
     should_compute_logical_index = (
         reduction_type
@@ -7716,7 +7913,7 @@ def pow(a, b):
     return pow_native(a, b)
 
 
-def mutate_to(changed, val, unsafe_alias=False):
+def mutate_to(changed, val, unsafe_alias=False, share_value=True):
     if isinstance(changed, TensorBox):
         changed_data = changed.data
     else:
@@ -7724,8 +7921,34 @@ def mutate_to(changed, val, unsafe_alias=False):
     if isinstance(val, TensorBox):
         val = val.data
 
-    if not isinstance(val, ir.StorageBox):
-        # introduce a copy to handle views
+    # Fast path, just swing the data pointer. Not for a realized StorageBox
+    # (inputs and module buffers included): it may already be referenced by
+    # name (views, extern kernel inputs), so its data can't be replaced.
+    # Except an empty buffer nothing has written yet: it holds no data, and
+    # its views only need the new value in its layout.
+    swing: ir.StorageBox | None = None
+    empty: ir.ComputedBuffer | None = None
+    if isinstance(changed_data, ir.StorageBox):
+        target = changed_data.data
+        if (
+            not unsafe_alias
+            and isinstance(target, ir.ComputedBuffer)
+            and target.is_no_op()
+            and changed_data.get_name() not in V.graph.mutated_buffers
+        ):
+            empty = target
+        if empty is not None or not IRNode.is_realized_node(target):
+            swing = changed_data
+
+    # Introduce a copy to handle views, and on the fast path to lay the value
+    # out as the empty buffer is, or when val is another tensor's (the copy_
+    # lowerings pass share_value=False): if changed took its buffer, an
+    # in-place write to either would change both.
+    if (
+        not isinstance(val, ir.StorageBox)
+        or empty is not None
+        or (swing is not None and not share_value)
+    ):
         node = Pointwise.create(
             device=changed.get_device(),
             dtype=changed.get_dtype(),
@@ -7738,15 +7961,13 @@ def mutate_to(changed, val, unsafe_alias=False):
         if not (isinstance(val, ir.StorageBox)):
             raise AssertionError("expected: isinstance(val, ir.StorageBox)")
 
-    if isinstance(changed_data, ir.StorageBox) and not (
-        changed_data.is_input_buffer()
-        # In AOTI, module parameters and buffers are not lifted as graph inputs
-        or changed_data.is_module_buffer()
-        or isinstance(changed_data.data, ir.NopKernel)
-    ):
-        # Fast path, just swing the data pointer
+    if swing is not None:
         val.realize()
-        changed_data.data = val.data
+        if empty is not None:
+            if not isinstance(val.data, ir.ComputedBuffer):
+                raise AssertionError("expected: isinstance(val.data, ComputedBuffer)")
+            val.data.layout = empty.layout
+        swing.data = val.data
         return changed
 
     ir.MutationLayoutSHOULDREMOVE.realize_into(
@@ -7768,7 +7989,7 @@ def copy_(dst, src, non_blocking=False):
     src = to_device(src, dst.get_device())
     src = to_dtype(src, dst.get_dtype())
     src = expand(src, dst.get_size())
-    return mutate_to(dst, src)
+    return mutate_to(dst, src, share_value=False)
 
 
 @make_pointwise
@@ -8535,6 +8756,20 @@ square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True, round_scalars_to_tensor_dtype=True)
 
 
+def _with_positional_alpha(lowering, self, other, alpha=1):
+    return lowering(self, other, alpha=alpha)
+
+
+# The Scalar schemas declare alpha positionally, so make_pointwise would
+# otherwise receive it as a third operand.
+register_lowering(aten.add.Scalar, type_promotion_kind=None)(
+    functools.partial(_with_positional_alpha, add)
+)
+register_lowering(aten.sub.Scalar, type_promotion_kind=None)(
+    functools.partial(_with_positional_alpha, sub)
+)
+
+
 @register_lowering(aten.addcmul, broadcast=True)
 def addcmul(self, tensor1, tensor2, *, value=1):
     """
@@ -8799,7 +9034,51 @@ register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.log2)
-register_pointwise_numeric(aten.nextafter)
+
+register_op_dtype_propagation_rules(
+    "nextafter",
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+    override_return_dtype=None,
+)
+register_pointwise_op("nextafter")
+
+
+def nextafter(x, y):
+    dtype = x.get_dtype()
+    is_low_precision = dtype in (torch.float16, torch.bfloat16)
+    device = x.get_device()
+    is_halide = (
+        device.type in ("cpu", "cuda") and get_current_backend(device.type) == "halide"
+    )
+    if dtype not in (
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+    ) or (
+        device.type == "mps"
+        or is_halide
+        or (is_low_precision and not is_triton(device))
+    ):
+        return fallback_handler(aten.nextafter.default, add_to_fallback_set=False)(x, y)
+
+    def inner_fn(x, y):
+        if is_low_precision:
+            x = ops.to_dtype(x, dtype, use_compute_types=False)
+            y = ops.to_dtype(y, dtype, use_compute_types=False)
+            return ops.to_dtype(ops.nextafter(x, y), dtype)
+        return ops.nextafter(x, y)
+
+    return make_pointwise(inner_fn)(x, y)
+
+
+register_lowering(
+    aten.nextafter,
+    broadcast=True,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+)(nextafter)
+register_lowering(prims.nextafter, broadcast=True, type_promotion_kind=None)(nextafter)
+
 
 from .codegen.common import BackendFeature, pointwise_overrides_data
 
@@ -9103,7 +9382,7 @@ if hasattr(torch.ops.fsdp, "copy_"):
         src = to_device(src, dst.get_device())
         src = to_dtype(src, dst.get_dtype())
         src = expand(src, dst.get_size())
-        return mutate_to(dst, src)
+        return mutate_to(dst, src, share_value=False)
 
 
 @register_lowering(torch.ops.aten.resize)

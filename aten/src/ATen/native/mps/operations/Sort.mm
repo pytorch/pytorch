@@ -1,5 +1,6 @@
 //  Copyright © 2023 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
@@ -14,6 +15,7 @@
 #include <c10/metal/common.h>
 #include <c10/util/TypeCast.h>
 #include <fmt/format.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -278,8 +280,15 @@ static void sort_single_block(const Tensor& input,
   const bool sel_mode = sel.count > 0;
   auto n_rows = static_cast<int>(input.numel() / sort_size);
   const auto type_str = scalarToMetalTypeString(input);
-  const auto kernel = sel_mode ? fmt::format("sort_block_topk_{}_tptg{}", type_str, tptg)
-                               : fmt::format("sort_block_{}_tptg{}{}", type_str, tptg, stable ? "_stable" : "");
+  // Non-stable float sorts compare integer keys, which is several times faster
+  // than the NaN-aware float compare.
+  const bool keyed = input.is_floating_point() && !stable;
+  const auto kernel = keyed ? fmt::format("sort_block_fkey_{}_tptg{}", type_str, tptg)
+      : sel_mode            ? fmt::format("sort_block_topk_{}_tptg{}", type_str, tptg)
+                            : fmt::format("sort_block_{}_tptg{}{}", type_str, tptg, stable ? "_stable" : "");
+  if (keyed && !sel_mode) {
+    sel = {0, sort_size};
+  }
 
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
@@ -289,7 +298,7 @@ static void sort_single_block(const Tensor& input,
       getMPSProfiler().beginProfileKernel(pso, kernel, {input}, mpsStream);
       [enc setComputePipelineState:pso];
       const auto strides = std::array<int64_t, 2>{stride_sort, stride_seg};
-      if (sel_mode) {
+      if (sel.count > 0) {
         mtl_setArgs(
             enc, input, values, indices, sort_size, strides, descending, std::array<int32_t, 2>{sel.offset, sel.count});
       } else {
@@ -637,7 +646,12 @@ static std::tuple<Tensor&, Tensor&> median_with_indices_impl_mps(Tensor& values,
 // Global median via radix selection (see Sort.metal); no sort materialized.
 static void median_radix_select(const Tensor& flat, const Tensor& out_val, bool ignore_nan) {
   const int n_passes = static_cast<int>(flat.element_size());
-  const auto numel = c10::checked_convert<uint32_t>(flat.numel(), "uint32_t");
+  // The histogram kernel strides through the input in uint32 by up to 256 * 256 threads.
+  TORCH_CHECK(std::in_range<uint32_t>(flat.numel() + 256 * 256),
+              "median: MPS does not support tensors with ",
+              flat.numel(),
+              " elements");
+  const auto numel = static_cast<uint32_t>(flat.numel());
   auto state = at::zeros({3}, flat.options().dtype(kLong));
   auto hist = at::zeros({257}, flat.options().dtype(kInt));
   const auto n_tgs = std::min<uint32_t>(at::ceil_div(numel, 256u), 256u);

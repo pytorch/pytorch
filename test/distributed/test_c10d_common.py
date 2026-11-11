@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import importlib.metadata
 import os
 import pickle
 import re
@@ -10,7 +11,7 @@ import tempfile
 import threading
 import time
 import unittest
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from itertools import product
@@ -366,6 +367,49 @@ class BackendEntryPointTest(TestCase):
         self.assertIn("nccl", looked_up)
         self.assertEqual(str(backend_config), "cpu:gloo,cuda:nccl")
 
+    def test_fake_backend_registration(self):
+        from torch.distributed._backends import fake
+        from torch.testing._internal.distributed import fake_pg
+
+        def ensure_registered_without_entrypoint():
+            with unittest.mock.patch(
+                "importlib.metadata.entry_points", return_value=[]
+            ):
+                dist.Backend._ensure_backend_registered("fake")
+
+        for name, register in {
+            "fallback": ensure_registered_without_entrypoint,
+            "testing_shim": lambda: importlib.reload(fake_pg),
+        }.items():
+            with self.subTest(name), unittest.mock.patch.dict(dist.Backend._plugins):
+                dist.Backend._plugins.pop("FAKE", None)
+                register()
+                creator = dist.Backend._plugins["FAKE"].creator_fn
+                self.assertIs(creator, fake._create_fake_pg)
+
+        # fbcode/sandcastle builds have no installed entry points.
+        if IS_FBCODE or IS_SANDCASTLE:
+            return
+        eps = importlib.metadata.entry_points(group="torch.distributed.backends")
+        self.assertEqual(
+            [ep.value for ep in eps if ep.name == "fake"],
+            ["torch.distributed._backends.fake:_register_fake_backend"],
+        )
+        # A fresh process registers "fake" without importing it up front.
+        script = (
+            "import sys, torch, torch.distributed as dist\n"
+            "print('torch.distributed._backends.fake' in sys.modules)\n"
+            "dist.init_process_group('fake', rank=0, world_size=2)\n"
+            "print('torch.testing._internal.distributed.fake_pg' in sys.modules)\n"
+            "print(type(dist.get_backend_impl(device=torch.device('cpu'))).__module__)\n"
+        )
+        out = subprocess.check_output(
+            [sys.executable, "-c", script], text=True, timeout=120
+        )
+        self.assertEqual(
+            out.split(), ["False", "False", "torch.distributed._backends.fake"]
+        )
+
     @parametrize("backend", ["nccl", "nccl-legacy", "nccl2", "nccl-lazy"])
     def test_nccl_backend_default_timeout(self, backend):
         timeout = timedelta(seconds=1)
@@ -669,6 +713,7 @@ class SparseGradientModule(nn.Module):
 
 class CommonDistributedDataParallelTest:
     def tearDown(self):
+        super().tearDown()
         # DistributedDataParallel test doesn't seem to call FileStore destructor
         # TODO: investigate this test and the test is known to have issues
         # Use this hack to remove files for that test
@@ -1706,17 +1751,66 @@ class CommonDistributedDataParallelTest:
                     ddp_model.finalize_backward()
 
     @skip_if_lt_x_gpu(2)
-    def test_manual_backward_finalization_pickle_compatibility(self):
-        ddp_model = self._create_ddp_model()
+    def test_lazy_bucket_allocation_with_gradient_as_bucket_view(self):
+        process_group = self._get_process_group()
+
+        for set_to_none in (True, False):
+            with self.subTest(set_to_none=set_to_none):
+                model = Net()
+                eager_model = self._create_ddp_model(
+                    model=copy.deepcopy(model),
+                    process_group=process_group,
+                    gradient_as_bucket_view=True,
+                )
+                lazy_model = self._create_ddp_model(
+                    model=copy.deepcopy(model),
+                    process_group=process_group,
+                    gradient_as_bucket_view=True,
+                    lazy_bucket_allocation=True,
+                )
+                lazy_model.require_manual_backward_finalization = True
+                input = torch.full(
+                    (4, 2),
+                    self.rank + 1.0,
+                    device=self.rank,
+                )
+
+                for _ in range(2):
+                    eager_model.zero_grad(set_to_none=set_to_none)
+                    lazy_model.zero_grad(set_to_none=set_to_none)
+                    eager_model(input)[:, 0].sum().backward()
+                    lazy_model(input)[:, 0].sum().backward()
+                    lazy_model.finalize_backward()
+
+                    for eager_param, lazy_param in zip(
+                        eager_model.parameters(), lazy_model.parameters()
+                    ):
+                        self.assertIsNotNone(eager_param.grad)
+                        self.assertIsNotNone(lazy_param.grad)
+                        self.assertTrue(lazy_param.grad._is_view())
+                        self.assertEqual(eager_param.grad, lazy_param.grad)
+
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_pickle_compatibility(self):
+        ddp_model = self._create_ddp_model(
+            batched_grad_copy=True,
+            lazy_bucket_allocation=True,
+        )
         old_state = ddp_model.__getstate__()
         old_state.pop("_require_manual_backward_finalization")
+        old_state.pop("batched_grad_copy")
+        old_state.pop("lazy_bucket_allocation")
         restored_old = DistributedDataParallel.__new__(DistributedDataParallel)
         restored_old.__setstate__(old_state)
         self.assertFalse(restored_old.require_manual_backward_finalization)
+        self.assertFalse(restored_old.batched_grad_copy)
+        self.assertFalse(restored_old.lazy_bucket_allocation)
 
         ddp_model.require_manual_backward_finalization = True
         restored = pickle.loads(pickle.dumps(ddp_model))
         self.assertTrue(restored.require_manual_backward_finalization)
+        self.assertTrue(restored.batched_grad_copy)
+        self.assertTrue(restored.lazy_bucket_allocation)
 
         restored(torch.randn(4, 2, device=self.rank)).sum().backward()
         restored.finalize_backward()
@@ -1965,6 +2059,10 @@ class AbstractCommTest:
             dist.get_global_rank(DummyProcessGroup(self.rank, self.world_size), 0)
 
         self.assertEqual(dist.get_process_group_ranks(group), [1])
+
+        # init_process_group can return on one rank while its peer is still
+        # connecting; tearing down before the peer is done makes its init fail.
+        dist.barrier()
 
     def _test_tensor_dtype_mismatch(self, backend):
         store = dist.FileStore(self.file_name, self.world_size)
@@ -2925,6 +3023,22 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 instantiate_parametrized_tests(CommonDistributedDataParallelTest)
 
 
+class _CloneTrackingStore(dist.Store):
+    def __init__(self):
+        super().__init__()
+        self._values = {}
+        self.clone_count = 0
+
+    def add(self, key, value):
+        result = int(self._values.get(key, b"0")) + value
+        self._values[key] = str(result).encode()
+        return result
+
+    def clone(self):
+        self.clone_count += 1
+        return self
+
+
 class SplitGroupOptionsTest(TestCase):
     class _SplittingBackend(C10DBackend):
         def __init__(self, rank, size, name):
@@ -2932,6 +3046,7 @@ class SplitGroupOptionsTest(TestCase):
             self._name = name
             self._options = C10DBackend.Options(name, timeout=timedelta(seconds=111))
             self.split_opts = None
+            self.split_store = None
 
         @property
         def supports_splitting(self):
@@ -2945,18 +3060,21 @@ class SplitGroupOptionsTest(TestCase):
             return self._name
 
         def split(self, store, ranks, opts):
+            self.split_store = store
             self.split_opts = opts
             return SplitGroupOptionsTest._SplittingBackend(
                 ranks.index(self.rank()), len(ranks), f"{self._name}-child"
             )
 
-    def _make_group(self):
+    def _make_group(self, store=None):
         # Shaped like a "cpu:gloo,cuda:nccl" group: two distinct backends, the
         # accelerator one being the group's default. The backend type tags are
         # just map keys here, the backends themselves are Python ones.
         cpu_backend = self._SplittingBackend(0, 1, "cpu-backend")
         default_backend = self._SplittingBackend(0, 1, "default-backend")
-        pg = dist.ProcessGroup(dist.HashStore(), 0, 1)
+        if store is None:
+            store = dist.HashStore()
+        pg = dist.ProcessGroup(store, 0, 1)
         pg._register_backend(
             torch.device("cpu"), dist.ProcessGroup.BackendType.GLOO, cpu_backend
         )
@@ -2966,6 +3084,18 @@ class SplitGroupOptionsTest(TestCase):
         pg._set_default_backend(dist.ProcessGroup.BackendType.NCCL)
         pg._set_group_name("split-options-test")
         return pg, cpu_backend, default_backend
+
+    def test_split_group_passes_prefixed_parent_store_to_backend(self):
+        store = _CloneTrackingStore()
+        pg, cpu_backend, default_backend = self._make_group(store)
+        child = pg.split_group([0], group_name="child")
+
+        self.assertEqual(store.clone_count, 0)
+        self.assertIs(cpu_backend.split_store, default_backend.split_store)
+        self.assertIs(cpu_backend.split_store.underlying_store, store)
+        self.assertIs(child.get_group_store(), cpu_backend.split_store)
+        child.get_group_store().add("probe", 1)
+        self.assertTrue(any(key.startswith("child/") for key in store._values))
 
     def test_split_group_clones_parent_options(self):
         # getBackendOptions() returns the backend's live options_, and split()
@@ -3195,6 +3325,68 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
             dist.all_to_all_single(output_tensor, input_tensor)
 
 
+@instantiate_parametrized_tests
+class CollectiveConfigTest(TestCase):
+    @contextmanager
+    def _group(self, backend="fake"):
+        if backend == "gloo" and not dist.is_gloo_available():
+            self.skipTest("Gloo is unavailable")
+        kwargs = {"store": dist.HashStore()} if backend == "gloo" else {}
+        dist.init_process_group(backend, rank=0, world_size=1, **kwargs)
+        try:
+            yield
+        finally:
+            dist.destroy_process_group()
+
+    @parametrize(
+        "name",
+        [
+            "all_reduce",
+            "all_gather",
+            "all_gather_single",
+            "all_gather_into_tensor",
+            "_all_gather_base",
+            "reduce_scatter",
+            "reduce_scatter_single",
+            "reduce_scatter_tensor",
+            "_reduce_scatter_base",
+            "all_to_all_single",
+        ],
+    )
+    @parametrize("frontend", ["compile", "export_strict", "export_nonstrict"])
+    @parametrize("config_kind", ["omitted", "none"])
+    def test_tracing(self, name, frontend, config_kind):
+        torch._dynamo.reset()
+        collective = getattr(dist, name)
+        kwargs = {}
+        if config_kind != "omitted":
+            kwargs["config"] = None
+
+        class Module(nn.Module):
+            def forward(self, tensor):
+                output = tensor.clone()
+                if name == "all_reduce":
+                    collective(output, **kwargs)
+                elif name == "all_gather":
+                    collective([output], tensor, **kwargs)
+                elif name == "reduce_scatter":
+                    collective(output, [tensor], **kwargs)
+                else:
+                    collective(output, tensor, **kwargs)
+                return output
+
+        with self._group():
+            module = Module()
+            tensor = torch.ones(2)
+            if frontend == "compile":
+                compiled = torch.compile(module, backend="eager", fullgraph=True)
+            else:
+                compiled = torch.export.export(
+                    module, (tensor,), strict=frontend == "export_strict"
+                ).module()
+            self.assertEqual(compiled(tensor), module(tensor))
+
+
 class ReduceOpTest(TestCase):
     # Ref: https://github.com/pytorch/pytorch/issues/87191
     def test_op_isinstance_of_reduceop(self):
@@ -3214,6 +3406,12 @@ class ReduceOpTest(TestCase):
             premul_sum = c10d.ReduceOp.PREMUL_SUM(scale)
             self.assertIsInstance(premul_sum, c10d.ReduceOp)
             self.assertEqual(premul_sum.factor, scale)
+
+        # `op` is writable, so PREMUL_SUM can lack its factor supplement.
+        reduce_op = c10d.ReduceOp(c10d.ReduceOp.SUM)
+        reduce_op.op = c10d.ReduceOp.PREMUL_SUM
+        with self.assertRaisesRegex(RuntimeError, "has no factor"):
+            reduce_op.factor
 
     # Ref: https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700
     def test_reduceop_copyable(self):

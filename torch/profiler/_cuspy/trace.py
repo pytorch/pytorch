@@ -12,6 +12,7 @@ from typing import Any, cast
 import numpy as np
 
 import torch
+from torch.profiler._trace_compression import _get_trace_file_opener
 
 
 # orjson serializes ~3-8x faster than stdlib json on large traces and emits bytes; not a
@@ -149,27 +150,6 @@ def _metadata_event(
         "tid": _export_tid(tid),
         "args": {arg_key: arg_value},
     }
-
-
-def _graphed_record_function(annotation: object) -> str | None:
-    """The ``record_function`` scope baked into a graphed op's node annotation.
-
-    A graphed op's ``record_function`` runs at capture, not at replay, so on a profiled
-    replay step the live active-id chain sees only the outer scopes still entered each
-    step (``forward_backward``, ``optimizer_step``). The scope the op actually ran under
-    survives in the node annotation recorded at capture, which is the only place a
-    graphed collective's own name (``FSDP::all_gather (layers.N)``) can be read from.
-    """
-    if annotation is None:
-        return None
-    try:
-        decoded = json.loads(annotation) if isinstance(annotation, str) else annotation
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(decoded, dict):
-        return None
-    value = decoded.get("record_function")
-    return value if isinstance(value, str) and value else None
 
 
 def _annotation_to_args(args: dict[str, object], annotation: object) -> None:
@@ -940,31 +920,30 @@ def _gpu_user_annotation_events(
     base_ns: int,
 ) -> list[dict[str, object]]:
     user_annotations = trace_window.get("user_annotations", {})
-    if not isinstance(user_annotations, dict):
-        user_annotations = {}
+    if not isinstance(user_annotations, dict) or not user_annotations:
+        return []
     columns = cast("dict[str, dict[str, Any]]", trace_window.get("columns", {}))
     ext = columns.get("external_correlation")
+    if not ext or not len(ext["correlation_id"]):
+        return []
 
     # `user_external_id` is the innermost ENCLOSING named-region id (resolved at decode via
-    # Cuspy's active-id chain), falling back to the raw external_id. Empty is not fatal:
-    # graphed ops are named from their own baked annotation instead (see below).
-    correlation_to_user_external = {}
-    if user_annotations and ext and len(ext["correlation_id"]):
-        correlation_to_user_external = {
-            corr: uext
-            for corr, uext in zip(
-                ext["correlation_id"].tolist(), ext["user_external_id"].tolist()
-            )
-            if corr != 0 and uext in user_annotations
-        }
+    # Cuspy's active-id chain), falling back to the raw external_id.
+    correlation_to_user_external = {
+        corr: uext
+        for corr, uext in zip(
+            ext["correlation_id"].tolist(), ext["user_external_id"].tolist()
+        )
+        if corr != 0 and uext in user_annotations
+    }
+    if not correlation_to_user_external:
+        return []
 
-    # The key's first element is a captured scope name for a graphed op and an external id
-    # otherwise, so it is deliberately heterogeneous.
-    span_map: dict[tuple[object, int, int], dict[str, Any]] = {}
-    # (device, lane) pairs that render real GPU work, where lane is the one the op actually
-    # displays on: its logical lane when the resolver moved it, else its capture stream
-    # (mirrors the display rule in _trace_window_entries). A span on a lane absent here has
-    # no kernels to sit over and is dropped below.
+    span_map: dict[tuple[int, int, int], dict[str, int]] = {}
+    # (device, stream) lanes that still render real GPU work after lane reassignment. A graphed
+    # op the resolver moved to a logical lane no longer displays on its capture stream (mirrors
+    # the display rule in _trace_window_entries); a span stranded on such a stream is dropped
+    # below.
     streams_with_display: set[tuple[int, int]] = set()
     for ks in ("kernel", "gpu_memcpy", "gpu_memset"):
         c = columns.get(ks)
@@ -972,6 +951,8 @@ def _gpu_user_annotation_events(
             continue
         corr_l = c["correlation_id"].tolist()
         dev_l = c["device_id"].tolist()
+        # Keep the annotation on the kernel's real capture stream; do not follow graphed
+        # ops onto the synthetic logical lanes assigned by the lane resolver.
         str_l = c["stream_id"].tolist()
         start_l = c["start_ns"].tolist()
         end_l = c["end_ns"].tolist()
@@ -979,81 +960,49 @@ def _gpu_user_annotation_events(
         gnid_col = c.get("graph_node_id")
         lane_l = lane_col.tolist() if lane_col is not None else None
         gnid_l = gnid_col.tolist() if gnid_col is not None else None
-        ann_col = c.get("annotation")
-        ann_l = ann_col.tolist() if ann_col is not None else None
         for i in range(len(corr_l)):
-            graphed = gnid_l is not None and gnid_l[i]
-            # Follow the op to the lane it renders on. Keying on the capture stream instead
-            # strands every graphed collective's annotation: its kernels draw on the logical
-            # lane the resolver assigned, so the span lands on a lane holding none of them
-            # and the orphan check below then drops it -- leaving those lanes with no
-            # grouping. A lane equal to the capture stream is not a reassignment, and this
-            # picks the same value either way.
-            lane = lane_l[i] if lane_l is not None and graphed else str_l[i]
-            streams_with_display.add((dev_l[i], lane))
-            # Prefer the scope baked in at capture; the live chain cannot see it on a
-            # replay step and would label every graphed op with the enclosing
-            # fwd/bwd range instead of its own.
-            baked = (
-                _graphed_record_function(ann_l[i])
-                if graphed and ann_l is not None
-                else None
+            reassigned = (
+                lane_l is not None
+                and gnid_l is not None
+                and gnid_l[i]
+                and lane_l[i] != str_l[i]
             )
-            if baked is not None:
-                key: tuple[object, int, int] = (baked, dev_l[i], lane)
-                name: str | None = baked
-                external_id = None
-            elif graphed:
-                # A graphed op with no captured scope has only the live chain to name it,
-                # and that resolves to an outer range the loop re-enters every step. Every
-                # such op on the lane shares that one name, so they merge into a single
-                # span covering the lane end to end while describing none of them.
+            if not reassigned:
+                streams_with_display.add((dev_l[i], str_l[i]))
+            external_id = correlation_to_user_external.get(corr_l[i])
+            if external_id is None:
                 continue
-            else:
-                external_id = correlation_to_user_external.get(corr_l[i])
-                if external_id is None:
-                    continue
-                key = (external_id, dev_l[i], lane)
-                name = user_annotations.get(external_id)
-                if not isinstance(name, str):
-                    continue
+            key = (external_id, dev_l[i], str_l[i])
             start_ns = start_l[i]
             end_ns = end_l[i]
             span = span_map.get(key)
             if span is None:
-                span_map[key] = {
-                    "start_ns": start_ns,
-                    "end_ns": end_ns,
-                    "name": name,
-                    "external_id": external_id,
-                }
+                span_map[key] = {"start_ns": start_ns, "end_ns": end_ns}
             else:
                 span["start_ns"] = min(span["start_ns"], start_ns)
                 span["end_ns"] = max(span["end_ns"], end_ns)
 
     gpu_user_events: list[dict[str, object]] = []
-    for (_label, device_id, stream_id), span in sorted(
-        span_map.items(), key=lambda kv: (str(kv[0][0]), kv[0][1], kv[0][2])
-    ):
-        # Orphaned span: no op renders on this lane, so it would sit alone divorced from its
-        # kernels -- drop it instead.
+    for (external_id, device_id, stream_id), span in sorted(span_map.items()):
+        name = user_annotations.get(external_id)
+        if not isinstance(name, str):
+            continue
+        # Orphaned span: the capture stream's ops all moved to logical lanes, so it would sit
+        # alone on an empty lane divorced from its kernels -- drop it instead.
         if (device_id, stream_id) not in streams_with_display:
             continue
         start_us = max((span["start_ns"] - base_ns) / 1000.0 - 0.001, 0.0)
         dur_us = max((span["end_ns"] - span["start_ns"]) / 1000.0 + 0.002, 0.0)
-        args: dict[str, object] = {}
-        if span["external_id"] is not None:
-            args["External id"] = span["external_id"]
         gpu_user_events.append(
             {
                 "ph": "X",
                 "cat": "gpu_user_annotation",
-                "name": span["name"],
+                "name": name,
                 "pid": device_id,
                 "tid": _export_tid(stream_id),
                 "ts": start_us,
                 "dur": dur_us,
-                "args": args,
+                "args": {"External id": external_id},
             }
         )
 
@@ -1133,7 +1082,7 @@ _RENDER_STAGES = (
     ("gpu_memcpy", 2, "Memcpy", 0),
     ("gpu_memset", 3, "Memset", 0),
     # GPU-side user annotations (collective/phase ranges) on the stream lane; not a kernel
-    # (no launch), so they render as a range nesting over the kernels they span.
+    # (no launch), so they render as a range on the row above the kernels they span.
     ("gpu_annotation", 4, "Annotation", 0),
     # CUDA-graph event-record / host-callback nodes on their stream lane. Rendered as render
     # stages (not kernels: no launch) so they carry graph id/node/annotation and become
@@ -1482,38 +1431,23 @@ def _build_render_stages(
         return None
     ts, dur, gpu = np.concatenate(ts_p), np.concatenate(dur_p), np.concatenate(gpu_p)
     stream, stage = np.concatenate(stream_p), np.concatenate(stage_p)
-    # Serialize overlapping kernel/memcpy/memset render stages per lane. A CUDA stream is
-    # serial, but CUPTI graph-replay timestamps overlap ~13%, which renders as messy multi-depth
-    # kernels instead of a clean depth-1 row beneath the spanning Annotation (which is the depth-0
-    # parent and must keep its full extent -- so it is excluded). Clamp each op's end to the next
-    # op's start on the same (gpu, stream) lane.
-    ann_iid = next(i for ks, i, _n, _c in _RENDER_STAGES if ks == "gpu_annotation")
-    end = ts + dur
-    sub = np.nonzero(stage != ann_iid)[0]
     # A lane is (gpu, stream), never a bare stream: the same stream id on two devices is two
-    # lanes. Shared by the clamp below and the stream-lane interning further down.
+    # lanes.
     lane = (gpu.astype(np.int64) << np.int64(32)) | (stream & 0xFFFFFFFF)
-    if len(sub):
-        order = sub[np.lexsort((ts[sub], lane[sub]))]
-        nxt_ts = np.empty(len(order), dtype=np.int64)
-        nxt_ts[:-1] = ts[order][1:]
-        nxt_ts[-1] = np.iinfo(np.int64).max
-        same = np.zeros(len(order), dtype=bool)
-        same[:-1] = lane[order][1:] == lane[order][:-1]
-        cap = np.where(same, nxt_ts, np.iinfo(np.int64).max)
-        end[order] = np.maximum(ts[order], np.minimum(end[order], cap))
-        dur = end - ts
     # One lane per (gpu, stream); lanes are split per gpu_id by Perfetto from
     # (gpu_id, stream_iid). Interning on the same (gpu, stream) key keeps each device's names
     # its own -- the iid table is global, so interning on the bare stream would let one device's
-    # resolver name ("DP") relabel another device's identically-numbered CUDA stream. The
-    # spanning annotation and its kernels share the lane and the viewer depth-nests them
-    # (annotation at depth 0, kernels at depth 1) once the kernels are clamped to not overlap
-    # each other. Perfetto sorts lanes lexicographically by name, so prefix every lane
-    # (resolver-named or "stream N") with a bracketed zero-padded lane id -> the lane order
-    # matches the chrome path's numeric lane-id order (otherwise "stream 7" sorts after
-    # "stream 26674", and resolver-named lanes like "DP" interleave alphabetically). The "["
-    # is a constant leading char, so the padded digits still decide the order.
+    # resolver name ("DP") relabel another device's identically-numbered CUDA stream.
+    # Durations are CUPTI's, unclamped. trace_processor puts a stage that overlaps another on
+    # its lane (the spanning annotation, PDL, graph-replay timestamps) on a spill track of the
+    # same track group, and the UI draws the group as one lane: the annotation on the top row,
+    # its kernels below, and each further level of overlap on one more row. No stage is dropped
+    # or cut short. Perfetto sorts lanes lexicographically by name, so
+    # prefix every lane (resolver-named or "stream N") with a bracketed zero-padded lane id ->
+    # the lane order matches the chrome path's numeric lane-id order (otherwise "stream 7"
+    # sorts after "stream 26674", and resolver-named lanes like "DP" interleave
+    # alphabetically). The "[" is a constant leading char, so the padded digits still decide
+    # the order.
     uniq, inv = np.unique(lane, return_inverse=True)
     uniq_dev, uniq_lane = (uniq >> 32).tolist(), (uniq & 0xFFFFFFFF).tolist()
     width = len(str(max(uniq_lane))) if len(uniq) else 1
@@ -1886,8 +1820,7 @@ def _gpu_annotation_render_column(
 ) -> dict[str, Any] | None:
     """Synthetic ``gpu_annotation`` render-stage column for the pftrace GPU stream lanes,
     built from the columnar window via the same synthesizer as the chrome gpu_user_annotation
-    events -- so it lands on the lane the kernels render on, the logical lane for a reassigned
-    graphed op and the capture stream otherwise.
+    events -- so it lands on the kernels' capture stream, never a reassigned logical lane.
     None when there are no GPU annotations. Kineto emits no gpu_user_annotation in
     cuspy mode, so cpu_data cannot be the source (the chrome path synthesizes them too)."""
     gua = _gpu_user_annotation_events(trace_window, base_ns=base_ns)
@@ -1912,6 +1845,7 @@ def _window_to_pftrace(
     base_ns: int,
     output_path: str,
     compression_level: int = 1,
+    trace_name: str | None = None,
 ) -> None:
     """Encode Cuspy's columnar window straight to a Perfetto-native trace (.pftrace),
     concatenated with the Kineto CPU events -- NO chrome-dict materialization. Full parity with
@@ -2138,11 +2072,10 @@ def _window_to_pftrace(
     # called later with these.
     graph_deps = {int(k): v for k, v in (trace_window.get("graph_deps") or {}).items()}
     # GPU-side user annotations (gpu_user_annotation): a synthetic "Annotation" render stage on
-    # the lane the kernels render on -- the logical lane for a reassigned graphed op, else the
-    # capture stream (matching the chrome path). Added to render_columns before event-id
-    # assignment so the annotation rows share the render-stage row order. Synthesized from the
-    # columnar window (kineto emits no gpu_user_annotation in Cuspy mode; the chrome path
-    # builds them the same way).
+    # the kernels' capture-stream lane -- never a reassigned logical lane (matching the chrome
+    # path). Added to render_columns before event-id assignment so the annotation rows share the
+    # render-stage row order. Synthesized from the columnar window (kineto emits no
+    # gpu_user_annotation in Cuspy mode; the chrome path builds them the same way).
     render_columns = columns
     ann_col = _gpu_annotation_render_column(trace_window, base_ns)
     if ann_col is not None:
@@ -2392,6 +2325,14 @@ def _window_to_pftrace(
         render,
         counters,
         compression_level,
+        # The chrome export's top-level fields (distributedInfo, deviceProperties, ...). The
+        # input's own traceName is its file path; the export's traceName is set as chrome does.
+        [
+            (key, json.dumps(value))
+            for key, value in cpu_data.items()
+            if key not in ("traceEvents", "traceName")
+        ]
+        + [("traceName", json.dumps(trace_name or output_path))],
     )
     with open(output_path, "wb") as f:
         f.write(out)
@@ -2417,7 +2358,12 @@ def merge_trace_window_into_chrome_trace(
     # chrome event dicts entirely -- that build dominates the JSON path).
     if ".pftrace" in output_path:
         _window_to_pftrace(
-            data, trace_window, base_ns, output_path, pftrace_compression_level
+            data,
+            trace_window,
+            base_ns,
+            output_path,
+            pftrace_compression_level,
+            trace_name,
         )
         return
     original_events = list(data.get("traceEvents", []))
@@ -2541,11 +2487,7 @@ def merge_trace_window_into_chrome_trace(
         payload = _orjson.dumps(data)
     else:
         payload = json.dumps(data, separators=(",", ":")).encode()
-    # Encode once and write the whole buffer, gzipped when the path ends .gz (compresslevel=1
-    # favors throughput over size).
-    if output_path.endswith(".gz"):
-        with gzip.open(output_path, "wb", compresslevel=1) as f:
-            f.write(payload)
-    else:
-        with open(output_path, "wb") as f:
-            f.write(payload)
+    # Compression level 1 favors throughput over file size.
+    trace_file_opener = _get_trace_file_opener(output_path, compresslevel=1)
+    with trace_file_opener(output_path, "wb") as f:
+        f.write(payload)
