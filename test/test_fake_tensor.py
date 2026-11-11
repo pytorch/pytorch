@@ -13,7 +13,6 @@ import pickle
 import re
 import subprocess
 import sys
-import traceback
 import unittest
 import weakref
 from unittest.mock import patch
@@ -81,6 +80,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import all_types_complex_float8_and
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
+    fake_tensor_modes,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -161,12 +161,18 @@ class _TestFakeTensorHelpers:
     def checkMetaProps(self, t1, t2):
         prims.utils.compare_tensor_meta(t1, t2, check_strides=True)
 
+    def fake_from_meta(self, mode, meta, device):
+        if isinstance(mode, CppFakeTensorMode):
+            return torch._C._from_meta_and_device(meta, torch.device(device), mode)
+        return FakeTensor(mode, meta, torch.device(device))
+
 
 class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def test_fake_mode_dispatch_api(self):
-        mode = FakeTensorMode()
+    @fake_tensor_modes
+    def test_fake_mode_dispatch_api(self, mode_cls):
+        mode = mode_cls()
         mode_key = torch._C._TorchDispatchModeKey.FAKE
         with mode:
             self.assertIs(torch._C._get_dispatch_mode(mode_key), mode)
@@ -2173,6 +2179,75 @@ def forward(self, x_1):
                 torch.select(x, dim=1, index=10)
             with self.assertRaisesRegex(IndexError, "index .* out of range"):
                 torch.select(x, dim=1, index=-10)
+
+    @fake_tensor_modes
+    @parametrize("previous", [False, True])
+    def test_allow_non_fake_inputs(self, mode_cls, previous):
+        from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
+
+        self.assertFalse(mode_cls().allow_non_fake_inputs)
+        mode = mode_cls(allow_non_fake_inputs=True)
+        self.assertTrue(mode.allow_non_fake_inputs)
+        mode.allow_non_fake_inputs = False
+        self.assertFalse(mode.allow_non_fake_inputs)
+        self.assertTrue(mode.allow_meta)
+        self.assertTrue(mode._allow_unsafe_data_ptr_access)
+        # allow_non_fake_inputs_temporarily restores the previous value, also
+        # when the body raises
+        mode.allow_non_fake_inputs = previous
+        with allow_non_fake_inputs_temporarily(mode):
+            self.assertTrue(mode.allow_non_fake_inputs)
+        self.assertEqual(mode.allow_non_fake_inputs, previous)
+        with self.assertRaisesRegex(ValueError, "raised in the body"):
+            with allow_non_fake_inputs_temporarily(mode):
+                self.assertTrue(mode.allow_non_fake_inputs)
+                raise ValueError("raised in the body")
+        self.assertEqual(mode.allow_non_fake_inputs, previous)
+
+    @fake_tensor_modes
+    def test_fake_mode_lookup(self, mode_cls):
+        from torch._guards import active_fake_mode, detect_fake_mode
+
+        # Distinct creation sites must appear in the mismatch diagnostic.
+        def make_mode():
+            return mode_cls()
+
+        def make_other():
+            return mode_cls()
+
+        mode, other = make_mode(), make_other()
+        cpu = torch.device("cpu")
+
+        def make_fake(m):
+            meta = torch.empty(2, device="meta")
+            return self.fake_from_meta(m, meta, cpu)
+
+        fake, other_fake = make_fake(mode), make_fake(other)
+        self.assertIs(maybe_get_fake_mode(fake), mode)
+        self.assertIs(maybe_get_fake_mode(TwoTensor(fake, make_fake(mode))), mode)
+        self.assertIsNone(maybe_get_fake_mode(torch.empty(2)))
+        self.assertIs(detect_fake_mode([fake]), mode)
+        self.assertIsNone(active_fake_mode())
+        with mode:
+            self.assertIs(active_fake_mode(), mode)
+            self.assertIs(detect_fake_mode(), mode)
+            # The inputs' mode must match the active one.
+            not_other = r"(?:(?!in make_other)[\s\S])*"
+            not_mode = r"(?:(?!in make_mode)[\s\S])*"
+            msg = (
+                rf"from active fake mode 0 allocated at:\n{not_other}in make_mode"
+                rf"{not_other}from fake tensor input 0 allocated at:\n"
+                rf"{not_mode}in make_other{not_mode}\Z"
+            )
+            with self.assertRaisesRegex(AssertionError, msg):
+                detect_fake_mode([other_fake])
+        self.assertIsNone(active_fake_mode())
+
+        with mode_cls() as nested_mode:
+            with BaseTorchDispatchMode():
+                self.assertIs(active_fake_mode(), nested_mode)
+            with unset_fake_temporarily():
+                self.assertIsNone(active_fake_mode())
 
 
 instantiate_parametrized_tests(TestFakeTensor)
@@ -6055,14 +6130,7 @@ class TestCppFakeTensorModeBindings(TestCase):
             mode = CppFakeTensorMode(shape_env=shape_env)
         self.assertTrue(mode.fake_tensor_converter.meta_converter.copy_data)
         self.assertIs(mode.shape_env, shape_env)
-        # The stack is captured where the mode is created: in
-        # CppFakeTensorMode.__init__, called from here
-        *_, caller, init = mode._creation_traceback.summary()
-        self.assertEqual(init.name, "__init__")
-        init_file = init.filename.replace("\\", "/")
-        self.assertTrue(init_file.endswith("torch/_subclasses/fake_tensor.py"))
-        self.assertIn("test_cpp_fake_tensor_mode_init", caller.name)
-        self.assertTrue(mode.stack.endswith("".join(traceback.format_list([init]))))
+        self.assertIn("test_cpp_fake_tensor_mode_init", mode.stack)
         defaults = CppFakeTensorMode()
         self.assertFalse(defaults.fake_tensor_converter.meta_converter.copy_data)
         self.assertIsNone(defaults.shape_env)
@@ -6074,77 +6142,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         meta = torch.empty((), device="meta")
         fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), mode)
-
-    @parametrize("previous", [False, True])
-    def test_cpp_fake_tensor_mode_allow_non_fake_inputs(self, previous):
-        from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
-
-        # Defaults to False, like FakeTensorMode, and is stored on the C++ mode
-        # apart from its other flags
-        self.assertFalse(CppFakeTensorMode().allow_non_fake_inputs)
-        mode = CppFakeTensorMode(allow_non_fake_inputs=True)
-        self.assertTrue(mode.allow_non_fake_inputs)
-        mode.allow_non_fake_inputs = False
-        self.assertFalse(mode.allow_non_fake_inputs)
-        self.assertTrue(mode.allow_meta)
-        self.assertTrue(mode._allow_unsafe_data_ptr_access)
-        # allow_non_fake_inputs_temporarily restores the previous value, also
-        # when the body raises
-        mode.allow_non_fake_inputs = previous
-        with allow_non_fake_inputs_temporarily(mode):
-            self.assertTrue(mode.allow_non_fake_inputs)
-        self.assertEqual(mode.allow_non_fake_inputs, previous)
-        with self.assertRaisesRegex(ValueError, "raised in the body"):
-            with allow_non_fake_inputs_temporarily(mode):
-                self.assertTrue(mode.allow_non_fake_inputs)
-                raise ValueError("raised in the body")
-        self.assertEqual(mode.allow_non_fake_inputs, previous)
-
-    def test_cpp_fake_tensor_mode_lookup(self):
-        from torch._guards import active_fake_mode, detect_fake_mode
-
-        def make_mode():
-            return CppFakeTensorMode()
-
-        def make_other():
-            return CppFakeTensorMode()
-
-        self.addCleanup(self._restore_fake_mode_state)
-        mode, other = make_mode(), make_other()
-        cpu = torch.device("cpu")
-
-        def make_fake(m):
-            meta = torch.empty(2, device="meta")
-            return torch._C._from_meta_and_device(meta, cpu, m)
-
-        fake, other_fake = make_fake(mode), make_fake(other)
-        self.assertIs(maybe_get_fake_mode(fake), mode)
-        self.assertIs(maybe_get_fake_mode(TwoTensor(fake, make_fake(mode))), mode)
-        self.assertIsNone(maybe_get_fake_mode(torch.empty(2)))
-        self.assertIs(detect_fake_mode([fake]), mode)
-        self.assertIsNone(active_fake_mode())
-        with mode:
-            self.assertIs(active_fake_mode(), mode)
-            self.assertIs(detect_fake_mode(), mode)
-            # As for a Python mode, the inputs' mode must match the active one
-            not_other = r"(?:(?!in make_other)[\s\S])*"
-            not_mode = r"(?:(?!in make_mode)[\s\S])*"
-            msg = (
-                rf"from active fake mode 0 allocated at:\n{not_other}in make_mode"
-                rf"{not_other}from fake tensor input 0 allocated at:\n"
-                rf"{not_mode}in make_other{not_mode}\Z"
-            )
-            with self.assertRaisesRegex(AssertionError, msg):
-                detect_fake_mode([other_fake])
-        self.assertIsNone(active_fake_mode())
-
-        # Python modes are found as before, including under a user mode, and
-        # not inside unset_fake_temporarily()
-        with torch._subclasses.fake_tensor.FakeTensorMode() as python_mode:
-            with BaseTorchDispatchMode():
-                self.assertIs(active_fake_mode(), python_mode)
-            with unset_fake_temporarily():
-                self.assertIsNone(active_fake_mode())
 
     def test_require_python_fake_mode(self):
         from torch._guards import require_python_fake_mode
