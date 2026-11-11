@@ -4,6 +4,7 @@ import asyncio
 import ctypes
 import itertools
 import os
+import socket
 from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
@@ -116,6 +117,13 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         super().setUp()
         register_transport("mooncake", MooncakeTransport, replace=True)
         self.addCleanup(_mooncake._pinned_registrations.clear)
+        ipv6 = patch.object(_mooncake, "_ipv6", None)
+        ipv6.start()
+        self.addCleanup(ipv6.stop)
+        env = patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("MC_USE_IPV6", None)
 
     def make_transport_pair(self):
         with patch.object(_mooncake, "_load_backend", return_value=_backend()):
@@ -136,23 +144,123 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         self.assertEqual(transport._engine.options, ("P2PHANDSHAKE", "tcp", "mlx5_0"))
         self.assertTrue(transport._endpoint.startswith("127.0.0.1:"))
 
-    def test_ipv6_host_requires_mc_use_ipv6(self):
+    def test_ipv6_host_sets_mc_use_ipv6(self):
         with patch.object(_mooncake, "_load_backend", return_value=_backend()):
-            with patch.dict(os.environ, {"MC_USE_IPV6": "1"}):
-                transport = new_transport("mooncake", host="::1")
+            transport = new_transport("mooncake", host="::1")
+        self.addCleanup(transport.close)
+        self.assertEqual(os.environ["MC_USE_IPV6"], "1")
+        self.assertTrue(transport._endpoint.startswith("[::1]:"))
+
+    def test_mixed_address_families_raise(self):
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            transport = new_transport("mooncake", host="127.0.0.1")
             self.addCleanup(transport.close)
-            self.assertTrue(transport._endpoint.startswith("[::1]:"))
-            with patch.dict(os.environ):
-                os.environ.pop("MC_USE_IPV6", None)
+            with self.assertRaises(RuntimeError) as ctx:
+                new_transport("mooncake", host="::1")
+            self.assertIn("using IPv4", str(ctx.exception.__cause__))
+            # Hostnames resolve in whichever family is in use.
+            hostname = new_transport("mooncake", host="localhost")
+            self.addCleanup(hostname.close)
+
+    def test_ipv6_mode_rejects_ipv4(self):
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            transport = new_transport("mooncake", host="::1")
+            self.addCleanup(transport.close)
+            self.assertTrue(_mooncake._ipv6)
+            for mode in (True, None):
+                _mooncake._ipv6 = mode  # None: decided by MC_USE_IPV6 alone
                 with self.assertRaises(RuntimeError) as ctx:
-                    new_transport("mooncake", host="::1")
-        self.assertIsInstance(ctx.exception.__cause__, ValueError)
+                    new_transport("mooncake", host="127.0.0.1")
+                self.assertIn("using IPv6", str(ctx.exception.__cause__))
+                self.assertIn("MC_USE_IPV6", str(ctx.exception.__cause__))
+
+    def test_failed_initialize_records_family(self):
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            with patch.object(_Engine, "initialize", return_value=-1):
+                with self.assertRaises(RuntimeError):
+                    new_transport("mooncake", host="127.0.0.1")
+            self.assertIs(_mooncake._ipv6, False)
+            with self.assertRaises(RuntimeError) as ctx:
+                new_transport("mooncake", host="::1")
+            self.assertIn("using IPv4", str(ctx.exception.__cause__))
+
+    def test_first_engine_family_is_kept(self):
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            transport = new_transport("mooncake", host="127.0.0.1")
+            self.addCleanup(transport.close)
+            os.environ["MC_USE_IPV6"] = "1"
+            hostname = new_transport("mooncake", host="localhost")
+            self.addCleanup(hostname.close)
+            self.assertIs(_mooncake._ipv6, False)
+            with self.assertRaises(RuntimeError) as ctx:
+                new_transport("mooncake", host="::1")
+            self.assertIn("using IPv4", str(ctx.exception.__cause__))
+
+    def test_empty_default_host_raises(self):
+        error = socket.gaierror("unresolvable")
+        with (
+            patch.object(_mooncake, "_load_backend", return_value=_backend()),
+            patch.object(_mooncake.socket, "gethostname", return_value=""),
+            patch.object(_mooncake.socket, "getaddrinfo", side_effect=error),
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                new_transport("mooncake")
+        self.assertIn("cannot be empty", str(ctx.exception.__cause__))
+
+    def test_default_host_uses_local_ip(self):
+        infos = [
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", 0, 0, 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0)),
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("fe80::1%eth0", 0, 0, 2)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", 0)),
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2001:db8::1", 0, 0, 0)),
+        ]
+        with patch.object(_mooncake.socket, "getaddrinfo", return_value=infos):
+            self.assertEqual(_mooncake._default_host(), "2001:db8::1")
+            _mooncake._ipv6 = False
+            self.assertEqual(_mooncake._default_host(), "10.0.0.1")
+            _mooncake._ipv6 = None
+        with patch.object(_mooncake.socket, "getaddrinfo", return_value=infos[:4]):
+            self.assertEqual(_mooncake._default_host(), "10.0.0.1")
+            os.environ["MC_USE_IPV6"] = "1"
+            with patch.object(_mooncake.socket, "gethostname", return_value="node0"):
+                self.assertEqual(_mooncake._default_host(), "node0")
+            del os.environ["MC_USE_IPV6"]
+        with (
+            patch.object(_mooncake.socket, "getaddrinfo", return_value=infos[:3]),
+            patch.object(_mooncake.socket, "gethostname", return_value="node0"),
+        ):
+            self.assertEqual(_mooncake._default_host(), "node0")
+        error = socket.gaierror("unresolvable")
+        with (
+            patch.object(_mooncake.socket, "getaddrinfo", side_effect=error),
+            patch.object(_mooncake.socket, "gethostname", return_value="node0"),
+        ):
+            self.assertEqual(_mooncake._default_host(), "node0")
+
+    def test_default_endpoint_uses_ip(self):
+        infos = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", 0))]
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            with patch.object(_mooncake.socket, "getaddrinfo", return_value=infos):
+                transport = new_transport("mooncake")
+        self.addCleanup(transport.close)
+        self.assertTrue(transport._endpoint.startswith("10.0.0.1:"))
+
+    def test_default_ipv6_endpoint_sets_mc_use_ipv6(self):
+        infos = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2001:db8::1", 0, 0, 0))]
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            with patch.object(_mooncake.socket, "getaddrinfo", return_value=infos):
+                transport = new_transport("mooncake")
+        self.addCleanup(transport.close)
+        self.assertTrue(transport._endpoint.startswith("[2001:db8::1]:"))
+        self.assertEqual(os.environ["MC_USE_IPV6"], "1")
 
     def test_initialization_failure_raises(self):
         with patch.object(_mooncake, "_load_backend", return_value=_backend()):
             with patch.object(_Engine, "initialize", return_value=-1):
-                with self.assertRaises(RuntimeError):
-                    new_transport("mooncake")
+                with self.assertRaises(RuntimeError) as ctx:
+                    new_transport("mooncake", host="127.0.0.1")
+        self.assertIn("initialization failed", str(ctx.exception.__cause__))
 
     def test_descriptor_roundtrip_excludes_metadata_blob(self):
         descriptor = MooncakeRemoteBuffer("[::1]:20001", 4096, 64, 0, "DRAM")
