@@ -19,7 +19,8 @@ KERNEL_CONFIGS_NAME = "KERNEL_CONFIGS"
 # The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
 # NOTE: if these fail asserts submit a PR to increase them
 TRITON_MAX_BLOCK = {
-    "X": 8192 if torch.version.hip else 4096,
+    # XBLOCK=8192 pointwise kernels with buffer stores are miscompiled on gfx950 (S729146)
+    "X": 4096,
     "Y": 1024,
     "Z": 1024,
     "R0_": 4096 * 16,  # * 16 is multi-kernel only
