@@ -17,7 +17,7 @@ import types
 import typing
 from collections.abc import Callable, Generator
 from functools import lru_cache, partial
-from typing import Any, NoReturn, TYPE_CHECKING
+from typing import NoReturn, TYPE_CHECKING
 
 import torch
 from torch._C._dynamo import (
@@ -959,12 +959,6 @@ def pynumber_as_ssize_t(
 
     https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/abstract.c#L1469
     """
-    # Fast path: an exact int constant in range is already a valid ssize_t.
-    if type(item) is ConstantVariable:
-        val = item.as_python_constant()
-        if item.python_type() is int and -sys.maxsize - 1 <= val <= sys.maxsize:
-            return item
-
     from .tensor import SymNodeVariable
 
     value = pynumber_index(tx, item)
@@ -1000,8 +994,6 @@ def pynumber_index(
     # exact int. A SymInt is not constant: nb_index is where it specializes.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1417-L1419
     # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1456-L1464
-    if type(obj) is ConstantVariable and type(obj.value) is int:
-        return obj
     if obj.is_python_constant() and pylong_check(obj.python_type()):
         return ConstantVariable.create(operator.index(obj.as_python_constant()))
 
@@ -1251,34 +1243,6 @@ def is_python_subtype(w: VariableTracker, v: VariableTracker) -> bool:
 #       Py_TYPE(v)
 
 
-_NUMERIC_LITERAL_TYPES = frozenset({int, float, bool, complex})
-
-_CONSTANT_NUMERIC_BINARY_OPS: dict[str, Callable[[Any, Any], Any]] = {
-    "nb_add": operator.add,
-    "nb_inplace_add": operator.add,
-    "nb_subtract": operator.sub,
-    "nb_inplace_subtract": operator.sub,
-    "nb_multiply": operator.mul,
-    "nb_inplace_multiply": operator.mul,
-    "nb_true_divide": operator.truediv,
-    "nb_inplace_true_divide": operator.truediv,
-    "nb_floor_divide": operator.floordiv,
-    "nb_inplace_floor_divide": operator.floordiv,
-    "nb_remainder": operator.mod,
-    "nb_inplace_remainder": operator.mod,
-    "nb_lshift": operator.lshift,
-    "nb_inplace_lshift": operator.lshift,
-    "nb_rshift": operator.rshift,
-    "nb_inplace_rshift": operator.rshift,
-    "nb_and": operator.and_,
-    "nb_inplace_and": operator.and_,
-    "nb_or": operator.or_,
-    "nb_inplace_or": operator.or_,
-    "nb_xor": operator.xor,
-    "nb_inplace_xor": operator.xor,
-}
-
-
 def binary_op1(
     tx: "InstructionTranslatorBase",
     v: VariableTracker,
@@ -1304,24 +1268,6 @@ def binary_op1(
 
     https://github.com/python/cpython/blob/3.13/Objects/abstract.c#L926-L977
     """
-    # Fast path: two plain numeric constants. CPython resolves these entirely
-    # inside the builtin nb slots, which is what evaluating the operator on
-    # the host does; any exception falls through to the full protocol so
-    # error behavior is unchanged.
-    if type(v) is ConstantVariable and type(w) is ConstantVariable:
-        op = _CONSTANT_NUMERIC_BINARY_OPS.get(op_slot)
-        if (
-            op is not None
-            and type(v.value) in _NUMERIC_LITERAL_TYPES
-            and type(w.value) in _NUMERIC_LITERAL_TYPES
-        ):
-            try:
-                result = op(v.value, w.value)
-            except Exception:
-                result = NotImplemented
-            if result is not NotImplemented:
-                return ConstantVariable.create(result)
-
     impl_attr = f"{op_slot}_impl"
     nb_slot_bit = NB_SLOT_MAPPING[op_slot]
 
