@@ -8,6 +8,7 @@ from torch._higher_order_ops import triton_kernel_wrap
 from torch._inductor.graph import GraphLowering
 from torch.fx.graph import _BoxedCodeGen, _PyTreeCodeGen, _PyTreeInfo
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -18,6 +19,8 @@ from torch.utils._pytree import tree_structure
 
 @instantiate_parametrized_tests
 class TestGraphLowering(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("codegen", ("plain", "boxed", "pytree"))
     def test_extract_autotune_inputs(self, codegen):
         graph = torch.fx.Graph()
