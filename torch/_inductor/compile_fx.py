@@ -1041,6 +1041,7 @@ def compile_fx_inner(
     compile_region_name: str | None = None,
     **kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
+    """Compile an AOT-produced FX graph into an OutputCode with Inductor."""
     kwargs.setdefault("cudagraphs", None)
     kwargs.setdefault("static_input_idxs", ())
     kwargs.setdefault("is_backward", False)
@@ -1057,6 +1058,10 @@ def compile_fx_inner(
     # compile_fx return and we may want to use the _LazyGraphModule for compiling
     # the backward graph as well.
     with contextlib.ExitStack() as stack:
+        # The only place override_cudagraphs is applied: after torch.compile options,
+        # which may reset it, and before the cpp_wrapper patch, which may turn it off.
+        if isinstance(kwargs["cudagraphs"], BoxedBool):
+            stack.enter_context(cudagraph_annotation_context(kwargs["cudagraphs"]))
         # When cpp_wrapper is enabled, ensure the required triton config
         # (store_cubin, autotune_at_compile_time, etc.) is applied. This is
         # needed because lazy backward compilation may run after the
@@ -2968,26 +2973,25 @@ def compile_fx_forward(
     # original strides
     _recursive_record_user_visible_output_idxs(gm)
 
-    with cudagraph_annotation_context(compiler_config_extra.cudagraphs):
-        result = inner_compile(
-            gm,
-            example_inputs,
-            static_input_idxs=get_static_input_idxs(fixed),
-            cudagraphs=compiler_config_extra.cudagraphs,
-            graph_id=compiler_config_extra.graph_id,
-            is_inference=is_inference,
-            boxed_forward_device_index=compiler_config_extra.forward_device_index,
-        )
+    result = inner_compile(
+        gm,
+        example_inputs,
+        static_input_idxs=get_static_input_idxs(fixed),
+        cudagraphs=compiler_config_extra.cudagraphs,
+        graph_id=compiler_config_extra.graph_id,
+        is_inference=is_inference,
+        boxed_forward_device_index=compiler_config_extra.forward_device_index,
+    )
 
-        if (
-            not is_inference
-            and isinstance(result, CompiledFxGraph)
-            and result.partition_maps
-            and result.has_uncaptured_partition
-        ):
-            compiler_config_extra.forward_is_cudagraph_partitioned.value = True
+    if (
+        not is_inference
+        and isinstance(result, CompiledFxGraph)
+        and result.partition_maps
+        and result.has_uncaptured_partition
+    ):
+        compiler_config_extra.forward_is_cudagraph_partitioned.value = True
 
-        return result
+    return result
 
 
 def compile_fx_backward(
@@ -3053,12 +3057,9 @@ def compile_fx_backward(
         _recursive_record_original_output_strides(gm)
 
         with (
-            (
-                config.patch(get_cpp_wrapper_config())
-                if config.cpp_wrapper
-                else contextlib.nullcontext()
-            ),
-            cudagraph_annotation_context(cudagraphs),
+            config.patch(get_cpp_wrapper_config())
+            if config.cpp_wrapper
+            else contextlib.nullcontext()
         ):
             return inner_compile(
                 gm,
