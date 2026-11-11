@@ -680,6 +680,33 @@ torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage) {
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_conj(AtenTensorHandle tensor, bool* ret_is_conj) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_is_conj = t->is_conj();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_is_neg = t->is_neg();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_is_inference = t->is_inference();
+  });
+}
+
 // Python interop conversions. These are the only stable
 // shims that need functionality from libtorch_python; they reach it through a
 // vtable that libtorch_python registers at load time

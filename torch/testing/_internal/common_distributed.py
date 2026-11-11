@@ -2013,7 +2013,12 @@ class MultiProcContinuousTest(TestCase):
         # it waits for enqueued collectives to finish.
         # Only call this on a clean exit path
         if not raised_exception:
+            cls._cleanup_worker()
             c10d.destroy_process_group()
+
+    @classmethod
+    def _cleanup_worker(cls) -> None:
+        """Hook run in each worker before the process group is destroyed."""
 
     @classmethod
     def _spawn_processes(cls, world_size) -> None:

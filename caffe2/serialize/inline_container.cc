@@ -305,7 +305,7 @@ bool PyTorchStreamReader::hasRecord(const std::string& name) {
   std::lock_guard<std::mutex> guard(reader_lock_);
 
   if ((!load_debug_symbol_) &&
-      c10::ends_with(std::string_view(name), kDebugPklSuffix)) {
+      std::string_view(name).ends_with(kDebugPklSuffix)) {
     return false;
   }
   std::string ss = archive_name_plus_slash_ + name;
@@ -343,9 +343,8 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
           buf);
     }
     if ((load_debug_symbol_) ||
-        (!c10::ends_with(
-            std::string_view(buf + archive_name_plus_slash_.size()),
-            kDebugPklSuffix))) {
+        (!std::string_view(buf + archive_name_plus_slash_.size())
+              .ends_with(kDebugPklSuffix))) {
       // NOLINTNEXTLINE(modernize-use-emplace)
       out.push_back(buf + archive_name_plus_slash_.size());
     }
@@ -370,7 +369,7 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
     const std::string& name,
     std::optional<at::Allocator*> allocator) {
   std::lock_guard<std::mutex> guard(reader_lock_);
-  if ((!load_debug_symbol_) && c10::ends_with(name, kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && name.ends_with(kDebugPklSuffix)) {
     at::DataPtr retval;
     return std::make_tuple(std::move(retval), 0);
   }
@@ -465,7 +464,7 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
     return getRecord(name, allocator);
   }
 
-  if ((!load_debug_symbol_) && c10::ends_with(name, kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && name.ends_with(kDebugPklSuffix)) {
     at::DataPtr retval;
     return std::make_tuple(std::move(retval), 0);
   }
@@ -491,7 +490,7 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
 size_t
 PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n) {
   std::lock_guard<std::mutex> guard(reader_lock_);
-  if ((!load_debug_symbol_) && c10::ends_with(name, kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && name.ends_with(kDebugPklSuffix)) {
     return 0;
   }
   size_t key = getRecordID(name);
@@ -523,7 +522,7 @@ size_t PyTorchStreamReader::getRecord(
   }
 
   if ((!load_debug_symbol_) &&
-      c10::ends_with(std::string_view(name), kDebugPklSuffix)) {
+      std::string_view(name).ends_with(kDebugPklSuffix)) {
     return 0;
   }
   size_t key = getRecordID(name);
@@ -554,7 +553,7 @@ size_t PyTorchStreamReader::getRecord(
     void* buf,
     const std::function<void(void*, const void*, size_t)>& memcpy_func) {
   std::lock_guard<std::mutex> guard(reader_lock_);
-  if ((!load_debug_symbol_) && c10::ends_with(name, kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && name.ends_with(kDebugPklSuffix)) {
     return 0;
   }
   if (chunk_size <= 0) {
@@ -787,9 +786,9 @@ void PyTorchStreamWriter::writeRecord(
   if (files_written_.count(name) > 0) {
     // Allow multiple writes for triton binaries
     bool is_triton_extension =
-        c10::ends_with(name, ".so") ||
-        c10::ends_with(name, ".cubin") ||
-        c10::ends_with(name, ".hsaco");
+        name.ends_with(".so") ||
+        name.ends_with(".cubin") ||
+        name.ends_with(".hsaco");
 
     if (is_triton_extension) {
       LOG(WARNING) << "File '" << name << "' is being serialized multiple times";
