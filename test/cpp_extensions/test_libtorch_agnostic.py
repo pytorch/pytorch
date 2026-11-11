@@ -9,6 +9,7 @@ from pathlib import Path
 
 import torch
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal import common_device_type
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
@@ -75,6 +76,7 @@ class TestLibtorchAgnostic(TestCase):
     """
 
     @classmethod
+    @getattr(common_device_type, "preserves_device_selection", lambda fn: fn)
     def setUpClass(cls):
         # Build versioned extensions
         base_dir = Path(__file__).parent
