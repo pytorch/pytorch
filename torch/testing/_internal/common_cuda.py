@@ -87,7 +87,7 @@ def _rocm_major_minor():
 ROCM_VERSION = LazyVal(_rocm_major_minor)
 
 # Cuspy needs both the cupti-python bindings and the build-generated
-# _cupti_stubs catalogs (emitted only on CUDA >= 13.3 builds where the field-id codegen
+# _cupti_stubs catalogs (emitted only on CUPTI >= 13.5 builds where the field-id codegen
 # ran); the module hard-imports the latter, so guard on both to skip (not error) where
 # the stubs were not generated.
 TEST_CUPTI = (
@@ -106,7 +106,11 @@ def _cupti_version():
         return 0
 
 
-TEST_CUPTI_V13_3 = LazyVal(lambda: TEST_CUPTI and _cupti_version() >= 130300)
+# Also gate on the build's CUDA: the cupti-python wheel pulls in its own (newer) libcupti,
+# so a CUDA 13.2 runner can still load a libcupti >= 13.5.
+TEST_CUPTI_V13_5 = LazyVal(
+    lambda: TEST_CUPTI and _get_torch_cuda_version() >= (13, 5) and _cupti_version() >= 130500
+)
 
 
 def _cuda_graph_tools_id_available():
@@ -146,6 +150,9 @@ IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is no
                   ((torch.cuda.get_device_capability() == (11, 0) and int(torch.version.cuda[:2]) >= 13) or
                    (torch.cuda.get_device_capability() == (10, 1) and int(torch.version.cuda[:2]) < 13)))
 IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device_capability() in [(7, 2), (8, 7)] or IS_THOR))
+# A MIG slice reports its profile in the device name, e.g. "NVIDIA A100-SXM4-40GB MIG 1g.5gb".
+IS_MIG = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is not None and
+                 "MIG" in torch.cuda.get_device_name().split())
 # These exact-match SM predicates identify specific NVIDIA architectures and must
 # be False on ROCm, where torch.cuda.get_device_capability() returns the gfx-arch
 # version and collides with NVIDIA capability tuples (e.g. gfx90a reads as (9, 0)).
@@ -420,6 +427,15 @@ def hipsparselt_supported_archs():
 def evaluate_platform_supports_hipsparselt():
     return bool(torch.version.hip) and evaluate_gfx_arch_within(hipsparselt_supported_archs())
 
+def evaluate_platform_supports_cublaslt_grouped_gemm(min_cuda_version=(13, 3)):
+    return (
+        TEST_CUDA
+        and SM90OrLater
+        and not SM120OrLater
+        and not TEST_WITH_ROCM
+        and _get_torch_cuda_version() >= min_cuda_version
+    )
+
 def evaluate_platform_supports_fp8_sparse():
     if torch.cuda.is_available():
         if torch.version.hip:
@@ -437,6 +453,8 @@ PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 PLATFORM_SUPPORTS_FP8_SPARSE: bool = LazyVal(lambda: evaluate_platform_supports_fp8_sparse())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
 PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
+PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_grouped_gemm())
+PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_grouped_gemm((13, 4)))
 
 if TEST_NUMBA:
     try:
