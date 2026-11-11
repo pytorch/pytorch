@@ -80,6 +80,9 @@ class TestCallSite(TestCase):
         self.rejects(other_tensor, "unary", lambda: -x, y)
         extra_tensor = "a tensor argument does not come from an operand"
         self.rejects(extra_tensor, "unary", lambda: x + y, x)
+        index = torch.tensor([0])
+        indexed = torch.ops.aten.index.Tensor
+        self.rejects(extra_tensor, "unary", lambda: indexed(x, [index]), x)
         not_a_tensor = "unsupported operand type tuple"
         self.rejects(not_a_tensor, "unary", lambda: torch.stack((x, y)), (x, y))
         self.rejects("the result is not the kernel output", "unary", lambda: [-x], x)
