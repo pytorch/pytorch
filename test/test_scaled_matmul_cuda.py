@@ -1254,6 +1254,27 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5775
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_scaled_addmm_out_row_size_one_strides(self, device):
+        # A (1, N) out is contiguous with any row stride, padded or too small
+        input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
+            1, 48, 32, device, torch.bfloat16
+        )
+        recipe = [ScalingType.TensorWise.value]
+        args = (input, mat1, mat2, [scale_a], recipe, [], [scale_b], recipe, [])
+        expected = torch._scaled_addmm(*args)
+        outs = (
+            torch.empty(1, 96, device=device, dtype=torch.bfloat16)[:, :48],
+            torch.empty(48, 1, device=device, dtype=torch.bfloat16).t(),
+        )
+        for out in outs:
+            torch._scaled_addmm(*args, out=out)
+            self.assertEqual(out, expected)
+
+    @onlyAccelerator
+    @skipMPS
+    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5775
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_wgrad_accumulation(self, device):
         torch.manual_seed(42)
         _, mat1_a, mat2_a, scale_a_a, scale_b_a = make_tensorwise_scaled_addmm_inputs(

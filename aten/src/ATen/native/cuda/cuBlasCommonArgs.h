@@ -18,6 +18,13 @@ c10::MaybeOwned<Tensor> inline resolve_conj_if_indicated(const Tensor& tensor, b
   }
 }
 
+// BLAS leading dimension for a matrix whose stride(dim) is its ld. A size-1 dim's
+// stride is arbitrary and never addresses memory, so pass the smallest valid ld.
+int64_t inline blas_leading_dim(const Tensor& tensor, int64_t dim) {
+  return tensor.size(dim) == 1 ? std::max<int64_t>(1, tensor.size(1 - dim))
+                               : tensor.stride(dim);
+}
+
 c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor, bool transpose_result) {
   if (tensor.is_non_overlapping_and_dense()) { // common case
       transpose_tensor = tensor.is_contiguous();
@@ -140,9 +147,9 @@ struct cublasCommonArgs {
     m = sizes_a[transpose_result ? 1 : 0];
     k = sizes_a[transpose_result ? 0 : 1];
     n = sizes_b[transpose_result ? 0 : 1];
-    lda = mata->stride((transpose_a == transpose_result) ? 1 : 0);
-    ldb = matb->stride((transpose_b == transpose_result) ? 1 : 0);
-    result_ld = result->stride(transpose_result ? 0 : 1);
+    lda = blas_leading_dim(*mata, (transpose_a == transpose_result) ? 1 : 0);
+    ldb = blas_leading_dim(*matb, (transpose_b == transpose_result) ? 1 : 0);
+    result_ld = blas_leading_dim(*result, transpose_result ? 0 : 1);
     transa = transpose_a ? mata->is_conj() ? 'c' : 't' : 'n';
     transb = transpose_b ? matb->is_conj() ? 'c' : 't' : 'n';
 

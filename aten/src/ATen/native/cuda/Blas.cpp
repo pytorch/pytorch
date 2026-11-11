@@ -528,9 +528,8 @@ bool launchGemmWithDistinctCAndDCublasLt(
     const Tensor& self,
     const Scalar& alpha,
     const Scalar& beta) {
-  // `self` is row-major (guarded), so its leading dimension is stride(0), which
-  // is the same convention cublasCommonArgs uses to derive result_ld for the
-  // row-major result this path requires.
+  // The guard keeps `self` row-major with stride(0) >= size(1), so stride(0) is
+  // already a valid ld; unlike result_ld it is not normalized.
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.stride(1) == 1);
   return at::cuda::blas::gemm_and_bias<scalar_t>(
     args.transa == 't',
@@ -625,7 +624,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         // instead of handing back an owned copy.
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
             !args.result->is_conj() && args.result->is_same(result) &&
-            args.result_ld == result.stride(0));
+            args.result_ld == blas_leading_dim(result, 0));
         bool distinct_c_and_d_lt_success = false;
         AT_DISPATCH_FLOATING_TYPES_AND2(
           at::ScalarType::Half,
