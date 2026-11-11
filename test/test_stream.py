@@ -100,6 +100,7 @@ class TestStream(TestCase):
 
     # torch.mps.Stream.query is not supported yet
     @expectedFailureMPS
+    @skipCUDANonDefaultStreamIf(True)
     def test_stream_query(self, device):
         m = torch.get_device_module(device)
         current_stream = m.current_stream()
