@@ -19,8 +19,7 @@ and recreate specific program states.
 import dataclasses
 from dataclasses import field
 from types import CellType, CodeType, ModuleType
-from typing import cast, IO, TYPE_CHECKING
-from typing_extensions import Self
+from typing import cast, IO, Self, TYPE_CHECKING
 
 from torch.utils._import_utils import import_dill
 
