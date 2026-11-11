@@ -269,11 +269,19 @@ class HopJointGraph:
                 continue
             val = n.meta["val"]
             if isinstance(val, torch.SymInt) and is_complex_expr(val.node.expr):
-                if n.meta.get("recompute", None) is not None:
-                    raise AssertionError(
-                        f"node {n} with complex SymInt expression should not have recompute policy set"
+                # The body may already tag this node (e.g. a pass that tags a
+                # whole region). Recomputing is scalar math on the input sizes,
+                # so override any tag, except an explicit request to save it.
+                tag = n.meta.get("recompute", None)
+                if tag == CheckpointPolicy.MUST_SAVE:
+                    raise RuntimeError(
+                        f"Node {n.name} computes the SymInt expression "
+                        f"{val.node.expr} and is tagged {tag}. Inside a "
+                        "control flow operator such as scan, a SymInt expression "
+                        "can't be saved across the forward/backward boundary, so "
+                        "it is always recomputed. Remove the MUST_SAVE tag from "
+                        "this node, e.g. by tagging only tensor ops."
                     )
-
                 n.meta["recompute"] = CheckpointPolicy.MUST_RECOMPUTE
 
         self.joint_gm.graph.lint()

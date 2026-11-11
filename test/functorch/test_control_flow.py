@@ -11073,6 +11073,76 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
         self.assertIn(sin, saved_by_forward_body(CheckpointPolicy.MUST_SAVE))
         self.assertNotIn(sin, saved_by_forward_body(CheckpointPolicy.PREFER_RECOMPUTE))
 
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_scan_recompute_tag_on_complex_symint(self):
+        # Under dynamic shapes, x.shape[0] * x.shape[1] is a complex SymInt
+        # node. Scan can't save it across the forward/backward boundary, so it
+        # overrides the body's tag with MUST_RECOMPUTE, and rejects MUST_SAVE.
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        def body(carry, x):
+            y = carry.sin() * (x.shape[0] * x.shape[1])
+            return y.cos() * x, y.new_zeros(())
+
+        def f(init, xs):
+            return scan(body, init, xs)[0]
+
+        init = torch.randn(4, 5, requires_grad=True)
+        xs = torch.randn(3, 4, 5, requires_grad=True)
+        expected = torch.autograd.grad(f(init, xs).sum(), (init, xs))
+
+        def compile_with_tags(symint_policy, tensor_policy):
+            torch._dynamo.reset()
+            record = AotEagerAndRecordGraphs()
+
+            def backend(gm, example_inputs):
+                # Tag every node in the body, SymInt ops included.
+                for mod in gm.modules():
+                    if mod is not gm and isinstance(mod, torch.fx.GraphModule):
+                        for node in mod.graph.nodes:
+                            if node.op == "call_function":
+                                val = node.meta.get("example_value")
+                                node.meta["recompute"] = (
+                                    symint_policy
+                                    if isinstance(val, torch.SymInt)
+                                    else tensor_policy
+                                )
+                return record(gm, example_inputs)
+
+            out = torch.compile(f, backend=backend, fullgraph=True, dynamic=True)(
+                init, xs
+            )
+            self.assertEqual(torch.autograd.grad(out.sum(), (init, xs)), expected)
+            (fw_gm,) = record.fw_graphs
+            (scan_node,) = fw_gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.scan
+            )
+            body_gm = getattr(fw_gm, scan_node.args[0].target)
+            return len(body_gm.graph.output_node().args[0])
+
+        for policy in (
+            CheckpointPolicy.PREFER_SAVE,
+            CheckpointPolicy.PREFER_RECOMPUTE,
+            CheckpointPolicy.MUST_RECOMPUTE,
+        ):
+            compile_with_tags(policy, policy)
+
+        # Tags still steer the tensor nodes: MUST_SAVE on them also saves y.
+        self.assertGreater(
+            compile_with_tags(
+                CheckpointPolicy.PREFER_RECOMPUTE, CheckpointPolicy.MUST_SAVE
+            ),
+            compile_with_tags(None, None),
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Node mul\w* computes the SymInt expression .* is tagged "
+            r"CheckpointPolicy.MUST_SAVE\. .* can't be saved across the "
+            r"forward/backward boundary",
+        ):
+            compile_with_tags(CheckpointPolicy.MUST_SAVE, CheckpointPolicy.MUST_SAVE)
+
     def test_scan_functionalized_elem_alias(self):
         def add(x, y):
             return x, x
