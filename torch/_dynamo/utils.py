@@ -3237,6 +3237,8 @@ deque_methods = {
 }
 
 str_methods = {method for method in str.__dict__.values() if callable(method)}
+int_methods = {method for method in int.__dict__.values() if callable(method)}
+float_methods = {method for method in float.__dict__.values() if callable(method)}
 
 # EnumType is the metaclass for Enum classes
 enum_type_methods = {

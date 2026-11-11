@@ -185,6 +185,7 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
 
 # Flag Include/object.h
 Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
+Py_TPFLAGS_HEAPTYPE = 1 << 9
 
 
 def type_disallows_instantiation(obj_type: type) -> bool:
@@ -2327,7 +2328,7 @@ def _is_skipped_constant_property(
         return False
     obj = obj.realize()
     if (
-        type(obj) is not variables.ConstantVariable
+        not variables.ConstantVariable.is_constant_vt(obj)
         or tx.output.side_effects.has_pending_mutation_of_attr(obj, name)
         or obj.lookup_tp_getset_member(name) is not None
     ):

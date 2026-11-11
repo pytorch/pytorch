@@ -189,7 +189,7 @@ class SuperVariable(VariableTracker):
             # objvar itself is a type (e.g. `super(Base, cls)` or
             # `super(Base, list)`); as_python_constant() works uniformly here
             # since objvar must be a type-representing VariableTracker
-            # (UserDefinedClassVariable, BaseBuiltinVariable, ...), unlike
+            # (UserDefinedClassVariable, TypeVariable, ...), unlike
             # `.value` which only some of those define.
             type_to_use = self.objvar.as_python_constant()
             type_to_use_source = self.objvar.source

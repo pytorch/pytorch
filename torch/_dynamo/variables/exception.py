@@ -97,7 +97,7 @@ class TracebackVariable(VariableTracker):
         return istype(obj, TracebackVariable) or obj.is_constant_none()
 
     def extract_tb(self) -> list[traceback.FrameSummary | FrameSummaryVariable]:
-        if istype(self.tb_next, ConstantVariable):
+        if not isinstance(self.tb_next, TracebackVariable):
             return [self.frame_summary]
         return [self.frame_summary] + self.tb_next.extract_tb()
 
@@ -249,12 +249,7 @@ class ExceptionVariable(VariableTracker):
 
         def codegen_attr(name: str) -> None:
             attr = getattr(self, name)
-            if istype(attr, ConstantVariable):
-                if attr.value not in (True, False, None):
-                    raise AssertionError(
-                        f"attr.value must be True, False, or None, got {attr}"
-                    )
-            else:
+            if not attr.is_constant_match(True, False, None):
                 codegen.dup_top()
                 codegen(attr)
                 codegen.extend_output(codegen.rot_n(2))
@@ -566,7 +561,7 @@ class _KwargAttrExceptionVariable(ExceptionVariable):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         super().reconstruct(codegen)
         for name, val in self._attrs.items():
-            if not (istype(val, ConstantVariable) and val.value is None):
+            if not val.is_constant_none():
                 codegen.dup_top()
                 codegen(val)
                 codegen.extend_output(codegen.rot_n(2))
