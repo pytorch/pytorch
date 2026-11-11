@@ -64,9 +64,9 @@ of entire networks. Usage is simple:
 We strongly encourage users to `torch.compile(..., mode='reduce-overhead')` the
 resulting module.
 
-Projects that have custom operations that they wish localized should use
-`register_localizable_op` to register said ops prior to invoking
-`torch.cuda.localize`. Registering a `module_type` alongside the op lets
+The internal `_register_localizable_op` helper can register custom operations
+prior to invoking `torch.cuda.localize`; it is not a public API.
+Registering a `module_type` alongside the op lets
 `torch.cuda.localize` rewrite that module's parameters when it walks a model,
 the same way it handles `torch.nn.Linear`.
 

@@ -8,7 +8,7 @@ Forward calls on the layer then run the op as parallel branches on
 green-context-backed streams that occupy disjoint SM partitions.
 
 Which ops (and which layers) qualify is entirely a matter of what is in
-the ``_LOCALIZABLE_OPS`` registry; see :func:`register_localizable_op`.
+the ``_LOCALIZABLE_OPS`` registry; see :func:`_register_localizable_op`.
 
 Typical use::
 
@@ -213,7 +213,7 @@ class _LocalizableOpMeta(NamedTuple):
 _LOCALIZABLE_OPS: dict[Any, _LocalizableOpMeta] = {}
 
 
-def register_localizable_op(
+def _register_localizable_op(
     op: Any,
     *,
     localized_args: Sequence[int],
@@ -687,14 +687,14 @@ def _register_default_localizable_ops() -> None:
     # F.linear is a builtin with no introspectable signature, so its
     # parameter names have to be spelled out for keyword matching.
     if torch.nn.functional.linear not in _LOCALIZABLE_OPS:
-        register_localizable_op(
+        _register_localizable_op(
             torch.nn.functional.linear,
             localized_args=(1, 2),
             arg_names=("input", "weight", "bias"),
             module_type=nn.Linear,
         )
     if torch.ops.aten.linear.default not in _LOCALIZABLE_OPS:
-        register_localizable_op(torch.ops.aten.linear.default, localized_args=(1, 2))
+        _register_localizable_op(torch.ops.aten.linear.default, localized_args=(1, 2))
 
 
 def localize(
@@ -706,7 +706,7 @@ def localize(
     """Localize every localizable layer in ``module``'s tree (recursive, in place).
 
     A layer is localizable when its type was registered as some op's
-    ``module_type`` via :func:`register_localizable_op`; out of the box that
+    ``module_type`` via :func:`_register_localizable_op`; out of the box that
     is :class:`torch.nn.Linear`, via ``F.linear``.  For each such layer
     reached from ``module``, the parameters named by the op's
     ``localized_args`` (``.weight`` and ``.bias`` for a linear) are replaced
