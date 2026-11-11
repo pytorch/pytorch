@@ -729,7 +729,7 @@ class _ScaledLinear(nn.Module):
 
 
 class TestLocalizableOpRegistryCustomOp(TestCase):
-    """A downstream op registered with ``register_localizable_op`` gets the
+    """A downstream op registered with ``_register_localizable_op`` gets the
     same treatment the built-in linear does, including through kwargs and
     the module walk."""
 
@@ -740,7 +740,7 @@ class TestLocalizableOpRegistryCustomOp(TestCase):
         torch._dynamo.reset()
         from torch.cuda.localized_tensor import (
             _LOCALIZABLE_OPS,
-            register_localizable_op,
+            _register_localizable_op,
         )
 
         stack = contextlib.ExitStack()
@@ -758,7 +758,7 @@ class TestLocalizableOpRegistryCustomOp(TestCase):
 
         self._lib.impl("scaled_linear", _scaled_linear, "CUDA")
         self._op = torch.ops.test_localization.scaled_linear.default
-        register_localizable_op(
+        _register_localizable_op(
             self._op, localized_args=(1, 2), module_type=_ScaledLinear
         )
         self._registry = _LOCALIZABLE_OPS
@@ -884,12 +884,12 @@ class TestLocalizableOpSlicedArgs(TestCase):
         self.addCleanup(_LOCALIZABLE_OPS.pop, self._op, None)
 
     def _register(self, *, sliced_args):
-        from torch.cuda.localized_tensor import register_localizable_op
+        from torch.cuda.localized_tensor import _register_localizable_op
 
         with warnings.catch_warnings():
             # Re-registering to vary sliced_args warns by design.
             warnings.simplefilter("ignore")
-            register_localizable_op(
+            _register_localizable_op(
                 self._op,
                 localized_args=(1, 2),
                 sliced_args=sliced_args,
