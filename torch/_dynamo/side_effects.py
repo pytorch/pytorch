@@ -1683,6 +1683,25 @@ def _codegen_const_dict_or_set_mutation(ctx: SideEffectReplayContext) -> None:
         ),
     ):
         raise AssertionError(type(var))
+    if type(var) is variables.ConstDictVariable and not var.should_reconstruct_all:
+        if var.mutation_log is not None:
+            if var.mutation_log:
+                for key in reversed(var.mutation_log):
+                    cg(var.items[key])
+                    cg(var.source)
+                    cg(key.vt)
+                    ctx.suffixes.append([create_instruction("STORE_SUBSCR")])
+                ctx.log(var)
+        elif var.has_new_items():
+            for key, value in reversed(var.items.items()):
+                original_value = var.original_items.get(key.vt)
+                if var.is_new_item(original_value, value):
+                    cg(value)
+                    cg(var.source)
+                    cg(key.vt)
+                    ctx.suffixes.append([create_instruction("STORE_SUBSCR")])
+            ctx.log(var)
+        return
     # Reconstruct works as follow:
     # (1) Skip codegen if there are no new items
     # (2) codegen(...) each pair of key/value

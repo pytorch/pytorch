@@ -30,6 +30,30 @@ def _filter_instructions(instructions, opname):
     return list(filter(lambda x: x.opname == opname, instructions))
 
 
+def _store_subscr_targets(instructions: list[dis.Instruction]) -> list[tuple[str, object]]:
+    targets = []
+
+    for idx, instruction in enumerate(instructions):
+        if instruction.opname != "STORE_SUBSCR":
+            continue
+
+        if idx < 2:
+            raise AssertionError("STORE_SUBSCR is missing target operands")
+
+        container = instructions[idx - 2]
+        key = instructions[idx - 1]
+
+        if container.opname != "LOAD_FAST" or key.opname != "LOAD_CONST":
+            raise AssertionError(
+                "Unexpected STORE_SUBSCR target operands: "
+                f"{container.opname}, {key.opname}"
+            )
+
+        targets.append((container.argval, key.argval))
+
+    return targets
+
+
 @contextlib.contextmanager
 def _force_tensor_descriptor_support():
     import torch.utils._triton as triton_utils
@@ -65,10 +89,11 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         """
 
         def hook(instructions: list[dis.Instruction]):
-            build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 1)
-            # reconstruct only d[40]
-            self.assertEqual(build_map[0].argval, 1)
+            # we only update the value of a single dict key
+            self.assertEqual(
+                _store_subscr_targets(instructions),
+                [("d", 40)],
+            )
 
         def f(d, t):
             d[40] = t + 1
@@ -268,9 +293,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         """
 
         def hook(instructions: list[dis.Instruction]):
-            build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 1)
-            self.assertEqual(build_map[0].argval, 1)
+            self.assertEqual(
+                _store_subscr_targets(instructions),
+                [("d", 456)],
+            )
             load_const = _filter_instructions(instructions, "LOAD_CONST")
             self.assertNotIn(123, load_const)
 

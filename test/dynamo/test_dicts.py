@@ -163,7 +163,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             1,
         )
 
-    @parametrize("consumer", ["nested", "computed"])
+    @parametrize("consumer", ["after_write", "store", "nested", "computed"])
     def test_lazy_dict_lookup_consumers(self, consumer):
         def fn(x, d):
             if consumer == "after_write":
@@ -3795,6 +3795,342 @@ class DictGuardTests(LoggingTestCase):
             f"Dynamo specialized the compiled code on this key being {expectation}.",
             failures[0],
         )
+
+    @torch._dynamo.config.patch(specialize_int=False)
+    def test_relational_dict_contains_avoids_key_specialization(self):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x, d, n):
+            if n in d:
+                return x + 1
+            return x + 2
+
+        x = torch.ones(1)
+        self.assertEqual(fn(x, {1: "one"}, 1), x + 1)
+        self.assertEqual(fn(x, {1: "one", 2: "two"}, 1), x + 1)
+        self.assertEqual(fn(x, {2: "two"}, 2), x + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+        self.assertEqual(fn(x, {2: "two"}, 3), x + 2)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_setitem_avoids_full_dict_keys_guard(self):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x, d):
+            d[3] = "three"
+            d[4] = "four"
+            return x + 1
+
+        x = torch.ones(1)
+        for initial in (
+            {},
+            {1: "one"},
+            {1: "one", 2: "two"},
+            {2: "two"},
+            {3: "old", 1: "one"},
+        ):
+            d = initial.copy()
+            expected = initial.copy()
+            expected[3] = "three"
+            expected[4] = "four"
+            self.assertEqual(fn(x, d), x + 1)
+            self.assertEqual(d, expected)
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("graph_break", [False, True])
+    def test_setitem_replay_preserves_write_order(self, graph_break):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=not graph_break)
+        def fn(x, d):
+            d["a"] = 1
+            d["b"] = 2
+            x = x + 1
+            if graph_break:
+                torch._dynamo.graph_break()
+            d["c"] = 3
+            return x + 1
+
+        x = torch.ones(1)
+        d = {"b": 0}
+        self.assertEqual(fn(x, d), x + 2)
+        self.assertEqual(list(d), ["b", "a", "c"])
+        d.clear()
+        self.assertEqual(fn(x, d), x + 2)
+        self.assertEqual(list(d), ["a", "b", "c"])
+        self.assertEqual(counter.frame_count, 2 if graph_break else 1)
+
+    @parametrize("repeated", [False, True])
+    def test_setitem_replay_preserves_equal_key_operand(self, repeated):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x, d):
+            d[True] = "new"
+            if repeated:
+                d[1] = "final"
+            return x + 1
+
+        x = torch.ones(1)
+        d = {1: "old"}
+        self.assertEqual(fn(x, d), x + 1)
+        self.assertIs(type(next(iter(d))), int)
+        d.clear()
+        self.assertEqual(fn(x, d), x + 1)
+        self.assertEqual(d, {True: "final" if repeated else "new"})
+        self.assertIs(type(next(iter(d))), bool)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_setitem_replay_coalesces_repeated_writes(self):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x, d):
+            d["a"] = 1
+            d["b"] = 2
+            d["c"] = 3
+            d["a"] = 4
+            d["d"] = 5
+            d["f"] = 6
+            return x + 1
+
+        x = torch.ones(1)
+        d = {"b": 0}
+        self.assertEqual(fn(x, d), x + 1)
+        self.assertEqual(
+            list(d.items()), [("b", 2), ("a", 4), ("c", 3), ("d", 5), ("f", 6)]
+        )
+        d.clear()
+        self.assertEqual(fn(x, d), x + 1)
+        self.assertEqual(
+            list(d.items()), [("a", 4), ("b", 2), ("c", 3), ("d", 5), ("f", 6)]
+        )
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("value_kind", ["generator", "dict_iterator"])
+    def test_setitem_replay_does_not_reconstruct_overwritten_values(self, value_kind):
+        def gen():
+            raise ValueError("generator should not be consumed")
+            yield 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, d):
+            if value_kind == "generator":
+                d["a"] = gen()
+            else:
+                d["a"] = iter({"temporary": 2})
+            d["a"] = 1
+            return x + 1
+
+        x = torch.ones(1)
+        d = {}
+        self.assertEqual(fn(x, d), x + 1)
+        self.assertEqual(d, {"a": 1})
+
+    @parametrize(
+        "operation",
+        [
+            "update_dict",
+            "update_mapping",
+            "update_iterable",
+            "update_kwargs",
+            "setdefault",
+            "init",
+            "ior",
+        ],
+    )
+    def test_dict_replay_logs_all_write_paths(self, operation):
+        class Mapping:
+            def keys(self):
+                return ["b"]
+
+            def __getitem__(self, key):
+                return 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, d):
+            d["a"] = 1
+            if operation == "update_dict":
+                d.update({"b": 2})
+            elif operation == "update_mapping":
+                d.update(Mapping())
+            elif operation == "update_iterable":
+                d.update([("b", 1), ("b", 2)])
+            elif operation == "update_kwargs":
+                d.update(b=2)
+            elif operation == "setdefault":
+                d.setdefault("b", 2)
+            elif operation == "init":
+                d.__init__([("b", 1), ("b", 2)])
+            else:
+                d |= {"b": 2}
+            d["c"] = 3
+            return x + 1
+
+        x = torch.ones(1)
+        d = {}
+        self.assertEqual(fn(x, d), x + 1)
+        self.assertEqual(list(d.items()), [("a", 1), ("b", 2), ("c", 3)])
+
+    def test_dict_update_replay_preserves_bulk_merge(self):
+        class Key:
+            def __init__(self, index, events):
+                self.index = index
+                self.events = events
+
+            def __hash__(self):
+                return 5
+
+            def __eq__(self, other):
+                self.events.append((self.index, other.index))
+                if len(self.events) > 2:
+                    raise ValueError("unexpected equality comparison")
+                return self is other
+
+        def fn(x, d, other):
+            d.update(other)
+            return x + 1
+
+        events = []
+        keys = [Key(1, events), Key(2, events)]
+        other = dict(zip(keys, [1, 2]))
+        events.clear()
+        x = torch.ones(1)
+        expected = fn(x, {}, other)
+        events.clear()
+        d = {}
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, d, other), expected)
+        self.assertEqual(list(d.values()), [1, 2])
+        actual_keys = list(d)
+        self.assertIs(actual_keys[0], keys[0])
+        self.assertIs(actual_keys[1], keys[1])
+
+    def test_dict_init_replay_preserves_mapping_subclass(self):
+        class MappingDict(dict):
+            def __iter__(self):
+                return super().__iter__()
+
+            def keys(self):
+                return ["visible"]
+
+            def __getitem__(self, key):
+                return 7
+
+            def items(self):
+                return [("visible", 7)]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, d, source):
+            d.__init__(source)
+            return x + 1
+
+        x = torch.ones(1)
+        d = {}
+        self.assertEqual(fn(x, d, MappingDict(hidden=3)), x + 1)
+        self.assertEqual(d, {"visible": 7})
+
+    @parametrize("unsafe_key", ["incoming", "stored"])
+    def test_dict_replay_falls_back_for_callback_keys(self, unsafe_key):
+        class Key:
+            def __hash__(self):
+                return hash("a")
+
+            def __eq__(self, other):
+                return self is other
+
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x, d, key):
+            d["a"] = 1
+            if unsafe_key == "incoming":
+                d[key] = 2
+            d["b"] = 3
+            return x + 1
+
+        x = torch.ones(1)
+        key = Key()
+        d = {} if unsafe_key == "incoming" else {key: 0}
+        self.assertEqual(fn(x, d, key), x + 1)
+        expected_keys = ["a", key, "b"] if unsafe_key == "incoming" else [key, "a", "b"]
+        self.assertEqual(list(d), expected_keys)
+        d.clear()
+        d["b"] = 0
+        self.assertEqual(fn(x, d, key), x + 1)
+        expected_keys = ["b", "a", key] if unsafe_key == "incoming" else ["b", "a"]
+        self.assertEqual(list(d), expected_keys)
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("operation", ["setitem", "update"])
+    def test_dict_replay_callback_fallback_stays_disabled(self, operation):
+        class Key:
+            def __hash__(self):
+                return hash("a")
+
+            def __eq__(self, other):
+                return other == "a"
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, d, key):
+            d["prefix"] = 1
+            if operation == "setitem":
+                d[key] = 2
+            else:
+                d.update({key: 2})
+            d["b"] = 3
+            return x + 1
+
+        x = torch.ones(1)
+        d = {"a": 0}
+        self.assertEqual(fn(x, d, Key()), x + 1)
+        self.assertEqual(list(d.items()), [("a", 2), ("prefix", 1), ("b", 3)])
+
+    def test_dict_replay_repeated_writes_preserve_live_aliases(self):
+        class Value:
+            pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, d):
+            value = Value()
+            value.items = [x + 1]
+            d["a"] = value
+            d["b"] = value.items
+            d["a"] = x + 2
+            del value
+            return x + 3
+
+        x = torch.ones(1)
+        d = {"a": "old"}
+        self.assertEqual(fn(x, d), x + 3)
+        self.assertEqual(d, {"a": x + 2, "b": [x + 1]})
+        d.clear()
+        self.assertEqual(fn(x, d), x + 3)
+        self.assertEqual(list(d), ["a", "b"])
+        self.assertEqual(d, {"a": x + 2, "b": [x + 1]})
+
+    def test_dict_write_order_observed_during_tracing(self):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x, d):
+            d["a"] = 1
+            d["b"] = 2
+            if list(d.keys()) == ["a", "b"]:
+                return x + 1
+            return x + 2
+
+        x = torch.ones(1)
+        d = {"b": 0}
+        self.assertEqual(fn(x, d), x + 2)
+        self.assertEqual(list(d), ["b", "a"])
+        d.clear()
+        self.assertEqual(fn(x, d), x + 1)
+        self.assertEqual(list(d), ["a", "b"])
+        self.assertEqual(counter.frame_count, 2)
 
     @make_logging_test(recompiles=True)
     def test_cmp_or(self, records):
