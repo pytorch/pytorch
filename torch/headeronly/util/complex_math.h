@@ -53,6 +53,7 @@ C10_HOST_DEVICE inline c10::complex<T> log2(const c10::complex<T>& x) {
 #if defined(_LIBCPP_VERSION) || \
     (defined(__GLIBCXX__) && !defined(_GLIBCXX11_USE_C99_COMPLEX))
 HIDDEN_NAMESPACE_BEGIN(_detail)
+inline namespace CPU_CAPABILITY {
 // Note [ Complex Square root in libc++]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // In libc++ complex square root is computed using polar form
@@ -130,6 +131,7 @@ C10_NOINLINE inline c10::complex<float> acos(const c10::complex<float>& in) {
 C10_NOINLINE inline c10::complex<double> acos(const c10::complex<double>& in) {
   return compute_cacos(in);
 }
+} // namespace CPU_CAPABILITY
 HIDDEN_NAMESPACE_END(_detail)
 #endif
 
