@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import gc
 import operator
+import weakref
 
 import onnx
 
@@ -12,12 +14,13 @@ from onnx.reference import ReferenceEvaluator
 
 import torch
 from torch.onnx._internal.exporter import (
+    _core,
     _custom_translation,
     _ir_builder,
     _registration,
 )
 from torch.onnx._internal.exporter._torchlib import _torchlib_registry
-from torch.onnx._internal.exporter._torchlib.ops import core
+from torch.onnx._internal.exporter._torchlib.ops import core, factories
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -27,6 +30,104 @@ from torch.testing._internal.common_utils import (
 
 class TestNativeRegistration(TestCase):
     hw_classification = HardwareClassification.CPU
+
+    def test_dynamic_repeat(self):
+        class Repeat(torch.nn.Module):
+            def forward(self, x, y):
+                return x.repeat(y.shape[0], 1)
+
+        model = Repeat()
+        inputs = (torch.ones(1, 3), torch.ones(2))
+        program = torch.onnx.export(
+            model,
+            inputs,
+            dynamic_shapes={"x": {}, "y": {0: torch.export.Dim("n")}},
+            opset_version=18,
+            optimize=False,
+            verbose=False,
+        )
+        proto = program.model_proto
+        onnx.checker.check_model(proto, full_check=True)
+        feed = {
+            value.name: tensor.numpy()
+            for value, tensor in zip(
+                program.model.graph.inputs, (inputs[0], torch.ones(4))
+            )
+        }
+        result = ReferenceEvaluator(proto).run(None, feed)[0]
+        self.assertEqual(torch.from_numpy(result), model(inputs[0], torch.ones(4)))
+
+    def test_arange_probe_does_not_retain_context(self):
+        references = []
+        expected = torch.arange(3.1, dtype=torch.int64).numel() == 4
+        for _ in range(3):
+            builder = _ir_builder.GraphBuilder(ir.Graph([], [], nodes=[]), opset=18)
+            op = _ir_builder.TranslationContext(builder)
+            references.append(weakref.ref(builder))
+            self.assertEqual(
+                factories._int64_arange_non_integral_uses_float_length(op), expected
+            )
+            del op, builder
+        gc.collect()
+        self.assertTrue(all(reference() is None for reference in references))
+
+    def test_graph_scoped_constant_cache(self):
+        class Add(torch.nn.Module):
+            def forward(self, x):
+                return (x + 2.0) * 2.0
+
+        programs = [
+            torch.onnx.export(
+                Add(),
+                (torch.ones(3),),
+                opset_version=18,
+                optimize=False,
+                verbose=False,
+            )
+            for _ in range(2)
+        ]
+        values = []
+        for program in programs:
+            nodes = list(program.model.graph)
+            add = next(node for node in nodes if node.op_type == "Add")
+            mul = next(node for node in nodes if node.op_type == "Mul")
+            self.assertIs(add.inputs[1], mul.inputs[1])
+            values.append(add.inputs[1])
+            onnx.checker.check_model(program.model_proto, full_check=True)
+        self.assertIsNot(values[0], values[1])
+
+    def test_declared_symbolic_real_dtype_preserves_complex_meta_shape(self):
+        meta = torch.empty(3, dtype=torch.complex64)
+        declared = ir.Value(type=ir.TensorType(ir.DataType.FLOAT))
+        _core._set_shape_type(declared, meta, complex_to_float=True)
+        self.assertEqual(list(declared.shape), [3])
+        packed = ir.Value(type=ir.TensorType(ir.DataType.FLOAT))
+        _core._set_shape_type(packed, meta, complex_to_float=True, packed_complex=True)
+        self.assertEqual(list(packed.shape), [3, 2])
+
+    def test_symbolic_declared_output_shapes(self):
+        class Symbolic(torch.nn.Module):
+            def forward(self, x):
+                return torch.onnx.ops.symbolic(
+                    "test::DeclaredOutput", (x,), dtype=dtype, shape=x.shape
+                )
+
+        for dtype in (torch.float32, torch.complex64):
+            with self.subTest(dtype=dtype):
+                program = torch.onnx.export(
+                    Symbolic(),
+                    (torch.ones(3),),
+                    opset_version=18,
+                    optimize=False,
+                    verbose=False,
+                )
+                self.assertEqual(list(program.model.graph.outputs[0].shape), [3])
+                self.assertEqual(
+                    program.model.graph.outputs[0].dtype,
+                    ir.DataType.FLOAT
+                    if dtype == torch.float32
+                    else ir.DataType.COMPLEX64,
+                )
 
     def test_pooling_gelu_native_export(self):
         class PoolGelu(torch.nn.Module):

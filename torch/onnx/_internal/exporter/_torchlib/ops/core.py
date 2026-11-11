@@ -2755,7 +2755,7 @@ def aten_repeat(
     if len(repeats) == 0:
         return self
     self_expanded = op.Expand(self, [1] * len(repeats))
-    return op.Tile(self_expanded, repeats)
+    return op.Tile(self_expanded, common_ops.merge_dims(op, repeats))
 
 
 @onnx_impl(aten.reshape.default)

@@ -23,7 +23,6 @@ if TYPE_CHECKING:
 aten = torch.ops.aten
 
 
-@functools.cache
 def _int64_arange_non_integral_uses_float_length(
     op: TranslationContext,
 ) -> bool:
@@ -33,6 +32,11 @@ def _int64_arange_non_integral_uses_float_length(
     while older versions return 3. This is evaluated lazily to avoid running torch code
     at import time.
     """
+    return _int64_arange_float_length_capability()
+
+
+@functools.cache
+def _int64_arange_float_length_capability() -> bool:
     return torch.arange(3.1, dtype=torch.int64, device="cpu").numel() == 4
 
 

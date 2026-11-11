@@ -214,6 +214,7 @@ def _set_shape_types(
     values: Sequence[ir.Value],
     meta_vals: Sequence[torch.Tensor],
     complex_to_float: bool = True,
+    packed_complex: bool = False,
 ) -> None:
     if not isinstance(meta_vals, Sequence):
         logger.warning(
@@ -222,7 +223,12 @@ def _set_shape_types(
         )
         meta_vals = (meta_vals,)
     for value, meta_val in zip(values, meta_vals):
-        _set_shape_type(value, meta_val, complex_to_float=complex_to_float)
+        _set_shape_type(
+            value,
+            meta_val,
+            complex_to_float=complex_to_float,
+            packed_complex=packed_complex,
+        )
 
 
 def _set_shape_type(
@@ -233,6 +239,7 @@ def _set_shape_type(
     | torch.SymFloat
     | tuple[torch.Tensor],
     complex_to_float: bool,
+    packed_complex: bool = False,
 ) -> None:
     if isinstance(meta_val, tuple):
         logger.warning("Setting shape and type of tensors is not supported yet")
@@ -257,13 +264,15 @@ def _set_shape_type(
         # When a user specifies complex in onnx_symbolic, we consider that to
         # be the intention even though none of the ONNX ops deals with complex values.
         # In this case, we don't change the dtype or the shape of the tensor.
-        if value.dtype is None:
+        infer_dtype = value.dtype is None
+        if infer_dtype:
             value.dtype = torch_dtype_to_onnx_dtype(meta_val.dtype)
             if complex_to_float and meta_val.dtype.is_complex:
                 value.dtype = torch_dtype_to_onnx_dtype(meta_val.dtype.to_real())
         if (
             complex_to_float
             and meta_val.dtype.is_complex
+            and (infer_dtype or packed_complex)
             and value.dtype == torch_dtype_to_onnx_dtype(meta_val.dtype.to_real())
         ):
             # Native builders may already have inferred the packed real dtype.
@@ -512,6 +521,7 @@ def _handle_call_function_node_with_lowering(
     *,
     graph_like: ir.Graph | ir.Function,
     constant_farm: dict[Any, ir.Value],
+    native_builder: _ir_builder.GraphBuilder,
     registry: _registration.ONNXRegistry,
     opset: int,
     node_name_to_local_functions: dict[str, ir.Function],
@@ -602,7 +612,7 @@ def _handle_call_function_node_with_lowering(
             graph = (
                 graph_like.graph if isinstance(graph_like, ir.Function) else graph_like
             )
-            builder = _ir_builder.GraphBuilder(graph, opset=registry.opset_version)
+            builder = native_builder
             # Native operators use the requested schema version even when the
             # only native translation occurs inside an owned subgraph.
             model.graph.opset_imports[""] = registry.opset_version
@@ -674,8 +684,17 @@ def _handle_call_function_node_with_lowering(
     #
     # When there are multiple outputs, the output names will be
     # node_name__0, node_name__1, etc.
+    packed_complex = native and not (
+        isinstance(node.target, torch._ops.OpOverload)
+        and node.target.namespace == "onnx_symbolic"
+    )
     if isinstance(outputs, Sequence):
-        _set_shape_types(outputs, node.meta["val"], complex_to_float=True)
+        _set_shape_types(
+            outputs,
+            node.meta["val"],
+            complex_to_float=True,
+            packed_complex=packed_complex,
+        )
         node_name_to_values[node.name] = outputs
         for i, output in enumerate(outputs):
             output.name = f"{node.name}__{i}"
@@ -684,7 +703,12 @@ def _handle_call_function_node_with_lowering(
             if producer is not None:
                 producer.name = f"node_{output.name}"
     else:
-        _set_shape_type(outputs, node.meta["val"], complex_to_float=True)
+        _set_shape_type(
+            outputs,
+            node.meta["val"],
+            complex_to_float=True,
+            packed_complex=packed_complex,
+        )
         node_name_to_values[node.name] = outputs
         outputs.name = node.name
         producer = outputs.producer()
@@ -891,6 +915,8 @@ def _translate_fx_graph(
     node_name_to_local_functions: dict[str, ir.Function] = {}
     constant_farm: dict[Any, ir.Value] = {}
     opset = registry.opset_version
+    graph = graph_like.graph if isinstance(graph_like, ir.Function) else graph_like
+    native_builder = _ir_builder.GraphBuilder(graph, opset=opset)
 
     for node in fx_graph.nodes:
         logger.debug(
@@ -913,6 +939,7 @@ def _translate_fx_graph(
                         node_name_to_values,
                         graph_like=graph_like,
                         constant_farm=constant_farm,
+                        native_builder=native_builder,
                         registry=registry,
                         opset=opset,
                         node_name_to_local_functions=node_name_to_local_functions,

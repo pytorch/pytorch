@@ -1001,6 +1001,12 @@ class TestNativeCutover(common_utils.TestCase):
                     continue
                 with self.subTest(module=path.name, line=node.lineno):
                     if isinstance(node, ast.FunctionDef):
+                        if (
+                            path.name == "factories.py"
+                            and node.name == "_int64_arange_float_length_capability"
+                        ):
+                            self.assertEqual(node.args.args, [])
+                            continue
                         self.assertTrue(node.args.args, node.name)
                         self.assertEqual(node.args.args[0].arg, "op", node.name)
                     if isinstance(node, ast.Call):
