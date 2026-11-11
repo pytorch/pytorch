@@ -15,6 +15,7 @@ from typing import Any, NamedTuple
 from unittest.mock import patch
 
 import torch
+import torch._dynamo.side_effects
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
@@ -69,6 +70,193 @@ class FakeMapping:
 
 class DictTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    def test_lazy_dict_get_return(self, mapping_type):
+        def fn(x, d):
+            return x + 1, d.get("x", 10)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        d = mapping_type()
+        d.update({"mask": torch.ones(1), "x": 1})
+        self.assertEqual(opt_fn(x, d), (x + 1, 1))
+        self.assertEqual(counter.frame_count, 1)
+        d["x"] = 5
+        self.assertEqual(opt_fn(x, d), (x + 1, 5))
+        self.assertEqual(counter.frame_count, 1)
+        del d["x"]
+        self.assertEqual(opt_fn(x, d), (x + 1, 10))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("skip_install", [False, True])
+    def test_lazy_source_guard_registration(self, skip_install):
+        from torch._dynamo.codegen import PyCodegen
+        from torch._dynamo.guards import GuardBuilder
+        from torch._dynamo.variables.dicts import ConstDictVariable
+        from torch._guards import TracingContext
+
+        register = ConstDictVariable._register_lazy_lookup_source
+        codegen_sources = []
+        observed_guards = []
+
+        def register_with_codegen(mapping, tx, key, value):
+            register(mapping, tx, key, value)
+            source = value.source
+            registry = tx.output.lazy_source_guarding
+            if codegen_sources or source not in registry:
+                return
+            guards = registry[source]
+            membership_guard = next(iter(guards.values()))
+            value_guard = source.make_guard(GuardBuilder.EQUALS_MATCH)
+            guards[GuardBuilder.EQUALS_MATCH] = value_guard
+            for _ in range(10):
+                register(mapping, tx, key, value)
+            self.assertEqual(len(guards), 2)
+            self.assertIs(next(iter(guards.values())), membership_guard)
+            codegen = PyCodegen(tx)
+            codegen(source)
+            codegen(source)  # A cached use must not add another guard.
+            if skip_install:
+                with TracingContext.get().guards_context.skip_guard_install():
+                    tx.output.install_lazy_source_guards(codegen)
+                self.assertNotIn(membership_guard, tx.output.guards.inner)
+                self.assertNotIn(value_guard, tx.output.guards.inner)
+            tx.output.install_lazy_source_guards(codegen)
+            self.assertIn(membership_guard, tx.output.guards.inner)
+            self.assertIn(value_guard, tx.output.guards.inner)
+            self.assertFalse(value.is_realized())
+            register(mapping, tx, key, value)
+            self.assertEqual(len(guards), 2)
+            self.assertIs(next(iter(guards.values())), membership_guard)
+            codegen_sources.append(source)
+
+        def fn(x, d):
+            return x + 1, d.get("x", 10)
+
+        with patch.object(
+            ConstDictVariable, "_register_lazy_lookup_source", register_with_codegen
+        ):
+            x = torch.ones(1)
+            opt_fn = torch._dynamo.optimize(
+                "eager", nopython=True, guard_export_fn=observed_guards.extend
+            )(fn)
+            self.assertEqual(
+                opt_fn(x, {"x": 1}),
+                (x + 1, 1),
+            )
+        self.assertEqual(len(codegen_sources), 1)
+        self.assertEqual(
+            sum(
+                g.inner_create_fn() is GuardBuilder.DICT_CONTAINS
+                for g in observed_guards
+            ),
+            1,
+        )
+        self.assertEqual(
+            sum(
+                g.inner_create_fn() is GuardBuilder.EQUALS_MATCH
+                and g.originating_source == codegen_sources[0]
+                for g in observed_guards
+            ),
+            1,
+        )
+
+    @parametrize("consumer", ["nested", "computed"])
+    def test_lazy_dict_lookup_consumers(self, consumer):
+        def fn(x, d):
+            if consumer == "after_write":
+                d["unrelated"] = None
+            value = d.get("x", 10)
+            if consumer == "store":
+                d["out"] = value
+                return x + 1
+            if consumer == "nested":
+                temporary = {"out": [value]}
+                return x + 1, temporary["out"][0]
+            if consumer == "computed":
+                value = value + 1
+            return x + 1, value
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        d = {"mask": torch.ones(1), "x": 1}
+        for value in (1, 5, None):
+            if value is None:
+                del d["x"]
+            else:
+                d["x"] = value
+            expected = 10 if value is None else value
+            result = opt_fn(x, d)
+            if consumer == "store":
+                self.assertEqual(result, x + 1)
+                self.assertEqual(d["out"], expected)
+            else:
+                self.assertEqual(result, (x + 1, expected + (consumer == "computed")))
+            self.assertEqual(counter.frame_count, 2 if value is None else 1)
+
+    def test_lazy_dict_get_lookup_argument(self):
+        def fn(x, d, lookup):
+            return x + 1, d.get(lookup, 10)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        d = {"mask": torch.ones(1), "a": 1, "b": 5}
+        self.assertEqual(opt_fn(x, d, "a"), (x + 1, 1))
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(opt_fn(x, d, "b"), (x + 1, 5))
+        self.assertEqual(counter.frame_count, 2)
+        del d["b"]
+        self.assertEqual(opt_fn(x, d, "b"), (x + 1, 10))
+        self.assertEqual(counter.frame_count, 3)
+
+    def test_lazy_dict_get_inserted_key(self):
+        def fn(x, d):
+            d["new"] = d["x"]
+            return x + 1, d.get("new", 10)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        d = {"x": 1}
+        self.assertEqual(opt_fn(x, d), (x + 1, 1))
+        self.assertEqual(d, {"x": 1, "new": 1})
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("consumer", ["lazy_constant", "computed", "lazy_variable"])
+    def test_discarded_dict_get_does_not_guard_membership(self, consumer):
+        def fn(x, d):
+            if consumer == "computed":
+                d.get("unused", 10) + 1
+            else:
+                d.get("unused", 10)
+            return x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        d = {"unused": {torch.ones(1)} if consumer == "lazy_variable" else 1}
+        self.assertEqual(opt_fn(x, d), x + 1)
+        del d["unused"]
+        self.assertEqual(opt_fn(x, d), x + 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_lazy_dict_get_graph_break(self):
+        def fn(x, d):
+            value = d.get("x", 10)
+            y = x + 1
+            torch._dynamo.graph_break()
+            return y + 1, value
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(1)
+        d = {"mask": torch.ones(1), "x": 1}
+        self.assertEqual(opt_fn(x, d), (x + 2, 1))
+        del d["x"]
+        self.assertEqual(opt_fn(x, d), (x + 2, 10))
 
     @parametrize(
         "operation",
@@ -1529,6 +1717,62 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
             x = torch.rand(4)
             self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_subclass_new_multilevel_mro_no_override(self):
+        # No class between the leaf subclass and dict/OrderedDict overrides
+        # __new__ anywhere in the chain -- tp_new must resolve the owner by
+        # walking the MRO, not by checking self.value.__new__ identity for
+        # a fixed list of known base types.
+        for base in (dict, OrderedDict):
+
+            class Level1(base):
+                pass
+
+            class Level2(Level1):
+                pass
+
+            def fn(x):
+                d = Level2(a=x, b=x + 1)
+                d2 = Level2.__new__(Level2, a=1, b=2)
+                return d["a"], d["b"], len(d2)
+
+            x = torch.ones(2)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_subclass_new_multilevel_mro_stores_no_init_args(self):
+        # Regression test: dict.__new__ ignores its extra args, so
+        # UserDefinedClassVariable.tp_new_impl must not thread them through
+        # to track_new_user_defined_object as init_args, even when reached
+        # through a 2+-level MRO chain with no override in between.
+        class Level1(dict):
+            pass
+
+        class Level2(Level1):
+            pass
+
+        def fn(x):
+            return Level2(a=x), x + 1
+
+        seen_init_args = []
+        orig = torch._dynamo.side_effects.SideEffects.track_new_user_defined_object
+
+        def spy(self, base_cls_vt, cls_vt, init_args, **kwargs):
+            seen_init_args.append(list(init_args))
+            return orig(self, base_cls_vt, cls_vt, init_args, **kwargs)
+
+        with patch.object(
+            torch._dynamo.side_effects.SideEffects,
+            "track_new_user_defined_object",
+            spy,
+        ):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            d, _ = opt_fn(torch.ones(2))
+
+        self.assertEqual(d["a"], torch.ones(2))
+        self.assertTrue(len(seen_init_args) >= 1)
+        for init_args in seen_init_args:
+            self.assertEqual(init_args, [])
 
     def test_dict_list_values(self):
         def inner_fn(args):

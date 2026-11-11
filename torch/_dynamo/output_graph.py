@@ -36,7 +36,7 @@ import traceback
 import types
 import warnings
 import weakref
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator, Hashable, Sequence
 from dataclasses import dataclass, field as dc_field
 from types import CodeType
 from typing import (
@@ -65,6 +65,7 @@ from torch._guards import (
     CompileContext,
     CompileId,
     GlobalContextCheckpointState,
+    Guard,
     Source,
     tracing,
     TracingContext,
@@ -878,6 +879,9 @@ class OutputGraph(OutputGraphCommon):
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
         self.variable_tracker_cache: dict[Source, VariableTracker] = {}
+        # Guards needed only when suffix codegen reconstructs a source. Stable
+        # registration keys deduplicate each producer without excluding others.
+        self.lazy_source_guarding: dict[Source, dict[Hashable, Guard]] = {}
         # Cache for sources resolved via MRO walk, keyed by (id(owning class),
         # name). When the same descriptor (e.g. property) is reached from
         # multiple instances or subclasses, we reuse the first source to avoid
@@ -2606,6 +2610,13 @@ class OutputGraph(OutputGraphCommon):
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
         self.side_effects.codegen_update_mutated(cg, log_side_effects)
+        self.install_lazy_source_guards(cg)
+
+    def install_lazy_source_guards(self, cg: PyCodegen) -> None:
+        for source, source_guards in self.lazy_source_guarding.items():
+            if source in cg.uses:
+                # Keep registrations across passes: install_guard can be skipped.
+                install_guard(*source_guards.values())
 
     def cleanup_graph(self) -> None:
         """
@@ -3696,6 +3707,7 @@ class OutputGraph(OutputGraphCommon):
         )
         self.side_effects.clear()
         self.variable_tracker_cache.clear()
+        self.lazy_source_guarding.clear()
         self.mro_source_cache.clear()
         self.guarded_mro_absent_keys.clear()
         self.signature_cache.clear()
