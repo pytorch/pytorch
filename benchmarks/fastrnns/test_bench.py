@@ -2,14 +2,11 @@ import pytest
 
 import torch
 
-from .fuser import set_fuser
 from .runner import get_nn_runners
 
 
 @pytest.fixture(scope="class")
-def modeldef(request, net_name, executor, fuser):
-    set_fuser(fuser, executor)
-
+def modeldef(net_name):
     # Given a 'net_name' provided by generate_tests, build the thing
     name, rnn_creator, context = get_nn_runners(net_name)[0]
     creator_args = {
