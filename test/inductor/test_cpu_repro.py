@@ -49,6 +49,7 @@ from torch.testing._internal.common_utils import (
     IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
     IS_MACOS,
+    IS_S390X,
     MI200_ARCH,
     parametrize,
     requires_mkl,
@@ -3062,7 +3063,7 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_zvec_vsx_simd(self):
         vec_zvec_vsx = cpu_vec_isa.valid_vec_isa_list()[0]
-        self.assertTrue(vec_zvec_vsx.bit_width() == 256)
+        self.assertTrue(vec_zvec_vsx.bit_width() == 256 if not IS_S390X else 128)
 
         with config.patch({"cpp.simdlen": 0}):
             isa = cpu_vec_isa.pick_vec_isa()
@@ -3072,11 +3073,11 @@ class CPUReproTests(TestCase):
             isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
-        with config.patch({"cpp.simdlen": 257}):
+        with config.patch({"cpp.simdlen": 257 if not IS_S390X else 129}):
             isa = cpu_vec_isa.pick_vec_isa()
             self.assertFalse(isa)
 
-        with config.patch({"cpp.simdlen": 256}):
+        with config.patch({"cpp.simdlen": 256 if not IS_S390X else 128}):
             isa = cpu_vec_isa.pick_vec_isa()
             self.assertTrue(isa == vec_zvec_vsx)
 
@@ -4850,7 +4851,6 @@ class CPUReproTests(TestCase):
                 f"Expected kernel_profile_events to be non-empty, got {len(kernel_profile_events)}"
             )
 
-    @xfailIfS390X
     @requires_vectorization
     def test_channel_shuffle_cl_output(self):
         """code and shape extracted from shufflenet_v2_x1_0"""
@@ -5306,6 +5306,10 @@ class CPUReproTests(TestCase):
         x = torch.rand(4, 5)
         self.common(f, (x,))
 
+    @unittest.skipIf(
+        IS_S390X,
+        "s390x uses a lot of FMA, and combined it can lead to considerable difference in result",
+    )
     def test_broadcast_scalar_cpp_tile_2d_kernel(self):
         # Based on detectron2_maskrcnn backbone (conv2d -> max_pool2d)
         s0 = 12
@@ -6384,7 +6388,6 @@ class CPUReproTests(TestCase):
         self.assertTrue("cvt_lowp_fp_to_fp32" not in code)
         self.assertTrue("cvt_fp32_to_lowp_fp" not in code)
 
-    @xfailIfS390X
     def test_concat_inner_vec(self):
         def fn(x, y):
             return F.relu(torch.cat([x, y], dim=1))
@@ -7641,6 +7644,8 @@ class CPUReproTests(TestCase):
             code
         )
 
+    # qnnpack/xnnpack not supported on s390x
+    @xfailIfS390X
     @config.patch(freezing=True)
     def test_add_layernorm(self):
         """
