@@ -5712,7 +5712,9 @@ def _occupancy_before_and_after_fusion(
     regs_per_block_unfused = unfused_n_regs * threads_per_block
     regs_per_block_fused = fused_n_regs * threads_per_block
 
-    blocks_unfused = regs_per_sm // regs_per_block_unfused
+    # Clamping blocks_fused as well would turn (fused=0, unfused=1) from 0/1
+    # (reject) into 1/1 (accept).
+    blocks_unfused = max(regs_per_sm // regs_per_block_unfused, 1)
     blocks_fused = regs_per_sm // regs_per_block_fused
 
     return blocks_unfused, blocks_fused
@@ -6171,6 +6173,8 @@ class Scheduler:
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.logged_slow_fusion = OrderedSet[tuple[str, str]]()
+        # Templates with a fused node whose device assert generated inputs could trip.
+        self.templates_with_unsafe_asserts = OrderedSet[str]()
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
 
@@ -7697,6 +7701,28 @@ class Scheduler:
 
             from torch._inductor.codegen.simd import CantSplit
 
+            # Benchmarking launches kernels on generated inputs, which can trip a
+            # device assert and leave the device unusable. So a fusion whose
+            # standalone side, or an earlier fusion into the template, has such an
+            # assert is judged by estimate. With multi_kernel_hints the fused choice
+            # for each hint can only be picked by benchmarking, so it is not made.
+            template_name = multi_node.get_name()
+            needs_real_inputs = template_name in self.templates_with_unsafe_asserts
+            if not (needs_real_inputs or has_atomic_add) and (
+                config.benchmark_template_fusion or config.multi_kernel_hints
+            ):
+                standalone = PyCodeCache.load(
+                    self.generate_kernel_code_from_nodes(
+                        node_list_2 if consumer_fusion else node_list_1,
+                        benchmark_kernel=True,
+                    )
+                )
+                needs_real_inputs = bool(
+                    standalone.triton_.inductor_meta.get("asserts_need_real_inputs")
+                )
+            if needs_real_inputs and config.multi_kernel_hints and not has_atomic_add:
+                return FusionResult.fuse(False)
+
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
             if not has_atomic_add:
                 for hint_override in config.multi_kernel_hints:
@@ -7761,7 +7787,9 @@ class Scheduler:
 
             from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-            benchmark_template_fusion = config.benchmark_template_fusion
+            benchmark_template_fusion = (
+                config.benchmark_template_fusion and not needs_real_inputs
+            )
             num_fusible_callers = sum(
                 isinstance(c, (TritonTemplateCallerBase, NVUniversalGemmCaller))
                 for c in multi_node.choices
@@ -8049,6 +8077,8 @@ class Scheduler:
                     if benchmark_template_fusion:
                         # pyrefly: ignore [missing-attribute]
                         multi_node._choice_timings[None] = new_timings
+                    if needs_real_inputs:
+                        self.templates_with_unsafe_asserts.add(template_name)
                     return True
                 else:
                     return False
@@ -12251,13 +12281,45 @@ class Scheduler:
 
             return False
 
-        for partition, skip_cudagraph in zip(
-            reversed(partitions), reversed(skip_cudagraphs)
+        # cat inputs write the cat buffer in place through NonOwningLayout,
+        # possibly in partitions before the ConcatKernel node. The first
+        # partition that writes it defines it. Only ConcatKernel targets count:
+        # other NonOwningLayout aliases (e.g. TMADescriptor) only read the
+        # tensor, so they keep normal ownership.
+        def is_cat_buffer(name: str) -> bool:
+            buf = self.name_to_buf.get(name)
+            return buf is not None and isinstance(buf.node, ir.ConcatKernel)
+
+        cat_writes = [
+            OrderedSet(
+                alias
+                for node in partition
+                for buf in node.get_outputs()
+                for alias in buf.get_aliases()
+                if is_cat_buffer(alias)
+            )
+            for partition in partitions
+        ]
+        cat_owner: dict[str, int] = {}
+        for idx, names in enumerate(cat_writes):
+            for name in names:
+                cat_owner.setdefault(name, idx)
+
+        for idx, partition, skip_cudagraph in zip(
+            reversed(range(len(partitions))),
+            reversed(partitions),
+            reversed(skip_cudagraphs),
         ):
             output_names: OrderedSet[str] = OrderedSet()
 
             for node in partition:
                 output_names.update(node.outputs_by_name.keys())
+
+            output_names = OrderedSet(
+                name
+                for name in output_names | cat_writes[idx]
+                if cat_owner.get(name, idx) == idx
+            )
 
             returned_output_names = output_names.intersection(unmet_output_names)
 
@@ -12270,8 +12332,9 @@ class Scheduler:
             # WeakDep is fake dependency on unused buffer. It should not appear
             # in partition_input_names for inputs that are actually read or written.
             partition_input_names = (
-                _real_dep_names(read_writes.reads | read_writes.writes) - output_names
-            )
+                _real_dep_names(read_writes.reads | read_writes.writes)
+                | cat_writes[idx]
+            ) - output_names
 
             partition_input_names = OrderedSet(
                 self.mutation_real_name.get(name, name)
