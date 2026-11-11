@@ -1064,7 +1064,7 @@ DEFINE_CACHED_PYTHON_IMPORT(
 std::function<py::object(py::object)> make_fake_device_stamp(
     const c10::OperatorHandle& op,
     c10::Device common_device,
-    std::shared_ptr<c10::FakeTensorModeHandle> mode) {
+    std::shared_ptr<c10::FakeTensorMode> mode) {
   return [&op, common_device, mode = std::move(mode)](
              py::object obj) -> py::object {
     if (!THPVariable_Check(obj.ptr())) {
@@ -1182,7 +1182,7 @@ bool run_fake_python_callback(
 // The active FakeTensorMode and the CppFakeTensorMode Python object that
 // op-impl callbacks are invoked against.
 struct ActiveFakeMode {
-  std::shared_ptr<c10::FakeTensorModeHandle> mode;
+  std::shared_ptr<c10::FakeTensorMode> mode;
   py::object py_fake_mode;
 };
 
@@ -1421,7 +1421,7 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
   at::Tensor real(real_impl);
   auto active = get_active_fake_mode();
   auto converter = py::reinterpret_borrow<py::object>(
-      active.mode->mode->fake_tensor_converter_->ptr(getPyInterpreter()));
+      active.mode->fake_tensor_converter_->ptr(getPyInterpreter()));
 
   at::Tensor fake_tensor;
   {
@@ -1449,7 +1449,7 @@ bool ConcretePyInterpreterVTable::allow_non_fake_inputs() const {
   }
   auto handle = c10::impl::FakeTensorModeTLS::get_state();
   TORCH_CHECK(handle != nullptr, "FakeTensorMode must be active");
-  return handle->mode->allow_non_fake_inputs_;
+  return handle->allow_non_fake_inputs_;
 }
 
 PyObject* ConcretePyInterpreterVTable::fake_run_real_op(
