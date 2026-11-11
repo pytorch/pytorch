@@ -79,6 +79,7 @@ from torch._C._dynamo.utils import get_current_stream  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
     justknobs_check,
@@ -193,13 +194,6 @@ compilation_time_metrics: dict[str, list[float]] = {}
 cumulative_time_spent_ns: dict[str, float] = collections.defaultdict(float)
 
 timer_counter = itertools.count()
-
-
-# Abstraction on top of counters.
-class ReInplaceTrigger(enum.Enum):
-    AUTO_FUNC_V1 = 1
-    AUTO_FUNC_V2 = 2
-    TRITON_OPS = 3
 
 
 class ReinplaceCounters:
@@ -2870,10 +2864,10 @@ def torchscript(model: Any, example_inputs: Any, verbose: bool = False) -> Any:
         return model
 
     try:
-        return torch.jit.trace(model, example_inputs)
+        return torch.jit._trace.trace(model, example_inputs)
     except Exception:
         try:
-            return torch.jit.script(model)
+            return torch.jit._script.script(model)
         except Exception:
             if verbose:
                 log.exception("jit error")
@@ -3274,6 +3268,10 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
+class InvalidOrderedDict(ValueError):
+    """An OrderedDict's storage and linked keys cannot form one snapshot."""
+
+
 def enumerate_items_with_dict_position(
     obj: dict[K, V],
 ) -> Iterable[tuple[int, K, V | Any]]:
@@ -3285,10 +3283,19 @@ def enumerate_items_with_dict_position(
     dict.keys() position so that ConstDictKeySource indices stay consistent
     with PyDict_Next / C++ DictGuardManager.
     """
+    if issubclass(cast(type[dict[K, V]], type(obj)), OrderedDict):
+        items = list(dict.items(obj))
+        keys = torch._C._dynamo.guards.ordered_dict_keys(obj)
+        positions = {id(key): (i, key, value) for i, (key, value) in enumerate(items)}
+        if (
+            keys is None
+            or len(positions) != len(items)
+            or len(keys) != len(items)
+            or {id(key) for key in keys} != positions.keys()
+        ):
+            raise InvalidOrderedDict("OrderedDict storage differs from linked keys")
+        return (positions[id(key)] for key in keys)
     items = get_items_from_dict(obj)
-    if isinstance(obj, OrderedDict):
-        key_to_pos = {k: i for i, k in enumerate(dict.keys(obj))}
-        return ((key_to_pos[k], k, v) for k, v in items)
     return ((i, k, v) for i, (k, v) in enumerate(items))
 
 

@@ -22,6 +22,7 @@ import sympy
 import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._higher_order_ops.user_kernel_hop import is_user_kernel_mutation_hop
 from torch._inductor.fx_passes.control_dependencies import control_deps
 from torch._library.utils import zip_schema
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -836,20 +837,29 @@ def get_node_storage(node: torch.fx.Node) -> int | None:
     return get_storage(node.meta["val"])
 
 
+def get_mutated_schema_args(
+    schema: torch._C.FunctionSchema,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> list[Any]:
+    """Arguments that the schema marks as written, without flattening."""
+    return [
+        arg
+        for schema_arg, arg in zip_schema(schema, args, kwargs)
+        if schema_arg.alias_info is not None and schema_arg.alias_info.is_write
+    ]
+
+
 def get_mutated_input_nodes(node: torch.fx.Node) -> list[torch.fx.Node]:
     """Tensor input nodes that node writes in place."""
     target: object = node.target
     args = node.args
     if target is torch.ops.higher_order.with_effects:
         target, args = args[1], args[2:]
-    if target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
+    if is_user_kernel_mutation_hop(target):
         written = [node.kwargs["kwargs"]]
     elif isinstance(target, torch._ops.OpOverload) and target._schema.is_mutable:
-        written = [
-            arg
-            for schema_arg, arg in zip_schema(target._schema, args, node.kwargs)
-            if schema_arg.alias_info is not None and schema_arg.alias_info.is_write
-        ]
+        written = get_mutated_schema_args(target._schema, args, node.kwargs)
     else:
         return []
     return [x for x in pytree.tree_leaves(written) if isinstance(x, torch.fx.Node)]

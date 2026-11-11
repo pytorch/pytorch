@@ -3,9 +3,10 @@
 import functools
 import itertools
 import logging
+import math
 import operator
 from collections import Counter, defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from typing import Any, cast, TypeVar
 from typing_extensions import ParamSpec
 
@@ -16,6 +17,11 @@ from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters, detect_fake_mode
 from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
+from torch._higher_order_ops.user_kernel_hop import (
+    is_user_kernel_functional_hop,
+    user_kernel_hop_infos,
+    UserKernelHOPInfo,
+)
 from torch._inductor.custom_graph_pass import (
     CustomInferenceAwareGraphPass,
     get_custom_graph_passes,
@@ -30,15 +36,15 @@ from torch._prims_common import (
     make_contiguous_strides_for,
 )
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.passes.reinplace import _is_view_op
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config, ir, pattern_matcher  # noqa: F401
+from .. import config, inductor_prims, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
 from ..fx_utils import (
     FakeTensorUpdater,
     get_fake_args_kwargs,
     get_node_storage,
-    get_storage,
     same_tensor_meta,
 )
 from ..kernel.symmetric_mm import quack_symmetric_mm
@@ -107,6 +113,131 @@ pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
+
+
+# Note [CPU flash attention accumulation order]
+# Uses the 512-key kv_split_size of aten/src/ATen/native/cpu/FlashAttentionKernel.cpp
+# so the per-block max and rescale match native, e.g. a late maximum overflows the same
+# way. Each block's weighted sum is reduced on its own and then added, while native's
+# GEMM accumulates into the running output, so when large values of opposite sign
+# cancel, either side may overflow; native's result also depends on its GEMM.
+# NaN scores always propagate; native's scalar-tail std::max can drop one.
+_CPU_FLASH_ATTENTION_KV_BLOCK_SIZE = 512
+
+# Applied only when cpp.enable_cpu_flash_attention_decomposition is set, so other
+# graphs do not pay for matching its getitem root.
+cpu_flash_attention_decomposition_pass = PatternMatcherPass(
+    pass_name="cpu_flash_attention_decomposition"
+)
+
+
+def _can_decompose_cpu_flash_attention(match: Match) -> bool:
+    if not config.cpp.enable_cpu_flash_attention_decomposition:
+        return False
+    flash_attention_node = match.output_node().args[0]
+    if (
+        not isinstance(flash_attention_node, fx.Node)
+        or len(flash_attention_node.args) < 3
+    ):
+        return False
+    input_nodes = [
+        arg for arg in flash_attention_node.args[:3] if isinstance(arg, fx.Node)
+    ]
+    if len(input_nodes) != 3:
+        return False
+    q, k, v = [arg.meta["val"] for arg in input_nodes]
+    if (
+        any(
+            t.device.type != "cpu" or t.dtype != torch.float32 or t.ndim != 4
+            for t in (q, k, v)
+        )
+        or any(type(s) is not int for t in (q, k, v) for s in t.shape[1:])
+        or not q.is_contiguous()
+        or k.stride(-1) != 1
+        or v.stride(-1) != 1
+    ):
+        return False
+    # CPU flash schema: q, k, v, dropout_p, is_causal, *, attn_mask, scale.
+    dropout = get_arg_value(flash_attention_node, 3, "dropout_p")
+    causal = get_arg_value(flash_attention_node, 4, "is_causal")
+    if (
+        flash_attention_node.kwargs.get("attn_mask") is not None
+        or dropout not in (None, 0.0)
+        or causal
+    ):
+        return False
+    batch, heads, queries, features = q.shape
+    keys = k.size(2)
+    if (
+        queries <= 0
+        or keys <= 0
+        or features <= 0
+        or not statically_known_true(sym_eq(k.shape, (batch, heads, keys, features)))
+        or not statically_known_true(sym_eq(v.shape, k.shape))
+    ):
+        return False
+    scale = flash_attention_node.kwargs.get("scale")
+    return scale is None or (isinstance(scale, (int, float)) and math.isfinite(scale))
+
+
+@register_graph_pattern(
+    CallFunction(
+        operator.getitem,
+        CallFunctionVarArgs(
+            aten._scaled_dot_product_flash_attention_for_cpu.default, users=1
+        ),
+        0,
+    ),
+    pass_dict=cpu_flash_attention_decomposition_pass,  # pyrefly: ignore [bad-argument-type]
+    extra_check=_can_decompose_cpu_flash_attention,
+)
+def _decompose_cpu_flash_attention(match: Match, *args, **kwargs):
+    flash_attention_node = cast(fx.Node, match.output_node().args[0])
+    scale_arg = cast(int | float | None, flash_attention_node.kwargs.get("scale"))
+    scale = None if scale_arg is None else float(scale_arg)
+
+    def attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        # Materialize Q once rather than recomputing its producer in each key reduction.
+        q = cast(torch.Tensor, inductor_prims.force_stride_order(q, q.stride()))
+        scaling = 1.0 / math.sqrt(q.size(-1)) if scale is None else scale
+
+        def attention_block(
+            key: torch.Tensor,
+            value: torch.Tensor,
+            previous_max: torch.Tensor | None,
+        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            scores = (q.unsqueeze(-2) * key.unsqueeze(-3)).sum(-1) * scaling
+            row_max = scores.amax(-1, keepdim=True)
+            if previous_max is not None:
+                row_max = torch.maximum(previous_max, row_max)
+            safe_max = torch.where(row_max == -math.inf, 0.0, row_max)
+            weights = (scores - safe_max).exp()
+            denominator = weights.sum(-1, keepdim=True)
+            weighted = (weights.unsqueeze(-1) * value.unsqueeze(-3)).sum(-2)
+            return row_max, denominator, weighted
+
+        block_size = _CPU_FLASH_ATTENTION_KV_BLOCK_SIZE
+        row_max, denominator, weighted = attention_block(
+            k[:, :, :block_size], v[:, :, :block_size], None
+        )
+        for start in range(block_size, k.size(-2), block_size):
+            previous_max = row_max
+            row_max, block_sum, block_weighted = attention_block(
+                k[:, :, start : start + block_size],
+                v[:, :, start : start + block_size],
+                previous_max,
+            )
+            rescale = torch.where(
+                row_max == -math.inf, 1.0, (previous_max - row_max).exp()
+            )
+            denominator = block_sum + denominator * rescale
+            weighted = block_weighted + weighted * rescale
+        denominator = torch.where(denominator == 0.0, 1.0, denominator)
+        return weighted * denominator.reciprocal()
+
+    match.replace_by_example(attention, list(flash_attention_node.args[:3]))
+    counters["inductor"]["cpu_flash_attention_decomposition"] += 1
+
 
 _QUACK_SYMMETRIC_ALIGNMENT = 8
 _QUACK_SYMMETRIC_MIN_M = 4096
@@ -311,6 +442,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(gm, "remove_assert_ops").apply_graph_pass(
             remove_assert_ops
         )
+        if config.cpp.enable_cpu_flash_attention_decomposition:
+            GraphTransformObserver(
+                gm, "cpu_flash_attention_decomposition"
+            ).apply_graph_pass(cpu_flash_attention_decomposition_pass.apply)
         for i, patterns in enumerate(pass_patterns):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
@@ -564,9 +699,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         fix_auto_functionalized_dtype_views
     )
 
+    # The observer keeps its Triton-era name, so compile-time metrics keep their key;
+    # the pass decomposes every registered user-kernel DSL's functional HOP.
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
-    ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
+    ).apply_graph_pass(decompose_user_kernel_wrapper_functional)
     GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
         decompose_auto_functionalized
     )
@@ -1285,7 +1422,8 @@ def is_valid_splitwithsizes_cat(match):
     if cat_items_args_order != list(range(len(split_sizes))):
         return False
 
-    return True
+    # The cat is a fresh copy of the input, like a clone in remove_noop_ops.
+    return not _aliased_by_writing_op(cat_node, [match.kwargs["input_"]])
 
 
 def _canonicalize_dim_arg(rank, dim):
@@ -1528,42 +1666,173 @@ def _collect_output_storage(
     )
 
 
-def _depends_on_storage_offset(node: torch.fx.Node) -> bool:
-    """Whether a user of ``node``, or of a view of it, depends on where it sits in its storage.
-
-    This is a denylist of consumers known to observe placement: ``as_strided``, whose
-    storage offset is relative to the storage, and user-defined Triton kernels, which
-    are opaque and may need an aligned base, for example to build a TMA descriptor on
-    the host or on the device. Other opaque consumers, such as custom ops and extern
-    fallback kernels, are intentionally not included. Views are followed through
-    single- and multi-output view ops.
-    """
-    storage = get_node_storage(node)
+def _storage_users(node: torch.fx.Node) -> Iterator[torch.fx.Node]:
+    """The users of ``node`` and of its views, each once, followed through view ops and
+    pass-through lowerings as in ``_storage_base``."""
+    storage = _storage_key(node)
     if storage is None:
-        return False
-    placement_dependent = (
-        aten.as_strided.default,
-        torch.ops.higher_order.triton_kernel_wrapper_functional,
-    )
+        return
     pending = [node]
     seen = OrderedSet([node])
     while pending:
         current = pending.pop()
         for user in current.users:
-            if user.target in placement_dependent:
-                return True
-            if user.op != "call_function" or user in seen:
+            if user in seen:
                 continue
-            val = user.meta.get("val")
-            outputs = val if isinstance(val, (list, tuple)) else [val]
-            if any(
-                isinstance(out, torch.Tensor)
-                and torch._C._has_storage(out)
-                and get_storage(out) == storage
-                for out in outputs
-            ):
-                seen.add(user)
+            seen.add(user)
+            yield user
+            # A multi-output pass-through lowering has no storage of its own, but the
+            # getitems of the inputs it forwards do.
+            getitems = [u for u in user.users if u.target is operator.getitem]
+            if any(_storage_key(n) == storage for n in [user, *getitems]):
                 pending.append(user)
+
+
+def _storage_key(node: torch.fx.Node) -> int | None:
+    return get_node_storage(_storage_base(node))
+
+
+def _storage_base(node: torch.fx.Node) -> torch.fx.Node:
+    """The node that owns ``node``'s storage, found by walking up views and pass-through
+    lowerings rather than from ``node``'s metadata: until fake tensors are updated, a
+    view of a copy that a pass replaced with its source still names the copy's
+    storage."""
+    while node.op == "call_function":
+        op, index = node, None
+        if node.target is operator.getitem and isinstance(node.args[0], fx.Node):
+            op, index = node.args[0], cast(int, node.args[1])
+        name = getattr(op.target, "_inductor_lowering_output_metadata_is_input", None)
+        if _is_view_op(op.target):
+            base = op.args[0]
+        elif name is not None:
+            base = op.args[name] if isinstance(name, int) else op.kwargs[name]
+            if index is not None:
+                if not isinstance(base, (list, tuple)):
+                    break
+                base = base[index]
+        else:
+            break
+        if not isinstance(base, fx.Node):
+            break
+        node = base
+    return node
+
+
+def _depends_on_storage_offset(node: torch.fx.Node) -> bool:
+    """Whether a user of ``node``, or of a view of it, depends on where it sits in its storage.
+
+    This is a denylist of consumers known to observe placement: ``as_strided``, whose
+    storage offset is relative to the storage, and user-defined kernels of any DSL,
+    which are opaque and may need an aligned base, for example to build a TMA
+    descriptor on the host or on the device. Other opaque consumers, such as custom
+    ops and extern fallback kernels, are intentionally not included.
+    """
+    return any(
+        user.target is aten.as_strided.default
+        or is_user_kernel_functional_hop(user.target)
+        for user in _storage_users(node)
+    )
+
+
+def _receive_op(name: str) -> torch._ops.OpOverload | None:
+    packet = getattr(torch.ops._c10d_functional, name, None)
+    return None if packet is None else packet.default
+
+
+def _received_into(op: torch.fx.Node) -> list[Any]:
+    """The tensors that a receive writes. ``irecv`` and ``batch_p2p_ops`` have
+    functional schemas, but their lowerings write the buffers they get in place, so
+    nothing else in the graph records these writes."""
+    if op.target is _receive_op("irecv"):
+        return [op.args[0]]
+    if op.target is _receive_op("batch_p2p_ops"):
+        kinds, tensors = cast(list[str], op.args[0]), cast(list[Any], op.args[3])
+        return [t for kind, t in zip(kinds, tensors) if kind == "irecv"]
+    return []
+
+
+def _reinplaced_writes(op: torch.fx.Node) -> tuple[list[Any], list[Any]] | None:
+    """The arguments that ``op`` writes once reinplaced, and all its arguments, for a
+    user-kernel functional HOP, ``auto_functionalized`` or ``auto_functionalized_v2``,
+    read from the fields that ``reinplace_inplaceable_ops`` uses."""
+    kwargs = cast(dict[str, Any], op.kwargs)
+    if is_user_kernel_functional_hop(op.target):
+        kernel_args = kwargs["kwargs"]
+        names = kwargs["tensors_to_clone"]
+        return [kernel_args[name] for name in names], list(kernel_args.values())
+    if op.target is torch.ops.higher_order.auto_functionalized:
+        from torch._higher_order_ops.auto_functionalize import get_mutable_args
+
+        names, _ = get_mutable_args(cast(torch._ops.OpOverload, op.args[0]))
+        return [kwargs[name] for name in names], list(kwargs.values())
+    if op.target is torch.ops.higher_order.auto_functionalized_v2:
+        return kwargs["_all_bases"], list(kwargs.values())
+    return None
+
+
+def _has_writing_op(graph: torch.fx.Graph) -> bool:
+    """Whether ``graph`` has an op that ``_received_into`` or ``_reinplaced_writes``
+    knows to write its arguments."""
+    targets = [
+        _receive_op("irecv"),
+        _receive_op("batch_p2p_ops"),
+        torch.ops.higher_order.auto_functionalized,
+        torch.ops.higher_order.auto_functionalized_v2,
+        *(info.functional for info in user_kernel_hop_infos()),
+    ]
+    return any(
+        graph.find_nodes(op="call_function", target=target)
+        for target in targets
+        if target is not None
+    )
+
+
+def _aliased_by_writing_op(node: torch.fx.Node, srcs: Sequence[torch.fx.Node]) -> bool:
+    """Whether replacing the fresh storage of ``node`` with that of ``srcs`` would let an
+    op write one of them where eager wrote another, or read its own writes. ``srcs`` is
+    the source of a copy, or the cat inputs that the outputs of ``cat(...).split(...)``
+    become.
+
+    That is the case when a receive (``_received_into``) writes any of these storages,
+    or a view of one, or when an op (``_reinplaced_writes``) takes ``node``'s storage
+    and a source's as arguments, or only ``node``'s when two sources share a storage,
+    and writes one of them: ``w = z.clone(); kernel(w, z.T)``, ``zt = z.clone();
+    kernel(z, zt.T)`` and ``p, q = torch.cat([z, z.clone()]).split(...); kernel(p,
+    q.T)`` would all become ``kernel(z, z.T)``, which reads its own writes. An op that
+    writes one storage and reads no other is safe: reinplacing writes a storage only
+    when no later op reads it, the copy's users included.
+    """
+
+    def storages(args: list[Any]) -> OrderedSet[int | None]:
+        leaves = pytree.tree_leaves(args)
+        return OrderedSet(_storage_key(a) for a in leaves if isinstance(a, fx.Node))
+
+    if not _has_writing_op(node.graph):
+        return False
+    storage = _storage_key(node)
+    src_storages = OrderedSet(_storage_key(src) for src in srcs)
+    if storage is None or None in src_storages:
+        return False
+    repeated = len(src_storages) < len(srcs)
+    bases = OrderedSet([node, *(_storage_base(src) for src in srcs)])
+    seen = OrderedSet[torch.fx.Node]()
+    for user in itertools.chain.from_iterable(map(_storage_users, bases)):
+        if user in seen:
+            continue
+        seen.add(user)
+        received = storages(_received_into(user))
+        if storage in received or any(s in received for s in src_storages):
+            return True
+        if (accesses := _reinplaced_writes(user)) is None:
+            continue
+        written, used = map(storages, accesses)
+        if storage in used and (
+            (repeated and storage in written)
+            or any(
+                s in used and (storage in written or s in written) for s in src_storages
+            )
+        ):
+            return True
     return False
 
 
@@ -1665,12 +1934,17 @@ def remove_noop_ops(graph: torch.fx.Graph):
             # A non-view noop such as clone has fresh storage at offset 0. Replacing it
             # with a source at another offset changes what storage-relative users read,
             # so compare offsets only when such a user exists.
-            if same_tensor_meta(
-                node,
-                src,
-                skip_storage_offset=node_is_view
-                or not _depends_on_storage_offset(node),
-            ) and cond(*args, **kwargs):
+            if (
+                same_tensor_meta(
+                    node,
+                    src,
+                    skip_storage_offset=node_is_view
+                    or not _depends_on_storage_offset(node),
+                )
+                and cond(*args, **kwargs)
+                # Keep a real copy when an op writes it or its source and uses both.
+                and (node_is_view or not _aliased_by_writing_op(node, [src]))
+            ):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
 
@@ -1925,9 +2199,10 @@ def _get_single_replacement_node(
     return nodes[0]
 
 
-def _propagate_triton_eager_input_vals(
+def _propagate_user_kernel_eager_input_vals(
     replacement_nodes: Sequence[torch.fx.Node],
     hop_node: torch.fx.Node,
+    mutation_hop: torch._ops.HigherOrderOperator,
 ) -> None:
     eager_input_vals = hop_node.meta.get("eager_input_vals")
     if eager_input_vals is None:
@@ -1940,58 +2215,63 @@ def _propagate_triton_eager_input_vals(
     }
     # The dense decomposition introduces clones plus the mutation HOP, but only
     # the mutation HOP should receive the eager-mode tensor metadata.
-    mutation_node = _get_single_replacement_node(
-        replacement_nodes, torch.ops.higher_order.triton_kernel_wrapper_mutation
-    )
+    mutation_node = _get_single_replacement_node(replacement_nodes, mutation_hop)
     mutation_node.meta["eager_input_vals"] = ((), mutation_eager_kwargs)
 
 
-def decompose_triton_kernel_wrapper_functional(graph):
-    """Decomposes triton_kernel_wrapper_functional nodes into clones and the underlying
-    mutation node.
+def decompose_user_kernel_wrapper_functional(graph):
+    """Decomposes user-kernel functional HOP nodes (triton_kernel_wrapper_functional,
+    ...) into clones and the underlying mutation node.
 
     We assume that the reinplacing pass runs before this; the reinplacing pass
     tells us (via rewriting the arguments or .meta to those nodes) which
     Tensors we should clone and which Tensors are safe to reinplace.
     """
     # First, recursively process any subgraphs
-    apply_pass_to_subgraphs(decompose_triton_kernel_wrapper_functional, graph)
+    apply_pass_to_subgraphs(decompose_user_kernel_wrapper_functional, graph)
 
     graph_pass = PatternMatcherPass()
+    user_kernel_hops = user_kernel_hop_infos()
 
-    @register_graph_pattern(
-        CallFunctionVarArgs(torch.ops.higher_order.triton_kernel_wrapper_functional),
-        # pyrefly: ignore [bad-argument-type]
-        pass_dict=graph_pass,
-    )
-    def _(match: Match, *args, **kwargs):
-        from torch._higher_order_ops.triton_kernel_wrap import (
-            triton_kernel_wrapper_functional_dense,
+    def register_pattern(user_kernel_hop: UserKernelHOPInfo) -> None:
+        # A HOP kwarg of any name reaches the handler as a keyword argument, so the
+        # handler closes over the info and takes match as a positional-only argument.
+        @register_graph_pattern(
+            CallFunctionVarArgs(user_kernel_hop.functional),
+            # pyrefly: ignore [bad-argument-type]
+            pass_dict=graph_pass,
         )
+        def _(match: Match, /, *args, **kwargs):
+            hop_node = match.nodes[0]
+            flat_args, spec = pytree.tree_flatten((args, kwargs))
+            # The impl that eager runs: clones plus the mutation HOP.
+            py_kernels = user_kernel_hop.functional.py_kernels
+            dense = py_kernels[torch._C.DispatchKey.CompositeExplicitAutograd]
 
-        hop_node = match.nodes[0]
-        flat_args, spec = pytree.tree_flatten((args, kwargs))
+            # NB: we combine (args, kwargs) into flat args for replacing.
+            # This is replace_by_example uses make_fx which does not support
+            # tracing a function with kwargs.
+            def decomp(*flat_args):
+                args, kwargs = pytree.tree_unflatten(flat_args, spec)
+                return (dense(*args, **kwargs),)
 
-        # NB: we combine (args, kwargs) into flat args for replacing.
-        # This is replace_by_example uses make_fx which does not support
-        # tracing a function with kwargs.
-        def decomp(*flat_args):
-            args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
+            # pyrefly: ignore [bad-argument-type]
+            replacement_nodes = match.replace_by_example(
+                decomp, flat_args, run_functional_passes=False
+            )
+            _propagate_user_kernel_eager_input_vals(
+                replacement_nodes, hop_node, user_kernel_hop.mutation
+            )
 
-        # pyrefly: ignore [bad-argument-type]
-        replacement_nodes = match.replace_by_example(
-            decomp, flat_args, run_functional_passes=False
-        )
-        _propagate_triton_eager_input_vals(replacement_nodes, hop_node)
-
+    for user_kernel_hop in user_kernel_hops:
+        register_pattern(user_kernel_hop)
     graph_pass.apply(graph)
 
-    for _ in graph.find_nodes(
-        op="call_function",
-        target=torch.ops.higher_order.triton_kernel_wrapper_functional,
-    ):
-        raise AssertionError("triton_kernel_wrapper_functional was not removed")
+    for user_kernel_hop in user_kernel_hops:
+        for _ in graph.find_nodes(
+            op="call_function", target=user_kernel_hop.functional
+        ):
+            raise AssertionError(f"{user_kernel_hop.functional} was not removed")
 
 
 def fix_auto_functionalized_dtype_views(graph: torch.fx.Graph) -> None:
@@ -2251,7 +2531,9 @@ def is_valid_cat_splitwithsizes(match):
         if cat_input_size != split_size:
             return False
 
-    return True
+    # Like a clone in remove_noop_ops, each split output is a copy of its cat input,
+    # and the outputs of cat inputs that share a storage become one storage.
+    return not _aliased_by_writing_op(cat_node, cat_inputs)
 
 
 # dim defaults to 0 for both ops, and aot autograd does not fill in defaults,
