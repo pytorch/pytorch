@@ -1,7 +1,19 @@
 from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_gfx950 import (
     build_flex_attn_bwd_module,
 )
+{% if CAPTURE_TABLE %}
+from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils import (
+    build_capture_table_launch,
+    CAPTURE_TABLE_SLOTS,
+)
+{% endif %}
 from torch._inductor.runtime.flydsl_cache import (
+{% if CAPTURE_TABLE %}
+    fill_flydsl_capture_table,
+{% endif %}
+{% if RUNTIME_SIZES %}
+    flydsl_runtime_layout_arg,
+{% endif %}
     LazyFlyDSLLauncher,
     precompile_flydsl_template,
     run_flydsl_template,
@@ -9,16 +21,50 @@ from torch._inductor.runtime.flydsl_cache import (
 
 
 {{gen_defines()}}
+{% if HAS_SCORE_MOD %}
+
+
+def score_mod(score, b, h, q_idx, kv_idx, aux):
+    {{ modification(
+        subgraph_number=0,
+        output_name="score_mod_out",
+        score="score",
+        b="b",
+        h="h",
+        m="q_idx",
+        n="kv_idx",
+    ) | indent_except_first(1) }}
+    return score_mod_out
+
+
+def joint_mod(score, b, h, q_idx, kv_idx, grad_score, aux):
+    {{ modification(
+        subgraph_number=1,
+        output_name="joint_mod_out",
+        score="score",
+        b="b",
+        h="h",
+        m="q_idx",
+        n="kv_idx",
+        grad_score_mod="grad_score",
+    ) | indent_except_first(1) }}
+    return joint_mod_out
+
+
+{{ scalar_defines() }}
+SCORE_MOD_AUX = {{ aux_slots() }}
+MOD_KEY = "{{ mod_key() }}"
+{% endif %}
 
 
 _launcher = LazyFlyDSLLauncher(
     lambda: build_flex_attn_bwd_module(
         BATCH_SIZE,
         NUM_HEADS,
-        SEQ_LEN,
+        SEQ_LEN_Q,
         QK_HEAD_DIM,
         V_HEAD_DIM,
-        "bf16",
+        DTYPE,
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         scale=float(SM_SCALE),
@@ -30,6 +76,7 @@ _launcher = LazyFlyDSLLauncher(
         mask_program_output=MASK_PROGRAM_OUTPUT,
         mask_buffer_shapes=MASK_BUFFER_SHAPES,
         mask_buffer_strides=MASK_BUFFER_STRIDES,
+        mask_buffer_dtypes=MASK_BUFFER_DTYPES,
         block_mask_is_dense=BLOCK_MASK_IS_DENSE,
         q_stride=Q_STRIDE,
         k_stride=K_STRIDE,
@@ -41,8 +88,44 @@ _launcher = LazyFlyDSLLauncher(
         dv_stride=DV_STRIDE,
         lse_in_log2=True,
         dq_accum_fp32=DQ_ACCUM_FP32,
+        num_kv_heads=NUM_KV_HEADS,
+        kv_sequence_length=SEQ_LEN_KV,
+        has_grad_logsumexp=HAS_DLSE,
+        target_limits=TARGET_LIMITS,
+{% if PLAN is defined %}
+        plan=PLAN,
+{% endif %}{% if SINGLE_PASS is defined %}
+        single_pass=SINGLE_PASS,
+{% endif %}
+{% if HAS_SCORE_MOD %}
+        score_mod=score_mod,
+        joint_mod=joint_mod,
+        score_mod_aux=SCORE_MOD_AUX,
+        score_mod_buffer_count=SCORE_MOD_BUFFER_COUNT,
+        score_mod_buffer_dtypes=SCORE_MOD_BUFFER_DTYPES,
+        mod_key=MOD_KEY,
+{% endif %}
     )
 )
+
+{% set buffer_args = [] %}
+{% for index in range(MASK_BUFFER_COUNT) %}
+{% set _ = buffer_args.append("mask_buffer_" ~ index) %}
+{% endfor %}
+{% if HAS_SCORE_MOD %}
+{% for index in range(SCORE_MOD_BUFFER_COUNT) %}
+{% set _ = buffer_args.append("score_mod_buffer_" ~ index) %}
+{% endfor %}
+{% endif %}
+{% set table_args = ["capture_table"] if CAPTURE_TABLE else [] %}{% set extent_args = [] %}{% for index in range(MASK_BUFFER_COUNT) if CAPTURE_TABLE and (none in MASK_BUFFER_SHAPES[index] or none in MASK_BUFFER_STRIDES[index]) %}{% set _ = extent_args.append("mask_buffer_" ~ index) %}{% endfor %}
+{% if CAPTURE_TABLE %}
+_capture_table_launchers = [
+    LazyFlyDSLLauncher(
+        lambda first=first: build_capture_table_launch(first, {{ buffer_args | length }})
+    )
+    for first in range(0, {{ buffer_args | length }}, CAPTURE_TABLE_SLOTS)
+]
+{% endif %}
 
 
 def _run_flydsl_backward(
@@ -64,15 +147,29 @@ def _run_flydsl_backward(
     partial_kv_indices,
     full_kv_counts,
     full_kv_indices_transposed,
-{% for index in range(MASK_BUFFER_COUNT) %}
-    mask_buffer_{{index}},
+{% for name in buffer_args + table_args %}
+    {{name}},
 {% endfor %}
     grad_query,
     stream,
 ):
-{% for index in range(MASK_BUFFER_COUNT, 4) %}
-    mask_buffer_{{index}} = kv_num_blocks
-{% endfor %}
+{% if CAPTURE_TABLE %}
+    fill_flydsl_capture_table(
+        _capture_table_launchers,
+        CAPTURE_TABLE_SLOTS,
+        capture_table,
+        ({% for name in buffer_args %}{{name}}, {% endfor %}),
+        stream,
+        compiler=flyc.compile,
+        tensor_converter={{ "flydsl_runtime_layout_arg" if RUNTIME_SIZES else "flyc.from_torch_tensor" }},
+    )
+    # The table takes the first capture slot, then each capture with runtime
+    # extents; the others alias kv_num_blocks.
+    buffers = (capture_table,{% for name in extent_args %} {{name}},{% endfor %}) + (kv_num_blocks,) * {{ 3 - extent_args | length }}
+{% else %}
+    # Unused capture slots alias kv_num_blocks.
+    buffers = ({% for name in buffer_args %}{{name}}, {% endfor %}) + (kv_num_blocks,) * {{ 4 - buffer_args | length }}
+{% endif %}
     dispatch_args = (
         query,
         key,
@@ -92,10 +189,7 @@ def _run_flydsl_backward(
         partial_kv_indices,
         full_kv_counts,
         full_kv_indices_transposed,
-        mask_buffer_0,
-        mask_buffer_1,
-        mask_buffer_2,
-        mask_buffer_3,
+        *buffers,
         grad_query_workspace,
         stream,
     )
@@ -103,7 +197,7 @@ def _run_flydsl_backward(
         _launcher.get(query.device),
         dispatch_args,
         compiler=flyc.compile,
-        tensor_converter=flyc.from_torch_tensor,
+        tensor_converter={{ "flydsl_runtime_layout_arg" if RUNTIME_SIZES else "flyc.from_torch_tensor" }},
     )
     return grad_query
 
@@ -115,9 +209,7 @@ def _run_flydsl_backward(
     "partial_kv_counts", "partial_kv_indices", "full_kv_counts",
     "full_kv_indices_transposed",
 ] %}
-{% for index in range(MASK_BUFFER_COUNT) %}
-{% set _ = kernel_args.append("mask_buffer_" ~ index) %}
-{% endfor %}
+{% set kernel_args = kernel_args + buffer_args + table_args %}
 {{def_kernel(*kernel_args)}}
     grad_query = {{get_output()}}
     return _run_flydsl_backward(
@@ -139,8 +231,8 @@ def _run_flydsl_backward(
         partial_kv_indices,
         full_kv_counts,
         full_kv_indices_transposed,
-{% for index in range(MASK_BUFFER_COUNT) %}
-        mask_buffer_{{index}},
+{% for name in buffer_args + table_args %}
+        {{name}},
 {% endfor %}
         grad_query,
         stream,

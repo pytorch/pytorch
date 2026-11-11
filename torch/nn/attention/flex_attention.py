@@ -288,10 +288,32 @@ class FlexKernelOptions(TypedDict, total=False):
     FLYDSL_DQ_ACCUM_FP32: NotRequired[bool]
     """Use FP32 for the private dQ accumulation workspace in FlyDSL backward.
     Specify as ``bwd_FLYDSL_DQ_ACCUM_FP32`` with ``BACKEND="FLYDSL"``.
-    Default: True. False uses BF16 intermediate storage to reduce workspace
-    traffic, rounding after each KV owner and potentially increasing gradient
-    error for long sequences. Both modes use fixed-order, non-atomic accumulation
-    and return gradients in the input dtype. This option does not affect forward."""
+    Default: True. False uses input-dtype (bf16 or fp16) intermediate storage to
+    reduce workspace traffic, rounding after each KV owner and potentially
+    increasing gradient error for long sequences. Both modes use fixed-order,
+    non-atomic accumulation and return gradients in the input dtype. This option
+    does not affect forward."""
+
+    FLYDSL_HEAD_SLOW_ORDER: NotRequired[bool]
+    """Let FlyDSL forwards (``BACKEND="FLYDSL"``) without a BlockMask, or with a
+    dense one, run long, many-headed grids in head-slow workgroup order to keep
+    each head's K/V in L2. Default: True. The output is the same either way.
+    This option does not affect backward."""
+
+    FLYDSL_SPLIT_KV: NotRequired[bool | int]
+    """Split each FlyDSL decode (Sq < 128) CTA's KV blocks across several CTAs,
+    then merge their partial outputs and LSEs in a second kernel. True picks the
+    split count from the grid size and Sk; an int sets an upper bound. Applies
+    only to static sizes, one V launch and partial outputs that fit the split
+    workspace; other inputs run unsplit. Default: False."""
+
+    FLYDSL_WIDE_SINGLE_PASS: NotRequired[bool]
+    """At FlyDSL QK or V head dims above 256, compute the scores once per tile
+    rather than once per V slice: the forward stages K and V through LDS in
+    column slices within one launch, and the backward gives each producer
+    full-width key rows where they fit in LDS. Specify as
+    ``fwd_FLYDSL_WIDE_SINGLE_PASS`` or ``bwd_FLYDSL_WIDE_SINGLE_PASS`` to set one
+    direction. Default: True for the forward, False for the backward."""
 
     # ROCm-specific options
 
@@ -314,9 +336,9 @@ class FlexKernelOptions(TypedDict, total=False):
         - "TRITON_DECODE": Triton flex_decoding kernel, only available for short sequence lengths with specific configurations
         - "FLASH": Experimental: Flash Attention kernel (cute-dsl), user needs to have flash installed
         - "FLYDSL": Experimental FlyDSL FlexAttention forward and backward kernels
-          for BF16 on ROCm gfx950, requiring the optional FlyDSL dependency.
-          Unsupported backward configurations fall back to Triton, including GQA,
-          decode, gradients through LSE, and shapes exceeding the dQ workspace limit.
+          for bf16/fp16 on ROCm gfx950, requiring the optional FlyDSL dependency.
+          Unsupported backward configurations, including shapes exceeding the dQ
+          workspace limit, fall back to Triton.
 
     This option cannot be combined with legacy knobs such as ``FORCE_USE_FLEX_ATTENTION``.
     Raises an error if the requested forward backend cannot be used. Default: "AUTO"
