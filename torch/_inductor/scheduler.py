@@ -4506,7 +4506,12 @@ class FusedSchedulerNode(BaseSchedulerNode):
 class FusedMixOrderReductions(FusedSchedulerNode):
     """Fused node for two reductions with different iteration orders (inner + outer)."""
 
-    def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
+    def __init__(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        absorbed_producers: OrderedSet[str] | None = None,
+    ) -> None:
         if not MixOrderReduction.is_contiguous_node(node1):
             if not MixOrderReduction.is_contiguous_node(node2):
                 raise AssertionError("expected node2 to be a contiguous node")
@@ -4518,19 +4523,28 @@ class FusedMixOrderReductions(FusedSchedulerNode):
             node1.scheduler, list(node1.get_nodes()) + list(node2.get_nodes())
         )
         self.numel = MixOrderReduction.get_numel(self.node1)
+        # Operation names of the pointwise producers absorbed into node1 by
+        # can_fuse_producer(). These are the only node1 ops node2 may depend on.
+        self.absorbed_producers: OrderedSet[str] = (
+            absorbed_producers if absorbed_producers is not None else OrderedSet()
+        )
 
     def sub_node_can_fuse(
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
         other_nodes: tuple[BaseSchedulerNode, ...],
+        absorbed_producers: OrderedSet[str] | None = None,
     ):
         """
         node1 is from the current mix order reduction; node2 is another node we want to fuse in.
 
         other_nodes are passed in to check if fusion will introduce producer/consumer relationship
-        between the inner and outer reduction. If yes, we don't fuse.
+        between the inner and outer reduction. If yes, we don't fuse. Dependencies on
+        absorbed_producers are allowed; can_fuse_with() validates them separately.
         """
+        if absorbed_producers is None:
+            absorbed_producers = self.absorbed_producers
         if isinstance(node1, FusedMixOrderReductions):
             raise AssertionError("expected node1 to not be a FusedMixOrderReductions")
         if isinstance(node2, FusedMixOrderReductions):
@@ -4561,8 +4575,12 @@ class FusedMixOrderReductions(FusedSchedulerNode):
             return out.union(*(n.get_operation_names() for n in nodes))
 
         if other_nodes:
-            if (_get_ancestors((node1, node2)) & _get_operation_names(other_nodes)) or (
-                _get_ancestors(other_nodes) & _get_operation_names((node1, node2))
+            if (
+                _get_ancestors((node1, node2))
+                & _get_operation_names(other_nodes) - absorbed_producers
+            ) or (
+                _get_ancestors(other_nodes)
+                & _get_operation_names((node1, node2)) - absorbed_producers
             ):
                 return False
 
@@ -4572,69 +4590,236 @@ class FusedMixOrderReductions(FusedSchedulerNode):
             >= self.numel
         )
 
+    @staticmethod
+    def _count_reads(
+        nodes: Iterable[BaseSchedulerNode], exclude: OrderedSet[str]
+    ) -> int:
+        reads: OrderedSet[str] = OrderedSet()
+        for sn in nodes:
+            for dep in sn.read_writes.reads:
+                if isinstance(dep, MemoryDep) and dep.name not in exclude:
+                    reads.add(dep.name)
+        return len(reads)
+
+    def _absorbed_buffers(self) -> OrderedSet[str]:
+        # absorbed producers' outputs are computed in the kernel, not loaded
+        return OrderedSet(
+            buf.get_name()
+            for sn in self.get_nodes()
+            if sn.get_name() in self.absorbed_producers
+            for buf in sn.get_outputs()
+        )
+
     def can_fuse_with(self, other: BaseSchedulerNode):
         if self.has_strict_reduction() or other.has_strict_reduction():
             return False
         # Limit tl.load() count in the fused RSPLIT loop to avoid register
         # spills. See https://github.com/pytorch/pytorch/issues/179423
         max_reads = config.triton.mix_order_reduction_max_reads
-        if max_reads > 0:
-            all_reads: OrderedSet[str] = OrderedSet()
-            for sn in itertools.chain(self.get_nodes(), other.get_nodes()):
-                for dep in sn.read_writes.reads:
-                    if isinstance(dep, MemoryDep):
-                        all_reads.add(dep.name)
-            if len(all_reads) > max_reads:
-                # pyrefly: ignore [bad-assignment]
-                metrics.rejected_mix_order_reduction_fusion += 1
-                return False
+        exclude = self._absorbed_buffers()
+        if isinstance(other, FusedMixOrderReductions):
+            exclude |= other._absorbed_buffers()
+        if max_reads > 0 and (
+            self._count_reads(
+                itertools.chain(self.get_nodes(), other.get_nodes()), exclude
+            )
+            > max_reads
+        ):
+            # pyrefly: ignore [bad-assignment]
+            metrics.rejected_mix_order_reduction_fusion += 1
+            return False
         if not isinstance(other, FusedMixOrderReductions):
-            return self.sub_node_can_fuse(
-                self.node1, other, (self.node2,)
-            ) or self.sub_node_can_fuse(self.node2, other, (self.node1,))
+            absorbed = self.absorbed_producers
+            if self.sub_node_can_fuse(self.node1, other, (self.node2,)):
+                node1_nodes = [*self.node1.get_nodes(), *other.get_nodes()]
+                node2_nodes = self.node2.get_nodes()
+            elif self.sub_node_can_fuse(self.node2, other, (self.node1,)):
+                node1_nodes = self.node1.get_nodes()
+                node2_nodes = [*self.node2.get_nodes(), *other.get_nodes()]
+            else:
+                return False
         else:
+            absorbed = self.absorbed_producers | other.absorbed_producers
             # pass empty tuple for the second since the producer/consumer relationship has
             # already been checked in the first call
-            return self.sub_node_can_fuse(
-                self.node1, other.node1, (self.node2, other.node2)
-            ) and self.sub_node_can_fuse(self.node2, other.node2, tuple())
+            if not (
+                self.sub_node_can_fuse(
+                    self.node1, other.node1, (self.node2, other.node2), absorbed
+                )
+                and self.sub_node_can_fuse(self.node2, other.node2, tuple(), absorbed)
+            ):
+                return False
+            node1_nodes = [*self.node1.get_nodes(), *other.node1.get_nodes()]
+            node2_nodes = [*self.node2.get_nodes(), *other.node2.get_nodes()]
+        if not absorbed:
+            return True
+        reason = self.check_absorbed_producers(node1_nodes, node2_nodes)
+        if reason is not None:
+            WhyNoFuse(self, other)("mix order reduction: %s", reason)
+            return False
+        return True
 
     def can_fuse_producer(self, producer: BaseSchedulerNode) -> bool:
         """
         A pointwise producer of the contiguous (row) half can be computed inside the
-        mix-order loop even when the other (column) half also reads its output: both
-        halves visit the same element in the same iteration, so there is no
-        reduction-to-reduction dependency. Fusing it avoids materializing e.g. the sum
-        of several matmul outputs that feeds a LayerNorm backward.
+        mix-order loop. The column half may read its output too, as long as it reads
+        the element the row half visits in the same iteration (the fused kernel serves
+        that read from the value just computed, see check_absorbed_producers). This
+        saves the producer's kernel launch and the read of its output, and its store
+        too when nothing outside the kernel reads it. Producers read only by the
+        column half are not absorbed.
         """
+        why = WhyNoFuse(producer, self)
         if (
             producer.is_reduction()
             or producer.is_template()
             or producer.has_strict_reduction()
             or isinstance(producer, FusedMixOrderReductions)
         ):
+            why("mix order reduction: producer is not pointwise")
             return False
         if producer.ancestors & self.get_operation_names():
+            why("mix order reduction: producer depends on the mix order reduction")
             return False
         if not (producer.get_operation_names() & self.node1.ancestors):
+            why("mix order reduction: not a producer of the contiguous reduction")
             return False
         if not self.scheduler.can_fuse(
             producer, self.node1, allow_mix_order_reduction=False
         ):
+            why(
+                "mix order reduction: producer cannot fuse with the contiguous reduction"
+            )
             return False
         if not MixOrderReduction.is_contiguous_node(producer):
+            why("mix order reduction: producer is not contiguous")
             return False
         max_reads = config.triton.mix_order_reduction_max_reads
         if max_reads > 0:
-            produced = OrderedSet(buf.get_name() for buf in producer.get_outputs())
-            all_reads: OrderedSet[str] = OrderedSet()
-            for sn in itertools.chain(self.get_nodes(), producer.get_nodes()):
-                for dep in sn.read_writes.reads:
-                    if isinstance(dep, MemoryDep) and dep.name not in produced:
-                        all_reads.add(dep.name)
-            if len(all_reads) > max_reads:
+            exclude = self._absorbed_buffers() | OrderedSet(
+                buf.get_name() for buf in producer.get_outputs()
+            )
+            num_reads = self._count_reads(
+                itertools.chain(self.get_nodes(), producer.get_nodes()), exclude
+            )
+            if num_reads > max_reads:
+                # pyrefly: ignore [bad-assignment]
+                metrics.rejected_mix_order_reduction_fusion += 1
+                why(
+                    "mix order reduction: %d reads exceed mix_order_reduction_max_reads=%d",
+                    num_reads,
+                    max_reads,
+                )
                 return False
+        reason = self.check_absorbed_producers(
+            [*producer.get_nodes(), *self.node1.get_nodes()], self.node2.get_nodes()
+        )
+        if reason is not None:
+            why("mix order reduction: %s", reason)
+            return False
         return True
+
+    def check_absorbed_producers(
+        self,
+        node1_nodes: Sequence[BaseSchedulerNode],
+        node2_nodes: Sequence[BaseSchedulerNode],
+    ) -> str | None:
+        """
+        Check a mix order reduction whose column half (node2_nodes) may depend on
+        pointwise producers absorbed into its contiguous half (node1_nodes). Returns
+        the reason it is invalid, or None.
+
+        _codegen_mix_order_reduction emits both halves in one loop over the
+        contiguous half's (row, col) iteration space, and a load of a buffer stored
+        earlier in the kernel returns the stored value without looking at the index.
+        So every read of such a buffer in node2 must be of the element written in the
+        same iteration. The ancestry checks that keep the two halves apart also
+        exempt the absorbed producers, so recheck for cycles through nodes outside
+        the fused kernel as well.
+        """
+        fused_ops: OrderedSet[str] = OrderedSet()
+        ancestors: OrderedSet[str] = OrderedSet()
+        for sn in itertools.chain(node1_nodes, node2_nodes):
+            fused_ops |= sn.get_operation_names()
+            ancestors |= sn.ancestors
+        for name in ancestors - fused_ops:
+            if self.scheduler.name_to_fused_node[name].ancestors & fused_ops:
+                return f"would create a cycle through {name}"
+
+        renames = self.scheduler.mutation_renames
+        writes: dict[str, list[MemoryDep]] = {}
+        for sn in node1_nodes:
+            if sn.is_reduction():
+                continue
+            for dep in sn.read_writes.writes:
+                # a non-MemoryDep write still registers the name, so reads of it fail
+                name_writes = writes.setdefault(renames.get(dep.name, dep.name), [])
+                if isinstance(dep, MemoryDep):
+                    name_writes.append(dep.normalize())
+
+        for sn in node2_nodes:
+            read_names = OrderedSet(
+                renames.get(dep.name, dep.name) for dep in sn.read_writes.reads
+            )
+            if not (read_names & writes.keys()):
+                continue
+            if not (sn.is_reduction() and isinstance(sn, SchedulerNode)):
+                return f"{sn.get_name()} reads a buffer computed in the contiguous half"
+            reads = self._reads_in_contiguous_order(sn, OrderedSet(writes.keys()))
+            if reads is None:
+                return f"{sn.get_name()} uses a buffer computed in the contiguous half other than by a load"
+            for read in reads:
+                read = read.rename(renames)
+                if not any(
+                    self.scheduler.fusable_read_and_write(read, write)
+                    for write in writes[read.name]
+                ):
+                    return f"{sn.get_name()} reads {read.name} at a different index than it is written"
+        return None
+
+    @staticmethod
+    def _reads_in_contiguous_order(
+        node: SchedulerNode, names: OrderedSet[str]
+    ) -> list[MemoryDep] | None:
+        """
+        node's loads of the buffers in names, indexed the way
+        _codegen_mix_order_reduction visits them: with the reduction split cancelled
+        and the reduction dimensions outermost, i.e. over the contiguous half's
+        (row, col) iteration space. Returns None if node uses one of the buffers
+        other than by a load.
+        """
+        from torch._inductor.loop_body import MemoryUsageType
+
+        if MixOrderReduction.is_split_reduction(node):
+            if not isinstance(node.node, ir.ComputedBuffer):
+                return None
+            # mirrors cancel_reduction_split() without mutating node
+            with node.node.with_original_inner_fn():
+                _, body = node.node.simplify_and_reorder()
+        else:
+            body = node._body
+        if not isinstance(body, LoopBody):
+            return None
+        # read_writes cannot be reused: it is indexed pointwise-dims first, and
+        # drops the dims a broadcast read does not use
+        var_ranges = {
+            v: body.var_ranges[v] for v in (*body.reduce_vars, *body.iter_vars)
+        }
+        reads = []
+        renames = node.scheduler.mutation_renames
+        for usage, entries in body.memory_usage.items():
+            for entry in entries:
+                if entry.buffer_name is None:
+                    continue
+                if renames.get(entry.buffer_name, entry.buffer_name) not in names:
+                    continue
+                if usage != MemoryUsageType.LOAD:
+                    return None
+                index, var_names, sizes = dependencies._RecordLoadStoreInner._normalize(
+                    body.indexing_exprs[entry.index_name], var_ranges
+                )
+                reads.append(MemoryDep(entry.buffer_name, index, var_names, sizes))
+        return reads
 
     def fuse_with(self, other: BaseSchedulerNode):
         device = self.node1.get_device()
@@ -4643,14 +4828,30 @@ class FusedMixOrderReductions(FusedSchedulerNode):
         if isinstance(other, FusedMixOrderReductions):
             fused_node1 = backend.fuse(self.node1, other.node1)
             fused_node2 = backend.fuse(self.node2, other.node2)
-            return FusedMixOrderReductions(fused_node1, fused_node2)
+            return FusedMixOrderReductions(
+                fused_node1,
+                fused_node2,
+                self.absorbed_producers | other.absorbed_producers,
+            )
         else:
             if self.sub_node_can_fuse(self.node1, other, (self.node2,)):
                 fused_node = backend.fuse(self.node1, other)
-                return FusedMixOrderReductions(fused_node, self.node2)
+                return FusedMixOrderReductions(
+                    fused_node, self.node2, self.absorbed_producers
+                )
             else:
                 fused_node = backend.fuse(self.node2, other)
-                return FusedMixOrderReductions(self.node1, fused_node)
+                return FusedMixOrderReductions(
+                    self.node1, fused_node, self.absorbed_producers
+                )
+
+    def fuse_producer(self, producer: BaseSchedulerNode) -> FusedMixOrderReductions:
+        backend = self.scheduler.get_backend(self.node1.get_device())
+        return FusedMixOrderReductions(
+            backend.fuse(producer, self.node1),
+            self.node2,
+            self.absorbed_producers | producer.get_operation_names(),
+        )
 
 
 class FusedStagedReduction(FusedSchedulerNode):
@@ -13181,7 +13382,7 @@ class BaseScheduling:  # noqa: docstring_linter
             return node1.fuse_with(node2)
         elif isinstance(node2, FusedMixOrderReductions):
             # pointwise producer absorbed into the contiguous half (can_fuse_producer)
-            return FusedMixOrderReductions(self.fuse(node1, node2.node1), node2.node2)
+            return node2.fuse_producer(node1)
         elif isinstance(node1, ExternKernelSchedulerNode) and isinstance(
             node2, SchedulerNode
         ):

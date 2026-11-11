@@ -3311,17 +3311,18 @@ class SIMDScheduling(BaseScheduling):
         node1, node2 = node.node1, node.node2
 
         # Make sure there are no producer/consumer relationship between the two
-        # reductions. node2 may consume pointwise producers absorbed into node1
-        # (config.triton.mix_order_reduction_fuse_producers).
-        node1_ops = (
-            OrderedSet(n.get_name() for n in node1.get_nodes() if n.is_reduction())
-            if config.triton.mix_order_reduction_fuse_producers
-            else node1.get_operation_names()
-        )
+        # halves, except node2 reading pointwise producers absorbed into node1.
         if (node1.ancestors & node2.get_operation_names()) or (
-            node2.ancestors & node1_ops
+            node2.ancestors & node1.get_operation_names() - node.absorbed_producers
         ):
-            raise AssertionError("node1 and node2 must not be ancestors of each other")
+            raise AssertionError(
+                "node2 may only depend on producers absorbed into node1, "
+                "and node1 must not depend on node2"
+            )
+        if node.absorbed_producers:
+            reason = node.check_absorbed_producers(node1.get_nodes(), node2.get_nodes())
+            if reason is not None:
+                raise AssertionError(f"invalid absorbed producer: {reason}")
 
         self._codegen_mix_order_reduction(node1, node2)
 
