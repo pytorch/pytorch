@@ -170,6 +170,15 @@ class ConstantVariable(VariableTracker):
         return impl
 
     @staticmethod
+    def _richcompare_slot(ty: type) -> SlotImpl:
+        def impl(self, tx, other, op):  # type: ignore[no-untyped-def]
+            if not other.is_python_constant():
+                return ConstantVariable.create(NotImplemented)
+            return ConstantVariable._fold(tx, getattr(ty, op), self, other)
+
+        return impl
+
+    @staticmethod
     def _iter_slot(ty: type) -> SlotImpl:
         # Iterates with ty's own tp_iter, not self.unpack_var_sequence, which a
         # user subclass VT overrides with the full iteration protocol.
@@ -439,6 +448,7 @@ class IntConstantVariable(ConstantVariable):
     tp_methods, tp_getset, tp_members = constant_type_tables(int)
 
     tp_repr_impl = ConstantVariable._unary_slot(int.__repr__)
+    tp_richcompare_impl = ConstantVariable._richcompare_slot(int)
     nb_bool_impl = ConstantVariable._unary_slot(int.__bool__)
     nb_index_impl = ConstantVariable._unary_slot(int.__index__)
     nb_int_impl = ConstantVariable._unary_slot(int.__int__)
@@ -492,6 +502,7 @@ class FloatConstantVariable(ConstantVariable):
     tp_methods, tp_getset, tp_members = constant_type_tables(float)
 
     tp_repr_impl = ConstantVariable._unary_slot(float.__repr__)
+    tp_richcompare_impl = ConstantVariable._richcompare_slot(float)
     nb_bool_impl = ConstantVariable._unary_slot(float.__bool__)
     nb_int_impl = ConstantVariable._unary_slot(float.__int__)
     nb_float_impl = ConstantVariable._unary_slot(float.__float__)
@@ -514,6 +525,7 @@ class ComplexConstantVariable(ConstantVariable):
     tp_methods, tp_getset, tp_members = constant_type_tables(complex)
 
     tp_repr_impl = ConstantVariable._unary_slot(complex.__repr__)
+    tp_richcompare_impl = ConstantVariable._richcompare_slot(complex)
     nb_bool_impl = ConstantVariable._unary_slot(complex.__bool__)
     nb_negative_impl = ConstantVariable._unary_slot(complex.__neg__)
     nb_positive_impl = ConstantVariable._unary_slot(complex.__pos__)
@@ -531,6 +543,7 @@ class StrConstantVariable(ConstantVariable):
     _tp_methods, tp_getset, tp_members = constant_type_tables(str)
 
     tp_repr_impl = ConstantVariable._unary_slot(str.__repr__)
+    tp_richcompare_impl = ConstantVariable._richcompare_slot(str)
     nb_remainder_impl = ConstantVariable._binary_slot(str, "mod")
     mp_subscript_impl = ConstantVariable._sequence_slot(
         str.__getitem__, VariableTracker.mp_subscript_impl
@@ -597,6 +610,7 @@ class BytesConstantVariable(ConstantVariable):
     tp_methods, tp_getset, tp_members = constant_type_tables(bytes)
 
     tp_repr_impl = ConstantVariable._unary_slot(bytes.__repr__)
+    tp_richcompare_impl = ConstantVariable._richcompare_slot(bytes)
     nb_remainder_impl = ConstantVariable._binary_slot(bytes, "mod")
     mp_subscript_impl = ConstantVariable._sequence_slot(
         bytes.__getitem__, VariableTracker.mp_subscript_impl
