@@ -1,0 +1,18 @@
+[package]
+name = "torch_cfg_rs"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "CFG/SSA compiler and VM behind torch.cfg_compile"
+
+[lib]
+name = "_cfg_rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+
+[profile.release]
+opt-level = 3
+debug = 1
+panic = "unwind"

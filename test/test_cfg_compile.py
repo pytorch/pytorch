@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import unittest
+import warnings
 
 import torch
 from torch.testing._internal.common_utils import (
@@ -15,6 +16,7 @@ from torch.testing._internal.common_utils import (
 # These tests look at which kernels the dispatcher runs; the crossref and
 # dynamo test configurations interpose on exactly that.
 UNDISTURBED = not (TEST_WITH_CROSSREF or TEST_WITH_TORCHDYNAMO)
+HAS_RUNTIME = UNDISTURBED and torch.cfg_compile.is_available()
 
 
 @unittest.skipUnless(UNDISTURBED, "the test configuration changes dispatch")
@@ -74,6 +76,59 @@ class TestDispatchCapture(TestCase):
 
         records = self.trace(outer)
         self.assertEqual([r[0] for r in records if r[2] == 0], ["aten::mul.Tensor"])
+
+
+@unittest.skipUnless(HAS_RUNTIME, "cfg_compile runtime not built")
+class TestCfgFrontend(TestCase):
+    """Bytecode -> SSA graph."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_whole_function_is_one_graph(self):
+        def f(x, n):
+            for _ in range(n):
+                if x.sum() > 0:
+                    x = x - 1
+                else:
+                    x = x + 2
+            return x
+
+        text = torch.cfg_compile(f, fallback=False).dump()
+        self.assertIn("phi", text)
+        self.assertIn("br_exhausted", text)
+        self.assertIn("binary - ", text)
+        self.assertIn("binary + ", text)
+
+    def test_unsupported(self):
+        def f(x):
+            try:
+                return x + 1
+            except RuntimeError:
+                return x
+
+        with self.assertRaisesRegex(torch.cfg_compile.Unsupported, "try/except"):
+            torch.cfg_compile(f, fallback=False)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self.assertIs(torch.cfg_compile(f), f)
+        self.assertIn(
+            "left f uncompiled", str(caught[0].message).replace(f.__qualname__, "f")
+        )
+
+    def test_methods_and_modules(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.ones(3))
+
+            def forward(self, x):
+                return x * self.w + 1
+
+        m = M()
+        x = torch.randn(3)
+        for compiled in (torch.cfg_compile(m), torch.cfg_compile(m.forward)):
+            for _ in range(3):
+                self.assertEqual(compiled(x), m(x))
 
 
 if __name__ == "__main__":
