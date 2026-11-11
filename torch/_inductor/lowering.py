@@ -10,7 +10,7 @@ import operator
 import os
 import sys
 import warnings
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
@@ -29,6 +29,10 @@ from torch._functorch._aot_autograd.descriptors import (
 )
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
+from torch._higher_order_ops.user_kernel_hop import (
+    get_user_kernel_hop_info,
+    is_user_kernel_functional_hop,
+)
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
 from torch._library.utils import get_layout_constraint_tag
@@ -67,6 +71,7 @@ from torch.utils._triton import has_triton_reduction_ordering
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
+from .fx_utils import get_mutated_schema_args
 from .ir import (
     BaseView,
     DtypeView,
@@ -1038,6 +1043,7 @@ for _pointwise_name in (
     "isnan",
     "isinf",
     "signbit",
+    "to_dtype_bitcast",
 ):
     register_pointwise_op(_pointwise_name)
 
@@ -2458,15 +2464,27 @@ def cat(inputs, dim=0):
     exclude: OrderedSet[str] = OrderedSet([recombined]) if recombined else OrderedSet()
     fusable_reduction = any(can_fuse_reduction(t, exclude) for t in inputs)
 
-    def should_lower_cat_input(x) -> bool:
+    def should_lower_cat_input(x, numel=None) -> bool:
+        # The cat input's own numel; unwrapping a view below reaches its base.
+        if numel is None:
+            numel = x.get_numel()
         # Unrealized inputs will not be storage and layouts, and we don't want to realize
         # them in case we want to fuse
         if ir.is_storage_and_layout(x):
             storage, _ = ir.as_storage_and_layout(x, freeze=False)
-            return not ir.ConcatKernel.can_realize_into_without_copy(storage)
+            if ir.ConcatKernel.can_realize_into_without_copy(storage):
+                return False
+            # Copying all of a buffer Inductor computes can fuse into its
+            # producer, which is cheaper than re-reading it in a pointwise cat.
+            return not (
+                config.cat_fuse_computed_input_copies
+                and isinstance(storage.data, ir.ComputedBuffer)
+                and not storage.data.is_no_op()
+                and V.graph.sizevars.statically_known_equals(numel, storage.get_numel())
+            )
 
         if isinstance(x, (TensorBox, ir.StorageBox)):
-            return should_lower_cat_input(unwrap_tensor(x))
+            return should_lower_cat_input(unwrap_tensor(x), numel)
 
         if isinstance(x, ir.Pointwise):
             return True
@@ -2974,8 +2992,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     if node.target in (
         torch.ops.higher_order.auto_functionalized,
         torch.ops.higher_order.auto_functionalized_v2,
-        torch.ops.higher_order.triton_kernel_wrapper_functional,
-    ):
+    ) or is_user_kernel_functional_hop(node.target):
         return False
 
     # Custom fallback lowering
@@ -3608,7 +3625,88 @@ def constrain_to_fake_tensor(arg, fake_arg):
     return arg
 
 
-def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
+# Note [Constrain shared storage inputs first]
+# require_strides copies an unrealized StorageBox (copy_input), except a 0/1-element
+# tensor under a stride order, so an op that reads one pointwise result through
+# several arguments, e.g. op(z, z) or op(z, z.T), materializes it once per argument.
+# The constraint helpers therefore first realize and constrain an argument that is a
+# storage TensorBox when more than one tensor argument reads its storage: they then
+# share its buffer, and views of it are constrained against its final layout instead
+# of freezing a FlexibleLayout to the default one (convert_to_reinterpret_view).
+# Storage reached only through views, as in op(z.T, z.T), keeps one copy per argument.
+# The constrain callback gets the realized TensorBox and its fake tensor; the
+# per-argument pass applies it again, so it must be idempotent. Storage that the op
+# writes through any argument is left to the per-argument constraints, so this pass
+# never makes a written argument share a buffer with another argument. A storage it
+# realizes stays realized for later ops, which then share it as on any realized
+# input, so a graph pass must not leave an op writing a storage that it also reads
+# through another argument, or a receive writing a storage, where eager had a separate
+# copy. remove_noop_ops, joint_graph.remove_no_ops and the split/cat lowering patterns
+# in post_grad.py check this with _aliased_by_writing_op.
+def _constrain_shared_storage_inputs_first(
+    fx_node, args, kwargs, fake_args, fake_kwargs, constrain
+):
+    def storage_ids(tree):
+        ids = []
+        for x in pytree.tree_leaves(tree):
+            while isinstance(x, (TensorBox, ir.BaseView)):
+                x = x.data
+            if isinstance(x, ir.StorageBox):
+                ids.append(id(x))
+        return ids
+
+    leaves = pytree.tree_leaves((args, kwargs))
+    counts = Counter(storage_ids(leaves))
+    shared = OrderedSet(
+        id(x.data)
+        for x in leaves
+        if isinstance(x, TensorBox)
+        and isinstance(x.data, ir.StorageBox)
+        and counts[id(x.data)] > 1
+    )
+    if shared:
+        written = _written_args(fx_node, args, kwargs, fake_kwargs)
+        shared -= OrderedSet(storage_ids(written))
+    if not shared:
+        return args, kwargs
+
+    def visit(arg, fake_arg):
+        if (
+            isinstance(arg, TensorBox)
+            and id(arg.data) in shared
+            and isinstance(fake_arg, torch.Tensor)
+        ):
+            arg.realize()
+            return constrain(arg, fake_arg)
+        if isinstance(arg, dict) and isinstance(fake_arg, dict):
+            return {k: visit(v, fake_arg[k]) for k, v in arg.items()}
+        if isinstance(arg, (tuple, list)) and isinstance(fake_arg, (tuple, list)):
+            return type(arg)(visit(a, f_a) for a, f_a in zip(arg, fake_arg))
+        return arg
+
+    return visit(args, fake_args), visit(kwargs, fake_kwargs)
+
+
+def _written_args(fx_node, args, kwargs, fake_kwargs):
+    """The arguments that fx_node's op writes; all of them for an unknown op."""
+    target = fx_node.target
+    if (info := get_user_kernel_hop_info(target, "mutation")) is not None:
+        names = info.get_mutated_tensors(kwargs, fake_kwargs["kwargs"])
+        return [kwargs["kwargs"][name] for name in names]
+    if isinstance(target, torch._ops.OpOverload):
+        # A collective's lowering can write tensors that its schema does not mark,
+        # like the irecv tensors of batch_p2p_ops (_c10d_functional_autograd too).
+        if in_namespace(target, "_c10d_functional"):
+            return [args, kwargs]
+        return get_mutated_schema_args(target._schema, args, kwargs)
+    return [args, kwargs]
+
+
+def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs, *, fx_node):
+    # See Note [Constrain shared storage inputs first]
+    args, kwargs = _constrain_shared_storage_inputs_first(
+        fx_node, args, kwargs, fake_args, fake_kwargs, constrain_to_fake_tensor
+    )
     args = tuple(
         constrain_to_fake_tensor(arg, fake_arg)
         for arg, fake_arg in zip(args, fake_args)
@@ -3618,20 +3716,16 @@ def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
 
 
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
-    def get_fake_val(fx_arg):
-        if isinstance(fx_arg, torch.fx.Node):
-            return fx_arg.meta.get("val")
-        return fx_arg
+    def require_fake_stride_order(arg, fake_val):
+        shape_env = V.graph.sizevars.shape_env
+        stride_order = ir.get_stride_order(fake_val.stride(), shape_env)
+        return ir.ExternKernel.require_stride_order(arg, stride_order)
 
-    def apply_constraint(arg, fx_arg):
-        fake_val = get_fake_val(fx_arg)
+    def apply_constraint(arg, fake_val):
         if _is_tensor_irnode(arg):
             if not isinstance(fake_val, torch.Tensor):
                 return arg
-            stride_order = ir.get_stride_order(
-                fake_val.stride(), V.graph.sizevars.shape_env
-            )
-            return ir.ExternKernel.require_stride_order(arg, stride_order)
+            return require_fake_stride_order(arg, fake_val)
         if isinstance(arg, dict):
             if not isinstance(fake_val, dict):
                 return arg
@@ -3639,15 +3733,18 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
         if isinstance(arg, (tuple, list)):
             if not isinstance(fake_val, (tuple, list)):
                 return arg
-            return type(arg)(
-                apply_constraint(a, fx_a) for a, fx_a in zip(arg, fake_val)
-            )
+            return type(arg)(apply_constraint(a, f_a) for a, f_a in zip(arg, fake_val))
         return arg
 
-    args = tuple(
-        apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)
+    fake_args, fake_kwargs = torch.fx.map_arg(
+        (fx_node.args, fx_node.kwargs), lambda n: n.meta.get("val")
     )
-    kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
+    # See Note [Constrain shared storage inputs first]
+    args, kwargs = _constrain_shared_storage_inputs_first(
+        fx_node, args, kwargs, fake_args, fake_kwargs, require_fake_stride_order
+    )
+    args = tuple(apply_constraint(arg, f_a) for arg, f_a in zip(args, fake_args))
+    kwargs = {k: apply_constraint(v, fake_kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
 
 
@@ -8657,6 +8754,20 @@ sigmoid = register_pointwise_numeric_ldf64(aten.sigmoid)
 sqrt = register_pointwise_numeric_ldf64(aten.sqrt)
 square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True, round_scalars_to_tensor_dtype=True)
+
+
+def _with_positional_alpha(lowering, self, other, alpha=1):
+    return lowering(self, other, alpha=alpha)
+
+
+# The Scalar schemas declare alpha positionally, so make_pointwise would
+# otherwise receive it as a third operand.
+register_lowering(aten.add.Scalar, type_promotion_kind=None)(
+    functools.partial(_with_positional_alpha, add)
+)
+register_lowering(aten.sub.Scalar, type_promotion_kind=None)(
+    functools.partial(_with_positional_alpha, sub)
+)
 
 
 @register_lowering(aten.addcmul, broadcast=True)

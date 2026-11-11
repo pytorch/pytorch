@@ -1442,6 +1442,8 @@ class TestPartitionedScatterOpt(TestCase):
     # on MI300X. Speedups on other GPUs vary (some NVIDIA CI hosts see ~1.35x).
     @runOnRocm
     @unittest.skipUnless(HAS_GPU, "requires GPU")
+    # with the sorted segment-scatter pass on, both arms would take the sorted path
+    @config.patch(sorted_segment_scatter_enabled=False)
     def test_perf_atomic_contention(self):
         """
         Reproduce the PR benchmark: three index_put(accumulate=True) ops with

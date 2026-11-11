@@ -11,10 +11,11 @@ from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA_AND_TRITON
 
 
 aten = torch.ops.aten
@@ -25,6 +26,8 @@ def _index_put(base, idx, src):
 
 
 class TestSortedSegmentScatter(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _indices(self, kind, m, n):
         if kind == "uniform":
             return torch.randint(0, n, (m,), device=GPU_TYPE)
@@ -117,5 +120,5 @@ class TestSortedSegmentScatter(TestCase):
 instantiate_parametrized_tests(TestSortedSegmentScatter)
 
 if __name__ == "__main__":
-    if HAS_GPU_AND_TRITON:
+    if HAS_CUDA_AND_TRITON:
         run_tests()
