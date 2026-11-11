@@ -1,9 +1,11 @@
 # Reusable CuteDSL reduction traits and cross-thread helpers. leaf creates a one-element
 # accumulator, combine merges accumulators, and reduce performs a serial update. Tree folds
 # use leaf/combine, so leaf must include every element transform. has_combine_equal opts a
-# trait into combine_equal, a closed-form merge of equal-count states. Other names mirror
-# SharedReduceOps.h. Accumulator dtypes provide their identities. Scalar conditionals lower
-# only inside cute.jit methods; cute.arch.fmax suppresses NaNs, so traits handle them.
+# trait into combine_equal, a closed-form merge of equal-count states, and
+# has_combine_uniform into combine_uniform, which folds equal-count partials deriving
+# counts from their index. Other names mirror SharedReduceOps.h. Accumulator dtypes
+# provide their identities. Scalar conditionals lower only inside cute.jit methods;
+# cute.arch.fmax suppresses NaNs, so traits handle them.
 
 import cutlass
 import cutlass.cute as cute
@@ -164,13 +166,14 @@ def _welford_denom(acc_dtype, nf, correction):
 class WelfordOps:
     # acc = (mean, m2, nf). `reduce` is the ONLINE Welford update and `combine` the PARALLEL Chan
     # merge -- deliberately different formulas. project divides m2 by the clamped dof.
-    # has_combine_equal enables combine_equal's closed-form equal-count merges; a subclass
-    # that changes leaf, combine or the (mean, m2, nf) layout must set it to False.
+    # has_combine_equal enables combine_equal's closed-form equal-count merges.
+    # has_combine_uniform enables staged inner-tree combines (tile.uniform_combine_ok),
+    # which rely on combine_uniform, uniform_weight, an FP32 accumulator and the count as
+    # the last field: they skip staging it and may stage the weight in its slot. A
+    # subclass that changes leaf, combine or the (mean, m2, nf) layout must set both
+    # flags to False.
     nfields = 3
     has_combine_equal = True
-    # Staged inner-tree combines (tile.uniform_combine_ok) rely on combine_uniform,
-    # uniform_weight, an FP32 accumulator and the count as the last field: they skip
-    # staging it and may stage the weight in its slot.
     has_combine_uniform = True
 
     def __init__(self, correction=1, take_sqrt=False, return_mean=False, acc=Float32):
