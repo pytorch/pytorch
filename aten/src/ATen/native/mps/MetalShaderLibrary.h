@@ -21,7 +21,6 @@ typedef void* MTLBuffer_t;
 #include <c10/core/Scalar.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <functional>
-#include <mutex>
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
@@ -121,27 +120,27 @@ class MetalShaderLibrary {
         compile_options(compile_options_) {}
   MetalShaderLibrary(const MetalShaderLibrary&) = delete;
   virtual ~MetalShaderLibrary();
-  std::vector<std::string> getFunctionNames();
+  virtual std::vector<std::string> getFunctionNames();
   std::shared_ptr<MetalKernelFunction> getKernelFunction(
       const std::string& name);
   // Returns a raw pointer to the kernel function for use in C APIs
   MetalKernelFunction* getCachedKernelFunctionPtr(const std::string& name);
   inline MTLComputePipelineState_t getPipelineStateForFunc(
       const std::string& fname) {
-    return getLibraryPipelineState(getLibrary(), fname).first;
+    return getLibraryPipelineState(fname).first;
   }
   MTLComputePipelineState_t getPipelineStateForFunc(
       const std::string& fname,
       const std::initializer_list<std::string>& params) {
-    return getLibraryPipelineState(getLibrary(params), fname).first;
+    return getLibraryPipelineState(fname, getLibrary(params)).first;
   }
   inline MTLFunction_t getMTLFunction(const std::string& fname) {
-    return getLibraryPipelineState(getLibrary(), fname).second;
+    return getLibraryPipelineState(fname).second;
   }
   MTLFunction_t getMTLFunction(
       const std::string& fname,
       const std::initializer_list<std::string>& params) {
-    return getLibraryPipelineState(getLibrary(params), fname).second;
+    return getLibraryPipelineState(fname, getLibrary(params)).second;
   }
   static MetalShaderLibrary& getBundledLibrary();
   // Returns whether the library exposes a kernel under the given host_name.
@@ -193,7 +192,16 @@ class MetalShaderLibrary {
       const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt,
       const std::optional<c10::ScalarType> natural_output_dtype = std::nullopt,
       const std::optional<uint32_t> ilp_threshold = std::nullopt);
-  void exec_ternary_kernel(TensorIteratorBase& iter, const std::string& name);
+  // `alpha` is the scalar ternary ops such as addcmul carry next to their
+  // three tensors; `scalar_arg_type` is the dtype it is narrowed to before
+  // binding (defaults to the kernel's compute dtype).
+  // With `beta`, the scalars are packed as an {alpha, beta} pair.
+  void exec_ternary_kernel(
+      TensorIteratorBase& iter,
+      const std::string& name,
+      const std::optional<c10::Scalar> alpha = std::nullopt,
+      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt,
+      const std::optional<c10::Scalar> beta = std::nullopt);
 
   template <typename T>
   void exec_unary_kernel_with_params(
@@ -213,17 +221,18 @@ class MetalShaderLibrary {
   virtual MTLLibrary_t getLibrary();
   virtual MTLLibrary_t getLibrary(
       const std::initializer_list<std::string>& params);
-  // Guards `library` and every cache below. MPS ops run on whatever thread
-  // called into ATen, so lazy compilation and cache population race. Recursive
-  // because the accessors call each other (hasFunction -> getFunctionNames ->
-  // getLibrary).
-  std::recursive_mutex cache_mutex;
+  // Single-library default; bundled libraries select by function name.
+  virtual MTLLibrary_t getLibraryForFunc(const std::string& /*fname*/) {
+    return getLibrary();
+  }
+  // `library` and the caches below are guarded by a mutex private to
+  // OperationUtils.mm, where every accessor that touches them is defined.
   MTLLibrary_t library = nullptr;
 
  private:
   std::pair<MTLComputePipelineState_t, MTLFunction_t> getLibraryPipelineState(
-      MTLLibrary_t lib,
-      const std::string& fname);
+      const std::string& fname,
+      MTLLibrary_t lib = nullptr);
   MTLLibrary_t compileLibrary(const std::string& src);
   std::string shaderSource;
   unsigned nparams;

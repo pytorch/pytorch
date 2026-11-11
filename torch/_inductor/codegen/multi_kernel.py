@@ -29,9 +29,13 @@ class MultiKernelState:
     V.graph.wrapper_code has a reference to MultiKernelState instance.
     """
 
-    def __init__(self):
+    def __init__(self, parent: "MultiKernelState | None" = None):
         self.subkernel_to_kernel_name = {}
         self.kernel_defs = IndentedBuffer()
+        # Subgraph definitions land in the parent's output module, so number
+        # them from the root state to avoid shadowing the parent's.
+        self._root: MultiKernelState = self if parent is None else parent._root
+        self._num_names = 0
 
     def define_kernel(
         self,
@@ -66,7 +70,8 @@ class MultiKernelState:
             return self.subkernel_to_kernel_name[kernel_names]
 
         # name the multi kernel based on the first kernel
-        multi_kernel_name = f"multi_kernel_{len(self.subkernel_to_kernel_name)}"
+        multi_kernel_name = f"multi_kernel_{self._root._num_names}"
+        self._root._num_names += 1
         self.subkernel_to_kernel_name[kernel_names] = multi_kernel_name
 
         if V.graph.cpp_wrapper and not config.triton.autotune_at_compile_time:
@@ -193,6 +198,18 @@ class MultiKernel:
             kernel.args.workspace_args = workspace_args
         return workspace_args
 
+    def launched_kernel_name(self) -> str:
+        """The kernel the generated code actually launches.
+
+        For the second pass of cpp-wrapper codegen the choice is already made,
+        so the concrete subkernel is called directly and the dispatcher name
+        never reaches the output. Anything naming the call -- a profiling guard
+        as much as the call itself -- has to use this rather than kernel_name.
+        """
+        if V.graph.cpp_wrapper and not config.triton.autotune_at_compile_time:
+            return MultiKernelCall.lookup_choice(self.kernel_name)
+        return self.kernel_name
+
     def call_kernel(self, kernel_name):
         """
         Collect the union of arguments from all subkernels as the arguments
@@ -218,10 +235,7 @@ class MultiKernel:
                     f"got {arg_types} != {other_arg_types}"
                 )
 
-        if V.graph.cpp_wrapper and not config.triton.autotune_at_compile_time:
-            # for the second pass of cpp-wrapper codegen, we should call
-            # the fast kernel directly
-            kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
+        kernel_name = self.launched_kernel_name()
 
         if isinstance(self.kernels[0], TritonTemplateKernel) and isinstance(
             self.kernels[0].output_node, MultiTemplateBuffer
@@ -247,17 +261,25 @@ class MultiKernel:
         for ws in self.kernels[0].args.workspace_args:
             V.graph.wrapper_code.generate_workspace_allocation(ws)
 
+        inductor_meta = (
+            {"asserts_need_real_inputs": True}
+            if any(kernel.asserts_need_real_inputs for kernel in self.kernels)
+            else None
+        )
         if V.graph.cpp_wrapper:
             # We have already selected the best kernel at compile time
             # so we only have one set of call args. NB: this currently
             # doesn't work with MultiTemplateBuffer kernels. @bobrenjc93
             # will add it in a subsequent PR.
             V.graph.wrapper_code.generate_kernel_call(
-                kernel_name, call_args, arg_types=arg_types
+                kernel_name, call_args, arg_types=arg_types, inductor_meta=inductor_meta
             )
         else:
             V.graph.wrapper_code.generate_kernel_call(
-                kernel_name, multi_call_args, arg_types=multi_call_arg_types
+                kernel_name,
+                multi_call_args,
+                arg_types=multi_call_arg_types,
+                inductor_meta=inductor_meta,
             )
 
         for ws in reversed(self.kernels[0].args.workspace_args):
@@ -405,6 +427,13 @@ class MultiKernelCall:
             def inner():
                 filtered_args = self._get_filtered_args(args, index)
                 args_clone, kwargs_clone = kernel.clone_args(*filtered_args, **kwargs)
+                if "stream" in kwargs_clone:
+                    # CUDA graph benchmarking captures on a side stream; launch on
+                    # the stream current at call time so the kernel is captured.
+                    device_interface = kernel.get_device_interface()
+                    kwargs_clone["stream"] = device_interface.get_raw_stream(
+                        device_interface.current_device()
+                    )
                 return kernel.run(*args_clone, **kwargs_clone)
 
             return inner
@@ -505,6 +534,21 @@ class MultiKernelCall:
         run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
         filtered_args = self._get_filtered_args(args, self.picked_kernel)
         run(*filtered_args, **kwargs)
+
+    def use_first_config(self, stream):
+        """Choose a sub-kernel without benchmarking, and keep its first config.
+        Returns whether autotuning would have had a choice to make.
+
+        For sub-kernels that the compile-time autotune block cannot launch on its
+        generated tensors, when the C++ wrapper needs the choice at compile time.
+        """
+        unpicked = self.picked_kernel is None
+        if unpicked:
+            self.picked_kernel = 0
+        kernel = self.kernels[self.picked_kernel]
+        had_choices = kernel.use_first_config(stream)
+        self.record_choice(self.multi_kernel_name, kernel.inductor_meta["kernel_name"])
+        return unpicked or had_choices
 
     def _metrics_table_row(self, timings):
         def get_kernel_path(k):

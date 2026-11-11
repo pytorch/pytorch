@@ -20,7 +20,8 @@ import threading
 import traceback
 import warnings
 from collections.abc import Callable
-from functools import lru_cache
+from enum import auto, Enum
+from functools import cache, lru_cache
 from typing import Any, cast, NewType, Optional, TYPE_CHECKING
 
 import torch
@@ -40,7 +41,7 @@ from .graphs import (
     make_graphed_callables,
 )
 from .green_contexts import GreenContext
-from .streams import Event, ExternalStream, Stream
+from .streams import Event, execute_on_streams, ExternalStream, Stream
 
 
 try:
@@ -60,6 +61,7 @@ _HAS_PYNVML = False
 _HAS_AMDSMI = False
 _PYNVML_ERR = None
 _AMDSMI_ERR = None
+
 try:
     from torch import version as _version
 
@@ -82,10 +84,11 @@ try:
             # This creates an ODR violation if the copy of libamd_smi.so from lib
             # is also loaded (via `ld` linking, `LD_LIBRARY_PATH` or `rpath`).
             #
-            # In order to avoid the violation we hook CDLL and try using the
-            # already loaded version of amdsmi, or any version in the processes
-            # rpath/LD_LIBRARY_PATH first, so that we only load a single copy
-            # of the .so.
+            # In order to avoid the violation we hook CDLL and redirect
+            # unversioned requests to the already loaded version of amdsmi, or
+            # any version in the process rpath/LD_LIBRARY_PATH, so that we only
+            # load a single copy of the .so. Versioned paths are not redirected
+            # because current wrappers use them to select a matching library ABI.
             class _amdsmi_cdll_hook:
                 def __init__(self) -> None:
                     self.original_CDLL = ctypes.CDLL  # type: ignore[misc,assignment]
@@ -122,7 +125,11 @@ try:
                 def hooked_CDLL(
                     self, name: str | Path | None, *args: Any, **kwargs: Any
                 ) -> ctypes.CDLL:
-                    if name and Path(name).name.startswith("libamd_smi.so"):
+                    requested = None if name is None else os.fspath(name)
+                    if (
+                        requested is not None
+                        and Path(requested).name == "libamd_smi.so"
+                    ):
                         for path in self.paths:
                             try:
                                 return self.original_CDLL(path, *args, **kwargs)
@@ -145,14 +152,20 @@ try:
                 raise
             except (KeyError, OSError) as err:
                 # The amdsmi python package is installed but its native library
-                # (libamd_smi.so) could not be discovered/loaded -- e.g. TheRock
-                # ROCm wheels lay amdsmi out so that its own find_smi_library()
-                # misses the versioned libamd_smi.so.* and raises KeyError. Treat
-                # this like a missing optional dependency (degrade to
-                # _HAS_AMDSMI=False) instead of aborting `import torch`.
+                # could not be discovered or loaded. For example, some ROCm
+                # wheels lay it out so find_smi_library() raises KeyError.
                 _AMDSMI_ERR = err
                 raise ModuleNotFoundError(
                     "amdsmi is installed but libamd_smi.so could not be loaded"
+                ) from err
+            except AttributeError as err:
+                # ctypes reports a wrapper/library ABI mismatch as an
+                # AttributeError when a symbol expected by the wrapper is absent.
+                if "undefined symbol:" not in str(err):
+                    raise
+                _AMDSMI_ERR = err
+                raise ModuleNotFoundError(
+                    "amdsmi is installed but libamd_smi.so is ABI-incompatible"
                 ) from err
 
         _HAS_PYNVML = True
@@ -789,13 +802,29 @@ def _primary_context_devices() -> list[int]:
     return [d for d in range(device_count()) if torch._C._cuda_hasPrimaryContext(d)]
 
 
+class _StrayContextCheckType(Enum):
+    DISABLED = auto()
+    WARN = auto()
+    ERROR = auto()
+
+
+@cache
+def _get_stray_context_mode() -> _StrayContextCheckType:
+    mode = os.environ.get("TORCH_CUDA_CHECK_STRAY_CONTEXT", "").lower()
+    if mode == "warn":
+        return _StrayContextCheckType.WARN
+    if mode == "error":
+        return _StrayContextCheckType.ERROR
+    return _StrayContextCheckType.DISABLED
+
+
 def _check_stray_context(expected: int) -> None:
     # Diagnostic, off unless TORCH_CUDA_CHECK_STRAY_CONTEXT is "warn" or "error".
     # Invoked from set_device so it runs once when a process pins its device, not
     # on the hot device-guard path. The check is creator-agnostic (it inspects
     # end state), so it catches stray contexts from any source.
-    mode = os.environ.get("TORCH_CUDA_CHECK_STRAY_CONTEXT", "").lower()
-    if mode not in ("warn", "error"):
+    mode = _get_stray_context_mode()
+    if mode == _StrayContextCheckType.DISABLED:
         return
     stray = [d for d in _primary_context_devices() if d != expected]
     if not stray:
@@ -803,11 +832,11 @@ def _check_stray_context(expected: int) -> None:
     msg = (
         f"set_device({expected}) found an existing CUDA primary context on "
         f"device(s) {stray}. Something created a CUDA context before this process "
-        f"pinned its device (e.g. a tensor op or a pin_memory=True allocation run "
+        "pinned its device (e.g. a tensor op or a pin_memory=True allocation run "
         f"before set_device). On a rank whose device is not among {stray}, each "
-        f"stray context wastes hundreds of MB on that shared device."
+        "stray context wastes hundreds of MB on that shared device."
     )
-    if mode == "error":
+    if mode == _StrayContextCheckType.ERROR:
         raise RuntimeError(msg)
     warnings.warn(msg, stacklevel=3)
 
@@ -1107,13 +1136,23 @@ def _raw_device_uuid_amdsmi() -> list[str] | None:
         except amdsmi.AmdSmiException:
             warnings.warn("Cannot get amd device handler", stacklevel=2)
             return None
+        # HIP and rocminfo identify a GPU by its KFD unique_id, which is not
+        # always the ASIC serial. Newer amdsmi reports it as hip_uuid.
         try:
-            uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
-                2:
-            ]  # Removes 0x prefix from serial
-        except amdsmi.AmdSmiException:
-            warnings.warn("Cannot get uuid for amd device", stacklevel=2)
-            return None
+            info = amdsmi.amdsmi_get_gpu_enumeration_info(handler)
+            hip_uuid = str(info.get("hip_uuid", ""))
+        except (AttributeError, amdsmi.AmdSmiException):
+            hip_uuid = ""
+        if hip_uuid.startswith("GPU-"):
+            uuid = hip_uuid.removeprefix("GPU-")
+        else:
+            try:
+                uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
+                    2:
+                ]  # Removes 0x prefix from serial
+            except amdsmi.AmdSmiException:
+                warnings.warn("Cannot get uuid for amd device", stacklevel=2)
+                return None
         uuids.append(
             str(uuid).lower()
         )  # Lower-case to match expected HIP_VISIBLE_DEVICES uuid input
@@ -1420,10 +1459,18 @@ def get_stream_from_external(data_ptr: int, device: Device = None) -> Stream:
 def current_blas_handle():
     r"""Return the ``cublasHandle_t`` pointer for the current device and stream.
 
-    On CUDA, the handle uses cuBLAS's default workspace unless ATen workspace
-    caching is explicitly enabled. When caching is disabled, internal ATen
-    operations may temporarily bind their own workspace, but restore the default
-    workspace before releasing it. ROCm caches workspaces by default.
+    On CUDA, the handle uses the BLAS library's default workspace unless ATen
+    workspace caching is explicitly enabled. When caching is disabled, internal
+    ATen operations may temporarily bind their own workspace to this handle, but
+    restore the default workspace before releasing it.
+
+    On ROCm, this function returns a different handle for each thread and
+    stream, and another one while the current stream is capturing. Run work on
+    a handle only on the stream it was returned for, and inside a capture call
+    this function again rather than use a handle obtained before it. See
+    :ref:`hipblas-workspaces` for the workspace each handle has, how handles
+    pass between threads, how to move one to another stream, and what to call
+    before graph capture begins.
     """
     _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()
@@ -1592,14 +1639,15 @@ def _get_amdsmi_temperature(device: Device = None) -> int:
 
 
 def _get_amdsmi_power_draw(device: Device = None) -> int:
+    # AMD SMI reports socket power in watts; power_draw() is documented in mW.
     handle = _get_amdsmi_handler(device)
     socket_power = amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
     if socket_power != "N/A":
-        return socket_power
+        return socket_power * 1000
     else:
         socket_power = amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
         if socket_power != "N/A":
-            return socket_power
+            return socket_power * 1000
         else:
             return 0
 
@@ -2154,6 +2202,7 @@ __all__ = [
     "DeferredCudaCallError",
     "Event",
     "ExternalStream",
+    "execute_on_streams",
     "Stream",
     "StreamContext",
     "GreenContext",
@@ -2227,6 +2276,7 @@ __all__ = [
     "memory_summary",
     "memory_usage",
     "MemPool",
+    "LocalizedAllocator",
     "use_mem_pool",
     "temperature",
     "power_draw",

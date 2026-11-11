@@ -11,7 +11,7 @@ else
 fi
 
 NVSHMEM_VERSION=3.7.2
-CUDA_CUPTI_VERSION=13.3.75
+CUDA_CUPTI_VERSION=13.5.25
 
 function install_cuda {
   version=$1
@@ -24,7 +24,17 @@ function install_cuda {
   runfile="${runfile}.run"
   wget -q https://developer.download.nvidia.com/compute/cuda/${version}/local_installers/${runfile} -O ${runfile}
   chmod +x ${runfile}
-  ./${runfile} --toolkit --silent
+  # The CUDA 13.5+ installer refuses to symlink /usr/local/cuda while /usr/local is writable
+  # by non-root users, which install_user.sh makes it (chown jenkins). Hand it back to root
+  # for the install, then restore its owner and mode.
+  usr_local_owner=$(stat -c '%u:%g' /usr/local)
+  usr_local_mode=$(stat -c '%a' /usr/local)
+  chown root:root /usr/local
+  chmod go-w /usr/local
+  # --silent prints nothing on failure; surface the installer's own log.
+  ./${runfile} --toolkit --silent || { tail -n 100 /var/log/cuda-installer.log; exit 1; }
+  chown "${usr_local_owner}" /usr/local
+  chmod "${usr_local_mode}" /usr/local
   rm -f ${runfile}
   rm -f /usr/local/cuda && ln -s /usr/local/cuda-${major_minor} /usr/local/cuda
 }
@@ -41,6 +51,22 @@ function install_cudnn {
   cp -a ${filepath}/lib/* /usr/local/cuda/lib64/
   cd ..
   rm -rf tmp_cudnn
+}
+
+function install_cublas {
+  local cublas_version=$1
+  local archive="libcublas-linux-${arch_path}-${cublas_version}_cuda13-archive"
+  local tmp_dir
+  tmp_dir=$(mktemp -d)
+  pushd "${tmp_dir}"
+  wget -q "https://developer.download.nvidia.com/compute/cublas/redist/libcublas/linux-${arch_path}/${archive}.tar.xz"
+  tar xf "${archive}.tar.xz"
+  # Remove old libraries so ldconfig cannot restore links to the toolkit version.
+  rm -f /usr/local/cuda/lib64/libcublas* /usr/local/cuda/lib64/libnvblas*
+  cp -a "${archive}/include/"* /usr/local/cuda/include/
+  cp -a "${archive}/lib/"* /usr/local/cuda/lib64/
+  popd
+  rm -rf "${tmp_dir}"
 }
 
 function install_nvshmem {
@@ -82,8 +108,8 @@ function install_nvshmem {
 }
 
 function install_cupti_headers {
-  cupti_version=$1                  # e.g. "13.3.75"
-  major_minor=${cupti_version%.*}   # e.g. "13.3"
+  cupti_version=$1                  # e.g. "13.5.25"
+  major_minor=${cupti_version%.*}   # e.g. "13.5"
   target_dir="/usr/local/cupti-headers-${major_minor}"
 
   # The CUDA toolkit runfile ships an older CUPTI than the standalone redist
@@ -201,11 +227,14 @@ function install_132 {
 }
 
 function install_134 {
+  CUBLAS_VERSION=13.8.1.7
   CUDNN_VERSION=9.26.0.51
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.4 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.4 in the same container
   install_cuda 13.4.1 cuda_13.4.1_linux
+
+  install_cublas $CUBLAS_VERSION
 
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
   install_cudnn 13 $CUDNN_VERSION
@@ -215,6 +244,25 @@ function install_134 {
   CUDA_VERSION=13.4 bash install_nccl.sh
 
   CUDA_VERSION=13.4 bash install_cusparselt.sh $CUSPARSELT_VERSION
+
+  ldconfig
+}
+
+function install_135 {
+  CUDNN_VERSION=9.27.0.42
+  CUSPARSELT_VERSION=0.8.1.1
+  echo "Installing CUDA 13.5 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
+  # install CUDA 13.5 in the same container
+  install_cuda 13.5.0 cuda_13.5.0_linux
+
+  # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
+  install_cudnn 13 $CUDNN_VERSION
+
+  install_nvshmem 13 $NVSHMEM_VERSION
+
+  CUDA_VERSION=13.5 bash install_nccl.sh
+
+  CUDA_VERSION=13.5 bash install_cusparselt.sh $CUSPARSELT_VERSION
 
   ldconfig
 }
@@ -234,6 +282,8 @@ do
     13.2|13.2.*) install_132;
         ;;
     13.4|13.4.*) install_134;
+        ;;
+    13.5|13.5.*) install_135;
         ;;
     *) echo "bad argument $1"; exit 1
         ;;

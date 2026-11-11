@@ -34,6 +34,7 @@ from .aot_compile_types import (
     SerializableCallable,
 )
 from .hooks import Hooks
+from .symbolic_convert import UNNAMED_SCOPE_PREFIX as _UNNAMED_SCOPE_PREFIX
 
 
 if TYPE_CHECKING:
@@ -93,7 +94,6 @@ _SHAPE_GUARD_GLOBAL_RE = re.compile(r"\bG\['([^']*)'\]")
 # moving a type off that list means re-checking this one.
 _IMPORT_ALIAS_PREFIX = "__import_"
 _BUILTINS_DICT_PREFIX = "__builtins_dict__"
-_UNNAMED_SCOPE_PREFIX = "___unnamed_scope"
 _MINTED_GLOBAL_PREFIXES = (
     _IMPORT_ALIAS_PREFIX,
     _BUILTINS_DICT_PREFIX,
@@ -212,6 +212,12 @@ class _GuardScope(enum.Enum):
     RECONSTRUCTED = "reconstructed"
 
 
+# Keep the format marker outside pickle so it is checked before the payload.
+_AOT_COMPILE_MAGIC = b"PT2AOT"
+# Bump for incompatible payload reducer changes.
+_AOT_COMPILE_FORMAT_VERSION = 1
+
+
 def bind_locals(
     signature: inspect.Signature, *args: Any, **kwargs: Any
 ) -> dict[str, Any]:
@@ -237,6 +243,18 @@ class CompileArtifacts:
     def check_compatibility(self) -> None:
         current_system = SystemInfo.current()
         current_system.check_compatibility(self.system_info, self.device_type)
+
+
+def _open_aot_compile_payload(data: bytes) -> io.BytesIO:
+    f = io.BytesIO(data)
+    magic = f.read(len(_AOT_COMPILE_MAGIC))
+    version = f.read(1)
+    if magic != _AOT_COMPILE_MAGIC or version != bytes([_AOT_COMPILE_FORMAT_VERSION]):
+        raise RuntimeError(
+            "AOT compiled artifact has an unsupported serialization format. "
+            "Recompile it with the current PyTorch version."
+        )
+    return f
 
 
 @dataclasses.dataclass
@@ -370,11 +388,9 @@ class AOTCompilePickler(FunctionPicklerBase):
             reason = (
                 f"it does not pickle ({failure})" if failure else "it does not pickle"
             )
-        # co_qualname is 3.11+; the bare co_name on 3.10 cannot tell a wraps
-        # wrapper from its wrappee, but __qualname__ could not either.
         log.warning(
             "dropping %s.%s (%s) from the artifact: %s; pass it in external_data to keep it (function defined at %s:%d)",
-            getattr(code, "co_qualname", code.co_name),
+            code.co_qualname,
             slot,
             type(value).__name__,
             reason,
@@ -454,7 +470,7 @@ class AOTCompilePickler(FunctionPicklerBase):
             code = obj.__code__
             log.debug(
                 "dropping the annotations of %s (%s:%d): %s",
-                getattr(code, "co_qualname", code.co_name),
+                code.co_qualname,
                 code.co_filename,
                 code.co_firstlineno,
                 e,
@@ -1155,6 +1171,8 @@ class AOTCompiledFunction:
         )
         state["original_code"] = SerializedCode.from_code_object(state["original_code"])
         buf = io.BytesIO()
+        buf.write(_AOT_COMPILE_MAGIC)
+        buf.write(bytes([_AOT_COMPILE_FORMAT_VERSION]))
         pickler = AOTCompilePickler(external_data or {}, buf)
         try:
             pickler.dump(state)
@@ -1237,11 +1255,28 @@ class AOTCompiledFunction:
         against the scope rebuilt from the artifact, where a rebinding in this
         process is invisible.
         """
-        f = io.BytesIO(data)
-        f.seek(0)
-        unpickler = AOTCompileUnpickler(external_closure_data or {}, f)
-        state = unpickler.load()
-        f.close()
+        f = _open_aot_compile_payload(data)
+        return cls._deserialize_payload(
+            f,
+            f_globals,
+            external_closure_data,
+            guard_globals=guard_globals,
+            forward_not_resolved_reason=forward_not_resolved_reason,
+        )
+
+    @classmethod
+    def _deserialize_payload(
+        cls,
+        f: io.BytesIO,
+        f_globals: dict[str, object] | None = None,
+        external_closure_data: dict[str, Any] | None = None,
+        *,
+        guard_globals: dict[str, object] | None = None,
+        forward_not_resolved_reason: str | None = None,
+    ) -> "AOTCompiledFunction":
+        with f:
+            unpickler = AOTCompileUnpickler(external_closure_data or {}, f)
+            state = unpickler.load()
         state["runtime_env"] = dataclasses.replace(
             state["runtime_env"],
             bytecode=SerializedCode.to_code_object(state["runtime_env"].bytecode),
@@ -1535,9 +1570,9 @@ def _resolve_guard_scope(
         if wrapped is not None and code is not None:
             # functools.wraps copied the wrappee's __qualname__ onto the wrapper
             # (a class-body @torch.compiler.wrap_numpy forward binds external_utils'
-            # wrap), which would read "X resolves to X". co_qualname is 3.11+.
+            # wrap), which would read "X resolves to X".
             what = (
-                f"{getattr(code, 'co_qualname', code.co_name)}, a functools.wraps'd "
+                f"{code.co_qualname}, a functools.wraps'd "
                 f"wrapper over {getattr(wrapped, '__qualname__', what)}"
             )
         return None, (
@@ -2497,15 +2532,16 @@ class AOTCompiledModel:
             scope, forward_not_resolved_reason = _resolve_guard_scope(model)
 
         results: list[bytes] = pickle.loads(data)
+        payloads = [_open_aot_compile_payload(result) for result in results]
         compiled_results = []
-        for result in results:
+        for f in payloads:
             with (
                 compile_context(CompileContext(convert_frame.get_compile_id({}))),
                 get_metrics_context(),
             ):
                 compiled_results.append(
-                    AOTCompiledFunction.deserialize(
-                        result,
+                    AOTCompiledFunction._deserialize_payload(
+                        f,
                         guard_globals=scope,
                         forward_not_resolved_reason=forward_not_resolved_reason,
                     )

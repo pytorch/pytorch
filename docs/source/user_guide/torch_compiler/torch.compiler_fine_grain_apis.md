@@ -33,8 +33,8 @@ disable compilation are listed in the following table:
    "``torch.compiler.is_compiling``", "Indicates whether a graph is executed/traced as part of torch.compile() or torch.export().", "Useful for selectively disabling parts of a function that cannot be compiled (i.e. logging statements, general I/O, network access, etc). See also ``torch._dynamo.config.ignore_logging_functions``"
    "``torch.compiler.is_dynamo_compiling``", "Indicates whether a graph is traced via TorchDynamo. It's stricter than torch.compiler.is_compiling() flag, as it would only be set to True when TorchDynamo is used."
    "``torch.compiler.is_exporting``", "Indicates whether a graph is traced via export. It's stricter than torch.compiler.is_compiling() flag, as it would only be set to True when torch.export is used."
-   "``torch.compiler.assume_constant_result``", "Allows Dynamo to assume that the function always produces the same result. The function is executed at trace time to determine the result, which is then baked into the graph", "Useful for functions with expensive and untraceable side effects that nevertheless produce constant results"
-   "``torch.compiler.substitute_in_graph``", "Registers a polyfill that Dynamo will trace instead of the substituted function", "Useful for adding compile support for native functions that Dynamo does not yet support."
+   "``torch.compiler.assume_constant_result``", "Allows Dynamo to assume that the function always produces the same result given the same arguments (but see below for some caveats). The function is executed at trace time to determine the result, which is then baked into the graph", "Useful for functions with expensive or untraceable computations that produce constant results and have no side effects"
+   "``torch.compiler.substitute_in_graph``", "Registers a polyfill (an equivalent Python implementation) that Dynamo will trace instead of the substituted function", "Useful for adding compile support for native functions that Dynamo does not yet support."
 ```
 
 ## `torch.compiler.disable`
@@ -103,9 +103,9 @@ could lead to soundness and hard-to-debug issues.
 
 ## `torch.compiler.assume_constant_result`
 
-This causes Dynamo to execute the function once at trace time, then assume the result
-never changes. In addition to making sure that this assumption holds, you should also
-make sure that the function has no side effects. As an example
+This causes Dynamo to execute the function at trace time, then assume the result never changes for the same
+arguments. In addition to making sure that this assumption holds, you should also make sure that the function has no
+side effects. As an example
 
 ```
 @torch.compiler.assume_constant_result
@@ -120,9 +120,13 @@ def rmsnorm(x, weight):
     return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + 1e-6) * weight
 ```
 
-Dyanmo is unable to trace file reads, so compilation would fail without `assume_constant_result`.
+Dynamo is unable to trace file reads, so compilation would fail without `assume_constant_result`.
 If the return value were to change (i.e. the contents of the config file changed, or `CONFIG_PATH`
 were changed), the compiled program would no longer be valid.
+
+Dynamo will produce guards on function arguments in an attempt to recompile when/if the arguments
+change.  These guards cover common cases (i.e. basic python types like int/str/..., object identity,
+etc.).  If you run into a case where stale results are being reused, please file a bug.
 
 ## Limitations
 
