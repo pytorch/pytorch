@@ -28,8 +28,8 @@ std::vector<std::string_view> NormRowConfig::passes() const {
 
 NormRowConfig select_norm_row_config(int64_t rows, int64_t row_size, int64_t groups) {
   NormRowConfig cfg;
-  cfg.rows = c10::safe_conv<uint32_t>(rows, "norm backward rows");
-  cfg.row_size = c10::safe_conv<uint32_t>(row_size, "norm backward row size");
+  cfg.rows = c10::safe_conv<uint32_t>(rows, "uint32_t");
+  cfg.row_size = c10::safe_conv<uint32_t>(row_size, "uint32_t");
   const auto lanes = ceil_div(row_size, ilp);
   if (lanes <= simd) {
     cfg.kernel = NormRowKernel::Packed;
@@ -73,7 +73,7 @@ NormColumnConfig select_norm_column_config(int64_t rows, int64_t cols, int64_t g
   const auto splits = std::clamp<int64_t>(groups / col_groups, 1, ceil_div(rows, ty * min_rows_per_thread));
   return {static_cast<uint32_t>(tx),
           static_cast<uint32_t>(ty),
-          c10::safe_conv<uint32_t>(col_groups, "norm backward column groups"),
+          c10::safe_conv<uint32_t>(col_groups, "uint32_t"),
           static_cast<uint32_t>(splits)};
 }
 
