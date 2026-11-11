@@ -3346,8 +3346,7 @@ class TestConvolutionNNDevice(NNTestCase):
 
     @onlyAccelerator
     @largeTensorTest("20GB", "cpu")
-    @largeTensorTest("60GB", "cuda")
-    @largeTensorTest("60GB", "xpu")
+    @largeTensorTest("60GB")
     @serialTest()
     @expectedFailureMPS
     def test_conv_large_batch_1(self, device):

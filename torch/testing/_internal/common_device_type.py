@@ -1912,9 +1912,10 @@ def _has_sufficient_memory(device, size):
         # Case 1: no accelerator found
         if not acc:
             return False
-        # Case 2: accelerator found but not matching device type
+        # Case 2: accelerator found but not matching device type, so this
+        # process cannot use the requested device at all
         if acc.type != device_type:
-            return True
+            return False
         # Case 3: accelerator found and matching device type but not available
         if not torch.accelerator.is_available():
             return False
@@ -1989,8 +1990,8 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
     """Skip test if the device has insufficient memory to run the test
 
     size is the test's total memory footprint, and may be a number of bytes, a
-    string of the form "N GB", or a callable. It is not a per-allocation limit;
-    for that see `largeMPSBufferTest`.
+    string of the form "N GB", or a callable returning either. It is not a
+    per-allocation limit; for that see `largeMPSBufferTest`.
 
     If the test is a device generic test, available memory on the primary device will be checked.
     It can also be overridden by the optional `device=` argument.
@@ -2001,7 +2002,9 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
     def inner(fn):
         @wraps(fn)
         def dep_fn(self, *args, **kwargs):
-            size_bytes: int = size(self, *args, **kwargs) if callable(size) else size
+            size_bytes: int = (
+                _parse_size(size(self, *args, **kwargs)) if callable(size) else size
+            )
             _device = _test_device(self, device)
 
             # If this is running with GPU cpp_wrapper, the autotuning step will generate
