@@ -4088,46 +4088,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(ValueError, "running_mean must be defined in evaluation mode"):
             torch.ops.aten.native_batch_norm(x, w, b, None, None, False, 0.1, 1e-5)
 
-    def test_native_batch_norm_empty_running_stats(self):
-        # Empty running stats in training mode used to segfault / access violation (#85217).
-        x = torch.full((5, 5), 1.0)
-        w = torch.full((5,), 1.0)
-        b = torch.full((5,), 1.0)
-        rm = torch.full((0,), 1.0)
-        rv = torch.full((0,), 1.0)
-        with self.assertRaisesRegex(RuntimeError, "running_mean should contain 5 elements not 0"):
-            torch.ops.aten.native_batch_norm(x, w, b, rm, rv, True, 0.1, 1e-5)
-
-    def test_native_batch_norm_mismatched_stats_length(self):
-        # Undersized running stats should not cause out-of-bounds heap access (#195547).
-        x = torch.full((5, 5), 1.0)
-        w = torch.full((5,), 1.0)
-        b = torch.full((5,), 1.0)
-        rm = torch.full((2,), 1.0)
-        rv = torch.full((2,), 1.0)
-        with self.assertRaisesRegex(RuntimeError, "running_mean should contain 5 elements not 2"):
-            torch.ops.aten.native_batch_norm(x, w, b, rm, rv, True, 0.1, 1e-5)
-
-    def test_native_batch_norm_invalid_weight_dim(self):
-        # Weight and bias must be 1D tensors matching channel count (#85217).
-        x = torch.full((5, 5), 1.0)
-        w = torch.full((1, 5), 1.0)
-        b = torch.full((5,), 1.0)
-        rm = torch.full((5,), 1.0)
-        rv = torch.full((5,), 1.0)
-        with self.assertRaisesRegex(RuntimeError, "weight should be a 1D tensor, but got 2D"):
-            torch.ops.aten.native_batch_norm(x, w, b, rm, rv, True, 0.1, 1e-5)
-
-    def test_native_batch_norm_invalid_input_dim(self):
-        # Input must have at least 2 dimensions (batch and channel).
-        x = torch.full((5,), 1.0)
-        w = torch.full((5,), 1.0)
-        b = torch.full((5,), 1.0)
-        rm = torch.full((5,), 1.0)
-        rv = torch.full((5,), 1.0)
-        with self.assertRaisesRegex(RuntimeError, "Expected input to have at least 2 dimensions, but got 1"):
-            torch.ops.aten.native_batch_norm(x, w, b, rm, rv, True, 0.1, 1e-5)
-
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
         input2 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
@@ -16663,6 +16623,216 @@ class TestNNDeviceType(NNTestCase):
 
         for g, ge in zip(grads, grads_expected):
             self.assertEqual(g, ge)
+
+    @parametrize_test(
+        "param_name,bad_shape,expected_msg",
+        [
+            subtest(
+                "running_mean",
+                (0,),
+                "running_mean should contain 5 elements not 0",
+                name="empty_running_mean",
+            ),
+            subtest(
+                "running_var",
+                (0,),
+                "running_var should contain 5 elements not 0",
+                name="empty_running_var",
+            ),
+            subtest(
+                "running_mean",
+                (2,),
+                "running_mean should contain 5 elements not 2",
+                name="mismatched_running_mean",
+            ),
+            subtest(
+                "running_var",
+                (2,),
+                "running_var should contain 5 elements not 2",
+                name="mismatched_running_var",
+            ),
+            subtest(
+                "weight",
+                (2,),
+                "weight should contain 5 elements not 2",
+                name="mismatched_weight",
+            ),
+            subtest(
+                "bias",
+                (2,),
+                "bias should contain 5 elements not 2",
+                name="mismatched_bias",
+            ),
+            subtest(
+                "weight",
+                (1, 5),
+                "weight should be a 1D tensor, but got 2D",
+                name="non_1d_weight",
+            ),
+            subtest(
+                "bias",
+                (1, 5),
+                "bias should be a 1D tensor, but got 2D",
+                name="non_1d_bias",
+            ),
+            subtest(
+                "running_mean",
+                (1, 5),
+                "running_mean should be a 1D tensor, but got 2D",
+                name="non_1d_running_mean",
+            ),
+            subtest(
+                "running_var",
+                (1, 5),
+                "running_var should be a 1D tensor, but got 2D",
+                name="non_1d_running_var",
+            ),
+            subtest(
+                "input",
+                (5,),
+                "Expected input to have at least 2 dimensions, but got 1",
+                name="invalid_input_dim",
+            ),
+        ],
+    )
+    def test_native_batch_norm_invalid_shapes(
+        self, device, param_name, bad_shape, expected_msg
+    ):
+        # Out-of-tree backends (e.g. XPU) are not updated here and may hard-crash on invalid shapes.
+        if self.device_type not in ("cpu", "cuda", "mps"):
+            raise SkipTest(f"native_batch_norm shape checks not implemented on {self.device_type}")
+
+        # Use N != C (3 != 5) so reading batch size instead of channels is caught.
+        args = {
+            "input": torch.full((3, 5), 1.0, device=device),
+            "weight": torch.full((5,), 1.0, device=device),
+            "bias": torch.full((5,), 1.0, device=device),
+            "running_mean": torch.full((5,), 1.0, device=device),
+            "running_var": torch.full((5,), 1.0, device=device),
+        }
+        args[param_name] = torch.full(bad_shape, 1.0, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, re.escape(expected_msg)):
+            torch.ops.aten.native_batch_norm(
+                args["input"],
+                args["weight"],
+                args["bias"],
+                args["running_mean"],
+                args["running_var"],
+                True,
+                0.1,
+                1e-5,
+            )
+
+        out = torch.empty_like(args["input"])
+        save_mean = torch.empty(5, device=device)
+        save_invstd = torch.empty(5, device=device)
+        with self.assertRaisesRegex(RuntimeError, re.escape(expected_msg)):
+            torch.ops.aten.native_batch_norm.out(
+                args["input"],
+                args["weight"],
+                args["bias"],
+                args["running_mean"],
+                args["running_var"],
+                True,
+                0.1,
+                1e-5,
+                out=out,
+                save_mean=save_mean,
+                save_invstd=save_invstd,
+            )
+
+    def test_native_batch_norm_eval_and_asymmetric_stats(self, device):
+        # Out-of-tree backends (e.g. XPU) are not updated here and may hard-crash on invalid stats.
+        if self.device_type not in ("cpu", "cuda", "mps"):
+            raise SkipTest(f"native_batch_norm shape checks not implemented on {self.device_type}")
+
+        x = torch.full((3, 5), 1.0, device=device)
+        w = torch.ones(5, device=device)
+        b = torch.zeros(5, device=device)
+        valid = torch.ones(5, device=device)
+        out = torch.empty_like(x)
+        save_mean = torch.empty(5, device=device)
+        save_invstd = torch.empty(5, device=device)
+
+        with self.assertRaisesRegex(ValueError, "running_mean must be defined in evaluation mode"):
+            torch.ops.aten.native_batch_norm(x, w, b, None, None, False, 0.1, 1e-5)
+        with self.assertRaisesRegex(ValueError, "running_mean must be defined in evaluation mode"):
+            torch.ops.aten.native_batch_norm.out(
+                x, w, b, None, None, False, 0.1, 1e-5,
+                out=out, save_mean=save_mean, save_invstd=save_invstd,
+            )
+
+        asym_msg = "running_mean and running_var must either both be None or neither be None"
+        for training in (True, False):
+            for rm, rv in ((None, valid), (valid, None)):
+                with self.assertRaisesRegex(ValueError, asym_msg):
+                    torch.ops.aten.native_batch_norm(x, w, b, rm, rv, training, 0.1, 1e-5)
+                with self.assertRaisesRegex(ValueError, asym_msg):
+                    torch.ops.aten.native_batch_norm.out(
+                        x, w, b, rm, rv, training, 0.1, 1e-5,
+                        out=out, save_mean=save_mean, save_invstd=save_invstd,
+                    )
+
+    def test_functional_batch_norm_non_1d_params(self, device):
+
+        x = torch.randn(3, 5, 4, 4, device=device)
+        w_base = torch.randn(5, 1, 1, 1, device=device)
+        b_base = torch.randn(1, 5, device=device)
+
+        contexts = [contextlib.nullcontext()]
+        if self.device_type == "cuda":
+            contexts.append(torch.backends.cudnn.flags(enabled=False))
+
+        for ctx in contexts:
+            for training in (True, False):
+                with ctx:
+                    w = w_base.clone().requires_grad_()
+                    b = b_base.clone().requires_grad_()
+                    rm = torch.zeros(5, device=device)
+                    rv = torch.ones(5, device=device)
+
+                    w_ref = w_base.view(-1).clone().requires_grad_()
+                    b_ref = b_base.view(-1).clone().requires_grad_()
+                    rm_ref = rm.clone()
+                    rv_ref = rv.clone()
+
+                    out = F.batch_norm(x, rm, rv, weight=w, bias=b, training=training)
+                    out_ref = F.batch_norm(
+                        x, rm_ref, rv_ref, weight=w_ref, bias=b_ref, training=training
+                    )
+                    self.assertEqual(out, out_ref)
+                    self.assertEqual(rm, rm_ref)
+                    self.assertEqual(rv, rv_ref)
+
+                    out.sum().backward()
+                    out_ref.sum().backward()
+                    self.assertEqual(w.grad.view(-1), w_ref.grad)
+                    self.assertEqual(b.grad.view(-1), b_ref.grad)
+
+    @skipMPS
+    def test_batch_norm_update_stats_invalid_shapes(self, device):
+        # Only CPU and CUDA batch_norm_update_stats were updated; out-of-tree backends may crash.
+        if self.device_type not in ("cpu", "cuda"):
+            raise SkipTest(f"batch_norm_update_stats shape checks not implemented on {self.device_type}")
+
+        x = torch.full((3, 5), 1.0, device=device)
+        valid = torch.ones(5, device=device)
+        cases = [
+            (x, torch.empty(0, device=device), valid, "running_mean should contain 5 elements not 0"),
+            (x, valid, torch.empty(2, device=device), "running_var should contain 5 elements not 2"),
+            (x, torch.ones(1, 5, device=device), valid, "running_mean should be a 1D tensor, but got 2D"),
+            (x, valid, torch.ones(1, 5, device=device), "running_var should be a 1D tensor, but got 2D"),
+            (
+                torch.full((5,), 1.0, device=device),
+                valid,
+                valid,
+                "Expected input to have at least 2 dimensions, but got 1",
+            ),
+        ]
+        for inp, rm, rv, msg in cases:
+            with self.assertRaisesRegex(RuntimeError, re.escape(msg)):
+                torch.batch_norm_update_stats(inp, rm, rv, 0.1)
 
 
 class TestNNCPU(NNTestCase):
