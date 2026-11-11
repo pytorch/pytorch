@@ -2009,6 +2009,7 @@ class TestLocalizationTritonEpilogue(TestCase):
 
     def tearDown(self):
         self._restore_decomp()
+        super().tearDown()
 
     @_requires_cuda
     @_requires_green_contexts
