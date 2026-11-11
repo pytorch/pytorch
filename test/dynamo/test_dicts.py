@@ -376,6 +376,105 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 list(actual_mapping.items()), list(expected_mapping.items())
             )
 
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_computed_nan_dict_contains(self):
+        def fn(x, mapping, n):
+            if n + float("nan") in mapping:
+                return x + 1
+            return x + 2
+
+        x = torch.ones(1)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for n in (1.0, 2.0, -3.0):
+            self.assertEqual(compiled(x, {}, n), fn(x, {}, n))
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_float=True)
+    @parametrize(
+        "mapping_type,operation",
+        [
+            (dict, "get"),
+            (dict, "getitem"),
+            (dict, "delitem"),
+            (OrderedDict, "pop"),
+            (defaultdict, "get"),
+        ],
+    )
+    def test_computed_nan_dict_lookup(self, mapping_type, operation):
+        def fn(x, mapping, n):
+            key = n + float("nan")
+            if operation == "getitem":
+                try:
+                    return x + mapping[key]
+                except KeyError:
+                    return x + 2
+            if operation == "delitem":
+                try:
+                    del mapping[key]
+                except KeyError:
+                    return x + 2
+                return x + 1
+            return x + getattr(mapping, operation)(key, 2)
+
+        x = torch.ones(1)
+        mapping = mapping_type()
+        mapping[float("nan")] = 1
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        for n in (1.0, 2.0, -3.0):
+            self.assertEqual(compiled(x, mapping, n), fn(x, mapping, n))
+            self.assertEqual(len(mapping), 1)
+
+    @torch._dynamo.config.patch(specialize_float=False)
+    @parametrize("operation", [operator.pos, min, max])
+    def test_computed_nan_dict_key_alias_guard(self, operation):
+        def fn(x, mapping, n):
+            key = +n if operation is operator.pos else operation(n, float("nan"))
+            return x + (key in mapping)
+
+        x = torch.zeros(1)
+        present, absent = float("nan"), float("nan")
+        mapping = OrderedDict([(present, 1)])
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for n in (present, absent, present):
+            self.assertEqual(compiled(x, mapping, n), fn(x, mapping, n))
+
+    @torch._dynamo.config.patch(specialize_float=False)
+    @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
+    def test_computed_nan_dict_setitem(self, mapping_type):
+        def fn(x, mapping, n):
+            key = n + float("nan")
+            mapping[key] = x + 1
+            return x + 2, key, key, mapping
+
+        x = torch.ones(1)
+        eager_mapping, compiled_mapping = mapping_type(), mapping_type()
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        previous_key = None
+        previous_frames = 0
+        for count, n in enumerate((1.0, 2.0, -3.0), start=1):
+            expected = fn(x, eager_mapping, n)
+            actual = compiled(x, compiled_mapping, n)
+            self.assertEqual(actual[0], expected[0])
+            self.assertIs(type(actual[1]), float)
+            self.assertTrue(actual[1] != actual[1])
+            self.assertIs(actual[1], actual[2])
+            self.assertIs(actual[3], compiled_mapping)
+            self.assertIsNot(actual[1], previous_key)
+            self.assertIn(actual[1], compiled_mapping)
+            self.assertEqual(len(compiled_mapping), count)
+            self.assertEqual(
+                list(compiled_mapping.values()), list(eager_mapping.values())
+            )
+            if count > 2:
+                self.assertEqual(counter.frame_count, previous_frames)
+            previous_key = actual[1]
+            previous_frames = counter.frame_count
+        if mapping_type is dict:
+            self.assertEqual(counter.frame_count, 1)
+
     @parametrize("mapping_type", [dict, OrderedDict, defaultdict])
     @parametrize("with_default", [False, True])
     def test_missing_dict_pop_in_hop(self, mapping_type, with_default):

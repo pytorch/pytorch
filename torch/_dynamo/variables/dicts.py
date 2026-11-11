@@ -123,11 +123,21 @@ def _contains_nan(value: Any) -> bool:
     return type(value) in (float, complex) and value != value
 
 
-def _guard_nan_key(key: VariableTracker) -> None:
+def _guard_nan_key(tx: "InstructionTranslatorBase", key: VariableTracker) -> None:
     # CONSTANT_MATCH accepts distinct NaNs, but dictionary lookups depend
     # on their identity, including NaNs nested inside tuple keys.
-    if key.source and _contains_nan(_get_literal_key(key)):
-        install_guard(key.make_guard(GuardBuilder.ID_MATCH))
+    source = key.source
+    if source is None:
+        return
+    value = _get_literal_key(key)
+    if not _contains_nan(value):
+        return
+    if isinstance(source, ComputedLazyConstantSource):
+        # Arithmetic creates fresh NaNs; min/max and unary + can alias the input.
+        if value is not tx.output.resolve_source_value(source.base):
+            return
+        source = source.base
+    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
 
 
 def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
@@ -551,7 +561,8 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             key_present = (
                 value is not None and type(value) is not variables.DeletedVariable
             )
-        if _get_literal_key(arg) is not NO_SUCH_SUBOBJ or (
+        literal_key = _get_literal_key(arg)
+        if literal_key is not NO_SUCH_SUBOBJ or (
             arg.source is None and arg.is_python_constant()
         ):
             guard_fn = (
@@ -563,7 +574,11 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 self.make_guard(
                     functools.partial(
                         guard_fn,
-                        key=arg.as_python_constant(),
+                        key=(
+                            literal_key
+                            if literal_key is not NO_SUCH_SUBOBJ
+                            else arg.as_python_constant()
+                        ),
                     )
                 )
             )
@@ -578,7 +593,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         tx: "InstructionTranslatorBase",
         key: VariableTracker,
     ) -> HashableTracker:
-        _guard_nan_key(key)
+        _guard_nan_key(tx, key)
         try:
             return HashableTracker(key)
         except ObservedTypeError:
@@ -814,7 +829,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             return args[1]
         # OrderedDict.pop uses PyObject_Hash, including for an empty mapping.
         if isinstance(self, OrderedDictVariable):
-            _guard_nan_key(args[0])
+            _guard_nan_key(tx, args[0])
             key = HashableTracker(args[0])
         else:
             key = self._lookup_key(tx, args[0])
@@ -1085,7 +1100,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         ):
             self.install_dict_keys_match_guard()
         if isinstance(self, OrderedDictVariable):
-            _guard_nan_key(key)
+            _guard_nan_key(tx, key)
             hkey = HashableTracker(key)
         else:
             hkey = self._lookup_key(tx, key)
