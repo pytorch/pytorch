@@ -7,6 +7,7 @@ import json
 import math
 import os
 import random
+import re
 import string
 import tempfile
 import types
@@ -75,6 +76,8 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
     skipMPSIf,
     skipXPUIf,
+    tol,
+    toleranceOverride,
 )
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import (
@@ -4641,6 +4644,88 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
+    @unittest.skipUnless(TEST_WITH_ROCM, "ROCm-specific autotuning")
+    @dtypes(torch.float16, torch.bfloat16)
+    @toleranceOverride(
+        {
+            torch.float16: tol(atol=0.003, rtol=0.003),
+            torch.bfloat16: tol(atol=0.02, rtol=0.02),
+        }
+    )
+    @common_utils.parametrize(
+        "head_dim,seq_len", [(64, 512), (64, 2048), (128, 512), (256, 512)]
+    )
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_flex_search_space": "DEFAULT",
+            "compile_threads": 1,
+            "force_disable_caches": True,
+            "autotune_in_subproc": False,
+        }
+    )
+    def test_gfx1250_autotune_pipelined_prefill(self, device, dtype, head_dim, seq_len):
+        import triton
+
+        from torch._inductor.utils import rocm_gfx_arch
+
+        if rocm_gfx_arch() != "gfx1250":
+            self.skipTest("requires gfx1250")
+
+        q, k, v = (
+            torch.randn(2, 2, seq_len, head_dim, device=device, dtype=dtype)
+            for _ in range(3)
+        )
+        compiled = torch.compile(flex_attention, fullgraph=True)
+        captured_configs = []
+        real_compile = triton.compile
+
+        def capture_configs(*args, **kwargs):
+            result = real_compile(*args, **kwargs)
+            source = kwargs.get("src", args[0] if args else None)
+            if (
+                isinstance(source, triton.compiler.ASTSource)
+                and "flex_attention" in source.fn.__name__
+            ):
+                options = kwargs.get("options") or {}
+                block_m = re.search(
+                    r"BLOCK_M\s*:\s*tl.constexpr\s*=\s*(\d+)", source.fn.src
+                )
+                block_n = re.search(
+                    r"BLOCK_N\s*:\s*tl.constexpr\s*=\s*(\d+)", source.fn.src
+                )
+                if block_m is not None and block_n is not None:
+                    captured_configs.append(
+                        (
+                            int(block_m[1]),
+                            int(block_n[1]),
+                            options.get("num_stages"),
+                            options.get("num_warps"),
+                        )
+                    )
+            return result
+
+        with patch.object(triton, "compile", side_effect=capture_configs):
+            kernel_options = {} if head_dim == 64 else {"BLOCK_N": 64}
+            output = compiled(q, k, v, kernel_options=kernel_options)
+        self.assertTrue(any(stages == 1 for _, _, stages, _ in captured_configs))
+        if head_dim == 64 and seq_len < 2048:
+            self.assertNotIn((64, 64, 2, 2), captured_configs)
+            self.assertNotIn((128, 128, 2, 4), captured_configs)
+        elif head_dim == 64:
+            self.assertIn((64, 64, 2, 2), captured_configs)
+            self.assertIn((128, 128, 2, 4), captured_configs)
+        else:
+            self.assertIn((64, 64, 2, 2), captured_configs)
+            self.assertIn((128, 64, 2, 4), captured_configs)
+        qc, kc, vc = (x.cpu().double() for x in (q, k, v))
+        reference = (qc @ kc.transpose(-2, -1) / math.sqrt(head_dim)).softmax(-1) @ vc
+        self.assertEqual(output.cpu().double(), reference)
+
+    @supported_platform
     @skip("TODO: Figure out why this is erroring")
     @patch.object(torch._inductor.config, "max_autotune", True)
     @skip_on_mps  # uses Triton max_autotune
@@ -5559,6 +5644,66 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             kernel_options={"BLOCK_M": 16},
         )
         FileCheck().check("BLOCK_M : tl.constexpr = 16").run(code[0])
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
+    @unittest.skipUnless(TEST_WITH_ROCM, "ROCm-specific kernel_options")
+    @common_utils.parametrize("phase", ["forward", "backward", "decode"])
+    @common_utils.parametrize("prefixed", [False, True])
+    @config.patch({"compile_threads": 1, "force_disable_caches": True})
+    def test_rocm_kernel_options_are_respected(self, device, phase, prefixed):
+        import triton
+
+        from torch._inductor.heuristics.template.triton import get_default_kpack
+
+        expected = {
+            "kpack": 1 if get_default_kpack() != 1 else 2,
+            "matrix_instr_nonkdim": 16,
+            "waves_per_eu": 3,
+        }
+        prefix = ("bwd_" if phase == "backward" else "fwd_") if prefixed else ""
+        kernel_options = {prefix + key: value for key, value in expected.items()}
+        make_tensor = functools.partial(
+            torch.randn,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=phase == "backward",
+        )
+        q = make_tensor(2, 2, 1 if phase == "decode" else 128, 64)
+        k, v = make_tensor(2, 2, 128, 64), make_tensor(2, 2, 128, 64)
+        compiled = torch.compile(flex_attention, fullgraph=True)
+
+        def run_forward():
+            return compiled(q, k, v, kernel_options=kernel_options)
+
+        if phase == "backward":
+            # Compile forward before capturing so it cannot satisfy the backward check.
+            out = run_forward()
+
+            def run():
+                out.sum().backward()
+        else:
+            run = run_forward
+
+        captured = []
+        real_compile = triton.compile
+
+        def capture_options(*args, **kwargs):
+            result = real_compile(*args, **kwargs)
+            options = kwargs.get("options") or {}
+            captured.append({key: options.get(key) for key in expected})
+            return result
+
+        # The constexpr declarations do not prove that backend options took effect.
+        with patch.object(triton, "compile", side_effect=capture_options):
+            _, code = run_and_get_code(run)
+        self.assertIn(expected, captured)
+        if phase == "backward":
+            FileCheck().check("flex_attention_backward").run("\n".join(code))
+        elif phase == "decode":
+            FileCheck().check("SPLIT_KV : tl.constexpr").run("\n".join(code))
 
     @supported_platform
     @skip_on_cpu
