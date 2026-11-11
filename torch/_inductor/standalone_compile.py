@@ -511,7 +511,7 @@ def _resolve_fake_mode(
             for key in ("example_value", "val"):
                 maybe_fake_mode = maybe_get_fake_mode(node.meta.get(key))
                 if maybe_fake_mode is not None:
-                    return maybe_fake_mode
+                    return torch._guards.require_python_fake_mode(maybe_fake_mode)
 
         return FakeTensorMode(shape_env=ShapeEnv())
     else:
@@ -825,7 +825,12 @@ def compile_to_python(
     # ``_acceleration_cache_bytes`` returns. (If ``gm`` is NOT decomposed against the
     # inductor table, inductor lowering asserts "both a fallback and a decomp for same op"
     # -- the precondition is load-bearing, not defensive.)
-    from torch._guards import detect_fake_mode, tracing, TracingContext
+    from torch._guards import (
+        detect_fake_mode,
+        require_python_fake_mode,
+        tracing,
+        TracingContext,
+    )
     from torch.compiler._cache import CacheArtifactManager
 
     from .compile_fx import compile_fx_inner
@@ -847,7 +852,7 @@ def compile_to_python(
     # dims. A post-AOTAutograd graph's shapes are already baked into this metadata, so
     # there is no separate dynamic-shapes knob.
     fake_inputs = _placeholder_fake_inputs(gm)
-    fake_mode = detect_fake_mode(fake_inputs)
+    fake_mode = require_python_fake_mode(detect_fake_mode(fake_inputs))
     if fake_mode is None:
         raise RuntimeError(
             "compile_to_python could not detect a FakeTensorMode on the graph's "

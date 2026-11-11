@@ -2588,7 +2588,7 @@ def export(
             # potential outer ambient fake mode which the user provided.
             # example_inputs is always the user specified inputs, so they
             # would have the wrong fake mode attached to them
-            fake_mode = _guards.detect_fake_mode()
+            fake_mode = _guards.require_python_fake_mode(_guards.detect_fake_mode())
             example_inputs = inner_example_inputs
 
             def result_capturing_wrapper(*graph_inputs: Any) -> Any:
@@ -2605,9 +2605,10 @@ def export(
                 named_buffers = dict(graph.named_buffers(remove_duplicate=False))
 
                 ambient_fake_mode = (
-                    _guards.detect_fake_mode(graph_inputs)
-                    if _guards.detect_fake_mode(graph_inputs) is not None
-                    else fake_mode
+                    _guards.require_python_fake_mode(
+                        _guards.detect_fake_mode(graph_inputs)
+                    )
+                    or fake_mode
                 )
 
                 # We reran fake tensor propagation, but we didn't do

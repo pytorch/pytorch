@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from torch._dynamo.output_graph import CodeOptions
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
     from torch.types import IntLikeType
 
 
@@ -1625,3 +1625,31 @@ def active_fake_mode() -> FakeTensorMode | None:
             return m
 
     return None
+
+
+def require_python_fake_mode(
+    mode: FakeTensorMode | CppFakeTensorMode | None,
+    /,
+) -> FakeTensorMode | None:
+    """
+    Returns mode unchanged if it is a FakeTensorMode or None.
+
+    Use it on a fake mode that must be a Python FakeTensorMode, for example to
+    call from_tensor or is_our_fake on it or to pass it on to code typed for
+    FakeTensorMode: a result of detect_fake_mode, active_fake_mode or
+    maybe_get_fake_mode, or a mode the caller was given. Callers narrow the
+    lookups with it so that they keep getting a Python FakeTensorMode when a
+    lookup finds a C++ mode.
+
+    Raises:
+        RuntimeError: if mode is a CppFakeTensorMode, which does not have all of
+            FakeTensorMode's interface.
+    """
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
+
+    if isinstance(mode, CppFakeTensorMode):
+        raise RuntimeError(
+            "This needs a Python torch._subclasses.fake_tensor.FakeTensorMode; "
+            "a CppFakeTensorMode is not supported here yet"
+        )
+    return mode
