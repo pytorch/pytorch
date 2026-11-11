@@ -9,12 +9,7 @@ green-context-backed memory pools.  ``__torch_function__`` then forks each
 ``F.linear`` call into per-branch matmuls on green streams, with a final
 ``aten.cat`` joining the per-branch outputs.
 
-Pointwise tails downstream of the cat (relu, bias-add, gelu, ...) are
-packed onto the per-branch streams by a separate post-grad FX pass --
-``torch._inductor.fx_passes.pack_pointwise_after_cat.PackPointwiseAfterCat``
--- which the IR tests in this file run over the captured AOT graph.
-The pass is fully localization-agnostic; it only matches "two matmul
-outputs, cat, then a pointwise op that consumes the cat".
+Pointwise tails (relu, bias-add, gelu, ...) consume the concatenated output.
 """
 
 import contextlib

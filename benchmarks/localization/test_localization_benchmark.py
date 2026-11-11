@@ -104,13 +104,11 @@ class TestLocalizationBenchmarks:
 
     @staticmethod
     def _bench_compiled(benchmark, model, args):
-        """Compile ``model`` in reduce-overhead mode with the
-        ``PackPointwiseAfterCat`` post-grad pass enabled, warm twice,
+        """Compile ``model`` in reduce-overhead mode, warm twice,
         then benchmark a single forward + sync."""
         torch._dynamo.reset()
         counters.clear()
-        # PackPointwiseAfterCat now runs as a built-in post-grad pass; only
-        # need to ensure no stray custom pre-pass leaked in from another test.
+        # Ensure no stray custom pre-pass leaked in from another test.
         with inductor_config.patch(
             {
                 "post_grad_custom_pre_pass": None,

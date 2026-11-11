@@ -126,9 +126,8 @@ ways.
 In practice we have found simple networks do not change behavior with
 localization enabled or not, and theoretically localization should lead to
 *more* accurate numerics. This is perhaps little consolation to a model author
-whose model accuracy declines in practice. One theoretical method to ameliorate
-these declines is---just like with quantization---to train the final epoch or
-last `N` batches *with* localization.
+whose model accuracy declines in practice. Training with localization enabled
+is currently unsupported.
 
 #### Integration gotchas
 
