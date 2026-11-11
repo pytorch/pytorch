@@ -854,7 +854,10 @@ class TestGpuWrapper(InductorTestCase):
         if not RUN_GPU:
             self.skipTest("GPU not available")
         if GPU_TYPE == "xpu":
-            self.skipTest("ocloc backend compiler crashes with too many kernel args")
+            self.skipTest(
+                "ocloc backend compiler crashes with too many kernel args, "
+                "https://github.com/intel/torch-xpu-ops/issues/6062"
+            )
 
         num_params = 130
         params = [torch.randn(64, device=self.device) for _ in range(num_params)]
@@ -1116,7 +1119,6 @@ compiled(x)
 class TestCppWrapperStaticInitDeadlock(InductorTestCase):
     device = GPU_TYPE
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184496")
     def test_static_init_dlopen_does_not_deadlock(self):
         """The cpp_wrapper-generated .so must not trigger Triton kernel
         compilation from a static initializer (dlopen-time): doing so

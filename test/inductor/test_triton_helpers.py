@@ -33,7 +33,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_dtype import floating_types
-from torch.testing._internal.common_utils import parametrize
+from torch.testing._internal.common_utils import parametrize, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
@@ -487,6 +487,7 @@ class Random4xTest(TestCase):
 
 
 class MinimumMaximumTest(TestCase):
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6060")
     def test_elementwise_nan_and_signed_zero(self, device: str) -> None:
         a = torch.tensor(
             [
@@ -609,7 +610,9 @@ if HAS_GPU:
     instantiate_device_type_tests(
         OnlineSoftmaxCombineTest, globals(), only_for=GPU_TYPE, allow_xpu=True
     )
-    instantiate_device_type_tests(MinimumMaximumTest, globals(), only_for=GPU_TYPE)
+    instantiate_device_type_tests(
+        MinimumMaximumTest, globals(), only_for=GPU_TYPE, allow_xpu=True
+    )
 
 
 if __name__ == "__main__":
