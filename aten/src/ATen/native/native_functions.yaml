@@ -5861,7 +5861,7 @@
 - func: hash_tensor.out(Tensor self, int[1] dim=[], *, bool keepdim=False, int mode=0, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
-    CPU, CUDA: hash_tensor_out
+    CPU, CUDA, XPU: hash_tensor_out
 
 - func: sum_to_size(Tensor self, SymInt[] size) -> Tensor
   variants: method
