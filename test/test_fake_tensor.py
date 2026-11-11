@@ -6220,6 +6220,42 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertTrue(released.wait(timeout=5))
         self.assertEqual(self._installed(), (None, False))
 
+    def test_cpp_fake_tensor_mode_inherited_detection(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        from torch.utils._python_dispatch import is_in_torch_dispatch_mode
+
+        mode = CppFakeTensorMode()
+        self.assertFalse(is_in_torch_dispatch_mode())
+        torch._C._set_dispatch_mode(mode)
+        try:
+            self.assertTrue(is_in_torch_dispatch_mode())
+            with _disable_current_modes():
+                self.assertTrue(is_in_torch_dispatch_mode())
+            with mode, unset_fake_temporarily():
+                self.assertTrue(is_in_torch_dispatch_mode())
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                self.assertFalse(pool.submit(is_in_torch_dispatch_mode).result())
+        finally:
+            torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+        self.assertFalse(is_in_torch_dispatch_mode())
+
+    @skipIfTorchDynamo("uses torch.compile")
+    def test_cpp_fake_tensor_mode_inherited_detection_compiles(self):
+        from torch.utils._python_dispatch import is_in_torch_dispatch_mode
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def g():
+            return is_in_torch_dispatch_mode()
+
+        torch._C._set_dispatch_mode(CppFakeTensorMode())
+        try:
+            self.assertTrue(g())
+            with torch._dynamo.config.patch(error_on_recompile=True):
+                self.assertTrue(g())
+        finally:
+            torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+
 
 if __name__ == "__main__":
     run_tests()

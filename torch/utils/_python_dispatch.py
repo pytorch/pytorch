@@ -15,6 +15,7 @@ import torchgen
 import torchgen.model
 from torch._C import (
     _get_dispatch_stack_at,
+    _is_cpp_fake_mode_set,
     _len_torch_dispatch_stack,
     _pop_torch_dispatch_stack,
     _push_on_torch_dispatch_stack,
@@ -46,9 +47,25 @@ class _CppFakeModeTLS(threading.local):
     def __init__(self) -> None:
         # Every entry, including reentry of an active or inherited mode.
         self.stack: list[tuple[CppFakeTensorMode, _FakeModeEnterRecord]] = []
+        # Whether _disable_current_modes has taken a C++ FakeTensorMode out of
+        # this thread's FAKE slot, which it may hold without an entered mode
+        # (on a thread that inherited it through ThreadLocalState)
+        self.suspended = False
 
 
 _cpp_fake_mode_tls = _CppFakeModeTLS()
+
+
+def _is_cpp_fake_mode_active() -> bool:
+    # - Installed: a mode is in the C++ slot now.
+    # - Suspended: _disable_current_modes() removed a mode and is holding it
+    #   for restoration.
+    # - Stack nonempty: at least one entered C++ fake-mode context is still open.
+    return (
+        _is_cpp_fake_mode_set()
+        or _cpp_fake_mode_tls.suspended
+        or bool(_cpp_fake_mode_tls.stack)
+    )
 
 
 def is_in_torch_dispatch_mode(include_infra_modes: bool = True) -> bool:
@@ -56,7 +73,8 @@ def is_in_torch_dispatch_mode(include_infra_modes: bool = True) -> bool:
         return _is_in_non_infra_torch_dispatch_mode
     if _is_in_torch_dispatch_mode:
         return True
-    return False
+    # A C++ FakeTensorMode, an infra mode, is not a TorchDispatchMode
+    return _is_cpp_fake_mode_active()
 
 
 def is_in_any_mode_without_ignore_compile_internals() -> bool:
@@ -447,13 +465,17 @@ def _disable_current_modes():
 
     # Manually disable proxy and fake modes, if any are active
     cpp_fake_mode = None
+    was_suspended = _cpp_fake_mode_tls.suspended
     try:
         # A C++ FakeTensorMode is not on the mode stack, but with the Python
         # modes popped, the FAKE slot reports it.
         fake_key = torch._C._TorchDispatchModeKey.FAKE
         cpp_fake_mode = torch._C._unset_dispatch_mode(fake_key)
+        if cpp_fake_mode is not None:
+            _cpp_fake_mode_tls.suspended = True
         yield old_pre_dispatch_modes + old_modes
     finally:
+        _cpp_fake_mode_tls.suspended = was_suspended
         for mode in reversed(old_modes):
             _push_mode(mode)
         for mode in reversed(old_pre_dispatch_modes):

@@ -1745,6 +1745,18 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+// Whether a C++ FakeTensorMode is installed on this thread, for
+// is_in_torch_dispatch_mode(), which Inductor checks on each call of a compiled
+// region under wrap_inductor_compiled_regions
+static PyObject* is_cpp_fake_mode_set(PyObject* _unused, PyObject* _args) {
+  HANDLE_TH_ERRORS
+  if (c10::impl::FakeTensorModeTLS::get_state() != nullptr) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   const auto len = c10::impl::TorchDispatchModeTLS::stack_len();
@@ -1918,6 +1930,7 @@ static PyMethodDef methods[] = {
     {"_set_dispatch_mode", set_dispatch_mode, METH_O, nullptr},
     {"_get_dispatch_mode", get_dispatch_mode, METH_O, nullptr},
     {"_unset_dispatch_mode", unset_dispatch_mode, METH_O, nullptr},
+    {"_is_cpp_fake_mode_set", is_cpp_fake_mode_set, METH_NOARGS, nullptr},
 
     {nullptr, nullptr, 0, nullptr}};
 

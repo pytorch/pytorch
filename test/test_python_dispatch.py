@@ -13,7 +13,7 @@ import torch
 import torch._dynamo
 from torch import SymInt
 from torch._C import DispatchKey, DispatchKeySet
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
 from torch.cuda.jiterator import _create_jit_fn
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    fake_tensor_modes,
     first_sample,
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -48,6 +49,7 @@ from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils import _pytree as pytree
 from torch.utils._mode_utils import all_same_mode, no_dispatch
 from torch.utils._python_dispatch import (
+    _disable_current_modes,
     _get_current_dispatch_mode,
     _get_current_dispatch_mode_stack,
     is_in_torch_dispatch_mode,
@@ -1917,7 +1919,9 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         self.assertFalse(all_same_mode([x, None]))
         self.assertFalse(all_same_mode([x, y]))
 
-    def test_mode_detection(self):
+    @parametrize("mode_type", ["infra", "python_fake", "cpp_fake"])
+    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
+    def test_mode_detection(self, mode_type):
         class InfraMode(TorchDispatchMode):
             @classmethod
             def is_infra_mode(cls):
@@ -1926,13 +1930,18 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         class NonInfraMode(TorchDispatchMode):
             pass
 
-        with InfraMode():
+        mode_cls = {
+            "infra": InfraMode,
+            "python_fake": FakeTensorMode,
+            "cpp_fake": CppFakeTensorMode,
+        }[mode_type]
+        with mode_cls():
             self.assertTrue(is_in_torch_dispatch_mode())
             self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
             with NonInfraMode():
                 self.assertTrue(is_in_torch_dispatch_mode())
                 self.assertTrue(is_in_torch_dispatch_mode(include_infra_modes=False))
-                with InfraMode():
+                with mode_cls():
                     self.assertTrue(is_in_torch_dispatch_mode())
                     self.assertTrue(
                         is_in_torch_dispatch_mode(include_infra_modes=False)
@@ -1942,9 +1951,28 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                 self.assertTrue(is_in_torch_dispatch_mode(include_infra_modes=False))
             self.assertTrue(is_in_torch_dispatch_mode())
             self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
+            with _disable_current_modes():
+                self.assertTrue(is_in_torch_dispatch_mode())
+                self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
 
         self.assertFalse(is_in_torch_dispatch_mode())
         self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
+
+    @skipIfTorchDynamo("uses torch.compile")
+    @fake_tensor_modes
+    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
+    def test_mode_detection_compiles(self, mode_cls):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f():
+            return is_in_torch_dispatch_mode()
+
+        self.assertFalse(f())
+        with mode_cls():
+            self.assertTrue(f())
+            with torch._dynamo.config.patch(error_on_recompile=True):
+                self.assertTrue(f())
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            self.assertFalse(f())
 
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
@@ -2808,6 +2836,9 @@ def forward(self, x_1):
             a = torch.full((3, 3), uarg, dtype=torch.uint64)
             self.assertEqual(m.last_args[1], uarg)
         self.assertTrue((a == uarg).all().item())
+
+
+instantiate_parametrized_tests(TestPythonDispatch)
 
 
 class TestPythonDispatcher(TestCase):
