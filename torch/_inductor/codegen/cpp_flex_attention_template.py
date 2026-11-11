@@ -1262,6 +1262,8 @@ class CppFlexAttentionTemplate(CppTemplate):
     and configuration settings.
     """
 
+    supports_epilogue_fusion = False
+
     def __init__(
         self,
         input_nodes,
