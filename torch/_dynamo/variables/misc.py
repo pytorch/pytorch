@@ -641,11 +641,15 @@ class ComptimeVariable(VariableTracker):
 
 
 class CellVariable(VariableTracker):  # noqa: RVT001
+    _nonvar_fields = {
+        *VariableTracker._nonvar_fields,
+        "class_owner",
+        "native_class_escape",
+    }
     # PyCell_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/cellobject.c#L151
     _cpython_type = types.CellType
 
-    # If the cell existed before Dynamo tracing started, this will be the
-    # VariableTracker that represents the cell content.
+    # Initial contents of an input cell or a cell materialized while tracing.
     #
     # Note that all mutation to the cell (i.e., its content) will be buffered in
     # SideEffects, rather than being reflected here. One can think of
@@ -655,12 +659,18 @@ class CellVariable(VariableTracker):  # noqa: RVT001
     # This is set when this cell can be referenced via `LOAD/STORE_DEREF` in the
     # root frame via this name (e.g., the name is in `co_cellvars/co_freevars`).
     local_name: str | None = None
+    class_owner: type | None = None
+    native_class_escape: bool = False
 
     def __init__(
-        self, pre_existing_contents: VariableTracker | None = None, **kwargs: Any
+        self,
+        pre_existing_contents: VariableTracker | None = None,
+        class_owner: type | None = None,
+        **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.pre_existing_contents = pre_existing_contents
+        self.class_owner = class_owner
 
     def python_type(self) -> type:
         return types.CellType

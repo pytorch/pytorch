@@ -1583,19 +1583,23 @@ class CompilePackage:
                             f_globals = module.__dict__
                             fn_name = function_name
 
+                            from .resume_execution import make_resume_function
+
                             def _make_fn(
                                 closure: tuple[types.CellType, ...],
                                 _code: types.CodeType = code,
                                 _globals: dict[str, Any] = f_globals,
                                 _name: str = fn_name,
-                            ) -> types.FunctionType:
-                                return types.FunctionType(
-                                    _code, _globals, _name, None, closure
+                            ) -> Callable[..., Any]:
+                                return make_resume_function(
+                                    _code, _globals, _name, closure
                                 )
 
                             self._install_global(module, function_name, _make_fn)
                         else:
-                            fn = types.FunctionType(
+                            from .resume_execution import make_resume_function
+
+                            fn = make_resume_function(
                                 code, module.__dict__, function_name
                             )
                             self._install_global(module, function_name, fn)

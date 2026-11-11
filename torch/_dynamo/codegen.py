@@ -269,6 +269,7 @@ class PyCodegen:
 
         if not isinstance(value, VariableTracker):
             raise AssertionError(f"expected VariableTracker, got {type(value)}")
+        self.tx.output.side_effects.check_materialized_class_escape(value, emitted=True)
         output = self._output
         graph_outputs = self.graph_outputs
 
@@ -549,9 +550,11 @@ class PyCodegen:
         return create_instruction("LOAD_GLOBAL", argval=name)
 
     def create_load_const(self, value: Any) -> Instruction:
+        self.tx.output.side_effects.check_materialized_class_escape(value, emitted=True)
         return create_load_const(value)
 
     def create_load_const_unchecked(self, value: Any) -> Instruction:
+        self.tx.output.side_effects.check_materialized_class_escape(value, emitted=True)
         return create_load_const(value, checked=False)
 
     def load_method(self, name: str) -> None:

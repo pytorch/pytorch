@@ -3261,6 +3261,16 @@
       ]
     }
   ],
+  "GB9859": [
+    {
+      "Gb_type": "Escaping materialized class cell",
+      "Context": "",
+      "Explanation": "Dynamo cannot reconstruct a materialized class and its shared closure cell together.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB3840": [
     {
       "Gb_type": "leaf_function without fake_fn",
@@ -5192,6 +5202,76 @@
       "Hints": [
         "Only staticmethod, property, and pybind11_static_property are supported.",
         "Consider accessing this attribute outside of the compiled region."
+      ]
+    }
+  ],
+  "GB7846": [
+    {
+      "Gb_type": "Cannot resume a frame using reserved continuation locals",
+      "Context": "code.co_name",
+      "Explanation": "User locals collide with generated continuation state.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8489": [
+    {
+      "Gb_type": "Delete an unguarded empty closure cell",
+      "Context": "inst.argval",
+      "Explanation": "Dynamo cannot guard an initially empty closure cell.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0547": [
+    {
+      "Gb_type": "Cannot resume a frame replacing its receiver cell",
+      "Context": "code.co_name",
+      "Explanation": "A comprehension replaces the first argument's cell slot.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3053": [
+    {
+      "Gb_type": "super() invoked by an emulated C callback",
+      "Context": "tx.f_code.co_name",
+      "Explanation": "A Python polyfill cannot reproduce the caller frame used by CPython's zero-argument super() callback.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8355": [
+    {
+      "Gb_type": "super() with an unguarded empty receiver cell",
+      "Context": "str(arg0_cell)",
+      "Explanation": "Dynamo cannot guard an initially empty receiver cell.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4488": [
+    {
+      "Gb_type": "super() with an unguarded empty class cell",
+      "Context": "str(class_cell)",
+      "Explanation": "Dynamo cannot guard an initially empty closure cell.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2756": [
+    {
+      "Gb_type": "super() receiver requires dynamic validation",
+      "Context": "str(arg0)",
+      "Explanation": "Dynamo cannot validate this receiver's __class__ without evaluating its attribute lookup.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

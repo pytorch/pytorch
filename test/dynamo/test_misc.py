@@ -11111,6 +11111,645 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 m, (x,), dynamic_shapes={"x": {0: d1}}, strict=False
             )
 
+    @parametrize("inlined", (False, True))
+    @parametrize("captured", (False, True))
+    @parametrize("class_method", (False, True))
+    @parametrize("call_style", ("literal", "attribute", "alias"))
+    def test_super_implicit_receiver(self, inlined, captured, class_method, call_style):
+        super_alias = super
+
+        class Parent:
+            def scale(first, x):
+                return first.factor * x
+
+            if class_method:
+                scale = classmethod(scale)
+
+        class Receiver(Parent):
+            if captured:
+
+                def method(first, x):
+                    def capture():
+                        return first
+
+                    if call_style == "literal":
+                        parent = super()
+                    elif call_style == "attribute":
+                        parent = builtins.super()
+                    else:
+                        parent = super_alias()
+                    return x + 1, parent.scale(x)
+
+            else:
+
+                def method(first, x):
+                    if call_style == "literal":
+                        parent = super()
+                    elif call_style == "attribute":
+                        parent = builtins.super()
+                    else:
+                        parent = super_alias()
+                    return x + 1, parent.scale(x)
+
+            if class_method:
+                method = classmethod(method)
+
+        class Derived(Receiver):
+            factor = 7
+
+        method = Derived.method if class_method else Derived().method
+        self.assertFalse(
+            any(
+                i.opname == "LOAD_SUPER_ATTR"
+                for i in dis.get_instructions(method.__func__)
+            )
+        )
+
+        def wrapper(x):
+            return method(x)
+
+        fn = wrapper if inlined else method
+        x = torch.ones(1)
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        for value in (x, x + 2):
+            self.assertEqual(opt_fn(value), fn(value))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @parametrize("inlined", (False, True))
+    @parametrize("bound_method", (False, True))
+    def test_super_deleted_receiver(self, inlined, bound_method):
+        def function(first, x):
+            del first
+            try:
+                builtins.super()
+            except RuntimeError as error:
+                return x + 1, str(error)
+            return x + 1, "no error"
+
+        class Receiver:
+            def method(first, x):
+                del first
+                try:
+                    super()
+                except RuntimeError as error:
+                    return x + 1, str(error)
+                return x + 1, "no error"
+
+        fn = Receiver().method if bound_method else function
+        args = (torch.ones(1),) if bound_method else (None, torch.ones(1))
+
+        def wrapper(*args):
+            return fn(*args)
+
+        expected = fn(*args)
+        self.assertEqual(expected[1], "super(): arg[0] deleted")
+        cnt = CompileCounter()
+        opt_fn = torch.compile(wrapper if inlined else fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(*args), expected)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @parametrize("inlined", (False, True))
+    @parametrize("aliased", (False, True))
+    def test_super_missing_class_cell(self, inlined, aliased):
+        super_alias = super
+
+        def fn(first, x):
+            try:
+                if aliased:
+                    super_alias()
+                else:
+                    builtins.super()
+            except RuntimeError as error:
+                return x + 1, str(error)
+
+        def wrapper(x):
+            return fn(None, x)
+
+        args = (torch.ones(1),) if inlined else (None, torch.ones(1))
+        function = wrapper if inlined else fn
+        expected = function(*args)
+        self.assertEqual(expected[1], "super(): __class__ cell not found")
+        cnt = CompileCounter()
+        result = torch.compile(function, backend=cnt, fullgraph=True)(*args)
+        self.assertEqual(result, expected)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @parametrize("graph_break", (False, True))
+    def test_no_guard_for_unused_first_input(self, graph_break):
+        def fn(unused, x):
+            y = x + 1
+            if graph_break:
+                torch._dynamo.graph_break()
+            return y + 1
+
+        x = torch.ones(1)
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=not graph_break)
+        self.assertEqual(opt_fn(torch.ones(2), x), fn(None, x))
+        self.assertEqual(opt_fn(torch.ones(3), x), fn(None, x))
+        self.assertEqual(opt_fn(object(), x), fn(None, x))
+        self.assertEqual(cnt.frame_count, 2 if graph_break else 1)
+
+    @parametrize("inlined", (False, True))
+    @parametrize("bound_method", (False, True))
+    def test_super_deleted_cell_receiver(self, inlined, bound_method):
+        def function(first, x):
+            def clear():
+                nonlocal first
+                del first
+
+            clear()
+            try:
+                builtins.super()
+            except RuntimeError as error:
+                return x + 1, str(error)
+
+        class Receiver:
+            def method(first, x):
+                def clear():
+                    nonlocal first
+                    del first
+
+                clear()
+                try:
+                    super()
+                except RuntimeError as error:
+                    return x + 1, str(error)
+
+        fn = Receiver().method if bound_method else function
+        args = (torch.ones(1),) if bound_method else (None, torch.ones(1))
+
+        def wrapper(*args):
+            return fn(*args)
+
+        expected = fn(*args)
+        self.assertEqual(expected[1], "super(): arg[0] deleted")
+        cnt = CompileCounter()
+        opt_fn = torch.compile(wrapper if inlined else fn, backend=cnt, fullgraph=True)
+        for _ in range(2):
+            self.assertEqual(opt_fn(*args), expected)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @parametrize("call_style", ("implicit", "explicit", "alias", "shadowed"))
+    @parametrize("inlined", (False, True))
+    def test_super_deleted_class_cell_effects(self, call_style, inlined):
+        def make_receiver():
+            class Receiver:
+                def mutate(self, x):
+                    nonlocal __class__
+                    try:
+                        del __class__
+                        if call_style in ("implicit", "shadowed"):
+                            super()
+                        elif call_style == "explicit":
+                            super(Receiver, self)
+                        else:
+                            saved = super
+                    except RuntimeError as error:
+                        return x + 1, str(error)
+                    except NameError:
+                        return x + 1, "already empty"
+                    return x + 1, "deleted"
+
+                def observe(self):
+                    return __class__
+
+            return Receiver
+
+        expected_class = make_receiver()
+        actual_class = make_receiver()
+
+        def expected_fn(x):
+            return expected_class().mutate(x)
+
+        def actual_fn(x):
+            return actual_class().mutate(x)
+
+        expected = expected_fn if inlined else expected_class().mutate
+        actual = actual_fn if inlined else actual_class().mutate
+        cnt = CompileCounter()
+        opt_fn = torch.compile(actual, backend=cnt)
+        x = torch.ones(1)
+        patch = {"super": lambda: None} if call_style == "shadowed" else {}
+        with mock.patch.dict(globals(), patch):
+            for _ in range(2):
+                self.assertEqual(opt_fn(x), expected(x))
+                with self.assertRaises(NameError):
+                    actual_class().observe()
+            cell = actual_class.mutate.__closure__[
+                actual_class.mutate.__code__.co_freevars.index("__class__")
+            ]
+            with self.assertRaises(ValueError):
+                cell.cell_contents
+            cell.cell_contents = actual_class
+            expected_cell = expected_class.mutate.__closure__[
+                expected_class.mutate.__code__.co_freevars.index("__class__")
+            ]
+            expected_cell.cell_contents = expected_class
+            self.assertEqual(opt_fn(x), expected(x))
+
+    def test_super_adjacent_class_cell_deletion(self):
+        class Receiver:
+            def mutate(self, x):
+                nonlocal __class__
+                try:
+                    del __class__
+                    super()
+                except RuntimeError:
+                    pass
+                try:
+                    return x + 1, __class__
+                except NameError:
+                    return x + 1, "empty"
+
+            def observe(self):
+                return __class__
+
+        instructions = list(dis.get_instructions(Receiver.mutate))
+        deletion = next(
+            i for i, inst in enumerate(instructions) if inst.opname == "DELETE_DEREF"
+        )
+        self.assertEqual(instructions[deletion + 1].opname, "LOAD_GLOBAL")
+        self.assertEqual(instructions[deletion + 1].argval, "super")
+
+        def fn(x):
+            return Receiver().mutate(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(1)
+        cell = Receiver.mutate.__closure__[0]
+        for value in (x, x + 2):
+            cell.cell_contents = Receiver
+            self.assertEqual(opt_fn(value), (value + 1, "empty"))
+            with self.assertRaises(NameError):
+                Receiver().observe()
+            with self.assertRaises(ValueError):
+                cell.cell_contents
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_super_local_class_cell_shared_state(self):
+        def fn(x):
+            class Receiver:
+                def clear(self):
+                    nonlocal __class__
+                    del __class__
+                    super()
+
+                def observe(self):
+                    return __class__
+
+                def refill(self, value):
+                    nonlocal __class__
+                    __class__ = value
+
+                def parent(self):
+                    return super()
+
+            obj = Receiver()
+            alias = obj.observe
+            try:
+                obj.clear()
+            except RuntimeError:
+                first = True
+            try:
+                alias()
+            except NameError:
+                empty = True
+            try:
+                obj.clear()
+            except NameError:
+                second = True
+            obj.refill(type(obj))
+            return x + 1, (
+                first,
+                empty,
+                second,
+                isinstance(obj.parent(), super) and alias() is type(obj),
+            )
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        for x in (torch.ones(1), torch.ones(1) + 2):
+            self.assertEqual(opt(x), fn(x))
+
+    @parametrize(
+        "kind",
+        (
+            "class",
+            "method",
+            "instance",
+            "closure",
+            "container",
+            "append",
+            "property",
+            "partial",
+            "generic_alias",
+        ),
+    )
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_super_local_class_cell_escape(self, kind):
+        import functools
+
+        seen = []
+
+        def fn(x):
+            class Receiver:
+                def clear(self):
+                    nonlocal __class__
+                    del __class__
+
+                def observe(self):
+                    return __class__
+
+            obj = Receiver()
+            obj.clear()
+            if kind == "class":
+                out = Receiver
+            elif kind == "method":
+                out = Receiver.observe
+            elif kind == "instance":
+                out = obj.observe
+            elif kind == "closure":
+
+                def out():
+                    return Receiver
+            elif kind == "container":
+                out = {"owner": (Receiver,)}
+            elif kind == "append":
+                seen.append(Receiver)
+                out = None
+            elif kind == "property":
+                out = property(Receiver.observe)
+            elif kind == "generic_alias":
+                out = list[Receiver]
+            else:
+                out = functools.partial(Receiver.observe, obj)
+            return x + 1, out
+
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+        self.assertEqual(seen, [])
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_super_class_cell_fullgraph_replay(self):
+        class Receiver:
+            def clear(self):
+                nonlocal __class__
+                del __class__
+                super()
+
+            def observe(self):
+                return __class__
+
+        def fn(x):
+            try:
+                Receiver().clear()
+            except RuntimeError as error:
+                return x + 1, str(error)
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        cell = Receiver.clear.__closure__[0]
+        for x in (torch.ones(1), torch.ones(1) + 2):
+            cell.cell_contents = Receiver
+            self.assertEqual(opt(x), (x + 1, "super(): empty __class__ cell"))
+            with self.assertRaises(NameError):
+                Receiver().observe()
+
+    def test_super_immutable_cell_fullgraph_does_not_delete(self):
+        class Receiver:
+            def mutate(self):
+                nonlocal __class__
+                del __class__
+                super()
+
+            def observe(self):
+                return __class__
+
+        def fn(x):
+            y = x + 1
+            Receiver().mutate()
+            return y
+
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+        self.assertIs(Receiver().observe(), Receiver)
+
+    @parametrize("captured", (False, True))
+    @parametrize("inlined", (False, True))
+    @parametrize("call_style", ("literal", "attribute", "alias"))
+    def test_super_implicit_receiver_after_graph_break(
+        self, captured, inlined, call_style
+    ):
+        super_alias = super
+
+        class Parent:
+            def scale(self, x):
+                return self.factor * x
+
+        class Receiver(Parent):
+            factor = 3
+
+            if captured:
+
+                def method(first, x):
+                    def replace():
+                        nonlocal first
+                        first = replacement
+
+                    replace()
+                    x = x + 1
+                    torch._dynamo.graph_break()
+                    if call_style == "literal":
+                        parent = super()
+                    elif call_style == "attribute":
+                        parent = builtins.super()
+                    else:
+                        parent = super_alias()
+                    x = parent.scale(x)
+                    torch._dynamo.graph_break()
+                    parent = super()
+                    return parent.scale(x)
+
+            else:
+
+                def method(first, x):
+                    x = x + 1
+                    torch._dynamo.graph_break()
+                    if call_style == "literal":
+                        parent = super()
+                    elif call_style == "attribute":
+                        parent = builtins.super()
+                    else:
+                        parent = super_alias()
+                    x = parent.scale(x)
+                    torch._dynamo.graph_break()
+                    parent = super()
+                    return parent.scale(x)
+
+        class Derived(Receiver):
+            factor = 7
+
+        replacement = Derived()
+        method = Receiver().method
+
+        def wrapper(x):
+            return method(x)
+
+        fn = wrapper if inlined else method
+        x = torch.ones(1)
+        cnt = CompileCounter()
+        graphs = []
+
+        def backend(graph, inputs):
+            graphs.append(graph)
+            return cnt(graph, inputs)
+
+        opt_fn = torch.compile(fn, backend=backend)
+        for value in (x, x + 2):
+            self.assertEqual(opt_fn(value), fn(value))
+        self.assertEqual(cnt.frame_count, 3)
+        targets = [
+            node.target
+            for graph in graphs
+            for node in graph.graph.nodes
+            if node.op == "call_function"
+        ]
+        self.assertEqual(targets, [operator.add, operator.mul, operator.mul])
+
+    @parametrize("inlined", (False, True))
+    @parametrize("error_kind", ("no_arguments", "deleted", "cell", "missing_class"))
+    def test_super_errors_after_graph_break(self, inlined, error_kind):
+        super_alias = super
+
+        def no_arguments(*args):
+            x = args[0] + 1
+            torch._dynamo.graph_break()
+            try:
+                super_alias()
+            except RuntimeError as error:
+                return x + 1, str(error)
+
+        def deleted(first, x):
+            del first
+            x = x + 1
+            torch._dynamo.graph_break()
+            try:
+                super_alias()
+            except RuntimeError as error:
+                return x + 1, str(error)
+
+        def cell(first, x):
+            def clear():
+                nonlocal first
+                del first
+
+            x = x + 1
+            torch._dynamo.graph_break()
+            clear()
+            try:
+                super_alias()
+            except RuntimeError as error:
+                return x + 1, str(error)
+
+        def missing_class(first, x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            try:
+                super_alias()
+            except RuntimeError as error:
+                return x + 1, str(error)
+
+        fn = {
+            "no_arguments": no_arguments,
+            "deleted": deleted,
+            "cell": cell,
+            "missing_class": missing_class,
+        }[error_kind]
+        args = (
+            (torch.ones(1),) if error_kind == "no_arguments" else (None, torch.ones(1))
+        )
+
+        def wrapper(*args):
+            return fn(*args)
+
+        function = wrapper if inlined else fn
+        expected = function(*args)
+        cnt = CompileCounter()
+        opt_fn = torch.compile(function, backend=cnt)
+        for _ in range(2):
+            self.assertEqual(opt_fn(*args), expected)
+
+    @torch._dynamo.config.patch(suppress_errors=True)
+    def test_super_missing_class_in_eager_nested_resume(self):
+        super_alias = super
+        attempts = []
+
+        def child(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 1
+
+        def fn(first, x):
+            x = child(x)
+            try:
+                super_alias()
+            except RuntimeError as error:
+                return x + 1, str(error)
+
+        def backend(graph, inputs):
+            attempts.append(graph)
+            if len(attempts) > 1:
+                raise RuntimeError("test forces eager continuation")
+            return graph.forward
+
+        x = torch.ones(1)
+        expected = fn(None, x)
+        opt_fn = torch.compile(fn, backend=backend)
+        self.assertEqual(opt_fn(None, x), expected)
+        self.assertEqual(opt_fn(None, x), expected)
+        self.assertGreaterEqual(len(attempts), 2)
+
+    def test_super_initially_empty_class_cell(self):
+        class Receiver:
+            def method(self, x):
+                try:
+                    parent = super()
+                except RuntimeError as error:
+                    return x + 1, str(error)
+                return x + 1, parent.__class__
+
+        cell = Receiver.method.__closure__[
+            Receiver.method.__code__.co_freevars.index("__class__")
+        ]
+        del cell.cell_contents
+        fn = Receiver().method
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(opt_fn(x), fn(x))
+        cell.cell_contents = Receiver
+        self.assertEqual(opt_fn(x), fn(x))
+
+    @parametrize("graph_break", (False, True))
+    def test_super_callable_iterator_frame(self, graph_break):
+        class Receiver:
+            def method(self, x):
+                x = x + 1
+                if graph_break:
+                    torch._dynamo.graph_break()
+                try:
+                    parent = next(iter(super, None))
+                    return x + 1, parent.__self__ is self
+                except RuntimeError as error:
+                    return x + 1, str(error)
+
+        fn = Receiver().method
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertIs(expected[1], True)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(opt_fn(x), expected)
+        self.assertEqual(opt_fn(x + 1), fn(x + 1))
+
     def test_call_parent_non_class_methods_from_child(self):
         class A:
             a = 4
