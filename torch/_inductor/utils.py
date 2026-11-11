@@ -5848,6 +5848,13 @@ def load_template(name: str, template_dir: Path) -> str:
         raise ValueError(f"Template {path} is not valid UTF-8: {e}") from e
 
 
+def get_cpp_wrapper_header_device(device: str) -> str:
+    """PrivateUse1 backends register an arbitrary device name, but the runtime
+    headers are shipped under the generic privateuse1 name."""
+    privateuse1 = torch._C._get_privateuse1_backend_name()
+    return "privateuse1" if device == privateuse1 else device
+
+
 def should_fallback_by_default(node: torch.fx.Node) -> bool:
     """Decide whether fallback for a node. This is only used in inductor lite mode."""
     target = node.target

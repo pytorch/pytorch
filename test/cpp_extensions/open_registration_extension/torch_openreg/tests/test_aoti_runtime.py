@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 
 import torch
+from torch._inductor.codecache import _get_cpp_wrapper_header
+from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils.cpp_extension import load_inline, TORCH_LIB_PATH
 
@@ -160,6 +162,26 @@ class TestAOTIRuntimeWithoutPrivateUse1(TestCase):
             capture_output=True,
             text=True,
         )
+
+
+class TestAOTICodegenPrivateUse1(TestCase):
+    def test_cpp_wrapper_header(self):
+        # The registered backend name has no header of its own.
+        for device in ("openreg", "openreg:1"):
+            aot = "torch/csrc/inductor/aoti_include/privateuse1.h"
+            jit = "torch/csrc/inductor/cpp_wrapper/privateuse1.h"
+            self.assertEqual(_get_cpp_wrapper_header(device, aot_mode=True), aot)
+            self.assertEqual(_get_cpp_wrapper_header(device, aot_mode=False), jit)
+        cuda = "torch/csrc/inductor/aoti_include/cuda.h"
+        self.assertEqual(_get_cpp_wrapper_header("cuda:0", aot_mode=True), cuda)
+
+    def test_include_path_hooks(self):
+        # Subclass overrides of these hooks see the real device name; the
+        # privateuse1 mapping happens in the defaults.
+        aot = "#include <torch/csrc/inductor/aoti_include/%s.h>"
+        include_path = CppWrapperCpu.get_device_include_path_aot
+        self.assertEqual(include_path("openreg"), aot % "privateuse1")
+        self.assertEqual(include_path("cuda"), aot % "cuda")
 
 
 if __name__ == "__main__":
