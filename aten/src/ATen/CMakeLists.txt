@@ -60,12 +60,16 @@ set_bool(AT_HIPSPARSELT_ENABLED CAFFE2_USE_HIPSPARSELT)
 # target's HIP_ARCHITECTURES and the runtime check in Context.cpp are all
 # derived from this one list.
 #
-# gfx1200/gfx1201 (RDNA4, WMMA) is opt-in through USE_ROCM_CK_SDPA_GFX12 (OFF by
-# default): those arches are already in the ROCm wheel arch list, so building CK
-# SDPA for them would add code generation and compile cost to existing builds.
+# gfx1100/gfx1101/gfx1102/gfx1150/gfx1151 (RDNA3/RDNA3.5, WMMA) and gfx1200/gfx1201 (RDNA4, WMMA) are opt-in through
+# USE_ROCM_CK_SDPA_GFX11 and USE_ROCM_CK_SDPA_GFX12 (OFF by default): those arches
+# are already in the ROCm wheel arch list, so building CK SDPA for them would add
+# code generation and compile cost to existing builds.
 set(AT_ROCM_CK_SDPA_ARCHS "")
 if(USE_ROCM AND USE_ROCM_CK_SDPA AND USE_FLASH_ATTENTION)
   set(_ck_sdpa_candidate_archs gfx942 gfx950)
+  if(USE_ROCM_CK_SDPA_GFX11)
+    list(APPEND _ck_sdpa_candidate_archs gfx1100 gfx1101 gfx1102 gfx1150 gfx1151)
+  endif()
   if(USE_ROCM_CK_SDPA_GFX12)
     list(APPEND _ck_sdpa_candidate_archs gfx1200 gfx1201)
   endif()
@@ -234,7 +238,7 @@ if(USE_FLASH_ATTENTION)
     # is built for. Auto-disable when it is empty; otherwise the ck_sdpa target
     # ends up with an empty HIP_ARCHITECTURES and CMake errors out.
     if(USE_ROCM_CK_SDPA AND NOT AT_ROCM_CK_SDPA_ARCHS)
-      message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no arch CK SDPA is built for (gfx942/gfx950; gfx1200/gfx1201 with USE_ROCM_CK_SDPA_GFX12)")
+      message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no arch CK SDPA is built for (gfx942/gfx950; gfx1100/gfx1101/gfx1102/gfx1150/gfx1151 with USE_ROCM_CK_SDPA_GFX11; gfx1200/gfx1201 with USE_ROCM_CK_SDPA_GFX12)")
       caffe2_update_option(USE_ROCM_CK_SDPA OFF)
     endif()
   endif()
@@ -1006,6 +1010,17 @@ if(USE_MPS)
             list(APPEND METALLIB_DEPS metal_40_shaders.stamp)
             air_to_metallib(kernels_40.metallib ${AIR_40})
             list(APPEND METALLIB_DEPS kernels_40.metallib)
+        endif()
+        if(CAN_COMPILE_METAL_41)
+            # Shaders with Metal 4.1 kernels (native fp8), which shadow the 4.0 ones on macOS 27+
+            set(METAL_41_SHADERS ScaledMM)
+            foreach(TGT_STEM ${METAL_41_SHADERS})
+                string(CONCAT TGT_41 ${TGT_STEM} "_41.air")
+                list(APPEND AIR_41 ${TGT_41})
+                metal_to_air(${CMAKE_CURRENT_SOURCE_DIR}/native/mps/kernels/${TGT_STEM}.metal ${TGT_41} "-std=metal4.1;-mmacos-version-min=27.0")
+            endforeach()
+            air_to_metallib(kernels_41.metallib ${AIR_41})
+            list(APPEND METALLIB_DEPS kernels_41.metallib)
         endif()
         add_custom_command(
                           COMMAND echo "// $$(date)" > metallib_dummy.cpp

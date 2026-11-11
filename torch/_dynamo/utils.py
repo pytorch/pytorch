@@ -79,6 +79,7 @@ from torch._C._dynamo.utils import get_current_stream  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
     justknobs_check,
@@ -125,6 +126,11 @@ try:
     import numpy as np
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
+
+try:
+    import tabulate as _tabulate
+except ImportError:
+    _tabulate = None  # type: ignore[assignment]
 
 try:
     import torch._logging
@@ -195,13 +201,6 @@ cumulative_time_spent_ns: dict[str, float] = collections.defaultdict(float)
 timer_counter = itertools.count()
 
 
-# Abstraction on top of counters.
-class ReInplaceTrigger(enum.Enum):
-    AUTO_FUNC_V1 = 1
-    AUTO_FUNC_V2 = 2
-    TRITON_OPS = 3
-
-
 class ReinplaceCounters:
     _values: collections.defaultdict[str, int] = collections.defaultdict(int)
 
@@ -246,14 +245,11 @@ def tabulate(
     rows: list[tuple[str, Any]] | list[list[Any]],
     headers: tuple[str, ...] | list[str],
 ) -> str:
-    try:
-        import tabulate
-
-        return tabulate.tabulate(rows, headers=headers)
-    except ImportError:
-        return "\n".join(
-            ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
-        )
+    if _tabulate is not None:
+        return _tabulate.tabulate(rows, headers=headers)
+    return "\n".join(
+        ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
+    )
 
 
 curr_frame = 0
@@ -2021,7 +2017,9 @@ def _scrubbed_inductor_config_for_logging() -> str | None:
 
     if torch._inductor.config:
         try:
-            inductor_config_copy = torch._inductor.config.get_config_copy()
+            # Skips entries excluded from saved configs, such as custom passes,
+            # which can hold arbitrary objects.
+            inductor_config_copy = torch._inductor.config.get_serializable_config_copy()
         except (TypeError, AttributeError, RuntimeError, AssertionError):
             inductor_conf_str = "Inductor Config cannot be pickled"
 
@@ -2055,7 +2053,7 @@ def _functorch_config_for_logging() -> str | None:
         return None
 
     try:
-        functorch_config_copy = torch._functorch.config.get_config_copy()
+        functorch_config_copy = torch._functorch.config.get_serializable_config_copy()
     except (TypeError, AttributeError, RuntimeError, AssertionError):
         return None
 
@@ -2870,10 +2868,10 @@ def torchscript(model: Any, example_inputs: Any, verbose: bool = False) -> Any:
         return model
 
     try:
-        return torch.jit.trace(model, example_inputs)
+        return torch.jit._trace.trace(model, example_inputs)
     except Exception:
         try:
-            return torch.jit.script(model)
+            return torch.jit._script.script(model)
         except Exception:
             if verbose:
                 log.exception("jit error")
@@ -3274,6 +3272,10 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
+class InvalidOrderedDict(ValueError):
+    """An OrderedDict's storage and linked keys cannot form one snapshot."""
+
+
 def enumerate_items_with_dict_position(
     obj: dict[K, V],
 ) -> Iterable[tuple[int, K, V | Any]]:
@@ -3285,10 +3287,19 @@ def enumerate_items_with_dict_position(
     dict.keys() position so that ConstDictKeySource indices stay consistent
     with PyDict_Next / C++ DictGuardManager.
     """
+    if issubclass(cast(type[dict[K, V]], type(obj)), OrderedDict):
+        items = list(dict.items(obj))
+        keys = torch._C._dynamo.guards.ordered_dict_keys(obj)
+        positions = {id(key): (i, key, value) for i, (key, value) in enumerate(items)}
+        if (
+            keys is None
+            or len(positions) != len(items)
+            or len(keys) != len(items)
+            or {id(key) for key in keys} != positions.keys()
+        ):
+            raise InvalidOrderedDict("OrderedDict storage differs from linked keys")
+        return (positions[id(key)] for key in keys)
     items = get_items_from_dict(obj)
-    if isinstance(obj, OrderedDict):
-        key_to_pos = {k: i for i, k in enumerate(dict.keys(obj))}
-        return ((key_to_pos[k], k, v) for k, v in items)
     return ((i, k, v) for i, (k, v) in enumerate(items))
 
 
@@ -4215,6 +4226,30 @@ def _custom_op_fake_impl_pending(tx: InstructionTranslatorBase, target: Any) -> 
     return side_effects.has_pending_mutation_of_attr(vt, "_abstract_fn")
 
 
+def _tensor_device_types(tree: Any) -> frozenset[str]:
+    return frozenset(
+        t.device.type for t in pytree.tree_leaves(tree) if isinstance(t, torch.Tensor)
+    ) - {"meta"}
+
+
+def _records_graph_break_ops(tx: InstructionTranslatorBase) -> bool:
+    package = tx.output.package
+    return package is not None and package.records_graph_break_ops
+
+
+def _record_graph_break_op(
+    tx: InstructionTranslatorBase, record: Callable[[Any], object]
+) -> None:
+    """Calls ``record`` with the capture package, if it records graph-break ops. A
+    failure only drops the record, so the graph break or error being handled stands."""
+    if not _records_graph_break_ops(tx):
+        return
+    try:
+        record(tx.output.package)
+    except Exception:
+        log.debug("precompile: dropped a graph-break op record", exc_info=True)
+
+
 def get_fake_value(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4308,6 +4343,15 @@ def _get_fake_value_impl(
             for arg in args
         )
 
+    def record_op(failed_op: object = None) -> None:
+        # The op graph-breaks, then runs eagerly on its inputs' devices.
+        _record_graph_break_op(
+            tx,
+            lambda p: p.add_graph_break_op(
+                node.target, failed_op, _tensor_device_types((args, kwargs))
+            ),
+        )
+
     try:
         from torch._dynamo.eval_frame import _use_eager_on_nested_compile
 
@@ -4315,13 +4359,26 @@ def _get_fake_value_impl(
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
-    except Unsupported:
+    except Unsupported as e:
+        # run_node and wrap_fake_exception graph-break on these.
+        fake_failures = (NotImplementedError, UnsupportedFakeTensorException)
+        if isinstance(e.__cause__, fake_failures):
+            record_op()
         raise
     except RuntimeError as e:
         cause: BaseException = e
         if e.__cause__ is not None:
             cause = e.__cause__
 
+        graph_break_causes = (
+            torch._subclasses.fake_tensor.DataDependentOutputException,
+            torch._subclasses.fake_tensor.DynamicOutputShapeException,
+            torch._subclasses.fake_tensor.UnsupportedOperatorException,
+        )
+        if isinstance(cause, graph_break_causes):
+            # These graph-break below; so do the TypeError and pending fake impl
+            # branches.
+            record_op(cause.func)
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
@@ -4424,6 +4481,7 @@ def _get_fake_value_impl(
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
+            record_op()
             unimplemented(
                 gb_type="TypeError when making fake tensor call",
                 context=f"TypeError {node.target}: {cause}",
@@ -4448,6 +4506,7 @@ def _get_fake_value_impl(
             # so do NOT wrap it as a hard TorchRuntimeError.
             # NB: gated on a pending _abstract_fn mutation so a genuinely
             # unregistered op still hard-errors below with actionable guidance.
+            record_op()
             unimplemented(
                 gb_type="Custom op missing fake impl during tracing",
                 context=f"{node.target}",
@@ -4804,9 +4863,7 @@ def tensor_always_has_static_shape(
 
 def lazy_format_graph_tabular(fn_name: str, gm: torch.fx.GraphModule) -> Any:
     def inner() -> str:
-        try:
-            from tabulate import tabulate  # TODO: Check that this is installed
-        except ImportError:
+        if _tabulate is None:
             return (
                 "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
                 + str(lazy_format_graph_code(fn_name, gm))
@@ -4815,7 +4872,7 @@ def lazy_format_graph_tabular(fn_name: str, gm: torch.fx.GraphModule) -> Any:
         node_specs = [
             [n.op, n.name, n.target, n.args, n.kwargs] for n in gm.graph.nodes
         ]
-        graph_str = tabulate(
+        graph_str = _tabulate.tabulate(
             node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
         )
         return _format_graph_code(fn_name, gm.forward.__code__.co_filename, graph_str)
@@ -6263,7 +6320,8 @@ def is_pybind11_enum_member(value: object) -> bool:
 
 
 def _make_inlined(
-    tx: InstructionTranslatorBase, f: Callable[..., Any]
+    tx: InstructionTranslatorBase,
+    f: types.FunctionType | torch.jit.ScriptFunction,  # type: ignore[type-arg]
 ) -> Callable[..., VariableTracker]:
     if not callable(f):
         raise AssertionError("Expect f to be a python callable.")
@@ -6272,11 +6330,11 @@ def _make_inlined(
         *args: VariableTracker, **kwargs: VariableTracker
     ) -> VariableTracker:
         from torch._dynamo.trace_rules import _force_inline
-        from torch._dynamo.variables.functions import UserFunctionVariable
+        from torch._dynamo.variables.builder import SourcelessBuilder
 
         with _force_inline():
             return tx.inline_user_function_return(
-                UserFunctionVariable(f),
+                SourcelessBuilder.create_internal_user_function(f),
                 list(args),
                 dict(kwargs),
             )

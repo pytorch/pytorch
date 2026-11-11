@@ -71,6 +71,7 @@ from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED as TEST_ON_CUDA,
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED as TEST_ON_XPU,
     largeTensorTest,
+    preserves_device_selection,
     skipCPUIf,
     skipCUDAIf,
     skipMPSIf,
@@ -78,6 +79,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import (
+    decorateIf,
     IS_LINUX,
     isRocmArchAnyOf,
     MI200_ARCH,
@@ -1310,12 +1312,10 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
 
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestFlexAttention(InductorTestCase):
-    def setUp(self):
-        super().setUp()
-        skipCPUIf(
-            LONG_COMPILATION_ON_CPU,
-            "skip UT for CPU due to long compilation time found in CI",
-        )
+    setUp = preserves_device_selection(InductorTestCase.setUp)
+    setUpClass = classmethod(
+        preserves_device_selection(InductorTestCase.setUpClass.__func__)
+    )
 
     def _check_equal(
         self,
@@ -2296,9 +2296,9 @@ class TestFlexAttention(InductorTestCase):
         self.run_test_with_paged_attention(*inputs)
 
     @supported_platform
-    @dtypes(*device_configs["cpu"].dtypes)
-    @dtypesIfCUDA(*device_configs["cuda"].dtypes)
-    @dtypesIfXPU(*device_configs["xpu"].dtypes)
+    @dtypes(*device_configs["cpu"].dtypes_fast)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("BLOCK_SIZE", test_block_size)
     def test_builtin_score_mods_different_block_size(
@@ -4691,9 +4691,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @common_utils.parametrize("score_mod", test_score_mods)
-    @dtypes(*device_configs["cpu"].dtypes)
-    @dtypesIfCUDA(*device_configs["cuda"].dtypes)
-    @dtypesIfXPU(*device_configs["xpu"].dtypes)
+    @dtypes(*device_configs["cpu"].dtypes_fast)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
     def test_non_equal_head_dims(self, device, dtype, score_mod, head_dims):
         qk_d, v_d = head_dims
@@ -4701,6 +4701,36 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(
             score_mod, dtype, device, B, H, S, qk_d, B, H, S, V_D=v_d
         )
+
+    @supported_platform
+    @dtypes(*device_configs["cpu"].dtypes)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes)
+    @common_utils.parametrize(
+        "BLOCK_SIZE,head_dims",
+        [
+            (128, (D, D // 2)),
+            (256, (D // 2, D)),
+            ((128, 256), (D, D // 2)),
+            ((256, 128), (D // 2, D)),
+        ],
+    )
+    def test_block_size_and_head_dims_all_dtypes(
+        self,
+        device,
+        dtype: torch.dtype,
+        BLOCK_SIZE: int | tuple[int, int],
+        head_dims: tuple[int, int],
+    ):
+        # The score_mod sweeps over block sizes and head dims use fast dtypes;
+        # keep one score_mod across all dtypes for these config-selection inputs.
+        qk_d, v_d = head_dims
+        block_mask = create_block_mask(
+            noop_mask, B, H, S, S, BLOCK_SIZE=BLOCK_SIZE, device=device
+        )
+        inputs = (_rel_causal, dtype, device, B, H, S, qk_d, B, H, S)
+        self.run_test(*inputs, V_D=v_d, block_mask=block_mask)
+        self.run_test_with_paged_attention(*inputs, V_D=v_d, block_mask=block_mask)
 
     @supported_platform
     @skip_on_cpu
@@ -5252,6 +5282,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         for eager, compiled in zip(eager_grads, compiled_grads):
             torch.testing.assert_close(eager, compiled, atol=9e-3, rtol=0)
 
+    @decorateIf(
+        unittest.skip("paged attention captures the page table; not supported on MPS"),
+        lambda params: params["mode"] == "paged_attention"
+        and _is_mps_device(params["device"]),
+    )
     @supported_platform
     @skip_on_cpu
     @common_utils.parametrize("mode", ["eager", "inductor", "paged_attention"])
@@ -7139,12 +7174,15 @@ class GraphModule(torch.nn.Module):
 
         choices = RecordingChoices()
         torch._dynamo.reset()
+        # V.set_choices_handler is thread-local; keep the lazily compiled
+        # backward on this thread instead of the reused autograd device thread.
         with (
             config.patch(
                 force_disable_caches=True,
                 inductor_choices_class=lambda: choices,
             ),
             V.set_choices_handler(choices),
+            torch.autograd.set_multithreading_enabled(False),
         ):
             torch.compile(compiled_attention, fullgraph=True)(
                 query, key, value, score_bias
@@ -8630,6 +8668,11 @@ class GraphModule(torch.nn.Module):
 
 
 class TestBlockMask(InductorTestCase):
+    setUpClass = classmethod(
+        preserves_device_selection(InductorTestCase.setUpClass.__func__)
+    )
+
+    @preserves_device_selection
     def setUp(self):
         super().setUp()
 
@@ -10078,13 +10121,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestPagedAttention(InductorTestCase):
-    def setUp(self):
-        super().setUp()
-        skipCPUIf(
-            LONG_COMPILATION_ON_CPU,
-            "skip UT for CPU due to long compilation time found in CI",
-        )
-
     def _check_equal(
         self,
         golden_out: torch.Tensor,
@@ -10590,15 +10626,29 @@ supports_learnable_bias = unittest.skipUnless(
 )
 
 
+def _skip_rocm_flaky_learnable_bias(test_name):
+    return common_utils.decorateIf(
+        unittest.skip(
+            "Flaky on ROCm: https://github.com/pytorch/pytorch/issues/167271 and https://github.com/pytorch/pytorch/issues/167296"
+        ),
+        lambda p: TEST_WITH_ROCM
+        and (
+            p["params"].batch_size,
+            p["params"].num_heads,
+            p["params"].seq_length,
+            p["params"].head_dim,
+            p["params"].dtype,
+            p["mode"],
+        )
+        in ROCM_FLAKY_LEARNABLE_BIAS_CASES[test_name],
+    )
+
+
 @supports_learnable_bias
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
         super().setUp()
-        skipCPUIf(
-            LONG_COMPILATION_ON_CPU,
-            "skip UT for CPU due to long compilation time found in CI",
-        )
         self.dtype = torch.float32
         self.atol = 3e-2
         self.rtol = 3e-2
@@ -10681,6 +10731,7 @@ class TestLearnableBiases(InductorTestCase):
         ):
             self._gold_check(eager, compiled, gold, name)
 
+    @_skip_rocm_flaky_learnable_bias("relative_1d_bias")
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -10999,6 +11050,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @_skip_rocm_flaky_learnable_bias("symmetric_bias")
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11072,6 +11124,7 @@ class TestLearnableBiases(InductorTestCase):
             (query, key, value, bias),
         )
 
+    @_skip_rocm_flaky_learnable_bias("head_specific_gate")
     @skip_on_cpu
     @common_utils.parametrize(
         "params", get_params(device_configs["cuda"].dtypes), name_fn=lambda x: f"{x}"
@@ -11788,6 +11841,19 @@ instantiate_device_type_tests(
     allow_xpu=True,
     allow_mps=True,
 )
+
+if LONG_COMPILATION_ON_CPU:
+    for name in (
+        "TestFlexAttentionCPU",
+        "TestPagedAttentionCPU",
+        "TestLearnableBiasesCPU",
+    ):
+        if name in globals() and not getattr(
+            globals()[name], "__unittest_skip__", False
+        ):
+            unittest.skip("skip UT for CPU due to long compilation time found in CI")(
+                globals()[name]
+            )
 
 
 if __name__ == "__main__":

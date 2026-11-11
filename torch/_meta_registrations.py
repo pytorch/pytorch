@@ -25,6 +25,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
+    is_expandable_to,
     make_channels_last_strides_for,
     make_contiguous_strides_for,
     Number,
@@ -729,6 +730,35 @@ def meta_philox_randint_(self, key, low=None, high=None):
             "(torch.int64 or torch.uint64).",
         )
     _check_philox_gen_args("_philox_randint_", self, key)
+    return self
+
+
+def _check_philox_bound(op_name, name, bound, self):
+    torch._check(
+        bound.device == self.device,
+        lambda: (
+            f"{op_name}: {name} must be on the same device as self, "
+            f"got {bound.device} and {self.device}"
+        ),
+    )
+    torch._check(
+        bound.dtype.is_floating_point,
+        lambda: f"{op_name}: {name} must be a floating point tensor, got {bound.dtype}",
+    )
+    torch._check(
+        is_expandable_to(bound.shape, self.shape),
+        lambda: (
+            f"{op_name}: {name} shape {list(bound.shape)} is not broadcastable "
+            f"to the output shape {list(self.shape)}"
+        ),
+    )
+
+
+@register_meta(aten._philox_uniform_.Tensor)
+def meta_philox_uniform_tensor_(self, key, low, high):
+    _check_philox_distribution_args("_philox_uniform_", self, key)
+    _check_philox_bound("_philox_uniform_", "low", low, self)
+    _check_philox_bound("_philox_uniform_", "high", high, self)
     return self
 
 
@@ -1845,6 +1875,10 @@ def _linalg_svd_meta(
 ):
     checkIsMatrix(A, "linalg.svd")
     checkFloatingOrComplex(A, "linalg.svd")
+    torch._check(
+        driver is None or driver in ("gesvd", "gesvdj", "gesvda"),
+        lambda: f"torch.linalg.svd: unknown svd driver {driver}. Expected one of gesvd, gesvdj, or gesvda.",
+    )
 
     batch_dims = list(A.shape[:-2])
     m = A.shape[-2]
@@ -3719,7 +3753,7 @@ def meta_avg_pool3d_backward(
 
 @register_meta(aten._adaptive_avg_pool2d.default)
 def meta_adaptive_avg_pool2d(self, output_size):
-    torch._check(
+    torch._check_value(
         self.ndim == 3 or self.ndim == 4,
         lambda: f"Expected 3D or 4D tensor, but got {self.shape}",
     )
@@ -3737,7 +3771,7 @@ def meta_adaptive_avg_pool2d(self, output_size):
 
 @register_meta(aten._adaptive_avg_pool3d.default)
 def meta_adaptive_avg_pool3d(self, output_size):
-    torch._check(
+    torch._check_value(
         self.ndim == 4 or self.ndim == 5,
         lambda: f"Expected 4D or 5D tensor, but got {self.shape}",
     )
@@ -3753,11 +3787,22 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
             lambda: f"adaptive_avg_pool2d_backward(): Expected grad_output to have non-zero \
                       size for non-batch dimensions, {grad_out.shape} with dimension {i} being empty",
         )
-    torch._check(
+    torch._check_value(
+        self.ndim == ndim,
+        lambda: f"adaptive_avg_pool2d_backward(): Expected dimensions {self.ndim} "
+        f"for `grad_output` but got dimensions {ndim}",
+    )
+    torch._check_value(
         ndim == 3 or ndim == 4,
         lambda: f"adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got {self.shape}",
     )
-    torch._check(
+    for i in range(ndim - 2):
+        torch._check_value(
+            self.size(i) == grad_out.size(i),
+            lambda: f"adaptive_avg_pool2d_backward(): input and grad_output must have the same size at dim {i}, "
+            f"but got {self.size(i)} and {grad_out.size(i)}",
+        )
+    torch._check_value(
         self.dtype == grad_out.dtype,
         lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}",
     )
@@ -3771,6 +3816,17 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
 @out_wrapper("grad_input")
 def meta__adaptive_avg_pool3d_backward(grad_output, self):
     _adaptive_pool_empty_output_check(grad_output, "adaptive_avg_pool3d_backward")
+    torch._check_value(
+        self.ndim == grad_output.ndim,
+        lambda: f"adaptive_avg_pool3d_backward(): Expected dimensions {self.ndim} "
+        f"for `grad_output` but got dimensions {grad_output.ndim}",
+    )
+    for i in range(grad_output.ndim - 3):
+        torch._check_value(
+            self.size(i) == grad_output.size(i),
+            lambda: f"adaptive_avg_pool3d_backward(): input and grad_output must have the same size at dim {i}, "
+            f"but got {self.size(i)} and {grad_output.size(i)}",
+        )
     return torch.empty_like(self, memory_format=torch.legacy_contiguous_format)
 
 
@@ -9007,10 +9063,15 @@ def _meta_grouped_mm_common(
                 offs.dtype == torch.int32,
                 lambda: f"Offsets tensor must be integer (int32) tensor, but got {offs.dtype}.",
             )
-            torch._check(
-                offs.stride() == (1,),
-                lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
-            )
+            if scaled:
+                torch._check_value(
+                    offs.is_contiguous(), lambda: "Offsets have to be contiguous"
+                )
+            else:
+                torch._check(
+                    offs.stride() == (1,),
+                    lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
+                )
     else:
         torch._check(
             offs is None,
@@ -9102,10 +9163,30 @@ def meta_scaled_grouped_mm_v2(
     contraction_dim: list[int] | None = None,
     use_fast_accum: bool = False,
 ):
-    """Shape inference only, since the structured C++ meta doesn't support
-    dynamic shapes. Input validation lives there; same pattern as meta_mm.
+    r"""Infer output shape without requiring concrete dimensions.
+
+    This Python meta overrides the C++ validator under FakeTensor and compile.
+    It checks recipe-specific output dtype and offset contiguity; bias, offset dtype/rank, and
+    dimension alignment are validated by the eager C++ path at execution.
     """
     _out_dtype = out_dtype or torch.bfloat16
+    torch._check_value(
+        _out_dtype in (torch.bfloat16, torch.float16, torch.float32),
+        lambda: "Only bf16, fp16, and fp32 high precision output types are supported for grouped gemm",
+    )
+    from torch.nn.functional import ScalingType
+
+    rowwise = scale_recipe_a == scale_recipe_b == [ScalingType.RowWise.value]
+    tensorwise = [ScalingType.TensorWise.value]
+    bf16_only = scale_recipe_a != tensorwise or scale_recipe_b != tensorwise
+    message = "Grouped scaling configuration requires BFloat16 output"
+    if rowwise:
+        message = "Rowwise grouped GEMM requires BFloat16 output"
+    torch._check_value(not bf16_only or _out_dtype == torch.bfloat16, lambda: message)
+    if offs is not None:
+        torch._check_value(
+            offs.is_contiguous(), lambda: "Offsets have to be contiguous"
+        )
     return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, _out_dtype)
 
 
