@@ -940,31 +940,8 @@ class MetaConverter(Generic[_TensorT]):
         # bearing: FakeTensor relies on real tensor being set to exactly this
         # value
         self.copy_data = copy_data
-        # Whether the callback makes C++ fakes, which cannot hold views, sparse
-        # or mkldnn layouts or nested ints yet, so converting those raises
-        # UnsupportedFakeTensorException
         self.cpp_fakes = cpp_fakes
         self.describer = MetaTensorDescriber(copy_data=copy_data)
-
-    def _check_cpp_fakes_support(self, t: MetaTensorDesc[Any]) -> None:
-        # C++ fakes cannot hold these yet, and making views and sparse tensors
-        # runs ops on the new fake (views under the Python dispatcher). The
-        # whole tensor, its grad and inner tensors included, is checked before
-        # anything is made for it.
-        from torch._subclasses.fake_tensor import UnsupportedFakeTensorException
-
-        is_sparse = t.is_sparse or is_sparse_compressed_layout(t.layout)
-        for kind, applies in (
-            ("views", t.is_view),
-            ("sparse", is_sparse),
-            ("mkldnn", t.is_mkldnn),
-            ("nested ints", t.nested_int is not None),
-        ):
-            if applies:
-                raise UnsupportedFakeTensorException(f"{kind} nyi in C++ fake tensors")
-        for inner in (t.grad, t.unwrapped, *(t.attrs or {}).values()):
-            if inner is not None:
-                self._check_cpp_fakes_support(inner)
 
     def successful(self) -> bool:
         return self.hit > 0 and self.miss == 0
@@ -1628,6 +1605,7 @@ class MetaConverter(Generic[_TensorT]):
                             is_coalesced=t.is_coalesced,
                         )
                     )
+                    require_python_fake_mode(maybe_get_fake_mode(r))
                     if self.copy_data:
                         # Pray that sparse clone doesn't lose information
                         if t.data is None:
@@ -1703,6 +1681,7 @@ class MetaConverter(Generic[_TensorT]):
                             device="meta",
                         )
                     )
+                    require_python_fake_mode(maybe_get_fake_mode(r))
                     if self.copy_data:
                         # Pray sparse clone doesn't lose information
                         if t.data is None:
@@ -1748,6 +1727,7 @@ class MetaConverter(Generic[_TensorT]):
                             sizes, strides, dtype=t.dtype, device="meta"
                         )
                     )
+                    require_python_fake_mode(maybe_get_fake_mode(r))
                     if self.copy_data:
                         with torch.no_grad(), no_dispatch():
                             if t.size is None:
@@ -1967,6 +1947,7 @@ class MetaConverter(Generic[_TensorT]):
                             torch._dynamo.source.AttrSource(source, "_base"),
                             base_symbolic_context,
                         )
+                    require_python_fake_mode(maybe_get_fake_mode(base))
 
                     def is_c_of_r(
                         complex_dtype: torch.dtype, real_dtype: torch.dtype
@@ -2417,8 +2398,6 @@ class MetaConverter(Generic[_TensorT]):
         # Describe the tensor.  NB: do NOT disable ambient modes, we may need
         # to query them when figuring out what to put in here
         t_desc = self.describer.describe_tensor(t, trace=trace)
-        if self.cpp_fakes:
-            self._check_cpp_fakes_support(t_desc)
 
         if trace:
             if source is None:
