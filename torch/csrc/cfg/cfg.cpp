@@ -217,6 +217,7 @@ struct TypedCall {
   virtual PyObject* call(
       const TcfgSite& site,
       PyObject* const* operands,
+      uint32_t flags,
       int32_t* status) const = 0;
 };
 
@@ -276,6 +277,37 @@ bool sameLibraryAsTorch(void* fn) {
   return ours.dli_fbase == theirs.dli_fbase;
 #endif
 }
+
+// Unboxed tensors: TensorImpl* | 1, an owned reference (see cfg.h).
+using TensorPtr = c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>;
+
+bool isUnboxed(PyObject* o) {
+  return (reinterpret_cast<uintptr_t>(o) & 1) != 0;
+}
+
+c10::TensorImpl* unboxedImpl(PyObject* o) {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+  return reinterpret_cast<c10::TensorImpl*>(
+      reinterpret_cast<uintptr_t>(o) & ~static_cast<uintptr_t>(1));
+}
+
+PyObject* tagUnboxed(c10::TensorImpl* impl) {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+  return reinterpret_cast<PyObject*>(reinterpret_cast<uintptr_t>(impl) | 1);
+}
+
+// An at::Tensor for an unboxed operand that does not own a reference, so
+// that handing it to a kernel costs no reference counting.
+struct BorrowedTensor {
+  explicit BorrowedTensor(c10::TensorImpl* impl)
+      : tensor(TensorPtr::reclaim(impl)) {}
+  BorrowedTensor(const BorrowedTensor&) = delete;
+  BorrowedTensor& operator=(const BorrowedTensor&) = delete;
+  ~BorrowedTensor() {
+    tensor.unsafeReleaseTensorImpl();
+  }
+  at::Tensor tensor;
+};
 
 bool sameDouble(double a, double b) {
   return std::memcmp(&a, &b, sizeof(double)) == 0;
@@ -698,6 +730,7 @@ struct Unbox<const at::Tensor&> {
   struct Holder {
     const at::Tensor* ptr = nullptr;
     at::Tensor temp;
+    std::optional<BorrowedTensor> borrowed;
   };
   static bool accepts(const ArgTemplate& a) {
     if (a.kind == ArgTemplate::Const) {
@@ -716,7 +749,12 @@ struct Unbox<const at::Tensor&> {
     }
     PyObject* o = operands[a.operand];
     if (a.conv == Conv::Tensor) {
-      h.ptr = &THPVariable_Unpack(o);
+      if (isUnboxed(o)) {
+        h.borrowed.emplace(unboxedImpl(o));
+        h.ptr = &h.borrowed->tensor;
+      } else {
+        h.ptr = &THPVariable_Unpack(o);
+      }
       return true;
     }
     if (PyBool_Check(o)) {
@@ -744,6 +782,7 @@ template <>
 struct Unbox<at::Tensor&> {
   struct Holder {
     at::Tensor* ptr = nullptr;
+    std::optional<BorrowedTensor> borrowed;
   };
   static bool accepts(const ArgTemplate& a) {
     return a.kind == ArgTemplate::Operand && a.conv == Conv::Tensor;
@@ -752,8 +791,14 @@ struct Unbox<at::Tensor&> {
       Holder& h,
       const ArgTemplate& a,
       PyObject* const* operands) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-    h.ptr = const_cast<at::Tensor*>(&THPVariable_Unpack(operands[a.operand]));
+    PyObject* o = operands[a.operand];
+    if (isUnboxed(o)) {
+      h.borrowed.emplace(unboxedImpl(o));
+      h.ptr = &h.borrowed->tensor;
+    } else {
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      h.ptr = const_cast<at::Tensor*>(&THPVariable_Unpack(o));
+    }
     return true;
   }
   static at::Tensor& get(Holder& h) {
@@ -944,16 +989,38 @@ struct Unbox<at::OptionalIntArrayRef> {
   }
 };
 
-PyObject* toPython(const TcfgSite& /*site*/, at::Tensor&& t) {
+// A tensor a kernel returned by value. Unless the caller wants it as a Python
+// object right away it stays unboxed: if nothing but other kernels ever looks
+// at it, it never gets one.
+PyObject* tensorResult(at::Tensor&& t, uint32_t flags) {
+  if ((flags & TCFG_UNBOXED_RESULT) != 0 && t.defined()) {
+    return tagUnboxed(t.unsafeReleaseTensorImpl());
+  }
   return THPVariable_Wrap(std::move(t));
 }
-PyObject* toPython(const TcfgSite& /*site*/, at::Tensor& t) {
+
+PyObject* toPython(const TcfgSite& /*site*/, uint32_t flags, at::Tensor&& t) {
+  return tensorResult(std::move(t), flags);
+}
+// The self an in-place operator returns. If it has a Python object, that is
+// the result; taking another reference to the tensor instead would have to
+// pin the Python object.
+PyObject* toPython(const TcfgSite& /*site*/, uint32_t flags, at::Tensor& t) {
+  auto* impl = t.unsafeGetTensorImpl();
+  if ((flags & TCFG_UNBOXED_RESULT) != 0 && t.defined() &&
+      impl->pyobj_slot()->load_pyobj() == nullptr) {
+    c10::raw::intrusive_ptr::incref(impl);
+    return tagUnboxed(impl);
+  }
   return THPVariable_Wrap(t);
 }
-PyObject* toPython(const TcfgSite& /*site*/, bool b) {
+PyObject* toPython(const TcfgSite& /*site*/, uint32_t /*flags*/, bool b) {
   return Py_NewRef(b ? Py_True : Py_False);
 }
-PyObject* toPython(const TcfgSite& site, const at::Scalar& s) {
+PyObject* toPython(
+    const TcfgSite& site,
+    uint32_t /*flags*/,
+    const at::Scalar& s) {
   switch (site.ret) {
     case Ret::Bool:
       return Py_NewRef(s.toBool() ? Py_True : Py_False);
@@ -983,13 +1050,14 @@ struct TypedCallImpl final : TypedCall {
   PyObject* call(
       const TcfgSite& site,
       PyObject* const* operands,
+      uint32_t flags,
       int32_t* status) const override {
     std::tuple<typename Unbox<A>::Holder...> holders;
     if (!prepare(site, operands, holders, std::index_sequence_for<A...>{})) {
       *status = TCFG_MISS;
       return nullptr;
     }
-    return invoke(site, holders, std::index_sequence_for<A...>{});
+    return invoke(site, flags, holders, std::index_sequence_for<A...>{});
   }
 
  private:
@@ -1006,10 +1074,12 @@ struct TypedCallImpl final : TypedCall {
   template <size_t... I>
   PyObject* invoke(
       const TcfgSite& site,
+      uint32_t flags,
       std::tuple<typename Unbox<A>::Holder...>& holders,
       std::index_sequence<I...> /*unused*/) const {
     return toPython(
         site,
+        flags,
         op_.redispatch(site.entry_ks, Unbox<A>::get(std::get<I>(holders))...));
   }
 
@@ -1246,7 +1316,11 @@ thread_local size_t StackLease::depth = 0;
 bool pushOperand(torch::jit::Stack& stack, PyObject* o, Conv conv) {
   switch (conv) {
     case Conv::Tensor:
-      stack.emplace_back(THPVariable_Unpack(o));
+      if (isUnboxed(o)) {
+        stack.emplace_back(at::Tensor(TensorPtr::reclaim_copy(unboxedImpl(o))));
+      } else {
+        stack.emplace_back(THPVariable_Unpack(o));
+      }
       return true;
     case Conv::Bool:
       stack.emplace_back(o == Py_True);
@@ -1306,7 +1380,11 @@ bool pushOperand(torch::jit::Stack& stack, PyObject* o, Conv conv) {
   }
 }
 
-PyObject* siteCall(TcfgSite* site, PyObject* const* operands, int32_t* status) {
+PyObject* siteCall(
+    TcfgSite* site,
+    PyObject* const* operands,
+    uint32_t flags,
+    int32_t* status) {
   *status = TCFG_MISS;
   const auto tls = c10::impl::tls_local_dispatch_key_set();
   if (tls.included_.raw_repr() != site->world.tls_included ||
@@ -1324,26 +1402,38 @@ PyObject* siteCall(TcfgSite* site, PyObject* const* operands, int32_t* status) {
       case OperandGuard::None:
         break;
       case OperandGuard::Tensor: {
-        if (Py_TYPE(o) != g.type ||
-            Py_TYPE(o)->tp_version_tag != g.type_version) {
+        // An unboxed tensor is one that would be a plain Tensor if it had a
+        // Python object.
+        PyTypeObject* type = isUnboxed(o)
+            ? reinterpret_cast<PyTypeObject*>(THPVariableClass)
+            : Py_TYPE(o);
+        if (type != g.type || type->tp_version_tag != g.type_version) {
           return nullptr;
         }
-        const auto& t = THPVariable_Unpack(o);
-        if (t.key_set().raw_repr() != g.key_set) {
+        const c10::TensorImpl* impl = isUnboxed(o)
+            ? unboxedImpl(o)
+            : THPVariable_Unpack(o).unsafeGetTensorImpl();
+        if (impl->key_set().raw_repr() != g.key_set) {
           return nullptr;
         }
         // A tensor without autograd metadata neither requires grad nor
         // carries a forward gradient.
-        if (skips_autograd &&
-            t.unsafeGetTensorImpl()->autograd_meta() != nullptr &&
-            ((grad_enabled && t.requires_grad()) ||
-             torch::autograd::isFwGradDefined(t))) {
-          return nullptr;
+        if (skips_autograd && impl->autograd_meta() != nullptr) {
+          if (grad_enabled && impl->requires_grad()) {
+            return nullptr;
+          }
+          const bool fw_grad = isUnboxed(o)
+              ? torch::autograd::isFwGradDefined(
+                    BorrowedTensor(unboxedImpl(o)).tensor)
+              : torch::autograd::isFwGradDefined(THPVariable_Unpack(o));
+          if (fw_grad) {
+            return nullptr;
+          }
         }
         break;
       }
       case OperandGuard::ExactType:
-        if (Py_TYPE(o) != g.type) {
+        if (isUnboxed(o) || Py_TYPE(o) != g.type) {
           return nullptr;
         }
         break;
@@ -1369,7 +1459,7 @@ PyObject* siteCall(TcfgSite* site, PyObject* const* operands, int32_t* status) {
     tls_guard.emplace(site->entry_tls);
   }
   if (site->typed) {
-    PyObject* result = site->typed->call(*site, operands, status);
+    PyObject* result = site->typed->call(*site, operands, flags, status);
     if (result != nullptr) {
       *status = TCFG_OK;
     }
@@ -1412,7 +1502,7 @@ PyObject* siteCall(TcfgSite* site, PyObject* const* operands, int32_t* status) {
   c10::IValue& out = stack.back();
   switch (site->ret) {
     case Ret::Tensor:
-      result = THPVariable_Wrap(std::move(out).toTensor());
+      result = tensorResult(std::move(out).toTensor(), flags);
       break;
     case Ret::Bool:
       result = Py_NewRef(out.toBool() ? Py_True : Py_False);
@@ -1490,23 +1580,37 @@ PyObject* siteInfo(const TcfgSite* site) {
 }
 
 int32_t tensorInfo(PyObject* obj, TcfgTensorInfo* out) {
-  if (!THPVariable_CheckExact(obj)) {
+  const c10::TensorImpl* impl = nullptr;
+  if (isUnboxed(obj)) {
+    impl = unboxedImpl(obj);
+  } else if (THPVariable_CheckExact(obj) && THPVariable_Unpack(obj).defined()) {
+    impl = THPVariable_Unpack(obj).unsafeGetTensorImpl();
+  } else {
     return 0;
   }
-  const auto& t = THPVariable_Unpack(obj);
-  if (!t.defined()) {
-    return 0;
-  }
-  const auto* impl = t.unsafeGetTensorImpl();
   if (impl->has_symbolic_sizes_strides()) {
     return 0;
   }
   const auto sizes = impl->sizes();
   out->ndim = static_cast<int32_t>(sizes.size());
   out->sizes = sizes.data();
-  out->requires_grad = t.requires_grad() ? 1 : 0;
-  out->key_set = t.key_set().raw_repr();
+  out->requires_grad = impl->requires_grad() ? 1 : 0;
+  out->key_set = impl->key_set().raw_repr();
   return 1;
+}
+
+PyObject* tensorBox(PyObject* tagged) {
+  HANDLE_TH_ERRORS
+  return THPVariable_Wrap(at::Tensor(TensorPtr::reclaim(unboxedImpl(tagged))));
+  END_HANDLE_TH_ERRORS
+}
+
+void tensorRetain(PyObject* tagged) {
+  c10::raw::intrusive_ptr::incref(unboxedImpl(tagged));
+}
+
+void tensorRelease(PyObject* tagged) {
+  c10::raw::intrusive_ptr::decref(unboxedImpl(tagged));
 }
 
 const TcfgApi api_table = {
@@ -1520,6 +1624,9 @@ const TcfgApi api_table = {
     &siteCall,
     &siteInfo,
     &tensorInfo,
+    &tensorBox,
+    &tensorRetain,
+    &tensorRelease,
 };
 
 } // namespace

@@ -17,6 +17,7 @@ use crate::analysis::{self, Analysis};
 use crate::capi::{self, SiteSlot, TcfgApi, TcfgPyOp, TcfgTensorInfo};
 use crate::ir::*;
 use crate::pyffi::{self, new_ref, py_bool, xdecref, Obj, Shared};
+use std::sync::atomic::AtomicU64;
 use crate::spec::{self, PassCx, Pipeline, Unit, ValueObs};
 use pyo3::ffi;
 use std::ffi::CString;
@@ -35,6 +36,8 @@ pub struct Options {
     /// How many times a block may go back to the profiling tier.
     pub max_respecializations: u32,
     pub max_site_variants: usize,
+    /// Keep the tensors kernels return unboxed until Python code needs them.
+    pub unboxed: bool,
 }
 
 impl Default for Options {
@@ -45,6 +48,7 @@ impl Default for Options {
             max_versions: 4,
             max_respecializations: 6,
             max_site_variants: 4,
+            unboxed: true,
         }
     }
 }
@@ -112,6 +116,10 @@ pub struct Compiled {
     pub options: Options,
     pub pipeline: Pipeline,
     frames: Shared<Vec<Vec<Obj>>>,
+    /// Kernel results that were kept unboxed, and how many of those got a
+    /// Python object after all.
+    pub unboxed_results: AtomicU64,
+    pub boxed_later: AtomicU64,
     name_c: CString,
     filename_c: CString,
 }
@@ -137,6 +145,8 @@ unsafe fn take(regs: &mut [Obj], v: V) -> Obj {
     std::mem::replace(regs.get_unchecked_mut(v as usize), null_mut())
 }
 
+/// The raw content of a register: a Python object, null, or an unboxed
+/// tensor. Only for code that handles all three; see `Compiled::obj`.
 #[inline(always)]
 unsafe fn reg(regs: &[Obj], v: V) -> Obj {
     *regs.get_unchecked(v as usize)
@@ -240,6 +250,32 @@ unsafe fn do_raise(exc: Obj, cause: Obj) {
 }
 
 impl Compiled {
+    /// The value of a register as a Python object. A kernel result is kept
+    /// unboxed until this is called on it, that is until generic code looks
+    /// at it; then it gets its Python object, in place.
+    #[inline(always)]
+    unsafe fn obj(&self, regs: &mut [Obj], v: V) -> Obj {
+        let o = reg(regs, v);
+        if capi::is_unboxed(o) {
+            self.box_register(regs, v)
+        } else {
+            o
+        }
+    }
+
+    #[cold]
+    unsafe fn box_register(&self, regs: &mut [Obj], v: V) -> Obj {
+        let boxed = (capi::api().unwrap_unchecked().tensor_box)(reg(regs, v));
+        if boxed.is_null() {
+            // The reference was consumed either way.
+            *regs.get_unchecked_mut(v as usize) = null_mut();
+            panic!("cfg_compile: could not create the Python object of a tensor");
+        }
+        *regs.get_unchecked_mut(v as usize) = boxed;
+        self.boxed_later.fetch_add(1, Ordering::Relaxed);
+        boxed
+    }
+
     pub fn new(func: Function, options: Options, pipeline: Pipeline) -> Compiled {
         let analysis = analysis::analyze(&func);
         let mut generic = Vec::with_capacity(func.blocks.len());
@@ -301,6 +337,8 @@ impl Compiled {
             options,
             pipeline,
             frames: Shared::new(Vec::new()),
+            unboxed_results: AtomicU64::new(0),
+            boxed_later: AtomicU64::new(0),
         }
     }
 
@@ -475,7 +513,7 @@ impl Compiled {
             Err(()) => null_mut(),
         };
         for r in regs.iter_mut() {
-            xdecref(std::mem::replace(r, null_mut()));
+            capi::release(std::mem::replace(r, null_mut()));
         }
         self.frames.borrow_mut().push(regs);
         ffi::Py_LeaveRecursiveCall();
@@ -492,7 +530,7 @@ impl Compiled {
     // Generic instructions
     // ------------------------------------------------------------------
 
-    unsafe fn vectorcall(&self, regs: &[Obj], callee: Obj, args: &[V], kwnames: u32) -> Obj {
+    unsafe fn vectorcall(&self, regs: &mut [Obj], callee: Obj, args: &[V], kwnames: u32) -> Obj {
         // One spare slot in front lets bound methods prepend self in place.
         let mut small: [Obj; 9] = [null_mut(); 9];
         let mut big: Vec<Obj>;
@@ -503,7 +541,7 @@ impl Compiled {
             &mut big[..]
         };
         for (i, v) in args.iter().enumerate() {
-            buf[i + 1] = reg(regs, *v);
+            buf[i + 1] = self.obj(regs, *v);
         }
         let (kw, nkw) = if kwnames == NONE {
             (null_mut(), 0)
@@ -581,7 +619,7 @@ impl Compiled {
                 Ok(v)
             }
             Op::LoadAttr(a, name) => {
-                let obj = reg(regs, *a);
+                let obj = self.obj(regs, *a);
                 // torch.add and friends: an attribute of a plain module is an
                 // entry of its dict.
                 if ffi::PyModule_CheckExact(obj) != 0 && *self.plain_name.get_unchecked(*name as usize)
@@ -607,18 +645,18 @@ impl Compiled {
                 checked(ffi::PyObject_GetAttr(obj, f.consts[*name as usize].as_ptr()))
             }
             Op::StoreAttr { obj, name, val } => status(ffi::PyObject_SetAttr(
-                reg(regs, *obj),
+                self.obj(regs, *obj),
                 f.consts[*name as usize].as_ptr(),
-                reg(regs, *val),
+                self.obj(regs, *val),
             )),
             Op::StoreGlobal(name, v) => status(ffi::PyDict_SetItem(
                 f.globals.as_ptr(),
                 f.consts[*name as usize].as_ptr(),
-                reg(regs, *v),
+                self.obj(regs, *v),
             )),
-            Op::Binary(kind, a, b) => checked(binary(*kind, reg(regs, *a), reg(regs, *b))),
+            Op::Binary(kind, a, b) => checked(binary(*kind, self.obj(regs, *a), self.obj(regs, *b))),
             Op::Unary(kind, a) => {
-                let a = reg(regs, *a);
+                let a = self.obj(regs, *a);
                 match kind {
                     UnaryKind::Neg => checked(ffi::PyNumber_Negative(a)),
                     UnaryKind::Pos => checked(ffi::PyNumber_Positive(a)),
@@ -633,18 +671,18 @@ impl Compiled {
                 }
             }
             Op::Compare(kind, a, b) => {
-                checked(ffi::PyObject_RichCompare(reg(regs, *a), reg(regs, *b), *kind as i32))
+                checked(ffi::PyObject_RichCompare(self.obj(regs, *a), self.obj(regs, *b), *kind as i32))
             }
-            Op::Is(a, b, invert) => Ok(py_bool((reg(regs, *a) == reg(regs, *b)) != *invert)),
+            Op::Is(a, b, invert) => Ok(py_bool((self.obj(regs, *a) == self.obj(regs, *b)) != *invert)),
             Op::Contains(item, container, invert) => {
-                let r = ffi::PySequence_Contains(reg(regs, *container), reg(regs, *item));
+                let r = ffi::PySequence_Contains(self.obj(regs, *container), self.obj(regs, *item));
                 if r < 0 {
                     return Err(());
                 }
                 Ok(py_bool((r == 1) != *invert))
             }
             Op::ToBool(a) => {
-                let a = reg(regs, *a);
+                let a = self.obj(regs, *a);
                 if a == ffi::Py_True() || a == ffi::Py_False() {
                     return Ok(new_ref(a));
                 }
@@ -654,19 +692,20 @@ impl Compiled {
                 }
                 Ok(py_bool(r != 0))
             }
+            // An unboxed tensor is not None; no need to box it to find out.
             Op::IsNone(a, invert) => Ok(py_bool((reg(regs, *a) == ffi::Py_None()) != *invert)),
-            Op::GetItem(a, k) => checked(ffi::PyObject_GetItem(reg(regs, *a), reg(regs, *k))),
+            Op::GetItem(a, k) => checked(ffi::PyObject_GetItem(self.obj(regs, *a), self.obj(regs, *k))),
             Op::SetItem { obj, key, val } => {
-                status(ffi::PyObject_SetItem(reg(regs, *obj), reg(regs, *key), reg(regs, *val)))
+                status(ffi::PyObject_SetItem(self.obj(regs, *obj), self.obj(regs, *key), self.obj(regs, *val)))
             }
-            Op::DelItem(a, k) => status(ffi::PyObject_DelItem(reg(regs, *a), reg(regs, *k))),
+            Op::DelItem(a, k) => status(ffi::PyObject_DelItem(self.obj(regs, *a), self.obj(regs, *k))),
             Op::BuildTuple(vs) => {
                 let t = ffi::PyTuple_New(vs.len() as isize);
                 if t.is_null() {
                     return Err(());
                 }
                 for (i, v) in vs.iter().enumerate() {
-                    ffi::PyTuple_SET_ITEM(t, i as isize, new_ref(reg(regs, *v)));
+                    ffi::PyTuple_SET_ITEM(t, i as isize, new_ref(self.obj(regs, *v)));
                 }
                 Ok(t)
             }
@@ -676,7 +715,7 @@ impl Compiled {
                     return Err(());
                 }
                 for (i, v) in vs.iter().enumerate() {
-                    ffi::PyList_SET_ITEM(l, i as isize, new_ref(reg(regs, *v)));
+                    ffi::PyList_SET_ITEM(l, i as isize, new_ref(self.obj(regs, *v)));
                 }
                 Ok(l)
             }
@@ -686,7 +725,7 @@ impl Compiled {
                     return Err(());
                 }
                 for v in vs {
-                    if ffi::PySet_Add(s, reg(regs, *v)) < 0 {
+                    if ffi::PySet_Add(s, self.obj(regs, *v)) < 0 {
                         ffi::Py_DECREF(s);
                         return Err(());
                     }
@@ -699,7 +738,7 @@ impl Compiled {
                     return Err(());
                 }
                 for kv in vs.chunks(2) {
-                    if ffi::PyDict_SetItem(d, reg(regs, kv[0]), reg(regs, kv[1])) < 0 {
+                    if ffi::PyDict_SetItem(d, self.obj(regs, kv[0]), self.obj(regs, kv[1])) < 0 {
                         ffi::Py_DECREF(d);
                         return Err(());
                     }
@@ -707,8 +746,8 @@ impl Compiled {
                 Ok(d)
             }
             Op::BuildSlice(a, b, c) => {
-                let step = if *c == NONE { null_mut() } else { reg(regs, *c) };
-                checked(ffi::PySlice_New(reg(regs, *a), reg(regs, *b), step))
+                let step = if *c == NONE { null_mut() } else { self.obj(regs, *c) };
+                checked(ffi::PySlice_New(self.obj(regs, *a), self.obj(regs, *b), step))
             }
             Op::BuildString(vs) => {
                 let t = ffi::PyTuple_New(vs.len() as isize);
@@ -716,7 +755,7 @@ impl Compiled {
                     return Err(());
                 }
                 for (i, v) in vs.iter().enumerate() {
-                    ffi::PyTuple_SET_ITEM(t, i as isize, new_ref(reg(regs, *v)));
+                    ffi::PyTuple_SET_ITEM(t, i as isize, new_ref(self.obj(regs, *v)));
                 }
                 let empty = ffi::PyUnicode_New(0, 0);
                 let s = if empty.is_null() { null_mut() } else { ffi::PyUnicode_Join(empty, t) };
@@ -725,7 +764,7 @@ impl Compiled {
                 checked(s)
             }
             Op::Format { val, conv, spec } => {
-                let val = reg(regs, *val);
+                let val = self.obj(regs, *val);
                 let converted = match conv {
                     1 => ffi::PyObject_Str(val),
                     2 => ffi::PyObject_Repr(val),
@@ -738,18 +777,18 @@ impl Compiled {
                 if *spec == NONE && ffi::PyUnicode_CheckExact(converted) != 0 {
                     return Ok(converted);
                 }
-                let spec = if *spec == NONE { null_mut() } else { reg(regs, *spec) };
+                let spec = if *spec == NONE { null_mut() } else { self.obj(regs, *spec) };
                 let s = ffi::PyObject_Format(converted, spec);
                 ffi::Py_DECREF(converted);
                 checked(s)
             }
-            Op::ListAppend(l, v) => status(ffi::PyList_Append(reg(regs, *l), reg(regs, *v))),
-            Op::SetAdd(s, v) => status(ffi::PySet_Add(reg(regs, *s), reg(regs, *v))),
+            Op::ListAppend(l, v) => status(ffi::PyList_Append(self.obj(regs, *l), self.obj(regs, *v))),
+            Op::SetAdd(s, v) => status(ffi::PySet_Add(self.obj(regs, *s), self.obj(regs, *v))),
             Op::MapAdd(d, k, v) => {
-                status(ffi::PyDict_SetItem(reg(regs, *d), reg(regs, *k), reg(regs, *v)))
+                status(ffi::PyDict_SetItem(self.obj(regs, *d), self.obj(regs, *k), self.obj(regs, *v)))
             }
             Op::ListExtend(l, it) => {
-                let r = ffi::PySequence_InPlaceConcat(reg(regs, *l), reg(regs, *it));
+                let r = ffi::PySequence_InPlaceConcat(self.obj(regs, *l), self.obj(regs, *it));
                 if r.is_null() {
                     return Err(());
                 }
@@ -761,7 +800,7 @@ impl Compiled {
                 if name.is_null() {
                     return Err(());
                 }
-                let args = [reg(regs, *s), reg(regs, *it)];
+                let args = [self.obj(regs, *s), self.obj(regs, *it)];
                 let r = ffi::PyObject_VectorcallMethod(name, args.as_ptr(), 2, null_mut());
                 ffi::Py_DECREF(name);
                 if r.is_null() {
@@ -770,9 +809,9 @@ impl Compiled {
                 ffi::Py_DECREF(r);
                 Ok(null_mut())
             }
-            Op::DictUpdate(d, o) => status(ffi::PyDict_Update(reg(regs, *d), reg(regs, *o))),
+            Op::DictUpdate(d, o) => status(ffi::PyDict_Update(self.obj(regs, *d), self.obj(regs, *o))),
             Op::DictMerge(d, o) => {
-                let (d, o) = (reg(regs, *d), reg(regs, *o));
+                let (d, o) = (self.obj(regs, *d), self.obj(regs, *o));
                 if ffi::PyDict_Check(o) != 0 {
                     let mut pos: ffi::Py_ssize_t = 0;
                     let mut key: Obj = null_mut();
@@ -796,9 +835,9 @@ impl Compiled {
                 }
                 status(ffi::PyDict_Update(d, o))
             }
-            Op::ListToTuple(l) => checked(ffi::PyList_AsTuple(reg(regs, *l))),
+            Op::ListToTuple(l) => checked(ffi::PyList_AsTuple(self.obj(regs, *l))),
             Op::Unpack(seq, n) => {
-                let seq = reg(regs, *seq);
+                let seq = self.obj(regs, *seq);
                 let n = *n as isize;
                 let t = if ffi::PyTuple_CheckExact(seq) != 0 {
                     new_ref(seq)
@@ -831,9 +870,10 @@ impl Compiled {
                 }
                 Ok(t)
             }
-            Op::TupleGet(t, i) => Ok(new_ref(ffi::PyTuple_GET_ITEM(reg(regs, *t), *i as isize))),
+            Op::TupleGet(t, i) => Ok(new_ref(ffi::PyTuple_GET_ITEM(self.obj(regs, *t), *i as isize))),
             Op::Call { callee, args, kwnames } => {
-                checked(self.vectorcall(regs, reg(regs, *callee), args, *kwnames))
+                let callee = self.obj(regs, *callee);
+                checked(self.vectorcall(regs, callee, args, *kwnames))
             }
             Op::CallMethod { recv, name, args, kwnames } => {
                 // Looks the method up on the type and calls it with the
@@ -846,9 +886,9 @@ impl Compiled {
                     big = vec![null_mut(); args.len() + 1];
                     &mut big[..]
                 };
-                buf[0] = reg(regs, *recv);
+                buf[0] = self.obj(regs, *recv);
                 for (i, v) in args.iter().enumerate() {
-                    buf[i + 1] = reg(regs, *v);
+                    buf[i + 1] = self.obj(regs, *v);
                 }
                 let (kw, nkw) = if *kwnames == NONE {
                     (null_mut(), 0)
@@ -864,7 +904,7 @@ impl Compiled {
                 ))
             }
             Op::CallEx { callee, args, kwargs } => {
-                let args = reg(regs, *args);
+                let args = self.obj(regs, *args);
                 let tuple = if ffi::PyTuple_CheckExact(args) != 0 {
                     new_ref(args)
                 } else {
@@ -874,14 +914,14 @@ impl Compiled {
                     }
                     t
                 };
-                let kwargs = if *kwargs == NONE { null_mut() } else { reg(regs, *kwargs) };
-                let r = ffi::PyObject_Call(reg(regs, *callee), tuple, kwargs);
+                let kwargs = if *kwargs == NONE { null_mut() } else { self.obj(regs, *kwargs) };
+                let r = ffi::PyObject_Call(self.obj(regs, *callee), tuple, kwargs);
                 ffi::Py_DECREF(tuple);
                 checked(r)
             }
-            Op::GetIter(a) => checked(ffi::PyObject_GetIter(reg(regs, *a))),
+            Op::GetIter(a) => checked(ffi::PyObject_GetIter(self.obj(regs, *a))),
             Op::IterNext(it) => {
-                let v = ffi::PyIter_Next(reg(regs, *it));
+                let v = ffi::PyIter_Next(self.obj(regs, *it));
                 if v.is_null() && !ffi::PyErr_Occurred().is_null() {
                     return Err(());
                 }
@@ -988,14 +1028,15 @@ impl Compiled {
     /// method of a CallMethod. Returns None if an operand is unbound.
     unsafe fn operand_ptrs(
         &self,
-        regs: &[Obj],
+        regs: &mut [Obj],
         kind: i32,
         op: &Op,
         operands: &[V],
     ) -> Option<Vec<Obj>> {
-        let mut ptrs: Vec<Obj> = operands.iter().map(|v| reg(regs, *v)).collect();
+        // The capture is matched against Python objects.
+        let mut ptrs: Vec<Obj> = operands.iter().map(|v| self.obj(regs, *v)).collect();
         if let (capi::TCFG_METHOD, Op::Call { callee, .. }) = (kind, op) {
-            let c = reg(regs, *callee);
+            let c = self.obj(regs, *callee);
             if c.is_null() || ffi::PyCFunction_Check(c) == 0 {
                 return None;
             }
@@ -1021,7 +1062,7 @@ impl Compiled {
             | Op::LoadAttr(a, _) => is_tensor(*a).then_some(capi::TCFG_UNARY),
             Op::Call { callee, .. } => {
                 let c = reg(regs, *callee);
-                if c.is_null() || ffi::PyCFunction_Check(c) == 0 {
+                if c.is_null() || capi::is_unboxed(c) || ffi::PyCFunction_Check(c) == 0 {
                     return None;
                 }
                 // x.f(...) on a tensor: the callee is a builtin bound to the
@@ -1068,7 +1109,7 @@ impl Compiled {
         let result = match op {
             Op::CallMethod { recv, name, args, kwnames } => {
                 method = ffi::PyObject_GetAttr(
-                    reg(regs, *recv),
+                    self.obj(regs, *recv),
                     self.func.consts[*name as usize].as_ptr(),
                 );
                 if method.is_null() {
@@ -1090,7 +1131,7 @@ impl Compiled {
                         .map(|v| matches!(self.analysis.def_op(&self.func, *v), Some(Op::Const(_))) as u8)
                         .collect();
                     let (callee, kwnames) = match op {
-                        Op::Call { callee, kwnames, .. } => (reg(regs, *callee), *kwnames),
+                        Op::Call { callee, kwnames, .. } => (self.obj(regs, *callee), *kwnames),
                         Op::CallMethod { kwnames, .. } => (method, *kwnames),
                         _ => (null_mut(), NONE),
                     };
@@ -1150,23 +1191,30 @@ impl Compiled {
             big = operands.iter().map(|v| reg(regs, *v)).collect();
             big.as_ptr()
         };
-        self.exec_slot(regs, slot, ptr, fallback, api)
+        let flags = if self.options.unboxed { capi::TCFG_UNBOXED_RESULT } else { 0 };
+        self.exec_slot(regs, slot, ptr, flags, fallback, api)
     }
 
+    /// `ptr` points at the operands, which may be unboxed tensors. With
+    /// TCFG_UNBOXED_RESULT in `flags` the result may be one as well.
     unsafe fn exec_slot(
         &self,
         regs: &mut [Obj],
         slot: &SiteSlot,
         ptr: *const Obj,
+        flags: u32,
         fallback: &Op,
         api: &TcfgApi,
     ) -> OpResult {
         let n = slot.len();
         for i in 0..n {
             let mut status = 0i32;
-            let r = (api.site_call)(slot.get(i), ptr, &mut status);
+            let r = (api.site_call)(slot.get(i), ptr, flags, &mut status);
             if !r.is_null() {
                 slot.hits.fetch_add(1, Ordering::Relaxed);
+                if capi::is_unboxed(r) {
+                    self.unboxed_results.fetch_add(1, Ordering::Relaxed);
+                }
                 return Ok(r);
             }
             if status != capi::TCFG_MISS {
@@ -1203,7 +1251,7 @@ impl Compiled {
                 .site_operands(slot.kind, &inst.op)
                 .and_then(|operands| self.operand_ptrs(regs, slot.kind, &inst.op, &operands));
             match ptrs {
-                Some(ptrs) => self.exec_slot(regs, &slot, ptrs.as_ptr(), &inst.op, api),
+                Some(ptrs) => self.exec_slot(regs, &slot, ptrs.as_ptr(), 0, &inst.op, api),
                 None => self.exec_op(regs, &inst.op),
             }
         } else if attempts >= MAX_CAPTURE_ATTEMPTS {
@@ -1375,18 +1423,16 @@ impl Compiled {
                     };
                     for (i, (_, src)) in moves.iter().enumerate() {
                         let o = reg(regs, *src);
-                        if !o.is_null() {
-                            ffi::Py_INCREF(o);
-                        }
+                        capi::retain(o);
                         vals[i] = o;
                     }
                     for (i, (dst, _)) in moves.iter().enumerate() {
                         let old = std::mem::replace(regs.get_unchecked_mut(*dst as usize), vals[i]);
-                        xdecref(old);
+                        capi::release(old);
                     }
                 }
                 for v in self.analysis.edge_kills.get_unchecked(cur).get_unchecked(pi) {
-                    xdecref(take(regs, *v));
+                    capi::release(take(regs, *v));
                 }
                 if cur <= pred {
                     back_edges = back_edges.wrapping_add(1);
@@ -1429,10 +1475,10 @@ impl Compiled {
                                         regs.get_unchecked_mut(inst.dst as usize),
                                         obj,
                                     );
-                                    xdecref(old);
+                                    capi::release(old);
                                 }
                                 for v in &inst.kills {
-                                    xdecref(take(regs, *v));
+                                    capi::release(take(regs, *v));
                                 }
                             }
                             Err(()) => return self.fail(inst.bc),
@@ -1446,7 +1492,7 @@ impl Compiled {
                         let next = match &code_ref.term {
                             Term::Jump(b) => *b as usize,
                             Term::Br { cond, then_, else_ } => {
-                                let c = reg(regs, *cond);
+                                let c = self.obj(regs, *cond);
                                 let truth = if c == ffi::Py_True() {
                                     true
                                 } else if c == ffi::Py_False() {
@@ -1463,16 +1509,21 @@ impl Compiled {
                             Term::BrNull { v, null, nonnull } => {
                                 (if reg(regs, *v).is_null() { *null } else { *nonnull }) as usize
                             }
-                            Term::Return(v) => return take(regs, *v),
+                            Term::Return(v) => {
+                                // What leaves the VM is a Python object.
+                                self.obj(regs, *v);
+                                return take(regs, *v);
+                            }
                             Term::Raise { exc, cause } => {
-                                let cause = if *cause == NONE { null_mut() } else { reg(regs, *cause) };
-                                do_raise(reg(regs, *exc), cause);
+                                let cause =
+                                    if *cause == NONE { null_mut() } else { self.obj(regs, *cause) };
+                                do_raise(self.obj(regs, *exc), cause);
                                 let bc = code_ref.insts.last().map_or(func.blocks[cur].bc_start, |i| i.bc);
                                 return self.fail(bc);
                             }
                         };
                         for v in &code_ref.term_kills {
-                            xdecref(take(regs, *v));
+                            capi::release(take(regs, *v));
                         }
                         break next;
                     }

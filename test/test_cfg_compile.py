@@ -654,6 +654,83 @@ class TestCfgCompile(TestCase):
         self.assertEqual(set(results), {12.0})
         self.assertEqual(len(results), 800)
 
+    def test_intermediates_never_get_a_python_object(self, device):
+        def f(x, y):
+            z = x + y
+            z = z * y
+            return z.relu()
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        x, y = torch.randn(4, device=device), torch.randn(4, device=device)
+        compiled(x, y)
+        before = compiled.stats()
+        for _ in range(5):
+            self.assertEqual(compiled(x, y), f(x, y))
+        after = compiled.stats()
+        # Three kernel results per call; only the one that is returned ever
+        # becomes a Python object.
+        self.assertEqual(after["unboxed_results"] - before["unboxed_results"], 15)
+        self.assertEqual(after["boxed_later"] - before["boxed_later"], 5)
+
+        boxed = torch.cfg_compile(f, fallback=False, unboxed=False)
+        for _ in range(3):
+            self.assertEqual(boxed(x, y), f(x, y))
+        self.assertEqual(boxed.stats()["unboxed_results"], 0)
+
+    def test_unboxed_tensors_reach_python_intact(self, device):
+        seen = []
+
+        def look(t):
+            seen.append(t)
+            return t.shape[0]
+
+        def f(x, y, n):
+            z = x + y
+            alias = z
+            z += 1  # in place, on a tensor without a Python object
+            for _ in range(n):  # carried around the loop unboxed
+                z = z * 2
+            same = alias is z
+            k = look(z)  # generic code gets a Python object
+            t = z.t()
+            t.add_(1)  # through a view
+            return z, [z, t], same, k, z is seen[-1]
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        for n in (0, 3, 0, 2):
+            x = torch.randn(3, 2, device=device)
+            y = torch.randn(3, 2, device=device)
+            out, ref = compiled(x, y, n), f(x, y, n)
+            self.assertEqual(out[0], ref[0])
+            self.assertEqual(out[1], ref[1])
+            self.assertEqual(out[2:], ref[2:])
+            self.assertIs(out[0], out[1][0])
+            self.assertIs(out[0], seen[-2])
+        self.assertGreater(compiled.stats()["unboxed_results"], 0)
+
+    def test_unboxed_tensors_are_released(self, device):
+        def f(x, y, fail):
+            a = x + y
+            b = a * 2
+            if fail:
+                return b @ y.reshape(-1)[:1]
+            return (a - b).sum()
+
+        compiled = torch.cfg_compile(f, fallback=False)
+        x = torch.randn(64, 64, device=device)
+        for _ in range(3):
+            compiled(x, x, False)
+        if device != "cpu":
+            torch.accelerator.synchronize()
+            baseline = torch.accelerator.memory_allocated()
+        for _ in range(10):
+            compiled(x, x, False)
+            with self.assertRaises(RuntimeError):
+                compiled(x, x, True)
+        if device != "cpu":
+            torch.accelerator.synchronize()
+            self.assertEqual(torch.accelerator.memory_allocated(), baseline)
+
     def test_first_call_is_the_trace(self, device):
         calls = []
 

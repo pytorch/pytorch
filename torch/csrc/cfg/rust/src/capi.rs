@@ -25,7 +25,9 @@ pub const TCFG_UNARY: i32 = 3;
 
 pub const TCFG_ALLOW_SKIP_AUTOGRAD: u32 = 1;
 
-pub const TCFG_API_VERSION: u32 = 1;
+pub const TCFG_UNBOXED_RESULT: u32 = 1;
+
+pub const TCFG_API_VERSION: u32 = 2;
 
 #[repr(C)]
 pub struct TcfgPyOp {
@@ -73,9 +75,12 @@ pub struct TcfgApi {
     pub site_from_trace:
         unsafe extern "C" fn(*const TcfgTrace, *const TcfgPyOp, *mut c_char, usize) -> *mut TcfgSite,
     pub site_free: unsafe extern "C" fn(*mut TcfgSite),
-    pub site_call: unsafe extern "C" fn(*mut TcfgSite, *const Obj, *mut i32) -> Obj,
+    pub site_call: unsafe extern "C" fn(*mut TcfgSite, *const Obj, u32, *mut i32) -> Obj,
     pub site_info: unsafe extern "C" fn(*const TcfgSite) -> Obj,
     pub tensor_info: unsafe extern "C" fn(Obj, *mut TcfgTensorInfo) -> i32,
+    pub tensor_box: unsafe extern "C" fn(Obj) -> Obj,
+    pub tensor_retain: unsafe extern "C" fn(Obj),
+    pub tensor_release: unsafe extern "C" fn(Obj),
 }
 
 static API: AtomicPtr<TcfgApi> = AtomicPtr::new(std::ptr::null_mut());
@@ -91,6 +96,40 @@ pub fn api() -> Option<&'static TcfgApi> {
         None
     } else {
         Some(unsafe { &*ptr })
+    }
+}
+
+/// Whether a register holds an unboxed tensor (TensorImpl* | 1, an owned
+/// reference) rather than a Python object. Kernel results stay in this form
+/// until something needs them as Python objects.
+#[inline(always)]
+pub fn is_unboxed(o: Obj) -> bool {
+    (o as usize) & 1 != 0
+}
+
+/// Drops the reference a register holds, whatever its form.
+#[inline(always)]
+pub unsafe fn release(o: Obj) {
+    if o.is_null() {
+        return;
+    }
+    if is_unboxed(o) {
+        (api().unwrap_unchecked().tensor_release)(o);
+    } else {
+        ffi::Py_DECREF(o);
+    }
+}
+
+/// Takes another reference to what a register holds, whatever its form.
+#[inline(always)]
+pub unsafe fn retain(o: Obj) {
+    if o.is_null() {
+        return;
+    }
+    if is_unboxed(o) {
+        (api().unwrap_unchecked().tensor_retain)(o);
+    } else {
+        ffi::Py_INCREF(o);
     }
 }
 

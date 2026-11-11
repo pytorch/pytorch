@@ -51,13 +51,14 @@ pub fn builtin_passes() -> Vec<&'static str> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, max_versions=4, max_respecializations=6))]
+#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6))]
 pub fn compile(
     py: Python<'_>,
     func: &Bound<'_, PyAny>,
     passes: Vec<Bound<'_, PyAny>>,
     specialize: bool,
     skip_autograd: bool,
+    unboxed: bool,
     max_versions: usize,
     max_respecializations: u32,
 ) -> PyResult<CfgFunction> {
@@ -92,6 +93,7 @@ pub fn compile(
     let options = Options {
         specialize,
         skip_autograd,
+        unboxed,
         max_versions: max_versions.max(1),
         max_respecializations,
         ..Options::default()
@@ -249,6 +251,8 @@ impl CfgFunction {
         out.set_item("sites", sites)?;
         out.set_item("site_hits", hits)?;
         out.set_item("site_misses", misses)?;
+        out.set_item("unboxed_results", cf.unboxed_results.load(Ordering::Relaxed))?;
+        out.set_item("boxed_later", cf.boxed_later.load(Ordering::Relaxed))?;
         out.set_item("unlowered", unlowered)?;
         out.set_item("log", state.log.clone())?;
         Ok(out.into_any().unbind())
