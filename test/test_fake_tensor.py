@@ -6322,6 +6322,50 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertTrue(torch._C._in_kernel_invocation())
             self.assertFalse(torch._C._meta_in_tls_dispatch_include())
 
+    def test_fake_fallback_static_shape_decomps(self):
+        from torch._decomp import decomposition_table, is_torch_decomp_decomposition
+        from torch._library.utils import lookup_op
+        from torch._meta_registrations import cpp_meta_supports_symint
+
+        contains = torch._C._fake_dispatch_contains_static_shape_decomp
+        self.assertTrue(contains("aten::log_sigmoid_forward", ""))
+        self.assertFalse(contains("aten::arange", "start"))
+
+        mismatched = set()
+        for name in torch._C._dispatch_get_all_op_names():
+            if not name.startswith("aten::"):
+                continue
+            op = lookup_op(name)
+            schema = op._schema
+            decomposes = (
+                op in decomposition_table
+                and is_torch_decomp_decomposition(op)
+                and not cpp_meta_supports_symint(op)
+            )
+            if contains(schema.name, schema.overload_name) != decomposes:
+                mismatched.add(name)
+        self.assertEqual(mismatched, set())
+
+    def test_fake_fallback_static_shape_decomp_registration(self):
+        from torch._decomp import (
+            decomposition_table,
+            register_decomposition,
+            remove_decompositions,
+        )
+        from torch._decomp.decompositions import hardswish
+
+        contains = torch._C._fake_dispatch_contains_static_shape_decomp
+        with torch.library._scoped_library("_test_static_shape_decomp", "DEF") as lib:
+            lib.define("op(Tensor x) -> Tensor")
+            op = torch.ops._test_static_shape_decomp.op.default
+            self.addCleanup(remove_decompositions, decomposition_table, [op])
+
+            self.assertFalse(contains(op.name(), ""))
+            register_decomposition(op)(hardswish)
+            self.assertTrue(contains(op.name(), ""))
+            remove_decompositions(decomposition_table, [op])
+            self.assertFalse(contains(op.name(), ""))
+
     def test_require_python_fake_mode(self):
         from torch._guards import require_python_fake_mode
 

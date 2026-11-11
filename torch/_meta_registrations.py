@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from functools import wraps
 from typing import TypeVar
@@ -12,7 +12,9 @@ from torch import SymBool, SymFloat, Tensor
 from torch._decomp import (
     _add_op_to_registry,
     _convert_out_params,
+    decomposition_table,
     global_decomposition_table,
+    is_torch_decomp_decomposition,
     meta_table,
 )
 from torch._ops import OpOverload
@@ -9598,4 +9600,21 @@ def cpp_meta_supports_symint(op: OpOverload) -> bool:
     return torch.Tag.view_copy in op.tags or op in cpp_meta_supports_symint_ops
 
 
+def _register_static_shape_decomps(ops: Iterable[torch._ops.OperatorBase]) -> None:
+    # Meta membership and sparse inputs are checked at dispatch time.
+    for op in ops:
+        if (
+            isinstance(op, OpOverload)
+            and is_torch_decomp_decomposition(op)
+            and not cpp_meta_supports_symint(op)
+        ):
+            schema = op._schema
+            torch._C._fake_dispatch_register_static_shape_decomp(
+                schema.name, schema.overload_name
+            )
+
+
 activate_meta()
+# Initial decorators run before their function names are bound in the module.
+_register_static_shape_decomps(decomposition_table)
+torch._decomp._static_shape_decomps_initialized = True
