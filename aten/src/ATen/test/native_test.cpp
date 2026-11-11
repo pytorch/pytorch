@@ -330,15 +330,12 @@ TEST(TestNative, PoolDowncastCompatibility) {
   }
 }
 
-// The handle of a mode made in C++, which has no Python object
-static std::shared_ptr<c10::FakeTensorModeHandle> make_cpp_fake_mode(
+// A mode made in C++ starts without a Python wrapper.
+static std::shared_ptr<c10::FakeTensorMode> make_cpp_fake_mode(
     bool allow_meta = true,
     bool allow_unsafe_data_ptr_access = true) {
-  return std::make_shared<c10::FakeTensorModeHandle>(
-      c10::FakeTensorModeHandle{
-          std::make_shared<c10::FakeTensorMode>(
-              nullptr, nullptr, allow_meta, allow_unsafe_data_ptr_access),
-          nullptr});
+  return std::make_shared<c10::FakeTensorMode>(
+      nullptr, nullptr, allow_meta, allow_unsafe_data_ptr_access);
 }
 
 TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
@@ -356,7 +353,7 @@ TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
   EXPECT_EQ(*fake_device, c10::Device(c10::kCPU));
   auto handle = result_impl->fake_tensor_mode();
   ASSERT_NE(handle, nullptr);
-  EXPECT_EQ(handle->mode, mode->mode);
+  EXPECT_EQ(handle, mode);
 }
 
 TEST(TestNative, InitCppFake) {
@@ -365,7 +362,7 @@ TEST(TestNative, InitCppFake) {
     auto t = at::empty({2}, at::device(at::kMeta));
     at::init_cpp_fake(t.unsafeGetTensorImpl(), c10::Device(c10::kCPU), mode);
     auto handle = t.unsafeGetTensorImpl()->fake_tensor_mode();
-    EXPECT_EQ(handle ? handle->mode : nullptr, mode->mode);
+    EXPECT_EQ(handle, mode);
     EXPECT_EQ(t.device(), c10::Device(c10::kCPU));
     return t;
   };
@@ -408,7 +405,7 @@ TEST(TestNative, InitCppFake) {
   // within a kernel does not mark the shared storage again, but a new fake of
   // it, as the fake fallback makes inside a kernel for a view op's output,
   // does; its fake device is replaced.
-  mode->mode->allow_unsafe_data_ptr_access_ = false;
+  mode->allow_unsafe_data_ptr_access_ = false;
   expect_throws(make_fake());
   expect_warns(fake);
   auto view = at::native::as_strided_tensorimpl(fake, {1}, {1});
@@ -426,7 +423,7 @@ TEST(TestNative, InitCppFake) {
   // A rejected tensor is left unchanged
   auto expect_rejected = [&](const at::Tensor& t,
                              c10::Device device,
-                             const std::shared_ptr<c10::FakeTensorModeHandle>& m,
+                             const std::shared_ptr<c10::FakeTensorMode>& m,
                              const std::string& msg) {
     auto* impl = t.unsafeGetTensorImpl();
     try {
