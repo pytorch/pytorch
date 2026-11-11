@@ -5412,6 +5412,34 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             torch.compile(minimal, fullgraph=True, backend="eager")(x), minimal(x)
         )
 
+    @parametrize("copier", [copy.copy, copy.deepcopy])
+    def test_ordered_dict_copy_input_order(self, copier):
+        def fn(x, od):
+            return x + next(iter(copier(od).values()))
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.tensor(10)
+        original = collections.OrderedDict(a=1, b=2)
+        self.assertEqual(compiled(x, original), fn(x, original))
+        reversed_input = collections.OrderedDict(b=2, a=1)
+        self.assertEqual(compiled(x, reversed_input), fn(x, reversed_input))
+        original.move_to_end("a")
+        self.assertEqual(compiled(x, original), fn(x, original))
+
+    @parametrize("copier", [copy.copy, copy.deepcopy])
+    def test_ordered_dict_copy_instance_attributes(self, copier):
+        def fn(x, od):
+            return x + 1, copier(od)
+
+        compiled = torch.compile(fn, backend="eager")
+        x = torch.tensor(10)
+        od = collections.OrderedDict(a=1)
+        self.assertEqual(vars(compiled(x, od)[1]), {})
+        od.tag = [42]
+        copied = compiled(x, od)[1]
+        self.assertEqual(vars(copied), vars(od))
+        self.assertEqual(copied.tag is od.tag, copier is copy.copy)
+
     def test_deepcopy_ordered_dict_nested(self):
         def fn(x):
             original = collections.OrderedDict(a=[1], b=[2])

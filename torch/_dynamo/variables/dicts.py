@@ -1037,13 +1037,44 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     # gives move_to_end/popitem(last=) below their real backing storage.
     items: "collections.OrderedDict[HashableTracker, VariableTracker]"  # pyrefly: ignore[bad-override]
 
+    def __init__(
+        self,
+        items: dict[VariableTracker, VariableTracker]
+        | dict[HashableTracker, VariableTracker],
+        *,
+        has_instance_attributes: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(items, **kwargs)
+        self.has_instance_attributes = has_instance_attributes
+
+    def reduce_ex(
+        self, tx: "InstructionTranslatorBase", protocol: int
+    ) -> VariableTracker:
+        from .iter import OrderedDictItemsIterator
+
+        if self.source and not is_constant_source(self.source):
+            # A later call may add attributes or reorder the linked keys.
+            install_guard(
+                AttrSource(self.source, "__dict__").make_guard(
+                    GuardBuilder.SEQUENCE_LENGTH
+                )
+            )
+            install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
+
+        reduced = self.as_python_constant().__reduce_ex__(protocol)
+        return variables.TupleVariable(
+            [VariableTracker.build(tx, item) for item in reduced[:-1]]
+            + [OrderedDictItemsIterator.create(self.items)]
+        )
+
+    def python_type(self) -> type:
+        return collections.OrderedDict
+
     # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
     # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
     # OrderedDict exposes no tp_getset / tp_members.
     # https://github.com/python/cpython/blob/v3.13.0/Objects/odictobject.c
-
-    def python_type(self) -> type:
-        return collections.OrderedDict
 
     def move_to_end(
         self: "OrderedDictVariable",

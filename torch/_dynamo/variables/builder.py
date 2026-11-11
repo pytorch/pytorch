@@ -1565,6 +1565,10 @@ class VariableBuilder:
                 result = OrderedDictVariable(
                     result,  # type: ignore[arg-type]
                     source=self.source,
+                    has_instance_attributes=dict.__len__(
+                        object.__getattribute__(value, "__dict__")
+                    )
+                    != 0,
                 )
             else:
                 result = ConstDictVariable(
@@ -6068,6 +6072,10 @@ class SourcelessBuilder:
         )
         handlers[collections.OrderedDict] = lambda tx, value: OrderedDictVariable(
             {create(tx, k): create(tx, v) for k, v in value.items()},
+            has_instance_attributes=dict.__len__(
+                object.__getattribute__(value, "__dict__")
+            )
+            != 0,
             mutation_type=ValueMutationNew(),
         )
         # immutable_dict is a dict subclass; represent it as a plain dict VT.
