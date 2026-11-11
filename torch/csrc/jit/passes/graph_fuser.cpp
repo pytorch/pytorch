@@ -380,7 +380,7 @@ struct GraphFuser {
     // remapping nodes that used the input to the newly-merged node
     // n is not an input when the fusion group is empty
     auto inputs = group->inputs();
-    for (size_t i = 0; i < n->outputs().size(); ++i) {
+    for (const auto i : c10::irange(n->outputs().size())) {
       auto it = std::find(inputs.begin(), inputs.end(), n->outputs()[i]);
       if (it != inputs.end()) {
         size_t p = it - inputs.begin();
@@ -510,7 +510,7 @@ struct GraphFuser {
       return;
     }
     auto& subgraph = getSubgraph(group);
-    for (size_t i = 0; i < chunk->outputs().size(); ++i) {
+    for (const auto i : c10::irange(chunk->outputs().size())) {
       // Find the input to the FusionGroup (group)
       auto* replacement_val = existingFusedChunk->outputs().at(i);
       auto* val = chunk->outputs().at(i);
@@ -897,8 +897,7 @@ struct GraphFuser {
       WithInsertPoint guard(bchunk->next());
 
       // Split the bchunk into bchunks.inputs().size() number of chunk nodes.
-      for (size_t input_offset = 0; input_offset < bchunk->inputs().size();
-           input_offset++) {
+      for (const auto input_offset : c10::irange(bchunk->inputs().size())) {
         auto* input = bchunk->inputs().at(input_offset);
 
         Node* new_chunk =

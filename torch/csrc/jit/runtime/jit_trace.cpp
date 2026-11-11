@@ -1,6 +1,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/symbol.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -35,7 +36,7 @@ Node* traceNode(Node* node, TracingData& td, Stack& stack) {
   auto env = [&td](Value* v) { return td.old_to_new_.at(v); };
 
   auto new_node = block->appendNode(td.traced_graph_->createClone(node, env));
-  for (size_t i = 0; i < node->outputs().size(); ++i) {
+  for (const auto i : c10::irange(node->outputs().size())) {
     auto oo = node->outputs()[i];
     auto no = new_node->outputs()[i];
     no->copyMetadata(oo);
@@ -84,7 +85,7 @@ void createPropNodeForIfBlock(
         int64_t frame_id = 0;
         pop(stack, frame_id);
 
-        for (size_t i = 0; i < b->outputs().size(); i++) {
+        for (const auto i : c10::irange(b->outputs().size())) {
           // propagate a then-block or else-output to an if-output
           auto nbo = td.old_to_new_.at(b->outputs()[i]);
           td.old_to_new_[n->outputs()[i]] = nbo;
@@ -247,7 +248,7 @@ void insertTracingNodes(Block* block, ProfilingRecord* pr, TracingData& td) {
       auto tracer = traceNode(n, td, stack);
       auto outputs_size = n->outputs().size();
       auto iivs = pop(stack, outputs_size);
-      for (size_t j = 0; j < outputs_size; j++) {
+      for (const auto j : c10::irange(outputs_size)) {
         auto& iiv = iivs[j];
         if (iiv.isTensor()) {
           auto t = iiv.toTensor();

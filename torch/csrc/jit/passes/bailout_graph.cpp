@@ -69,7 +69,7 @@ struct BailOutGraphBuilderForNode {
     auto env = [this](Value* v) { return getOrAddInputForValue(v); };
 
     auto new_node = block->appendNode(copy_graph_->createClone(node, env));
-    for (size_t i = 0; i < node->outputs().size(); ++i) {
+    for (const auto i : c10::irange(node->outputs().size())) {
       auto oo = node->outputs()[i];
       auto no = new_node->outputs()[i];
       old_to_new_[oo] = no;

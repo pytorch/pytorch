@@ -482,7 +482,7 @@ struct FileCheckImpl {
       case CHECK_COUNT: {
         auto group_start_range = std::string::npos;
         AT_ASSERT(check.count_ && *check.count_ != 0);
-        for (size_t i = 0; i < *check.count_; ++i) {
+        for ([[maybe_unused]] const auto _ : c10::irange(*check.count_)) {
           start_range =
               assertFind(source, check.search_str_, start_range, check);
           group_start_range = std::min(start_range, group_start_range);

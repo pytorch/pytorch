@@ -14,6 +14,7 @@
 #include <ATen/ATen.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/train/export_data.h>
@@ -523,7 +524,7 @@ flatbuffers::Offset<mobile::serialization::ObjectType> FlatbufferSerializer::
     size_t num_attr = class_ptr->numAttributes();
     std::vector<flatbuffers::Offset<flatbuffers::String>> names;
     names.reserve(num_attr);
-    for (size_t i = 0; i < num_attr; ++i) {
+    for (const auto i : c10::irange(num_attr)) {
       names.push_back(fbb.CreateSharedString(class_ptr->getAttributeName(i)));
     }
     names_offset = fbb.CreateVector(names);
@@ -594,7 +595,7 @@ flatbuffers::Offset<mobile::serialization::Object> FlatbufferSerializer::
     size_t num_attr = type->numAttributes();
     std::vector<uint32_t> tuple_index;
     tuple_index.reserve(num_attr);
-    for (size_t i = 0; i < num_attr; ++i) {
+    for (const auto i : c10::irange(num_attr)) {
       tuple_index.push_back(storeIValueAndGetIndex(fbb, obj->getSlot(i)));
     }
     attrs = fbb.CreateVector(tuple_index);

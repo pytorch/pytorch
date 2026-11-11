@@ -70,13 +70,13 @@ void inlineBody(Node* loop) {
 
   // Loop node has extra (max_iters, initial_cond) inputs,
   // body has an extra (loop_counter) input.
-  for (size_t i = 2; i < loop->inputs().size(); ++i) {
+  for (const auto i : c10::irange(2, loop->inputs().size())) {
     value_map[body->inputs()[i - 1]] = loop->inputs()[i];
   }
 
   for (Node* orig : body->nodes()) {
     Node* clone = graph->insertNode(graph->createClone(orig, get_value));
-    for (size_t i = 0; i < orig->outputs().size(); ++i) {
+    for (const auto i : c10::irange(orig->outputs().size())) {
       value_map[orig->outputs()[i]] = clone->outputs()[i];
     }
   }
@@ -347,9 +347,7 @@ Node* PeelLoop(Node* n, size_t times) {
   orig_loop.replaceInputCondition(peeled_copy->output(cond_index));
 
   static const size_t LOOP_DEPS_WITH_COND_OFFSET = 2;
-  for (size_t i = 0; i < peeled_copy->outputs().size() -
-           1 /* leave off the termination condition */;
-       i++) {
+  for (const auto i : c10::irange(peeled_copy->outputs().size() - 1)) {
     n->replaceInput(LOOP_DEPS_WITH_COND_OFFSET + i, peeled_copy->output(i));
   }
 
