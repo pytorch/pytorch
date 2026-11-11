@@ -2980,6 +2980,7 @@ cpp_fake_ops = {
     "mean",
     "mul",
     "neg",
+    "nn.functional.silu",
     "sin",
     "sqrt",
     "sub",
