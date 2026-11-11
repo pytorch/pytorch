@@ -995,20 +995,20 @@ class TestC10dGroupNameHashSalt(TestCase):
     same later group; backends that use the group name as a rendezvous store
     prefix (e.g. Gloo split's ``connectFullMesh``) then key off mismatched
     prefixes and deadlock. The salt must instead be ``_world.group_count``, which
-    only the non-hashed path advances so every rank keeps it in lockstep, plus a
-    count of earlier hashed-name groups over the same ranks.
+    every rank advances in lockstep -- ``_process_group_name`` increments it
+    before the membership check, on BOTH the hashed and non-hashed paths.
     """
 
     def setUp(self):
         super().setUp()
         self._saved_group_count = c10d._world.group_count
         self._saved_pg_names = dict(c10d._world.pg_names)
-        self._saved_hashed_group_counts = dict(c10d._world._hashed_group_counts)
+        self._saved_local_sync_counts = dict(c10d._world._local_sync_group_counts)
 
     def tearDown(self):
         c10d._world.group_count = self._saved_group_count
-        c10d._world._hashed_group_counts.clear()
-        c10d._world._hashed_group_counts.update(self._saved_hashed_group_counts)
+        c10d._world._local_sync_group_counts.clear()
+        c10d._world._local_sync_group_counts.update(self._saved_local_sync_counts)
         c10d._world.pg_names.clear()
         c10d._world.pg_names.update(self._saved_pg_names)
         super().tearDown()
@@ -1045,24 +1045,20 @@ class TestC10dGroupNameHashSalt(TestCase):
         ranks = [0, 1, 2, 3]
         # Rank that was a member of earlier subgroups: more pg_names.
         c10d._world.group_count = 3
-        c10d._world._hashed_group_counts.clear()
         c10d._world.pg_names.clear()
         self._register_dummy_pgs(2)
         name_member = c10d._process_group_name(ranks, use_hashed_name=True)
         # Rank that was a non-member: fewer pg_names, but same group_count because
         # every rank advances it in lockstep regardless of membership.
         c10d._world.group_count = 3
-        c10d._world._hashed_group_counts.clear()
         c10d._world.pg_names.clear()
         name_non_member = c10d._process_group_name(ranks, use_hashed_name=True)
         self.assertEqual(name_member, name_non_member)
 
-    def test_process_group_name_hashed_path_keeps_group_count(self):
-        # Hashed-name callers can be reached by member ranks only, so advancing
-        # group_count here would desync the non-hashed names of later groups.
+    def test_process_group_name_increments_on_hashed_path(self):
         c10d._world.group_count = 10
         c10d._process_group_name([0, 1], use_hashed_name=True)
-        self.assertEqual(c10d._world.group_count, 10)
+        self.assertEqual(c10d._world.group_count, 11)
 
     def test_process_group_name_increments_on_nonhashed_path(self):
         c10d._world.group_count = 20
@@ -1093,16 +1089,26 @@ class TestC10dGroupNameHashSalt(TestCase):
         final_names = {}
         for rank in range(4):
             c10d._world.group_count = 1
-            c10d._world._hashed_group_counts.clear()
             c10d._process_group_name([2, 3], use_hashed_name=False)
-            c10d._process_group_name(
-                [2] if rank == 2 else [0, 1], use_hashed_name=True
-            )
+            c10d._process_group_name([2] if rank == 2 else [0, 1], use_hashed_name=True)
             if rank in (2, 3):
                 final_names[rank] = c10d._process_group_name(
                     [0, 1], use_hashed_name=True
                 )
         self.assertEqual(final_names[2], final_names[3])
+
+    def test_local_sync_group_name_keeps_group_count(self):
+        # Only member ranks create a local-synchronization group, so advancing
+        # group_count would desync the names of later groups every rank creates.
+        c10d._world.group_count = 10
+        c10d._local_sync_group_name([0, 1])
+        self.assertEqual(c10d._world.group_count, 10)
+
+    def test_repeated_local_sync_same_ranks_get_distinct_names(self):
+        c10d._world._local_sync_group_counts.clear()
+        first = c10d._local_sync_group_name([2, 3])
+        second = c10d._local_sync_group_name([2, 3])
+        self.assertNotEqual(first, second)
 
 
 class _FakeComm:

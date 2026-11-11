@@ -1371,6 +1371,7 @@ _pg_group_ranks: dict[ProcessGroup | _NonGroupMember, dict[int, int]] = {}
 # For a pg, it is a map from ProcessGroup to BackendConfig
 _pg_backend_config: dict[ProcessGroup, str] = {}
 _group_count = 0
+_local_sync_group_counts: dict[tuple[int, ...], int] = {}
 _tags_to_pg: dict[str, list[ProcessGroup]] = {}
 _pg_to_tag: dict[ProcessGroup, str] = {}
 _backend: str | None = None
@@ -1391,7 +1392,6 @@ class _World:
         self._pg_coalesce_state: dict[ProcessGroup, list[_CollOp]] = {}
         self._pg_flight_recorder_hooks: dict[ProcessGroup, FlightRecorderHook] = {}
         self._comms: list[_TorchComm] = []
-        self._hashed_group_counts: dict[tuple[int, ...], int] = {}
 
     @property
     def default_pg(self) -> ProcessGroup | None:
@@ -1467,6 +1467,11 @@ class _World:
         """Use to compute the name of ProcessGroups when using global synchronization."""
         global _group_count
         _group_count = value
+
+    @property
+    def _local_sync_group_counts(self) -> dict[tuple[int, ...], int]:
+        global _local_sync_group_counts
+        return _local_sync_group_counts
 
     @property
     def tags_to_pg(self) -> dict[str, list[ProcessGroup]]:
@@ -3317,7 +3322,7 @@ def destroy_process_group(
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
-        _world._hashed_group_counts.clear()
+        _world._local_sync_group_counts.clear()
     else:
         if _TORCHCOMM_AVAILABLE:
             # A single comm may be shared across multiple device types (e.g. a
@@ -3440,7 +3445,7 @@ def _abort_process_group(
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
-        _world._hashed_group_counts.clear()
+        _world._local_sync_group_counts.clear()
     else:
         pg.abort()
         del _world.pg_map[pg]
@@ -6902,11 +6907,12 @@ def _hash_ranks_to_str(ranks: Sequence[int]) -> str:
     # as a rendezvous store prefix (e.g. Gloo split's connectFullMesh) then key
     # off different prefixes and deadlock. len(_world.pg_names) is NOT safe here:
     # it diverges across ranks after an earlier asymmetric-membership new_group()
-    # (non-member ranks register fewer PGs). _world.group_count only advances on
-    # calls every rank makes, and every hashed-name group over `ranks` is created
-    # by all of `ranks`, so the per-ranks count also agrees among its members.
-    ranks_count = _world._hashed_group_counts.get(tuple(ranks), 0)
-    unique_str = "_".join([rank_join, str(_world.group_count), str(ranks_count)])
+    # (non-member ranks register fewer PGs). _world.group_count is incremented by
+    # _process_group_name() on every rank that reaches it (before the member
+    # check), so it agrees across ranks that make the same group-creation calls.
+    # Local-synchronization new_group() is made by members only and does not
+    # advance it; see _local_sync_group_name().
+    unique_str = "_".join([rank_join, str(_world.group_count)])
     return hashlib.sha1(bytes(unique_str, "utf-8"), usedforsecurity=False).hexdigest()
 
 
@@ -6930,15 +6936,28 @@ def _process_group_name(ranks: Sequence[int], use_hashed_name: bool) -> GroupNam
     global _world
     if use_hashed_name:
         pg_name = GroupName(_hash_ranks_to_str(ranks))
-        # Some hashed-name callers are reached by member ranks only (e.g.
-        # new_group(use_local_synchronization=True)), so they must not advance
-        # group_count, which names the groups that every rank creates.
-        key = tuple(ranks)
-        _world._hashed_group_counts[key] = _world._hashed_group_counts.get(key, 0) + 1
     else:
         pg_name = GroupName(str(_world.group_count))
-        _world.group_count += 1
+    # Increment on BOTH paths so group_count advances once per group-creation
+    # call on every rank that reaches here. This keeps it a collective-consistent,
+    # monotonic counter usable as the uniqueness salt in _hash_ranks_to_str
+    # (see the comment there). Names need only be unique, not contiguous, so the
+    # hashed path consuming counter values is harmless for the non-hashed names.
+    _world.group_count += 1
     return pg_name
+
+
+def _local_sync_group_name(ranks: Sequence[int]) -> GroupName:
+    # Only the ranks in `ranks` create this group, so advancing group_count here
+    # would desync it from the other ranks. Every member counts the earlier
+    # groups over `ranks` alike, which tells repeated groups apart. The "local"
+    # field keeps these names apart from the _hash_ranks_to_str() names.
+    key = tuple(ranks)
+    count = _world._local_sync_group_counts.get(key, 0)
+    _world._local_sync_group_counts[key] = count + 1
+    unique_str = "_".join([*map(str, ranks), "local", str(count)])
+    name = hashlib.sha1(bytes(unique_str, "utf-8"), usedforsecurity=False)
+    return GroupName(name.hexdigest())
 
 
 def _get_backend_from_str(backend: str | None = None) -> str:
@@ -7406,7 +7425,10 @@ def _new_group_with_tag(
         group_world_size = global_world_size
         group_rank = global_rank
 
-    group_name = _process_group_name(ranks, use_hashed_name=use_local_synchronization)
+    if use_local_synchronization:
+        group_name = _local_sync_group_name(ranks)
+    else:
+        group_name = _process_group_name(ranks, use_hashed_name=False)
 
     # If the default PG implements new_group, delegate to it. This allows
     # custom Python PG subclasses to handle subgroup creation in a single
