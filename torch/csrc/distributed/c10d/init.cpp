@@ -108,6 +108,29 @@ bool registerGilChecker() {
 static bool registered = registerGilChecker();
 #endif // USE_C10D_NCCL
 
+#ifdef USE_C10D_GLOO
+
+std::optional<std::array<int64_t, 3>> get_python_gc_counts() {
+  if (!Py_IsInitialized()) {
+    return std::nullopt;
+  }
+  pybind11::gil_scoped_acquire gil;
+  py::tuple counts =
+      py::module_::import("gc").attr("get_count")().cast<py::tuple>();
+  return std::array<int64_t, 3>{
+      counts[0].cast<int64_t>(),
+      counts[1].cast<int64_t>(),
+      counts[2].cast<int64_t>()};
+}
+
+bool registerGcCountGetter() {
+  c10d::get_gc_count_getter() = &get_python_gc_counts;
+  return true;
+}
+
+static bool registered_gc_count_getter = registerGcCountGetter();
+#endif // USE_C10D_GLOO
+
 // Wrapper to ensure GIL is released before destructing ProcessGroupGloo
 // TODO: move this somewhere more generally useful
 template <typename T>
@@ -1578,7 +1601,10 @@ Returns:
 The operation a pre/post hook is firing for. Values mostly follow the
 dispatcher ops, so e.g. ``ALLGATHER_BASE`` (``all_gather_into_tensor``) is
 distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
-``recv`` from any source reports ``RECV``.)")
+``recv`` from any source reports ``RECV``. ``SPLIT``, ``NEW_WINDOW`` and
+``RECONFIGURE`` fire with no tensors; the post-hook ``work`` is ``None`` for
+``SPLIT`` and ``NEW_WINDOW``, which pass the new ``group`` or ``window``
+instead.)")
       .value("SEND", ::c10d::HookOpName::SEND)
       .value("RECV", ::c10d::HookOpName::RECV)
       .value("BROADCAST", ::c10d::HookOpName::BROADCAST)
@@ -1603,6 +1629,7 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
           "REDUCE_SCATTER_TENSOR_COALESCED",
           ::c10d::HookOpName::REDUCE_SCATTER_TENSOR_COALESCED)
       .value("ALLTOALL_BASE", ::c10d::HookOpName::ALLTOALL_BASE)
+      .value("RECONFIGURE", ::c10d::HookOpName::RECONFIGURE)
       .value("UNKNOWN", ::c10d::HookOpName::UNKNOWN);
 
   py::class_<::c10d::PreHookArgs>(
@@ -1633,11 +1660,19 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
       .def_readwrite(
           "op_id",
           &::c10d::PreHookArgs::op_id,
-          "Identifies the operation; the matching post-hook gets the same ``op_id``.");
+          "Identifies the operation; the matching post-hook gets the same ``op_id``.")
+      .def_readwrite(
+          "device",
+          &::c10d::PreHookArgs::device,
+          "Device type (index unset) the operation was dispatched for, set only for ``barrier``; ``None`` otherwise, including tensorless lifecycle ops.");
 
   py::class_<::c10d::PostHookArgs>(
       module,
       "PostHookArgs",
+#if PYBIND11_VERSION_MAJOR >= 3
+      // A kept copy may hold the last reference to a group or work.
+      py::release_gil_before_calling_cpp_dtor(),
+#endif
       "Arguments passed to a post-hook, see ``ProcessGroup.register_post_hook``.")
       .def(py::init<>())
       .def_readwrite(
@@ -1651,11 +1686,23 @@ distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
       .def_readwrite(
           "work",
           &::c10d::PostHookArgs::work,
-          "``Work`` handle of the issued operation; may be ``None``.")
+          "``Work`` handle of the issued operation; ``None`` for ``SPLIT`` and "
+          "``NEW_WINDOW`` and may be ``None`` for synchronous operations.")
       .def_readwrite(
           "op_id",
           &::c10d::PostHookArgs::op_id,
-          "Same ``op_id`` as the matching pre-hook call.");
+          "Same ``op_id`` as the matching pre-hook call.")
+      .def_readwrite(
+          "group",
+          &::c10d::PostHookArgs::group,
+          "New ``ProcessGroup`` for ``SPLIT``; ``None`` on ranks not in it and "
+          "for other operations. When created by ``torch.distributed.split_group``, "
+          "the hook runs before the group is registered, so lookups such as "
+          "``get_rank(group)`` or ``get_process_group_ranks`` fail on it.")
+      .def_readwrite(
+          "window",
+          &::c10d::PostHookArgs::window,
+          "New window for ``NEW_WINDOW``; ``None`` for other operations.");
 
   py::class_<::c10d::DistributedBackendOptions>(
       module, "_DistributedBackendOptions")
@@ -3387,10 +3434,6 @@ Args:
               &::c10d::ProcessGroup::unregisterAbortHook,
               py::arg("hook_id"),
               "Remove the abort hook registered with ``hook_id``.")
-          .def_property_readonly(
-              "supports_completion_hooks",
-              &::c10d::ProcessGroup::supportsCompletionHooks,
-              "Whether the default backend reports operation completion to completion hooks, which can only be registered from C++.")
           .def(
               "register_pre_hook",
               &::c10d::ProcessGroup::registerPreHook,
@@ -3422,7 +3465,8 @@ Args:
 Register ``hook`` to be called with a ``PostHookArgs`` after each operation
 issued through this process group is issued, not when it completes; wait on
 ``PostHookArgs.work`` to observe completion. If a hook raises, the operation
-has already been issued but its ``Work`` is not returned to the caller.
+has already been issued but its result (``Work``, new group or window) is not
+returned to the caller.
 Otherwise behaves like ``register_pre_hook``.
 
 Args:
@@ -3624,10 +3668,6 @@ Args:
               &::c10d::Backend::unregisterAbortHook,
               py::arg("hook_id"),
               "Remove the abort hook registered with ``hook_id``.")
-          .def_property_readonly(
-              "supports_completion_hooks",
-              &::c10d::Backend::supportsCompletionHooks,
-              "Whether the backend reports operation completion to completion hooks, which can only be registered from C++.")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -5084,8 +5124,17 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                 Also, users can use ``fut.then(call_back_func)`` to register a callback function to be called
                 when the work is completed, without blocking the current thread.
 
-            .. warning ::
-                ``get_future_result`` API supports NCCL
+            Raises ``NotImplementedError`` if the backend's work does not support it.
+
+            Gloo send/recv works complete the future only in ``wait()``; it stays
+            pending until the work is waited on.
+
+            Python ``Work`` subclasses may override this to return a
+            ``torch.futures.Future``. FlightRecorder calls it once per op as
+            the op is issued, so overrides must be cheap and must not block.
+            FlightRecorder records the op as completed once the future
+            completes. A ``torch.futures.Future()`` can't report failure: any
+            value, including one set with ``set_exception``, counts as success.
            )")
           .def(
               "get_future",
@@ -5474,8 +5523,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       R"(
 Records the operations of a process group into the flight recorder using
 pre/post hooks, for backends without a native flight recorder. Attached
-automatically to new process groups unless the buffer size
-(``TORCH_FR_BUFFER_SIZE``, or ``TORCH_NCCL_TRACE_BUFFER_SIZE``) is 0 or
+automatically to groups from init_process_group, new_group and
+torch.distributed.split_group (see attach) unless the buffer size
+(``TORCH_FR_BUFFER_SIZE``, or ``TORCH_NCCL_TRACE_BUFFER_SIZE``) is <= 0 or
 every backend of the group records natively.)")
       .def_static(
           "attach",
@@ -5485,9 +5535,17 @@ every backend of the group records natively.)")
           R"(
 Attach a FlightRecorder hook to a process group. Collectives issued through
 the group are recorded into the generic flight recorder ring buffer (dump
-with _dump_fr_trace / _dump_fr_trace_json), regardless of whether the
-backend has native FlightRecorder support. The hook detaches when remove()
-is called or the returned handle is garbage collected.
+with _dump_fr_trace / _dump_fr_trace_json), except those served by a backend
+that records natively: "nccl" (stock ProcessGroupNCCL, not nccl2) and "xccl".
+Groups from init_process_group, new_group and torch.distributed.split_group
+already have one attached, unless the default group provides its own
+new_group; attaching another records each op twice, under separate pg_ids.
+The hook detaches when remove() is called or the returned handle is garbage
+collected. If the backend times
+collectives the hook holds each Work (and its output tensors) until its
+result and the group's next collective; call remove() rather than dropping
+the handle, so pending result callbacks don't destroy it, with those Works,
+on a backend thread.
 
 global_ranks maps the group's ranks to world ranks; it names the per-rank
 dump file and is published as the group's membership. Leave it empty only
@@ -5554,7 +5612,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
         Arguments:
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
-                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo", the instance ProcessGroupGloo records into.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Default is "gloo".
         Returns:
                 Stringified json work traces.
                 Default settings return everything.
@@ -5580,7 +5638,7 @@ abort hooks. The backends own the registered hooks for their lifetimes.)");
                 includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
                 includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
                 onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
-                backend (str, optional): Name of the backend whose recorder instance to dump. Each hooked backend has its own, so there is one dump per backend and no merging. Default is "gloo", the instance ProcessGroupGloo records into.
+                backend (str, optional): Name of the backend whose recorder instance to dump. Each hooked backend has its own, so there is one dump per backend and no merging. Default is "gloo".
             Returns:
                 Stringified pickle work traces.
                 Default settings return everything.
