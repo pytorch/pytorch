@@ -17,21 +17,14 @@ namespace detail {
 // a separate background thread (alternatively we call it daemon thread). The
 // client and server communicate via TCP sockets.
 //
-// Currently we have two types of server backends:
-// 1. TCPStoreBackend: a single thread to handle all incoming request
-// synchronously.
-// 2. LibUVTCPStoreBackend: an event-driven asynchronous stream processing that
-// leverages libuv library (https://github.com/libuv/libuv) for better
-// performance. And this backend now is recommended to users. (We set the
-// default value of `useLibUV` inside `TCPStoreOptions` to true now, so users
-// should get it by default).
+// The server is an event-driven asynchronous stream processor built on libuv
+// (https://github.com/libuv/libuv).
 //
 // Code structure:
 // ├── TCPStore client side API and server setup code:
 // │   TCPStore.hpp/TCPStore.cpp
-// ├── TCPStoreBackend server side API implementation code:
+// ├── Server background thread base class:
 // │   TCPStoreBackend.hpp/TCPStoreBackend.cpp
-// |   (actual class:`TCPStoreMasterDaemon`)
 // ├── LibUVTCPStoreBackend
 // │   TCPStoreLibUvBackend.cpp
 // |   (actual class: `LibUVStoreDaemon`)
@@ -65,7 +58,8 @@ struct TCPStoreOptions {
   // port assignment races in certain scenarios.
   std::optional<int> masterListenFd = std::nullopt;
 
-  // A boolean value indicating whether to use the experimental libUV backend.
+  // Deprecated since 2.16 and ignored; libuv is the only server backend.
+  // Setting it to false warns.
   bool useLibUV = true;
 
   // TLS with mutual certificate authentication: PEM certificate (chain),
@@ -74,8 +68,7 @@ struct TCPStoreOptions {
   // be combined with the certificate options. If no tls* option is set, the
   // matching TORCH_TCPSTORE_TLS_{CERT,KEY,CA,PSK} environment variables are
   // used instead. TLS is enabled if any value is non-empty; set them to empty
-  // strings to disable TLS regardless of the environment. The server requires
-  // useLibUV.
+  // strings to disable TLS regardless of the environment.
   std::optional<std::string> tlsCert = std::nullopt;
   std::optional<std::string> tlsKey = std::nullopt;
   std::optional<std::string> tlsCa = std::nullopt;
@@ -154,8 +147,9 @@ class TORCH_API TCPStore : public Store {
     return addr_.port;
   }
 
+  // Always true; libuv is the only server backend.
   bool isLibUvBackend() const noexcept {
-    return usingLibUv_;
+    return true;
   }
 
   // note(xilunwu): this function is only for internal testing
@@ -183,7 +177,6 @@ class TORCH_API TCPStore : public Store {
   const std::string initKey_ = "init/";
   const std::string keyPrefix_ = "/";
   std::mutex activeOpLock_;
-  bool usingLibUv_ = true;
   std::string tlsCert_;
   std::string tlsKey_;
   std::string tlsCa_;

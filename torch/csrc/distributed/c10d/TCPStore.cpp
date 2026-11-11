@@ -59,8 +59,7 @@ std::mutex TCPServer::cache_mutex_{};
 std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
   auto tls = tlsConfig(opts);
   auto startCore = [&opts, &tls]() {
-    auto daemon = opts.useLibUV ? create_libuv_tcpstore_backend(opts)
-                                : create_tcpstore_backend(opts);
+    auto daemon = create_libuv_tcpstore_backend(opts);
     daemon->start();
     return std::make_shared<TCPServer>(daemon->port(), std::move(daemon), tls);
   };
@@ -284,29 +283,25 @@ using detail::Socket;
 TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     : Store{opts.timeout},
       addr_{std::move(host)},
-      numWorkers_{opts.numWorkers},
-      usingLibUv_{opts.useLibUV} {
+      numWorkers_{opts.numWorkers} {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__init);
 
+  if (!opts.useLibUV) {
+    TORCH_WARN_ONCE(
+        "TCPStoreOptions::useLibUV=false is deprecated and ignored since PyTorch 2.16: "
+        "libuv is the only backend. Remove the option to silence this warning.");
+  }
   // Resolved once for the server and connect retries. clone() reuses the
   // resolved paths but builds a new context.
   auto tls = detail::tlsConfig(opts);
   // Checks the platform, OpenSSL and files before the backend.
   auto clientTls = detail::TLSContext::fromConfig(tls, /*isServer=*/false);
-  if (opts.useLibUV) {
+  if (opts.isServer) {
     TORCH_CHECK_WITH(
         DistStoreError,
         ::c10d::detail::is_libuv_tcpstore_backend_available(),
-        "use_libuv was requested but PyTorch was built without libuv support, run with USE_LIBUV=0 to disable it.");
+        "TCPStore server requires libuv but PyTorch was built without libuv support.");
   }
-  TORCH_CHECK_WITH(
-      DistStoreError,
-      !opts.isServer || opts.useLibUV || !tls.enabled(),
-      "TCPStore TLS (enabled by ",
-      tls.fromEnv ? "TORCH_TCPSTORE_TLS_* environment variables"
-                  : "tls_* options",
-      ") requires the libuv backend: use_libuv=True, "
-      "or USE_LIBUV=1 for env:// and tcp:// initialization");
   tlsCert_ = tls.cert;
   tlsKey_ = tls.key;
   tlsCa_ = tls.ca;
@@ -421,7 +416,6 @@ c10::intrusive_ptr<Store> TCPStore::clone() {
   opts.isServer = false;
   opts.waitWorkers = false;
   opts.timeout = timeout_;
-  opts.useLibUV = usingLibUv_;
   opts.tlsCert = tlsCert_;
   opts.tlsKey = tlsKey_;
   opts.tlsCa = tlsCa_;
@@ -735,11 +729,6 @@ void TCPStore::multiSet(
 void TCPStore::queuePush(
     const std::string& key,
     const std::vector<uint8_t>& data) {
-  TORCH_CHECK_WITH(
-      NotImplementedError,
-      usingLibUv_,
-      "queues not implemented on legacy TCPStore backend");
-
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__queuePush);
 
   const std::lock_guard<std::mutex> lock(activeOpLock_);
@@ -751,11 +740,6 @@ void TCPStore::queuePush(
 }
 
 std::vector<uint8_t> TCPStore::queuePop(const std::string& key, bool block) {
-  TORCH_CHECK_WITH(
-      NotImplementedError,
-      usingLibUv_,
-      "queues not implemented on legacy TCPStore backend");
-
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__queuePop);
 
   const std::lock_guard<std::mutex> lock(activeOpLock_);
@@ -775,11 +759,6 @@ std::vector<uint8_t> TCPStore::queuePop(const std::string& key, bool block) {
 }
 
 int64_t TCPStore::queueLen(const std::string& key) {
-  TORCH_CHECK_WITH(
-      NotImplementedError,
-      usingLibUv_,
-      "queues not implemented on legacy TCPStore backend");
-
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__queueLen);
 
   const std::lock_guard<std::mutex> lock(activeOpLock_);

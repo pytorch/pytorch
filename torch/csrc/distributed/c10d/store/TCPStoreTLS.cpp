@@ -17,12 +17,6 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 
-#ifdef _WIN32
-#include <torch/csrc/distributed/c10d/WinSockUtils.hpp>
-#else
-#include <torch/csrc/distributed/c10d/UnixSockUtils.hpp>
-#endif
-
 #ifdef __linux__
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -499,11 +493,16 @@ bool TLSSession::recvSome(int socket, std::optional<Deadline> deadline) {
   while (deadline) {
     auto remaining = std::chrono::ceil<std::chrono::milliseconds>(
         *deadline - std::chrono::steady_clock::now());
-    auto pfd = tcputil::getPollfd(socket, POLLIN);
-    int res = tcputil::poll(
-        &pfd,
-        1,
-        static_cast<int>(std::clamp<int64_t>(remaining.count(), 0, INT_MAX)));
+    ::pollfd pfd{};
+    pfd.fd = static_cast<decltype(pfd.fd)>(socket);
+    pfd.events = POLLIN;
+    auto timeout =
+        static_cast<int>(std::clamp<int64_t>(remaining.count(), 0, INT_MAX));
+#ifdef _WIN32
+    int res = ::WSAPoll(&pfd, 1, timeout);
+#else
+    int res = ::poll(&pfd, 1, timeout);
+#endif
     // Retry interrupted polls here so each attempt recomputes the deadline.
     if (res < 0 && errno != EINTR) {
       C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(errno));

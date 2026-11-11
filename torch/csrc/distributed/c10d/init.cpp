@@ -2502,11 +2502,14 @@ Arguments:
     wait_for_workers (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
     multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
     master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. To bind an ephemeral port we recommend setting the port to 0 and reading ``.port``. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
-    use_libuv (bool, optional): If True, use libuv for ``TCPServer`` backend. Default is True.
-    tls_cert (str, optional): Path to a PEM certificate (chain). Enables TLS with mutual certificate authentication, which requires ``tls_cert``, ``tls_key`` and ``tls_ca`` and must be enabled on both client and server. If no ``tls_*`` option is set, the ``TORCH_TCPSTORE_TLS_CERT``, ``TORCH_TCPSTORE_TLS_KEY``, ``TORCH_TCPSTORE_TLS_CA`` and ``TORCH_TCPSTORE_TLS_PSK`` environment variables are used instead; set them to empty strings to disable TLS regardless of the environment. ``clone()`` reloads the files from the resolved paths, so prefer absolute paths; replacing the files affects later clones. The server requires ``use_libuv=True``; ``USE_LIBUV=0`` (the Windows default) makes a TLS server fail. Reusing a ``multi_tenant`` server with a different TLS configuration raises. Stores created internally, such as by ``init_process_group`` with ``env://`` and by torchrun/the elastic agent, only enable TLS through the environment variables. Linux only; loads OpenSSL >= 1.1.1 (``libssl.so.3``, ``libssl.so.1.1`` or ``libssl.so``) at runtime. Any certificate signed by the CA is accepted; the hostname and subject are not checked, so use a dedicated CA. A certificate may be used for both server and client connections (rank 0 runs both), so it needs both the serverAuth and clientAuth extended key usages, or none; any extended key usage on CA certificates in the chain must also include both. Default is None.
+    use_libuv (bool, optional): Deprecated since 2.16 and ignored; ``TCPServer`` always uses libuv. ``False`` emits a ``FutureWarning``. Default is True.
+    tls_cert (str, optional): Path to a PEM certificate (chain). Enables TLS with mutual certificate authentication, which requires ``tls_cert``, ``tls_key`` and ``tls_ca`` and must be enabled on both client and server. If no ``tls_*`` option is set, the ``TORCH_TCPSTORE_TLS_CERT``, ``TORCH_TCPSTORE_TLS_KEY``, ``TORCH_TCPSTORE_TLS_CA`` and ``TORCH_TCPSTORE_TLS_PSK`` environment variables are used instead; set them to empty strings to disable TLS regardless of the environment. ``clone()`` reloads the files from the resolved paths, so prefer absolute paths; replacing the files affects later clones. Reusing a ``multi_tenant`` server with a different TLS configuration raises. Stores created internally, such as by ``init_process_group`` with ``env://`` and by torchrun/the elastic agent, only enable TLS through the environment variables. Linux only; loads OpenSSL >= 1.1.1 (``libssl.so.3``, ``libssl.so.1.1`` or ``libssl.so``) at runtime. Any certificate signed by the CA is accepted; the hostname and subject are not checked, so use a dedicated CA. A certificate may be used for both server and client connections (rank 0 runs both), so it needs both the serverAuth and clientAuth extended key usages, or none; any extended key usage on CA certificates in the chain must also include both. Default is None.
     tls_key (str, optional): Path to the unencrypted PEM private key, which may be the same file as ``tls_cert``. Default is None.
     tls_ca (str, optional): Path to the PEM CA bundle used to verify the peer certificate. Default is None.
     tls_psk (str, optional): Path to a regular file whose raw bytes, 32 to 256 including any trailing newline, are a pre-shared key. Enables TLS 1.3 with pre-shared key authentication instead of certificates; it cannot be combined with ``tls_cert``, ``tls_key`` or ``tls_ca``. Client and server must use the same key. The key must be random, with at least 128 bits of entropy, not a passphrase: a captured handshake allows offline guessing. A key shared with NCCL must not contain NUL bytes; ``(umask 077; openssl rand -hex 32 > key)`` satisfies both. The environment variable is ``TORCH_TCPSTORE_TLS_PSK``; the other notes for ``tls_cert`` apply except those about certificates. Any holder of the key can act as a server or client, so it can impersonate either side or intercept traffic, and gets full read/write access to every key. Keep the file private (a warning is logged if group or others can access it); distributing it is up to the user. Default is None.
+
+.. note:: The server limits keys (including any prefix) to 8 KiB, values to 8 MiB per request and multi-key requests to 128K keys; it disconnects clients that exceed them.
+
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
@@ -2532,6 +2535,21 @@ Example::
                       std::optional<std::string> tlsKey,
                       std::optional<std::string> tlsCa,
                       std::optional<std::string> tlsPsk) {
+            if (!useLibUV) {
+              static std::atomic<bool> warned{false};
+              if (!warned.load() || c10::WarningUtils::get_warnAlways()) {
+                if (PyErr_WarnEx(
+                        PyExc_FutureWarning,
+                        "TCPStore use_libuv=False (USE_LIBUV=0, ?use_libuv=0) is "
+                        "deprecated and ignored since PyTorch 2.16: libuv is the "
+                        "only backend. Remove the option to silence this warning.",
+                        1) != 0) {
+                  throw py::error_already_set();
+                }
+                warned.store(true);
+              }
+            }
+
             // gil_scoped_release is not safe as a call_guard in init.
             // https://github.com/pybind/pybind11/issues/5473
             py::gil_scoped_release nogil{};
@@ -2551,7 +2569,6 @@ Example::
                 .timeout = timeout,
                 .multiTenant = multiTenant,
                 .masterListenFd = masterListenFd,
-                .useLibUV = useLibUV,
                 .tlsCert = std::move(tlsCert),
                 .tlsKey = std::move(tlsKey),
                 .tlsCa = std::move(tlsCa),
@@ -2588,7 +2605,7 @@ Example::
       .def_property_readonly(
           "libuvBackend",
           &::c10d::TCPStore::isLibUvBackend,
-          R"(Returns True if it's using the libuv backend.)")
+          R"(Always True; libuv is the only ``TCPServer`` backend.)")
       .def(
           "__repr__",
           &::c10d::TCPStore::repr,
@@ -5149,9 +5166,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             Python ``Work`` subclasses may override this to return a
             ``torch.futures.Future``. FlightRecorder calls it once per op as
             the op is issued, so overrides must be cheap and must not block.
-            FlightRecorder records the op as completed once the future
-            completes. A ``torch.futures.Future()`` can't report failure: any
-            value, including one set with ``set_exception``, counts as success.
+            FlightRecorder retires the op once the future completes
+            successfully; if it fails (e.g. ``set_exception``) the op stays
+            un-retired.
            )")
           .def(
               "get_future",
