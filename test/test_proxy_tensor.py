@@ -46,7 +46,7 @@ from torch.fx.experimental.proxy_tensor import (
 # Mirror test_fake_tensor.py: under the C++ fake path, make bare FakeTensorMode()
 # construction build a CppFakeTensorMode so the suite exercises it end to end.
 if torch._dynamo.config.use_cpp_fake_tensor:
-    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorConverter
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
 
     def FakeTensorMode(
         *,
@@ -55,12 +55,9 @@ if torch._dynamo.config.use_cpp_fake_tensor:
         allow_non_fake_inputs=False,
         **kwargs,
     ):
-        mode = CppFakeTensorMode.create_cpp_fake_tensor_mode(
-            FakeTensorConverter(), shape_env
-        )
-        mode.set_allow_fallback_kernels(allow_fallback_kernels)
-        mode.allow_non_fake_inputs = allow_non_fake_inputs
-        return mode
+        if not allow_fallback_kernels or allow_non_fake_inputs or kwargs:
+            raise NotImplementedError("CppFakeTensorMode has no such options yet")
+        return CppFakeTensorMode(shape_env=shape_env)
 
 from torch.utils._pytree import tree_map
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
