@@ -558,8 +558,9 @@ class TestOrigami(TestCase):
         # Count only calls made after topk selection: the selector constructor
         # also calls select_workgroup_mapping.
         def arm_topk(*a, **kw):
+            results = real_topk(*a, **kw)
             calls.clear()
-            return real_topk(*a, **kw)
+            return results
 
         def fail_on_second_call(*a, **kw):
             calls.append(1)
@@ -578,8 +579,33 @@ class TestOrigami(TestCase):
         torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
         self.assertGreaterEqual(len(calls), 2)
         self.assertGreater(counters["inductor"]["origami_fallback"], 0)
-        # A kept partial result would leave at most one benchmarked config.
-        self.assertGreater(self._benchmark_gpu_call_count(), ORIGAMI_COMPILE_TOPK)
+        # A kept partial pick leaves one choice and no benchmarks; more choices
+        # than Origami could pick means the regular generator ran.
+        self.assertGreater(self._benchmark_gpu_call_count(), ORIGAMI_TOPK_VALUES[0])
+
+    def test_origami_falls_back_on_attribute_error(self):
+        # The _origami_* wrappers read private rocm-origami attributes; a renamed
+        # attribute must fall back instead of failing the compile.
+        fn, args = self._make_fn_and_inputs("mm", 256)
+        expected = fn(*args)
+
+        torch._dynamo.reset()
+        counters.clear()
+        with (
+            fresh_cache(),
+            config.patch(self._origami_default_config(ORIGAMI_TOPK_VALUES[0])),
+            mock.patch.object(
+                triton_heuristics,
+                "_origami_hardware",
+                side_effect=AttributeError("_hardware"),
+            ) as hardware,
+        ):
+            result = torch.compile(fn, dynamic=False)(*args)
+
+        hardware.assert_called()
+        torch.testing.assert_close(result, expected, atol=5e-2, rtol=5e-2)
+        self.assertGreater(counters["inductor"]["origami_fallback"], 0)
+        self.assertGreater(self._benchmark_gpu_call_count(), ORIGAMI_TOPK_VALUES[0])
 
     def test_origami_falls_back_when_config_lookup_fails(self):
         import dataclasses
@@ -706,7 +732,8 @@ class TestOrigami(TestCase):
             )
         else:
             self.assertEqual(select_topk.call_count, 0)
-            self.assertEqual(counters["inductor"]["origami_fallback"], 0)
+            # More choices than Origami could pick: the regular generator ran.
+            self.assertGreater(self._benchmark_gpu_call_count(), ORIGAMI_TOPK_VALUES[0])
 
     @parametrize("op_name", ("mm", "addmm", "bmm"))
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))

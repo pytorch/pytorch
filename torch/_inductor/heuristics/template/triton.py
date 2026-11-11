@@ -103,7 +103,8 @@ def _origami_package_supported(
         return False
 
 
-_ORIGAMI_ERRORS = (ValueError, TypeError, RuntimeError)
+# AttributeError: the _origami_* wrappers below read private rocm-origami attributes.
+_ORIGAMI_ERRORS = (ValueError, TypeError, RuntimeError, AttributeError)
 
 
 def _log_origami_fallback(err: Exception) -> None:
@@ -2551,6 +2552,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
 
     def _origami_select_configs(
         self,
+        origami_module: Any,
         allcfgs: Any,
         m: Any,
         n: Any,
@@ -2564,9 +2566,6 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
 
         Raises whatever Origami raises; the caller falls back on _ORIGAMI_ERRORS.
         """
-        origami_module = origami
-        if origami_module is None:
-            return [], {}
         selector = origami_module.OrigamiMatmulSelector(
             allcfgs,
             m,
@@ -2594,6 +2593,14 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         origami_configs: list[BaseConfig] = []
         # Tile key -> (occupancy, group_m) for converting the filtered configs.
         origami_params: dict[tuple[int, int, int], tuple[Any, Any]] = {}
+        try:
+            warp_size = DeviceProperties.create(device).warp_size or 64
+        except (RuntimeError, AttributeError) as e:
+            # Fall back to the standard warp size if device properties are unavailable.
+            torch._logging.warning_once(
+                log, "Failed to get device warp size (%s); using 64.", type(e).__name__
+            )
+            warp_size = 64
         for result in topk_results:
             cfg = result.config
             key = (cfg.mt.m, cfg.mt.n, cfg.mt.k, cfg.occupancy)
@@ -2612,12 +2619,6 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             )
             # One MFMA per warp, capped at 2 * parallel_mi_cu.
             tile_area = cfg.mt.m * cfg.mt.n
-            try:
-                warp_size = DeviceProperties.create(device).warp_size or 64
-            except (RuntimeError, AttributeError) as e:
-                # Fallback to standard warp size if device properties unavailable
-                log.warning("Failed to get device warp size: %s. Using default 64.", e)
-                warp_size = 64
             max_warps = 2 * hardware.parallel_mi_cu
             # mfma_dim from origami hardware object; fall back to 16.
             mfma_dim = getattr(hardware, "mfma_m", 16)
@@ -2680,6 +2681,16 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             and config.max_autotune_gemm_search_space == "DEFAULT"
         ):
             log.debug("Origami skipped: symbolic m/n/k, using regular config generator")
+        if (
+            origami is not None
+            and _origami_enabled()
+            and config.max_autotune_gemm_search_space == "DEFAULT"
+            and not self._origami_may_select()
+        ):
+            log.debug(
+                "Origami skipped: %s is not an in-tree heuristic or max_mm_configs is set",
+                type(self).__name__,
+            )
         # `origami is not None` is the module-load gate (set at import time);
         # `_origami_enabled()` checks config.rocm.origami at call time so that
         # config.patch({"rocm.origami": False}) disables the origami path even
@@ -2733,10 +2744,13 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             )
             try:
                 origami_configs, origami_triton_configs = self._origami_select_configs(
-                    allcfgs, m, n, k, dtype, device, a_stride, b_stride
+                    origami, allcfgs, m, n, k, dtype, device, a_stride, b_stride
                 )
                 origami_error = False
             except _ORIGAMI_ERRORS as err:
+                # This also covers Inductor's own code in the helper (num_warps math,
+                # GemmConfig build): a ValueError/TypeError/RuntimeError/AttributeError
+                # bug there falls back and is counted instead of failing the compile.
                 _log_origami_fallback(err)
                 origami_error = True
                 origami_configs, origami_triton_configs = [], {}
