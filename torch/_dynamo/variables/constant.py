@@ -11,23 +11,17 @@ from __future__ import annotations
 import enum
 import operator
 import types
-from collections.abc import Callable, Iterable
-from typing import Any, cast, Literal, overload, TYPE_CHECKING
+from collections.abc import Callable
+from typing import Any, cast, Literal, overload, Self, TYPE_CHECKING
+from typing_extensions import TypeIs
 
 import torch
 from torch._dynamo.source import GetItemSource
 
 from .. import graph_break_hints, variables
-from ..exc import raise_observed_exception, raise_type_error, unimplemented
-from ..utils import (
-    common_constant_types,
-    istype,
-    np,
-    raise_args_mismatch,
-    unpack_iterable,
-)
+from ..exc import raise_observed_exception, unimplemented
+from ..utils import common_constant_types, np, unpack_iterable
 from .base import (
-    _RICHCOMPARE_OPS,
     GetSet,
     Member,
     Method,
@@ -81,39 +75,27 @@ def _constant_getter(
     return getter
 
 
-class _ConstantTables:
-    """Per-type tp_methods / tp_getset / tp_members of the constant types, read
-    from the real descriptors of each type and its bases."""
-
-    def __init__(self) -> None:
-        self.methods: dict[type, dict[str, Method]] = {}
-        self.getset: dict[type, dict[str, GetSet]] = {}
-        self.members: dict[type, dict[str, Member]] = {}
-        for ty in (int, bool, float, complex, str, bytes, type(None), type(...)):
-            methods = self.methods.setdefault(ty, {})
-            getset = self.getset.setdefault(ty, {})
-            members = self.members.setdefault(ty, {})
-            for klass in reversed(ty.__mro__[:-1]):
-                for name, d in klass.__dict__.items():
-                    if isinstance(d, types.MethodDescriptorType):
-                        methods[name] = Method(_constant_method(d))
-                    elif isinstance(d, types.GetSetDescriptorType):
-                        getset[name] = GetSet(_constant_getter(d), readonly_setter)
-                    elif isinstance(d, types.MemberDescriptorType):
-                        members[name] = Member(_constant_getter(d), readonly_setter)
-
-    @staticmethod
-    def of(tables: dict[type, dict[str, Any]], value: object) -> dict[str, Any]:
-        mro = type(value).__mro__
-        for i, ty in enumerate(mro):
-            if ty in tables:
-                # A user subclass's own attributes shadow the builtin's members.
-                shadowed = {n for sub in mro[:i] for n in sub.__dict__}
-                return {n: e for n, e in tables[ty].items() if n not in shadowed}
-        return {}
+ConstantTables = tuple[dict[str, Method], dict[str, GetSet], dict[str, Member]]
 
 
-_CONSTANT_TABLES = _ConstantTables()
+def constant_type_tables(ty: type) -> ConstantTables:
+    """tp_methods / tp_getset / tp_members of a builtin constant type, read from
+    the descriptors in its own __dict__. Base types' entries are inherited
+    through the VT class MRO, like CPython's per-type tp_dict."""
+    methods: dict[str, Method] = {}
+    getset: dict[str, GetSet] = {}
+    members: dict[str, Member] = {}
+    for name, d in ty.__dict__.items():
+        if isinstance(d, types.MethodDescriptorType):
+            methods[name] = Method(_constant_method(d))
+        elif isinstance(d, types.GetSetDescriptorType):
+            getset[name] = GetSet(_constant_getter(d), readonly_setter)
+        elif isinstance(d, types.MemberDescriptorType):
+            members[name] = Member(_constant_getter(d), readonly_setter)
+    return methods, getset, members
+
+
+SlotImpl = Callable[..., VariableTracker]
 
 
 class ConstantVariable(VariableTracker):
@@ -125,27 +107,90 @@ class ConstantVariable(VariableTracker):
     nested collections.
     """
 
-    # PyLong_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L6585
-    # PyFloat_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L1880
-    # PyBool_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/boolobject.c#L171
-    # PyUnicode_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/unicodeobject.c#L14931
-    # PyBytes_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/bytesobject.c#L3017
-    # PyComplex_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L1099
-    # _PyNone_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L2022
-    _cpython_type = (int, float, str, bytes, bool, type(None), complex, type(...))
+    # The builtin literal types have their own subclasses below; the base class
+    # holds the other common_constant_types (torch.dtype, NotImplemented, ...).
+    _cpython_type = None
 
-    # These depend on the wrapped value's type, so they are properties of the VT.
-    @property
-    def tp_methods(self) -> dict[str, Method]:  # type: ignore[override]
-        return _ConstantTables.of(_CONSTANT_TABLES.methods, self.value)
+    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
+        # Route ConstantVariable(v) to the subclass modeling type(v), so every
+        # construction path (create(), clone(), direct calls) agrees.
+        if cls is ConstantVariable and (args or "value" in kwargs):
+            value = args[0] if args else kwargs["value"]
+            if np is not None and isinstance(value, np.number):
+                value = value.item()
+            cls = _CONSTANT_VT_FOR_TYPE.get(type(value), ConstantVariable)
+        return super().__new__(cls)
 
-    @property
-    def tp_getset(self) -> dict[str, GetSet]:  # type: ignore[override]
-        return _ConstantTables.of(_CONSTANT_TABLES.getset, self.value)
+    @staticmethod
+    def is_constant_vt(vt: VariableTracker) -> TypeIs[ConstantVariable]:
+        """Whether vt is ConstantVariable or one of its per-type subclasses
+        (IntConstantVariable, ...). False for user subclass VTs such as
+        UserDefinedConstantVariable."""
+        return type(vt) in _CONSTANT_VT_CLASSES
 
-    @property
-    def tp_members(self) -> dict[str, Member]:  # type: ignore[override]
-        return _ConstantTables.of(_CONSTANT_TABLES.members, self.value)
+    # Builders for the per-type subclasses' slot impls. Each subclass declares
+    # only the slots its type defines, each running that type's own C slot on
+    # the constant values. A slot reached through a base type's descriptor, e.g.
+    # int.__and__(True, True), therefore gets the base type's result (1, not True).
+    @staticmethod
+    def _fold(
+        tx: InstructionTranslatorBase, slot: Any, *args: VariableTracker
+    ) -> VariableTracker:
+        try:
+            res = slot(*(a.as_python_constant() for a in args))
+        except Exception as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ConstantVariable.create(res)
+
+    @staticmethod
+    def _unary_slot(slot: Any) -> SlotImpl:
+        return lambda self, tx: ConstantVariable._fold(tx, slot, self)
+
+    @staticmethod
+    def _binary_slot(ty: type, name: str) -> SlotImpl:
+        # A non-constant operand is left to its own (reflected) slot.
+        fwd, rev = getattr(ty, f"__{name}__"), getattr(ty, f"__r{name}__")
+
+        def impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
+            if not other.is_python_constant():
+                return ConstantVariable.create(NotImplemented)
+            return ConstantVariable._fold(tx, rev if reverse else fwd, self, other)
+
+        return impl
+
+    @staticmethod
+    def _power_slot(ty: type) -> SlotImpl:
+        def impl(self, tx, other, z, reverse=False):  # type: ignore[no-untyped-def]
+            operands = [other] if z is None else [other, z]
+            if not all(a.is_python_constant() for a in operands):
+                return ConstantVariable.create(NotImplemented)
+            slot = ty.__rpow__ if reverse else ty.__pow__
+            return ConstantVariable._fold(tx, slot, self, *operands)
+
+        return impl
+
+    @staticmethod
+    def _iter_slot(ty: type) -> SlotImpl:
+        # Iterates with ty's own tp_iter, not self.unpack_var_sequence, which a
+        # user subclass VT overrides with the full iteration protocol.
+        def impl(self, tx):  # type: ignore[no-untyped-def]
+            from .lists import ListIteratorVariable
+
+            items: list[VariableTracker] = [
+                ConstantVariable.create(c) for c in ty.__iter__(self.value)
+            ]
+            return ListIteratorVariable(items, mutation_type=ValueMutationNew())
+
+        return impl
+
+    @staticmethod
+    def _sequence_slot(slot: Any, fallback: SlotImpl) -> SlotImpl:
+        def impl(self, tx, arg):  # type: ignore[no-untyped-def]
+            if not arg.is_python_constant():
+                return fallback(self, tx, arg)
+            return ConstantVariable._fold(tx, slot, self, arg)
+
+        return impl
 
     @overload
     @staticmethod
@@ -252,55 +297,6 @@ class ConstantVariable(VariableTracker):
     def is_constant_none(self) -> bool:
         return self.value is None
 
-    @property
-    def items(self) -> list[VariableTracker]:
-        """
-        Need this when adding a BaseListVariable and a ConstantVariable together.
-        Happens in detectron2.
-        """
-        try:
-            return [ConstantVariable.create(x) for x in self.value]
-        except TypeError as e:
-            raise NotImplementedError from e
-
-    def getitem_const(
-        self, tx: InstructionTranslatorBase, arg: VariableTracker
-    ) -> VariableTracker:
-        # bytes_subscript: https://github.com/python/cpython/blob/62a6e898e017c9878490544f6a227b8a187a949c/Objects/bytesobject.c#L1732
-        # unicode_subscript: https://github.com/python/cpython/blob/62a6e898e017c9878490544f6a227b8a187a949c/Objects/unicodeobject.c#L13738
-        if isinstance(self.value, (str, bytes)):
-            from .lists import SliceVariable
-            from .object_protocol import maybe_get_python_type, pyindex_check
-
-            # _PyIndex_Check first, then slice, mirroring unicode_subscript /
-            # bytes_subscript.
-            if pyindex_check(maybe_get_python_type(arg)):
-                arg = arg.nb_index_impl(tx)
-            elif isinstance(arg, SliceVariable):
-                return ConstantVariable.create(self.value[arg.as_index_slice(tx)])
-            else:
-                raise_type_error(
-                    tx,
-                    f"{self.python_type_name()} indices must be integers, "
-                    f"not {arg.python_type_name()}",
-                )
-        return ConstantVariable.create(
-            self.value[arg.as_python_constant()],
-        )
-
-    def sq_item_impl(
-        self, tx: InstructionTranslatorBase, key: VariableTracker
-    ) -> VariableTracker:
-        # unicode_getitem: https://github.com/python/cpython/blob/62a6e898e01/Objects/unicodeobject.c#L13777
-        # bytes_item: https://github.com/python/cpython/blob/62a6e898e01/Objects/bytesobject.c#L319
-        # CPython's sq_item takes Py_ssize_t (already int from generic_getitem's
-        # nb_index_impl).  Unlike mp_subscript, sq_item never handles slices.
-        index = key.as_python_constant()
-        try:
-            return ConstantVariable.create(self.value[index])
-        except IndexError as e:
-            raise_observed_exception(IndexError, tx, args=list(e.args))
-
     @staticmethod
     def is_base_literal(obj: object) -> bool:
         return type(obj) in common_constant_types
@@ -316,14 +312,6 @@ class ConstantVariable(VariableTracker):
             cache[id(obj)] = obj
             return all(ConstantVariable.is_literal(x, cache) for x in obj)  # type: ignore[attr-defined]
         return ConstantVariable.is_base_literal(obj)
-
-    def unpack_var_sequence(
-        self, tx: InstructionTranslatorBase | None
-    ) -> list[VariableTracker]:
-        try:
-            return [ConstantVariable.create(x) for x in self.as_python_constant()]
-        except TypeError as e:
-            raise NotImplementedError from e
 
     def tp_hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
@@ -351,35 +339,6 @@ class ConstantVariable(VariableTracker):
     def tp_str_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         return ConstantVariable.create(str(self.value))
 
-    def len_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
-        """Generic len for any constant value (sequence or mapping)."""
-        try:
-            return ConstantVariable.create(len(self.value))
-        except TypeError as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-
-    def sq_length_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
-        """Sequence length - delegates to len_impl for constants."""
-        return self.len_impl(tx)
-
-    def mp_length_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
-        """Mapping length - delegates to len_impl for constants."""
-        return self.len_impl(tx)
-
-    def mp_subscript_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        key: VariableTracker,
-    ) -> VariableTracker:
-        from .object_protocol import type_implements_mp_subscript
-
-        if type_implements_mp_subscript(type(self.value)) and key.is_python_constant():
-            try:
-                return ConstantVariable.create(self.value[key.as_python_constant()])
-            except Exception as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-        return super().mp_subscript_impl(tx, key)
-
     def const_getattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker:
@@ -389,155 +348,6 @@ class ConstantVariable(VariableTracker):
         if callable(member):
             raise NotImplementedError
         return member
-
-    def sq_concat_impl(
-        self, tx: InstructionTranslatorBase, other: VariableTracker
-    ) -> VariableTracker:
-        from .object_protocol import type_implements_sq_concat
-
-        if type_implements_sq_concat(type(self.value)) and other.is_python_constant():
-            try:
-                return ConstantVariable.create(self.value + other.as_python_constant())
-            except Exception as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-        return super().sq_concat_impl(tx, other)
-
-    def sq_contains_impl(self, tx: InstructionTranslatorBase, item: VariableTracker):
-        """Sequence contains for constants."""
-        if item.is_python_constant():
-            search = item.as_python_constant()
-            try:
-                result = search in self.value
-                return ConstantVariable.create(result)
-            except TypeError as e:
-                raise_observed_exception(
-                    type(e),
-                    tx,
-                    args=list(e.args),
-                )
-        return super().sq_contains_impl(tx, item)
-
-    def tp_iter_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
-        from .lists import ListIteratorVariable
-
-        if isinstance(self.value, Iterable):
-            try:
-                return ListIteratorVariable(
-                    [ConstantVariable.create(c) for c in self.value],
-                    mutation_type=ValueMutationNew(),
-                )
-            except NotImplementedError:
-                pass
-        return super().tp_iter_impl(tx)
-
-    def call_method(
-        self,
-        tx: InstructionTranslatorBase,
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-        from .tensor import SymNodeVariable
-
-        if name == "format" and istype(self.value, str):
-            return SourcelessBuilder.create_internal_builtin(str.format).call_function(
-                tx,
-                [self, *args],
-                kwargs,
-            )
-        elif name == "join" and istype(self.value, str):
-            if kwargs or len(args) != 1:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "1 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            arg_unpacked = unpack_iterable(tx, args[0])
-            try:
-                arg_const = [x.as_python_constant() for x in arg_unpacked]
-                return ConstantVariable.create(self.value.join(arg_const))
-            except NotImplementedError:
-                return super().call_method(tx, name, args, kwargs)
-            except TypeError as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-
-        if any(isinstance(x, SymNodeVariable) for x in args):
-            # Promote to SymNodeVariable for operations involving dynamic shapes.
-            return variables.SymNodeVariable.create(
-                tx, self.as_proxy(), self.value
-            ).call_method(tx, name, args, kwargs)
-
-        try:
-            const_args = [a.as_python_constant() for a in args]
-            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-        except NotImplementedError:
-            return super().call_method(tx, name, args, kwargs)
-
-        if name == "__iter__":
-            return self.tp_iter_impl(tx)
-
-        if isinstance(self.value, str) and name in str.__dict__:
-            method = getattr(self.value, name)
-            try:
-                result = method(*const_args, **const_kwargs)
-            except Exception as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-            # str.split/rsplit/splitlines return a fresh caller-owned list;
-            # mark it mutable so in-place ops (.sort(), shuffle, etc.) are tracked.
-            if name in ("split", "rsplit", "splitlines"):
-                return ConstantVariable.create(result, mutation_type=ValueMutationNew())
-            return ConstantVariable.create(result)
-        elif istype(self.value, (float, int)) and hasattr(self.value, name):
-            if not (args or kwargs):
-                try:
-                    return ConstantVariable.create(getattr(self.value, name)())
-                except (OverflowError, ValueError) as exc:
-                    raise_observed_exception(
-                        type(exc),
-                        tx,
-                        args=list(exc.args),
-                    )
-            if (
-                hasattr(operator, name)
-                and name not in _RICHCOMPARE_OPS
-                and len(args) == 1
-                and args[0].is_python_constant()
-            ):
-                add_target = const_args[0]
-                op = getattr(operator, name)
-                if isinstance(
-                    add_target, (torch.SymBool, torch.SymFloat, torch.SymInt)
-                ):
-                    # Addition between a non sym and sym makes a sym
-                    proxy = tx.output.create_proxy(
-                        "call_function", op, (self.value, add_target), {}
-                    )
-                    return SymNodeVariable.create(tx, proxy, add_target)
-                else:
-                    try:
-                        return ConstantVariable.create(op(self.value, add_target))
-                    except Exception as e:
-                        raise_observed_exception(type(e), tx, args=list(e.args))
-        elif isinstance(self.value, bytes) and name == "decode":
-            method = getattr(self.value, name)
-            return ConstantVariable.create(method(*const_args, **const_kwargs))
-        elif type(self.value) is complex and name in complex.__dict__:
-            method = getattr(self.value, name)
-            try:
-                return ConstantVariable.create(method(*const_args, **const_kwargs))
-            except Exception as e:
-                raise_observed_exception(type(e), tx)
-
-        if name == "__round__" and len(args) == 1 and args[0].is_python_constant():
-            try:
-                return ConstantVariable.create(
-                    round(self.value, args[0].as_python_constant())
-                )
-            except Exception as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
-        return super().call_method(tx, name, args, kwargs)
 
     def call_tree_map(
         self,
@@ -622,370 +432,34 @@ class ConstantVariable(VariableTracker):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
-    def nb_bool_impl(
-        self,
-        tx: InstructionTranslatorBase,
-    ) -> VariableTracker:
-        # CPython: int, float, and bool define nb_bool (returns self for int,
-        # bool(self) for float). All other constant types do not.
-        from .object_protocol import type_implements_nb_bool
 
-        if type_implements_nb_bool(type(self.value)):
-            return ConstantVariable.create(bool(self.value))
-        return super().nb_bool_impl(tx)
+class IntConstantVariable(ConstantVariable):
+    # PyLong_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L6585
+    _cpython_type = int
+    tp_methods, tp_getset, tp_members = constant_type_tables(int)
 
-    def nb_index_impl(
-        self,
-        tx: InstructionTranslatorBase,
-    ) -> VariableTracker:
-        # CPython: int and bool define nb_index (returns self for int,
-        # int(self) for bool). All other constant types do not.
-        from .object_protocol import type_implements_nb_index
-
-        if type_implements_nb_index(type(self.value)):
-            return ConstantVariable.create(operator.index(self.value))
-        return super().nb_index_impl(tx)
-
-    def nb_int_impl(
-        self,
-        tx: InstructionTranslatorBase,
-    ) -> VariableTracker:
-        # CPython: int defines nb_int (long_long, returns copy).
-        # bool inherits nb_int from int via slot inheritance.
-        # float defines nb_int (truncates toward zero via PyLong_FromDouble).
-        try:
-            return ConstantVariable.create(int(self.value))
-        except (OverflowError, ValueError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-
-    def nb_float_impl(
-        self,
-        tx: InstructionTranslatorBase,
-    ) -> VariableTracker:
-        # CPython: float defines nb_float (float_float, returns copy).
-        # int defines nb_float (long_float, converts to float).
-        # bool inherits nb_float from int via slot inheritance.
-        try:
-            return ConstantVariable.create(float(self.value))
-        except (OverflowError, ValueError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-
-    def _nb_binary_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        other: VariableTracker,
-        op: Any,
-        type_check: Any,
-        reverse: bool,
-    ) -> VariableTracker:
-        # Shared body for ConstantVariable's binary nb_* slots. Mirrors the
-        # CPython contract: if the type doesn't implement the slot, return
-        # NotImplemented so dispatch can try the reverse slot; otherwise run
-        # ``op(v, w)`` and re-raise arithmetic exceptions as observed.
-        if not type_check(type(self.value)):
-            return ConstantVariable.create(NotImplemented)
-        if not other.is_python_constant():
-            return ConstantVariable.create(NotImplemented)
-        self_, other_ = (other, self) if reverse else (self, other)
-        v, w = self_.as_python_constant(), other_.as_python_constant()
-        try:
-            result = op(v, w)
-        except (TypeError, ValueError, OverflowError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-        if result is NotImplemented:
-            return ConstantVariable.create(NotImplemented)
-        return VariableTracker.build(tx, result)
-
-    def nb_lshift_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # CPython: only int defines nb_lshift; bool inherits via slot inheritance.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5489 (long_lshift)
-        from .object_protocol import type_implements_nb_lshift
-
-        return self._nb_binary_impl(
-            tx, other, operator.lshift, type_implements_nb_lshift, reverse
-        )
-
-    def nb_rshift_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # CPython: only int defines nb_rshift; bool inherits via slot inheritance.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5526 (long_rshift)
-        from .object_protocol import type_implements_nb_rshift
-
-        return self._nb_binary_impl(
-            tx, other, operator.rshift, type_implements_nb_rshift, reverse
-        )
-
-    def nb_floor_divide_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # CPython: int and float define nb_floor_divide; bool inherits int's.
-        # complex does NOT (complex floor division raises TypeError).
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L4057 (long_floor_div)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L660 (float_floor_div)
-        if not isinstance(self.value, (int, float)):
-            return ConstantVariable.create(NotImplemented)
-        if not other.is_python_constant():
-            return ConstantVariable.create(NotImplemented)
-        self_, other_ = (other, self) if reverse else (self, other)
-        v, w = self_.as_python_constant(), other_.as_python_constant()
-        try:
-            return VariableTracker.build(tx, v // w)
-        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-
-    def nb_true_divide_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # CPython: int, float, and complex define nb_true_divide; bool inherits int's.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L4146 (long_true_divide)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L618 (float_div)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L518 (complex_div)
-        if not isinstance(self.value, (int, float, complex)):
-            return ConstantVariable.create(NotImplemented)
-        if not other.is_python_constant():
-            return ConstantVariable.create(NotImplemented)
-        self_, other_ = (other, self) if reverse else (self, other)
-        v, w = self_.as_python_constant(), other_.as_python_constant()
-        try:
-            return VariableTracker.build(tx, v / w)
-        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-
-    def nb_remainder_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # CPython: int and float define nb_remainder (bool inherits int's); complex
-        # does NOT. str/bytes/bytearray define nb_remainder for %-formatting.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L4116 (long_mod)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L640 (float_rem)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/unicodeobject.c#L15170 (unicode_mod)
-        if not isinstance(self.value, (int, float, str, bytes, bytearray)):
-            return ConstantVariable.create(NotImplemented)
-        if not other.is_python_constant():
-            return ConstantVariable.create(NotImplemented)
-        self_, other_ = (other, self) if reverse else (self, other)
-        v, w = self_.as_python_constant(), other_.as_python_constant()
-        try:
-            return VariableTracker.build(tx, v % w)
-        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-
-    def nb_divmod_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # CPython: int and float define nb_divmod (bool inherits int's); complex
-        # does NOT. Returns a (quotient, remainder) tuple.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L4126 (long_divmod)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L680 (float_divmod)
-        if not isinstance(self.value, (int, float)):
-            return ConstantVariable.create(NotImplemented)
-        if not other.is_python_constant():
-            return ConstantVariable.create(NotImplemented)
-        self_, other_ = (other, self) if reverse else (self, other)
-        v, w = self_.as_python_constant(), other_.as_python_constant()
-        try:
-            return VariableTracker.build(tx, divmod(v, w))
-        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-
-    def nb_or_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # CPython: int, frozenset, and type all define nb_or.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5606 (long_or)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L1319 (set_or)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L6028-L6030 (type_as_number.nb_or)
-        # bool inherits int's nb_or via slot inheritance.
-        from .object_protocol import type_implements_nb_or
-
-        return self._nb_binary_impl(
-            tx, other, operator.or_, type_implements_nb_or, reverse
-        )
-
-    def nb_subtract_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # CPython: int, float, and complex define nb_subtract; bool inherits int's.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L3819-L3824 (long_sub_method)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L598-L606 (float_sub)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L494-L503 (COMPLEX_BINOP(sub, diff))
-        from .object_protocol import type_implements_nb_subtract
-
-        return self._nb_binary_impl(
-            tx, other, operator.sub, type_implements_nb_subtract, reverse
-        )
-
-    def nb_multiply_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # int, float, and complex all define nb_multiply (bool inherits int's slot).
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L4242-L4260 (long_mul)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L608-L616 (float_mul)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L506 (complex_mul)
-        # str/bytes/bytearray do NOT have nb_multiply — they go through sq_repeat,
-        # so this method should not see them as ``self``.
-        from .object_protocol import type_implements_nb_multiply
-
-        if not other.is_python_constant():
-            return ConstantVariable.create(NotImplemented)
-        other_val = other.as_python_constant()
-        # CPython's nb_multiply (e.g. long_mul, float_mul) returns NotImplemented
-        # whenever the other operand isn't numeric — sequence repetition is
-        # then handled by PyNumber_Multiply's sq_repeat fallback. We mirror that
-        # here because ``operator.mul`` performs the full protocol (including
-        # sq_repeat) and would incorrectly short-circuit the dispatch.
-        if not isinstance(other_val, (int, float, complex)):
-            return ConstantVariable.create(NotImplemented)
-        return self._nb_binary_impl(
-            tx, other, operator.mul, type_implements_nb_multiply, reverse
-        )
-
-    def sq_repeat_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        count: VariableTracker,
-    ) -> VariableTracker:
-        # Only str / bytes are reachable via ConstantVariable since list, tuple,
-        # bytearray have their own VTs.  ``count`` was already validated as an
-        # index by pysequence_repeat -> nb_index_impl.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/unicodeobject.c#L12371 (unicode_repeat)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/bytesobject.c#L1448 (bytes_repeat)
-        if not isinstance(self.value, (str, bytes)):
-            raise AssertionError("Expected str or bytes in sq_repeat_impl")
-        n = count.as_python_constant()
-        try:
-            return ConstantVariable.create(self.value * n)
-        except (MemoryError, OverflowError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
-
-    def nb_and_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # CPython: int, frozenset, and type all define nb_and.
-        # https://github.com/python/cpython/blob/3.13/Objects/longobject.c#L5574 (long_and)
-        # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1506-L1518 (set_and)
-        # bool inherits int's nb_and via slot inheritance.
-        from .object_protocol import type_implements_nb_and
-
-        return self._nb_binary_impl(
-            tx, other, operator.and_, type_implements_nb_and, reverse
-        )
-
-    def nb_xor_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # CPython: int and frozenset define nb_xor.
-        # https://github.com/python/cpython/blob/3.13/Objects/longobject.c#L5587 (long_xor)
-        # https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L1984-L1990 (set_xor)
-        # bool inherits int's nb_xor via slot inheritance.
-        from .object_protocol import type_implements_nb_xor
-
-        return self._nb_binary_impl(
-            tx, other, operator.xor, type_implements_nb_xor, reverse
-        )
-
-    def nb_negative_impl(
-        self,
-        tx: InstructionTranslatorBase,
-    ) -> VariableTracker:
-        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5179-L5189
-        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L839-L849
-        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L569-L575
-        # bool inherits nb_negative from int via slot inheritance.
-        return ConstantVariable.create(-self.value)
-
-    def nb_positive_impl(
-        self,
-        tx: InstructionTranslatorBase,
-    ) -> VariableTracker:
-        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5619 (long_long)
-        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L1114 (float_float)
-        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L578 (complex_pos)
-        # bool inherits nb_positive from int via slot inheritance.
-        return ConstantVariable.create(+self.value)
-
-    def nb_add_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        other: VariableTracker,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # CPython: int, float, and complex define nb_add; bool inherits int's.
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L3800 (long_add)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L559 (float_add)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L720 (COMPLEX_BINOP(add, sum))
-        from .object_protocol import type_implements_nb_add
-
-        return self._nb_binary_impl(
-            tx, other, operator.add, type_implements_nb_add, reverse
-        )
-
-    def nb_power_impl(
-        self,
-        tx: InstructionTranslatorBase,
-        other: VariableTracker,
-        z: VariableTracker | None,
-        reverse: bool = False,
-    ) -> VariableTracker:
-        # CPython: int, float, and complex all define nb_power (bool inherits int's).
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c (long_pow)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c (float_pow)
-        # https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c (complex_pow)
-
-        if z is not None:
-            z = z.as_python_constant()
-
-        if not other.is_python_constant():
-            return ConstantVariable.create(NotImplemented)
-
-        self_, other_ = (other, self) if reverse else (self, other)
-        v, w = (
-            self_.as_python_constant(),
-            other_.as_python_constant(),
-        )
-
-        try:
-            return VariableTracker.build(tx, pow(v, w, z))
-        except TypeError:
-            return ConstantVariable.create(NotImplemented)
-        except (ValueError, ZeroDivisionError, OverflowError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
+    tp_repr_impl = ConstantVariable._unary_slot(int.__repr__)
+    nb_bool_impl = ConstantVariable._unary_slot(int.__bool__)
+    nb_index_impl = ConstantVariable._unary_slot(int.__index__)
+    nb_int_impl = ConstantVariable._unary_slot(int.__int__)
+    nb_float_impl = ConstantVariable._unary_slot(int.__float__)
+    nb_negative_impl = ConstantVariable._unary_slot(int.__neg__)
+    nb_positive_impl = ConstantVariable._unary_slot(int.__pos__)
+    nb_absolute_impl = ConstantVariable._unary_slot(int.__abs__)
+    nb_invert_impl = ConstantVariable._unary_slot(int.__invert__)
+    nb_add_impl = ConstantVariable._binary_slot(int, "add")
+    nb_subtract_impl = ConstantVariable._binary_slot(int, "sub")
+    nb_multiply_impl = ConstantVariable._binary_slot(int, "mul")
+    nb_floor_divide_impl = ConstantVariable._binary_slot(int, "floordiv")
+    nb_true_divide_impl = ConstantVariable._binary_slot(int, "truediv")
+    nb_remainder_impl = ConstantVariable._binary_slot(int, "mod")
+    nb_divmod_impl = ConstantVariable._binary_slot(int, "divmod")
+    nb_lshift_impl = ConstantVariable._binary_slot(int, "lshift")
+    nb_rshift_impl = ConstantVariable._binary_slot(int, "rshift")
+    nb_and_impl = ConstantVariable._binary_slot(int, "and")
+    nb_or_impl = ConstantVariable._binary_slot(int, "or")
+    nb_xor_impl = ConstantVariable._binary_slot(int, "xor")
+    nb_power_impl = ConstantVariable._power_slot(int)
 
     def nb_power_z_impl(
         self,
@@ -993,41 +467,190 @@ class ConstantVariable(VariableTracker):
         v: VariableTracker,
         w: VariableTracker,
     ) -> VariableTracker:
-        if not isinstance(self.value, int):
-            return ConstantVariable.create(NotImplemented)
+        # pow(v, w, self): ternary_op tries the modulus's slot last.
         if not v.is_python_constant() or not w.is_python_constant():
             return ConstantVariable.create(NotImplemented)
-        v_val, w_val = v.as_python_constant(), w.as_python_constant()
-        if not isinstance(v_val, int) or not isinstance(w_val, int):
-            return ConstantVariable.create(NotImplemented)
-        try:
-            return VariableTracker.build(tx, pow(v_val, w_val, self.value))
-        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ConstantVariable._fold(tx, int.__pow__, v, w, self)
 
-    def nb_absolute_impl(
+
+class BoolConstantVariable(IntConstantVariable):
+    # PyBool_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/boolobject.c#L171
+    # tp_base is PyLong_Type; bool_repr and bool_as_number override int's.
+    _cpython_type = bool
+    tp_methods, tp_getset, tp_members = constant_type_tables(bool)
+
+    tp_repr_impl = ConstantVariable._unary_slot(bool.__repr__)
+    nb_invert_impl = ConstantVariable._unary_slot(bool.__invert__)
+    nb_and_impl = ConstantVariable._binary_slot(bool, "and")
+    nb_or_impl = ConstantVariable._binary_slot(bool, "or")
+    nb_xor_impl = ConstantVariable._binary_slot(bool, "xor")
+
+
+class FloatConstantVariable(ConstantVariable):
+    # PyFloat_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L1880
+    _cpython_type = float
+    tp_methods, tp_getset, tp_members = constant_type_tables(float)
+
+    tp_repr_impl = ConstantVariable._unary_slot(float.__repr__)
+    nb_bool_impl = ConstantVariable._unary_slot(float.__bool__)
+    nb_int_impl = ConstantVariable._unary_slot(float.__int__)
+    nb_float_impl = ConstantVariable._unary_slot(float.__float__)
+    nb_negative_impl = ConstantVariable._unary_slot(float.__neg__)
+    nb_positive_impl = ConstantVariable._unary_slot(float.__pos__)
+    nb_absolute_impl = ConstantVariable._unary_slot(float.__abs__)
+    nb_add_impl = ConstantVariable._binary_slot(float, "add")
+    nb_subtract_impl = ConstantVariable._binary_slot(float, "sub")
+    nb_multiply_impl = ConstantVariable._binary_slot(float, "mul")
+    nb_floor_divide_impl = ConstantVariable._binary_slot(float, "floordiv")
+    nb_true_divide_impl = ConstantVariable._binary_slot(float, "truediv")
+    nb_remainder_impl = ConstantVariable._binary_slot(float, "mod")
+    nb_divmod_impl = ConstantVariable._binary_slot(float, "divmod")
+    nb_power_impl = ConstantVariable._power_slot(float)
+
+
+class ComplexConstantVariable(ConstantVariable):
+    # PyComplex_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L1099
+    _cpython_type = complex
+    tp_methods, tp_getset, tp_members = constant_type_tables(complex)
+
+    tp_repr_impl = ConstantVariable._unary_slot(complex.__repr__)
+    nb_bool_impl = ConstantVariable._unary_slot(complex.__bool__)
+    nb_negative_impl = ConstantVariable._unary_slot(complex.__neg__)
+    nb_positive_impl = ConstantVariable._unary_slot(complex.__pos__)
+    nb_absolute_impl = ConstantVariable._unary_slot(complex.__abs__)
+    nb_add_impl = ConstantVariable._binary_slot(complex, "add")
+    nb_subtract_impl = ConstantVariable._binary_slot(complex, "sub")
+    nb_multiply_impl = ConstantVariable._binary_slot(complex, "mul")
+    nb_true_divide_impl = ConstantVariable._binary_slot(complex, "truediv")
+    nb_power_impl = ConstantVariable._power_slot(complex)
+
+
+class StrConstantVariable(ConstantVariable):
+    # PyUnicode_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/unicodeobject.c#L14931
+    _cpython_type = str
+    _tp_methods, tp_getset, tp_members = constant_type_tables(str)
+
+    tp_repr_impl = ConstantVariable._unary_slot(str.__repr__)
+    nb_remainder_impl = ConstantVariable._binary_slot(str, "mod")
+    mp_subscript_impl = ConstantVariable._sequence_slot(
+        str.__getitem__, VariableTracker.mp_subscript_impl
+    )
+    sq_item_impl = ConstantVariable._sequence_slot(
+        str.__getitem__, VariableTracker.sq_item_impl
+    )
+    sq_length_impl = ConstantVariable._unary_slot(str.__len__)
+    mp_length_impl = ConstantVariable._unary_slot(str.__len__)
+    sq_contains_impl = ConstantVariable._sequence_slot(
+        str.__contains__, VariableTracker.sq_contains_impl
+    )
+    tp_iter_impl = ConstantVariable._iter_slot(str)
+    sq_concat_impl = ConstantVariable._sequence_slot(
+        str.__add__, VariableTracker.sq_concat_impl
+    )
+    sq_repeat_impl = ConstantVariable._sequence_slot(
+        str.__mul__, VariableTracker.sq_repeat_impl
+    )
+
+    def unpack_var_sequence(
+        self, tx: InstructionTranslatorBase | None
+    ) -> list[VariableTracker]:
+        return [ConstantVariable.create(c) for c in str.__iter__(self.value)]
+
+    def join_method(
         self,
         tx: InstructionTranslatorBase,
-    ) -> VariableTracker:
-        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5184-L5190
-        # float: https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L847-L850
-        # complex: https://github.com/python/cpython/blob/v3.13.0/Objects/complexobject.c#L588-L600
-        #   _Py_c_abs can set errno=ERANGE on overflow, which complex_abs
-        #   converts to OverflowError("absolute value too large").
-        # bool inherits nb_absolute from int via slot inheritance.
-        try:
-            return ConstantVariable.create(abs(self.value))
-        except OverflowError as e:
-            raise_observed_exception(OverflowError, tx, args=list(e.args))
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # str.join consumes any iterable, including lazy ones (generators, map)
+        # that the table's constant fold declines; unpack it, then fold str.join.
+        items = unpack_iterable(tx, args[0])
+        if not all(item.is_python_constant() for item in items):
+            return None
+        return ConstantVariable._fold(
+            tx, str.join, self, variables.TupleVariable(items)
+        )
 
-    def nb_invert_impl(
+    def format_method(
         self,
         tx: InstructionTranslatorBase,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # int: https://github.com/python/cpython/blob/v3.13.0/Objects/longobject.c#L5163-L5177
-        #   long_invert implements ~x as -(x+1).
-        # bool inherits nb_invert from int via slot inheritance.
-        return ConstantVariable.create(~self.value)
+        # str.format with non-constant arguments (e.g. a tensor) builds a
+        # StringFormatVariable through the str.format builtin.
+        from .builder import SourcelessBuilder
+
+        fmt = SourcelessBuilder.create_internal_builtin(str.format)
+        return fmt.call_function(tx, [self, *args], kwargs)
+
+    tp_methods = {
+        **_tp_methods,
+        "join": Method(join_method),
+        "format": Method(format_method),
+    }
+
+
+class BytesConstantVariable(ConstantVariable):
+    # PyBytes_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/bytesobject.c#L3017
+    _cpython_type = bytes
+    tp_methods, tp_getset, tp_members = constant_type_tables(bytes)
+
+    tp_repr_impl = ConstantVariable._unary_slot(bytes.__repr__)
+    nb_remainder_impl = ConstantVariable._binary_slot(bytes, "mod")
+    mp_subscript_impl = ConstantVariable._sequence_slot(
+        bytes.__getitem__, VariableTracker.mp_subscript_impl
+    )
+    sq_item_impl = ConstantVariable._sequence_slot(
+        bytes.__getitem__, VariableTracker.sq_item_impl
+    )
+    sq_length_impl = ConstantVariable._unary_slot(bytes.__len__)
+    mp_length_impl = ConstantVariable._unary_slot(bytes.__len__)
+    sq_contains_impl = ConstantVariable._sequence_slot(
+        bytes.__contains__, VariableTracker.sq_contains_impl
+    )
+    tp_iter_impl = ConstantVariable._iter_slot(bytes)
+    sq_concat_impl = ConstantVariable._sequence_slot(
+        bytes.__add__, VariableTracker.sq_concat_impl
+    )
+    sq_repeat_impl = ConstantVariable._sequence_slot(
+        bytes.__mul__, VariableTracker.sq_repeat_impl
+    )
+
+    def unpack_var_sequence(
+        self, tx: InstructionTranslatorBase | None
+    ) -> list[VariableTracker]:
+        return [ConstantVariable.create(c) for c in bytes.__iter__(self.value)]
+
+
+class NoneConstantVariable(ConstantVariable):
+    # _PyNone_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/object.c#L2022
+    _cpython_type = type(None)
+    tp_methods, tp_getset, tp_members = constant_type_tables(type(None))
+
+    tp_repr_impl = ConstantVariable._unary_slot(type(None).__repr__)
+    nb_bool_impl = ConstantVariable._unary_slot(type(None).__bool__)
+
+
+class EllipsisConstantVariable(ConstantVariable):
+    # PyEllipsis_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/sliceobject.c#L77
+    _cpython_type = type(...)
+    tp_methods, tp_getset, tp_members = constant_type_tables(type(...))
+
+    tp_repr_impl = ConstantVariable._unary_slot(type(...).__repr__)
+
+
+_CONSTANT_VT_FOR_TYPE: dict[type, type[ConstantVariable]] = {
+    int: IntConstantVariable,
+    bool: BoolConstantVariable,
+    float: FloatConstantVariable,
+    complex: ComplexConstantVariable,
+    str: StrConstantVariable,
+    bytes: BytesConstantVariable,
+    type(None): NoneConstantVariable,
+    type(...): EllipsisConstantVariable,
+}
+_CONSTANT_VT_CLASSES = frozenset((ConstantVariable, *_CONSTANT_VT_FOR_TYPE.values()))
 
 
 # These interned singletons back ConstantVariable.create itself.

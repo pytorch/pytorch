@@ -597,6 +597,13 @@ def getset_set(name: str) -> Callable[..., None]:
     return setter
 
 
+def attr_getset(name: str, obj: Callable[[Any], Any]) -> GetSet:
+    """GetSet for a plain writable attribute: read via getattr(obj(self), name),
+    written through store_attr_mutation."""
+    getter = getset_load_or_build(lambda vt: getattr(obj(vt), name), name)
+    return GetSet(getter, getset_set(name))
+
+
 # This helps users of `as_python_constant` to catch unimplemented error with
 # more information; it inherits `NotImplementedError` for backward
 # compatibility reasons.
@@ -1800,9 +1807,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     """
 
     # The CPython type(s) this VT is designed to represent.
-    # Single type or tuple of types. None means no static CPython type mapping
-    # (e.g., dynamic types like UserDefinedObjectVariable, or Dynamo-internal VTs).
-    _cpython_type: type | tuple[type, ...] | None = None
+    # Single type or tuple of types. None means no static CPython type mapping.
+    # Read per class (own __dict__), not inherited. The base class itself
+    # represents plain `object()` instances, like PyBaseObject_Type:
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L7243
+    _cpython_type: type | tuple[type, ...] | None = object
 
     # Declarative named-method table (analogous to CPython's tp_methods): maps a
     # method name to a Method describing its handler and calling convention.
@@ -1834,15 +1843,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         its own table entries into its own tp_dict, and lookup walks the MRO with
         the most-derived class winning. A subclass table therefore *adds* to
         (rather than replaces) the entries it inherits. Within a class the tables
-        are consulted in the order given. A table may be a property of the
-        instance, for a VT that wraps several Python types.
+        are consulted in the order given.
         """
         for klass in type(self).__mro__:
             d = klass.__dict__
             for attr in table_attrs:
                 table = d.get(attr)
-                if isinstance(table, property):
-                    table = table.__get__(self)
                 if table is not None and name in table:
                     return table[name]
         return None
@@ -1986,6 +1992,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Raises:
             NotImplementedError: If the method is not implemented in a subclass.
         """
+        if type(self) is VariableTracker:
+            return object
         try:
             return type(self.as_python_constant())
         except NotImplementedError:
@@ -2974,7 +2982,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         Returns NO_SUCH_SUBOBJ if no concrete Python object is available.
         """
-
+        if type(self) is VariableTracker:
+            return self.value
         try:
             return self.as_python_constant()
         except NotImplementedError:
@@ -3481,8 +3490,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         mutation_type: MutationType | None = None,
         source_location: SourceLocation | None = None,
         dict_vt: variables.DunderDictVariable | None = None,
+        value: object = NO_SUCH_SUBOBJ,
     ) -> None:
         super().__init__()
+        # Only bare VariableTrackers (plain object() instances) pass a value;
+        # subclasses manage their own self.value.
+        if value is not NO_SUCH_SUBOBJ:
+            self.value: Any = value
         self.source = source
         self.source_location = source_location
         self.mutation_type = mutation_type
