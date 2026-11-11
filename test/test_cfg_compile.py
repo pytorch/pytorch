@@ -18,6 +18,74 @@ UNDISTURBED = not (TEST_WITH_CROSSREF or TEST_WITH_TORCHDYNAMO)
 
 
 @unittest.skipUnless(UNDISTURBED, "the test configuration changes dispatch")
+class TestCallSite(TestCase):
+    """Call sites built from the capture of one Python-level operation."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def site(self, kind, run, *operands, **options):
+        result, site, reason = torch._C._cfg_make_site(kind, run, operands, **options)
+        self.assertIsNotNone(site, reason)
+        return result, site
+
+    def rejects(self, reason, kind, run, *operands, **options):
+        site, why = torch._C._cfg_make_site(kind, run, operands, **options)[1:]
+        self.assertEqual((site, why), (None, reason))
+
+    def test_binary_operator(self):
+        x, y = torch.randn(3), torch.randn(3)
+        result, site = self.site("binary", lambda: x + y, x, y)
+        self.assertEqual(result, torch.add(x, y))
+        self.assertEqual(site.info()["op"], "aten::add.Tensor")
+        self.assertEqual(site.info()["args"], ["self=$0", "other=$1", "alpha=1"])
+
+    def test_reflected_operator(self):
+        x, y = torch.randn(3), torch.randn(3)
+        # What Python falls back to for x - y when x does not know how.
+        result, site = self.site("binary", lambda: y.__rsub__(x), x, y)
+        self.assertEqual(result, x - y)
+        self.assertEqual(site.info()["op"], "aten::rsub.Tensor")
+        self.assertEqual(site.info()["args"], ["self=$1", "other=$0", "alpha=1"])
+
+    def test_unary_operator(self):
+        x = torch.randn(3)
+        info = self.site("unary", lambda: -x, x)[1].info()
+        self.assertEqual((info["op"], info["args"]), ("aten::neg", ["self=$0"]))
+
+    def test_rejects_what_is_not_one_dispatcher_call(self):
+        x, y, bad = torch.randn(3), torch.randn(3), torch.randn(4)
+
+        def nested():
+            return torch._C._cfg_dispatch_trace(lambda: x + y)[0]
+
+        def raises():
+            try:
+                return x + bad
+            except RuntimeError:
+                return None
+
+        self.rejects("no dispatcher call", "binary", lambda: None, x, y)
+        self.rejects("not a single dispatcher call", "binary", lambda: x + y + y, x, y)
+        self.rejects("not a single dispatcher call", "binary", nested, x, y)
+        self.rejects("the kernel raised", "binary", raises, x, bad)
+        two_results = "operator signature is not supported"
+        self.rejects(two_results, "unary", lambda: x.max(0), x)
+
+    def test_rejects_operands_that_do_not_line_up(self):
+        x, y = torch.randn(3), torch.randn(3)
+        self.rejects("not a binary operator", "binary", lambda: -x, x)
+        self.rejects("not a unary operator", "unary", lambda: x + y, x, y)
+        self.rejects("unknown operation kind", "ternary", lambda: x + y, x, y)
+        other_tensor = "tensor operand is not the kernel argument"
+        self.rejects(other_tensor, "unary", lambda: -x, y)
+        extra_tensor = "a tensor argument does not come from an operand"
+        self.rejects(extra_tensor, "unary", lambda: x + y, x)
+        not_a_tensor = "unsupported operand type tuple"
+        self.rejects(not_a_tensor, "unary", lambda: torch.stack((x, y)), (x, y))
+        self.rejects("the result is not the kernel output", "unary", lambda: [-x], x)
+
+
+@unittest.skipUnless(UNDISTURBED, "the test configuration changes dispatch")
 class TestDispatchCapture(TestCase):
     """The dispatcher hook that cfg_compile records kernels with."""
 
