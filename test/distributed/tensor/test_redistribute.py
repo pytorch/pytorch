@@ -72,6 +72,43 @@ funcol = torch.ops.c10d_functional
 class RedistributeTest(DTensorContinuousTestBase):
     world_size = 4
 
+    @parametrize("fsdp_dim_first", [False, True])
+    @parametrize("norm_type", [1, 2, float("inf")])
+    def test_clip_grad_norm_on_composed_mesh(self, fsdp_dim_first, norm_type):
+        dim_names = ("fsdp", "placement") if fsdp_dim_first else ("placement", "fsdp")
+        root_mesh = init_device_mesh(self.device_type, (2, 2), mesh_dim_names=dim_names)
+        root_mesh._flatten("flat")
+        # FSDP puts its mesh dimension before the parameter's placement dimension.
+        mesh = DeviceMesh._concatenate([root_mesh["fsdp"], root_mesh["placement"]])
+        full_grad = torch.arange(1, 65, dtype=torch.float32, device=self.device_type)
+        full_grad = full_grad.reshape(8, 8)
+        grad = distribute_tensor(full_grad, mesh, [Shard(1), Shard(0)])
+        expected_norm = torch.linalg.vector_norm(full_grad, norm_type)
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            norm = torch.linalg.vector_norm(grad, norm_type).full_tensor()
+        self.assertEqual(norm, expected_norm)
+        self.assertEqual(
+            comm_mode.get_comm_counts()[funcol.all_reduce],
+            1 if fsdp_dim_first else 2,
+        )
+        total_norm = torch.nn.utils.get_total_norm([grad], norm_type=norm_type)
+        self.assertEqual(total_norm.full_tensor(), expected_norm)
+
+        param = torch.nn.Parameter(torch.zeros_like(grad))
+        param.grad = grad
+        ref_param = torch.nn.Parameter(torch.zeros_like(full_grad))
+        ref_param.grad = full_grad.clone()
+        ref_norm = torch.nn.utils.clip_grad_norm_(
+            [ref_param], max_norm=1.0, norm_type=norm_type
+        )
+        clipped_norm = torch.nn.utils.clip_grad_norm_(
+            [param], max_norm=1.0, norm_type=norm_type
+        )
+        self.assertEqual(clipped_norm.full_tensor(), ref_norm)
+        self.assertEqual(param.grad.full_tensor(), ref_param.grad)
+
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_shard_to_replicate_forward_backward(self, dtype):
         # 1) test shard -> replicate forward
@@ -2160,6 +2197,41 @@ class OptimizeFlattenedReductionsTest(TestCase):
     def tearDownClass(cls):
         dist.destroy_process_group()
         super().tearDownClass()
+
+    def test_non_root_order_mesh_uses_sequential_collectives(self):
+        root_mesh = init_device_mesh(
+            "cpu", (2, 4), mesh_dim_names=("placement", "fsdp")
+        )
+        root_mesh._flatten("flat")
+        mesh = DeviceMesh._concatenate([root_mesh["fsdp"], root_mesh["placement"]])
+        for src, dst, mesh_dims in (
+            (Partial(), Replicate(), (0, 1)),
+            (Shard(0), Replicate(), (1, 0)),
+            (Partial(), Shard(0), (0, 1)),
+        ):
+            with self.subTest(src=src, dst=dst):
+                transform_infos = [
+                    _TransformInfo(
+                        mesh_dim=dim,
+                        src_dst_placements=(src, dst),
+                        logical_shape=[16],
+                    )
+                    for dim in mesh_dims
+                ]
+                with (
+                    patch(
+                        "torch.distributed.tensor._redistribute._warned_flatten_issues",
+                        new=set(),
+                    ),
+                    self.assertLogs(
+                        "torch.distributed.tensor._redistribute", level=logging.WARNING
+                    ) as log_context,
+                ):
+                    result = _optimize_transform_infos(
+                        transform_infos, mesh, (src, src), (dst, dst)
+                    )
+                self.assertEqual(result, transform_infos)
+                self.assertIn("non-ascending order", log_context.output[0])
 
     def test_no_flattened_mesh_returns_original(self):
         """When no flattened mesh exists, original transforms are returned with a warning."""
