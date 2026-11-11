@@ -645,15 +645,11 @@ class CompiledFxGraph(OutputCode):
                 else:
                     self.constants[k] = v
 
-        # Constants that were pinned in the parent are rebound to the parent's
-        # own tensors on deserialization (see CompiledFxGraphConstantsWithGm),
-        # so the compiled graph keeps pinned storage without re-pinning.
-        pinned_targets = gm.meta.get("pinned_constants", ())
-        self.pinned_constant_names = {}
-        for k in graph.constants:
-            orig = graph.allocated_constant_name.get(k)
-            if orig is not None and orig in pinned_targets:
-                self.pinned_constant_names[k] = orig
+        # Constants the parent reported as pinned (allocated name -> module
+        # attribute name). CompiledFxGraphConstantsWithGm rebinds these to the
+        # parent's own tensors on deserialization, so the compiled graph keeps
+        # pinned storage without re-pinning.
+        self.pinned_constant_names = graph.pinned_constant_names
 
         self.torchbind_constants = graph.torchbind_constants
         self.opaque_value_type_classes = graph.opaque_value_type_classes

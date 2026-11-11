@@ -31,7 +31,7 @@ from torch.utils._ordered_set import OrderedSet
 from . import config
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile, log
 from .debug import DebugContext
-from .graph import GraphLowering
+from .graph import _is_cpu_strided_tensor_pinned, GraphLowering
 from .virtualized import V
 
 
@@ -429,27 +429,19 @@ def _pinned_constant_targets(gm: torch.fx.GraphModule) -> tuple[str, ...]:
     Names of graph constants pinned in this process.
 
     A compile worker reproduces pin_memory codegen from this metadata instead
-    of touching real pinned memory. Sorted tuple (not a set) so the FX-graph
-    cache key hashes deterministically; only the root graph is scanned.
+    of touching real pinned memory. Only the root graph is scanned; sorted so
+    the pickled payload is deterministic.
     """
-    from torch.fx.graph_module import _get_attr as _get_gm_attr
+    from torch.fx.graph_module import _get_attr
 
-    pinned: list[str] = []
-    for node in gm.graph.find_nodes(op="get_attr"):
-        try:
-            const = _get_gm_attr(gm, node.target)
-            is_pinned = (
-                isinstance(const, torch.Tensor)
-                and const.device.type == "cpu"
-                and const.layout == torch.strided
-                and bool(const.is_pinned())
-            )
-        except Exception:
-            log.debug("Skipping pinned-ness probe for %s", node.target)
-            continue
-        if is_pinned:
-            pinned.append(node.target)
-    return tuple(sorted(pinned))
+    return tuple(
+        sorted(
+            node.target
+            for node in gm.graph.find_nodes(op="get_attr")
+            if isinstance(t := _get_attr(gm, node.target), torch.Tensor)
+            and _is_cpu_strided_tensor_pinned(t)
+        )
+    )
 
 
 class _SerializedFxCompile(FxCompile):
@@ -521,6 +513,8 @@ class _SerializedFxCompile(FxCompile):
 
         context = torch._guards.TracingContext.try_get()
         constants = CompiledFxGraphConstantsWithGm(gm)
+        # The compile worker reads this from the unpickled graph module to
+        # reproduce pin_memory codegen. Popped so the caller's gm is unchanged.
         gm.meta["pinned_constants"] = _pinned_constant_targets(gm)
         logger_state = _LoggerState()
         lowering = _LoweringSerializer()
@@ -565,6 +559,8 @@ class _SerializedFxCompile(FxCompile):
             log.warning("Unable to pickle input graph or example inputs", exc_info=True)
 
             return None
+        finally:
+            gm.meta.pop("pinned_constants", None)
 
     @abstractmethod
     def _send_to_child(

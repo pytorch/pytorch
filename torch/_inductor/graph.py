@@ -601,6 +601,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.allocated_constant_name: dict[str, str] = (
             const_module.allocated_constant_name if const_module is not None else {}
         )
+        # Allocated constant name -> module attribute name, for constants the
+        # parent process reported as pinned. Used to rebind the parent's own
+        # pinned tensors after subprocess compilation (CompiledFxGraph).
+        self.pinned_constant_names: dict[str, str] = {}
         init_backend_registration()
         self.get_backend_features = functools.lru_cache(None)(get_backend_features)
 
@@ -1247,8 +1251,13 @@ class GraphLowering(torch.fx.Interpreter):
         self.allocated_constant_name[name] = orig_name  # type: ignore[assignment]
         return name
 
-    def add_tensor_constant(self, data: Tensor, name: str | None = None) -> TensorBox:
+    def add_tensor_constant(
+        self, data: Tensor, name: str | None = None, is_pinned: bool = False
+    ) -> TensorBox:
+        is_pinned = is_pinned or _is_cpu_strided_tensor_pinned(data)
         new_name = self.allocate_non_dup_const_name(name, data)
+        if is_pinned and name is not None:
+            self.pinned_constant_names[new_name] = name
         return TensorBox.create(
             ir.ConstantBuffer(
                 name=new_name,
@@ -1256,9 +1265,7 @@ class GraphLowering(torch.fx.Interpreter):
                     data.device,
                     data.dtype,
                     *self.static_sizes_strides(data),
-                    is_pinned=_is_cpu_strided_tensor_pinned(data)
-                    or name
-                    in getattr(self.module, "meta", {}).get("pinned_constants", ()),
+                    is_pinned=is_pinned,
                 ),
             )
         )
@@ -1626,13 +1633,16 @@ class GraphLowering(torch.fx.Interpreter):
 
         if not isinstance(value, torch.Tensor):
             raise AssertionError(f"Expected torch.Tensor, got {type(value)}")
+        # Pinned-ness travels as graph metadata for out-of-process compiles,
+        # where the worker's copy of the constant is pageable.
+        pinned = target in getattr(self.module, "meta", {}).get("pinned_constants", ())
         if (
             config.aot_inductor.use_runtime_constant_folding
             or config.always_keep_tensor_constants
             or unsupported_output_tensor(value)
             or target in self.mutated_named_buffers
         ):
-            return self.add_tensor_constant(value, target)
+            return self.add_tensor_constant(value, target, pinned)
 
         with no_dispatch():
             if value.shape == ():
@@ -1648,12 +1658,10 @@ class GraphLowering(torch.fx.Interpreter):
                     value.tolist(),
                     dtype=value.dtype,
                     device=value.device,
-                    pin_memory=_is_cpu_strided_tensor_pinned(value)
-                    or target
-                    in getattr(self.module, "meta", {}).get("pinned_constants", ()),
+                    pin_memory=pinned or _is_cpu_strided_tensor_pinned(value),
                 )
 
-        return self.add_tensor_constant(value, target)
+        return self.add_tensor_constant(value, target, pinned)
 
     @typing_extensions.override
     def call_module(
