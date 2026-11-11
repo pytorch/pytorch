@@ -1340,7 +1340,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         *itertools.product(
             (torch.int, torch.long),
             (torch.int, torch.long),
-            (torch.float32, torch.double, torch.half),
+            (torch.float32, torch.double, torch.half, torch.bfloat16),
         )
     )
     def test_EmbeddingBag_empty_per_sample_weights_and_offsets(self, device, dtypes):
@@ -1413,7 +1413,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         *itertools.product(
             (torch.int, torch.long),
             (torch.int, torch.long),
-            (torch.float32, torch.double, torch.half),
+            (torch.float32, torch.double, torch.half, torch.bfloat16),
         )
     )
     def test_EmbeddingBag_per_sample_weights_and_offsets(self, device, dtypes):
@@ -1481,7 +1481,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         *itertools.product(
             (torch.int, torch.long),
             (torch.int, torch.long),
-            (torch.float32, torch.double, torch.half),
+            (torch.float32, torch.double, torch.half, torch.bfloat16),
         )
     )
     def test_EmbeddingBag_per_sample_weights_and_new_offsets(self, device, dtypes):
@@ -1858,7 +1858,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         *itertools.product(
             (torch.int, torch.long),
             (torch.int, torch.long),
-            (torch.float32, torch.double, torch.half),
+            (torch.float32, torch.double, torch.half, torch.bfloat16),
         )
     )
     def test_embedding_bag_device(self, device, dtypes):
@@ -1941,7 +1941,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         *itertools.product(
             (torch.int, torch.long),
             (torch.int, torch.long),
-            (torch.float32, torch.double, torch.half),
+            (torch.float32, torch.double, torch.half, torch.bfloat16),
         )
     )
     def test_embedding_bag_non_contiguous_weight(self, device, dtypes):
