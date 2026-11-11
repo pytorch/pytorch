@@ -1285,6 +1285,7 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(shape_env.guards, [])
         self.assertEqual(shape_env.deferred_runtime_asserts, {})
 
+    @unittest.skipIf(not torch.version.hip, "ROCm-specific MFMA config pruning")
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize(
         "arch,f16_count,int8_count,int8_kpack",
