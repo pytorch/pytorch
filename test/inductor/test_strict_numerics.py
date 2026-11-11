@@ -376,6 +376,95 @@ class StrictNumericsCompileTest(TestCase):
             # tensorify cannot handle, so lambd is specialized there.
             self.assertEqual(counter.frame_count, 2)
 
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_div_trunc_scalar_output_rounding(self, device, dtype, numerics):
+        # Cover rounding before a float consumer.
+        # Non-strict returns 2635: fusion skips the intermediate fp16/bf16 rounding.
+        x = torch.tensor([10048.0], device=device, dtype=dtype)
+
+        def fn(x):
+            return torch.div(x, 3.8125, rounding_mode="trunc").float()
+
+        compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
+        self.assertEqual(compiled(x), fn(x))
+
+    @dtypes(torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_div_trunc_scalar_reciprocal_rounding(self, device, dtype, numerics):
+        # Cover a Python divisor not representable in fp32.
+        # Non-strict returns 0.0: the reciprocal is taken before fp32 rounding.
+        x = torch.tensor([1.0], device=device, dtype=dtype)
+
+        def fn(x):
+            return torch.div(x, 1.00000004, rounding_mode="trunc")
+
+        compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
+        self.assertEqual(compiled(x), fn(x))
+
+    @dtypes(torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_div_trunc_cpu_scalar_reciprocal(self, device, dtype, numerics):
+        # Cover CPU tensor reciprocal selection.
+        # Non-strict returns 3.0: it divides directly instead of multiplying.
+        x = torch.tensor([11.4375], device=device, dtype=dtype)
+        divisor = torch.tensor(3.8125, device="cpu")
+
+        def fn(x, divisor):
+            return torch.div(x, divisor, rounding_mode="trunc")
+
+        compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
+        self.assertEqual(compiled(x, divisor), fn(x, divisor))
+
+    @config.patch({"graph_partition": True})
+    @dtypes(torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_div_trunc_cpu_scalar_reciprocal_cudagraphs(self, device, dtype, numerics):
+        # Cover CPU scalar movement under cudagraphs, absent from the generic test.
+        # Non-strict returns 3.0: it divides directly instead of multiplying.
+        x = torch.tensor([11.4375], device=device, dtype=dtype)
+        divisor = torch.tensor(3.8125, device="cpu")
+
+        def fn(x, divisor):
+            return torch.div(x, divisor, rounding_mode="trunc")
+
+        with config.patch({"numerics": numerics}):
+            compiled = torch.compile(fn, fullgraph=True, mode="reduce-overhead")
+            self.assertEqual(compiled(x, divisor), fn(x, divisor))
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_div_trunc_cpu_scalar_precision(self, device, dtype, numerics):
+        # Cover mixed-dtype CPU scalar promotion.
+        # Non-strict also returns 0.0: fp32 codegen skips low-precision casts.
+        x = torch.tensor([1.0009765625], device=device, dtype=dtype)
+        divisor = torch.tensor(1.001, dtype=torch.float64, device="cpu")
+
+        def fn(x, divisor):
+            return torch.div(x, divisor, rounding_mode="trunc")
+
+        compiled = torch.compile(fn, fullgraph=True, options={"numerics": numerics})
+        self.assertEqual(compiled(x, divisor), fn(x, divisor))
+
+    @config.patch({"graph_partition": True})
+    @dtypes(torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("tensor_divisor", (False, True))
+    def test_div_trunc_fp64_scalar_reciprocal(
+        self, device, dtype, numerics, tensor_divisor
+    ):
+        # Cover fp64 scalar reciprocals and movement; the generic sweep excludes fp64.
+        # Non-strict returns 1 for CPU tensors; Python scalars already use a reciprocal.
+        x = torch.tensor(49.0, device=device, dtype=dtype)
+        divisor = torch.tensor(49.0, dtype=dtype) if tensor_divisor else 49.0
+
+        def fn(x, divisor):
+            return torch.div(x, divisor, rounding_mode="trunc")
+
+        with config.patch({"numerics": numerics}):
+            compiled = torch.compile(fn, fullgraph=True, mode="reduce-overhead")
+            self.assertEqual(compiled(x, divisor), fn(x, divisor))
+
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_compile_options_enable_eager_division(self, device, numerics):
         x = torch.full((1024,), 11.0, device=device)
@@ -920,8 +1009,6 @@ BACKWARD_OPS = [op for op in POINTWISE_OPS if op.supports_autograd]
 # (op_id, dtype_label) pairs that must still differ from eager.
 POINTWISE_XFAIL = frozenset(
     {
-        ("div_trunc_rounding", "bfloat16"),
-        ("div_trunc_rounding", "float16"),
         ("xlogy", "float32"),
         ("div_no_rounding_mode", "bfloat16"),
         ("div_no_rounding_mode", "float16"),
@@ -1157,10 +1244,15 @@ NONFLOAT_XFAIL = frozenset(
 )
 
 
+# Preserve all floating dtype coverage after removing repaired xfail entries.
+FULL_DTYPE_POINTWISE_OPS = frozenset({"div_trunc_rounding"})
+
+
 class _strict_ops(ops):
-    def __init__(self, op_list, xfails):
+    def __init__(self, op_list, xfails, *, full_dtype_ops=()):
         super().__init__(op_list, allowed_dtypes=POINTWISE_DTYPES)
         self.xfails = xfails
+        self.full_dtype_ops = full_dtype_ops
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         for case in super()._parametrize_test(test, generic_cls, device_cls):
@@ -1171,6 +1263,7 @@ class _strict_ops(ops):
             if (
                 ALL_SAMPLES
                 or dtype == preferred
+                or _op_id(op) in self.full_dtype_ops
                 or (_op_id(op), _dtype_label(dtype)) in self.xfails
             ):
                 yield case
@@ -1445,7 +1538,9 @@ class PointwiseStrictNumericsTest(TestCase):
                 f"on (source, index, shape, kwargs, kind): {mismatches}.",
             )
 
-    @_strict_ops(POINTWISE_OPS, POINTWISE_XFAIL)
+    @_strict_ops(
+        POINTWISE_OPS, POINTWISE_XFAIL, full_dtype_ops=FULL_DTYPE_POINTWISE_OPS
+    )
     def test_pointwise_bitwise(self, device, dtype, op):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
         self._assert_ledger(
