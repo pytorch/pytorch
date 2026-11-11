@@ -1813,10 +1813,7 @@ class TypingVariable(VariableTracker):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
-        try:
-            value = getattr(self.value, name)
-        except AttributeError:
-            raise_observed_exception(AttributeError, tx)
+        value = getattr(self.value, name)
         if self.source:
             attr_source = AttrSource(self.source, name)
             return VariableBuilder(tx, attr_source)(value)
@@ -2477,11 +2474,6 @@ class ConstantLikeVariable(VariableTracker):
         ):
             return VariableTracker.build(tx, result)
         return GetAttrVariable(self, name, py_type=type(result))
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(self.value, name))  # type: ignore[return-value]
 
 
 class NumpyDTypeVariable(ConstantLikeVariable):
