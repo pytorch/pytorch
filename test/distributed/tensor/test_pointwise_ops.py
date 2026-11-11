@@ -544,12 +544,6 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
                     result = op(partial)
                     self.assertEqual(result.placements, (Replicate(),))
                     self.assertEqual(result.full_tensor(), expected)
-                    alias = partial.detach()
-                    inplace_op = partial.sign_ if op is torch.sign else partial.sgn_
-                    self.assertIs(inplace_op(), partial)
-                    self.assertEqual(partial.placements, (Partial(reduction),))
-                    self.assertEqual(partial.full_tensor(), expected)
-                    self.assertEqual(alias.full_tensor(), expected)
 
     @with_comms
     def test_mul_div_scalar_partial(self):

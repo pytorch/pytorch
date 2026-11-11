@@ -767,7 +767,10 @@ class TestLocalDTensorOps(TestDTensorOps):
                             self.assertEqual(out.placements, placement)
                             self.assertEqual(out.full_tensor(), expected)
 
-                            self.assertIs(getattr(pending, op_name + "_")(), pending)
+                            with ExplicitRedistributionContext():
+                                self.assertIs(
+                                    getattr(pending, op_name + "_")(), pending
+                                )
                             self.assertEqual(pending.placements, placement)
                             self.assertEqual(pending.full_tensor(), expected)
 
@@ -795,24 +798,26 @@ class TestLocalDTensorOps(TestDTensorOps):
                         self.assertIs(op(pending, out=out), out)
                         self.assertEqual(out.full_tensor(), expected)
 
+                        before = pending.to_local().clone()
+                        partial_out = pending.clone()
                         with self.assertRaisesRegex(
                             RuntimeError, "no valid sharding strategy"
                         ):
-                            op(pending, out=pending.clone())
+                            op(pending, out=partial_out)
+                        self.assertEqual(partial_out.to_local(), before)
 
-                        alias = pending.detach()
-                        placements = pending.placements
-                        version = pending._version
-                        self.assertIs(getattr(pending, op_name + "_")(), pending)
-                        self.assertEqual(pending.placements, placements)
-                        self.assertEqual(pending._version, version + 1)
-                        self.assertEqual(alias._version, version + 1)
-                        self.assertEqual(pending.full_tensor(), expected)
-                        self.assertEqual(alias.full_tensor(), expected)
+                        with self.assertRaisesRegex(
+                            RuntimeError,
+                            "in-place operations that require placement changes",
+                        ):
+                            getattr(pending, op_name + "_")()
+                        self.assertEqual(pending.to_local(), before)
 
-                        replicated = distribute_tensor(full, mesh, [Replicate()])
-                        self.assertIs(getattr(replicated, op_name + "_")(), replicated)
-                        self.assertEqual(replicated.full_tensor(), op(full))
+                        materialized = pending.redistribute(placements=[Replicate()])
+                        self.assertIs(
+                            getattr(materialized, op_name + "_")(), materialized
+                        )
+                        self.assertEqual(materialized.full_tensor(), expected)
 
     @parametrize("op_name", ["sign", "sgn"])
     def test_sign_inplace_other_placements(self, op_name):
@@ -831,43 +836,6 @@ class TestLocalDTensorOps(TestDTensorOps):
                 getattr(pending, op_name + "_")()
             self.assertEqual(pending.placements, (Partial(),))
             self.assertEqual(pending.full_tensor(), before)
-
-    def test_sign_inplace_partial_backward(self):
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            for reduction in ("max", "min"):
-                source = DTensor.from_local(
-                    torch.tensor([-2.0, 0.0, 5.0], requires_grad=True),
-                    mesh,
-                    [Partial(reduction)],
-                )
-                source.retain_grad()
-                value = source.clone()
-                value.sign_().sum().backward()
-                self.assertEqual(source.grad.full_tensor(), torch.zeros(3))
-
-    @parametrize("op_name", ["sign", "sgn"])
-    def test_sign_inplace_explicit_redistribution(self, op_name):
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            full = torch.tensor([[-2.0, 0.0, 5.0]]).repeat(self.world_size, 1)
-            for reduction in ("amax", "amin"):
-                shard = distribute_tensor(full, mesh, [Shard(0)])
-                pending = getattr(shard, reduction)(dim=0)
-                before = pending.full_tensor()
-                version = pending._version
-                with ExplicitRedistributionContext():
-                    with self.assertRaisesRegex(
-                        RuntimeError, "Implicit redistribution"
-                    ):
-                        getattr(pending, op_name + "_")()
-                self.assertEqual(pending.full_tensor(), before)
-                self.assertEqual(pending._version, version)
-            for placement in (Replicate(), Shard(0)):
-                value = distribute_tensor(full, mesh, [placement])
-                with ExplicitRedistributionContext():
-                    getattr(value, op_name + "_")()
-                self.assertEqual(value.full_tensor(), getattr(torch, op_name)(full))
 
     def test_mean(self):
         with LocalTensorMode(frozenset(range(self.world_size))):

@@ -192,67 +192,6 @@ def found_inf_reduce_handler(
     target_tensor.copy_(found_inf)
 
 
-def sign_inplace_handler(
-    op_call: torch._ops.OpOverload,
-    args: tuple[object, ...],
-    kwargs: dict[str, object],
-) -> "dtensor.DTensor":
-    args, kwargs = fill_defaults(op_call._schema, args, kwargs)
-    tensor = cast(dtensor.DTensor, args[0])
-    partials = [p for p in tensor.placements if isinstance(p, Partial)]
-    preserves_partial = all(p.reduce_op in ("max", "min") for p in partials)
-    if not partials or (
-        preserves_partial
-        and not tensor.dtype.is_floating_point
-        and not tensor.dtype.is_complex
-    ):
-        if tensor.device_mesh._is_current_rank_part_of_mesh():
-            op_call(tensor._local_tensor)
-        return tensor
-    if tensor.dtype.is_floating_point and partials and preserves_partial:
-        placements = [
-            Replicate() if isinstance(p, Partial) else p for p in tensor.placements
-        ]
-        ExplicitRedistributionContext.observe_redistribution(
-            tensor._spec,
-            DTensorSpec(
-                tensor.device_mesh,
-                tuple(placements),
-                tensor_meta=tensor._spec.tensor_meta,
-            ),
-            LazyString(lambda: f"Implicit redistribution occurred for {op_call}"),
-        )
-        reduced = tensor.redistribute(tensor.device_mesh, placements)
-        functional_op = (
-            aten.sign.default if op_call == aten.sign_.default else aten.sgn.default
-        )
-        result = functional_op(reduced)
-        # Identical copies preserve max/min, so keep the destination's layout
-        # and storage rather than changing metadata shared with aliases.
-        replacement = dtensor.DTensor.from_local(
-            result.to_local(),
-            tensor.device_mesh,
-            tensor.placements,
-            run_check=False,
-            shape=tensor.shape,
-            stride=tensor.stride(),
-        )
-        tensor.copy_(replacement)
-        return tensor
-
-    # Use the existing sharding checks and local execution for other inputs.
-    dispatcher = dtensor.DTensor._op_dispatcher
-    op_info = dispatcher.unwrap_to_op_info(op_call, args, kwargs)
-    op_info.output_sharding = cast(
-        OutputSharding,
-        dispatcher._propagate_op_sharding_dispatch_slow_path(
-            op_call, args, kwargs, op_info, try_cache=True
-        ),
-    )
-    dispatcher._dispatch_get_local_results_slow_path(op_call, args, op_info)
-    return tensor
-
-
 class OpDispatcher:
     """
     Op dispatching class instance to handle args/kwargs pre-processing (un-wrapping), sharding
@@ -290,8 +229,6 @@ class OpDispatcher:
             aten.multinomial.default,
         }
         self._custom_op_handlers = {
-            aten.sign_.default: sign_inplace_handler,
-            aten.sgn_.default: sign_inplace_handler,
             aten.is_same_size.default: is_same_size_handler,
             aten.is_pinned.default: is_pinned_handler,
             aten.convolution.default: convolution_handler,

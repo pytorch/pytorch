@@ -102,15 +102,17 @@ def _register_single_dim_pointwise(
     partial_extra_rules: list[list[Placement]] | None = None,
     static_argnum: int = 0,
     *,
-    partial_integral_only: bool = False,
+    partial_rules_if: Callable[[ArgsType], bool] | None = None,
 ) -> None:
     if partial_extra_rules is not None:
         _specially_registered_ops.add(op)
-    inner_fn = _common_pointwise_single_dim_strategy(
+    with_rules = _common_pointwise_single_dim_strategy(
         partial_extra_rules=partial_extra_rules  # pyrefly: ignore[bad-argument-type]
     )
-    generic_fn = (
-        _common_pointwise_single_dim_strategy() if partial_integral_only else inner_fn
+    without_rules = (
+        _common_pointwise_single_dim_strategy()
+        if partial_rules_if is not None
+        else with_rules
     )
 
     # Wrap to append tensor kwarg placements in schema declaration order.
@@ -120,17 +122,9 @@ def _register_single_dim_pointwise(
         op: OpOverload,
         args: ArgsType,
         kwargs: KwargsType,
-        _fn: Callable = inner_fn,
     ) -> list[list[Placement | _ShardingPlaceholder]]:
-        input_meta = args[0] if args else None
-        if partial_integral_only and (
-            not isinstance(input_meta, TensorMeta)
-            or input_meta.dtype.is_floating_point
-            or input_meta.dtype.is_complex
-        ):
-            strategies = generic_fn(op, args, kwargs)
-        else:
-            strategies = _fn(op, args, kwargs)
+        use_rules = partial_rules_if is None or partial_rules_if(args)
+        strategies = (with_rules if use_rules else without_rules)(op, args, kwargs)
         kw_names = [k for k, v in kwargs.items() if isinstance(v, TensorMeta)]
         if not kw_names:
             return strategies
@@ -339,6 +333,13 @@ _NON_DECREASING_RULES: list[list[Placement]] = [
 for op in non_decreasing_unary_ops:
     _register_single_dim_pointwise(op, _NON_DECREASING_RULES)
 
+
+def _cannot_be_nan(args: ArgsType) -> bool:
+    return isinstance(args[0], TensorMeta) and not (
+        args[0].dtype.is_floating_point or args[0].dtype.is_complex
+    )
+
+
 # Integral inputs cannot contain NaN, so sign/sgn preserve max/min for them.
 for op in (
     aten.sign.default,
@@ -349,7 +350,7 @@ for op in (
     aten.sgn.out,
 ):
     _register_single_dim_pointwise(
-        op, _NON_DECREASING_RULES, partial_integral_only=True
+        op, _NON_DECREASING_RULES, partial_rules_if=_cannot_be_nan
     )
 
 # Non-increasing unary ops: f(max(a,b)) = min(f(a),f(b)).
