@@ -93,6 +93,7 @@ from .pre_grad import is_same_dict, save_inductor_dict
 from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
 from .slice_scatter_chunking import slice_scatter_chunking_pass
+from .sorted_segment_scatter import sorted_segment_scatter_optimization_pass
 from .split_cat import POST_GRAD_PATTERNS
 
 
@@ -450,6 +451,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
             )
+        if config.sorted_segment_scatter_enabled:
+            GraphTransformObserver(
+                gm, "sorted_segment_scatter_optimization"
+            ).apply_graph_pass(sorted_segment_scatter_optimization_pass)
         if config.partitioned_scatter_enabled:
             GraphTransformObserver(
                 gm, "partitioned_scatter_optimization"
