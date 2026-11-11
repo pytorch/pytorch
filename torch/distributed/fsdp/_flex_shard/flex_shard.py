@@ -11,23 +11,15 @@ from typing import cast, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
-from torch.distributed._composable_state import _get_module_state
 from torch.distributed.fsdp._fully_shard._fsdp_api import (
     CPUOffloadPolicy,
+    GradientReductionHandle,
     MixedPrecisionPolicy,
 )
 
 from . import module_ops
 from .bucket_comm import begin_explicit_bucket_unshard
-from .bucket_runtime import (
-    _bucket_runtimes,
-    _EAGER_COMM_CONTEXTS_ATTR,
-    _in_backward,
-    _MAX_PENDING_REDUCE_GRADS_ATTR,
-    GradientReductionHandle,
-    ModuleUnshardHandle,
-    ParamOwnerRef,
-)
+from .bucket_runtime import _bucket_runtimes, BucketCommContext, ParamOwnerRef
 from .bucket_storage import (
     _assign_params_to_buckets,
     _fsdp2_param_order,
@@ -39,6 +31,7 @@ from .bucket_storage import (
     ShardedBucketStorage,
 )
 from .module_state import BucketGroup, ShardedModuleState
+from .param_homing import install_params, ParamHoming
 from .placements.shard import _engine_placements
 from .sharded_param import is_flex_shard_param
 from .utils import (
@@ -65,7 +58,10 @@ __all__ = [
 
 _SHARDED_BUCKET_STORAGES_ATTR = "_sharded_bucket_storages"
 _EAGER_HOOKS_INSTALLED_ATTR = "_flex_shard_eager_hooks_installed"
-_MANUAL_FINALIZATION_ATTR = "_flex_shard_manual_backward_finalization"
+_MAX_PENDING_REDUCE_GRADS_ATTR = "_flex_shard_max_pending_reduce_grads"
+# The module state that runs the buckets' hooks, created by flex_shard() and
+# initialized once the buckets have storage
+_STATE_ATTR = "_flex_shard_state"
 
 
 class FlexShardModule:
@@ -86,75 +82,56 @@ class FlexShardModule:
         return result
 
     def _materialize_after_to_empty(self) -> None:
-        """Rebuild sharded param views after nn.Module.to_empty()."""
-        bucket_storages = getattr(self, _SHARDED_BUCKET_STORAGES_ATTR, None)
-        if bucket_storages is None:
+        """Keep the parameters' data, which nn.Module.to_empty() gave storage of
+        their own, in their buckets' storage again."""
+        if all(p.device.type == "meta" for p in cast(nn.Module, self).parameters()):
             return
-
-        materialized_device: torch.device | None = None
-        for _, param in cast(nn.Module, self).named_parameters(recurse=True):
-            if param.device.type != "meta":
-                materialized_device = param.device
-                break
-        if materialized_device is None:
-            return
-
-        for bucket_storage in bucket_storages:
-            if bucket_storage.byte_storage.device.type == "meta":
-                bucket_storage._byte_storage = torch.empty(
-                    bucket_storage.total_bytes,
-                    dtype=torch.uint8,
-                    device=materialized_device,
-                )
-            elif bucket_storage.byte_storage.device != materialized_device:
-                bucket_storage._byte_storage = torch.empty(
-                    bucket_storage.total_bytes,
-                    dtype=torch.uint8,
-                    device=materialized_device,
-                )
-            bucket_storage.install_sharded_params(bucket_storage.byte_storage.device)
-
-        # Installed runtime hooks still hold the replaced local-shard params.
-        for context in getattr(self, _EAGER_COMM_CONTEXTS_ATTR, {}).values():
-            for bucket in context.buckets:
-                bucket.reset_sharded_params()
+        for runtime in self._runtimes():
+            homing = cast(ParamHoming, runtime.representation.homing)
+            homing.reset_sharded_params()
+            homing.home()
         self._install_runtime_if_materialized()
 
-    def _install_runtime_if_materialized(self) -> None:
-        """Install eager hooks once all bucket storage has real CUDA backing."""
-        if getattr(self, _EAGER_HOOKS_INSTALLED_ATTR, False):
-            return
-
-        bucket_storages = getattr(self, _SHARDED_BUCKET_STORAGES_ATTR)
-        if any(
-            storage.byte_storage.device.type == "meta" for storage in bucket_storages
-        ):
-            return
-
-        # The buckets unshard on their modules' forwards through the module
-        # lifecycle that fully_shard runs on too
-        state = ShardedModuleState()
-        context = None
-        for runtime, modules, casts in _bucket_runtimes(bucket_storages):
+    def _add_groups(self) -> None:
+        """Run each bucket on the forward of its modules, through the module
+        state (installed once all storage is materialized)."""
+        state = self._state()
+        runtimes = [
+            cast("BucketRuntime", s.runtime) for s in self.sharded_bucket_storages
+        ]
+        for runtime, modules, casts in _bucket_runtimes(runtimes):
             group = BucketGroup(runtime, modules)
             group.named_by_modules = False
             state.add_group(group, casts)
-            context = runtime.context
+        state._shared_engine_context = runtimes[0].context
+
+    def _install_runtime_if_materialized(self) -> None:
+        """Install the buckets' hooks once all bucket storage is materialized:
+        their modules' forwards unshard them through the module lifecycle that
+        fully_shard runs on too."""
+        if getattr(self, _EAGER_HOOKS_INSTALLED_ATTR, False) or any(
+            s.byte_storage.is_meta for s in self.sharded_bucket_storages
+        ):
+            return
         module = cast(nn.Module, self)
-        state.init(
+        self._state().init(
             (module,),
-            bucket_storages[0]._compute_device
-            or bucket_storages[0].byte_storage.device,
+            _get_device_from_mesh(self.sharded_bucket_storages[0]._mesh),
             (None, None),
             auto_reshard_after_forward=False,
             root_module=module,
             post_hook_always_call=True,
         )
-        state._shared_engine_context = context
-        state._state_ctx.manual_backward_finalization = getattr(
-            self, _MANUAL_FINALIZATION_ATTR, False
-        )
         setattr(self, _EAGER_HOOKS_INSTALLED_ATTR, True)
+
+    def _state(self) -> ShardedModuleState:
+        return getattr(self, _STATE_ATTR)
+
+    def _runtimes(self) -> list[BucketRuntime]:
+        return self._state().runtimes
+
+    def _contexts(self) -> list[BucketCommContext]:
+        return list({id(r.context): r.context for r in self._runtimes()}.values())
 
     def reshard(self) -> None:
         """Reshard every unsharded bucket, like FSDP2's ``FSDPModule.reshard()``.
@@ -165,8 +142,12 @@ class FlexShardModule:
         zero grads through the optimizer rather than ``module.zero_grad()``.
         Grads accumulated without sync are kept.
         """
-        for context in getattr(self, _EAGER_COMM_CONTEXTS_ATTR, {}).values():
+        for context in self._contexts():
             context.reset()
+        # The backward that reshard() abandons no longer fixes the mode
+        state_ctx = self._state()._state_ctx
+        state_ctx.manual_backward_finalization_active = None
+        state_ctx.gradient_reduction_pending = False
 
     def set_manual_backward_finalization(self, enabled: bool) -> None:
         """Set whether the caller finalizes backward, like FSDP2's
@@ -177,15 +158,7 @@ class FlexShardModule:
         then, buckets a backward left unsharded stay unsharded and their grads
         stay on the unsharded params. It cannot change during a backward.
         """
-        if _in_backward():
-            raise RuntimeError(
-                "FlexShard: set_manual_backward_finalization() cannot run in backward."
-            )
-        setattr(self, _MANUAL_FINALIZATION_ATTR, enabled)
-        if (state := _get_module_state(cast(nn.Module, self))) is not None:
-            state._state_ctx.manual_backward_finalization = enabled  # type: ignore[attr-defined]
-        for context in getattr(self, _EAGER_COMM_CONTEXTS_ATTR, {}).values():
-            context.manual_backward_finalization = enabled
+        self._state()._set_manual_backward_finalization(enabled)
 
     def finalize_backward(
         self, *, async_op: bool = False
@@ -198,21 +171,17 @@ class FlexShardModule:
         and resets per-backward state, following the current sync and reshard
         settings. For example, a pipeline stage can reduce its last
         microbatch's grads after its backward, while other stages compute.
+        It requires :meth:`set_manual_backward_finalization`, as FSDP2's does.
         Call it after a backward, not between a forward and its backward. With
         ``async_op=True``, it returns a handle without waiting; call its
         ``wait()`` before using the grads or running the next forward. Eager
         only.
         """
-        contexts = list(getattr(self, _EAGER_COMM_CONTEXTS_ATTR, {}).values())
-        for context in contexts:
-            context.start_finalize_backward()
-        handle = GradientReductionHandle(contexts)
-        if async_op:
-            return handle
-        handle.wait()
-        return None
+        return self._state()._finalize_backward(async_op)
 
-    def unshard(self, *, async_op: bool = False) -> ModuleUnshardHandle | None:
+    def unshard(
+        self, *, async_op: bool = False
+    ) -> module_ops.ModuleUnshardHandle | None:
         """Unshard every bucket and keep it unsharded, like FSDP2's
         ``FSDPModule.unshard()``.
 
@@ -233,16 +202,10 @@ class FlexShardModule:
         using the unsharded params directly. A forward finishes its buckets'
         all-gathers without it.
         """
-        started = []
-        for context in getattr(self, _EAGER_COMM_CONTEXTS_ATTR, {}).values():
+        for context in self._contexts():
             context.check_outside_backward("unshard")
-            for bucket in context.buckets:
-                if not async_op or bucket.is_unsharded:
-                    bucket.unshard(on_current_stream=True)
-                else:
-                    context.prefetch(bucket, on_current_stream=True)
-                    started.append((context, bucket))
-        return ModuleUnshardHandle(started) if async_op else None
+        started = self._state()._unshard(async_op)
+        return module_ops.ModuleUnshardHandle(started) if async_op else None
 
     def finish_deferred_backward(self, param: nn.Parameter) -> None:
         """Finish the backward of the bucket that holds ``param`` and defers its
@@ -274,13 +237,12 @@ class FlexShardModule:
         return self._bucket_holding(param).bucket_storage
 
     def _bucket_holding(self, param: nn.Parameter) -> BucketRuntime:
-        for context in getattr(self, _EAGER_COMM_CONTEXTS_ATTR, {}).values():
-            for bucket in context.buckets:
-                if any(
-                    p is param
-                    for p in (*bucket.sharded_params, *(bucket.unsharded_params or ()))
-                ):
-                    return bucket
+        for bucket in self._runtimes():
+            if any(
+                p is param
+                for p in (*bucket.sharded_params, *(bucket.unsharded_params or ()))
+            ):
+                return bucket
         raise ValueError("FlexShard: param is not in this module's buckets.")
 
     def _bucket_storages(self, recurse: bool) -> list[ShardedBucketStorage]:
@@ -439,16 +401,9 @@ class FlexShardModule:
         for module in modules:
             if not isinstance(module, FlexShardModule):
                 continue
-            setattr(
-                module,
-                _MAX_PENDING_REDUCE_GRADS_ATTR,
-                max_pending_reduce_grads,
-            )
-            contexts = getattr(module, _EAGER_COMM_CONTEXTS_ATTR, None)
-            if contexts is None:
-                continue
-            for context in contexts.values():
-                context.max_pending_reduce_grads = max_pending_reduce_grads
+            setattr(module, _MAX_PENDING_REDUCE_GRADS_ATTR, max_pending_reduce_grads)
+            for runtime in module._runtimes():
+                runtime.context.max_pending_reduce_grads = max_pending_reduce_grads
 
 
 def flex_shard(
@@ -537,6 +492,7 @@ def flex_shard(
 
     flex_shard_module = _attach_flex_shard_module_state(module, bucket_storages)
     flex_shard_module.set_max_pending_reduce_grads()
+    flex_shard_module._add_groups()
 
     # Install bucket unshard hooks for eager mode when the storage layout
     # supports one collective per bucket. Meta modules are materialized later by
@@ -582,8 +538,8 @@ def relayout_bucket(
         )
     if bucket_storage._cpu_offload is not None:
         raise NotImplementedError("relayout_bucket does not support CPU offload yet.")
-    runtime = _bucket_runtime_of(cast(nn.Module, module), bucket_storage)
-    if runtime is not None and (runtime.is_unsharded or runtime.unsharded_params):
+    runtime = cast("BucketRuntime", bucket_storage.runtime)
+    if runtime.is_unsharded or runtime.unsharded_params:
         raise RuntimeError(
             "relayout_bucket must run before the bucket's first unshard, e.g. "
             "right after initialization or checkpoint loading."
@@ -629,7 +585,7 @@ def relayout_bucket(
     for info in infos:
         param_infos[info.fqn].shared_fqns = info.shared_fqns
     new_storage = ShardedBucketStorage(
-        torch.empty(total_bytes, dtype=torch.uint8, device=device),
+        torch.empty(0, dtype=torch.uint8, device=device),
         param_infos,
         mesh,
         total_bytes,
@@ -645,8 +601,6 @@ def relayout_bucket(
     )
     new_storage._requires_gradient_sync = bucket_storage._requires_gradient_sync
     new_storage._reshard_after_backward = bucket_storage._reshard_after_backward
-    new_storage.copy_params_from(named_full_params)
-    new_storage.install_sharded_params(device)
     for storage in storages:
         for attr in ("_forward_prefetch", "_backward_prefetch"):
             prefetch = getattr(storage, attr)
@@ -659,19 +613,11 @@ def relayout_bucket(
     new_storage._forward_prefetch = bucket_storage._forward_prefetch
     new_storage._backward_prefetch = bucket_storage._backward_prefetch
     storages[index] = new_storage
-    if runtime is not None:
-        runtime.rebind_storage(new_storage)
+    runtime.rebind_storage(new_storage)
+    new_storage.runtime = runtime
+    full = dict(named_full_params)
+    install_params(runtime, [full[info.fqn] for info in runtime.infos], device)
     return new_storage
-
-
-def _bucket_runtime_of(
-    module: nn.Module, bucket_storage: ShardedBucketStorage
-) -> BucketRuntime | None:
-    for context in getattr(module, _EAGER_COMM_CONTEXTS_ATTR, {}).values():
-        for bucket in context.buckets:
-            if bucket.bucket_storage is bucket_storage:
-                return bucket
-    return None
 
 
 def _module_param(module: nn.Module, fqn: str) -> nn.Parameter:
@@ -744,6 +690,7 @@ def _attach_flex_shard_module_state(
     """Attach FlexShard ownership state and mixin accessors to a module."""
     setattr(module, _SHARDED_BUCKET_STORAGES_ATTR, bucket_storages)
     setattr(module, _EAGER_HOOKS_INSTALLED_ATTR, False)
+    setattr(module, _STATE_ATTR, ShardedModuleState())
 
     cls = type(module)
     if not issubclass(cls, FlexShardModule):
@@ -768,8 +715,10 @@ def _materialize_bucket_storages(
     inputs: PreparedFlexShardInputs,
     buckets: list[BucketSpec],
 ) -> list[ShardedBucketStorage]:
-    """Create ShardedBucketStorage objects and install sharded parameters."""
+    """Create ShardedBucketStorage objects, with their runtimes in one
+    context, and install sharded parameters."""
     named_params_dict = dict(inputs.named_params)
+    context = BucketCommContext.for_device(_get_device_from_mesh(buckets[0].mesh))
     bucket_storages: list[ShardedBucketStorage] = []
 
     for bucket_idx, bucket_fqns in enumerate(inputs.bucket_assignments):
@@ -792,6 +741,7 @@ def _materialize_bucket_storages(
                 inputs.device,
                 bucket_spec,
                 inputs.shared_param_names,
+                context,
             )
         )
 

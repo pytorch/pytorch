@@ -235,11 +235,7 @@ def _bucket(patterns, mesh, reshard_after_forward, placement_fn=per_param_placem
 
 
 def _buckets(model: nn.Module):
-    return [
-        bucket
-        for context in model._flex_shard_eager_comm_contexts.values()
-        for bucket in context.buckets
-    ]
+    return model._runtimes()
 
 
 class TestFlexShardEagerRuntime(TestCase):

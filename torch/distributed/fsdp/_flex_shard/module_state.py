@@ -31,8 +31,10 @@ from torch.distributed._composable_state import (
     _insert_module_state,
     _State,
 )
+from torch.distributed.fsdp._fully_shard._fsdp_api import GradientReductionHandle
 from torch.distributed.utils import _apply_to_tensors
 
+from . import module_ops
 from .bucket_runtime import _in_backward, BucketCommContext, PartialBackward
 from .utils import _cast_fp_tensor, TrainingState
 
@@ -599,6 +601,62 @@ class ShardedModuleState(_State):
             group.bucket.pre_backward_hook((grad,))
 
     # Explicit finalization and reset #
+    @property
+    def runtimes(self) -> list[BucketRuntime]:
+        return [group.bucket for group in self._groups]
+
+    @property
+    def storages(self) -> list[ShardedBucketStorage]:
+        return [group.storage for group in self._groups]
+
+    def _unshard(self, async_op: bool) -> list[BucketRuntime]:
+        """Start (``async_op``) or finish the groups' unshards on the current
+        stream, re-reading parameters replaced since (``BucketGroup.refresh``);
+        return the buckets to wait on."""
+        for group in self._groups:
+            group.lazy_init()
+            group.refresh()
+        return module_ops.unshard(self.runtimes, async_op)
+
+    def _set_manual_backward_finalization(self, enabled: bool) -> None:
+        """Whether the caller finalizes backward (``finalize_backward``)
+        instead of the end of each backward; set on the root."""
+        if self._is_root is False:
+            raise RuntimeError(
+                "set_manual_backward_finalization must be called on the root "
+                f"{self._state_name} module"
+            )
+        state_ctx = self._state_ctx
+        if (
+            enabled != state_ctx.manual_backward_finalization
+            and torch._C._current_graph_task_id() != -1
+        ):
+            raise RuntimeError(
+                "set_manual_backward_finalization cannot change mode during backward"
+            )
+        active_mode = state_ctx.manual_backward_finalization_active
+        if active_mode is not None and enabled != active_mode:
+            raise RuntimeError(
+                "set_manual_backward_finalization cannot change mode after backward starts"
+            )
+        state_ctx.manual_backward_finalization = enabled
+        # The next backward follows it even without a forward in between
+        if (context := self._engine_context or self._shared_engine_context) is not None:
+            context.manual_backward_finalization = enabled
+
+    def _finalize_backward(self, async_op: bool) -> GradientReductionHandle | None:
+        """Issue the reductions that backwards left and reshard; with
+        ``async_op``, return a handle to wait for them instead of waiting."""
+        if self._is_root is None:
+            return GradientReductionHandle() if async_op else None
+        self._validate_finalize_backward()
+        self._start_finalize_backward()
+        if not async_op:
+            self._end_backward_iteration()
+            return None
+        self._state_ctx.gradient_reduction_pending = True
+        return FinalizationHandle(self)
+
     def _validate_finalize_backward(self) -> None:
         state_ctx, context = self._state_ctx, self._engine_context
         name = self._state_name
@@ -687,31 +745,32 @@ class ShardedModuleState(_State):
                 f"another {self._state_name} root sharing the communication context"
             )
         if context is not None:
-            context.take_pending_unshard(None)
-            context.wait_and_clear_reduce_grad_states(debug_fqn=None)
-            context.pending_finalization = None
-            context.post_backward_callback_queued = False
-            context.finish_at_backward_end = False
-            for runtime in context.buckets:
-                if runtime.is_unsharded:
-                    runtime.reshard()
-                runtime.post_forward_storage = None
-                runtime.partial_reduce_output = None
-                runtime.partial_reduce_indices = frozenset()
-                runtime.needs_sync = False
-                runtime.forward_since_reduce = False
-                for param in runtime.unsharded_params or []:
-                    param.grad = None
-                runtime.reset_backward_state()
-                runtime._set_unsharded_grad_dtypes(defer_upcast=False)
+            context.reset(drop_grads=True)
         for s in state_ctx.all_states:
             s._training_state = TrainingState.IDLE
-            for group in s._groups:
-                for param in group.bucket.sharded_params:
-                    param.grad = None
+            for param in (p for r in s.runtimes for p in r.sharded_params):
+                param.grad = None
         state_ctx.iter_forward_root = None
         state_ctx.manual_backward_finalization_active = None
         state_ctx.gradient_reduction_pending = False
+
+
+class FinalizationHandle(GradientReductionHandle):
+    """Returned by ``finalize_backward(async_op=True)``."""
+
+    def __init__(self, state: ShardedModuleState) -> None:
+        self._state: ShardedModuleState | None = state
+        # The engine context, which roots may share, holds one pending
+        # finalization at a time
+        state._engine_context.pending_finalization = self  # type: ignore[union-attr]
+
+    def wait(self) -> None:
+        if (state := self._state) is None:
+            return
+        if state._engine_context.pending_finalization is not self:  # type: ignore[union-attr]
+            raise RuntimeError("This gradient reduction handle was invalidated")
+        state._end_backward_iteration()
+        self._state = None
 
 
 def share_context(states: Sequence[ShardedModuleState]) -> None:

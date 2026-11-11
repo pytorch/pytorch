@@ -4,15 +4,13 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Where a ``Shard`` bucket's sharded parameters keep their data.
+"""Where a bucket's sharded parameters keep their data.
 
-Each parameter keeps its sharded data at the start of a slot of the bucket's
-storage: the padded shard's elements (the rank-0 chunk's) in its dtype, so that
-the ranks' slots line up in the collectives, aligned to its element size. A
-``Shard(0)`` shard is stored padded, so the all-gather needs no copy to pad it;
-a ``Shard(i)``, i > 0, shard is stored as is, since padding would sit between
-rows. A parameter whose data is a tensor subclass, or defines an all-gather
-extension, keeps storage of its own, and so does every parameter of its bucket.
+Each parameter keeps its sharded data at the start of its slot of the bucket's
+storage, the bytes that its placement reserves for it (e.g. the rank-0 chunk's
+for ``Shard``, so that the ranks' slots line up in the collectives). A
+parameter whose data is a tensor subclass, or defines an all-gather extension,
+keeps storage of its own, and so does every parameter of its bucket.
 
 Modules may replace a sharded parameter, or its data, after sharding:
 ``to_empty()``, ``load_state_dict(assign=True)``, ``module.to(dtype)``,
@@ -24,6 +22,7 @@ the parameters at their slots again.
 from __future__ import annotations
 
 import functools
+import math
 from dataclasses import dataclass, replace
 from typing import Any, cast, TYPE_CHECKING
 
@@ -51,14 +50,15 @@ class ParamHoming:
         self,
         runtime: BucketRuntime,
         device: torch.device,
-        extension_mesh: DeviceMesh | Any,
-        mp_policies: list[Any],
+        extension_mesh: DeviceMesh | Any = None,
+        mp_policies: list[Any] | None = None,
     ) -> None:
         self.runtime = runtime
         # Where the storage lives when the parameters' devices disagree
         self.device = device
         # The mesh passed to fsdp_pre_all_gather, and each parameter's mixed
-        # precision policy, resolved for it
+        # precision policy, resolved for it, if its dtypes follow the
+        # parameter's after module.to(dtype)
         self.extension_mesh = extension_mesh
         self.mp_policies = mp_policies
         # Each parameter's 1-D slot: the stored data first, then zeros
@@ -84,13 +84,35 @@ class ParamHoming:
         return self.storage._mesh.size()
 
     # Slots #
-    def _geometry(self, info: ParamInfo) -> tuple[int, torch.Size, int, int]:
-        """(slot numel, stored size, shard dim, local length on the dim)."""
-        placement = info.placement
-        dim = placement.dim  # type: ignore[attr-defined]
-        padded = placement.compute_local_shape(info.global_shape, 0, self.world_size)
-        stored = padded if dim == 0 else info.local_shape
-        return padded.numel(), stored, dim, info.local_shape[dim]
+    @staticmethod
+    def _slot_numel(info: ParamInfo) -> int:
+        return info.storage_nbytes // info.dtype.itemsize
+
+    def _storage_device(self, devices: set[torch.device]) -> torch.device:
+        if torch.device("meta") in devices:
+            # Meta parameters stay on meta until to_empty()
+            return torch.device("meta")
+        if self.storage._cpu_offload is not None:
+            return torch.device("cpu")
+        # The parameters' device, as sharded parameters stay where
+        # Module._apply (e.g. module.cpu()) moved them
+        return devices.pop() if len(devices) == 1 else self.device
+
+    def _new_storage(self, nbytes: int, device: torch.device) -> torch.Tensor:
+        offload = self.storage._cpu_offload
+        pin = offload is not None and offload.pin_memory and device.type == "cpu"
+        return torch.zeros(nbytes, dtype=torch.uint8, device=device, pin_memory=pin)
+
+    def _layout(self, dtypes: list[torch.dtype]) -> tuple[list[int], int]:
+        """The slots' byte offsets and the storage's size for data in
+        ``dtypes``: the placements' layout, or after ``module.to(dtype)`` the
+        slots packed anew."""
+        infos = [bp.param_info for bp in self.runtime.bucket_params]
+        if all(d == info.dtype for d, info in zip(dtypes, infos, strict=True)):
+            return [info.byte_offset for info in infos], self.storage._total_bytes
+        keys = [(self._slot_numel(i), d) for i, d in zip(infos, dtypes, strict=True)]
+        offsets = _aligned_offsets(keys)
+        return offsets, offsets[-1] + keys[-1][0] * keys[-1][1].itemsize
 
     @torch.no_grad()
     def _bind(
@@ -109,20 +131,17 @@ class ParamHoming:
         (``holds_param=False``). ``create`` builds the sharded parameter."""
         runtime = self.runtime
         info = runtime.bucket_params[index].param_info
-        slot_numel, stored_size, dim, length = self._geometry(info)
         if slot is None:
-            slot = source.new_zeros(slot_numel)
+            slot = source.new_zeros(self._slot_numel(info))
             offload = self.storage._cpu_offload
             if offload is not None and not slot.is_meta:
                 slot = slot.cpu()
                 if offload.pin_memory:
                     slot = slot.pin_memory()
-        stored_numel = stored_size.numel()
-        stored = slot if slot.numel() == stored_numel else slot[:stored_numel]
-        local = stored.view(stored_size).narrow(dim, 0, length)
+        local = slot.narrow(0, 0, info.local_numel).view(info.local_shape)
         if not local.is_meta and local.numel() > 0:
-            # A replaced Shard(0) local tensor may hold the padding too
-            local.copy_(source.narrow(dim, 0, length))
+            # A replaced local tensor may hold the padding rows too
+            local.copy_(source[tuple(slice(0, n) for n in info.local_shape)])
         representation = runtime.representation
         if create:
             param = representation.new_sharded_param(index, local, info)
@@ -136,98 +155,137 @@ class ParamHoming:
             )
         return slot.view(-1)
 
-    def home(self, shards: list[torch.Tensor] | None = None) -> None:
-        """Keep the parameters' sharded data in one byte buffer, each at the
-        start of its slot: ``shards`` (taken at construction, which creates the
-        sharded parameters), or the data of sharded parameters replaced since,
-        in new storage if their dtypes or device changed. Parameters with
-        storage of their own (``own_storage``) keep it."""
+    def install(self, sources: list[torch.Tensor]) -> None:
+        """Keep each parameter's shard of ``sources``, the tensors whose
+        chunks the bucket stores, in the bucket's storage, as its placement
+        lays it out, and register a sharded parameter that views it in the
+        parameter's module slots. Runs once, at construction."""
+        runtime, storage = self.runtime, self.storage
+        infos = [bp.param_info for bp in runtime.bucket_params]
+        rank = storage._mesh.get_local_rank()
+        sources = [source.detach() for source in sources]
+        self.own_storage = any(
+            ParamExtension.defined_by(s) or type(s) is not torch.Tensor for s in sources
+        )
+        devices = {s.device for s in sources}
+        if self.own_storage or (torch.device("meta") in devices and len(devices) > 1):
+            # Storage of its own per parameter, or, while some parameters are
+            # still on meta (to_empty() visits a bucket's modules one by one),
+            # their own local tensors until all are materialized
+            self.slots = [
+                self._bind(
+                    i,
+                    None,
+                    info.placement.extract_local_shard(source, rank, self.world_size),
+                    create=True,
+                )
+                for i, (info, source) in enumerate(zip(infos, sources, strict=True))
+            ]
+            self._rebuild_infos()
+            return
+        byte_storage = self._new_storage(
+            storage._total_bytes, self._storage_device(devices)
+        )
+        if not byte_storage.is_meta:
+            for info, source in zip(infos, sources, strict=True):
+                info.placement.copy_param_to_storage(
+                    byte_storage, info, source, rank, self.world_size
+                )
+        storage._byte_storage = byte_storage
+        self.slots = [
+            self._slot(byte_storage, info.byte_offset, info) for info in infos
+        ]
+        for index, (info, slot) in enumerate(zip(infos, self.slots, strict=True)):
+            param = runtime.representation.new_sharded_param(
+                index, slot.narrow(0, 0, info.local_numel).view(info.local_shape), info
+            )
+            bp = runtime.bucket_params[index]
+            for owner in (bp.param_owner, *bp.shared_owners):
+                _set_param(owner.module, owner.param_name, param)
+            runtime.bucket_params[index] = replace(bp, sharded_param=param)
+        self.locals = [
+            runtime.representation.local_tensor(bp.sharded_param)
+            for bp in runtime.bucket_params
+        ]
+        self.slot_keys = [(self._slot_numel(info), info.dtype) for info in infos]
+        self._rebuild_infos()
+
+    def _slot(
+        self,
+        byte_storage: torch.Tensor,
+        offset: int,
+        info: ParamInfo,
+        dtype: torch.dtype | None = None,
+    ) -> torch.Tensor:
+        dtype = dtype or info.dtype
+        nbytes = self._slot_numel(info) * dtype.itemsize
+        return byte_storage[offset : offset + nbytes].view(dtype)
+
+    def home(self) -> None:
+        """Keep the data of sharded parameters replaced since construction in
+        the bucket's storage again, at the start of their slots, in new storage
+        if their dtypes or the device changed. Parameters with storage of their
+        own (``own_storage``) keep it."""
         runtime = self.runtime
         representation = runtime.representation
         bucket_params = runtime.bucket_params
-        create = shards is not None
-        sources = (
-            shards
-            if shards is not None
-            else [representation.local_tensor(bp.sharded_param) for bp in bucket_params]
-        )
-        if create:
-            self.own_storage = any(
-                ParamExtension.defined_by(s) or type(s) is not torch.Tensor
-                for s in sources
-            )
+        sources = [
+            representation.local_tensor(bp.sharded_param) for bp in bucket_params
+        ]
         if self.own_storage:
-            self.slots = [
-                self._bind(i, None, s, create=create) if create else self.slots[i]
-                for i, s in enumerate(sources)
-            ]
             self._rebuild_infos()
             return
-        geometry = [self._geometry(bp.param_info) for bp in bucket_params]
-        keys = [(g[0], s.dtype) for g, s in zip(geometry, sources, strict=True)]
         devices = {s.device for s in sources}
         if torch.device("meta") in devices and len(devices) > 1:
-            # Some parameters are materialized and others still on meta, e.g.
-            # while to_empty() visits the bucket's modules one by one: each
-            # keeps its local tensor until all are materialized
-            self.slots = [
-                self._bind(i, None, s, create=True) if create else self.slots[i]
-                for i, s in enumerate(sources)
-            ]
+            # Some parameters are materialized and others still on meta: each
+            # keeps its local tensor until all are materialized (see install)
             self.locals = []
             self._rebuild_infos()
             return
-        if torch.device("meta") in devices:
-            # Meta parameters stay on meta until to_empty()
-            device = torch.device("meta")
-        elif self.storage._cpu_offload is not None:
-            device = torch.device("cpu")
-        else:
-            # The parameters' device, as sharded parameters stay where
-            # Module._apply (e.g. module.cpu()) moved them
-            device = devices.pop() if len(devices) == 1 else self.device
-        offsets = _aligned_offsets(keys)
-        total = offsets[-1] + keys[-1][0] * keys[-1][1].itemsize if keys else 0
+        device = self._storage_device(devices)
+        dtypes = [s.dtype for s in sources]
+        offsets, total = self._layout(dtypes)
+        keys = [
+            (self._slot_numel(bp.param_info), d)
+            for bp, d in zip(bucket_params, dtypes, strict=True)
+        ]
         byte_storage = self.storage._byte_storage
         reuse = keys == self.slot_keys and byte_storage.device == device
         if not reuse:
-            offload = self.storage._cpu_offload
-            byte_storage = torch.zeros(
-                total,
-                dtype=torch.uint8,
-                device=device,
-                pin_memory=offload is not None
-                and offload.pin_memory
-                and device.type == "cpu",
-            )
+            byte_storage = self._new_storage(total, device)
         slots: list[torch.Tensor] = []
         locals_: list[torch.Tensor | None] = []
         first_index: dict[int, int] = {}
         self.aliases = []
-        for index, ((numel, dtype), offset, source) in enumerate(
-            zip(keys, offsets, sources, strict=True)
-        ):
-            view = byte_storage[offset : offset + numel * dtype.itemsize].view(dtype)
+        for index, (offset, source) in enumerate(zip(offsets, sources, strict=True)):
+            view = self._slot(
+                byte_storage, offset, bucket_params[index].param_info, source.dtype
+            )
             sharded_param = bucket_params[index].sharded_param
-            if not create:
-                first = first_index.setdefault(id(sharded_param), index)
-                if first != index:
-                    # A parameter tied after sharding (e.g. re-tied after
-                    # to_empty) has an entry per module slot, so a slot per
-                    # entry. The parameter views the first slot, and each
-                    # unshard copies it into the others (sync_aliases).
-                    self.aliases.append((index, first))
-                    slots.append(
-                        self._bind(index, view, source, create=False, holds_param=False)
-                    )
-                    locals_.append(None)
-                    continue
-                local = representation.local_tensor(sharded_param)
-                if reuse and local is self.locals[index]:
-                    slots.append(view)
-                    locals_.append(local)
-                    continue
-            slots.append(self._bind(index, view, source, create=create))
+            first = first_index.setdefault(id(sharded_param), index)
+            if first != index:
+                # A parameter tied after sharding (e.g. re-tied after
+                # to_empty) has an entry per module slot, so a slot per
+                # entry. The parameter views the first slot, and each
+                # unshard copies it into the others (sync_aliases).
+                self.aliases.append((index, first))
+                slots.append(
+                    self._bind(index, view, source, create=False, holds_param=False)
+                )
+                locals_.append(None)
+                continue
+            local = representation.local_tensor(sharded_param)
+            # The local tensor may be the parameter itself, whose data an op
+            # like to_empty() replaced in place
+            if (
+                reuse
+                and local is self.locals[index]
+                and _same_storage_slot(local, view)
+            ):
+                slots.append(view)
+                locals_.append(local)
+                continue
+            slots.append(self._bind(index, view, source, create=False))
             locals_.append(
                 representation.local_tensor(bucket_params[index].sharded_param)
             )
@@ -284,14 +342,22 @@ class ParamHoming:
                 runtime.bucket_params[index] = replace(
                     runtime.bucket_params[index], sharded_param=new
                 )
+                # Slots that shared the parameter (e.g. tied weights) got
+                # parameters of their own too, e.g. from to_empty(); tie again
+                for owner in bp.shared_owners:
+                    if owner.param is not new:
+                        _set_param(owner.module, owner.param_name, new)
             info = runtime.bucket_params[index].param_info
             if info.has_explicit_grad_dtype and not new._has_grad_dtype_override:
                 new.grad_dtype = info.grad_dtype_override
             local = representation.local_tensor(new)
             if local.is_meta:
                 continue
-            _, stored_size, _, _ = self._geometry(info)
-            if local.size() not in (info.local_shape, stored_size):
+            rows = math.prod(info.local_shape[1:])
+            padded = torch.Size(
+                (self._slot_numel(info) // rows if rows else 0, *info.local_shape[1:])
+            )
+            if local.size() not in (info.local_shape, padded):
                 raise AssertionError(
                     f"{info.fqn} expects a local tensor of size {info.local_shape} "
                     f"but got {local.size()}"
@@ -422,7 +488,7 @@ class ParamHoming:
         may have changed (``module.to(dtype)``), and slot offsets with them."""
         runtime = self.runtime
         storage = runtime.bucket_storage
-        offsets = _aligned_offsets([(slot.numel(), slot.dtype) for slot in self.slots])
+        offsets, _ = self._layout([slot.dtype for slot in self.slots])
         infos: dict[str, ParamInfo] = {}
         new_params: list[BucketParam] = []
         for index, (bp, slot, offset) in enumerate(
@@ -430,21 +496,23 @@ class ParamHoming:
         ):
             old = bp.param_info
             dtype = slot.dtype
-            policy = self.mp_policies[index]
-            requested = getattr(policy, "param_dtype", None)
-            # No cast if it is the parameter's dtype or the parameter is not
-            # floating point (mixed precision is only meaningful for those)
-            param_dtype = (
-                None if requested == dtype or not dtype.is_floating_point else requested
-            )
-            fields = {
+            fields: dict[str, Any] = {
                 "dtype": dtype,
                 "requires_grad": bp.sharded_param.requires_grad,
-                "param_dtype": param_dtype,
-                "reduce_dtype": getattr(policy, "reduce_dtype", None),
                 "byte_offset": offset,
                 "storage_nbytes": slot.numel() * slot.element_size(),
             }
+            if self.mp_policies is not None:
+                policy = self.mp_policies[index]
+                requested = getattr(policy, "param_dtype", None)
+                # No cast if it is the parameter's dtype or the parameter is
+                # not floating point (mixed precision is only meaningful there)
+                fields["param_dtype"] = (
+                    None
+                    if requested == dtype or not dtype.is_floating_point
+                    else requested
+                )
+                fields["reduce_dtype"] = getattr(policy, "reduce_dtype", None)
             # Explicit unshards refresh every time, so keep unchanged infos
             if any(getattr(old, name) != value for name, value in fields.items()):
                 bp = replace(bp, param_info=replace(old, **fields))
@@ -495,7 +563,7 @@ class ParamHoming:
                 info,
                 self.extension_mesh,
                 bp.param_owner.module,
-                self.mp_policies[index],
+                self.mp_policies[index] if self.mp_policies else None,
                 device,
             )
         if not self.own_storage:
@@ -503,7 +571,8 @@ class ParamHoming:
         data = self.slots[index]
         if device is not None:
             data = data.to(device, non_blocking=True)
-        slot_numel, _, dim, length = self._geometry(info)
+        dim = info.placement.dim  # type: ignore[attr-defined]
+        length = info.local_shape[dim]
         if dim != 0 and length != _padded_length(self, info):
             padded = data.new_zeros(
                 info.placement.compute_local_shape(
@@ -646,6 +715,16 @@ class ParamSource:
     local_shape: torch.Size | None = None
 
 
+def install_params(
+    runtime: BucketRuntime, params: list[torch.Tensor], device: torch.device
+) -> ParamHoming:
+    """Give a bucket's runtime a ``ParamHoming`` that keeps the shards of
+    ``params``, in the bucket's order, in its storage."""
+    homing = runtime.representation.homing = ParamHoming(runtime, device)
+    homing.install(params)
+    return homing
+
+
 def build_homed_bucket(
     sources: list[ParamSource],
     *,
@@ -669,7 +748,7 @@ def build_homed_bucket(
     from .bucket_runtime import BucketRuntime
     from .bucket_storage import ShardedBucketStorage
 
-    infos, _ = ShardedBucketStorage.create_param_infos(
+    infos, total_bytes = ShardedBucketStorage.create_param_infos(
         # The data tensors stand for their parameters, whose settings the
         # metas carry
         cast(list[tuple[str, nn.Parameter]], [(src.fqn, src.data) for src in sources]),
@@ -689,7 +768,7 @@ def build_homed_bucket(
         torch.empty(0, dtype=torch.uint8, device=device),
         infos,
         mesh,
-        0,
+        total_bytes,
         module,
         reshard_after_forward=reshard_after_forward,
         fsdp2_compatible=True,
@@ -714,15 +793,9 @@ def build_homed_bucket(
     homing = representation.homing = ParamHoming(
         runtime, device, extension_mesh, [src.mp_policy for src in sources]
     )
-    rank, world_size = mesh.get_local_rank(), mesh.size()
-    # The rank's shard of each parameter, which homing copies into the
-    # storage, so that the parameters' data can be freed once this returns
-    homing.home(
-        [
-            info.placement.extract_local_shard(src.data, rank, world_size)
-            for src, info in zip(sources, infos.values(), strict=True)
-        ]
-    )
+    # Copies each parameter's shard into the storage, so that the parameters'
+    # data can be freed once this returns
+    homing.install([src.data for src in sources])
     homing.init_extensions()
     return runtime, homing
 

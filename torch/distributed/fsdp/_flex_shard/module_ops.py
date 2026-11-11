@@ -14,6 +14,7 @@ from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
+from torch.distributed.fsdp._fully_shard._fsdp_api import UnshardHandle
 
 from .bucket_runtime import _alloc_storage, _free_storage, _inner_tensors
 
@@ -84,6 +85,19 @@ def wait_for_unshard(runtimes: Sequence[BucketRuntime]) -> None:
     for runtime in runtimes:
         if any(p.bucket is runtime for p in runtime.context.pending_unshards):
             runtime.unshard()
+
+
+class ModuleUnshardHandle(UnshardHandle):
+    """Returned by ``unshard(async_op=True)``: ``wait()`` finishes the
+    all-gathers that ``unshard`` started and are still pending. A forward that
+    runs first finishes its buckets' all-gathers itself."""
+
+    def __init__(self, runtimes: list[BucketRuntime]) -> None:
+        self._runtimes = runtimes
+
+    def wait(self) -> None:
+        wait_for_unshard(self._runtimes)
+        self._runtimes = []
 
 
 def _sharded_storages(

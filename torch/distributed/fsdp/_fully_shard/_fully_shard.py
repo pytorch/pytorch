@@ -20,9 +20,11 @@ from . import _fsdp_engine
 from ._fsdp_api import (
     AllGather,
     DataParallelMeshDims,
+    GradientReductionHandle,
     MixedPrecisionPolicy,
     OffloadPolicy,
     ReduceScatter,
+    UnshardHandle,
 )
 from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
@@ -377,8 +379,7 @@ class FSDPModule:
         default, this frees the unsharded parameter storage; call
         :meth:`set_keep_unsharded_storage` to preserve it.
         """
-        state = self._get_fsdp_state()
-        module_ops.reshard(_fsdp_engine.runtimes(state))
+        module_ops.reshard(self._fsdp_runtimes())
 
     def complete_grouped_forward(self, output: Any = None) -> Any:
         """
@@ -458,16 +459,14 @@ class FSDPModule:
         ``reshard_after_forward``). The root module reports ``False`` for
         ``fully_shard``'s default once its first forward made it the root.
         """
-        return module_ops.get_reshard_after_forward(
-            _fsdp_engine.first_storage(self._get_fsdp_state())
-        )
+        return module_ops.get_reshard_after_forward(self._first_storage())
 
     def get_reshard_after_backward(self) -> bool:
         """
         Returns whether this module reshards its parameters after backward
         (see :meth:`set_reshard_after_backward`).
         """
-        storage = _fsdp_engine.first_storage(self._get_fsdp_state())
+        storage = self._first_storage()
         return storage._reshard_after_backward if storage is not None else True
 
     def get_requires_gradient_sync(self) -> bool:
@@ -475,7 +474,7 @@ class FSDPModule:
         Returns whether this module reduces its gradients (see
         :meth:`set_requires_gradient_sync`).
         """
-        storage = _fsdp_engine.first_storage(self._get_fsdp_state())
+        storage = self._first_storage()
         return storage._requires_gradient_sync if storage is not None else True
 
     def get_requires_all_reduce(self) -> bool:
@@ -484,7 +483,7 @@ class FSDPModule:
         with HSDP (see :meth:`set_requires_all_reduce`), which
         :meth:`set_requires_gradient_sync` also sets.
         """
-        storage = _fsdp_engine.first_storage(self._get_fsdp_state())
+        storage = self._first_storage()
         return storage._requires_all_reduce if storage is not None else True
 
     def get_is_last_backward(self) -> bool:
@@ -528,11 +527,13 @@ class FSDPModule:
             needs to call :meth:`wait` explicitly if the wait should happen
             before pre-forward.
         """
-        state = self._get_fsdp_state()
-        engine_handle = _UnshardHandleImpl(_fsdp_engine.unshard(state, async_op))
+        handle = module_ops.ModuleUnshardHandle(
+            self._get_fsdp_state()._unshard(async_op)
+        )
         if async_op:
-            return engine_handle
-        engine_handle.wait()
+            return handle
+        handle.wait()
+        return None
 
     @_dynamo_disable
     def reset_iter_state(self) -> None:
@@ -592,25 +593,7 @@ class FSDPModule:
         Set this before backward. The mode cannot change after backward starts
         until the backward iteration is finalized or reset.
         """
-        state = self._get_fsdp_state()
-        if state._is_root is False:
-            raise RuntimeError(
-                "set_manual_backward_finalization must be called on the root "
-                f"{state._state_name} module"
-            )
-        if (
-            enabled != state._state_ctx.manual_backward_finalization
-            and torch._C._current_graph_task_id() != -1
-        ):
-            raise RuntimeError(
-                "set_manual_backward_finalization cannot change mode during backward"
-            )
-        active_mode = state._state_ctx.manual_backward_finalization_active
-        if active_mode is not None and enabled != active_mode:
-            raise RuntimeError(
-                "set_manual_backward_finalization cannot change mode after backward starts"
-            )
-        state._state_ctx.manual_backward_finalization = enabled
+        self._get_fsdp_state()._set_manual_backward_finalization(enabled)
 
     @overload
     def finalize_backward(self, *, async_op: Literal[False] = False) -> None: ...
@@ -674,16 +657,7 @@ class FSDPModule:
                 FSDP root that shares its communication context. If ``False``,
                 wait before returning.
         """
-        state = self._get_fsdp_state()
-        if state._is_root is None:
-            return GradientReductionHandle() if async_op else None
-        state._validate_finalize_backward()
-        state._start_finalize_backward()
-        if not async_op:
-            state._end_backward_iteration()
-            return None
-        state._state_ctx.gradient_reduction_pending = True
-        return _GradientReductionHandleImpl(state)
+        return self._get_fsdp_state()._finalize_backward(async_op)
 
     def set_requires_gradient_sync(
         self, requires_gradient_sync: bool, *, recurse: bool = True
@@ -1241,10 +1215,15 @@ class FSDPModule:
     def _fsdp_storages(self, recurse: bool = False) -> list[ShardedBucketStorage]:
         """The engine storages of this module's groups, or of all FSDP
         modules' under it."""
-        return [g.storage for s in self._fsdp_states(recurse) for g in s._groups]
+        return [st for s in self._fsdp_states(recurse) for st in s.storages]
 
     def _fsdp_runtimes(self, recurse: bool = False) -> list[BucketRuntime]:
-        return [g.bucket for s in self._fsdp_states(recurse) for g in s._groups]
+        return [r for s in self._fsdp_states(recurse) for r in s.runtimes]
+
+    def _first_storage(self) -> ShardedBucketStorage | None:
+        """The storage of the first group, which holds the settings that the
+        setters give all of this module's groups."""
+        return next(iter(self._fsdp_storages()), None)
 
     def _get_fsdp_state(self) -> FSDPState:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
@@ -1262,57 +1241,6 @@ class FSDPModule:
         for group, grads in zip(groups, saved, strict=True):
             group.homing.restore_after_apply(grads)
         return ret
-
-
-class GradientReductionHandle:
-    """A handle for asynchronous backward finalization."""
-
-    def wait(self) -> None:
-        """Wait for gradient reduction and release its retained buffers.
-
-        Raises:
-            RuntimeError: If :meth:`FSDPModule.reset_iter_state` invalidated
-                this handle.
-        """
-        return
-
-
-class _GradientReductionHandleImpl(GradientReductionHandle):
-    def __init__(self, state: FSDPState) -> None:
-        self._state: FSDPState | None = state
-        # The engine context, which roots may share, holds one pending
-        # finalization at a time
-        state._engine_context.pending_finalization = self  # type: ignore[union-attr]
-
-    def wait(self) -> None:
-        if (state := self._state) is None:
-            return
-        if state._engine_context.pending_finalization is not self:  # type: ignore[union-attr]
-            raise RuntimeError("This gradient reduction handle was invalidated")
-        state._end_backward_iteration()
-        self._state = None
-
-
-class UnshardHandle:
-    """
-    A handle to wait on a :meth:`FSDPModule.unshard` op.
-    """
-
-    def wait(self) -> None:
-        """
-        Waits on the unshard op. This ensures that the current stream can use
-        the unsharded parameters, which are now registered to the module.
-        """
-        return
-
-
-class _UnshardHandleImpl(UnshardHandle):
-    def __init__(self, runtimes: list) -> None:
-        self._runtimes = runtimes
-
-    def wait(self) -> None:
-        module_ops.wait_for_unshard(self._runtimes)
-        self._runtimes = []
 
 
 def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:

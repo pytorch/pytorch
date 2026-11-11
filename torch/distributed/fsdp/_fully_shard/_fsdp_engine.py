@@ -29,11 +29,11 @@ from torch.distributed.tensor import DTensor
 
 from .._flex_shard import module_ops
 from .._flex_shard.bucket_runtime import (
+    _reshard_buckets,
     BucketCommContext,
-    BucketRuntime,
     ParamRepresentation,
 )
-from .._flex_shard.bucket_storage import ParamMeta, ShardedBucketStorage
+from .._flex_shard.bucket_storage import ParamMeta
 from .._flex_shard.module_ops import GroupMesh
 from .._flex_shard.module_state import BucketGroup
 from .._flex_shard.param_homing import build_homed_bucket, param_owners, ParamSource
@@ -140,34 +140,6 @@ class FSDPParamRepresentation(ParamRepresentation):
         for fsdp_param in self.fsdp_params:
             fsdp_param.sharded_state = sharded_state
 
-    def sharded_grads(
-        self,
-        indices: list[int],
-        sharded_params: list[nn.Parameter],
-        grads: list[torch.Tensor],
-    ) -> list[torch.Tensor]:
-        # Each sharded grad's dtype: an explicit grad_dtype, or the parameter's
-        dtypes = [
-            param.grad_dtype if param._has_grad_dtype_override else param.dtype
-            for param in sharded_params
-        ]
-        casts = [
-            dtype is not None and grad.dtype != dtype
-            for grad, dtype in zip(grads, dtypes, strict=True)
-        ]
-        # As FSDP2: views of uncast grads keep the whole reduce output alive,
-        # including the regions cast into their own buffers, so copy the uncast
-        # grads when those regions are larger
-        cast_numel = sum(g.numel() for g, cast in zip(grads, casts) if cast)
-        copy_uncast = cast_numel > sum(g.numel() for g in grads) - cast_numel
-        cast_grads = _cast_grad_runs(grads, dtypes, casts)
-        return [
-            cast_grad if needs_cast else grad.clone() if copy_uncast else grad
-            for grad, cast_grad, needs_cast in zip(
-                grads, cast_grads, casts, strict=True
-            )
-        ]
-
     def store_sharded_grads(
         self,
         indices: list[int],
@@ -189,43 +161,6 @@ class FSDPParamRepresentation(ParamRepresentation):
                 sharded_param.grad = self.fsdp_params[index].to_sharded_dtensor(grad)
             for hook in (hooks or {}).values():
                 hook(sharded_param)
-
-
-def _cast_grad_runs(
-    grads: list[torch.Tensor], dtypes: list[torch.dtype | None], casts: list[bool]
-) -> list[torch.Tensor]:
-    """Cast each run of adjacent grads to the same dtype in one buffer, as
-    FSDP2 casts the reduce output per dtype run: one allocation per dtype."""
-    out = list(grads)
-    i = 0
-    while i < len(grads):
-        if not casts[i]:
-            i += 1
-            continue
-        j = i + 1
-        storage = grads[i].untyped_storage()
-        while (
-            j < len(grads)
-            and casts[j]
-            and dtypes[j] == dtypes[i]
-            and grads[j].untyped_storage().data_ptr() == storage.data_ptr()
-        ):
-            j += 1
-        run = grads[i:j]
-        if all(g.is_contiguous() for g in run):
-            start = min(g.storage_offset() for g in run)
-            end = max(g.storage_offset() + g.numel() for g in run)
-            # pyrefly: ignore [no-matching-overload]
-            flat = run[0].new_empty(0).set_(storage, start, (end - start,))
-            cast_flat = flat.to(dtypes[i])
-            for k, grad in enumerate(run, start=i):
-                offset = grad.storage_offset() - start
-                out[k] = cast_flat.narrow(0, offset, grad.numel()).view(grad.shape)
-        else:
-            for k in range(i, j):
-                out[k] = grads[k].to(dtypes[k])
-        i = j
-    return out
 
 
 class FullyShardBucket(BucketGroup):
@@ -328,18 +263,15 @@ class FullyShardBucket(BucketGroup):
             self.bucket.group_modules = modules
         # As FSDP2: state dicts read and load the sharded parameters, which a
         # load with assign=True replaces
+        reshard_hook = functools.partial(_reshard_buckets, (self.bucket,))
         for module in modules:
-            module.register_state_dict_pre_hook(self._reshard_hook)
-            module._register_load_state_dict_pre_hook(self._reshard_hook)
+            module.register_state_dict_pre_hook(reshard_hook)
+            module._register_load_state_dict_pre_hook(reshard_hook)
         # A weak reference, so that a submodule kept alive does not keep the
         # whole module alive
         reload_hook = functools.partial(_reload_params, weakref.ref(self))
         for module in {owner.module for owner, _ in owners}:
             module.register_load_state_dict_post_hook(reload_hook)
-
-    def _reshard_hook(self, *args: Any, **kwargs: Any) -> None:
-        if self.bucket.is_unsharded:
-            self.bucket.reshard()
 
     @property
     def all_gather(self) -> ShardAllGather:
@@ -460,40 +392,10 @@ def _reload_params(group_ref: weakref.ref[FullyShardBucket], *args: Any) -> None
 
 
 # FSDPModule methods on the engine #
-def _buckets(state: Any) -> list[FullyShardBucket]:
-    return list(state._fsdp_param_groups)
-
-
-def runtimes(state: Any) -> list[BucketRuntime]:
-    """The engine runtimes of the state's groups."""
-    return [bucket.bucket for bucket in state._fsdp_param_groups]
-
-
-def storages(state: Any) -> list[ShardedBucketStorage]:
-    """The engine storages of the state's groups."""
-    return [bucket.storage for bucket in state._fsdp_param_groups]
-
-
-def first_storage(state: Any) -> ShardedBucketStorage | None:
-    """The storage of the state's first group, which holds the settings that
-    the ``FSDPModule`` setters give all its groups."""
-    buckets = _buckets(state)
-    return buckets[0].storage if buckets else None
-
-
-def unshard(state: Any, async_op: bool) -> list[BucketRuntime]:
-    """Start (``async_op``) or finish the module's unshards on the current
-    stream, as ``FSDPModule.unshard`` does; return the buckets to wait on."""
-    for bucket in _buckets(state):
-        bucket.lazy_init()
-        bucket.refresh()
-    return module_ops.unshard(runtimes(state), async_op)
-
-
 def set_reshard_after_forward(state: Any, reshard_after_forward: bool | int) -> None:
     from ._fsdp_init import _get_post_forward_mesh_info
 
-    for bucket in _buckets(state):
+    for bucket in state._fsdp_param_groups:
         if (shard_info := bucket.mesh_info.shard_info) is None:
             raise AssertionError(
                 f"Expected a mesh that shards parameters, got {bucket.mesh_info}"
@@ -510,19 +412,19 @@ def set_modules_to_prefetch(
         runtime
         for target_state in target_states
         for runtime in (
-            runtimes(target_state) if forward else reversed(runtimes(target_state))
+            target_state.runtimes if forward else reversed(target_state.runtimes)
         )
     ]
-    module_ops.set_prefetch(runtimes(state), targets, forward=forward)
+    module_ops.set_prefetch(state.runtimes, targets, forward=forward)
 
 
 def set_reduce_scatter_max_input_buffers(state: Any, max_input_buffers: int) -> None:
-    for bucket in _buckets(state):
+    for bucket in state._fsdp_param_groups:
         bucket.max_input_buffers = max_input_buffers
     if state._engine_context is not None:
         root_states = state._state_ctx.all_states
         state._engine_context.max_pending_reduce_grads = max(
-            (b.max_input_buffers or 1 for s in root_states for b in _buckets(s)),
+            (b.max_input_buffers or 1 for s in root_states for b in s._groups),
             default=1,
         )
 

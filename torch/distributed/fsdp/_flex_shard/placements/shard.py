@@ -229,6 +229,9 @@ class Shard(Placement):
             # Rank 0 has the largest chunk; reserve its capacity on every rank.
             padded_numel = placement.compute_local_numel(param.shape, 0, world_size)
             storage_nbytes = padded_numel * param.dtype.itemsize
+            # Aligned to the element size, for buckets of several dtypes
+            itemsize = param.dtype.itemsize
+            byte_offset = -(-byte_offset // itemsize) * itemsize
             param_layouts[fqn] = BucketParamStorageLayout(
                 local_shape=local_shape,
                 local_numel=local_numel,

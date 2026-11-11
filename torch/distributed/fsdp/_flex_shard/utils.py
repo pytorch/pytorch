@@ -64,13 +64,6 @@ def _record_copy_out_if_eager() -> AbstractContextManager[Any]:
     return torch.profiler.record_function("FlexShard::copy_out")
 
 
-def _record_view_out_if_eager() -> AbstractContextManager[Any]:
-    """Return an eager profiler range for unshard view-out."""
-    if torch.compiler.is_compiling():
-        return nullcontext()
-    return torch.profiler.record_function("FlexShard::view_out")
-
-
 def _record_comm_if_eager(
     label: str,
     fqn: str | None,

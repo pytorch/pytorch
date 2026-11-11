@@ -263,3 +263,29 @@ class CPUOffloadPolicy(OffloadPolicy):
     """
 
     pin_memory: bool = True
+
+
+class GradientReductionHandle:
+    """A handle for asynchronous backward finalization."""
+
+    def wait(self) -> None:
+        """Wait for gradient reduction and release its retained buffers.
+
+        Raises:
+            RuntimeError: If :meth:`FSDPModule.reset_iter_state` invalidated
+                this handle.
+        """
+        return
+
+
+class UnshardHandle:
+    """
+    A handle to wait on a :meth:`FSDPModule.unshard` op.
+    """
+
+    def wait(self) -> None:
+        """
+        Waits on the unshard op. This ensures that the current stream can use
+        the unsharded parameters, which are now registered to the module.
+        """
+        return

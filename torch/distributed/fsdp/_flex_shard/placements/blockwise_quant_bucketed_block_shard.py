@@ -123,28 +123,6 @@ def _padded_shape(shape: torch.Size, block_size: int) -> tuple[int, int]:
     return scale_rows * block_size, scale_cols * block_size
 
 
-def _pad_2d_to_block_shape(
-    tensor: torch.Tensor,
-    block_size: int,
-) -> torch.Tensor:
-    _validate_block_size(block_size)
-    out_dim, in_dim = _validate_2d_non_empty(tensor.shape, "blockwise tensor")
-    padded_out, padded_in = _padded_shape(tensor.shape, block_size)
-    if out_dim == padded_out and in_dim == padded_in:
-        return tensor.contiguous()
-    padded = torch.zeros(
-        (padded_out, padded_in),
-        dtype=tensor.dtype,
-        device=tensor.device,
-    )
-    padded[:out_dim, :in_dim].copy_(tensor)
-    return padded
-
-
-def _callable_name(value: Any) -> str:
-    return getattr(value, "__qualname__", type(value).__qualname__)
-
-
 class _ScaleRegion(NamedTuple):
     """Bytes ``[offset, offset + nbytes)`` of one rank's gathered payload."""
 

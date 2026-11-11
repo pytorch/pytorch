@@ -34,17 +34,6 @@ def _dynamo_disable(func: Callable[_P, _R]) -> Callable[_P, _R]:
     return wrapper
 
 
-def _disable_functorch_if_active(func: Callable[_P, _R]) -> Callable[_P, _R]:
-    @functools.wraps(func)
-    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        if torch._C._are_functorch_transforms_active():
-            with torch._C._DisableFuncTorch():
-                return func(*args, **kwargs)
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
 @dataclass
 class DataParallelMeshInfo:
     mesh: DeviceMesh
