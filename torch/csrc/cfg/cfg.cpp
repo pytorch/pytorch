@@ -42,6 +42,8 @@ class Sink final : public c10::DispatchCaptureSink {
 
   // Captures nest; each records into its own trace.
   std::vector<std::unique_ptr<Trace>> active;
+  // The sink that was installed when the outermost capture began.
+  c10::DispatchCaptureSink* previous = nullptr;
 };
 
 thread_local Sink tls_sink;
@@ -49,7 +51,7 @@ thread_local Sink tls_sink;
 void captureBegin() {
   tls_sink.active.push_back(std::make_unique<Trace>());
   if (tls_sink.active.size() == 1) {
-    c10::setDispatchCaptureSink(&tls_sink);
+    tls_sink.previous = c10::setDispatchCaptureSink(&tls_sink);
   }
 }
 
@@ -57,7 +59,7 @@ std::unique_ptr<Trace> captureEnd() {
   auto trace = std::move(tls_sink.active.back());
   tls_sink.active.pop_back();
   if (tls_sink.active.empty()) {
-    c10::setDispatchCaptureSink(nullptr);
+    c10::setDispatchCaptureSink(tls_sink.previous);
   }
   return trace;
 }
