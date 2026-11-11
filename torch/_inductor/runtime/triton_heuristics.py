@@ -662,6 +662,10 @@ class CachingAutotuner(KernelInterface):
 
     # Set for a pinned kernel: builds it unpinned, for the configs to fall back to.
     fallback: Callable[[], CachingAutotuner] | None = None
+    # The coordinate descent's winner config hash; a class-level default so instances
+    # built without __init__ still have it.
+    coordesc_config_hash: Hashable | None = None
+
     # The state set after __init__ that falling back keeps, rather than taking the
     # unpinned instance's: the held lock, and the launch a lazy precompile from run()
     # is part of.
@@ -2717,9 +2721,10 @@ class CachingAutotuner(KernelInterface):
                     self._combo_sequential_autotune(self.launchers[0], *args, **kwargs)
                 ]
 
-        launcher_config_hash = triton_config_to_hashable(self.launchers[0].config)
-        if launcher_config_hash != self.coordesc_config_hash and self.inductor_meta.get(
+        if self.inductor_meta.get(
             "coordinate_descent_tuning", False
+        ) and self.coordesc_config_hash != triton_config_to_hashable(
+            self.launchers[0].config
         ):
             self.launchers = [
                 self.coordinate_descent_tuning(self.launchers[0], *args, **kwargs)

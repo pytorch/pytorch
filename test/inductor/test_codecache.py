@@ -5628,6 +5628,7 @@ class TestAutotuneCache(TestCase):
             "fx_graph_remote_cache": False,
             "autotune_local_cache": True,
             "autotune_remote_cache": False,
+            "compile_worker_mode": "process",
             "compile_threads": 2,
         }
     )
