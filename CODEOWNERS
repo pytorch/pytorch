@@ -818,6 +818,7 @@
 # /test/cpython/
 # /test/distributions/
 # /test/nn/
+# /test/test_info_nce_loss.py
 # /test/test_modules.py
 # /test/test_nn.py
 # /test/test_numpy_interop.py
