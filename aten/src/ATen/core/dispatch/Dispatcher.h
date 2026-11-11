@@ -200,6 +200,14 @@ class TORCH_API Dispatcher final {
       bool isRedispatch,
       Args... args);
 
+  static void callBoxedWithCaptureSink(
+      const OperatorHandle& op,
+      DispatchCaptureSink& sink,
+      DispatchKeySet dispatchKeySet,
+      const KernelFunction& kernel,
+      bool isRedispatch,
+      Stack* stack);
+
   // Like call, but intended for use in a redispatch in kernels that have
   // explicitly performed the DispatchKey update calculatulation. This will take
   // the DispatchKeySet completely as is and dispatch to the kernel of the
@@ -947,6 +955,13 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack)
   }
 #endif
   const auto& kernel = entry.lookup(dispatchKeySet);
+  if (C10_UNLIKELY(impl::dispatch_capture_enabled())) {
+    if (auto* sink = impl::tls_dispatch_capture_sink()) {
+      callBoxedWithCaptureSink(
+          op, *sink, dispatchKeySet, kernel, /*isRedispatch=*/false, stack);
+      return;
+    }
+  }
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
       at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
@@ -1015,6 +1030,13 @@ inline void Dispatcher::redispatchBoxed(
   }
 #endif
   const auto& kernel = entry.lookup(dispatchKeySet);
+  if (C10_UNLIKELY(impl::dispatch_capture_enabled())) {
+    if (auto* sink = impl::tls_dispatch_capture_sink()) {
+      callBoxedWithCaptureSink(
+          op, *sink, dispatchKeySet, kernel, /*isRedispatch=*/true, stack);
+      return;
+    }
+  }
   kernel.callBoxed(op, dispatchKeySet, stack);
 }
 

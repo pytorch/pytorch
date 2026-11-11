@@ -1,5 +1,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
+#include <algorithm>
 #include <list>
 #include <utility>
 #include <c10/util/env.h>
@@ -62,6 +63,31 @@ DispatchCaptureSink* setDispatchCaptureSink(DispatchCaptureSink* sink) {
   }
   impl::tls_dispatch_capture_sink_ = sink;
   return prev;
+}
+
+void Dispatcher::callBoxedWithCaptureSink(
+    const OperatorHandle& op,
+    DispatchCaptureSink& sink,
+    DispatchKeySet dispatchKeySet,
+    const KernelFunction& kernel,
+    bool isRedispatch,
+    Stack* stack) {
+  // Operators registered without a schema only know their stack.
+  const auto clamp = [&](size_t n) { return std::min(n, stack->size()); };
+  const size_t num_inputs =
+      op.hasSchema() ? clamp(op.schema().arguments().size()) : stack->size();
+  sink.onKernelEnter(
+      op,
+      dispatchKeySet,
+      isRedispatch,
+      c10::ArrayRef<const c10::IValue>(
+          stack->data() + (stack->size() - num_inputs), num_inputs));
+  impl::DispatchCaptureExitGuard exitGuard(sink, op);
+  kernel.callBoxed(op, dispatchKeySet, stack);
+  const size_t num_outputs =
+      op.hasSchema() ? clamp(op.schema().returns().size()) : stack->size();
+  exitGuard.finish(c10::ArrayRef<const c10::IValue>(
+      stack->data() + (stack->size() - num_outputs), num_outputs));
 }
 
 namespace detail {

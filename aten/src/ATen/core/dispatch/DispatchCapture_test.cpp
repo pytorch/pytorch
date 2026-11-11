@@ -63,6 +63,10 @@ struct Installed {
   c10::DispatchCaptureSink* prev;
 };
 
+c10::OperatorHandle addTensor() {
+  return c10::Dispatcher::singleton().findSchemaOrThrow("aten::add", "Tensor");
+}
+
 TEST(DispatchCaptureTest, CallReportsEveryStepOfTheChain) {
   const auto x = at::ones({3});
   const auto y = at::ones({3});
@@ -89,6 +93,39 @@ TEST(DispatchCaptureTest, CallReportsEveryStepOfTheChain) {
     EXPECT_EQ(e.num_outputs, 1u);
   }
   EXPECT_EQ(sink.depth, 0);
+}
+
+TEST(DispatchCaptureTest, BoxedCallIsReported) {
+  const auto x = at::ones({3});
+  torch::jit::Stack stack{x, x, 1};
+  RecordingSink sink;
+  {
+    Installed installed(&sink);
+    addTensor().callBoxed(&stack);
+  }
+  ASSERT_FALSE(sink.enters.empty());
+  EXPECT_EQ(sink.enters.front().op, "aten::add.Tensor");
+  EXPECT_FALSE(sink.enters.front().is_redispatch);
+  EXPECT_EQ(sink.enters.front().num_inputs, 3u);
+  EXPECT_EQ(sink.exits.back().num_outputs, 1u);
+  ASSERT_EQ(stack.size(), 1u);
+  EXPECT_TRUE(stack[0].toTensor().equal(at::full({3}, 2.0)));
+}
+
+TEST(DispatchCaptureTest, BoxedRedispatchIsReported) {
+  const auto x = at::ones({3});
+  torch::jit::Stack stack{x, x, 1};
+  RecordingSink sink;
+  {
+    Installed installed(&sink);
+    addTensor().redispatchBoxed(
+        c10::DispatchKeySet(c10::DispatchKey::CPU), &stack);
+  }
+  ASSERT_EQ(sink.enters.size(), 1u);
+  EXPECT_TRUE(sink.enters[0].is_redispatch);
+  EXPECT_EQ(sink.enters[0].key, c10::DispatchKey::CPU);
+  ASSERT_EQ(sink.exits.size(), 1u);
+  EXPECT_EQ(sink.exits[0].num_outputs, 1u);
 }
 
 TEST(DispatchCaptureTest, ThrowingKernelReportsItsExit) {
