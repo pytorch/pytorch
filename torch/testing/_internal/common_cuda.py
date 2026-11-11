@@ -455,6 +455,9 @@ PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_sup
 PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
 PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_grouped_gemm())
 PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_grouped_gemm((13, 4)))
+PLATFORM_SUPPORTS_CUBLASLT_FP32_BLOCK_GROUPED_GEMM: bool = LazyVal(
+    lambda: bool(PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM and IS_SM90)
+)
 
 if TEST_NUMBA:
     try:
@@ -637,6 +640,7 @@ def with_tf32_off(f):
         with tf32_off():
             return f(*args, **kwargs)
 
+    wrapped._preserves_device_arguments = wrapped
     return wrapped
 
 def _get_magma_version():
