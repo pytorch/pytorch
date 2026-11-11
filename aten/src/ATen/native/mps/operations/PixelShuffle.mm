@@ -64,8 +64,8 @@ static Tensor pixel_shuffle_helper(const Tensor& self, int64_t factor, bool upsc
   // Grid (wd, hd, n * C + c), or (c, wd, n * Hd + hd) when channel_major. Keeping hd and wd on separate axes lets a
   // depth plane with 2^32 or more pixels fit the 32-bit per-axis thread ids.
   const int64_t z_dim = channel_major ? hd : channels;
-  const std::array<uint32_t, 2> factor_zdim = {c10::safe_conv<uint32_t>(factor, "factor"),
-                                               c10::safe_conv<uint32_t>(z_dim, "z_dim")};
+  const std::array<uint32_t, 2> factor_zdim = {c10::safe_conv<uint32_t>(factor, "uint32_t"),
+                                               c10::safe_conv<uint32_t>(z_dim, "uint32_t")};
   const std::string kernel = "pixel_shuffle_" + std::to_string(input.element_size());
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {

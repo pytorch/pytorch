@@ -520,15 +520,10 @@ class TestBenchmarkUtils(TestCase):
                 globals={"model": benchmark_utils.CopyIfCallgrind(MyModule())},
             ).collect_callgrind(collect_baseline=False)
 
-        @torch.jit.script
-        def add_one(x):
-            return x + 1
-
         timer = benchmark_utils.Timer(
-            "y = add_one(x) + k",
+            "y = model(x) + k",
             setup="x = torch.ones((1,))",
             globals={
-                "add_one": benchmark_utils.CopyIfCallgrind(add_one),
                 "k": benchmark_utils.CopyIfCallgrind(5),
                 "model": benchmark_utils.CopyIfCallgrind(
                     MyModule(),
