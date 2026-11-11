@@ -17,9 +17,11 @@ guard generation, and in code reconstruction by providing methods to rebuild
 the code needed to recreate values.
 """
 
+import builtins
 import dataclasses
 import enum
 import functools
+import operator
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
@@ -665,6 +667,117 @@ class DynamicScalarSource(ChainedSource):
     @property
     def _name_template(self) -> str:
         return "int({0})"
+
+
+_BINARY_COMPUTED_LAZY_OPS: dict[Callable[..., Any], str] = {
+    operator.add: "+",
+    operator.sub: "-",
+    operator.mul: "*",
+    operator.truediv: "/",
+    operator.floordiv: "//",
+    operator.mod: "%",
+    operator.and_: "&",
+    operator.or_: "|",
+    operator.xor: "^",
+    operator.eq: "==",
+    operator.ne: "!=",
+    operator.lt: "<",
+    operator.le: "<=",
+    operator.gt: ">",
+    operator.ge: ">=",
+}
+
+_UNARY_COMPUTED_LAZY_OPS: dict[Callable[..., Any], str] = {
+    operator.neg: "-",
+    operator.pos: "+",
+    operator.not_: "not",
+    operator.invert: "~",
+}
+
+
+@dataclass_with_cached_hash(frozen=True)
+class ComputedLazyConstantSource(ChainedSource):
+    op: Callable[..., Any]
+    args: tuple[Source | object, ...]
+
+    def __post_init__(self) -> None:
+        if self.base is None:
+            raise AssertionError("ComputedLazyConstantSource base must not be None")
+        if not any(
+            arg == self.base
+            or (isinstance(arg, ComputedLazyConstantSource) and arg.base == self.base)
+            for arg in self.args
+        ):
+            raise AssertionError(
+                "ComputedLazyConstantSource must use its base source as an argument"
+            )
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        module = (
+            "builtins"
+            if getattr(builtins, self.op.__name__, None) is self.op
+            else "operator"
+        )
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(module, self.op.__name__)
+        )
+        for arg in self.args:
+            if isinstance(arg, Source):
+                codegen(arg)
+            else:
+                codegen.append_output(codegen.create_load_const(arg))
+        codegen.extend_output(create_call_function(len(self.args), False))
+
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        names: list[str] = []
+        for arg in self.args:
+            if isinstance(arg, Source):
+                names.append(arg.reconstruct_pycode(codegen))
+            else:
+                names.append(self._arg_name(arg))
+        if self.op in _BINARY_COMPUTED_LAZY_OPS and len(names) == 2:
+            return f"({names[0]} {_BINARY_COMPUTED_LAZY_OPS[self.op]} {names[1]})"
+        if self.op in _UNARY_COMPUTED_LAZY_OPS and len(names) == 1:
+            return f"{_UNARY_COMPUTED_LAZY_OPS[self.op]}({names[0]})"
+        if self.op in (abs, len, str, bool, min, max):
+            return f"{self.op.__name__}({', '.join(names)})"
+        raise AssertionError(f"unsupported computed lazy source op: {self.op}")
+
+    def eval_with_base(self, value: Any) -> Any:
+        values = []
+        for arg in self.args:
+            if arg == self.base:
+                values.append(value)
+            elif isinstance(arg, ComputedLazyConstantSource):
+                values.append(arg.eval_with_base(value))
+            elif isinstance(arg, Source):
+                raise AssertionError(
+                    "ComputedLazyConstantSource contains an unsupported nested source"
+                )
+            else:
+                values.append(arg)
+        return self.op(*values)
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        names = [
+            "{0}" if arg == self.base else self._arg_name(arg) for arg in self.args
+        ]
+        if self.op in _BINARY_COMPUTED_LAZY_OPS and len(names) == 2:
+            return f"({names[0]} {_BINARY_COMPUTED_LAZY_OPS[self.op]} {names[1]})"
+        if self.op in _UNARY_COMPUTED_LAZY_OPS and len(names) == 1:
+            return f"{_UNARY_COMPUTED_LAZY_OPS[self.op]}({names[0]})"
+        if self.op in (abs, len, str, bool, min, max):
+            return f"{self.op.__name__}({', '.join(names)})"
+        raise AssertionError(f"unsupported computed lazy source op: {self.op}")
+
+    @staticmethod
+    def _arg_name(arg: Source | object) -> str:
+        if isinstance(arg, Source):
+            return arg.name
+        if isinstance(arg, float) and arg != arg:
+            return "float('nan')"
+        return _esc_str(arg, apply_repr=True)
 
 
 @dataclass_with_cached_hash(frozen=True)
