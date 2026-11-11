@@ -3235,8 +3235,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(out, y, atol=0., rtol=0.)
 
     @onlyCUDA
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.half, torch.bfloat16, torch.float, torch.double, torch.complex64)
+    @dtypes(*all_types_and(torch.half, torch.bfloat16, torch.complex64))
     def test_cumsum_cumprod_outer_dim(self, device, dtype):
         # On ROCm, scans along a non-last dim of length >= 16 run a tiled kernel that also splits
         # long columns into chunks. The inputs keep every result exact in `dtype` for any combine
@@ -3279,7 +3278,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(x_off, expected, atol=0, rtol=0)
 
     @onlyCUDA
-    @dtypes(torch.float, torch.double, torch.complex64)
+    @dtypes(*floating_types_and(torch.complex64))
     def test_logcumsumexp_outer_dim(self, device, dtype):
         cases = [((16, 5), 0), ((1024, 4), 0), ((257, 33), 0), ((4, 300, 33), 1), ((65536, 4), 0)]
         ref_dtype = torch.complex128 if dtype.is_complex else torch.double
@@ -3293,7 +3292,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(torch.logcumsumexp(x, dim), expected, **tol)
 
     @onlyCUDA
-    @dtypes(torch.float, torch.double)
+    @dtypes(*floating_types())
     def test_cumulative_ops_special_values(self, device, dtype):
         # -inf, inf and nan on lines long enough to cross the tile and chunk boundaries of the ROCm
         # scan kernels, along an outer dim and along the last dim.
@@ -3347,6 +3346,8 @@ class TestTorchDeviceType(TestCase):
                 expected = ((torch.arange(start, start + 1024, device=device) + 1) % 256).to(torch.uint8)
                 expected = expected.view(-1, *([1] * (got.dim() - 1))).expand_as(got)
                 self.assertEqual(got, expected, atol=0, rtol=0)
+            # got is a view of res; both must go before the next shape allocates.
+            del res, got, expected
 
     @onlyCUDA
     @dtypes(torch.uint8, torch.int16, torch.half)
