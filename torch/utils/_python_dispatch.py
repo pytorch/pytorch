@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import threading
 import warnings
 from collections import deque
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from torch._custom_class_base import CustomClassBase
+    from torch._subclasses.fake_tensor import _FakeModeEnterRecord, CppFakeTensorMode
 
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
@@ -38,6 +40,15 @@ _is_in_torch_dispatch_mode = False
 _is_in_non_infra_torch_dispatch_mode = False
 # If inside any mode that has ignore_compile_internals() = False
 _is_in_any_mode_without_ignore_compile_internals = False
+
+
+class _CppFakeModeTLS(threading.local):
+    def __init__(self) -> None:
+        # Every entry, including reentry of an active or inherited mode.
+        self.stack: list[tuple[CppFakeTensorMode, _FakeModeEnterRecord]] = []
+
+
+_cpp_fake_mode_tls = _CppFakeModeTLS()
 
 
 def is_in_torch_dispatch_mode(include_infra_modes: bool = True) -> bool:
