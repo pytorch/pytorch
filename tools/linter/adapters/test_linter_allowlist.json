@@ -347,7 +347,6 @@
   "test/export/test_converter.py",
   "test/export/test_db.py",
   "test/export/test_draft_export.py",
-  "test/export/test_experimental.py",
   "test/export/test_export.py",
   "test/export/test_export_logging.py",
   "test/export/test_export_opinfo.py",
