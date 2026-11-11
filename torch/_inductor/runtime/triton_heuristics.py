@@ -79,6 +79,7 @@ from .runtime_utils import (
     cache_dir,
     ceildiv,
     conditional_product,
+    config_ctas_per_cga,
     create_bandwidth_info_str,
     dynamo_timed,
     extra_options_to_hashable,
@@ -798,7 +799,9 @@ class CachingAutotuner(KernelInterface):
 
         # Cached launcher for fast path — bypasses all preamble after first
         # successful steady-state launch.  Set to None until populated.
+        # _cached_profiler_kwargs is read only while _cached_launcher is set.
         self._cached_launcher: LauncherType | None = None
+        self._cached_profiler_kwargs: dict[str, Any] = {}
         # Pre-compute static eligibility for launcher caching.  These flags
         # are set once in __init__ and never change, so we avoid re-checking
         # them on every kernel launch.
@@ -2670,8 +2673,8 @@ class CachingAutotuner(KernelInterface):
         # After the first successful launch in steady state, cache the launcher
         # and skip all preamble on subsequent calls (~2µs savings).
         # Conditions here deliberately differ from the cache-population block
-        # below: we re-check dynamic conditions (profiler, debug mode) every
-        # call so enabling them at runtime falls back to the slow path.
+        # below: we re-check debug mode every call so enabling it at runtime
+        # falls back to the slow path; an active profiler only adds a per-launch record.
         # Static conditions (interpret, dump flags, launcher count) were
         # already validated when the cache was populated.
         # `not kwargs` is checked here but not at population time because
@@ -2682,10 +2685,16 @@ class CachingAutotuner(KernelInterface):
             fast is not None
             and not benchmark_run
             and not kwargs
-            and not autograd_profiler._is_profiler_enabled
             and not get_active_debug_mode()
         ):
-            return fast(*args, stream=stream)
+            if not autograd_profiler._is_profiler_enabled:
+                return fast(*args, stream=stream)
+            with torch._C._profiler._RecordFunctionFast(
+                self.inductor_meta.get("kernel_name", "triton kernel"),
+                args,
+                {**self._cached_profiler_kwargs, "stream": stream},
+            ):
+                return fast(*args, stream=stream)
 
         debug_mode = get_active_debug_mode()
         if debug_mode:
@@ -2788,13 +2797,13 @@ class CachingAutotuner(KernelInterface):
             and self._cache_eligible
             and not benchmark_run
             and not debug_mode
-            and not autograd_profiler._is_profiler_enabled
             and len(self.launchers) == 1
             # The fast path skips save_gpu_kernel. A later AOTI compile that reuses
             # this kernel must save its params again, because CudaKernelParamCache
             # is keyed by kernel name and shared by every compile in the process.
             and not launcher.store_cubin
         ):
+            self._cached_profiler_kwargs = self.get_profiler_kwargs(None, launcher)
             self._cached_launcher = self._build_fast_launcher(launcher) or launcher
         return result
 
@@ -3854,6 +3863,12 @@ def hash_configs(configs: list[Config]):
         hasher.update(
             f"{sorted(cfg.kwargs.items())} {cfg.num_warps} {cfg.num_stages}\n".encode()
         )
+        # Only when set, like extra_options below; triton_config_to_hashable also
+        # tells configs apart by these.
+        if (maxnreg := getattr(cfg, "maxnreg", None)) is not None:
+            hasher.update(f"maxnreg={maxnreg}\n".encode())
+        if (ctas_per_cga := config_ctas_per_cga(cfg)) is not None:
+            hasher.update(f"ctas_per_cga={ctas_per_cga}\n".encode())
         if extra_options := getattr(cfg, "extra_options", None):
             # Preserve existing hashes when no backend-specific options exist.
             hasher.update(
@@ -5524,7 +5539,7 @@ def template(
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,
         filename=filename,
-        # Its config carries compile options, such as ctas_per_cga, a table row does not.
+        # A template keeps the config it is built with, even if a hand edit names it.
         pinnable=False,
     )
 
@@ -5536,6 +5551,7 @@ def _pop_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
         "num_warps",
         "num_stages",
         "num_ctas",
+        "ctas_per_cga",
         "maxnreg",
         "num_consumer_groups",
         "num_buffers_warp_spec",
@@ -5543,6 +5559,9 @@ def _pop_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
         val = config.pop(key, None)
         if val is not None:
             popped[key] = val
+    # A dict read from JSON (e.g. autotune_lookup_table) holds the cluster shape as a list.
+    if "ctas_per_cga" in popped:
+        popped["ctas_per_cga"] = tuple(popped["ctas_per_cga"])
     return popped
 
 
@@ -5556,6 +5575,10 @@ def config_to_dict(config: Config) -> dict[str, Any]:
     # survive the round trip or a user config's register cap silently vanishes.
     if getattr(config, "maxnreg", None) is not None:
         config_dict["maxnreg"] = config.maxnreg
+    # Likewise ctas_per_cga, as the tuple config_from_dict restores: precomputed
+    # grids are looked up by comparing these dicts.
+    if (ctas_per_cga := config_ctas_per_cga(config)) is not None:
+        config_dict["ctas_per_cga"] = ctas_per_cga
     if HAS_WARP_SPEC:
         config_dict.update(
             {
