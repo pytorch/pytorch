@@ -26,6 +26,7 @@ REPO_ROOT = SCRIPT_DIR.parent.parent
 
 
 CUDA_ARCHES = ["13.2", "13.4", "13.5"]
+CUDA_WINDOWS_ARCHES = ["13.2", "13.4"]
 CUDA_STABLE = "13.2"
 # Only consumed by generate_docker_release_matrix.py, whose Dockerfile installs
 # an already-published torch nightly. A CUDA version belongs here only once its
@@ -119,12 +120,6 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
             "nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | "
             "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
         ),
-        "windows": (
-            "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.5.0; platform_system == 'Windows' and platform_machine == 'AMD64' | "
-            "cuda-pathfinder>=1.8.5; platform_system == 'Windows' and platform_machine == 'AMD64' | "
-            "nvidia-cudnn-cu13==9.27.0.42; platform_system == 'Windows' and platform_machine == 'AMD64' | "
-            "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Windows' and platform_machine == 'AMD64'"
-        ),
     },
     # dependency on latest patch version for (major, minor)
     "10.0": ("rocm[libraries,device-all]==10.0.*"),
@@ -180,7 +175,11 @@ CUDA_NIGHTLY_SOURCE_MATRIX = {
     f"cuda-{major}.{minor}": dict(
         name=f"cuda-{major}.{minor}",
         index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu{major}{minor}",
-        supported_platforms=["Linux", "Windows"],
+        supported_platforms=(
+            ["Linux", "Windows"]
+            if f"{major}.{minor}" in CUDA_WINDOWS_ARCHES
+            else ["Linux"]
+        ),
         accelerator="cuda",
     )
     for major, minor in (map(int, version.split(".")) for version in CUDA_ARCHES)
@@ -413,7 +412,7 @@ def generate_libtorch_matrix(
     if arches is None:
         arches = ["cpu"]
         if os == "windows":
-            arches += CUDA_ARCHES
+            arches += CUDA_WINDOWS_ARCHES
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -466,7 +465,7 @@ def generate_wheels_matrix(
         if os == "linux":
             arches += CUDA_ARCHES + ROCM_ARCHES + ROCM_PREVIEW_ARCHES + XPU_ARCHES
         elif os == "windows":
-            arches += CUDA_ARCHES + XPU_ARCHES
+            arches += CUDA_WINDOWS_ARCHES + XPU_ARCHES
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
