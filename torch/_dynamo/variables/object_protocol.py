@@ -32,6 +32,7 @@ from torch._C._dynamo import (
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     handle_observed_exception,
+    ObservedAttributeError,
     ObservedTypeError,
     raise_observed_exception,
     raise_type_error,
@@ -2572,6 +2573,12 @@ def generic_getattr(
 
     # Handle default for getattr(obj, name, default).
     if default is not _NO_DEFAULT:
+        if name == "__class__" and isinstance(obj, variables.UserDefinedObjectVariable):
+            try:
+                return generic_getattr(tx, obj, name)
+            except ObservedAttributeError:
+                handle_observed_exception(tx)
+                return default  # type: ignore[return-value]
         hasattr_var = obj.call_obj_hasattr(tx, name)
         if not hasattr_var.is_constant_match(True, False):
             raise AssertionError(
@@ -2583,7 +2590,9 @@ def generic_getattr(
     # tp_getset/tp_members are data descriptors: resolve ahead of the VT's
     # tp_getattro so a tp_getattro_impl override need not repeat the consult.
     getset = obj.lookup_tp_getset_member(name)
-    if getset is not None:
+    if getset is not None and not (
+        name == "__class__" and isinstance(obj, variables.UserDefinedObjectVariable)
+    ):
         result = getset.getter(obj, tx)
         if result is not None:
             return result

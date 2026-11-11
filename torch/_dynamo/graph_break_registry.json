@@ -5206,6 +5206,16 @@
       ]
     }
   ],
+  "GB8378": [
+    {
+      "Gb_type": "super(): unresolved __class__",
+      "Context": "objvar: {objvar}, classvar: {classvar}",
+      "Explanation": "Dynamo cannot determine the object's __class__ to validate super() initialization.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0283": [
     {
       "Gb_type": "Failed to make weakref to graph-created external object",
@@ -5962,6 +5972,26 @@
       "Gb_type": "ContextVar.get() with non-constant default",
       "Context": "ContextVar('{self.cv_obj.name}').get(...)",
       "Explanation": "ContextVar.get() default argument must be a compile-time constant inside torch.compile.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8933": [
+    {
+      "Gb_type": "super(): proxy __class__ initialization",
+      "Context": "objvar: {objvar}",
+      "Explanation": "Dynamo cannot reconstruct super() initialized through a proxy's __class__ without repeating attribute lookup.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9976": [
+    {
+      "Gb_type": "Attribute access on an existing proxy super object",
+      "Context": "attribute: {name}",
+      "Explanation": "Dynamo cannot model the saved receiver type of a proxy super object created outside the current graph.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
