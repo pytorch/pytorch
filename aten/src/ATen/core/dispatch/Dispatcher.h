@@ -4,6 +4,7 @@
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/boxing/impl/boxing.h>
 #include <ATen/core/dispatch/CppSignature.h>
+#include <ATen/core/dispatch/DispatchCapture.h>
 #include <ATen/core/dispatch/OperatorEntry.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <ATen/record_function.h>
@@ -186,6 +187,17 @@ class TORCH_API Dispatcher final {
       at::StepCallbacks& stepCallbacks,
       DispatchKeySet dispatchKeySet,
       const KernelFunction& kernel,
+      Args... args);
+
+  // Slow path of call/redispatch taken while a DispatchCaptureSink is
+  // installed on this thread: boxes the arguments and results for the sink.
+  template <class Return, class... Args>
+  static Return callWithCaptureSink(
+      const TypedOperatorHandle<Return(Args...)>& op,
+      DispatchCaptureSink& sink,
+      DispatchKeySet dispatchKeySet,
+      const KernelFunction& kernel,
+      bool isRedispatch,
       Args... args);
 
   // Like call, but intended for use in a redispatch in kernels that have
@@ -782,6 +794,45 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(
 
 // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
 template <class Return, class... Args>
+C10_NOINLINE Return Dispatcher::callWithCaptureSink(
+    const TypedOperatorHandle<Return(Args...)>& op,
+    DispatchCaptureSink& sink,
+    DispatchKeySet dispatchKeySet,
+    const KernelFunction& kernel,
+    bool isRedispatch,
+    Args... args) {
+  constexpr auto num_boxed_args = impl::boxed_size<Args...>();
+  if constexpr (num_boxed_args != 0) {
+    // NOLINTNEXTLINE(*array*)
+    alignas(IValue) std::byte boxedArgs[num_boxed_args * sizeof(IValue)];
+    IValue* boxedArgsPtr = reinterpret_cast<IValue*>(boxedArgs);
+    impl::boxArgsToStack(boxedArgsPtr, args...);
+    sink.onKernelEnter(
+        op,
+        dispatchKeySet,
+        isRedispatch,
+        c10::ArrayRef<const c10::IValue>(
+            reinterpret_cast<IValue*>(boxedArgs), num_boxed_args));
+    boxedArgsPtr = reinterpret_cast<IValue*>(boxedArgs);
+    for (size_t ii = 0; ii < num_boxed_args; ++ii) {
+      (boxedArgsPtr + ii)->~IValue();
+    }
+  } else {
+    sink.onKernelEnter(op, dispatchKeySet, isRedispatch, {});
+  }
+  impl::DispatchCaptureExitGuard exitGuard(sink, op);
+  detail::CaptureKernelCall<Return> captureKernelCall(
+      kernel, op, dispatchKeySet, std::forward<Args>(args)...);
+  {
+    Stack outputs = captureKernelCall.getOutputs();
+    exitGuard.finish(
+        c10::ArrayRef<const c10::IValue>(outputs.data(), outputs.size()));
+  }
+  return std::move(captureKernelCall).release();
+}
+
+// See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
+template <class Return, class... Args>
 C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(
     const TypedOperatorHandle<Return(Args...)>& op,
     Args... args) const {
@@ -796,6 +847,17 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(
   }
 #endif
   const KernelFunction& kernel = op.operatorDef_->op.lookup(dispatchKeySet);
+  if (C10_UNLIKELY(impl::dispatch_capture_enabled())) {
+    if (auto* sink = impl::tls_dispatch_capture_sink()) {
+      return callWithCaptureSink<Return, Args...>(
+          op,
+          *sink,
+          dispatchKeySet,
+          kernel,
+          /*isRedispatch=*/false,
+          std::forward<Args>(args)...);
+    }
+  }
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
       at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
@@ -855,6 +917,17 @@ inline Return Dispatcher::redispatch(
 #endif
   const KernelFunction& kernel =
       op.operatorDef_->op.lookup(currentDispatchKeySet);
+  if (C10_UNLIKELY(impl::dispatch_capture_enabled())) {
+    if (auto* sink = impl::tls_dispatch_capture_sink()) {
+      return callWithCaptureSink<Return, Args...>(
+          op,
+          *sink,
+          currentDispatchKeySet,
+          kernel,
+          /*isRedispatch=*/true,
+          std::forward<Args>(args)...);
+    }
+  }
   return kernel.template call<Return, Args...>(
       op, currentDispatchKeySet, std::forward<Args>(args)...);
 }
