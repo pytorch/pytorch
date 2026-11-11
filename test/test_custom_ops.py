@@ -6269,38 +6269,67 @@ Please use `add.register_fake` to add an fake impl.""",
 
 @instantiate_parametrized_tests
 class TestLibrarySourceLocation(TestCase):
-    @parametrize("module_name", ["_test_fake_module", "torchvision._test_fake", None])
-    def test_register_fake_caller_module(self, module_name):
-        with torch.library._scoped_library("_test_fake_caller", "FRAGMENT") as lib:
-            lib.define("foo(Tensor x) -> Tensor")
-            module = ModuleType(module_name or "_test_fake_anonymous")
-            module.__file__ = f"/{module.__name__}.py"
-            scope = module.__dict__
-            scope.update(torch=torch, lib=lib)
-            if module_name is None:
-                del scope["__name__"]
-            with (
-                patch.dict(sys.modules, {module_name: module} if module_name else {}),
-                patch.object(
-                    torch.library,
-                    "_check_pystubs_once",
-                    wraps=torch.library._check_pystubs_once,
-                ) as check_pystubs,
-            ):
-                exec(
-                    compile(
-                        'torch.library.register_fake("_test_fake_caller::foo", '
-                        "lambda x: torch.empty_like(x), lib=lib)",
-                        module.__file__,
-                        "exec",
-                    ),
-                    scope,
-                )
-            if module_name == "_test_fake_module":
-                check_pystubs.assert_called_once()
-                self.assertEqual(check_pystubs.call_args.args[2], module_name)
-            else:
-                check_pystubs.assert_not_called()
+    @parametrize(
+        "caller",
+        [
+            "interactive",
+            "exec",
+            "unregistered",
+            "matching",
+            "mismatched",
+            "mismatched_virtual",
+            "mismatched_pyc",
+            "torchvision",
+        ],
+    )
+    def test_register_fake_caller_module(self, caller):
+        # quantized::add is defined in C++ with m.set_python_module.
+        op = torch.ops.quantized.add.default
+        expected_module, _ = torch._C._dispatch_pystub("quantized::add", "")
+        name = {
+            "interactive": "__main__",
+            "matching": expected_module,
+            "torchvision": "torchvision._test_fake",
+        }.get(caller, "_test_fake_module")
+        module = ModuleType(name)
+        filename = f"/{name}.py"
+        if caller != "interactive":
+            module.__file__ = filename
+        if caller in ("interactive", "exec"):
+            filename = "<string>"
+        if caller == "mismatched_virtual":
+            module.__file__ = filename = "<test_fake_caller>"
+        elif caller == "mismatched_pyc":
+            module.__file__ = filename + "c"
+        registered = {} if caller == "unregistered" else {name: module}
+        calls = []
+
+        def fake(a, b, scale, zero_point):
+            calls.append(True)
+            return a.new_empty((a.shape[0], b.shape[1]))
+
+        with (
+            torch.library._scoped_library("quantized", "FRAGMENT") as lib,
+            patch.dict(sys.modules, registered),
+        ):
+            module.__dict__.update(torch=torch, lib=lib, fake=fake)
+            exec(
+                compile(
+                    'torch.library.register_fake("quantized::add", fake, lib=lib)',
+                    filename,
+                    "exec",
+                ),
+                module.__dict__,
+            )
+            with torch._subclasses.fake_tensor.FakeTensorMode():
+                a, b = torch.empty(2, 3), torch.empty(3, 5)
+                if caller.startswith("mismatched"):
+                    with self.assertRaisesRegex(RuntimeError, "actually found in"):
+                        op(a, b, 1.0, 0)
+                    self.assertEqual(calls, [])
+                else:
+                    self.assertEqual(op(a, b, 1.0, 0).shape, (2, 5))
+                    self.assertEqual(calls, [True])
 
     def test_get_source_stacklevel(self):
         def caller():
