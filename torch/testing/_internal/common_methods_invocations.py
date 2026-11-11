@@ -17280,10 +17280,11 @@ op_db: list[OpInfo] = [
         # it and use e4m3_type / e5m2_type instead.
         dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
         dtypesIfMPS=custom_types(torch.float8_e4m3fn),
+        dtypesIfXPU=custom_types(torch.float8_e4m3fn),
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[onlyOn(["cuda", "mps"]), skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support')],
+        decorators=[onlyOn(["cuda", "mps", "xpu"]), skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support')],
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
@@ -17312,10 +17313,11 @@ op_db: list[OpInfo] = [
         dtypesIfMPS=empty_types(),
         # Deliberately e4m3fn even on gfx942 (native fnuz); see _scaled_mm_v2.
         dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
+        dtypesIfXPU=custom_types(torch.float8_e4m3fn),
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[skipXPU, skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support')],
+        decorators=[skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support')],
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
