@@ -4814,13 +4814,13 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": x, "x_": x}, True)
         self._test_check_fn(ref, loaded, {"x": x, "x_": torch.randn(3, 2)}, False)
 
-    def test_identity_compare(self):
+    def test_not_aliasing(self):
         def fn(x, a, b):
             return x + 1 if a is b else x - 1
 
         x = torch.randn(3)
         a, b = object(), object()
-        ref, loaded = self._test_serialization("IDENTITY_COMPARE", fn, x, a, b)
+        ref, loaded = self._test_serialization("NOT_ALIASING", fn, x, a, b)
 
         self._test_check_fn(ref, loaded, {"x": x, "a": a, "b": object()}, True)
         self._test_check_fn(ref, loaded, {"x": x, "a": a, "b": a}, False)

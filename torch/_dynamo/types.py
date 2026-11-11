@@ -46,7 +46,7 @@ class GuardFilterEntry:
     guard_type: str
     derived_guard_types: tuple[str, ...]
     # True when the guard's originating source, or for a two-source guard
-    # (DUPLICATE_INPUT, IDENTITY_COMPARE) either source, is rooted in a
+    # (DUPLICATE_INPUT, NOT_ALIASING) either source, is rooted in a
     # GlobalSource.
     is_global: bool
     orig_guard: Guard

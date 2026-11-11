@@ -3321,9 +3321,13 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 _IS_TEST_STATE.v = 1.0
                 self.assertEqual(opt_fn(x, _IS_TEST_STATE), fn(x, _IS_TEST_STATE))
             self.assertEqual(cnt.frame_count, 1)
+            # No longer the same object, and the global's value differs.
             other = _IsTestMissing()
-            other.v = 5.0
+            other.v = 1.0
+            _IS_TEST_STATE = _IsTestMissing()
+            _IS_TEST_STATE.v = 5.0
             self.assertEqual(opt_fn(x, other), fn(x, other))
+            self.assertEqual(cnt.frame_count, 2)
         finally:
             _IS_TEST_STATE = None
 
@@ -3338,7 +3342,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.ones(2)
         for f in [torch.add, torch.sub, torch.add]:
             self.assertEqual(opt_fn(x, f), fn(x, f))
-        relation_guards = {"IDENTITY_COMPARE", "DUPLICATE_INPUT"}
+        relation_guards = {"NOT_ALIASING", "DUPLICATE_INPUT"}
         self.assertFalse([g for g in guards if g.create_fn_name() in relation_guards])
 
     def test_type_is_global_class_adds_no_lambda_guard(self):
@@ -3351,11 +3355,14 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnt, guard_export_fn=guards.extend)(fn)
         x = torch.ones(2)
-        for o in [_IsTestMissing(), _IsTestMissing(), object(), _IsTestMissing()]:
-            self.assertEqual(opt_fn(x, o), fn(x, o))
+        with torch._dynamo.config.patch(use_lamba_guard_for_object_aliasing=False):
+            for o in [_IsTestMissing(), _IsTestMissing(), object(), _IsTestMissing()]:
+                self.assertEqual(opt_fn(x, o), fn(x, o))
         self.assertEqual(cnt.frame_count, 2)
-        relation = [g for g in guards if g.create_fn_name() == "IDENTITY_COMPARE"]
-        self.assertFalse(relation)
+        self.assertFalse([g for g in guards if g.create_fn_name() == "NOT_ALIASING"])
+        dupes = [g for g in guards if g.create_fn_name() == "DUPLICATE_INPUT"]
+        self.assertEqual(len(dupes), 1)
+        self.assertEqual(dupes[0].code_list, ["type(L['o']) is G['_IsTestMissing']"])
 
     def test_containment_adds_no_relation_guard(self):
         # `in`, dict lookups, list.index, list.count and dict == also compare by
@@ -3374,10 +3381,12 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.ones(2)
         args = (x, [Key(), Key()], {Key(): 0}, {0: Key()}, {0: Key()}, Key())
         self.assertEqual(opt_fn(*args), fn(*args))
-        relation_guards = {"IDENTITY_COMPARE", "DUPLICATE_INPUT"}
+        relation_guards = {"NOT_ALIASING", "DUPLICATE_INPUT"}
         self.assertFalse([g for g in guards if g.create_fn_name() in relation_guards])
 
-    def test_is_guards_reuse_cache_per_relation(self):
+    @parametrize("aliasing_lambda", [False, True])
+    def test_is_guards_reuse_cache_per_relation(self, aliasing_lambda):
+        # With the flag on, DUPLICATE_INPUT and NOT_ALIASING share one lambda.
         def fn(x, a, b, c):
             if c is None:
                 x = x * 2
@@ -3386,13 +3395,56 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.ones(2)
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
-        for c in [None, object(), None, object(), object()]:
-            o = object()
-            self.assertEqual(opt_fn(x, o, o, c), fn(x, o, o, c))
-            a, b = object(), object()
-            self.assertEqual(opt_fn(x, a, b, c), fn(x, a, b, c))
+        with torch._dynamo.config.patch(
+            use_lamba_guard_for_object_aliasing=aliasing_lambda
+        ):
+            for c in [None, object(), None, object(), object()]:
+                o = object()
+                self.assertEqual(opt_fn(x, o, o, c), fn(x, o, o, c))
+                a, b = object(), object()
+                self.assertEqual(opt_fn(x, a, b, c), fn(x, a, b, c))
         # (a is b) x (c is None): four entries, however many objects.
         self.assertEqual(cnt.frame_count, 4)
+
+    @parametrize("other", ["local", "global"])
+    def test_is_not_guards_identity_of_sourced_objects(self, other):
+        def fn(x, a, b):
+            c = b if other == "local" else _IS_TEST_SENTINEL
+            return x + 1 if a is not c else x - 1
+
+        x = torch.ones(2)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        o = object()
+        for a, b in [(o, o), (o, object()), (_IS_TEST_SENTINEL, o), (o, o)]:
+            self.assertEqual(opt_fn(x, a, b), fn(x, a, b))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_is_guard_against_global_is_filtered_as_global(self):
+        # The guard reads a global through source_b, so is_global must be set
+        # for skip_guard_on_globals_unsafe and the default AOT filter to drop it.
+        def fn(x, opt=_IS_TEST_SENTINEL):
+            return x + 1 if opt is _IS_TEST_SENTINEL else x - 1
+
+        entries = []
+
+        def guard_filter_fn(gs):
+            entries.extend(gs)
+            return [True] * len(gs)
+
+        opt_fn = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+            options={"guard_filter_fn": guard_filter_fn},
+        )
+        x = torch.ones(2)
+        opt_fn(x, object())
+        opt_fn(x)
+        relation_guards = {"NOT_ALIASING", "DUPLICATE_INPUT"}
+        relation = [e for e in entries if e.guard_type in relation_guards]
+        self.assertEqual({e.guard_type for e in relation}, relation_guards)
+        self.assertTrue(all(e.is_global for e in relation))
 
     @parametrize("kind", ["tuple", "partial", "slice"])
     def test_is_on_rebuilt_values_does_not_recompile(self, kind):

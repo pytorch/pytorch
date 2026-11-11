@@ -292,12 +292,12 @@ class Guard:
         return self._hash
 
     def sort_key(self) -> tuple[bool, int, int, str, int]:
-        # Put the two-source guards (DUPLICATE_INPUT, IDENTITY_COMPARE) at the
+        # Put the two-source guards (DUPLICATE_INPUT, NOT_ALIASING) at the
         # end, since guard.name only considers one source.
 
         relation_guards = (
             torch._dynamo.guards.GuardBuilder.DUPLICATE_INPUT,
-            torch._dynamo.guards.GuardBuilder.IDENTITY_COMPARE,
+            torch._dynamo.guards.GuardBuilder.NOT_ALIASING,
         )
         is_relation_guard = (
             isinstance(self.create_fn, functools.partial)

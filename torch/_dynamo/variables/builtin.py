@@ -55,7 +55,7 @@ from ..exc import (
     UserError,
     UserErrorType,
 )
-from ..guards import GuardBuilder, install_guard, make_dupe_guard
+from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     DictGetItemSource,
@@ -358,8 +358,10 @@ def _fold_disagrees_with_frame(
 ) -> bool:
     # Some VTs (tuples, partials, slices, ...) rebuild their backed value, so
     # the fold can disagree with the frame, and a guard on it would fail on the
-    # frame that created it. A source that cannot be resolved here is still
-    # guarded: a failing guard only recompiles, a missing one is a wrong result.
+    # frame that created it (CheckFunctionManager raises on that). Only the guard
+    # is skipped; the fold itself is unchanged. A source that cannot be resolved
+    # here is guarded unverified, which is only a problem if the fold also
+    # disagrees with the frame.
     resolve = tx.output.resolve_source_value
     try:
         frame_is_same = resolve(a) is resolve(b)
@@ -425,16 +427,15 @@ def _guard_identity_fold(
             b.source.make_guard(GuardBuilder.ID_MATCH),
         )
     elif is_same:
-        # make_dupe_guard leaves out a local against a global, but
-        # DUPLICATE_INPUT's C++ aliasing leaf relates those too.
-        dupe = make_dupe_guard(a.source, b.source) or functools.partial(
-            GuardBuilder.DUPLICATE_INPUT, source_b=b.source
-        )
-        install_guard(a.source.make_guard(dupe))
+        # Not make_dupe_guard: it leaves out a local against a global, which
+        # DUPLICATE_INPUT's C++ aliasing leaf relates too.
+        if a.source != b.source:
+            dupe = functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=b.source)
+            install_guard(a.source.make_guard(dupe))
     else:
         install_guard(
             a.source.make_guard(
-                functools.partial(GuardBuilder.IDENTITY_COMPARE, source_b=b.source)
+                functools.partial(GuardBuilder.NOT_ALIASING, source_b=b.source)
             )
         )
 

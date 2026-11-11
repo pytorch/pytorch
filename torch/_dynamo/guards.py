@@ -1603,7 +1603,7 @@ class GuardBuilder(GuardBuilderBase):
         self._cached_guard_managers: dict[str, GuardManager] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
         self.object_aliasing_guard_codes: list[tuple[str, str]] = []
-        self._cached_identity_compare_guards: set[frozenset[str]] = set()
+        self._cached_not_aliasing_guards: set[frozenset[str]] = set()
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
         )
@@ -3715,14 +3715,14 @@ class GuardBuilder(GuardBuilderBase):
     # that was False. A True fold gets DUPLICATE_INPUT. There is no C++ leaf for
     # `is not`, so this is always an epilogue lambda.
     @skip_guard_check_spec
-    def IDENTITY_COMPARE(self, guard: Guard, source_b: Source) -> None:
+    def NOT_ALIASING(self, guard: Guard, source_b: Source) -> None:
         if (refs := self._relation_guard_refs(guard, source_b)) is None:
             return
         ref_a, ref_b = refs
         key = frozenset(refs)
-        if key in self._cached_identity_compare_guards:
+        if key in self._cached_not_aliasing_guards:
             return
-        self._cached_identity_compare_guards.add(key)
+        self._cached_not_aliasing_guards.add(key)
         code_part = f"{ref_b} is not {ref_a}"
         self._set_guard_export_info(guard, [code_part])
         verbose_code_part = get_verbose_code_parts(code_part, guard)[0]
@@ -5810,7 +5810,7 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
         except:  # noqa: E722
             value = MISSING
             has_value = False
-    # Relation guards (DUPLICATE_INPUT, IDENTITY_COMPARE) also read source_b.
+    # Relation guards (DUPLICATE_INPUT, NOT_ALIASING) also read source_b.
     sources = [guard.originating_source]
     if isinstance(guard.create_fn, functools.partial):
         sources.append(guard.create_fn.keywords.get("source_b"))
@@ -6502,7 +6502,7 @@ class CheckFunctionManager:
         # overhead is outweighed by the gains from enabling recursive-dict guard
         # optimization.
         # DUPLICATE_INPUT lands here only under use_lamba_guard_for_object_aliasing;
-        # IDENTITY_COMPARE, from a constant-folded `is`, always does.
+        # NOT_ALIASING, from a constant-folded `is`, always does.
         if builder.object_aliasing_guard_codes:
             aliasing_code_parts, aliasing_verbose_code_parts = map(
                 list, zip(*builder.object_aliasing_guard_codes)

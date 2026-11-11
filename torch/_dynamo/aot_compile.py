@@ -669,7 +669,7 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
     # guard, an iterated global dict is exactly that shape.
     # Narrower than the serialized global_scope for the same reason: the
     # serializer also fills that from a ShapeEnvSource guard's shape_env_sources
-    # and from DUPLICATE_INPUT's and IDENTITY_COMPARE's source_b -- names whose
+    # and from DUPLICATE_INPUT's and NOT_ALIASING's source_b -- names whose
     # value no guard checks, and which both record before their optimizer-source
     # early return, so an optimizer-rooted pair records one with no guard
     # installed at all.
@@ -686,7 +686,7 @@ def _recorded_guard_globals(guards_state: "GuardsState") -> set[str]:
     """Every global name the kept guards read at check time."""
     # Wider than their originating_sources: the serialized global_scope is the
     # serializer's own record of the names the kept guards resolve, so it also
-    # carries a DUPLICATE_INPUT's or IDENTITY_COMPARE's source_b and a cpp-form
+    # carries a DUPLICATE_INPUT's or NOT_ALIASING's source_b and a cpp-form
     # SHAPE_ENV guard's shape_env_sources. A SHAPE_ENV guard installed as a
     # Python lambda reads its G['NAME'] operands from the same scope, and none
     # of them reaches global_scope -- shape_env_sources is filled from the cpp
