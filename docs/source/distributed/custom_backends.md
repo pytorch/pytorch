@@ -127,8 +127,16 @@ objects such as `AllreduceOptions`:
 `recv_anysource` and `end_coalescing` may return `None`. Subclass
 `dist.Work` and override `wait(timeout)` and `get_future()`, as with `MyWork`
 above. `is_completed()`, `synchronize()`, `source_rank()` (used by
-`recv(src=None)`), `result()` and `block_current_stream()` can also be
-overridden. Other `Work` methods can't be overridden from Python.
+`recv(src=None)`), `result()`, `block_current_stream()` and
+`get_future_result()` can also be overridden. Other `Work` methods can't be
+overridden from Python.
+
+FlightRecorder calls `get_future_result()` once per op as it is issued, so an
+override must be cheap and must not block. FlightRecorder records the op as
+completed when the returned future completes. A `torch.futures.Future()` can't
+report failure: any value, including one set with `set_exception()`, counts as
+success. Ops whose Work doesn't override it, or whose override raises, are
+retired at issue.
 
 **Capabilities.** Features are opted into with read-only properties, for
 example `supports_splitting`, `supports_coalescing` and `supports_shrinking`,
