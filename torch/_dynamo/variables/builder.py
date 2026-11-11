@@ -187,6 +187,7 @@ from ..utils import (
     get_static_address_type,
     get_type_dict_no_user_code,
     has_custom_metaclass_accessor,
+    InvalidOrderedDict,
     is_frozen_dataclass,
     is_function,
     is_function_or_wrapper,
@@ -259,8 +260,10 @@ from .functions import (
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
+    FunctionWrapperVariable,
     FunctoolsPartialVariable,
     LocalGeneratorFunctionVariable,
+    LruCacheWrapperVariable,
     PolyfilledFunctionVariable,
     PyTreeGetNodeTypeFunctionVariable,
     SkipFunctionVariable,
@@ -933,6 +936,23 @@ def _is_dim_dynamic_from_source_dynamism(
     return dim_dynamism is not None and dim < len(dim_dynamism) and dim_dynamism[dim]
 
 
+def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
+    try:
+        return list(enumerate_items_with_dict_position(value))
+    except InvalidOrderedDict:
+        unimplemented(
+            gb_type="OrderedDict storage differs from linked keys",
+            context="OrderedDict input snapshot",
+            explanation="Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
+            hints=[
+                "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
+                *graph_break_hints.FUNDAMENTAL,
+            ],
+            skip_frame=True,
+            apply_to_code=False,
+        )
+
+
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -1054,7 +1074,13 @@ class VariableBuilder:
             raise AssertionError(
                 f"Expected function or wrapper, got {type(wrapper_obj)}"
             )
-        return WrapperUserFunctionVariable(wrapper_obj, attr_to_trace, source=source)
+        if is_lru_cache_wrapped_function(wrapper_obj):
+            wrapper_cls = LruCacheWrapperVariable
+        elif isinstance(wrapper_obj, types.FunctionType):
+            wrapper_cls = FunctionWrapperVariable
+        else:
+            wrapper_cls = WrapperUserFunctionVariable
+        return wrapper_cls(wrapper_obj, attr_to_trace, source=source)
 
     @staticmethod
     def create_internal_torch_function_mode_stack_entry(
@@ -1511,8 +1537,7 @@ class VariableBuilder:
                 return key, res_value
 
             result = dict(
-                build_key_value(i, k, v)
-                for i, k, v in enumerate_items_with_dict_position(value)
+                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(value)
             )
 
             if istype(value, collections.defaultdict):
@@ -2139,27 +2164,24 @@ class VariableBuilder:
             "__script_if_tracing_wrapper", False
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return WrapperUserFunctionVariable(
-                value,
-                "__original_fn",
-                source=self.source,
-                mutation_type=AttributeMutationExisting(),
-            )
+            result = FunctionWrapperVariable(value, "__original_fn", source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return WrapperUserFunctionVariable(
-                value,
-                "__wrapped__",
-                source=self.source,
-                mutation_type=AttributeMutationExisting(),
-            )
+            result = LruCacheWrapperVariable(value, "__wrapped__", source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif value is sys.exc_info or value is sys.exception:
             return SysFunctionVariable(value, source=self.source)
         elif is_function_or_wrapper(value) and inspect.getattr_static(
             value, "_torchdynamo_inline", False
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return WrapperUserFunctionVariable(
+            wrapper_cls = (
+                FunctionWrapperVariable
+                if isinstance(value, types.FunctionType)
+                else WrapperUserFunctionVariable
+            )
+            return wrapper_cls(
                 value,
                 "_torchdynamo_inline",
                 source=self.source,
@@ -2541,8 +2563,7 @@ class VariableBuilder:
                 return key, res_value
 
             kv_items = dict(
-                build_key_value(i, k, v)
-                for i, k, v in enumerate_items_with_dict_position(value)
+                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(value)
             )
 
             if isinstance(value, collections.defaultdict):
