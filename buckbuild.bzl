@@ -906,9 +906,17 @@ def define_buck_targets(
         aten_default_args = dict(),
         pt_xplat_cxx_library = fb_xplat_cxx_library,
         c2_fbandroid_xplat_compiler_flags = [],
-        labels = []):
+        labels = [],
+        # Internal builds pass versions of these that also cover directories
+        # that are separate Buck packages there.
+        glob_impl = None,
+        subdir_glob_impl = None,
+        source_file = None):
     if get_fbsource_cell() == "fbcode":
         return
+    glob_impl = glob_impl or glob
+    subdir_glob_impl = subdir_glob_impl or subdir_glob
+    source_file = source_file or (lambda path: path)
 
     # @lint-ignore BUCKLINT
     fb_native.filegroup(
@@ -1023,7 +1031,7 @@ def define_buck_targets(
         ("", "aten/src/ATen/quantized/*.h"),
     ]
 
-    _torch_headers_all = subdir_glob(
+    _torch_headers_all = subdir_glob_impl(
         _torch_headers_common_globs + [
             ("", "torch/csrc/**/*.h"),
         ],
@@ -1041,7 +1049,7 @@ def define_buck_targets(
         }),
         raw_headers = select({
             "DEFAULT": [],
-            "ovr_config//os:windows": glob([
+            "ovr_config//os:windows": glob_impl([
                 "torch/csrc/**/*.h",
                 "torch/nativert/**/*.h",
                 "torch/headeronly/**/*.h",
@@ -2125,7 +2133,7 @@ def define_buck_targets(
             ":gen_aten[core/ATenOpList.cpp]",
             ":gen_aten[core/TensorMethods.cpp]",
             # Needed by ATen/native/EmbeddingBag.cpp
-            "caffe2/perfkernels/embedding_lookup_idx.cc",
+            source_file("caffe2/perfkernels/embedding_lookup_idx.cc"),
         ], [], [], ["PUBLIC"]),
         ("aten_native_cpu", aten_native_source_list, [
             ":aten_native_xnnpack",
@@ -2254,7 +2262,7 @@ def define_buck_targets(
             "torch/csrc/jit/serialization/import_read.cpp",
         ],
         header_namespace = "",
-        exported_headers = subdir_glob(
+        exported_headers = subdir_glob_impl(
             [
                 ("", "torch/csrc/jit/ir/*.h"),
                 ("", "caffe2/serialize/*.h"),
@@ -2435,7 +2443,7 @@ def define_buck_targets(
             "torch/csrc/jit/runtime/vararg_functions.cpp",
         ],
         header_namespace = "",
-        exported_headers = [
+        exported_headers = {h: source_file(h) for h in [
             "caffe2/serialize/versions.h",
             "torch/csrc/jit/backends/backend_exception.h",
             "torch/csrc/jit/mobile/register_ops_common_utils.h",
@@ -2446,7 +2454,7 @@ def define_buck_targets(
             "torch/csrc/jit/runtime/vararg_functions.h",
             "torch/csrc/jit/serialization/import_export_constants.h",
             "torch/csrc/jit/serialization/import_export_functions.h",
-        ],
+        ]},
         compiler_flags = get_pt_compiler_flags() + select({
             "DEFAULT": [],
             "ovr_config//os:xtensa-xos": [
@@ -2472,4 +2480,10 @@ def define_buck_targets(
             ":torch_mobile_headers",
             C10,
         ],
+        # Internally caffe2/serialize is a separate package, and a header from
+        # another package makes fb_xplat_cxx_library skip its header map default.
+        **({} if IS_OSS else {"header_mode": select({
+            "DEFAULT": "header_map_only",
+            "ovr_config//cuda:has_cuda": None,
+        })})
     )
