@@ -87,6 +87,7 @@ from torch._dynamo.package import (
     SerializedCode,
 )
 from torch._dynamo.source import (
+    ComputedLazyConstantSource,
     get_global_source_name,
     get_local_source_name,
     IndexedSource,
@@ -2421,6 +2422,15 @@ class GuardBuilder(GuardBuilderBase):
                 raise AssertionError("base_guard_manager must not be None")
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: int(x),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, ComputedLazyConstantSource):
+            if not base_guard_manager:
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x, src=source: src.eval_with_base(x),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
