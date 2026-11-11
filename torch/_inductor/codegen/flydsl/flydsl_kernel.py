@@ -83,20 +83,21 @@ class FlyDSLTemplateKernel(Kernel):
             params.writeline(f"{name}: fx.Constexpr = {val!r}")
         return params.getvalue()
 
-    def render(self, template, **kwargs):
-        from torch._inductor.select_algorithm import PartialRender
-
-        template_env = {
+    def template_env(self, **kwargs) -> dict[str, Any]:
+        return {
             "def_kernel": self.def_kernel,
             "gen_defines": lambda: self.gen_defines(**kwargs),
             "get_output": self.get_output,
         }
 
+    def render(self, template, **kwargs):
+        from torch._inductor.select_algorithm import PartialRender
+
         rendered_code = template.render(
             kernel_name=self.kernel_name,
             input_nodes=self.input_nodes,
             output_node=self.output_node,
-            **template_env,
+            **self.template_env(**kwargs),
             **kwargs,
         )
         return PartialRender(self.gen_imports() + rendered_code, self.render_hooks)
