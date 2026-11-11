@@ -33,7 +33,7 @@ class TestUnevenParamShard(FSDPTestContinuous):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def _get_ref_results(self, device, model, input, my_lr):
-        device_type = self.device_type
+        device_type = torch.device(device).type
         with torch.no_grad():
             # Compute one iteration local output.
             weight = model.weight.T.clone().to(device_type)
@@ -49,7 +49,7 @@ class TestUnevenParamShard(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     def test_one_iteration(self, device):
         """Test FSDP with uneven divide of parameter shards."""
-        device_type = self.device_type
+        device_type = torch.device(device).type
         model = Linear(3, 3, bias=False)
         input = torch.rand(self.world_size, 3)
         my_lr = 0.1
