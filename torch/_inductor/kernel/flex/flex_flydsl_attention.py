@@ -9,13 +9,21 @@ from typing import Any, cast
 import sympy
 
 import torch
+from torch._inductor.utils import ceildiv
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.nn.attention.flex_attention import _LARGE_SPARSE_BLOCK_SIZE
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 from ...codegen.flydsl import flydsl_utils
 from ...codegen.flydsl.flydsl_flex_kernel import FlyDSLFlexTemplate
-from ...ir import ExternKernel, FixedLayout, Pointwise, Reduction, TensorBox
+from ...ir import (
+    ExternKernel,
+    FixedLayout,
+    FlexibleLayout,
+    Pointwise,
+    Reduction,
+    TensorBox,
+)
 from ...lowering import constant_pad_nd, empty_strided, full, lowerings
 from ...ops_handler import ReductionType
 from ...select_algorithm import autotune_select_algorithm
@@ -39,7 +47,6 @@ from ..vendored_templates.flydsl.kernels.flex_attn_target import (
     WAVE_SIZE,
 )
 from .common import (
-    construct_strides,
     create_indices_fake,
     create_num_blocks_fake_generator,
     freeze_irnodes,
@@ -79,8 +86,7 @@ _SCORE_MOD_CAPTURE_DTYPES = (torch.float32, torch.bfloat16, torch.float16)
 _MAX_HEAD_DIM = max(max(dims) for dims in WIDE_HEAD_DIMS)
 
 
-def _contiguous_strides(shape):
-    return construct_strides(shape, range(len(shape) - 1, -1, -1))
+_contiguous_strides = FlexibleLayout.contiguous_strides
 
 
 def _sym(expr):
@@ -112,17 +118,11 @@ def _size_expr(expr):
     return int(expr) if isinstance(expr, sympy.Integer) else expr
 
 
-def _max_size(left, right):
-    if isinstance(left, int) and isinstance(right, int):
-        return max(left, right)
-    return V.graph.sizevars.evaluate_max(left, right)
-
-
 def _ceil_div(value, divisor):
     """Ceil division of an int, SymInt or size expression."""
     if isinstance(value, (int, torch.SymInt)):
         return -(-value // divisor)
-    return _size_expr(CeilDiv(value, divisor))
+    return _size_expr(ceildiv(value, divisor))
 
 
 def _template_int(value):
@@ -857,7 +857,7 @@ def _get_flydsl_flex_attention_forward_config(
     }
     runtime = _is_runtime(list(sizes.values())) or _is_runtime(
         mask_config["MASK_BUFFER_SHAPES"]
-    )
+    ) or _is_runtime(mask_config["MASK_BUFFER_STRIDES"])
     reason = _capture_table_reason(mask_config, score_mod_config["CAPTURE_TABLE"])
     if reason:
         return None, reason
@@ -1051,8 +1051,10 @@ def _create_dense_metadata(query, key):
     shape = [1, 1, num_q_blocks]
     device = query.get_device()
     if isinstance(num_q_blocks, int) and isinstance(num_kv_blocks, int):
-        # Graph constants: four tiny kernels per call cost as much as a small
-        # attention.
+        # Static metadata is registered as graph constants.  Dynamic shapes
+        # take the runtime path below and materialize three full buffers plus
+        # the indexed range, so metadata construction is not uniformly a
+        # one-time operation.
         with torch.utils._python_dispatch._disable_current_modes():
             tensors = (
                 torch.zeros(shape, dtype=torch.int32, device=device),
@@ -1144,7 +1146,9 @@ def _create_packed_decode_union_metadata(
     num_kv_blocks,
 ):
     """Merge a per-Q-head decode BlockMask over each GQA group: a block stays
-    full only if every head lists it as full. Assumes distinct list entries."""
+    full only if every head lists it as full. Assumes distinct list entries.
+    This is a graph-time reduction even for static shapes because the
+    per-head lists are runtime inputs."""
     mask_batch, num_q_heads, num_q_blocks = map(_size_expr, kv_num_blocks.get_size())
     num_q_heads = V.graph.sizevars.guard_int(num_q_heads)
     capacities = [
@@ -1182,8 +1186,13 @@ def _create_packed_decode_union_metadata(
         return _pack(*hits)
 
     # Per KV block: how many group heads list it as full / as partial.
+    max_capacity = (
+        max(capacities)
+        if all(isinstance(capacity, int) for capacity in capacities)
+        else V.graph.sizevars.evaluate_max(*capacities)
+    )
     load_hits = _reduce_int32(
-        device, hits_fn, ranges, [group, _max_size(*capacities)]
+        device, hits_fn, ranges, [group, max_capacity]
     ).make_loader()
 
     def flags(index):

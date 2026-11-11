@@ -997,9 +997,13 @@ def flex_attention_backward(*args, **kwargs):
             **mod_kwargs,
         )
 
-    flydsl_score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
+    score_is_trivial = (
+        is_trivial_score_graph(fw_graph.graph_module)
+        if backend in ("FLYDSL", "FLASH")
+        else None
+    )
     if backend == "FLYDSL":
-        if flydsl_score_is_trivial:
+        if score_is_trivial:
             flydsl_result = _create_flydsl_backward()
             if flydsl_result is not None:
                 return flydsl_result
@@ -1044,7 +1048,7 @@ def flex_attention_backward(*args, **kwargs):
         all_joint_outputs, len(joint_placeholder_inps)
     )
 
-    if backend == "FLYDSL" and not flydsl_score_is_trivial:
+    if backend == "FLYDSL" and not score_is_trivial:
         flydsl_result = _create_flydsl_backward(
             fw_subgraph_buffer=fw_subgraph_buffer, joint_outputs=joint_outputs
         )
@@ -1076,7 +1080,6 @@ def flex_attention_backward(*args, **kwargs):
         if grad_logsumexp is not None:
             (grad_logsumexp,) = maybe_realize([grad_logsumexp])
 
-        score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
         return create_flex_flash_attention_backward_kernel(
             query,
             key,

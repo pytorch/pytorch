@@ -16,7 +16,7 @@ import sympy
 import torch
 from torch.utils._ordered_set import OrderedSet
 
-from ...ir import ComputedBuffer, FixedLayout, InputBuffer
+from ...ir import ComputedBuffer, InputBuffer
 from ...virtualized import V
 from ..common import CSE, IndentedBuffer, PythonPrinter, ValueRanges
 from .flydsl_kernel import FlyDSLTemplateKernel
@@ -30,7 +30,7 @@ from .flydsl_template import FlyDSLTemplate
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Sequence
 
     from ...ir import Buffer
 
@@ -79,17 +79,13 @@ def _hierarchical_indexer(size: Sequence[Any]) -> Callable[[Sequence[Any]], Any]
 
 
 @contextlib.contextmanager
-def _patch_capture_indexer() -> Iterator[None]:
-    original = FixedLayout.make_indexer
+def _patch_capture_indexer():
+    from ...kernel.flex.flex_flash_attention import patch_fixed_layout_indexer
 
-    def make_indexer(self):
-        return _hierarchical_indexer(self.size)
-
-    FixedLayout.make_indexer = make_indexer  # type: ignore[assignment]
-    try:
+    with patch_fixed_layout_indexer(
+        lambda size, stride, offset: _hierarchical_indexer(size)
+    ):
         yield
-    finally:
-        FixedLayout.make_indexer = original  # type: ignore[assignment]
 
 
 @dataclasses.dataclass

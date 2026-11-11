@@ -241,9 +241,8 @@ def _hierarchical_indexer_cute(
 
 
 @contextmanager
-def patch_fixed_layout_indexer_for_cutedsl():
-    """
-    Temporarily swap FixedLayout.make_indexer so CuteDSL sees hierarchical indexing.
+def patch_fixed_layout_indexer(indexer_factory):
+    """Temporarily swap ``FixedLayout.make_indexer`` for hierarchical indexing.
 
     Note [CuteDSL indexer patch]:
     Flex flash attention only supports a limited set of IR ops (pointwise, reads, no stores),
@@ -253,13 +252,19 @@ def patch_fixed_layout_indexer_for_cutedsl():
     original_make_indexer = FixedLayout.make_indexer
 
     def cutedsl_make_indexer(self):
-        return _hierarchical_indexer_cute(self.size, self.stride, self.offset)
+        return indexer_factory(self.size, self.stride, self.offset)
 
     FixedLayout.make_indexer = cutedsl_make_indexer  # type: ignore[assignment]
     try:
         yield
     finally:
         FixedLayout.make_indexer = original_make_indexer  # type: ignore[assignment]
+
+
+@contextmanager
+def patch_fixed_layout_indexer_for_cutedsl():
+    with patch_fixed_layout_indexer(_hierarchical_indexer_cute):
+        yield
 
 
 def wrap_choice_render_with_cutedsl_indexer(choice: Any) -> None:
@@ -308,9 +313,11 @@ def is_trivial_score_graph(graph_module: GraphModule) -> bool:
     output = [n for n in nodes if n.op == "output"]
     if len(output) != 1:
         raise AssertionError("Got graph w/ multiple outputs")
+    if not placeholders:
+        raise AssertionError("Got score graph without a score placeholder")
     output_val = output[0].args[0]
     # The identity graph just sends the score straight through
-    return output_val == placeholders[0]
+    return output_val is placeholders[0]
 
 
 def is_trivial_mask_graph(graph_module: GraphModule) -> bool:

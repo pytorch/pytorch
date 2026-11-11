@@ -371,9 +371,9 @@ class TestPublicBindings(TestCase):
             "torch._inductor.kernel.vendored_templates.cutedsl.wrappers",  # depends on cutlass.operators
             "torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel",  # depends on cutlass.operators
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_gfx950",  # depends on flydsl
-            "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_utils",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_pipeline",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_fwd_gfx950",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_split_kv_combine",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_gemm_gfx950",  # depends on flydsl
@@ -381,6 +381,7 @@ class TestPublicBindings(TestCase):
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_buffer_ops",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_gemm_utils",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_grouped_gemm_gfx950",  # depends on flydsl
+            "torch._inductor.codegen.flydsl.flydsl_mod_runtime",  # depends on flydsl
             "torch._inductor.runtime.triton_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",

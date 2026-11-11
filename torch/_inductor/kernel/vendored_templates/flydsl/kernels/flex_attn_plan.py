@@ -3,6 +3,14 @@
 
 Sizes may be SymInts: each choice is then one guard on a predicate built with
 ``&`` and ``|``, so a graph recompiles only when the choice changes.
+
+The planner's guard set is intentionally limited to launch-choice boundaries:
+the power-of-two bounds used for runtime block counts, the decode/prefill
+boundary at ``Sq == 128``, the large-query head-order boundary at ``Sq ==
+16384``, and the occupancy/workspace thresholds in the choice predicates.
+These guards are created by evaluating SymBool predicates here rather than by
+calling the generic sizevars guard helpers because the planner returns a
+single, coherent choice dictionary.
 """
 
 import functools

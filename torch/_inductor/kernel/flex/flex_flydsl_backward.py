@@ -674,6 +674,7 @@ def create_flydsl_flex_attention_backward_kernel(
         + [config[name] for name in stride_lengths]
         + [config["BLOCK_MASK_BATCH"], config["MAX_PARTIAL_BLOCKS"]]
         + [config["MAX_FULL_BLOCKS"], config["MASK_BUFFER_SHAPES"]]
+        + [config["MASK_BUFFER_STRIDES"]]
     )
     config["RUNTIME_SIZES"] = runtime
     if runtime:

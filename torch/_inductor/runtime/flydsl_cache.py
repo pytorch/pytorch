@@ -108,9 +108,11 @@ def run_cached_flydsl(
     if compile_args_factory is not None and compile_args:
         raise TypeError("pass compile_args or compile_args_factory, not both")
     device = getattr(dispatch_args[0], "device", None)
+    gpu_arch = os.environ.get("FLYDSL_GPU_ARCH") or _device_gpu_arch(device)
     cache_key = (
         os.getpid(),
         getattr(device, "index", None),
+        gpu_arch,
         constexpr_param.__cache_signature__(),
         layout_key,
     )
@@ -219,14 +221,23 @@ def run_flydsl_template(
 
 
 def _tensor_layout_key(arg: Any, runtime_layout: bool) -> tuple[Any, ...]:
-    """What a compiled kernel fixes about a tensor argument: under a runtime
-    layout its first unit-stride dim, otherwise its whole layout."""
+    """What a compiled kernel fixes about a tensor argument.
+
+    A runtime-layout argument can have more than one unit-stride dimension
+    (for example, a trailing size-one dimension).  Keep all of their
+    positions in the key so a different leading-dimension choice cannot
+    reuse a stale dispatcher.
+    """
     if not callable(getattr(arg, "stride", None)):
         return (type(arg),)
     tensor = arg
     stride = tuple(tensor.stride())
     if runtime_layout and 1 in stride:
-        return (tensor.dtype, len(stride), stride.index(1))
+        return (
+            tensor.dtype,
+            len(stride),
+            tuple(index for index, value in enumerate(stride) if value == 1),
+        )
     return (tensor.dtype, tuple(tensor.shape), stride)
 
 

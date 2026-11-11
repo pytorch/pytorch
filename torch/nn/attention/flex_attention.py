@@ -327,7 +327,8 @@ class FlexKernelOptions(TypedDict, total=False):
         - "FLYDSL": Experimental FlyDSL FlexAttention forward and backward kernels
           for bf16/fp16 on ROCm gfx950, requiring the optional FlyDSL dependency.
           Unsupported backward configurations, including shapes exceeding the dQ
-          workspace limit, fall back to Triton.
+          workspace limit and gradients with respect to captured score/mask
+          tensors, fall back to Triton.
 
     This option cannot be combined with legacy knobs such as ``FORCE_USE_FLEX_ATTENTION``.
     Raises an error if the requested forward backend cannot be used. Default: "AUTO"

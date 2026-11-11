@@ -741,12 +741,22 @@ def _random_block_mask_metadata(
     return counts, indices, full_counts, full_indices
 
 
-def _dynamic_case(shapes, mask=None, score_mod=False, graphs=1, heads=(4, 2)):
-    return (*heads, shapes, mask, score_mod, graphs)
+def _dynamic_case(
+    shapes,
+    mask=None,
+    score_mod=False,
+    graphs=1,
+    heads=(4, 2),
+    dtype=torch.bfloat16,
+    qk_dim=128,
+    v_dim=128,
+):
+    return (*heads, shapes, mask, score_mod, graphs, dtype, qk_dim, v_dim)
 
 
 _PREFILLS = [(3, 1000, 1500), (5, 600, 900)]
-# (Q heads, KV heads, (B, Sq, Sk) of each call, mask, score_mod, compiled graphs).
+# (Q heads, KV heads, (B, Sq, Sk) calls, mask, score_mod, compiled graphs,
+# dtype, QK head dim, V head dim).
 # Kernel choices only change between decode and prefill.
 _DYNAMIC_SHAPE_CASES = {
     "ragged_gqa": _dynamic_case([*_PREFILLS, (4, 300, 2001)]),
@@ -768,6 +778,14 @@ _DYNAMIC_SHAPE_CASES = {
     ),
     # Four document captures, the 64x64 block states and a score_mod capture.
     "capture_table": _dynamic_case(_PREFILLS, "documents_64", score_mod=True),
+    "fp16_wide_unequal": _dynamic_case(
+        _PREFILLS,
+        "causal",
+        heads=(4, 2),
+        dtype=torch.float16,
+        qk_dim=256,
+        v_dim=384,
+    ),
 }
 
 
@@ -779,9 +797,22 @@ _DYNAMIC_BLOCK_SIZES = {
 
 
 def _dynamic_shape_runs(case, device, backend, dynamic, score_mods=None):
-    """Outputs and Q/K/V gradients of each shape of ``case`` through one compile;
-    a None ``backend`` runs eagerly in fp64. Appends the score_mod to ``score_mods``."""
-    q_heads, kv_heads, shapes, mask, use_score_mod, _ = _DYNAMIC_SHAPE_CASES[case]
+    """Outputs and Q/K/V gradients of each shape through one compiled callable.
+
+    A ``None`` backend runs eagerly in fp64.  Appends the score_mod to
+    ``score_mods`` and checks the expected FlyDSL forward graph count.
+    """
+    (
+        q_heads,
+        kv_heads,
+        shapes,
+        mask,
+        use_score_mod,
+        graphs,
+        dtype,
+        qk_dim,
+        v_dim,
+    ) = _DYNAMIC_SHAPE_CASES[case]
     documents = (torch.arange(4096, device=device) * 7 // 900).to(torch.int32)
     d0, d1, d2, d3 = (
         (torch.arange(4096, device=device) * 7 // length).to(torch.int32)
@@ -810,8 +841,6 @@ def _dynamic_shape_runs(case, device, backend, dynamic, score_mods=None):
     kernel_options = None if backend is None else {"BACKEND": backend}
     if backend == "TRITON" and isinstance(block_size, tuple):
         kernel_options.update(_triton_tile_options(block_size))
-    patches = []
-
     def attention(q, k, v, block_mask):
         return flex_attention(
             q,
@@ -819,7 +848,7 @@ def _dynamic_shape_runs(case, device, backend, dynamic, score_mods=None):
             v,
             block_mask=block_mask,
             score_mod=score_mod if use_score_mod else None,
-            scale=128**-0.5,
+            scale=qk_dim**-0.5,
             enable_gqa=True,
             kernel_options=kernel_options,
         )
@@ -832,6 +861,9 @@ def _dynamic_shape_runs(case, device, backend, dynamic, score_mods=None):
         backend="eager" if backend is None else "inductor",
     )
     results = []
+    generated_codes = []
+    from torch._inductor.graph import GraphLowering
+
     for batch, seq_q, seq_kv in shapes:
         query, key, value = _make_qkv(
             device=device,
@@ -840,6 +872,9 @@ def _dynamic_shape_runs(case, device, backend, dynamic, score_mods=None):
             kv_heads=kv_heads,
             seq_q=seq_q,
             seq_kv=seq_kv,
+            qk_dim=qk_dim,
+            v_dim=v_dim,
+            dtype=dtype,
             seed=seq_q + seq_kv,
         )
         if mask == "kv_batch_1":
@@ -855,18 +890,26 @@ def _dynamic_shape_runs(case, device, backend, dynamic, score_mods=None):
                 device=device,
                 BLOCK_SIZE=block_size,
             )
-        dtype = torch.float64 if backend is None else query.dtype
+        input_dtype = torch.float64 if backend is None else query.dtype
         inputs = [
-            t.detach().to(dtype, copy=True).requires_grad_()
+            t.detach().to(input_dtype, copy=True).requires_grad_()
             for t in (query, key, value)
         ]
-        with contextlib.ExitStack() as stack:
-            for patch in patches:
-                stack.enter_context(patch)
+        with mock.patch.object(
+            GraphLowering, "save_output_code", generated_codes.append
+        ):
             output = compiled(*inputs, block_mask)
         torch.manual_seed(seq_q)
-        output.backward(torch.randn_like(output, dtype=query.dtype).to(dtype))
+        output.backward(torch.randn_like(output, dtype=query.dtype).to(input_dtype))
         results.append((output.detach(), *(t.grad for t in inputs)))
+    if backend == "FLYDSL":
+        forward_codes = [
+            code for code in generated_codes if "build_flex_attn_fwd_module" in code
+        ]
+        assert len(forward_codes) == graphs, (
+            f"{case} expected {graphs} FlyDSL forward graphs, "
+            f"generated {len(forward_codes)}"
+        )
     return results
 
 
@@ -1495,6 +1538,9 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
         from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_plan import (
             forward_plan,
         )
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_target import (
+            GFX950_LIMITS,
+        )
 
         graph, symbols = _symbolic_graph(*hints)
         shape_env = graph.sizevars.shape_env
@@ -1507,6 +1553,7 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
             seq_kv=sizes[2],
             qk_head_dim=128,
             v_head_dim=128,
+            target=GFX950_LIMITS,
         )
         self.assertEqual({name: plan[name] for name in expected}, expected)
 
@@ -1543,6 +1590,9 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
         from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_plan import (
             forward_kv_splits,
         )
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_target import (
+            GFX950_LIMITS,
+        )
 
         batch, seq_q, seq_kv = sizes
         splits = forward_kv_splits(
@@ -1554,6 +1604,7 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
             qk_head_dim=128,
             v_head_dim=128,
             requested=requested,
+            target=GFX950_LIMITS,
         )
         self.assertEqual(splits, expected)
 
@@ -1612,12 +1663,12 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
         self.assertFalse(backward_single_pass(256, 512, small_lds))
 
     def test_split_kv_builder_rejects_prefill(self):
+        if importlib.util.find_spec("flydsl") is None:
+            self.skipTest("requires the FlyDSL package")
         from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
             build_flex_attn_fwd_module,
         )
 
-        if importlib.util.find_spec("flydsl") is None:
-            self.skipTest("requires the FlyDSL package")
         with self.assertRaisesRegex(ValueError, "KV blocks of decode CTAs only"):
             build_flex_attn_fwd_module(
                 batch_size=1,
@@ -1642,6 +1693,9 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
     def test_symbolic_sizes_reach_the_backward_at_runtime(self, block_list):
         from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_plan import (
             backward_plan,
+        )
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_target import (
+            GFX950_LIMITS,
         )
 
         graph, (batch, seq_q, seq_kv) = _symbolic_graph(3, 1000, 1500)
@@ -1680,6 +1734,7 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
                 workspace_element_bytes=4,
                 strides=(config["Q_STRIDE"],) * 8,
                 dq_partitions=8,
+                target=GFX950_LIMITS,
             )
         self.assertEqual(
             [config[name] for name in ("BATCH_SIZE", "SEQ_LEN_Q", "SEQ_LEN_KV")],
@@ -2062,15 +2117,17 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
 
     def test_unsupported_backward_logs_fallback_reason(self):
         counters.clear()
+        inputs = _supported_fake_backward_inputs(
+            q_size=(1, 3, 256, 128),
+            k_size=(1, 2, 256, 128),
+        )
         with (
             V.set_graph_handler(_fake_graph()),
             mock.patch.object(
                 flex_flydsl_backward, "runtime_available", return_value=True
             ),
             mock.patch.object(
-                flex_flydsl_backward,
-                "_get_flydsl_flex_attention_backward_config",
-                return_value=(None, "FlyDSL flex bwd currently supports MHA"),
+                flex_flydsl_attention, "_is_gfx950_device", return_value=True
             ),
             mock.patch.object(
                 flex_flydsl_attention,
@@ -2088,27 +2145,28 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
             mock.patch.object(flex_flydsl_backward, "empty_strided") as allocate,
             self.assertLogs(flex_flydsl_backward.perf_hint_log, "INFO") as logs,
         ):
-            query = _FakeNode((1, 2, 256, 128), (65536, 32768, 128, 1))
             result = flex_flydsl_backward.create_flydsl_flex_attention_backward_kernel(
-                query,
-                query,
-                query,
-                query,
-                query,
-                query,
+                inputs["query"],
+                inputs["key"],
+                inputs["value"],
+                inputs["out"],
+                None,
+                inputs["grad_out"],
                 None,
                 1.0,
                 128,
                 128,
-                fw_subgraph=object(),
-                mask_graph=SimpleNamespace(
-                    graph_module=_mask_graph(lambda b, h, q, kv: q >= kv)
-                ),
+                fw_subgraph=inputs["fw_subgraph"],
+                mask_graph=inputs["mask_graph"],
+                kv_num_blocks=inputs["kv_num_blocks"],
+                kv_indices=inputs["kv_indices"],
+                full_kv_num_blocks=inputs["full_kv_num_blocks"],
+                full_kv_indices=inputs["full_kv_indices"],
             )
         self.assertIsNone(result)
         allocate.assert_not_called()
         self.assertEqual(counters["inductor"]["flydsl_flex_bwd_fallback"], 1)
-        self.assertIn("supports MHA", "\n".join(logs.output))
+        self.assertIn("Q heads divisible by KV heads", "\n".join(logs.output))
 
     @_subtests(
         "option,name",
@@ -5847,6 +5905,17 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
 
         self.assertFalse(torch.isnan(output).any())
         self.assertNotIn("build_flex_attn_fwd_module", "\n".join(code))
+        reference = torch.compile(
+            lambda q, k, v: flex_attention(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "TRITON"},
+            ),
+            fullgraph=True,
+        )(query, key, value)
+        self.assertEqual(output, reference, atol=0.04, rtol=0.03)
 
     @parametrize(
         *_paired(
@@ -6338,16 +6407,32 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
         )
 
     @parametrize(
-        "shape,case,split_kv",
+        "shape,case,split_kv,dtype",
         [
-            subtest(((4, 32, 8, 1, 65613), "causal", True), name="b4_gqa_ragged"),
-            subtest(((3, 8, 2, 2, 10000), "lists", 7), name="b3_lists_empty_splits"),
-            subtest(((2, 4, 4, 1, 20000), "document_bias", 5), name="b2_document_bias"),
-            subtest(((2, 8, 4, 3, 8192), "bshd", 6), name="b2_bshd"),
+            subtest(
+                ((4, 32, 8, 1, 65613), "causal", True, torch.bfloat16),
+                name="b4_gqa_ragged_bf16",
+            ),
+            subtest(
+                ((4, 32, 8, 1, 65613), "causal", True, torch.float16),
+                name="b4_gqa_ragged_fp16",
+            ),
+            subtest(
+                ((3, 8, 2, 2, 10000), "lists", 7, torch.bfloat16),
+                name="b3_lists_empty_splits_bf16",
+            ),
+            subtest(
+                ((2, 4, 4, 1, 20000), "document_bias", 5, torch.bfloat16),
+                name="b2_document_bias_bf16",
+            ),
+            subtest(
+                ((2, 8, 4, 3, 8192), "bshd", 6, torch.bfloat16),
+                name="b2_bshd_bf16",
+            ),
         ],
     )
     @torch._inductor.config.patch({"fx_graph_cache": False})
-    def test_gfx950_split_kv_decode(self, device, shape, case, split_kv):
+    def test_gfx950_split_kv_decode(self, device, shape, case, split_kv, dtype):
         self._require_runtime()
         batch, q_heads, kv_heads, seq_q, seq_kv = shape
         query, key, value = _make_qkv(
@@ -6357,6 +6442,7 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
             kv_heads=kv_heads,
             seq_q=seq_q,
             seq_kv=seq_kv,
+            dtype=dtype,
             seed=65,
             transposed=case == "bshd",
         )
@@ -6414,9 +6500,17 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
             flydsl_options={"FLYDSL_SPLIT_KV": split_kv},
         )
 
-    @parametrize("grad_lse", [False, True])
+    @parametrize(
+        "grad_lse,dtype",
+        [
+            (False, torch.bfloat16),
+            (True, torch.bfloat16),
+            (False, torch.float16),
+            (True, torch.float16),
+        ],
+    )
     @torch._inductor.config.patch({"fx_graph_cache": False})
-    def test_gfx950_split_kv_backward(self, device, grad_lse):
+    def test_gfx950_split_kv_backward(self, device, grad_lse, dtype):
         # The backward reads the merged LSE of the split forward.
         self._require_runtime()
         seq_q, seq_kv = 4, 8192
@@ -6427,6 +6521,7 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
             kv_heads=2,
             seq_q=seq_q,
             seq_kv=seq_kv,
+            dtype=dtype,
             seed=67,
         )
         self._compare_backward(
@@ -6446,13 +6541,18 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
         inputs = [t.detach().clone().requires_grad_() for t in (query, key, value)]
         torch.manual_seed(57)
         grad_output = torch.randn_like(value)
-        output = torch.compile(
+        compiled = torch.compile(
             lambda q, k, v: flex_attention(
                 q, k, v, score_mod=_softcap_mod, kernel_options={"BACKEND": "FLYDSL"}
             ),
             fullgraph=True,
-        )(*inputs)
-        grads = torch.autograd.grad(output, inputs, grad_output)
+        )
+        output, forward_code = run_and_get_code(compiled, *inputs)
+        grads, backward_code = run_and_get_code(
+            lambda: torch.autograd.grad(output, inputs, grad_output)
+        )
+        self.assertIn("build_flex_attn_fwd_module", "\n".join(forward_code))
+        self.assertIn("build_flex_attn_bwd_module", "\n".join(backward_code))
         reference_inputs = [
             t.detach().double().requires_grad_() for t in (query, key, value)
         ]
@@ -6618,7 +6718,7 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
                 t.detach().to(dtype, copy=True).requires_grad_()
                 for t in (query, key, value)
             ]
-            out, aux = torch.compile(
+            compiled = torch.compile(
                 lambda q, k, v: flex_attention(
                     q,
                     k,
@@ -6629,13 +6729,20 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
                 ),
                 fullgraph=True,
                 backend="eager" if backend is None else "inductor",
-            )(*inputs)
+            )
+            (out, aux), forward_code = run_and_get_code(compiled, *inputs)
             # Empty rows have a -inf LSE, so the loss is -inf but its gradient is finite.
-            (out.float().sum() + (aux.lse * grad_logsumexp).sum()).backward()
-            return [t.grad for t in inputs]
+            _, backward_code = run_and_get_code(
+                lambda: (out.float().sum() + (aux.lse * grad_logsumexp).sum()).backward()
+            )
+            return [t.grad for t in inputs], "\n".join(forward_code + backward_code)
 
-        grads = run("FLYDSL")
-        for grad, reference_grad, golden_grad in zip(grads, run("TRITON"), run(None)):
+        grads, code = run("FLYDSL")
+        self.assertIn("build_flex_attn_fwd_module", code)
+        self.assertIn("build_flex_attn_bwd_module", code)
+        for grad, reference_grad, golden_grad in zip(
+            grads, run("TRITON")[0], run(None)[0]
+        ):
             self.assertTrue(grad.isfinite().all())
             self._assert_close_to_fp64(
                 grad, reference_grad, golden_grad, atol=0.04, rtol=0.03
@@ -6663,7 +6770,23 @@ class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
         _, backward_code = run_and_get_code(lambda: output.sum().backward())
         self.assertIn("build_flex_attn_fwd_module", "\n".join(forward_code))
         self.assertNotIn("build_flex_attn_bwd_module", "\n".join(backward_code))
-        self.assertIsNotNone(bias.grad)
+        reference_inputs = [
+            tensor.detach().clone().requires_grad_() for tensor in (query, key, value)
+        ]
+        reference_bias = bias.detach().clone().requires_grad_()
+        reference = torch.compile(
+            lambda q, k, v: flex_attention(
+                q,
+                k,
+                v,
+                score_mod=lambda score, b, h, q_idx, kv_idx: score
+                + reference_bias[b, h, q_idx, kv_idx],
+                kernel_options={"BACKEND": "TRITON"},
+            ),
+            fullgraph=True,
+        )(*reference_inputs)
+        reference.sum().backward()
+        self.assertEqual(bias.grad, reference_bias.grad, atol=0.04, rtol=0.03)
 
 
 instantiate_device_type_tests(TestFlyDSLFlexAttention, globals(), only_for=("cuda",))

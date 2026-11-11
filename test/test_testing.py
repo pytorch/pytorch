@@ -3103,6 +3103,7 @@ class TestImports(TestCase):
                            "torch._native.ops.topk",  # depends on cutlass
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
+                           "torch._inductor.codegen.flydsl.flydsl_mod_runtime",  # depends on flydsl
                            "torch._inductor.kernel.flex_gemm.compile_pool",  # depends on cutlass
                            "torch._inductor.kernel.flex_gemm.output_layout_cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
