@@ -312,7 +312,6 @@
   "test/dynamo/test_verify_correctness.py",
   "test/dynamo/test_wrap_inductor_compiled_regions.py",
   "test/export/test_db.py",
-  "test/export/test_experimental.py",
   "test/export/test_export.py",
   "test/export/test_export_logging.py",
   "test/export/test_export_opinfo.py",
