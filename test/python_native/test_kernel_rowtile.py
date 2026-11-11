@@ -682,8 +682,8 @@ class TestKernelRowTile(TestCase):
                 order="inner_tree",
                 ragged_vector=True,
             )
-        # 4096 is whole and TMA-able; 4097 is ragged, and the ragged check must fire
-        # before TMA's own check rejects its 16388-byte row stride.
+        # 4096 is whole with a TMA-aligned stride; 4097 is ragged, and the ragged check
+        # must fire before TMA's own check rejects its 16388-byte row stride.
         f32 = [torch.float32]
         for n in (4096, 4097):
             x = torch.randn(64, n, device="cuda")
@@ -696,13 +696,10 @@ class TestKernelRowTile(TestCase):
     @parametrize(
         "axis,kwargs,msg",
         (
-            ("row", {}, r"vec \* itemsize == 16"),
-            ("row", {"vec": 1}, r"vec \* itemsize == 16"),
-            ("row", {"vec": 4}, r"vec \* itemsize == 16"),
             ("col", {"vec": 8}, "require the row axis"),
-            ("row", {"vec": 8, "order": "inner_tree"}, "require the linear order"),
-            ("row", {"vec": 8, "use_tma": True}, "cannot use TMA"),
-            ("row", {"vec": 8, "combine": True}, "cannot combine partials"),
+            ("row", {"order": "inner_tree"}, "require the linear order"),
+            ("row", {"use_tma": True}, "cannot use TMA"),
+            ("row", {"combine": True}, "cannot combine partials"),
         ),
         name_fn=lambda axis, kwargs, msg: "_".join(
             [axis] + [f"{k}_{v}" for k, v in kwargs.items()]
@@ -718,7 +715,7 @@ class TestKernelRowTile(TestCase):
     def test_ragged_vector_tile_rejects_empty_rows(self):
         trait, f16 = T.SumOps(acc=cutlass.Float32), cutlass.Float16
         with self.assertRaisesRegex(ValueError, "nonempty rows"):
-            rt.tile.TileReduce(trait, f16, "row", 0, vec=8, ragged_vector=True)
+            rt.tile.TileReduce(trait, f16, "row", 0, ragged_vector=True)
 
     def test_ragged_vector_rejects_misaligned_rows(self):
         """Refuse empty rows and rows not starting at r * N from an aligned base."""

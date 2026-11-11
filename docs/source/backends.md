@@ -493,12 +493,18 @@ enable or disable high-performance implementations from various DSLs like Triton
 
 On CUDA GPUs with compute capability 9.x or 10.x and a supported CuTeDSL runtime version
 installed, `torch.sum`, `torch.mean`, `torch.amax`, `torch.amin` and `torch.prod` (with
-`dim`) are overridden by default for float16, bfloat16 and float32 inputs. `amax` and
-`amin` results are exact; `sum`, `mean` and `prod` results can differ bitwise from ATen's,
-since the kernels accumulate in FP32 in a different reduction order. To keep ATen, pass
-the overload names `sum.dim_IntList`, `mean.dim`, `prod.dim_int`, `amax` and `amin` to
-`disable_operations`, or use `torch.backends.python_native.cutedsl.disabled()`. Setting
-`TORCH_DISABLE_NATIVE_JIT=1` registers no native DSL overrides.
+`dim`) are overridden by default for float16, bfloat16 and float32 inputs. `sum`, `mean`
+and `prod` results can differ bitwise from ATen's, since the kernels accumulate in FP32 in
+a different reduction order; `amax` and `amin` results are equal in value, though the sign
+of zero and NaN payloads can differ. The dim `out=` overloads (unless
+`PYTORCH_SUM_INNER_TREE` is set), full `prod()` and declined inputs (such as 0-d, empty or
+not 16-byte aligned ones) stay on ATen, so `torch.sum(x, 1)` and `torch.sum(x, 1, out=o)`
+can differ bitwise. With `PYTORCH_NATIVE_INNER_TREE=strict`, a served call whose layout
+cannot take the inner tree raises instead of falling back. To keep ATen, pass the overload
+names `sum.dim_IntList`, `mean.dim`, `prod.dim_int`, `amax` and `amin` to
+`disable_operations`, or use `torch.backends.python_native.cutedsl.disabled()`, which
+turns off every CuTeDSL op and native AOT. Setting `TORCH_DISABLE_NATIVE_JIT=1` before
+`import torch` registers no native DSL overrides.
 
 ```{eval-rst}
 .. autofunction:: torch.backends.python_native.enable_operations

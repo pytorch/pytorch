@@ -24,8 +24,6 @@ from ...utils.device import check_current
 from . import kernel_general as kg, tile
 from .inner_tree_plan import _MAX_WARPS
 from .kernel_general import (
-    _B200_DTYPES,
-    _B200_RAGGED_COL_ONE_FIELD,
     _combine_itree_partials,
     _flat,
     _INT32_LIMIT,
@@ -350,7 +348,7 @@ def select_col_config(
         not explicit
         and anchor is not None
         and cc in kg._B200_CCS
-        and dtype in _B200_DTYPES
+        and dtype in kg._B200_DTYPES
         and columns in (257, 4095)
         and acc_bits == 32
         and batches == 1
@@ -360,7 +358,7 @@ def select_col_config(
         welford = welford_outs == nouts == 1
         # Only argmax with int32 indices (32-bit accumulators) was measured.
         index = trait_type is ArgMaxOps
-        one_field = trait_type in _B200_RAGGED_COL_ONE_FIELD
+        one_field = trait_type in kg._B200_RAGGED_COL_ONE_FIELD
         if columns == 4095 and anchor == 16 << 20 and (one_field or welford):
             return cfg._replace(
                 rule="b200_ragged_c4095_ordered",
@@ -947,12 +945,12 @@ def reduce_ordered_col(
         return None
     # Single-field traits replay all 32 lanes' leaves statically, compiling in 0.35 s at
     # R = 2048 (fp32/bf16, C = 2048). With per-load stride copies, unmasked replays of
-    # 512 leaves per warp (looped R = 8192, whole split partitions at R = 32768-131072)
-    # compile in 1.5-2.4 s instead of 9.2-10.2 s (B200 fp32/bf16/fp16 sums, fp32/bf16
-    # amax). Multi-field traits roll lanes but replay a static lane tree per load,
-    # taking 1.3 s at R = 8192 and 2.5-3.1 s at R = 8193-16384 (fp32). The indexed tree
-    # takes 0.3-0.75 s, so cap replays at tile.MAX_UNROLL leaves (looped rows up to
-    # 8192).
+    # 512 leaves per warp (looped R = 8192, full-tile split partitions at
+    # R = 32768-131072) compile in 1.5-2.4 s instead of 9.2-10.2 s (B200 fp32/bf16/fp16
+    # sums, fp32/bf16 amax). Multi-field traits roll lanes but replay a static lane tree
+    # per load, taking 1.3 s at R = 8192 and 2.5-3.1 s at R = 8193-16384 (fp32). The
+    # indexed tree takes 0.3-0.75 s, so cap replays at tile.MAX_UNROLL leaves (looped
+    # rows up to 8192).
     # Plans past one planner batch always exceed the cap.
     if sum(b[2] for b in plan.batches) * WARP * plan.vec > tile.MAX_UNROLL:
         return None
@@ -986,6 +984,8 @@ def reduce_ordered_col(
             if split:
                 return None
             config = OrderedColConfig(0)
+        else:
+            _check_ordered_mapping(config.worker_warps, config.tile_columns)
     op = _OrderedColReduce(
         trait,
         plan,

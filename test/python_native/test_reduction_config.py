@@ -63,6 +63,19 @@ def _contract_name(contract):
     return f"{contract['trait_type'].__name__}_{contract['nouts']}out"
 
 
+def _updates_name(updates):
+    """A stable test name fragment for a guard row's updated selector arguments."""
+
+    def value(v):
+        if isinstance(v, tuple):
+            return "x".join(value(e) for e in v)
+        if isinstance(v, torch.dtype):
+            return str(v)[6:]
+        return v.__name__ if isinstance(v, type) else str(v)
+
+    return "_".join(f"{k}_{value(v)}" for k, v in updates.items())
+
+
 def _served(trait_key):
     """Tags of the row and general plans compiled for trait_key."""
     rows = {k[0] for k in rt._CACHE if k[1] == trait_key}
@@ -255,6 +268,7 @@ class TestReductionConfig(TestCase):
                 {"dtype": torch.float16},
             ),
         ],
+        name_fn=lambda base, updates: _updates_name(updates),
     )
     def test_sm107_general_guards(self, base, updates):
         """Keep a 256 MiB strided anchor that breaks one guard on the generic policy."""
@@ -272,6 +286,7 @@ class TestReductionConfig(TestCase):
             {"M": 65535},
             {"trait_type": T.ProdOps, "nfields": 1, "welford_outs": 0},
         ],
+        name_fn=_updates_name,
     )
     def test_sm107_row_guards(self, updates):
         """Keep a 256 MiB SM107 row anchor that breaks one guard on the linear order."""
@@ -347,6 +362,7 @@ class TestReductionConfig(TestCase):
             {"alignment": 8},
             {"out_dtypes": (torch.bfloat16,)},
         ],
+        name_fn=_updates_name,
     )
     def test_sm107_full_guards(self, updates):
         """Keep calls outside the SM107 policy contract on the generic path."""
@@ -375,6 +391,7 @@ class TestReductionConfig(TestCase):
             {"out_dtypes": (torch.bfloat16,)},
             {"out_dtypes": (torch.float32,) * 2},
         ],
+        name_fn=_updates_name,
     )
     def test_sm107_full_welford_guards(self, updates):
         """Keep Welford calls outside the SM107 Welford contract on the generic path."""

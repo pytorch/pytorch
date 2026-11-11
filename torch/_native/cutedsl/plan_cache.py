@@ -35,10 +35,10 @@ _MISS = object()  # sentinel so a cached None (declined) is distinct from a miss
 
 
 class LRUCache:
-    """A cache of its `maxsize` most recently used entries, supporting `get`, item
-    assignment, `in`, `len`, iteration, `items()` and `clear()`. Every method holds its
-    lock, so concurrent use is safe (free-threaded builds included). Only `get` and item
-    assignment update recency; iteration and `items()` return snapshots.
+    """A cache of its `maxsize` most recently used entries, supporting `get`, `pop`,
+    item assignment, `in`, `len`, iteration, `items()` and `clear()`. Every method holds
+    its lock, so concurrent use is safe (free-threaded builds included). Only `get` and
+    item assignment update recency; iteration and `items()` return snapshots.
     """
 
     def __init__(self, maxsize: int) -> None:
@@ -54,6 +54,10 @@ class LRUCache:
                 return default
             self._d.move_to_end(key)
             return value
+
+    def pop(self, key: Any, default: Any = None) -> Any:
+        with self._lock:
+            return self._d.pop(key, default)
 
     def __setitem__(self, key: Any, value: Any) -> None:
         with self._lock:
