@@ -561,7 +561,8 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             key_present = (
                 value is not None and type(value) is not variables.DeletedVariable
             )
-        if _get_literal_key(arg) is not NO_SUCH_SUBOBJ or (
+        literal_key = _get_literal_key(arg)
+        if literal_key is not NO_SUCH_SUBOBJ or (
             arg.source is None and arg.is_python_constant()
         ):
             guard_fn = (
@@ -573,7 +574,11 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 self.make_guard(
                     functools.partial(
                         guard_fn,
-                        key=arg.as_python_constant(),
+                        key=(
+                            literal_key
+                            if literal_key is not NO_SUCH_SUBOBJ
+                            else arg.as_python_constant()
+                        ),
                     )
                 )
             )
@@ -771,8 +776,42 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 # if default is not given, return None
                 return ConstantVariable.create(None)
             return args[1]
-        # Key guarding - Nothing to do.
+        self._register_lazy_lookup_source(tx, key, value)
         return value
+
+    def _register_lazy_lookup_source(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: HashableTracker,
+        value: VariableTracker,
+    ) -> None:
+        if self.source is None or self.source.guard_source in (
+            GuardSource.CONSTANT,
+            GuardSource.EPHEMERAL,
+            GuardSource.SYNTHETIC_LOCAL,
+            GuardSource.TEMP_LOCAL,
+        ):
+            return
+        if (
+            type(self).install_dict_contains_guard
+            is not ConstDictVariable.install_dict_contains_guard
+        ):
+            return
+        if not isinstance(value, variables.LazyVariableTracker) or value.is_realized():
+            return
+        key_value = _get_literal_key(key.vt)
+        if key_value is NO_SUCH_SUBOBJ:
+            return
+        source = value.source
+        # Only original slots depend on membership at function entry.
+        if source is None or source != DictGetItemSource(self.source, key_value):
+            return
+        guards = tx.output.lazy_source_guarding.setdefault(source, {})
+        guard_key = (self.source, type(self).CONTAINS_GUARD)
+        if guard_key not in guards:
+            guards[guard_key] = self.source.make_guard(
+                functools.partial(type(self).CONTAINS_GUARD, key=key_value)
+            )
 
     def dict_pop(
         self,

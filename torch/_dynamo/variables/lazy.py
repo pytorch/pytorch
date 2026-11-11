@@ -604,14 +604,18 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         if not sources:
             return None
 
-        bases = {cls._source_base(source) for source in sources.values()}
+        bases = {
+            source.base if isinstance(source, ComputedLazyConstantSource) else source
+            for source in sources.values()
+        }
         if len(bases) != 1:
             return None
         base = next(iter(bases))
+        root = cls._source_base(base)
         if (
-            not isinstance(base, LocalSource)
-            or not base.is_input
-            or base.is_derefed_cell_contents
+            not isinstance(root, LocalSource)
+            or not root.is_input
+            or root.is_derefed_cell_contents
         ):
             return None
 
@@ -619,8 +623,9 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         for index, arg in enumerate(args):
             if index in sources:
                 source = sources[index]
-                if source != base and not isinstance(
-                    source, ComputedLazyConstantSource
+                if source != base and not (
+                    isinstance(source, ComputedLazyConstantSource)
+                    and source.base == base
                 ):
                     return None
                 values.append(source)
