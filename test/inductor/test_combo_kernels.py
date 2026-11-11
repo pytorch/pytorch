@@ -4805,7 +4805,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
     @requires_triton()
     def test_combo_kernel_peak_memory_wide_resnet(self, device):
         """A tight peak-memory threshold must measurably reduce the
-        runtime CUDA peak memory of the compiled forward pass compared
+        runtime device peak memory of the compiled forward pass compared
         to a permissive memory-gated baseline. Both runs pin
         combo_kernel_max_distance so candidate formation is identical
         and only the acceptance threshold differs."""
@@ -4894,6 +4894,23 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertEqual(peak, 350)
 
 
+# instantiate_device_type_tests only instantiates members in the subclass's own
+# __dict__, so a subclass that merely sets a config flag runs none of the tests it
+# inherits. Copy the inherited test methods into each per-subkernel subclass before
+# instantiation so they actually run under that configuration.
+def _npu_inherit_tests(child, parent):
+    for name, obj in vars(parent).items():
+        if name.startswith("test_") and name not in vars(child):
+            setattr(child, name, obj)
+
+
+_npu_inherit_tests(ComboKernelTestsPerSubkernelBlocks, ComboKernelTests)
+_npu_inherit_tests(ComboKernelBenchmarkTestsPerSubkernelBlocks, ComboKernelBenchmarkTests)
+_npu_inherit_tests(
+    ComboKernelDynamicShapesTestsPerSubkernelBlocks, ComboKernelDynamicShapesTests
+)
+
+
 instantiate_device_type_tests(
     ComboKernelBenchmarkCompileErrorTests, globals(), allow_xpu=True, except_for="cpu"
 )
@@ -4915,6 +4932,18 @@ instantiate_device_type_tests(
 )
 
 instantiate_device_type_tests(
+    ComboKernelTestsPerSubkernelBlocks, globals(), allow_xpu=True, except_for="cpu"
+)
+
+instantiate_device_type_tests(
+    ComboKernelBenchmarkTestsPerSubkernelBlocks, globals(), allow_xpu=True, except_for="cpu"
+)
+
+instantiate_device_type_tests(
+    ComboKernelDynamicShapesTestsPerSubkernelBlocks, globals(), allow_xpu=True, except_for="cpu"
+)
+
+instantiate_device_type_tests(
     ComboKernelCompileTimeAutotuneTests, globals(), allow_xpu=True, except_for="cpu"
 )
 
@@ -4930,8 +4959,25 @@ instantiate_device_type_tests(
     ComboKernelMetadataTests, globals(), allow_xpu=True, except_for="cpu"
 )
 
+class ComboKernelPeakMemoryPureLogicTests(TestCase):
+    """Peak-memory tests that need no accelerator at all.
+
+    They live in a class of their own because ComboKernelPeakMemoryTests is
+    instantiated with except_for="cpu"; keeping them there would drop them from
+    CPU-only runs.
+    """
+
+    combo_kernel_peak_memory_fake_only = True
+
+    test_estimate_region_peak_memory = ComboKernelPeakMemoryTests.test_estimate_region_peak_memory
+
+
 instantiate_device_type_tests(
     ComboKernelPeakMemoryTests, globals(), allow_xpu=True, except_for="cpu"
+)
+
+instantiate_device_type_tests(
+    ComboKernelPeakMemoryPureLogicTests, globals(), allow_xpu=True
 )
 
 
