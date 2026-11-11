@@ -1933,9 +1933,31 @@ def _are_functorch_transforms_active() -> _bool: ...
 
 # Defined in torch/csrc/cfg/cfg.cpp
 def _cfg_c_api() -> Any: ...
+@overload
 def _cfg_dispatch_trace(
     fn: Callable[[], Any],
+    detail: Literal[False] = False,
 ) -> tuple[Any, list[tuple[str, str, _int, _bool]]]: ...
+@overload
+def _cfg_dispatch_trace(
+    fn: Callable[[], Any],
+    detail: Literal[True],
+) -> tuple[Any, list[dict[str, Any]]]: ...
+
+class _CfgSite:
+    def info(self) -> dict[str, Any]: ...
+    def call(self, *operands: Any) -> Any: ...
+
+def _cfg_make_site(
+    kind: str,
+    run: Callable[[], Any],
+    operands: tuple[Any, ...],
+    *,
+    callee: Any = None,
+    kwnames: tuple[str, ...] | None = None,
+    constants: Sequence[_bool] | None = None,
+    skip_autograd: _bool = False,
+) -> tuple[Any, _CfgSite | None, str]: ...
 
 # Define in torch/csrc/autograd/init.cpp
 def _set_python_dispatcher(dispatcher: object) -> None: ...
