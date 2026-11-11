@@ -265,10 +265,6 @@ S390X_BLOCKLIST = [
     # these tests fail when mkldnn is not available
     "inductor/test_custom_post_grad_passes",
     "inductor/test_mkldnn_pattern_matcher",
-    "test_metal",
-    # lacks quantization support
-    "onnx/test_models_quantized_onnxruntime",
-    "onnx/test_pytorch_onnx_onnxruntime",
     # sysctl -n hw.memsize is not available
     "test_mps",
     # https://github.com/pytorch/pytorch/issues/102078
@@ -291,7 +287,6 @@ S390X_BLOCKLIST = [
     "fx/test_z3_gradual_types",
     "test_proxy_tensor",
     # depends on torchvision
-    "onnx/test_utility_funs",
     # crash on s390x that needs investigation
     "test_schema_check",
     "test_meta",
@@ -316,12 +311,10 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_stream_and_event",
     "test_cpp_extensions_mtia_backend",
     "test_jit_disabled",
-    "test_mobile_optimizer",
     "test_multiprocessing",
     "test_multiprocessing_spawn",
     "test_namedtuple_return_api",
     "test_overrides",
-    "test_show_pickle",
     "test_tensorexpr",
     "test_cuda_primary_ctx",
     "test_gpu_trace",
@@ -339,7 +332,6 @@ RUN_PARALLEL_BLOCKLIST = [
 CI_SERIAL_LIST = [
     "test_nn",
     "test_fake_tensor",
-    "test_cpp_api_parity",
     "test_reductions",
     "test_fx_backends",
     "test_cpp_extensions_jit",
@@ -380,15 +372,6 @@ XDIST_SERIAL_CPU_LIST = [
     "test_torch",
 ]
 XDIST_SERIAL_FILES = XDIST_SERIAL_LIST + XDIST_SERIAL_CPU_LIST
-# A subset of onnx tests that cannot run in parallel due to high memory usage.
-ONNX_SERIAL_LIST = [
-    "onnx/test_models",
-    "onnx/test_models_quantized_onnxruntime",
-    "onnx/test_models_onnxruntime",
-    "onnx/test_custom_ops",
-    "onnx/test_utility_funs",
-]
-
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
 CORE_TEST_LIST = [
     "test_autograd",
@@ -398,7 +381,6 @@ CORE_TEST_LIST = [
     "test_ops",
     "test_ops_gradients",
     "test_ops_fwd_gradients",
-    "test_ops_jit",
     "test_torch",
 ]
 
@@ -454,12 +436,6 @@ or `conda install ninja`. Alternatively, disable said tests with
 """
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
-
-JIT_EXECUTOR_TESTS = [
-    "test_jit_profiling",
-    "test_jit_legacy",
-    "test_jit_fuser_legacy",
-]
 
 INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
@@ -1128,7 +1104,6 @@ def run_gloo_test(test_module, test_directory, options):
         (
             "ProcessGroupGlooTest",
             "ProcessGroupGlooLazyInitTest",
-            "ProcessGroupGlooFRTest",
             "DistributedDataParallelTest",
         ),
     )
@@ -1925,11 +1900,6 @@ def parse_args():
         help="run non-serial tests with N pytest-xdist workers",
     )
     parser.add_argument(
-        "--exclude-jit-executor",
-        action="store_true",
-        help="exclude tests that are run for a specific jit config",
-    )
-    parser.add_argument(
         "--exclude-torch-export-tests",
         action="store_true",
         help="exclude torch export tests",
@@ -2025,8 +1995,6 @@ def must_serial(file: str | ShardedTest) -> bool:
         or file in RUN_PARALLEL_BLOCKLIST
         or file in CI_SERIAL_LIST
         or file in XDIST_SERIAL_FILES
-        or file in JIT_EXECUTOR_TESTS
-        or file in ONNX_SERIAL_LIST
         or NUM_PROCS == 1
     )
 
@@ -2140,7 +2108,6 @@ def get_selected_tests(options) -> list[str]:
         selected_tests = [
             "test_ops",
             "test_mps",
-            "test_metal",
             "test_modules",
             "test_linalg",
             "test_scaled_matmul_cuda",
@@ -2175,9 +2142,6 @@ def get_selected_tests(options) -> list[str]:
         options.exclude.extend(onnx_tests)
 
     # process exclusion
-    if options.exclude_jit_executor:
-        options.exclude.extend(JIT_EXECUTOR_TESTS)
-
     if options.exclude_distributed_tests:
         options.exclude.extend(DISTRIBUTED_TESTS)
 
@@ -2546,6 +2510,7 @@ def run_tests(
             raise RuntimeError(failure.message + keep_going_message)
 
     pool = None
+    serial_report_dir = None
     try:
         for test in selected_tests_serial:
             workers = serial_file_xdist_workers(test, options)
@@ -2561,10 +2526,6 @@ def run_tests(
             finally:
                 del os.environ["NUM_PARALLEL_PROCS"]
             finish(failure)
-
-        # Run tests marked as serial first
-        for test in selected_tests_parallel:
-            finish(run_module(test, "serial"))
 
         # This is used later to constrain memory per proc on the GPU. On ROCm
         # the number of procs is the number of GPUs, so we don't need to do this.
@@ -2588,10 +2549,22 @@ def run_tests(
             ):
                 pool.terminate()
 
-        for test in selected_tests_parallel:
+        # Each parallel pass reports how many @serialTest tests it left out (see
+        # SerialReportPlugin in conftest.py), so the serial passes below run only
+        # where needed instead of starting a process per test file.
+        serial_report_dir = tempfile.mkdtemp(prefix="serial-report-")
+        serial_reports = [
+            os.path.join(serial_report_dir, str(i))
+            for i in range(len(selected_tests_parallel))
+        ]
+        failures_before_pool = len(failures)
+        for test, serial_report in zip(selected_tests_parallel, serial_reports):
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
+                options_clone.additional_args.append(
+                    f"--serial-report-file={serial_report}"
+                )
             options_clone.additional_args.extend(marker_args("not serial"))
             pool.apply_async(
                 run_test_module,
@@ -2602,12 +2575,33 @@ def run_tests(
         pool.join()
         del os.environ["NUM_PARALLEL_PROCS"]
 
+        if (
+            len(failures) == failures_before_pool
+            or options.continue_through_error
+            or RERUN_DISABLED_TESTS
+        ):
+            for test, serial_report in zip(selected_tests_parallel, serial_reports):
+                if has_serial_tests(serial_report):
+                    finish(run_module(test, "serial"))
+
     finally:
         if pool:
             pool.terminate()
             pool.join()
+        if serial_report_dir:
+            shutil.rmtree(serial_report_dir, ignore_errors=True)
 
     return
+
+
+def has_serial_tests(serial_report: str) -> bool:
+    """Whether a parallel pass reported @serialTest tests in its shard. A missing
+    report (not run under pytest, or it failed before collection finished) counts
+    as yes, so a serial pass is never skipped without evidence."""
+    if not os.path.exists(serial_report):
+        return True
+    with open(serial_report) as f:
+        return any(int(line) > 0 for line in f if line.strip())
 
 
 def check_pip_packages() -> None:
