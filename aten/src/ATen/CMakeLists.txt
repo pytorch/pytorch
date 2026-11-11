@@ -798,11 +798,6 @@ if(NOT MSVC)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS m)
 endif()
 
-if(AT_NNPACK_ENABLED)
-  include_directories(${NNPACK_INCLUDE_DIRS})
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS nnpack) # cpuinfo is added below
-endif()
-
 if(MKLDNN_FOUND)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ${MKLDNN_LIBRARIES})
 endif(MKLDNN_FOUND)
