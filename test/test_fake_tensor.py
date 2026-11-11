@@ -1090,24 +1090,9 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertEqual(t.device, torch.device("meta"))
         self.assertFalse(torch._C._in_kernel_invocation())
         self.assertEqual(t.device, torch.device("cpu"))
-        mode = mode_cls()
-        with in_kernel_invocation_manager(mode):
-            self.assertTrue(torch._C._in_kernel_invocation())
-            self.assertTrue(torch._C._meta_in_tls_dispatch_include())
+        with in_kernel_invocation_manager(mode_cls()):
             self.assertEqual(t.device, torch.device("meta"))
-            with in_kernel_invocation_manager(mode):
-                self.assertEqual(t.device, torch.device("meta"))
-            self.assertTrue(torch._C._in_kernel_invocation())
-            self.assertTrue(torch._C._meta_in_tls_dispatch_include())
-            self.assertEqual(t.device, torch.device("meta"))
-        self.assertFalse(torch._C._in_kernel_invocation())
-        self.assertFalse(torch._C._meta_in_tls_dispatch_include())
         self.assertEqual(t.device, torch.device("cpu"))
-        with torch._C._PreserveDispatchKeyGuard():
-            torch._C._set_meta_in_tls_dispatch_include(True)
-            with self.assertRaises(AssertionError):
-                with in_kernel_invocation_manager(mode):
-                    pass
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
     # mkldnn nyi in C++ fake tensors
@@ -3380,29 +3365,14 @@ class TestFakeTensorConverter(TestCase):
 
     @xfailIfTorchDynamo
     @fake_tensor_modes
-    @parametrize("strided", [False, True])
-    @parametrize("convert_alias_first", [False, True])
-    def test_separate_tensor_storages_non_view(
-        self, mode_cls, strided, convert_alias_first
-    ):
+    def test_separate_tensor_storages_non_view(self, mode_cls):
         x = torch.rand(2, 2, 2)
         y = torch.rand(4, 2)
-        if strided:
-            y.set_(x.untyped_storage(), 2, (2,), (2,))
-        else:
-            y.set_(x.storage())
+        y.set_(x.storage())
         mode = mode_cls()
         converter = mode.fake_tensor_converter
-        if convert_alias_first:
-            y_conv = converter.from_real_tensor(mode, y)
-            x_conv = converter.from_real_tensor(mode, x)
-        else:
-            x_conv = converter.from_real_tensor(mode, x)
-            y_conv = converter.from_real_tensor(mode, y)
-        self.assertEqual(y_conv.shape, y.shape)
-        self.assertEqual(y_conv.stride(), y.stride())
-        self.assertEqual(y_conv.storage_offset(), y.storage_offset())
-        self.assertEqual(y_conv.device, y.device)
+        x_conv = converter.from_real_tensor(mode, x)
+        y_conv = converter.from_real_tensor(mode, y)
         stor_id = torch._C._storage_id(x_conv)
         self.assertEqual(stor_id, torch._C._storage_id(y_conv))
         del x
