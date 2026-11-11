@@ -853,6 +853,29 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         t = torch.tensor([])
         t.share_memory_()
 
+    def _test_shared_resize(self):
+        t = torch.arange(6, dtype=torch.int8)
+        t.share_memory_()
+        self.assertTrue(t.is_shared())
+        t.resize_(3)
+        self.assertEqual(t, torch.arange(3, dtype=torch.int8))
+        t.resize_(6)
+        self.assertEqual(t, torch.arange(6, dtype=torch.int8))
+        with self.assertRaisesRegex(
+            RuntimeError, "Trying to resize storage that is not resizable"
+        ):
+            t.resize_(7)
+
+    @unittest.skipIf(
+        platform == "darwin", "file descriptor strategy is not supported on macOS"
+    )
+    def test_fd_shared_resize(self):
+        self._test_shared_resize()
+
+    def test_fs_shared_resize(self):
+        with fs_sharing():
+            self._test_shared_resize()
+
     def _test_is_shared(self):
         t = torch.randn(5, 5)
         self.assertFalse(t.is_shared())
