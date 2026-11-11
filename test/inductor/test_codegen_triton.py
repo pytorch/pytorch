@@ -1172,6 +1172,7 @@ def helper(x):
         [
             (torch.float16, 0, True),
             (torch.float16, 1, False),
+            (torch.float16, 4, False),
             (torch.float16, 8, True),
             (torch.float32, 1, False),
             (torch.float32, 4, True),
