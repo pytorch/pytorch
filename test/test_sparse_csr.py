@@ -1516,6 +1516,11 @@ class TestSparseCSRDevice(TestCase):
                     self.assertEqual(b_nc.values().stride(), values.stride())
                 else:
                     self._check_nnz_change_rejected(b_nc, buf, lambda o: o.resize_as_sparse_(a), fill)
+            # to nnz 0, which writes nothing; copy_ sets the indices, as in out= ops
+            a0 = self.genSparseCompressedTensor(shape, layout=layout, device=device, index_dtype=index_dtype,
+                                                dtype=dtype, nnz=0, blocksize=blocksize)
+            b_nc, buf = self._with_strided_values(a, fill)
+            self._check_nnz_zero_result(b_nc, buf, lambda o: o.resize_as_sparse_(a0).copy_(a0))
 
             # cross-device resize is not supported: the template must be on the same device
             if device_type != 'cpu':
@@ -2702,6 +2707,9 @@ class TestSparseCSRDevice(TestCase):
             self._check_nnz_change_rejected(out, buf, lambda o: torch.add(a, b, alpha=0.5, out=o), fill)
             out, buf = self._with_strided_values(a, fill)
             self._check_nnz_change_rejected(out, buf, lambda o: o.add_(c), fill)
+            # the result has nnz 0
+            out, buf = self._with_strided_values(c, fill)
+            self._check_nnz_zero_result(out, buf, lambda o: torch.add(gen(0, index_dtype), gen(0, index_dtype), out=o))
 
     # Helpers for tests with non-contiguous values, gh-201268: the values of
     # the returned tensor are a stride-2 view into `buf`, a buffer twice as
@@ -2743,6 +2751,19 @@ class TestSparseCSRDevice(TestCase):
                                                       out.shape, out.layout)
         self.assertEqual(out.to_dense(), before)
 
+    def _check_nnz_zero_result(self, out, buf, fn):
+        # A result with nnz 0 writes nothing, so fn(out) may shrink the values
+        # view to zero elements, as out.zero_() does, and leaves the buffer
+        # untouched.
+        buf_before = buf.clone()
+        fn(out)
+        compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[out.layout]
+        torch._validate_sparse_compressed_tensor_args(compressed_indices_mth(out), plain_indices_mth(out), out.values(),
+                                                      out.shape, out.layout)
+        self.assertEqual(out._nnz(), 0)
+        self.assertEqual(out.to_dense(), torch.zeros(out.shape, dtype=out.dtype, device=out.device))
+        self.assertEqual(buf, buf_before)
+
     @skipMeta
     @skipCPUIfNoMklSparse
     @dtypes(torch.float64)
@@ -2774,6 +2795,12 @@ class TestSparseCSRDevice(TestCase):
                 # the result has a different nnz than out
                 out, buf = self._with_strided_values(gen((4, 5), 2 if nnz != 2 else 3), fill)
                 self._check_nnz_change_rejected(out, buf, fn, fill)
+
+            # the result has nnz 0
+            a0 = gen((4, 6), 0)
+            for fn in (lambda o: torch.mm(a0, b, out=o), lambda o: torch.addmm(gen((4, 5), 0), a0, b, out=o)):
+                out, buf = self._with_strided_values(gen((4, 5), 3), fill)
+                self._check_nnz_zero_result(out, buf, fn)
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add_errors(self, device, dtype):
@@ -2903,9 +2930,13 @@ class TestSparseCSRDevice(TestCase):
             self.assertEqual(actual.to_dense(), expected)
 
             # out with non-contiguous values, gh-201268
-            if actual._nnz() == 0:
-                return
             fill = -99
+            if actual._nnz() == 0:
+                out, buf = self._with_strided_values(
+                    self.genSparseCSRTensor(actual.shape, 2, dtype=dtype, device=device, index_dtype=index_dtype), fill)
+                self._check_nnz_zero_result(
+                    out, buf, lambda o: torch.sparse.sampled_addmm(c, a, b, alpha=alpha, beta=beta, out=o))
+                return
             out, buf = self._with_strided_values(actual, fill)
             values = out.values()
             values.fill_(fill)  # so that a lost write is caught

@@ -157,9 +157,10 @@ void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, int64_t dense_di
 
 void SparseCsrTensorImpl::resize_values_(IntArrayRef size) {
   // resize_ on a non-contiguous view would overwrite the storage between
-  // its elements.
+  // its elements. A resize to zero elements writes nothing, as in zero_().
   TORCH_CHECK(
-      values_.is_contiguous() || values_.sizes().equals(size),
+      values_.is_contiguous() || values_.sizes().equals(size) ||
+          c10::multiply_integers(size) == 0,
       "resizing the non-contiguous values of a sparse compressed tensor from size ",
       values_.sizes(), " to ", size, " is not supported: the values must be ",
       "contiguous or already have the same shape as the result. This usually ",
