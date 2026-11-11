@@ -209,6 +209,17 @@ struct OperandGuard {
 
 enum class Ret : uint8_t { Tensor, Bool, Int, Double };
 
+// A call of the entry kernel through its C++ signature. Tensors are passed by
+// reference straight out of their Python objects, so unlike the boxed call
+// this neither builds an IValue stack nor touches a reference count.
+struct TypedCall {
+  virtual ~TypedCall() = default;
+  virtual PyObject* call(
+      const TcfgSite& site,
+      PyObject* const* operands,
+      int32_t* status) const = 0;
+};
+
 } // namespace
 
 struct TcfgSite {
@@ -237,6 +248,9 @@ struct TcfgSite {
   std::vector<OperandGuard> guards;
   std::vector<ArgTemplate> args;
   Ret ret = Ret::Tensor;
+  // Null when the operator's signature is not one of the typed ones; the
+  // call then goes through the boxed calling convention.
+  std::unique_ptr<TypedCall> typed;
 };
 
 namespace {
@@ -673,6 +687,392 @@ at::Tensor wrapNumber(const at::Scalar& s) {
   return t;
 }
 
+// How a kernel argument of C++ type A is produced from an ArgTemplate.
+// accepts() is checked once when the site is built; prepare() runs per call
+// and returns false if the operand cannot be converted after all.
+template <class A>
+struct Unbox;
+
+template <>
+struct Unbox<const at::Tensor&> {
+  struct Holder {
+    const at::Tensor* ptr = nullptr;
+    at::Tensor temp;
+  };
+  static bool accepts(const ArgTemplate& a) {
+    if (a.kind == ArgTemplate::Const) {
+      return a.constant.isTensor();
+    }
+    return a.kind == ArgTemplate::Operand &&
+        (a.conv == Conv::Tensor || a.conv == Conv::WrappedNumber);
+  }
+  static bool prepare(
+      Holder& h,
+      const ArgTemplate& a,
+      PyObject* const* operands) {
+    if (a.kind == ArgTemplate::Const) {
+      h.ptr = &a.constant.toTensor();
+      return true;
+    }
+    PyObject* o = operands[a.operand];
+    if (a.conv == Conv::Tensor) {
+      h.ptr = &THPVariable_Unpack(o);
+      return true;
+    }
+    if (PyBool_Check(o)) {
+      h.temp = wrapNumber(at::Scalar(o == Py_True));
+    } else if (PyFloat_CheckExact(o)) {
+      h.temp = wrapNumber(at::Scalar(PyFloat_AS_DOUBLE(o)));
+    } else {
+      int overflow = 0;
+      const long long x = PyLong_AsLongLongAndOverflow(o, &overflow);
+      if (overflow != 0) {
+        return false;
+      }
+      h.temp = wrapNumber(at::Scalar(static_cast<int64_t>(x)));
+    }
+    h.ptr = &h.temp;
+    return true;
+  }
+  static const at::Tensor& get(Holder& h) {
+    return *h.ptr;
+  }
+};
+
+// The self argument of an in-place operator.
+template <>
+struct Unbox<at::Tensor&> {
+  struct Holder {
+    at::Tensor* ptr = nullptr;
+  };
+  static bool accepts(const ArgTemplate& a) {
+    return a.kind == ArgTemplate::Operand && a.conv == Conv::Tensor;
+  }
+  static bool prepare(
+      Holder& h,
+      const ArgTemplate& a,
+      PyObject* const* operands) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+    h.ptr = const_cast<at::Tensor*>(&THPVariable_Unpack(operands[a.operand]));
+    return true;
+  }
+  static at::Tensor& get(Holder& h) {
+    return *h.ptr;
+  }
+};
+
+template <>
+struct Unbox<const at::Scalar&> {
+  struct Holder {
+    at::Scalar value;
+  };
+  static bool accepts(const ArgTemplate& a) {
+    if (a.kind == ArgTemplate::Const) {
+      return a.constant.isScalar();
+    }
+    return a.kind == ArgTemplate::Operand &&
+        (a.conv == Conv::Int || a.conv == Conv::Double ||
+         a.conv == Conv::Bool || a.conv == Conv::IntAsDouble);
+  }
+  static bool prepare(
+      Holder& h,
+      const ArgTemplate& a,
+      PyObject* const* operands) {
+    if (a.kind == ArgTemplate::Const) {
+      h.value = a.constant.toScalar();
+      return true;
+    }
+    PyObject* o = operands[a.operand];
+    if (a.conv == Conv::Double) {
+      h.value = at::Scalar(PyFloat_AS_DOUBLE(o));
+    } else if (a.conv == Conv::Bool) {
+      h.value = at::Scalar(o == Py_True);
+    } else {
+      int overflow = 0;
+      const long long x = PyLong_AsLongLongAndOverflow(o, &overflow);
+      if (overflow != 0) {
+        return false;
+      }
+      h.value = a.conv == Conv::Int ? at::Scalar(static_cast<int64_t>(x))
+                                    : at::Scalar(static_cast<double>(x));
+    }
+    return true;
+  }
+  static const at::Scalar& get(Holder& h) {
+    return h.value;
+  }
+};
+
+template <>
+struct Unbox<int64_t> {
+  struct Holder {
+    int64_t value = 0;
+  };
+  static bool accepts(const ArgTemplate& a) {
+    if (a.kind == ArgTemplate::Const) {
+      return a.constant.isInt();
+    }
+    return a.kind == ArgTemplate::Operand && a.conv == Conv::Int;
+  }
+  static bool prepare(
+      Holder& h,
+      const ArgTemplate& a,
+      PyObject* const* operands) {
+    if (a.kind == ArgTemplate::Const) {
+      h.value = a.constant.toInt();
+      return true;
+    }
+    int overflow = 0;
+    h.value = PyLong_AsLongLongAndOverflow(operands[a.operand], &overflow);
+    return overflow == 0;
+  }
+  static int64_t get(Holder& h) {
+    return h.value;
+  }
+};
+
+template <>
+struct Unbox<bool> {
+  struct Holder {
+    bool value = false;
+  };
+  static bool accepts(const ArgTemplate& a) {
+    if (a.kind == ArgTemplate::Const) {
+      return a.constant.isBool();
+    }
+    return a.kind == ArgTemplate::Operand && a.conv == Conv::Bool;
+  }
+  static bool prepare(
+      Holder& h,
+      const ArgTemplate& a,
+      PyObject* const* operands) {
+    h.value = a.kind == ArgTemplate::Const ? a.constant.toBool()
+                                           : operands[a.operand] == Py_True;
+    return true;
+  }
+  static bool get(Holder& h) {
+    return h.value;
+  }
+};
+
+template <>
+struct Unbox<std::optional<at::ScalarType>> {
+  struct Holder {
+    std::optional<at::ScalarType> value;
+  };
+  static bool accepts(const ArgTemplate& a) {
+    return a.kind == ArgTemplate::Const &&
+        (a.constant.isNone() || a.constant.isInt());
+  }
+  static bool prepare(
+      Holder& h,
+      const ArgTemplate& a,
+      PyObject* const* /*operands*/) {
+    if (a.constant.isInt()) {
+      h.value = static_cast<at::ScalarType>(a.constant.toInt());
+    }
+    return true;
+  }
+  static std::optional<at::ScalarType> get(Holder& h) {
+    return h.value;
+  }
+};
+
+template <>
+struct Unbox<at::OptionalIntArrayRef> {
+  struct Holder {
+    c10::SmallVector<int64_t, 4> values;
+    bool present = false;
+  };
+  static bool accepts(const ArgTemplate& a) {
+    switch (a.kind) {
+      case ArgTemplate::Const:
+        return a.constant.isNone() || a.constant.isIntList();
+      case ArgTemplate::Operand:
+        return a.conv == Conv::IntAsList || a.conv == Conv::IntSeq;
+      case ArgTemplate::PackedInts:
+        return true;
+      default:
+        return false;
+    }
+  }
+  static bool prepare(
+      Holder& h,
+      const ArgTemplate& a,
+      PyObject* const* operands) {
+    const auto push = [&](PyObject* o) {
+      int overflow = 0;
+      h.values.push_back(PyLong_AsLongLongAndOverflow(o, &overflow));
+      return PyLong_CheckExact(o) && overflow == 0;
+    };
+    if (a.kind == ArgTemplate::Const) {
+      if (a.constant.isNone()) {
+        return true;
+      }
+      for (int64_t x : a.constant.toIntList()) {
+        h.values.push_back(x);
+      }
+      h.present = true;
+      return true;
+    }
+    h.present = true;
+    if (a.kind == ArgTemplate::PackedInts) {
+      for (int32_t k : a.packed) {
+        if (!push(operands[k])) {
+          return false;
+        }
+      }
+      return true;
+    }
+    PyObject* o = operands[a.operand];
+    if (a.conv == Conv::IntAsList) {
+      return push(o);
+    }
+    const Py_ssize_t n = PySequence_Fast_GET_SIZE(o);
+    for (Py_ssize_t i = 0; i < n; i++) {
+      if (!push(PySequence_Fast_GET_ITEM(o, i))) {
+        return false;
+      }
+    }
+    return true;
+  }
+  static at::OptionalIntArrayRef get(Holder& h) {
+    if (!h.present) {
+      return std::nullopt;
+    }
+    return at::IntArrayRef(h.values.data(), h.values.size());
+  }
+};
+
+PyObject* toPython(const TcfgSite& /*site*/, at::Tensor&& t) {
+  return THPVariable_Wrap(std::move(t));
+}
+PyObject* toPython(const TcfgSite& /*site*/, at::Tensor& t) {
+  return THPVariable_Wrap(t);
+}
+PyObject* toPython(const TcfgSite& /*site*/, bool b) {
+  return Py_NewRef(b ? Py_True : Py_False);
+}
+PyObject* toPython(const TcfgSite& site, const at::Scalar& s) {
+  switch (site.ret) {
+    case Ret::Bool:
+      return Py_NewRef(s.toBool() ? Py_True : Py_False);
+    case Ret::Int:
+      return PyLong_FromLongLong(s.toLong());
+    default:
+      return PyFloat_FromDouble(s.toDouble());
+  }
+}
+
+template <class R>
+bool returns(Ret ret) {
+  if constexpr (std::is_same_v<R, bool>) {
+    return ret == Ret::Bool;
+  } else if constexpr (std::is_same_v<R, at::Scalar>) {
+    return ret != Ret::Tensor;
+  } else {
+    return ret == Ret::Tensor;
+  }
+}
+
+template <class R, class... A>
+struct TypedCallImpl final : TypedCall {
+  explicit TypedCallImpl(c10::TypedOperatorHandle<R(A...)> op)
+      : op_(std::move(op)) {}
+
+  PyObject* call(
+      const TcfgSite& site,
+      PyObject* const* operands,
+      int32_t* status) const override {
+    std::tuple<typename Unbox<A>::Holder...> holders;
+    if (!prepare(site, operands, holders, std::index_sequence_for<A...>{})) {
+      *status = TCFG_MISS;
+      return nullptr;
+    }
+    return invoke(site, holders, std::index_sequence_for<A...>{});
+  }
+
+ private:
+  template <size_t... I>
+  static bool prepare(
+      const TcfgSite& site,
+      PyObject* const* operands,
+      std::tuple<typename Unbox<A>::Holder...>& holders,
+      std::index_sequence<I...> /*unused*/) {
+    return (
+        Unbox<A>::prepare(std::get<I>(holders), site.args[I], operands) && ...);
+  }
+
+  template <size_t... I>
+  PyObject* invoke(
+      const TcfgSite& site,
+      std::tuple<typename Unbox<A>::Holder...>& holders,
+      std::index_sequence<I...> /*unused*/) const {
+    return toPython(
+        site,
+        op_.redispatch(site.entry_ks, Unbox<A>::get(std::get<I>(holders))...));
+  }
+
+  c10::TypedOperatorHandle<R(A...)> op_;
+};
+
+template <class R, class... A>
+std::unique_ptr<TypedCall> tryTyped(const TcfgSite& site) {
+  if (site.args.size() != sizeof...(A) || !returns<R>(site.ret)) {
+    return nullptr;
+  }
+  size_t i = 0;
+  if (!(Unbox<A>::accepts(site.args[i++]) && ...)) {
+    return nullptr;
+  }
+  try {
+    // typed() verifies the signature against the one the kernels were
+    // registered with.
+    return std::make_unique<TypedCallImpl<R, A...>>(site.op.typed<R(A...)>());
+  } catch (const c10::Error&) {
+    return nullptr;
+  }
+}
+
+std::unique_ptr<TypedCall> makeTypedCall(const TcfgSite& site) {
+  // Only operators with native kernels are known to have a C++ signature
+  // registered for typed() to check against.
+  if (site.op.operator_name().name.rfind("aten::", 0) != 0) {
+    return nullptr;
+  }
+  using T = const at::Tensor&;
+  using S = const at::Scalar&;
+  using Self = at::Tensor&;
+  using Dtype = std::optional<at::ScalarType>;
+  using Dims = at::OptionalIntArrayRef;
+#define TCFG_TRY(...)                             \
+  if (auto typed = tryTyped<__VA_ARGS__>(site)) { \
+    return typed;                                 \
+  }
+  TCFG_TRY(at::Tensor, T)
+  TCFG_TRY(at::Tensor, T, T)
+  TCFG_TRY(at::Tensor, T, T, S)
+  TCFG_TRY(at::Tensor, T, S)
+  TCFG_TRY(at::Tensor, T, S, S)
+  TCFG_TRY(at::Tensor, T, T, T)
+  TCFG_TRY(at::Tensor, T, T, T, S)
+  TCFG_TRY(at::Tensor, T, T, T, S, S)
+  TCFG_TRY(at::Tensor, T, Dtype)
+  TCFG_TRY(at::Tensor, T, Dims, bool, Dtype)
+  TCFG_TRY(at::Tensor, T, int64_t)
+  TCFG_TRY(at::Tensor, T, int64_t, int64_t)
+  TCFG_TRY(at::Tensor, T, int64_t, Dtype)
+  TCFG_TRY(bool, T)
+  TCFG_TRY(at::Scalar, T)
+  TCFG_TRY(Self, Self)
+  TCFG_TRY(Self, Self, T)
+  TCFG_TRY(Self, Self, T, S)
+  TCFG_TRY(Self, Self, S)
+  TCFG_TRY(Self, Self, S, S)
+#undef TCFG_TRY
+  return nullptr;
+}
+
 TcfgSite* siteFromTraceImpl(
     const TcfgTrace& trace,
     const TcfgPyOp& pyop,
@@ -791,6 +1191,7 @@ TcfgSite* siteFromTraceImpl(
   site->args = std::move(binder.args);
   // Ownership of the identity references moved into the site.
   binder.guards.clear();
+  site->typed = makeTypedCall(*site);
   return site.release();
 }
 
@@ -967,6 +1368,13 @@ PyObject* siteCall(TcfgSite* site, PyObject* const* operands, int32_t* status) {
   if (skips_autograd) {
     tls_guard.emplace(site->entry_tls);
   }
+  if (site->typed) {
+    PyObject* result = site->typed->call(*site, operands, status);
+    if (result != nullptr) {
+      *status = TCFG_OK;
+    }
+    return result;
+  }
   StackLease lease;
   torch::jit::Stack& stack = *lease.stack;
   for (const ArgTemplate& arg : site->args) {
@@ -1036,6 +1444,7 @@ PyObject* siteInfo(const TcfgSite* site) {
   info["chain"] = chain;
   info["entry_level"] = site->entry_level;
   info["skips_autograd"] = site->skips_autograd;
+  info["calling_convention"] = site->typed ? "unboxed" : "boxed";
   py::list args;
   for (size_t a = 0; a < site->args.size(); a++) {
     const ArgTemplate& arg = site->args[a];
