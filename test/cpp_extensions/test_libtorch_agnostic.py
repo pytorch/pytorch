@@ -1314,6 +1314,8 @@ for warning in w:
             actual = getattr(libtorch_agnostic.ops, f"my_is_{name}")(t)
             self.assertEqual(actual, name == flag)
 
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
     @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("add_c", [False, True])
