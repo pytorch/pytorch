@@ -710,7 +710,7 @@ class CompiledNodeArgs {
     constexpr uint8_t encode_as_u64 = std::numeric_limits<uint8_t>::max();
     constexpr uint8_t encode_as_u32 = encode_as_u64 - 1;
     constexpr uint8_t encode_as_u16 = encode_as_u64 - 2;
-    if (C10_UNLIKELY(s >= encode_as_u16)) {
+    if (s >= encode_as_u16) [[unlikely]] {
       // first write a byte indicating the path we followed, then the data
       if (s <= std::numeric_limits<uint16_t>::max()) {
         // 3 bytes
@@ -753,8 +753,8 @@ class CompiledNodeArgs {
  private:
   template <typename T>
   void specialize_on_bytes(const T& t) {
-    while (C10_UNLIKELY(
-        _specialization_key_size + sizeof(T) > _specialization_key_storage)) {
+    while (_specialization_key_size + sizeof(T) > _specialization_key_storage)
+        [[unlikely]] {
       _specialization_key_storage *= 2;
       // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       _specialization_key = (uint8_t*)std::realloc(
