@@ -25,6 +25,7 @@ from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
+    _get_reduce_scatter_slot_numels,
     _wait_all_gather,
     AllGather,
     AllGatherResult,
@@ -282,6 +283,10 @@ class FSDPParamGroup:
         # resolved into the single shared
         # comm_ctx.reduce_scatter_max_input_buffers that post_backward reads.
         self.reduce_scatter_max_input_buffers: int = 1
+        # Byte alignment of each per-parameter slot in the all-gather and
+        # reduce-scatter communication buffers (set via
+        # FSDPModule.set_comm_buffer_alignment); 1 packs slots back-to-back
+        self.comm_buffer_alignment: int = 1
         # Optional custom factor for the gradient reduction op (e.g. to divide
         # by a factor other than the world size)
         self.gradient_divide_factor: float | None = None
@@ -491,6 +496,7 @@ class FSDPParamGroup:
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
                 self._all_gather_comm,
+                comm_buffer_alignment=self.comm_buffer_alignment,
             )
 
     @_disable_functorch_if_active
@@ -776,6 +782,13 @@ class FSDPParamGroup:
                     if isinstance(self.mesh_info, DDPMeshInfo)
                     else []
                 )
+                if isinstance(self.mesh_info, HSDPMeshInfo):
+                    partial_sizes = _get_reduce_scatter_slot_numels(
+                        partial_sizes,
+                        self.comm_buffer_alignment,
+                        reduce_dtype,
+                        self.mesh_info.shard_mesh_size,
+                    )
                 partial_input = None
                 if partial_sizes:
                     rs_stream = self.comm_ctx.reduce_scatter_stream
@@ -823,6 +836,7 @@ class FSDPParamGroup:
                     self._all_reduce_hook,
                     self.force_sum_reduction_for_comms,
                     prepare_reduce_scatter_inputs=self._prepare_reduce_scatter_inputs,
+                    comm_buffer_alignment=self.comm_buffer_alignment,
                 )
                 self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                     self._post_reduce_event
