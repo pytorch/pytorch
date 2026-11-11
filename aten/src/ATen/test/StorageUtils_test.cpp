@@ -19,6 +19,7 @@ TEST(StorageUtilsTest, shm_storage_refcount) {
   at::share_memory_(*t1);
   ASSERT_EQ(t1->storage().allocator(), nullptr)
       << "Expect original storage allocator to be detached";
+  ASSERT_FALSE(t1->storage().resizable());
   ASSERT_NE(verificationTensor.storage().allocator(), nullptr);
   ASSERT_EQ(t1->storage().use_count(), 2) << "Expect refcount to be the same";
   ASSERT_EQ(t2->storage().use_count(), 2);

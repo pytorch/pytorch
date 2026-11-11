@@ -51,6 +51,7 @@ C10_EXPORT void share_memory_(TensorBase& t) {
   c10::StorageImpl* newStorageImpl = newStorage.unsafeGetStorageImpl();
   origStorageImpl->set_data_ptr(std::move(newStorageImpl->mutable_data_ptr()));
   origStorageImpl->set_allocator(newStorageImpl->allocator());
+  origStorageImpl->set_resizable(false);
 }
 
 } // namespace at
