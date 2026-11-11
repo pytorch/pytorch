@@ -677,8 +677,8 @@ class StorageWeakRefWrapper:
         return self.ref.cdata
 
     def swap_weakref(self, cdata: Any) -> None:
-        self.ref.__del__()
-        self.ref.cdata = cdata
+        """Take ownership of ``cdata``, a weak reference returned by ``_weak_ref()``."""
+        self.ref = StorageWeakRef.from_weakref(cdata)
 
     def data_ptr(self) -> int:
         "NB: returns the data ptr even if the storage has expired"
