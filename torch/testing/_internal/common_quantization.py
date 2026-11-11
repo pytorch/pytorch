@@ -33,7 +33,6 @@ from torch.ao.quantization import (
     propagate_qconfig_,
     QConfig,
     QConfigMapping,
-    quantize,
     QuantStub,
     QuantType,
     QuantWrapper,
@@ -44,7 +43,6 @@ from torch.ao.quantization.quantization_mappings import (
     get_default_qconfig_propagation_list,
 )
 
-from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
 
@@ -498,10 +496,6 @@ except ImportError:
 skip_if_no_torchvision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
-def get_script_module(model, tracing, data):
-    return torch.jit.trace(model, data) if tracing else torch.jit.script(model)
-
-
 def lengths_to_offsets(t, offset_type=np.int64, use_begin_offset=True):
     """
     Convert lengths to offsets for embedding_bag
@@ -861,35 +855,6 @@ class QuantizationTestCase(TestCase):
                 self.assertEqual(
                     packed_params.param.__getstate__()[0][0], wt_dtype_map[dtype]
                 )
-
-    def checkScriptable(self, orig_mod, calib_data, check_save_load=False):
-        scripted = torch.jit.script(orig_mod)
-        self._checkScriptable(orig_mod, scripted, calib_data, check_save_load)
-
-        # Use first calib_data entry as trace input
-        traced = torch.jit.trace(orig_mod, calib_data[0])
-        self._checkScriptable(orig_mod, traced, calib_data, check_save_load)
-
-    # Call this twice: once for a scripted module and once for a traced module
-    def _checkScriptable(self, orig_mod, script_mod, calib_data, check_save_load):
-        self._checkModuleCorrectnessAgainstOrig(orig_mod, script_mod, calib_data)
-
-        # Test save/load
-        buffer = io.BytesIO()
-        torch.jit.save(script_mod, buffer)
-
-        buffer.seek(0)
-        loaded_mod = torch.jit.load(buffer)
-        # Pending __get_state_ and __set_state__ support
-        # See tracking task https://github.com/pytorch/pytorch/issues/23984
-        if check_save_load:
-            self._checkModuleCorrectnessAgainstOrig(orig_mod, loaded_mod, calib_data)
-
-    def _checkModuleCorrectnessAgainstOrig(self, orig_mod, test_mod, calib_data):
-        for inp in calib_data:
-            ref_output = orig_mod(*inp)
-            scripted_output = test_mod(*inp)
-            self.assertEqual(scripted_output, ref_output)
 
     def checkGraphModuleNodes(
         self,
@@ -1329,9 +1294,6 @@ class QuantizationTestCase(TestCase):
             embedding_unpack(loaded_qemb._packed_params._packed_weight),
         )
 
-        # Test JIT serialization
-        self.checkScriptable(qemb, [inputs], check_save_load=True)
-
         # Test from_float call
         if is_emb_bag:
             float_embedding = torch.nn.EmbeddingBag(
@@ -1367,59 +1329,6 @@ class QuantizationTestCase(TestCase):
         q_embeddingbag(*inputs)
 
         self.assertTrue(expected_name in str(q_embeddingbag))
-
-
-class QuantizationLiteTestCase(QuantizationTestCase):
-    def _create_quantized_model(self, model_class: type[torch.nn.Module], **kwargs):
-        # Creates quantized model for testing mobile script modules
-        qengine = "qnnpack"
-        with override_quantized_engine(qengine):
-            # FIXME(rec): shouldn't qconfig be passed to quantize?
-            qconfig = torch.ao.quantization.get_default_qconfig(qengine)  # noqa: F841
-            model = model_class(**kwargs)
-            model = quantize(model, test_only_eval_fn, [self.calib_data])
-
-        return model
-
-    def _compare_script_and_mobile(self, model: torch.nn.Module, input: torch.Tensor):
-        # Compares the numerical outputs for script and lite modules
-        qengine = "qnnpack"
-        with override_quantized_engine(qengine):
-            script_module = torch.jit.script(model)
-            script_module_result = script_module(input)
-
-            max_retry = 5
-            for retry in range(1, max_retry + 1):
-                # retries `max_retry` times; breaks iff succeeds else throws exception
-                try:
-                    buffer = io.BytesIO(
-                        script_module._save_to_buffer_for_lite_interpreter()
-                    )
-                    buffer.seek(0)
-                    mobile_module = _load_for_lite_interpreter(buffer)
-
-                    mobile_module_result = mobile_module(input)
-
-                    torch.testing.assert_close(
-                        script_module_result, mobile_module_result
-                    )
-                    mobile_module_forward_result = mobile_module.forward(input)
-                    torch.testing.assert_close(
-                        script_module_result, mobile_module_forward_result
-                    )
-
-                    mobile_module_run_method_result = mobile_module.run_method(
-                        "forward", input
-                    )
-                    torch.testing.assert_close(
-                        script_module_result, mobile_module_run_method_result
-                    )
-                except AssertionError as e:
-                    if retry == max_retry:
-                        raise e
-                    else:
-                        continue
-                break
 
 
 # Below are a series of toy models to use in testing quantization
