@@ -204,7 +204,9 @@ class TestAutocastMPS(TestCase):
         self.assertEqual(y.to(y_autocast.dtype), y_autocast)
 
     # Regression test for https://github.com/pytorch/pytorch/issues/201630
-    @parametrize("backend", [None, "eager", "aot_eager", "inductor"])
+    # None and "eager" are baselines that worked before the fix. "aot_eager"
+    # used to fail.
+    @parametrize("backend", [None, "eager", "aot_eager"])
     def test_nested_autocast_compiled(self, backend):
         def f(x):
             with torch.autocast(device_type=x.device.type, enabled=False):
@@ -213,6 +215,7 @@ class TestAutocastMPS(TestCase):
         device = "mps"
 
         x = torch.rand(64, 64, device=device) + 10.0
+        x.requires_grad_()
         torch._dynamo.reset()
         fn = f if backend is None else torch.compile(f, fullgraph=True, backend=backend)
         with torch.autocast(device, dtype=torch.float16):
@@ -14308,6 +14311,25 @@ class TestRNNMPS(TestCaseMPS):
         for num_layers in [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, backward=True, **test_options)
+
+    def test_lstm_dtype_mismatch_error(self, device="mps"):
+        dtype = torch.float32
+        other_dtype = torch.float16
+
+        seq_len = 3
+        batch_size = 5
+        hidden_size = 7
+        input_size = 11
+        num_layers = 2
+
+        rnn = nn.LSTM(input_size=input_size, hidden_size=hidden_size, dtype=dtype)
+
+        input = torch.randn(seq_len, batch_size, input_size, dtype=other_dtype)
+        hx = torch.randn(num_layers, batch_size, hidden_size, dtype=dtype)
+        cx = torch.randn(num_layers, batch_size, hidden_size, dtype=dtype)
+
+        with self.assertRaisesRegex(ValueError, r"does not match weight dtype"):
+            output, (hn, cn) = rnn(input, (hx, cx))
 
     # Regression test for https://github.com/pytorch/pytorch/issues/190057:
     # dropout=1.0 produced 0 * inf = NaN between layers.
