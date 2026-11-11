@@ -12,12 +12,12 @@ namespace at::impl {
 // ops FakeTensorMode decomposes under static shapes
 //
 // The tables are kept in sync by hooks at the Python registration sites, which
-// call fakeDispatchTableAdd/Remove, except StaticShapeDecomp, filled once:
+// call fakeDispatchTableAdd/Remove:
 //   - Decomp:   torch._decomp.decomposition_table (post-autograd
 //   decompositions),
-//               via torch._decomp._add_op_to_registry
+//               via torch._decomp._add_op_to_registry / remove_decompositions
 //   - Meta:     torch._decomp.meta_table (Python meta registrations),
-//               via torch._decomp._add_op_to_registry
+//               via torch._decomp._add_op_to_registry / remove_decompositions
 //   - OpImpl:   the exact-identity tier of
 //               torch._subclasses.fake_impls.op_implementations_dict, via
 //               register_op_impl / _deregister_op_impl, minus ops whose C++
@@ -28,15 +28,12 @@ namespace at::impl {
 //   - PythonCIA: Python CompositeImplicitAutograd overrides, via
 //                OpOverload.py_impl
 //   - StaticShapeDecomp: default static-shape decomposition eligibility,
-//                recorded once after torch._meta_registrations imports finish.
-//                Callers still check Meta membership and sparse inputs.
-//                This precise filter avoids declined Python callbacks while
-//                C++ follows Python's decomposition-selection policy.
-//                Assumes eligibility cannot grow after import: registrations,
-//                removals, direct dictionary writes and mode-method overrides
-//                are not mirrored. Stale positives can over-reject; missed
-//                additions can incorrectly reach Meta. The parity test checks
-//                the initial table only.
+//                initialized after torch._meta_registrations imports finish,
+//                then updated by register_decomposition /
+//                remove_decompositions. Callers still check Meta membership and
+//                sparse inputs. Direct dictionary edits and mode-method
+//                overrides are not mirrored; Python's first-dispatch
+//                classification cache is unchanged.
 //
 // This does not store the Python callables and is backed by c10::LeftRight
 enum class FakeDispatchCategory {
@@ -60,7 +57,7 @@ inline uint32_t fakeDispatchCategoryBit(FakeDispatchCategory category) {
 }
 
 // Record/erase that `name` belongs to `category`. Called from the Python
-// registration hooks listed above, and once at import for StaticShapeDecomp.
+// registration hooks listed above, including initialization at import.
 TORCH_API void fakeDispatchTableAdd(
     FakeDispatchCategory category,
     const c10::OperatorName& name);
