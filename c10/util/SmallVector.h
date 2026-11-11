@@ -176,7 +176,7 @@ class SmallVectorTemplateCommon
   /// NewSize.
   bool isSafeToReferenceAfterResize(const void* Elt, size_t NewSize) {
     // Past the end.
-    if (C10_LIKELY(!isReferenceToStorage(Elt)))
+    if (!isReferenceToStorage(Elt)) [[likely]]
       return true;
 
     // Return false if Elt will be destroyed by shrinking.
@@ -237,13 +237,13 @@ class SmallVectorTemplateCommon
       const T& Elt,
       size_t N) {
     size_t NewSize = This->size() + N;
-    if (C10_LIKELY(NewSize <= This->capacity()))
+    if (NewSize <= This->capacity()) [[likely]]
       return &Elt;
 
     bool ReferencesStorage = false;
     int64_t Index = -1;
     if constexpr (!U::TakesParamByValue) {
-      if (C10_UNLIKELY(This->isReferenceToStorage(&Elt))) {
+      if (This->isReferenceToStorage(&Elt)) [[unlikely]] {
         ReferencesStorage = true;
         Index = &Elt - This->begin();
       }
@@ -997,7 +997,7 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
 
   template <typename... ArgTypes>
   reference emplace_back(ArgTypes&&... Args) {
-    if (C10_UNLIKELY(this->size() >= this->capacity()))
+    if (this->size() >= this->capacity()) [[unlikely]]
       return this->growAndEmplaceBack(std::forward<ArgTypes>(Args)...);
 
     ::new ((void*)this->end()) T(std::forward<ArgTypes>(Args)...);
