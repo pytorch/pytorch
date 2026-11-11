@@ -750,7 +750,8 @@ def _load_libssl():
     for name in ("libssl.so.3", "libssl.so.1.1", "libssl.so"):
         try:
             # SSL_CTX_set_num_tickets excludes OpenSSL 1.1.0, like the C++ loader.
-            return hasattr(ctypes.CDLL(name), "SSL_CTX_set_num_tickets")
+            if hasattr(ctypes.CDLL(name), "SSL_CTX_set_num_tickets"):
+                return True
         except OSError:
             pass
     return False
@@ -966,6 +967,7 @@ class TCPStoreTLSTest(TestCase):
         listener.settimeout(60)
         received = []
         errors = []
+        partial_record_sent = threading.Event()
 
         def recv_exact(conn, n):
             data = b""
@@ -984,9 +986,10 @@ class TCPStoreTLSTest(TestCase):
                     recv_exact(tls, 5)  # VALIDATE
                     ping = recv_exact(tls, 5)
                     tls.sendall(ping[1:])
-                    recv_exact(tls, 1 + 8 + 8 + len("/k"))  # WAIT
                     # Header of an application data record without its body.
                     os.write(tls.fileno(), b"\x17\x03\x03\x00\x20")
+                    partial_record_sent.set()
+                    recv_exact(tls, 1 + 8 + 8 + len("/k"))  # WAIT
                     received.append(recv_exact(tls, 1))
             except Exception as e:
                 errors.append(e)
@@ -1009,6 +1012,7 @@ class TCPStoreTLSTest(TestCase):
             tls_key=self.client[1],
             tls_ca=self.ca,
         )
+        self.assertTrue(partial_record_sent.wait(60), "partial record not sent")
         start = time.monotonic()
         # The wait times out, then the server closes after CANCEL_WAIT.
         with self.assertRaisesRegex(DistNetworkError, "Failed to recv"):
