@@ -3279,17 +3279,74 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(x_off, expected, atol=0, rtol=0)
 
     @onlyCUDA
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.complex64)
     def test_logcumsumexp_outer_dim(self, device, dtype):
         cases = [((16, 5), 0), ((1024, 4), 0), ((257, 33), 0), ((4, 300, 33), 1), ((65536, 4), 0)]
+        ref_dtype = torch.complex128 if dtype.is_complex else torch.double
         for shape, dim in cases:
             x = torch.randn(shape, dtype=dtype, device=device)
-            expected = torch.logcumsumexp(x.cpu().double(), dim).to(dtype)
+            expected = torch.logcumsumexp(x.cpu().to(ref_dtype), dim).to(dtype)
             tol = {}
-            if not TEST_WITH_ROCM and dtype == torch.float and shape[dim] > 4096:
+            if not TEST_WITH_ROCM and dtype in (torch.float, torch.complex64) and shape[dim] > 4096:
                 # CUDA scans each column serially, so float32 rounding error grows with the scan length.
                 tol = {"atol": 1e-5, "rtol": 2e-5}
             self.assertEqual(torch.logcumsumexp(x, dim), expected, **tol)
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    def test_cumulative_ops_special_values(self, device, dtype):
+        # -inf, inf and nan on lines long enough to cross the tile and chunk boundaries of the ROCm
+        # scan kernels, along an outer dim and along the last dim.
+        inf, nan = float("inf"), float("nan")
+        cases = [((4, 300, 33), 1), ((65536, 4), 0), ((4, 65536), 1)]
+        for (shape, dim), op in product(cases, (torch.cumsum, torch.cumprod, torch.logcumsumexp)):
+            n = shape[dim]
+            if op is torch.logcumsumexp:
+                x = torch.randn(shape, dtype=dtype)
+            else:
+                # Finite results stay exact in `dtype` for any combine order.
+                vals = torch.tensor([-1, 0, 1] if op is torch.cumsum else [-1, 1], dtype=dtype)
+                x = vals[torch.randint(len(vals), shape)]
+            # Scan line k is x.movedim(dim, 0)[:, 0, ..., 0, k].
+            lines = x.movedim(dim, 0)
+            pre = (0,) * (x.dim() - 2)
+            lines[(slice(0, n // 2),) + pre + (0,)] = -inf
+            lines[(n // 3,) + pre + (1,)] = inf
+            lines[(2 * n // 3,) + pre + (2,)] = nan
+            if op is torch.logcumsumexp:
+                lines[(slice(None),) + pre + (3,)] = -inf
+                expected = op(x.double(), dim).to(dtype)
+                tol = {}
+                if not TEST_WITH_ROCM and dtype == torch.float and n > 4096:
+                    tol = {"atol": 1e-5, "rtol": 2e-5}
+            else:
+                # inf + -inf and 0 * inf turn the rest of the line into nan.
+                lines[(n // 4,) + pre + (3,)] = inf if op is torch.cumsum else 0
+                lines[(n // 2,) + pre + (3,)] = -inf if op is torch.cumsum else inf
+                expected = op(x, dim)
+                tol = {"atol": 0, "rtol": 0}
+            x = x.to(device)
+            self.assertEqual(op(x, dim), expected, **tol)
+            if op is not torch.logcumsumexp:
+                getattr(x, op.__name__ + "_")(dim)
+                self.assertEqual(x, expected, **tol)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @largeTensorTest('12GB')
+    def test_cumsum_more_than_2_32_elements(self, device):
+        # On CUDA these shapes give each line to a single thread (outer dim) or block (last dim),
+        # which is too slow for a unit test.
+        for shape, dim in (((2, 2**30 + 8, 2), 1), ((2, 2**31 + 16), 1)):
+            x = torch.ones(shape, dtype=torch.uint8, device=device)
+            res = x.cumsum(dim, dtype=torch.uint8).movedim(dim, 0)
+            del x
+            n = shape[dim]
+            for start in (0, n // 2, n - 1024):
+                got = res[start:start + 1024]
+                expected = ((torch.arange(start, start + 1024, device=device) + 1) % 256).to(torch.uint8)
+                expected = expected.view(-1, *([1] * (got.dim() - 1))).expand_as(got)
+                self.assertEqual(got, expected, atol=0, rtol=0)
 
     def _test_cumminmax_helper(self, x, fn, expected_val, expected_ind):
         val, ind = fn(x, -1)
