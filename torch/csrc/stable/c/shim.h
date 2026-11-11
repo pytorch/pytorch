@@ -415,8 +415,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
     void* C,
     int32_t is_vnni);
 
-AOTI_TORCH_EXPORT AOTITorchError
-torch_cpublas_brgemm_release(int32_t is_vnni);
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm_release(int32_t is_vnni);
 
 AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_default_real(
     int32_t dtype,
