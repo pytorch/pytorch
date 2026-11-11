@@ -144,6 +144,10 @@ _stream = _L.stream
 # _L.compile_kernel uses fake operands and tvm-ffi, avoiding per-call tensor wrapping.
 _compile = _L.compile_kernel
 
+# The compiled-kernel caches (this, kernel_rowtile._CACHE, kernel_coltile._CACHE and
+# kernel_xcta._PLAN) stay unbounded: evicting a kernel drops its last reference and
+# CuTeDSL unloads its CUDA module, which a captured CUDA graph may still launch. _PLAN,
+# kernel_xcta._GEOM and _REPLAYS can be LRUs since these caches keep the kernels alive.
 _COMPILE_CACHE = {}  # structural key -> compiled kernel (one per cache_sig)
 # (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
 _PLAN = LRUCache(1024)
@@ -414,9 +418,12 @@ def _sm107_outputs(
 _ORDERED_COL_DTYPES = _B200_DTYPES
 # Routing ccs, deliberately separate from the launch-policy _B200_CCS: the route and the
 # policies are measured and extended independently. kernel_coltile._ORDERED_COL_CONFIGS
-# (10, 0) entries are reached through _reduce and the b200_ragged_c4095_ordered hand-off,
-# (10, 7) entries through select_col_config hand-offs; entries for architectures outside
-# _ORDERED_COL_CCS, _B200_CCS and (10, 7) serve direct reduce_ordered_col calls only.
+# has no (10, 0) entries: B200 split views reached through _reduce and the
+# b200_ragged_c4095_ordered hand-off take the selector's fallback,
+# OrderedColConfig(0, tile_columns=WARP, full_tiles=...), which its B200 full-tile rules
+# narrow to 16-column tiles at some shapes. Its (10, 7) entries are reached through
+# select_col_config hand-offs; entries for architectures outside _ORDERED_COL_CCS,
+# _B200_CCS and (10, 7) serve direct reduce_ordered_col calls only.
 _ORDERED_COL_CCS = ((10, 0),)
 _ORDERED_COL_MIN_R = 128
 _ORDERED_COL_MAX_R = 8192
@@ -434,8 +441,9 @@ _ORDERED_COL_GENERAL_NORM_MIN_OUTPUTS = 16384
 # views route from R = 32768; C = 192 and 256 won 1.19-3.3x at every R from 24577.
 # General-p norms (an exp/log leaf; p = 3 and 0.5 measured) run 0.34-0.36x at C = 128
 # and R = 32768 but 1.0-2.1x from C = 1024. Routed views compile one stage-one kernel
-# per R, ragged last partitions included: C = 128 split views compiled in about 9.5 s on
-# first call (B200), against 0.55 s for the indexed tree.
+# per R, ragged last partitions included: on first call (B200), single-field split
+# views compiled in 1.5-2.4 s with whole partitions and about 3.7 s with a ragged last
+# one (R = 100003, C = 128), against 0.55 s for the indexed tree.
 _ORDERED_SPLIT_MIN_R = _K_TWO_KERNEL_THRESHOLD * _K_INNER_TREE_THRESHOLD + 1
 _ORDERED_SPLIT_MIN_OUTPUTS = 128
 _ORDERED_SPLIT_GENERAL_NORM_MIN_OUTPUTS = 1024

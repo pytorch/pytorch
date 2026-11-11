@@ -27,7 +27,7 @@ Example usage::
 
     # Query capabilities
     print(pn.available_dsls)  # ['triton', 'cutedsl']
-    print(pn.get_dsl_operations("triton"))  # Operations for triton
+    print(pn.get_dsl_operations("cutedsl"))  # Operations for cutedsl
 """
 
 import functools

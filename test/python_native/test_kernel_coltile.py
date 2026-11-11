@@ -804,10 +804,27 @@ class TestOrderedColRoute(TestCase):
         with self.assertRaisesRegex(ValueError, error):
             ct._OrderedColReduce(trait, bad, 1024, 32, 1, **kwargs)
 
+    def test_explicit_mappings_raise_before_any_gate(self):
+        # Otherwise this CPU view would fail the device check, or, being narrower than
+        # a warp, decline on CUDA.
+        x, trait = torch.zeros(4, 8), T.SumOps(acc=cutlass.Float32)
+        bad = ct.OrderedColConfig(0, tile_columns=7)
+        with self.assertRaisesRegex(ValueError, "tile_columns must be one of"):
+            ct.reduce_ordered_col(trait, "bad", x, [torch.float32], 1, config=bad)
+
     def test_policy_table_mappings(self):
-        for configs in ct._ORDERED_COL_CONFIGS.values():
-            for cfg in configs.values():
-                ct._check_ordered_mapping(cfg.worker_warps, cfg.tile_columns)
+        """Keep every table entry a mapping the kernel accepts."""
+        self.assertTrue(ct._ORDERED_COL_CONFIGS)
+        for cc, configs in ct._ORDERED_COL_CONFIGS.items():
+            for trait_type, cfg in configs.items():
+                with self.subTest(cc=cc, trait=trait_type.__name__):
+                    ct._check_ordered_mapping(cfg.worker_warps, cfg.tile_columns)
+                    self.assertGreaterEqual(cfg.min_blocks, 0)
+                    self.assertIsInstance(cfg.full_tiles, bool)
+                    outs = cfg.out_dtypes
+                    if outs is not None:
+                        self.assertTrue(outs)
+                        self.assertTrue(all(isinstance(d, torch.dtype) for d in outs))
 
     def test_row_offsets_widen_past_int32(self):
         from torch._native.ops.reductions import kernel_rowtile as rt
@@ -817,6 +834,32 @@ class TestOrderedColRoute(TestCase):
         narrow = ct._OrderedColReduce(trait, plan, 1024, (1 << 21) - 1, 1)
         wide = ct._OrderedColReduce(trait, plan, 1024, 1 << 21, 1)
         self.assertEqual((narrow.wide, wide.wide), (False, True))
+
+    @parametrize(
+        "name,rows,loads,exact,full_tiles,per_load",
+        [
+            ("sum", 8192, 4, True, False, True),
+            ("sum", 4096, 2, True, False, True),
+            ("sum", 2048, 1, True, False, False),
+            ("sum", 8000, 4, False, False, False),
+            ("argmax", 8192, 4, True, False, False),
+            ("sum", 32768, 4, False, True, True),
+            ("sum", 32768, 4, False, False, False),
+        ],
+    )
+    def test_per_load_strides(self, name, rows, loads, exact, full_tiles, per_load):
+        """Only exact or full-tile single-field multi-load replays copy the stride."""
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        trait = T.SumOps() if name == "sum" else T.ArgMaxOps()
+        plan = rt.itree_plan(min(rows, 8192), 64, 4, stage=False)
+        if rows > 8192:
+            # Split planning queries the device. R = 32768 splits into four whole
+            # partitions, each tiled like looped R = 8192.
+            plan = plan._replace(shape="split", split=(4, 8192, 8192, 512, 512))
+        op = ct._OrderedColReduce(trait, plan, rows, 64, 1, full_tiles=full_tiles)
+        self.assertEqual((plan.batches[0][2], op.exact), (loads, exact))
+        self.assertEqual(op.per_load, per_load)
 
     @parametrize("columns", [512, 1024])
     def test_general_norm_splits_need_wide_columns(self, columns):
@@ -832,9 +875,12 @@ class TestOrderedColRoute(TestCase):
         measured = cfg._replace(out_dtypes=(bf16,))
         table = {(9, 0): {T.SumOps: cfg, T.WelfordOps: cfg, T.AMaxOps: measured}}
 
-        def select(op=T.SumOps, dtype=f32, columns=64, batches=1, **kwargs):
-            trait = dict(nfields=1, nouts=1, welford_outs=0)
-            contract = trait | dict(acc_bits=32, out_dtypes=(f32,)) | kwargs
+        def select(trait=None, dtype=f32, columns=64, batches=1, **kwargs):
+            trait = T.SumOps() if trait is None else trait
+            op, nouts = type(trait), getattr(trait, "nouts", 1)
+            welford = T.welford_outputs(trait)
+            structure = dict(nfields=trait.nfields, nouts=nouts, welford_outs=welford)
+            contract = structure | dict(acc_bits=32, out_dtypes=(f32,)) | kwargs
             partials = contract.pop("partials", 2)
             return ct.select_ordered_col_config(
                 (9, 0), dtype, columns, batches, partials, trait_type=op, **contract
@@ -845,14 +891,14 @@ class TestOrderedColRoute(TestCase):
             for dtype in (f32, bf16, torch.float16):
                 for out in (f32, dtype):
                     self.assertEqual(select(dtype=dtype, out_dtypes=(out,)), cfg)
-            self.assertEqual(select(T.WelfordOps, bf16, welford_outs=1), cfg)
+            self.assertEqual(select(T.WelfordOps(), bf16), cfg)
             # WelfordOps entries serve var and std, not mean-returning traits.
-            self.assertIsNone(select(T.WelfordOps, bf16, welford_outs=0))
+            self.assertIsNone(select(T.WelfordOps(return_mean=True), bf16))
             # Entries with out_dtypes apply only to those outputs.
-            self.assertEqual(select(T.AMaxOps, bf16, out_dtypes=(bf16,)), measured)
-            self.assertIsNone(select(T.AMaxOps, bf16))
-            self.assertIsNone(select(T.AMaxOps, bf16, out_dtypes=(bf16, bf16)))
-            self.assertIsNone(select(T.MeanOps))
+            self.assertEqual(select(T.AMaxOps(), bf16, out_dtypes=(bf16,)), measured)
+            self.assertIsNone(select(T.AMaxOps(), bf16))
+            self.assertIsNone(select(T.AMaxOps(), bf16, out_dtypes=(bf16, bf16)))
+            self.assertIsNone(select(T.MeanOps()))
             self.assertIsNone(select(dtype=torch.float64))
             self.assertIsNone(select(batches=2))
             self.assertIsNone(select(acc_bits=64))
@@ -888,6 +934,8 @@ class TestOrderedColDevice(TestCase):
             ("var_mean", torch.bfloat16, (2, 2048, 40), False),
             ("argmax", torch.float32, (8000, 32), False),
             ("var_mean", torch.float32, (2, 8000, 32), False),
+            # Four exact loads per warp, each through its own stride copy.
+            ("sum", torch.float32, (2, 8192, 32), False),
             # Exact multi-group merges and a single masked warp.
             ("sum", torch.float32, (2, 4096, 32), False),
             ("argmax", torch.float32, (2, 8192, 32), False),

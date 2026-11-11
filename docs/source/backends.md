@@ -491,6 +491,15 @@ enable or disable high-performance implementations from various DSLs like Triton
 .. autofunction:: torch.backends.python_native.disable_operations
 ```
 
+On CUDA GPUs with compute capability 9.x or 10.x and a supported CuTeDSL runtime version
+installed, `torch.sum`, `torch.mean`, `torch.amax`, `torch.amin` and `torch.prod` (with
+`dim`) are overridden by default for float16, bfloat16 and float32 inputs. `amax` and
+`amin` results are exact; `sum`, `mean` and `prod` results can differ bitwise from ATen's,
+since the kernels accumulate in FP32 in a different reduction order. To keep ATen, pass
+the overload names `sum.dim_IntList`, `mean.dim`, `prod.dim_int`, `amax` and `amin` to
+`disable_operations`, or use `torch.backends.python_native.cutedsl.disabled()`. Setting
+`TORCH_DISABLE_NATIVE_JIT=1` registers no native DSL overrides.
+
 ```{eval-rst}
 .. autofunction:: torch.backends.python_native.enable_operations
 ```
@@ -584,7 +593,7 @@ Each DSL controller provides the following methods:
     pn.disable_operations('sum.dim_IntList', 'amax')
 
     # Query operations for a specific DSL
-    triton_ops = pn.get_dsl_operations('triton')
+    cutedsl_ops = pn.get_dsl_operations('cutedsl')
 ```
 
 ## torch.backends.xeon

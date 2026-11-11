@@ -388,7 +388,10 @@ class TestCuTeDSLReductionOpInfo(TestCase):
     )
     def test_samples_match_aten(self, device, dtype, op):
         """Match ATen on every OpInfo sample of the overridden operations: amax and amin
-        exactly, prod to a relative tolerance, and sum and mean to _TOL."""
+        exactly, prod to a relative tolerance, and sum and mean to _TOL. The override's
+        condition must accept every nonempty sample with dimensions, including tuple-dim
+        and keepdim samples, except full prod, which is not registered; a sample must be
+        served exactly when its condition accepts it."""
         from torch._native.ops.reductions import kernel_general as kg
 
         tolerance = _TOL[dtype]
@@ -396,16 +399,24 @@ class TestCuTeDSLReductionOpInfo(TestCase):
             tolerance = {"atol": 0, "rtol": 0}
         elif op.name == "prod":
             tolerance = {"atol": 0, "rtol": tolerance["rtol"]}
-        # A served call adds one replay entry for its metadata, so start from none.
-        kg._REPLAYS.clear()
-        for sample in op.sample_inputs(device, dtype):
-            got = op(sample.input, *sample.args, **sample.kwargs)
-            with _disabled():
-                ref = op(sample.input, *sample.args, **sample.kwargs)
-            self.assertEqual(got, ref, **tolerance)
+        cond = ov._cond if op.name in ("amax", "amin") else ov._dtype_cond
         # Sum and prod calls served by the inner-tree family add no replay entries.
-        if op.name not in ("sum", "prod") or not cutedsl_impl._INNER_TREE_ENABLED:
-            self.assertGreater(len(kg._REPLAYS), 0)
+        counted = op.name not in ("sum", "prod") or not cutedsl_impl._INNER_TREE_ENABLED
+        for i, sample in enumerate(op.sample_inputs(device, dtype)):
+            x, args, kwargs = sample.input, sample.args, sample.kwargs
+            full_prod = op.name == "prod" and not args and "dim" not in kwargs
+            accepted = not full_prod and cond(x, *args, **kwargs)
+            with self.subTest(sample=i, shape=tuple(x.shape), args=args, kwargs=kwargs):
+                if x.numel() and x.dim() and not full_prod:
+                    self.assertTrue(accepted)
+                # A served call adds one replay entry for its metadata, so start from none.
+                kg._REPLAYS.clear()
+                got = op(x, *args, **kwargs)
+                if counted:
+                    self.assertEqual(len(kg._REPLAYS), int(accepted))
+                with _disabled():
+                    ref = op(x, *args, **kwargs)
+                self.assertEqual(got, ref, **tolerance)
 
 
 instantiate_device_type_tests(TestCuTeDSLReductionWiring, globals(), only_for="cuda")
