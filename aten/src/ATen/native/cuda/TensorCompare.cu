@@ -116,15 +116,22 @@ struct Msg {
  static constexpr size_t MAX_MSG_LENGTH = 256;
  char msg[MAX_MSG_LENGTH];
 };
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700 && defined(__grid_constant__)
+#define ASSERT_ASYNC_GRID_CONSTANT __grid_constant__
+#else
+#define ASSERT_ASYNC_GRID_CONSTANT
+#endif
+
 template <typename scalar_t>
-__global__ void _assert_async_cuda_kernel(const scalar_t* input, Msg msg) {
+__global__ void _assert_async_cuda_kernel(const scalar_t* input, const ASSERT_ASYNC_GRID_CONSTANT Msg msg) {
   CUDA_KERNEL_ASSERT_MSG(input[0] != 0, msg.msg);
 }
 
-__global__ void _assert_async_cuda_kernel(const c10::complex<float>* input, Msg msg) {
+__global__ void _assert_async_cuda_kernel(const c10::complex<float>* input, const ASSERT_ASYNC_GRID_CONSTANT Msg msg) {
   CUDA_KERNEL_ASSERT_MSG(input[0] != c10::complex<float>(0, 0), msg.msg);
 }
-__global__ void _assert_async_cuda_kernel(const c10::complex<double>* input, Msg msg) {
+__global__ void _assert_async_cuda_kernel(const c10::complex<double>* input, const ASSERT_ASYNC_GRID_CONSTANT Msg msg) {
   CUDA_KERNEL_ASSERT_MSG(input[0] != c10::complex<double>(0, 0), msg.msg);
 }
 

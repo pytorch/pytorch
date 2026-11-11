@@ -4527,6 +4527,33 @@ class TestFxGraphCacheHashing(TestCase):
             pickler.dumps(details4),
         )
 
+    def test_hash_provenance_profiler_markers(self):
+        """
+        Test that provenance_profiler_markers affects hashes.
+        """
+        with config.patch(
+            {
+                "trace.provenance_tracking_level": 1,
+                "trace.provenance_profiler_markers": False,
+            }
+        ):
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
+
+        with config.patch(
+            {
+                "trace.provenance_tracking_level": 1,
+                "trace.provenance_profiler_markers": True,
+            }
+        ):
+            details3 = FxGraphHashDetails(None, [], {}, [])
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        self.assertEqual(pickler.dumps(details1), pickler.dumps(details2))
+        self.assertNotEqual(pickler.dumps(details1), pickler.dumps(details3))
+
     def test_provenance_tracking_level_causes_cache_miss(self):
         """
         Test that changing provenance_tracking_level causes a cache miss.
@@ -5734,6 +5761,23 @@ class TestUtils(TestCase):
         self.assertEqual(res1, res2)
         self.assertNotEqual(cache_dir1, cache_dir2)
 
+    def test_skip_in_setup_exits_fresh_cache(self):
+        # A fresh_cache() leaked by a skip in setUp exits whenever the garbage
+        # collector finalizes it, which can deadlock on locks clear_caches() takes.
+        class SkipsInSetUp(TestCase):
+            def setUp(self):
+                super().setUp()
+                self.skipTest("skip after entering fresh_cache()")
+
+            def test_nothing(self):
+                pass
+
+        prior = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+        result = unittest.TestResult()
+        SkipsInSetUp("test_nothing").run(result)
+        self.assertEqual(len(result.skipped), 1)
+        self.assertEqual(os.environ.get("TORCHINDUCTOR_CACHE_DIR"), prior)
+
     # This combination of settings exposed a bug where we cleared the
     # PyCodeCache disk artifacts while they were still needed:
     @requires_gpu_and_triton
@@ -6642,6 +6686,97 @@ class TestAutotuneCacheExtraOptions(TestCase):
         mock_local_backend.put.assert_called_once()
         saved_data = mock_local_backend.put.call_args[0][1]
         self.assertNotIn("extra_options", saved_data)
+
+
+@instantiate_parametrized_tests
+class TestAutotuneCacheClusterShape(TestCase):
+    @staticmethod
+    def _configs():
+        from triton import Config
+
+        # Set as an attribute, so the code that only reads ctas_per_cga runs with
+        # any Triton; rebuilding a Config with it needs a Triton that has it. A
+        # list, as users write it, which triton.Config keeps as given.
+        plain = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        clustered = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        clustered.ctas_per_cga = [2, 1, 1]
+        return [plain, clustered]
+
+    @staticmethod
+    def _cache(configs, directory, coordinate_descent_tuning=False):
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "is_fbcode": False,
+            "coordinate_descent_tuning": coordinate_descent_tuning,
+        }
+        filename = os.path.join(directory, "kernel.py")
+        cache = AutotuneCache.create(inductor_meta, filename, hash_configs(configs))
+        return cache, inductor_meta
+
+    @requires_triton()
+    @parametrize("winner", [0, 1])
+    def test_cache_hit_matches_ctas_per_cga(self, winner):
+        configs = self._configs()
+        with tempfile.TemporaryDirectory() as directory:
+            cache, inductor_meta = self._cache(configs, directory)
+            self.assertIsNotNone(cache)
+            cache.save(configs[winner], time_taken_ns=1000)
+            result = cache.read_best(inductor_meta, configs)
+        self.assertIs(result, configs[winner])
+
+    @requires_triton()
+    def test_cache_saves_ctas_per_cga_only_when_set(self):
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+
+        saved = []
+        for cfg in self._configs():
+            cache = AutotuneCache.__new__(AutotuneCache)
+            cache.configs_hash = "test_hash"
+            backend = mock.MagicMock()
+            cache.local_cache = (backend, "test_key")
+            cache.remote_cache = None
+            with mock.patch(
+                "torch._inductor.runtime.autotune_cache.AutotuneCacheBundler"
+            ):
+                cache.save(cfg, time_taken_ns=1000)
+            saved.append(backend.put.call_args[0][1])
+        self.assertNotIn("ctas_per_cga", saved[0])
+        self.assertEqual(saved[1]["ctas_per_cga"], [2, 1, 1])
+
+    @requires_triton()
+    def test_coordesc_cache_hit_keeps_ctas_per_cga(self):
+        from torch._inductor.runtime.triton_compat import _triton_config_has
+
+        if not _triton_config_has("ctas_per_cga"):
+            raise unittest.SkipTest("triton.Config has no ctas_per_cga")
+        configs = self._configs()
+        with tempfile.TemporaryDirectory() as directory:
+            cache, inductor_meta = self._cache(configs, directory, True)
+            self.assertIsNotNone(cache)
+            cache.save(configs[1], time_taken_ns=1000, found_by_coordesc=True)
+            result = cache.read_best(inductor_meta, configs)
+        self.assertIsInstance(result.ctas_per_cga, tuple)
+        self.assertEqual(result.ctas_per_cga, (2, 1, 1))
+
+    @requires_triton()
+    def test_configs_differing_in_ctas_per_cga_or_maxnreg_stay_distinct(self):
+        from triton import Config
+
+        from torch._inductor.runtime.triton_heuristics import (
+            hash_configs,
+            unique_configs,
+        )
+
+        plain, clustered = self._configs()
+        capped = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        capped.maxnreg = 64
+        configs = [plain, clustered, capped]
+        self.assertEqual(unique_configs(configs), configs)
+        self.assertEqual(len({hash_configs([cfg]) for cfg in configs}), 3)
 
 
 if __name__ == "__main__":

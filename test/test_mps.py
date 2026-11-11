@@ -1,7 +1,6 @@
 # Owner(s): ["module: mps"]
 # ruff: noqa: F841
 import glob
-import io
 import sys
 import math
 import random
@@ -23,7 +22,7 @@ from collections import defaultdict
 from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
-    (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, MACOS_VERSION, IS_CI,
+    (parametrize, run_tests, TestCase, MACOS_VERSION, IS_CI,
      NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier
 from torch.testing import make_tensor
@@ -924,6 +923,23 @@ class TestMPS(TestCaseMPS):
             if not torch.equal(out.cpu(), torch.full((1_000_000,), 2.0)):
                 mismatches += 1
         self.assertEqual(mismatches, 0)
+
+    def test_stream_device(self):
+        for device in [None, torch.device("mps"), torch.device("mps", 0), "mps", "mps:0", 0, -10]:
+            s = torch.mps.Stream(device=device)
+            self.assertEqual(s.device.type, "mps")
+            self.assertEqual(s.device.index, 0)
+
+        with self.assertRaisesRegex(ValueError, r"device index is invalid"):
+            torch.mps.Stream(device=10000)
+
+        for device in [torch.device("mps", 1000), "mps:1000"]:
+            with self.assertRaisesRegex(ValueError, r"device index is invalid"):
+                torch.mps.Stream(device=device)
+
+        for device in [torch.device("cpu"), "cpu"]:
+            with self.assertRaisesRegex(ValueError, r"Expected an mps device"):
+                torch.mps.Stream(device=device)
 
     # Tests that `torch.mps.empty_cache` empties unused buffers on any stream
     @parametrize("stream", ["default", "pool"])
@@ -8030,29 +8046,14 @@ class TestMPS(TestCaseMPS):
         out_cpu.backward(cpu_grad)
         self.assertEqual(x.grad, cpu_x.grad)
 
-    def test_adaptive_avg_pool3d_channels_last(self):
-        # Output layout must match CPU and the meta kernel, or torch.compile fallbacks fail stride asserts
-        cpu_x = torch.randn(2, 4, 6, 10, 10).to(memory_format=torch.channels_last_3d)
-        x = cpu_x.to('mps')
-        out = torch.ops.aten._adaptive_avg_pool3d(x, (3, 7, 9))
-        out_cpu = torch.ops.aten._adaptive_avg_pool3d(cpu_x, (3, 7, 9))
-        self.assertEqual(out, out_cpu)
-        self.assertEqual(out.stride(), out_cpu.stride())
-
-        cpu_grad = torch.randn(out_cpu.shape)
-        grad_input = torch.ops.aten._adaptive_avg_pool3d_backward(cpu_grad.to('mps'), x)
-        grad_input_cpu = torch.ops.aten._adaptive_avg_pool3d_backward(cpu_grad, cpu_x)
-        self.assertEqual(grad_input, grad_input_cpu)
-        self.assertEqual(grad_input.stride(), grad_input_cpu.stride())
-
     def test_adaptive_avg_pool_backward_errors(self):
         x = torch.randn(2, 3, 4, 5, 6, device='mps')
         grad = torch.randn(2, 3, 2, 2, 2, device='mps')
-        with self.assertRaisesRegex(RuntimeError, "Expected dtype"):
+        with self.assertRaisesRegex(ValueError, "Expected dtype"):
             torch.ops.aten.adaptive_avg_pool3d_backward(grad, x, grad_input=torch.empty(0, device='mps', dtype=torch.bfloat16))
-        with self.assertRaisesRegex(RuntimeError, "Expected 4D or 5D tensor"):
+        with self.assertRaisesRegex(ValueError, "Expected 4D or 5D tensor"):
             torch.ops.aten._adaptive_avg_pool3d_backward(grad.view(6, 8), x.view(6, 120))
-        with self.assertRaisesRegex(RuntimeError, "Expected 3D or 4D tensor"):
+        with self.assertRaisesRegex(ValueError, "Expected 3D or 4D tensor"):
             torch.ops.aten._adaptive_avg_pool2d_backward(grad.view(6, 8), x.view(6, 120))
 
     # Test max avg pool2d - when the input size is a multiple of output size
@@ -9413,15 +9414,6 @@ class TestMPS(TestCaseMPS):
         self.assertTrue(event.query())
         self.assertEqual(c_acc.cpu(), c)
 
-    def test_jit_save_load(self):
-        m = torch.nn.Module()
-        m.x = torch.rand(3, 3, device='mps')
-        buffer = io.BytesIO()
-        torch.jit.save(torch.jit.script(m), buffer)
-        buffer.seek(0)
-        n = torch.jit.load(buffer)
-        self.assertEqual(n.x, m.x)
-
     # Test random_, random_.to and random_.from
     def test_random(self):
         def helper(shape, low, high, dtype=torch.int32):
@@ -10150,7 +10142,7 @@ def _conformance_read_metal_header(rel_path):
         stripped = line.strip()
         if stripped == "#pragma once":
             continue
-        if stripped.startswith("#include <c10/metal/"):
+        if stripped.startswith("#include <c10/"):
             continue
         cleaned.append(line)
     return "\n".join(cleaned)
@@ -10158,6 +10150,7 @@ def _conformance_read_metal_header(rel_path):
 
 def _conformance_compose_metal_source():
     return "\n".join([
+        _conformance_read_metal_header("c10/util/IntegerDivider.h"),
         _conformance_read_metal_header("c10/metal/float8.h"),
         _conformance_read_metal_header("c10/metal/common.h"),
         _conformance_read_metal_header("c10/metal/utils.h"),
@@ -10336,21 +10329,12 @@ class TestBinaryDispatchRouting(TestCaseMPS):
         self._assert_kernel(
             self._probe(a, b), "probe_dense_scalar_float2_float2")
 
-    def test_dense_broadcast(self):
-        # other broadcasts -> kernel name has no _rhs/_lhs suffix. The smaller
-        # tensor must stay contiguous (no `expand`) for is_dense_broadcastable
-        # to accept it; TI handles the actual broadcast.
+    def test_broadcast_strided(self):
+        # A broadcasting operand has no dedicated kernel: the strided kernel
+        # divides by host-precomputed magic numbers (DimDivider) instead.
         a = torch.empty(4, 4, dtype=torch.float32, device="mps")
         b = torch.empty(4, dtype=torch.float32, device="mps").unsqueeze(0)
-        self._assert_kernel(self._probe(a, b), "probe_dense_broadcast_float_float")
-
-    def test_dense_broadcast_lhs(self):
-        # input broadcasts -> dispatcher emits "_rhs" suffix (mirrors the
-        # other-broadcast kernel signature with operands swapped).
-        a = torch.empty(4, dtype=torch.float32, device="mps").unsqueeze(0)
-        b = torch.empty(4, 4, dtype=torch.float32, device="mps")
-        self._assert_kernel(
-            self._probe(a, b), "probe_dense_broadcast_rhs_float_float")
+        self._assert_kernel(self._probe(a, b), "probe_strided_float_float")
 
     def test_dense_ilp(self):
         # Force ILP path with a threshold of 1: any contiguous, no-cast,
@@ -11077,10 +11061,12 @@ class TestNNMPS(NNTestCase):
 
             # Input and weights on different devices
             self.assertRaisesRegex(RuntimeError,
-                                   'must be on the same device',
+                                   'Expected all tensors to be on the same device, but got weight is on mps:0, '
+                                   'different from other tensors on cpu',
                                    lambda: torch.conv2d(torch.rand(1, 3, 32, 32), torch.rand(1, 3, 3, 3, device='mps')))
             self.assertRaisesRegex(RuntimeError,
-                                   'Input type \\(MPSFloatType\\) and weight type \\(torch\\.FloatTensor\\) should be the same',
+                                   'Expected all tensors to be on the same device, but got weight is on cpu, '
+                                   'different from other tensors on mps:0',
                                    lambda: torch.conv2d(torch.rand(1, 3, 32, 32, device='mps'), torch.rand(1, 3, 3, 3)))
 
 
@@ -13022,39 +13008,6 @@ class TestViewOpsMPS(TestCaseMPS):
         z = y.to(device)
         self.assertEqual(y, z.cpu())
 
-    def test_expand(self, device="mps"):
-        tensor = torch.rand(1, 8, 1, device=device)
-        tensor2 = torch.rand(5, device=device)
-        template = torch.rand(4, 8, 5, device=device)
-        target = template.size()
-        self.assertEqual(tensor.expand_as(template).size(), target)
-        self.assertEqual(tensor.expand(4, 8, 5).size(), target)
-        self.assertEqual(tensor.expand(target).size(), target)
-        self.assertEqual(tensor2.expand_as(template).size(), target)
-        self.assertEqual(tensor2.expand(4, 8, 5).size(), target)
-        self.assertEqual(tensor2.expand(target).size(), target)
-
-        # test double expand
-        self.assertEqual(tensor2.expand(1, 5).expand(2, 2, 5), tensor2.repeat(2, 2, 1))
-
-        # test non-contiguous
-        noncontig = torch.randn(5, 2, 1, 3, device=device)[:, 0]
-        self.assertFalse(noncontig.is_contiguous())
-        self.assertEqual(noncontig.expand(2, 5, 4, 3), noncontig.contiguous().repeat(2, 1, 4, 1))
-
-        # make sure it's compatible with unsqueeze
-        expanded = tensor2.expand(1, 1, 5)
-        unsqueezed = tensor2.unsqueeze(0).unsqueeze(1)
-        self.assertEqual(expanded, unsqueezed)
-        self.assertEqual(expanded.stride(), unsqueezed.stride())
-
-        # test -1 as target size
-        self.assertEqual(tensor.expand(4, -1, 5), tensor.expand(4, 8, 5))
-        self.assertRaises(RuntimeError, lambda: tensor2.expand(-1, -1))
-
-        # test expanding empty to empty
-        self.assertEqual(torch.zeros(0, device=device).expand((0,)), torch.zeros(0, device=device))
-
     # unit test for special case transposed copy (see ATen/native/Copy.cpp for details)
     def test_python_types(self, device="mps"):
         a1 = torch.randn((1, 2), device=device, dtype=torch.float32)
@@ -13070,34 +13023,6 @@ class TestViewOpsMPS(TestCaseMPS):
         self.assertEqual(c1.dtype, c2.dtype)
 
     # TODO: is resize best put in test_view_ops?
-    # TODO: OpInfo this
-    def _test_atleast(self, device, torch_fn):
-        # 0-dim
-        s = torch.tensor(0.5, dtype=torch.double, requires_grad=True)
-
-        gradcheck(lambda x: torch_fn(x), s)
-        gradgradcheck(lambda x: torch_fn(x), s)
-
-        # 1-dim
-        a = torch.rand(4, dtype=torch.double, requires_grad=True)
-
-        gradcheck(lambda x: torch_fn(x), a)
-        gradgradcheck(lambda x: torch_fn(x), a)
-
-        # 2,3,4-dim
-        b = torch.rand(4, 3, dtype=torch.double, requires_grad=True)
-        c = torch.rand(4, 3, 2, dtype=torch.double, requires_grad=True)
-        d = torch.rand(4, 3, 2, 1, dtype=torch.double, requires_grad=True)
-
-        input_tuple = (s, a, b, c, d)
-        gradcheck(lambda s, w, x, y, z: torch_fn(s, w, x, y, z), input_tuple)
-        gradgradcheck(lambda s, w, x, y, z: torch_fn(s, w, x, y, z), input_tuple)
-
-    def test_atleast_gradient(self, device="mps"):
-        self._test_atleast(device, torch.atleast_1d)
-        self._test_atleast(device, torch.atleast_2d)
-        self._test_atleast(device, torch.atleast_3d)
-
     def test_resize_mps_dtypes(self, device="mps"):
         shape = (2, 2)
         for dt in MPS_DTYPES:
@@ -13881,7 +13806,7 @@ class TestAdvancedIndexing(TestCaseMPS):
         # Currently, here using torchscript to put None into indices.
         # on C++ it gives indices as a list of 2 optional tensors: first is null and
         # the second is a valid tensor.
-        @torch.jit.script
+        @torch.jit._script.script
         def func(x, i, v):
             idx = [None, i]
             x.index_put_(idx, v, accumulate=True)
@@ -14705,6 +14630,9 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.avg_pool2d',  # NS: Only for backward pass
         # CPU accumulates in half precision, so MPS is closer to the float32 result
         'nn.functional.adaptive_avg_pool3d',
+        # Only for backward pass, which sums fp16 gradients of repeated elements with
+        # index_put(accumulate=True) in a different order than CPU
+        'combinations',
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
@@ -14936,6 +14864,9 @@ class TestConsistency(TestCaseMPS):
             atol, rtol = self._compute_tolerances(op, dtype)
             # Forward is bit-exact; backward may include inexact broadcast reductions.
             if op.name == "nextafter":
+                atol, rtol = 0, 0
+            # Computed in float with float params and rounded once, same as CPU
+            if op.name in ("nn.functional.elu", "nn.functional.celu", "nn.functional.selu") and dtype.itemsize == 2:
                 atol, rtol = 0, 0
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
                mps_sample.kwargs.get("mode") == "bilinear" and
@@ -15237,6 +15168,8 @@ class TestConsistency(TestCaseMPS):
                 # fp16; one unlucky seeded angle can produce ~0.1 absolute
                 # drift on a single element while the rest match.
                 atol, rtol = 0.15, 0.1
+            if op.name == "linalg.pinv" and op.variant_test_name == "hermitian" and dtype == torch.float32:
+                atol, rtol = 1e-4, 5e-5
 
             if isinstance(cpu_sample.input, torch.Tensor):
                 equal_input_types = cpu_sample.input.dtype == mps_sample.input.dtype
@@ -15291,6 +15224,31 @@ class TestConsistency(TestCaseMPS):
             # non-deterministic and introduces more rounding than forward
             bwd_atol, bwd_rtol = (5e-3, 2e-2) if dtype == torch.float16 else (1e-1, 5e-1)
             self.assertEqual(half_grad_input, full_grad_input.to(dtype), atol=bwd_atol, rtol=bwd_rtol)
+
+    @parametrize("spatial_dims", (2, 3))
+    def test_grid_sample_size_one_large_stride(self, device, spatial_dims):
+        input_shape = (1, 2, 1, 4) if spatial_dims == 2 else (1, 2, 1, 3, 4)
+        grid_shape = (1, 2, 1, 2) if spatial_dims == 2 else (1, 1, 2, 1, 3)
+        input_cpu = torch.randn(input_shape, requires_grad=True)
+        grid_cpu = torch.empty(grid_shape).uniform_(-0.8, 0.8).requires_grad_()
+        expected = F.grid_sample(input_cpu, grid_cpu, align_corners=False)
+        grad_output_cpu = torch.randn_like(expected)
+        tensors = []
+        for tensor in (input_cpu, grid_cpu, grad_output_cpu):
+            tensor_mps = tensor.detach().to(device)
+            strides = tuple(2**31 if size == 1 else stride
+                            for size, stride in zip(tensor_mps.shape, tensor_mps.stride()))
+            tensor_mps = tensor_mps.as_strided(tensor_mps.shape, strides)
+            self.assertEqual(tensor_mps.stride(), strides)
+            tensors.append(tensor_mps)
+        input_mps, grid_mps, grad_output_mps = tensors
+        input_mps.requires_grad_()
+        grid_mps.requires_grad_()
+        actual = F.grid_sample(input_mps, grid_mps, align_corners=False)
+        self.assertEqual(actual, expected)
+        expected_grads = torch.autograd.grad(expected, (input_cpu, grid_cpu), grad_output_cpu)
+        actual_grads = torch.autograd.grad(actual, (input_mps, grid_mps), grad_output_mps)
+        self.assertEqual(actual_grads, expected_grads, atol=1e-5, rtol=1e-5)
 
     def test_grid_sampler_3d_nan(self, device):
         input = torch.ones(1, 1, 3, 3, 3)

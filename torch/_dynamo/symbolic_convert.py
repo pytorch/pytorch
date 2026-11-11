@@ -212,6 +212,7 @@ from .variables.lists import (
 from .variables.misc import CellVariable, NullVariable, UnknownVariable
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
+    _is_skipped_constant_property,
     generic_delitem,
     generic_getattr,
     generic_getiter,
@@ -1821,7 +1822,7 @@ class InstructionTranslatorBase(
         Redirect the call to the generator "call_function"
         """
         if not isinstance(fn, LocalGeneratorFunctionVariable):
-            fn = LocalGeneratorFunctionVariable(fn)
+            fn = LocalGeneratorFunctionVariable.create(fn)
         return fn.call_function(self, args, kwargs)  # type: ignore[arg-type]
 
     def inline_user_function_return(
@@ -3395,23 +3396,21 @@ class InstructionTranslatorBase(
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop().realize()
         try:
-            result = generic_getattr(self, obj, attr)
+            if not _is_skipped_constant_property(self, obj, attr):
+                result = generic_getattr(self, obj, attr)
+                self.push(result)
+                return
         except Unsupported:
             if not obj.is_python_constant():
                 raise
-            # An eager getattr would run a user-defined __get__ at trace time
-            # and bake its result into the graph.
-            if isinstance(obj, variables.UserDefinedClassVariable) and isinstance(
-                inspect.getattr_static(
-                    type(obj.lookup_cls_mro_attr(attr)), "__get__", None
-                ),
-                types.FunctionType,
-            ):
+            if isinstance(
+                obj, variables.UserDefinedClassVariable
+            ) and obj.getattr_needs_tracing(self, attr):
                 raise
-            source = AttrSource(obj.source, attr) if obj.source else None
-            result = VariableTracker.build(
-                self, getattr(obj.as_python_constant(), attr), source=source
-            )
+        source = AttrSource(obj.source, attr) if obj.source else None
+        result = VariableTracker.build(
+            self, getattr(obj.as_python_constant(), attr), source=source
+        )
         self.push(result)
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
@@ -3738,7 +3737,7 @@ class InstructionTranslatorBase(
 
         wrapper = _make_warnings_warn_wrapper(leaf_filename, leaf_lineno)
         wrapper_name = self.output.install_global("__warnings_warn_wrapper", wrapper)
-        self.stack[callable_idx] = SkipFunctionVariable(
+        self.stack[callable_idx] = VariableBuilder.create_internal_skip_function(
             wrapper, source=GlobalSource(wrapper_name)
         )
 
@@ -4242,14 +4241,7 @@ class InstructionTranslatorBase(
                 if flags & 0x01:
                     defaults = self.pop()
 
-        fn = NestedUserFunctionVariable(
-            fn_name,
-            code,
-            self.f_globals,
-            defaults,
-            kwdefaults,
-            closure,
-        )
+        ann = None
         if annotations:
             if not isinstance(annotations, TupleVariable):
                 raise AssertionError(
@@ -4265,8 +4257,18 @@ class InstructionTranslatorBase(
                 ann_items,
                 mutation_type=ValueMutationNew(),
             )
-            fn.annotations = ann
-        self.push(fn)
+
+        self.push(
+            NestedUserFunctionVariable(  # noqa: RVT001
+                fn_name,
+                code,
+                self.f_globals,
+                defaults,
+                kwdefaults,
+                closure,
+                ann,
+            )
+        )
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = self.pop()
@@ -4820,7 +4822,7 @@ class InstructionTranslatorBase(
                 "expected isinstance( ctx, (ContextWrappingVariable, GenericContextWrappingVariable) ) to be true"
             )
 
-        self.push(WithExitFunctionVariable(ctx, inst.target))
+        self.push(WithExitFunctionVariable.create(ctx, inst.target))
         self.push(self.enter_ctx(ctx, inst))
 
     def append_prefix_inst(self, inst: Instruction) -> None:
@@ -5003,8 +5005,10 @@ class InstructionTranslatorBase(
 
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
-            attr = attr.call_function(self, [VariableTracker.build(self, 1)], {})
-            fn.annotations = attr
+            fn.annotate = attr
+            fn.annotations = attr.call_function(
+                self, [VariableTracker.build(self, 1)], {}
+            )
         elif flags & 0x08:
             fn.closure = attr
         elif flags & 0x04:
@@ -5091,11 +5095,11 @@ class InstructionTranslatorBase(
                     "expected isinstance( ctx, (ContextWrappingVariable, GenericContextWrappingVariable) ) to be true"
                 )
             if attr == "__enter__":
-                self.push(WithEnterFunctionVariable(ctx))
+                self.push(WithEnterFunctionVariable(ctx))  # noqa: RVT001
                 self.PUSH_NULL(inst)
             else:
                 # WithExitFunctionVariable doesn't really do anything with target for 3.11+
-                self.push(WithExitFunctionVariable(ctx, None))
+                self.push(WithExitFunctionVariable.create(ctx, None))
                 self.PUSH_NULL(inst)
         else:
             # Implementation is similar to LOAD_METHOD for 3.13+
