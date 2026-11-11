@@ -890,14 +890,14 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @onlyAccelerator
     @skipMPS
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5771
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    def test_float8_scale_result(self, device) -> None:
+    @parametrize("scale_result_value", [0.5, 2.0, 0.0, -1.0])
+    def test_float8_scale_result(self, device, scale_result_value) -> None:
         torch.manual_seed(0)
         a = torch.randint(-1, 2, (32, 16), device=device).float().to(e4m3_type)
         b = torch.randint(-1, 2, (16, 32), device=device).float().t().contiguous().t().to(e4m3_type)
         scale = torch.ones((), device=device)
-        scale_result = torch.full((), 0.5, device=device)
+        scale_result = torch.full((), scale_result_value, device=device)
 
         actual = torch._scaled_mm(
             a,

@@ -711,8 +711,9 @@ sycl::event scaled_matmul(
 
   at::Tensor dst_scale_tensor;
   if (with_dst_scale) {
-    // Bind single f32 scalar as DST scale
-    dst_scale_tensor = scale_result->to(at::kFloat).contiguous();
+    // oneDNN divides the result by the DST scale, while scale_result is a
+    // multiplier, so bind its reciprocal.
+    dst_scale_tensor = scale_result->to(at::kFloat).reciprocal().contiguous();
     dnnl::memory::desc dst_sc_md(
         {1}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::x);
     auto dst_sc_mem = make_onednn_memory(

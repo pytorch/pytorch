@@ -270,15 +270,14 @@ Tensor& _scaled_gemm(
     const std::optional<Tensor>& bias,
     const bool use_fast_accum,
     Tensor& out,
-    const std::optional<Tensor>& alpha = std::nullopt) {
+    const std::optional<Tensor>& alpha = std::nullopt,
+    const std::optional<Tensor>& scale_result = std::nullopt) {
   // Note: XPU does not support fast_accum for now, we will warn and always pass
   // false to the call.
   if (use_fast_accum) {
     TORCH_WARN(
         "scaled_mm: fast_accum is not supported in XPU for now. It would silently set use_fast_accum to false.");
   }
-  // TODO: scale_result is not defined or used!
-  std::optional<Tensor> scale_result = std::nullopt;
   at::native::onednn::scaled_matmul(
       mat1,
       mat2,
@@ -325,8 +324,8 @@ Tensor& _scaled_gemm(
 //        BlockWise1x32: [K//32, N] (MXFP8/MXFP4, Float8_e8m0fnu);
 //        BlockWise1x16: [K//16, N] (NVFP4, Float8_e4m3fn);
 //        BlockWise128x128: [K//128, N//128]
-//    - `scale_result`: a scalar tensor with the scale of the output (not
-//    currently supported on XPU)
+//    - `scale_result`: a scalar tensor with the scale of the output, only
+//    utilized if the output is a float8 type
 //    - `use_fast_accum`: not supported on XPU, silently ignored
 //    - `out`: a reference to the output tensor
 
@@ -470,7 +469,6 @@ Tensor& _scaled_mm_out_xpu(
     return out;
   }
 
-  // TODO: Scale_result is not supported by now!!
   // API shapes match CUDA v1. oneDNN needs row-major contiguous.
   // scale_a: [M, K//128] or [M//128, K//128] or [M, K//32] or [M, K//16]
   // scale_b: [K//128, N] or [K//128, N//128] or [K//32, N] or [K//16, N]
@@ -503,7 +501,9 @@ Tensor& _scaled_mm_out_xpu(
       scaling_choice_b,
       bias,
       false /* use_fast_accum */,
-      out);
+      out,
+      std::nullopt /* alpha */,
+      at::isFloat8Type(out.scalar_type()) ? scale_result : std::nullopt);
 }
 
 Tensor _scaled_mm_xpu(
