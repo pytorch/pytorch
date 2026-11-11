@@ -1759,7 +1759,7 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 endif()
 
-if(CAFFE2_USE_MKL AND USE_CUDA AND NOT MSVC AND NOT APPLE)
+if(CAFFE2_USE_MKL AND USE_CUDA AND NOT MSVC)
   # Note [Extra MKL symbols for MAGMA in torch_cpu]
   #
   # When we build CUDA libraries and link against MAGMA, MAGMA makes use of
@@ -1776,9 +1776,6 @@ if(CAFFE2_USE_MKL AND USE_CUDA AND NOT MSVC AND NOT APPLE)
   #
   # We aren't really optimizing for binary size on Windows (and this link
   # line doesn't work on Windows), so don't do it there.
-  #
-  # These linker commands do not work on OS X, do not attempt this there.
-  # (It shouldn't matter anyway, though, because OS X has dropped CUDA support)
   foreach(_symb IN ITEMS slaed0 daled0 dormql sormql zheevd cheevd)
     target_link_options(torch_cpu PRIVATE "LINKER:--undefined=mkl_lapack_${_symb}")
   endforeach()
