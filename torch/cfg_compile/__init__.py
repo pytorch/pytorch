@@ -94,17 +94,21 @@ class Pipeline:
         return cls.default().insert_before("fold", "narrow_dims")
 
     def append(self, pass_: Pass) -> "Pipeline":
+        """A pipeline with ``pass_`` added at the end."""
         return Pipeline([*self.passes, pass_])
 
     def insert_before(self, name: str, pass_: Pass) -> "Pipeline":
+        """A pipeline with ``pass_`` added in front of the pass called ``name``."""
         i = self.passes.index(name)
         return Pipeline([*self.passes[:i], pass_, *self.passes[i:]])
 
     def insert_after(self, name: str, pass_: Pass) -> "Pipeline":
+        """A pipeline with ``pass_`` added behind the pass called ``name``."""
         i = self.passes.index(name) + 1
         return Pipeline([*self.passes[:i], pass_, *self.passes[i:]])
 
     def remove(self, name: str) -> "Pipeline":
+        """A pipeline without the pass called ``name``."""
         return Pipeline([p for p in self.passes if p != name])
 
     def __repr__(self) -> str:

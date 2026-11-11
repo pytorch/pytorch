@@ -115,6 +115,7 @@ __all__ = [
     "UntypedStorage",
     "are_deterministic_algorithms_enabled",
     "autocast",
+    "cfg_compile",
     "chunk",
     "compile",
     "cond",
