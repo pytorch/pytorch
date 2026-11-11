@@ -2,49 +2,72 @@
 #include <torch/csrc/PyInterpreter.h>
 
 #include <mutex>
+#include <string_view>
 
 namespace torch::fake_tensor {
 
-// Note [C++ FakeTensorMode handle]
-// A C++ FakeTensorMode is exposed to Python as one object, a CppFakeTensorMode,
-// which subclasses the mode's binding (torch._C._CppFakeTensorMode). It is the
-// fake mode that the Python parts of fake dispatch (op implementations, the
-// fake tensor converter) see. TODO: it does not yet have all of the
-// FakeTensorMode interface they use (e.g. is_our_fake, allow_fallback_kernels,
-// in_kernel_invocation, which is thread-local for a C++ mode); it gains it as
-// C++ fake dispatch comes to call them.
+static constexpr const char* kCppFakeModeCapsuleName =
+    "torch._C._CppFakeTensorMode";
+
+static py::capsule make_cpp_fake_mode_capsule(
+    const std::shared_ptr<c10::FakeTensorMode>& mode) {
+  return py::capsule(
+      new std::shared_ptr<c10::FakeTensorMode>(mode),
+      kCppFakeModeCapsuleName,
+      [](PyObject* capsule) {
+        delete static_cast<std::shared_ptr<c10::FakeTensorMode>*>(
+            PyCapsule_GetPointer(capsule, kCppFakeModeCapsuleName));
+      });
+}
+
+std::shared_ptr<c10::FakeTensorMode> cpp_fake_mode_from_capsule(
+    const py::capsule& capsule) {
+  TORCH_CHECK_TYPE(
+      capsule.name() != nullptr &&
+          std::string_view(capsule.name()) == kCppFakeModeCapsuleName,
+      "expected a C++ FakeTensorMode capsule");
+  return *capsule.get_pointer<std::shared_ptr<c10::FakeTensorMode>>();
+}
+
+// Whether py_mode is an initialized _CppFakeTensorMode holding mode
+static bool holds_mode(
+    const py::object& py_mode,
+    const std::shared_ptr<c10::FakeTensorMode>& mode) {
+  if (!py::isinstance<c10::FakeTensorMode>(py_mode)) {
+    return false;
+  }
+  try {
+    return py::cast<std::shared_ptr<c10::FakeTensorMode>>(py_mode) == mode;
+  } catch (const py::cast_error&) {
+    // An instance whose __init__ has not run
+    return false;
+  }
+}
+
+// The referent of a weakref, or a null py::object if it was collected.
+static py::object weakref_referent(const c10::SafePyObject& weakref) {
+  PyObject* obj = nullptr;
+  if (PyWeakref_GetRef(weakref.ptr(getPyInterpreter()), &obj) < 0) {
+    throw py::error_already_set();
+  }
+  return py::reinterpret_steal<py::object>(obj);
+}
+
+// Note [C++ FakeTensorMode Python object lifetime]
+// Fakes, TLS and saved ThreadLocalState own the C++ mode through shared_ptr.
+// CppFakeTensorMode's pybind11 holder also owns it; the reverse reference is
+// weak, so Python can collect the wrapper while C++ still uses the mode.
+// Every C++-to-Python lookup reuses the live wrapper or recreates it around
+// the same mode. All persistent state must therefore live on the C++ mode.
+// A returned py::object keeps the wrapper alive for the duration of a callback.
 //
-// Fakes, the fake mode slot (FakeTensorModeTLS) and the ThreadLocalStates that
-// capture it hold a mode through a c10::FakeTensorModeHandle, which owns both
-// the mode and its Python object:
+// ShapeEnv and the converter must not strongly hold the mode's fakes: Python
+// GC cannot see the references through the C++ mode. Only the exact slotted
+// CppFakeTensorMode is supported, so wrappers cannot introduce extra state.
 //
-//   fake tensor / slot --shared_ptr--> handle --mode--> C++ mode
-//                                             --py_mode--> CppFakeTensorMode
-//   CppFakeTensorMode --shared_ptr (pybind11 holder)--> C++ mode
-//   C++ mode --handle_ (weak_ptr)--> handle
-//
-// So, like a Python FakeTensorMode, which its FakeTensors and the FAKE slot
-// hold, the Python object lives at least as long as anything uses the mode,
-// and lookups (getCppFakeTensorModePyObj) return that object. The mode holds
-// its handle only weakly, so the handle makes no cycle. But GC can see neither
-// through the handle nor through the mode's shape_env_ and
-// fake_tensor_converter_, so the CppFakeTensorMode, its ShapeEnv and its
-// converter must not hold the mode's fakes strongly, or the fakes, the mode
-// and its Python object leak (Dynamo's ShapeEnv tracked_fakes, for one, must be
-// cleared as Dynamo does for a Python FakeTensorMode). So CppFakeTensorMode has
-// __slots__ that hold no fakes, and getCppFakeTensorModeHandle accepts no other
-// type, including a subclass.
-//
-// A mode has at most one handle at a time: getCppFakeTensorModeHandle reuses
-// the live one, and makes a new one only once every holder of the last is
-// gone. C++ code copies a handle from a fake or the slot, and a mode made in
-// C++ (which has no Python object) makes its one handle itself and leaves
-// handle_ unset. As a mode may get a new handle over time, code compares and
-// keys modes by handle->mode, never by handle.
-//
-// Copying or dropping a handle reference takes no GIL. When the last one
-// drops, the handle releases its Python object through SafePyObject, which
-// takes the GIL, as the mode's shape_env_ and fake_tensor_converter_ do.
+// The per-mode mutex protects the weak cache on free-threaded Python. Python
+// reconstruction runs outside the lock; racing lookups return the first live
+// wrapper installed, releasing any unused wrapper after unlocking.
 static py::handle get_cpp_fake_tensor_mode_class() {
   // NB: leak
 #if IS_PYBIND_2_13_PLUS
@@ -65,8 +88,7 @@ static py::handle get_cpp_fake_tensor_mode_class() {
 #endif
 }
 
-std::shared_ptr<c10::FakeTensorModeHandle> getCppFakeTensorModeHandle(
-    py::handle py_mode) {
+std::shared_ptr<c10::FakeTensorMode> getCppFakeTensorMode(py::handle py_mode) {
   TORCH_CHECK_TYPE(
       Py_TYPE(py_mode.ptr()) ==
           reinterpret_cast<PyTypeObject*>(
@@ -74,32 +96,52 @@ std::shared_ptr<c10::FakeTensorModeHandle> getCppFakeTensorModeHandle(
       "Expected a CppFakeTensorMode (not a subclass, nor a bare ",
       "_CppFakeTensorMode), got ",
       Py_TYPE(py_mode.ptr())->tp_name);
-  auto mode = py::cast<std::shared_ptr<c10::FakeTensorMode>>(py_mode);
-  // Under free-threaded Python, threads can get the same mode's handle at
-  // once. Nothing under the lock runs Python code or releases a handle.
-  std::lock_guard<std::mutex> lock(mode->handle_mutex_);
-  auto handle = mode->handle_.lock();
-  if (handle == nullptr) {
-    handle =
-        std::make_shared<c10::FakeTensorModeHandle>(c10::FakeTensorModeHandle{
-            mode,
-            std::make_shared<c10::SafePyObject>(
-                py_mode.inc_ref().ptr(), getPyInterpreter())});
-    mode->handle_ = handle;
-  }
-  return handle;
+  return py::cast<std::shared_ptr<c10::FakeTensorMode>>(py_mode);
 }
 
 py::object getCppFakeTensorModePyObj(
-    const std::shared_ptr<c10::FakeTensorModeHandle>& handle) {
-  if (handle == nullptr) {
+    const std::shared_ptr<c10::FakeTensorMode>& mode) {
+  if (mode == nullptr) {
     return py::none();
   }
+  std::shared_ptr<c10::SafePyObject> cached;
+  {
+    std::lock_guard<std::mutex> lock(mode->fake_mode_pyobj_mutex_);
+    cached = mode->fake_mode_pyobj_;
+  }
+  if (cached != nullptr) {
+    if (py::object py_mode = weakref_referent(*cached)) {
+      return py_mode;
+    }
+  }
+  // The object is gone; see Note [C++ FakeTensorMode Python object lifetime].
+  py::object py_mode =
+      py::module::import("torch._subclasses.fake_tensor")
+          .attr("CppFakeTensorMode")
+          .attr("_from_cpp_mode")(make_cpp_fake_mode_capsule(mode));
   TORCH_CHECK(
-      handle->py_mode != nullptr,
-      "This C++ FakeTensorMode was made in C++ and has no Python object");
-  return py::reinterpret_borrow<py::object>(
-      handle->py_mode->ptr(getPyInterpreter()));
+      Py_TYPE(py_mode.ptr()) ==
+              reinterpret_cast<PyTypeObject*>(
+                  get_cpp_fake_tensor_mode_class().ptr()) &&
+          holds_mode(py_mode, mode),
+      "CppFakeTensorMode._from_cpp_mode returned an object that does not hold "
+      "the C++ FakeTensorMode it was given");
+  // SafePyObject owns the weakref with interpreter-safe lifetime management,
+  // and the shared_ptr owns the SafePyObject.
+  PyObject* weakref = PyWeakref_NewRef(py_mode.ptr(), nullptr);
+  if (weakref == nullptr) {
+    throw py::error_already_set();
+  }
+  auto fresh = std::make_shared<c10::SafePyObject>(weakref, getPyInterpreter());
+  std::lock_guard<std::mutex> lock(mode->fake_mode_pyobj_mutex_);
+  // Another thread may have cached an object while this one ran Python
+  if (mode->fake_mode_pyobj_ != cached) {
+    if (py::object installed = weakref_referent(*mode->fake_mode_pyobj_)) {
+      return installed;
+    }
+  }
+  mode->fake_mode_pyobj_.swap(fresh);
+  return py_mode;
 }
 
 } // namespace torch::fake_tensor
