@@ -5093,7 +5093,6 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable, ExceptionVar
         # was designed to model. self.exc_type here is an arbitrary
         # user-defined class, so import it from its actual defining module
         # instead.
-        from .constant import ConstantVariable
 
         codegen.add_push_null(
             lambda: codegen.load_import_from(
@@ -5105,12 +5104,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable, ExceptionVar
 
         def codegen_attr(name: str) -> None:
             attr = getattr(self, name)
-            if istype(attr, ConstantVariable):
-                if attr.value not in (True, False, None):
-                    raise AssertionError(
-                        f"attr.value must be True, False, or None, got {attr}"
-                    )
-            else:
+            if not attr.is_constant_match(True, False, None):
                 codegen.dup_top()
                 codegen(attr)
                 codegen.extend_output(codegen.rot_n(2))
@@ -5518,12 +5512,8 @@ class DefaultDictVariable(ConstDictVariable):
 
         https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2233-L2254
         """
-        from .constant import ConstantVariable
 
-        if (
-            istype(self.default_factory, ConstantVariable)
-            and self.default_factory.value is None
-        ):
+        if self.default_factory.is_constant_none():
             raise_observed_exception(KeyError, tx, args=[key])
         default_var = self.default_factory.call_function(tx, [], {})
         self.call_method(tx, "__setitem__", [key, default_var], {})
@@ -5671,7 +5661,7 @@ class DefaultDictVariable(ConstDictVariable):
             if len(args) != 2:
                 raise_args_mismatch(tx, name, "2 args", f"{len(args)} args")
             if (
-                istype(args[0], ConstantVariable) and args[0].value == "default_factory"
+                args[0].is_constant_match("default_factory")
             ) and self.is_supported_factory(args[1]):
                 self.default_factory = args[1]
                 tx.output.side_effects.store_attr(
