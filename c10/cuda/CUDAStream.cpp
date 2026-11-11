@@ -205,7 +205,7 @@ void initSingleStream(int p, DeviceIndex device_index, int i) {
 
   C10_CUDA_CHECK(cudaStreamCreateWithPriority(&stream, kDefaultFlags, pri));
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-  if (C10_UNLIKELY(interp)) {
+  if (interp) [[unlikely]] {
     (*interp)->trace_gpu_stream_creation(
         c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
   }

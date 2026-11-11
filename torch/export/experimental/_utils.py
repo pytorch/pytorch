@@ -167,8 +167,14 @@ def _get_main_cpp_file(
                     ib.writeline(
                         f"""std::cout << "output_tensor{i + 1}\\n" << output_tensor{i + 1} << std::endl;"""
                     )
-                    ib.writeline(
-                        f"""torch::save(output_tensor{i + 1}, "output_tensor{i + 1}.pt");"""
+                    ib.writelines(
+                        [
+                            f"const auto output_data{i + 1} = torch::pickle_save(torch::IValue(output_tensor{i + 1}[0]));",
+                            f'std::ofstream output_file{i + 1}("output_tensor{i + 1}.pt", std::ios::binary);',
+                            f"output_file{i + 1}.exceptions(std::ios::failbit | std::ios::badbit);",
+                            f"output_file{i + 1}.write(output_data{i + 1}.data(), static_cast<std::streamsize>(output_data{i + 1}.size()));",
+                            f"output_file{i + 1}.close();",
+                        ]
                     )
 
             ib.writeline("return 0;")
