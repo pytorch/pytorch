@@ -99,6 +99,9 @@ class LogRegistry:
     # logging format string for artifacts
     artifact_log_formatters: dict[str, logging.Formatter] = field(default_factory=dict)
 
+    # deprecation message of each deprecated artifact, warned on enabling it
+    artifact_deprecations: dict[str, str] = field(default_factory=dict)
+
     def is_artifact(self, name):
         return name in self.artifact_names
 
@@ -113,9 +116,18 @@ class LogRegistry:
 
     # register an artifact name
     def register_artifact_name(
-        self, name, description, visible, off_by_default, log_format
+        self,
+        name,
+        description,
+        visible,
+        off_by_default,
+        log_format,
+        *,
+        deprecation_message=None,
     ) -> None:
         self.artifact_names.add(name)
+        if deprecation_message is not None:
+            self.artifact_deprecations[name] = deprecation_message
         if visible:
             self.visible_artifacts.add(name)
         self.artifact_descriptions[name] = description
@@ -266,6 +278,7 @@ def set_logs(
     compute_dependencies: bool = False,
     caching: bool = False,
     partitioned_scatter: bool = False,
+    scatter_preagg: bool = False,
 ) -> None:
     """
     Sets the log level for individual components and toggles individual log
@@ -492,6 +505,17 @@ def set_logs(
         caching (:class:`bool`):
             Whether to emit detailed Inductor caching information. Default: ``False``
 
+        partitioned_scatter (:class:`bool`):
+            Logs nothing: partitioned scatter was replaced by the scatter
+            pre-aggregation template. Default: ``False``
+
+            .. deprecated:: 2.16
+                Use ``scatter_preagg`` instead. To be removed in 2.18.
+
+        scatter_preagg (:class:`bool`):
+            Whether to emit Inductor scatter pre-aggregation template decisions.
+            Default: ``False``
+
     Example::
 
         >>> # xdoctest: +SKIP
@@ -529,6 +553,8 @@ def set_logs(
                     )
 
                 if val:
+                    # set_logs -> _set_logs -> here
+                    _warn_if_deprecated_artifact(alias, stacklevel=3)
                     log_state.enable_artifact(alias)
             elif log_registry.is_log(alias) or alias in log_registry.child_log_qnames:
                 if val not in logging._levelToName:
@@ -616,6 +642,7 @@ def set_logs(
         compute_dependencies=compute_dependencies,
         caching=caching,
         partitioned_scatter=partitioned_scatter,
+        scatter_preagg=scatter_preagg,
     )
 
 
@@ -637,7 +664,13 @@ def register_log(setting_name, log_name) -> None:
 
 
 def register_artifact(
-    setting_name, description, visible=False, off_by_default=False, log_format=None
+    setting_name,
+    description,
+    visible=False,
+    off_by_default=False,
+    log_format=None,
+    *,
+    deprecation_message=None,
 ) -> None:
     """
     Enables an artifact to be controlled by the env var and user API with name
@@ -647,10 +680,43 @@ def register_artifact(
         visible: Whether it gets suggested to users by default
         off_by_default: whether this artifact should be logged when the ancestor loggers
             are enabled at level DEBUG
+        deprecation_message: if set, the artifact is deprecated, and enabling it
+            warns with this message, once per process (every time under
+            torch.set_warn_always)
     """
     log_registry.register_artifact_name(
-        setting_name, description, visible, off_by_default, log_format
+        setting_name,
+        description,
+        visible,
+        off_by_default,
+        log_format,
+        deprecation_message=deprecation_message,
     )
+
+
+_warned_deprecated_artifacts: set[str] = set()
+_pending_deprecated_artifacts: set[str] = set()
+
+
+def _warn_if_deprecated_artifact(name: str, stacklevel: int) -> None:
+    message = log_registry.artifact_deprecations.get(name)
+    if message is None:
+        return
+    if name not in _warned_deprecated_artifacts or torch.is_warn_always_enabled():
+        warnings.warn(
+            f"The {name!r} logging artifact is deprecated: {message}",
+            FutureWarning,
+            stacklevel=stacklevel + 1,
+        )
+        _warned_deprecated_artifacts.add(name)
+
+
+def warn_deprecated_artifacts() -> None:
+    """Emit warnings deferred while parsing TORCH_LOGS during torch import."""
+    pending = tuple(_pending_deprecated_artifacts)
+    _pending_deprecated_artifacts.clear()
+    for name in pending:
+        _warn_if_deprecated_artifact(name, stacklevel=1)
 
 
 def getArtifactLogger(module_qname, artifact_name) -> logging.Logger:
@@ -861,6 +927,8 @@ def _parse_log_settings(settings):
             log_qnames = log_registry.log_alias_to_log_qnames[name]
             log_state.enable_log(log_qnames, level)
         elif log_registry.is_artifact(name):
+            if name in log_registry.artifact_deprecations:
+                _pending_deprecated_artifacts.add(name)
             log_state.enable_artifact(name)
         elif _is_valid_module(name):
             # Get the module and all its submodules if it's a package

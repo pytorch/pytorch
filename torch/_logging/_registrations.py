@@ -228,9 +228,19 @@ register_artifact(
     "Detailed Inductor overlap scheduling pass information",
     off_by_default=True,
 )
+# Deprecated in 2.16, to be removed in 2.18.
 register_artifact(
     "partitioned_scatter",
-    "Inductor partitioned scatter pass decisions and memory accounting",
+    "Deprecated: partitioned scatter was removed; this logs nothing. Use scatter_preagg.",
+    off_by_default=True,
+    deprecation_message="partitioned scatter was replaced by the scatter "
+    "pre-aggregation template in 2.16, so it logs nothing (removal planned for "
+    "2.18; see https://github.com/pytorch/pytorch/issues/204051). Use "
+    "'scatter_preagg' instead.",
+)
+register_artifact(
+    "scatter_preagg",
+    "Inductor scatter pre-aggregation template decisions",
     off_by_default=True,
 )
 register_artifact(

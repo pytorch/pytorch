@@ -15,7 +15,7 @@ import torch
 import torch._inductor.codegen.common as common
 import torch.utils._pytree as pytree
 from torch._dynamo.exc import BackendCompilerFailed
-from torch._dynamo.utils import same
+from torch._dynamo.utils import counters, same
 from torch._higher_order_ops.triton_kernel_wrap import (
     kernel_side_table,
     triton_kernel_wrapper_mutation,
@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     instantiate_parametrized_tests,
     parametrize,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -702,7 +703,25 @@ class FxirTestCase(InductorTestCase):
         num_fallback = self._count_ops(gm, torch.ops.aten.scatter_.value)
         self.assertEqual(num_fallback, 1)
 
-    @config.patch("partitioned_scatter_enabled", False)
+    @unittest.skipIf(not TEST_WITH_ROCM, "scatter template is ROCm only")
+    @config.patch("scatter_preagg_template", True)
+    def test_index_put_scatter_template(self):
+        out = torch.zeros(64, 32, device=self.device)
+        indices = (torch.randint(64, (1 << 19,), device=self.device),)
+        # Small integers sum exactly in any order of the atomics.
+        values = torch.randint(-1, 2, (1 << 19, 32), device=self.device).float()
+        counters.clear()
+        with DeterministicGuard(False):
+            self._compile_and_check(
+                torch.index_put,
+                (out, indices, values, True),
+                # The output's copy, the copies' fill, the template, the sum.
+                expected_num_triton_kernels=4,
+            )
+        self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 1)
+        self.assertEqual(counters["inductor"]["scatter_preagg_copies"], 1)
+
+    @config.patch("scatter_preagg_template", False)
     def test_index_put_fallback(self):
         """
         Test the deterministic fallback for index_put.

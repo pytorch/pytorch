@@ -24,6 +24,8 @@ from .heuristics.template.triton import (
     IS_ROCM,
     MTIAConfigHeuristic,
     ROCmConfigHeuristic,
+    ScatterPreaggConfig,
+    ScatterPreaggTarget,
     XPUConfigHeuristic,
 )
 from .kernel_inputs import KernelInputs, MMKernelInputs
@@ -192,6 +194,55 @@ class InductorChoices:
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_decode_configs(head_dim, dtype)
+
+    def get_scatter_preagg_target(self, device: torch.device) -> ScatterPreaggTarget:
+        """
+        Device properties and backend choices the scatter pre-aggregation
+        template and its configs use.
+        """
+        return self.get_config_heuristics(device.type).get_scatter_preagg_target(device)
+
+    def get_scatter_preagg_configs(
+        self,
+        num_tokens: int,
+        num_inner: int,
+        dtype: torch.dtype,
+        *,
+        device: torch.device,
+        inner_contiguous: bool = True,
+        num_keys: int | None = None,
+        max_autotune: bool = False,
+    ) -> list[ScatterPreaggConfig]:
+        """
+        Non-empty: the default config first, which alone guards symbolic sizes
+        and serves the sorted lowering, then autotuning candidates.
+        """
+        heuristics = self.get_config_heuristics(device.type)
+        return heuristics.get_scatter_preagg_configs(
+            num_tokens,
+            num_inner,
+            dtype,
+            target=heuristics.get_scatter_preagg_target(device),
+            inner_contiguous=inner_contiguous,
+            num_keys=num_keys,
+            max_autotune=max_autotune,
+        )
+
+    def should_use_scatter_preagg_template(self, device: torch.device | None) -> bool:
+        """
+        Whether accumulating scatters on ``device`` are offered to the scatter
+        pre-aggregation template (kernel/scatter_preagg.py), including those
+        that would otherwise take the eager fallback for atomic_add dtype
+        support or deterministic algorithms, or atomics Triton lacks (8/16-bit
+        ints).
+        """
+        return (
+            config.scatter_preagg_template
+            and device is not None
+            and self.get_config_heuristics(
+                device.type
+            ).should_use_scatter_preagg_template(device)
+        )
 
     def append_flex_attention_choices(
         self,

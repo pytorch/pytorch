@@ -1407,63 +1407,114 @@ _fuse_ddp_communication_passes: list[Callable[..., None] | str] = [
 _micro_pipeline_tp: bool = False
 
 
-# Enable/disable partitioned scatter optimization for atomic add kernels.
-# Improves kernel performance for high-contention accumulating scatters
-# (index_put, index_add, scatter_add, scatter_reduce) at the cost of
-# temporary memory for expanded partition buffers.
-_partitioned_scatter_default = "1" if torch.version.hip else "0"
-partitioned_scatter_enabled = (
+# Adaptive scatter pre-aggregation on ROCm, including the sorted lowering for
+# deterministic mode and 8/16-bit integers. This setting is ignored off ROCm.
+scatter_preagg_template: bool = (
     os.environ.get(
-        "TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", _partitioned_scatter_default
+        "TORCHINDUCTOR_SCATTER_PREAGG_TEMPLATE",
+        # Deprecated name.
+        os.environ.get(
+            "TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED",
+            "1" if torch.version.hip else "0",
+        ),
     )
     == "1"
 )
 
-# Power-of-2 bounds for num_partitions (bitwise AND partition assignment requires pow2).
-# Capped at 64: contention relief saturates before that while the expanded buffer keeps
-# growing, and P=128 measured slower than P=64 at every contention level on MI308X.
-partitioned_scatter_min_partitions: int = 2
-partitioned_scatter_max_partitions: int = 64
+# Leave scatters of fewer elements (tokens times inner elements) than this to
+# the regular lowering or eager fallback, including the sorted lowering for
+# deterministic mode and 8/16-bit integers.
+scatter_preagg_template_min_numel: int = 4096
 
-# Skip ops with fewer writes than this — small scatters don't generate meaningful contention.
-partitioned_scatter_min_index_size: int = 4096
+# Base fraction of a block's atomics pre-aggregation must save for the block to
+# take it, which the template halves for single columns and the fp16 matrix
+# product. Blocks with a hot destination pre-aggregate regardless. -1 always
+# pre-aggregates; small negative values still leave plain atomics to blocks of
+# rows wider than 8 whose destinations look distinct.
+scatter_preagg_template_min_saved: float = 0.125
 
-# Skip ops where (writes along the scatter dim) / scatter_dim_size is below
-# this ratio. The numerator is index.numel() for index_put and index.shape[dim]
-# for scatter_add / scatter_reduce.
-# Contention is measured per scatter-dim slot; low density means most slots get ≤1 write.
-# The partitioned form pays a zero-fill and reduce over the expanded buffer plus a
-# slower scatter kernel (atomics over P copies lose cache residency), whether or not
-# contention was actually relieved. Assumes indices spread uniformly over all slots;
-# the real distribution is a runtime property, so concentrated indices are
-# under-estimated here.
-partitioned_scatter_min_contention_ratio: float = 4.0
-
-# GPU memory reserved for state invisible to the FX profile: CUDA driver context,
-# PyTorch caching allocator pool, and kernel scratch (cuBLAS/Triton). Subtracted from
-# total GPU memory to compute available headroom for expanded partition buffers.
-# 1.5 GB is conservative for MI300 (206 GB total); tune down to allow more partitions.
-partitioned_scatter_non_model_floor_bytes: int = 1_500_000_000
-
-# Accumulate the partial sums in fp32 when the scatter dtype is a narrower float,
-# rounding once in the reduce. On by default because narrow partials stall once a
-# hot slot outgrows the addend's ulp, and how far they stall depends on
-# num_partitions, which the memory budget picks: the result would vary with free
-# GPU memory. fp32 partials give the same result for any P, and let bf16 scatters
-# be rewritten where bf16 atomic_add falls back (sm<90, XPU). Costs 2x the
-# expanded buffer's bytes for bf16/fp16, charged against the memory budget.
-partitioned_scatter_fp32_accumulation: bool = (
-    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_FP32_ACCUMULATION", "1") == "1"
+# Deprecated in 2.16, to be removed in 2.18: the partitioned scatter pass was
+# replaced by scatter_preagg_template.
+_partitioned_scatter_removal = (
+    "Removal planned for 2.18; see https://github.com/pytorch/pytorch/issues/204051"
+)
+partitioned_scatter_enabled: bool = Config(
+    alias="torch._inductor.config.scatter_preagg_template",
+    deprecated=True,
+    deprecation_message="has aliased scatter_preagg_template since 2.16; use that "
+    "instead. The template is ROCm only, so this no longer affects CUDA or XPU. "
+    + _partitioned_scatter_removal,
+)
+partitioned_scatter_min_partitions: int = Config(
+    default=2,
+    deprecated=True,
+    deprecation_message="has done nothing since 2.16. " + _partitioned_scatter_removal,
+)
+partitioned_scatter_max_partitions: int = Config(
+    default=64,
+    deprecated=True,
+    deprecation_message="has done nothing since 2.16. " + _partitioned_scatter_removal,
+)
+partitioned_scatter_min_index_size: int = Config(
+    default=4096,
+    deprecated=True,
+    deprecation_message="has done nothing since 2.16; "
+    "scatter_preagg_template_min_numel gates on elements rather than indices. "
+    + _partitioned_scatter_removal,
+)
+partitioned_scatter_min_contention_ratio: float = Config(
+    default=4.0,
+    deprecated=True,
+    deprecation_message="has done nothing since 2.16. " + _partitioned_scatter_removal,
+)
+partitioned_scatter_non_model_floor_bytes: int = Config(
+    default=1_500_000_000,
+    deprecated=True,
+    deprecation_message="has done nothing since 2.16. " + _partitioned_scatter_removal,
+)
+partitioned_scatter_fp32_accumulation: bool = Config(
+    default=True,
+    deprecated=True,
+    deprecation_message="has done nothing since 2.16. " + _partitioned_scatter_removal,
+)
+partitioned_scatter_force: bool = Config(
+    default=False,
+    deprecated=True,
+    deprecation_message="has done nothing since 2.16: the template decides per "
+    "block at run time (see scatter_preagg_template_min_saved). "
+    + _partitioned_scatter_removal,
 )
 
-# Bypass the heuristic skip gates (min_index_size, min_contention_ratio, and the
-# traffic cap on num_partitions). Correctness gates and the hard memory
-# budget are still enforced. Useful for benchmarking or skewed-index workloads where
-# static estimates undercount real contention.
-# Enable via: TORCHINDUCTOR_PARTITIONED_SCATTER_FORCE=1
-partitioned_scatter_force: bool = (
-    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_FORCE", "0") == "1"
-)
+
+def _warn_deprecated_scatter_env_vars() -> None:
+    if getattr(_warn_deprecated_scatter_env_vars, "_warned", False):
+        return
+    _warn_deprecated_scatter_env_vars._warned = True  # type: ignore[attr-defined]
+    for suffix, instead in (
+        (
+            "ENABLED",
+            "sets scatter_preagg_template unless TORCHINDUCTOR_SCATTER_PREAGG_TEMPLATE "
+            "is set; use that instead. The template is ROCm only, so this no longer "
+            "affects CUDA or XPU",
+        ),
+        ("FP32_ACCUMULATION", "does nothing"),
+        (
+            "FORCE",
+            "does nothing: the template decides per block at run time (see "
+            "scatter_preagg_template_min_saved)",
+        ),
+    ):
+        name = f"TORCHINDUCTOR_PARTITIONED_SCATTER_{suffix}"
+        if name in os.environ:
+            import warnings
+
+            warnings.warn(
+                f"The environment variable {name} is deprecated since 2.16 (removal "
+                f"planned for 2.18; see "
+                f"https://github.com/pytorch/pytorch/issues/204051) and {instead}.",
+                FutureWarning,
+                stacklevel=1,
+            )
 
 
 class _collective:
@@ -3415,6 +3466,8 @@ _save_config_ignore: list[str] = [
 _cache_config_ignore_prefix: list[str] = [
     # trace functions are not relevant to config caching
     "trace",
+    # Deprecated no-op settings retained only for compatibility.
+    "partitioned_scatter_",
     # uses absolute path
     "cuda.cutlass_dir",
     "cutlass.cutlass_dir",

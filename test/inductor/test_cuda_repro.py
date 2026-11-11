@@ -3480,6 +3480,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         config.is_fbcode(),
         "fbcode uses its bfloat16 atomic add lowering",
     )
+    @config.patch(scatter_preagg_template=False)
     def test_index_add_bfloat16_deterministic(self):
         def f(x, idx, src):
             return torch.index_add(x, 1, idx, src)

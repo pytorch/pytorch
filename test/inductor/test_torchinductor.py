@@ -12295,6 +12295,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn(8, 8), torch.arange(4), torch.ones(4, 8)))
 
+    # Keep this test on the regular scatter lowering.
+    @config.patch(scatter_preagg_template=False)
     def test_index_put_deterministic_fallback(self):
         if is_mps_backend(self.device):
             # MPS has no deterministic implementation for
@@ -22231,6 +22233,8 @@ if RUN_GPU:
             self.assertEqual(a_ref.grad, a_test.grad)
             self.assertEqual(b_ref.grad, b_test.grad)
 
+        # Keep this test on the regular scatter lowering.
+        @config.patch(scatter_preagg_template=False)
         def test_optimize_indexing_assert(self):
             def has_indirect(code, tl_fn: str):
                 self.assertTrue(

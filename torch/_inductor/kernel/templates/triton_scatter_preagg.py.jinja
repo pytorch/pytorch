@@ -1,0 +1,204 @@
+{{preagg_def_kernel()}}
+    {{preagg_sizes() | indent_except_first(1)}}
+    pid_tok = tl.program_id(0).to(INDEX_DTYPE)
+    pid_inner = tl.program_id(1).to(INDEX_DTYPE)
+{% if COPIES > 1 %}
+    # Token blocks take turns over COPIES copies of the output (summed by the
+    # lowering), so a hot destination's atomics split COPIES ways.
+    OUT = OUT + (pid_tok % COPIES) * COPY_NUMEL
+{% endif %}
+    pos = tl.arange(0, BLOCK_T).to(INDEX_DTYPE)
+    # Subgraph loads are unmasked, so every lane must address a real token. The
+    # last block is shifted back (shared lanes masked) rather than clamped,
+    # which keeps its token range contiguous.
+    tok_block = pid_tok * BLOCK_T
+    if TOK_SHIFT:
+        tok_start = tl.minimum(tok_block, NUM_TOKENS - BLOCK_T)
+        tok = tok_start + pos
+        tok_mask = tok >= tok_block
+    else:
+        tok_start = tok_block
+        tok = tl.minimum(tok_block + pos, NUM_TOKENS - 1)
+        tok_mask = tok_block + pos < NUM_TOKENS
+
+    {{preagg_key("tok", "key", "valid") | indent_except_first(1)}}
+
+    dest = tl.where(tok_mask & valid, key, NUM_KEYS).to(KEY_DTYPE)
+{% if ADAPTIVE %}
+{% if DOT %}
+    # Count destinations exactly from the sorted keys and skip the product when
+    # it saves few atomics. Masked lanes count as one destination.
+    sorted_key = tl.sort(dest)
+    next_key = tl.gather(sorted_key, tl.minimum(pos + 1, BLOCK_T - 1), 0)
+    heads = (sorted_key != next_key) | (pos == BLOCK_T - 1)
+    distinct = tl.sum(heads.to(tl.int32), 0)
+    plain = BLOCK_T - distinct < BLOCK_T * SORT_SAVED
+    # A destination taking over HOT_COUNT tokens serializes plain atomics.
+    span_key = tl.gather(sorted_key, tl.minimum(pos + HOT_COUNT, BLOCK_T - 1), 0)
+    hot = (sorted_key == span_key) & (pos + HOT_COUNT < BLOCK_T) & (sorted_key < NUM_KEYS)
+    plain = plain & (tl.max(hot.to(tl.int32), 0) == 0)
+{% else %}
+    # Runs of equal keys in token order bound the distinct destinations.
+    next_dest = tl.gather(dest, tl.minimum(pos + 1, BLOCK_T - 1), 0)
+    runs = tl.sum(((dest != next_dest) | (pos == BLOCK_T - 1)).to(tl.int32), 0)
+    distinct = runs.to(tl.float32)
+    # When the runs already prove the sort saves enough, narrow rows, where
+    # the histogram is a good part of the block, skip the histogram. Wider
+    # rows always build it: the branch costs them more registers than it saves.
+    if BLOCK_D > 8 or BLOCK_T - runs < BLOCK_T * SORT_SAVED:
+        # Count distinct destinations over a histogram of their keys (exactly
+        # when each has a bin, else by linear counting over hashed keys), and
+        # skip the sort when it saves few atomics.
+        live = tok_mask & valid
+{% if HIST_EXACT %}
+        bins = tl.where(live, dest, 0)
+{% else %}
+        bins = ((dest.to(tl.int64) * 2654435761) >> (32 - LOG_HIST_BINS)) & (
+            HIST_BINS - 1
+        )
+{% endif %}
+        # TODO: Remove the float cast once ROCm correctly folds integer
+        # histogram-count comparisons.
+        counts = tl.histogram(bins.to(tl.int32), HIST_BINS, mask=live).to(
+            tl.float32
+        )
+        # A destination taking over HOT_COUNT tokens serializes its plain
+        # atomics, so such blocks sort whatever they save: a hot bin counts
+        # as HIST_BINS more empty ones, which takes the count below zero.
+        empty = (counts == 0).to(tl.float32) + (counts > HOT_COUNT).to(
+            tl.float32
+        ) * HIST_BINS
+{% if HIST_EXACT %}
+        distinct = HIST_BINS - tl.sum(empty, 0)
+{% else %}
+        empty = tl.maximum(tl.sum(empty, 0), 1.0)
+        distinct = -HIST_BINS * tl.log(empty / HIST_BINS)
+        # A moderately hot key hides among hashed collisions, but usually
+        # fills the fullest bin: count that bin's largest and smallest keys
+        # exactly (either may be the colliding one), and sort if one recurs
+        # TOP_COUNT times.
+        top_bin = tl.argmax(counts, 0)
+        in_top = live & (bins == top_bin)
+        top_key = tl.max(tl.where(in_top, dest, -1), 0)
+        low_key = tl.min(tl.where(in_top, dest, NUM_KEYS), 0)
+        top_n = tl.maximum(
+            tl.sum((live & (dest == top_key)).to(tl.float32), 0),
+            tl.sum((live & (dest == low_key)).to(tl.float32), 0),
+        )
+        distinct = tl.where(top_n >= TOP_COUNT, -1.0, distinct)
+{% endif %}
+    plain = BLOCK_T - distinct < BLOCK_T * SORT_SAVED
+{% endif %}
+    if plain:
+        # Plain atomics in token order, like regular Inductor. Rows of PLAIN_D
+        # put fewer tokens in each atomic instruction than BLOCK_D-wide tiles,
+        # which matters when hot keys collide within one.
+        # TODO: Use a regular loop once ROCm correctly compiles loop bounds
+        # assertions; keep this unrolled until then.
+        for chunk in tl.static_range(0, BLOCK_T // PLAIN_T):
+            chunk_block = tok_block + chunk * PLAIN_T
+            chunk_pos = tl.arange(0, PLAIN_T).to(INDEX_DTYPE)
+            if TOK_SHIFT:
+                ctok = tl.minimum(chunk_block, NUM_TOKENS - PLAIN_T) + chunk_pos
+                ctok_mask = ctok >= chunk_block
+            else:
+                ctok = tl.minimum(chunk_block + chunk_pos, NUM_TOKENS - 1)
+                ctok_mask = chunk_block + chunk_pos < NUM_TOKENS
+
+            {{preagg_key("ctok", "ckey", "cvalid", rows="PLAIN_T") | indent_except_first(3)}}
+
+            clive = ctok_mask & cvalid
+            ckey = tl.where(clive, ckey, 0).to(INDEX_DTYPE)[:, None]
+            ctok = ctok[:, None]
+            for it in tl.range(0, PLAIN_ITERS):
+                {{inner_block("PLAIN_ITERS", "PLAIN_D", "PLAIN_VEC") | indent_except_first(4)}}
+
+                {{preagg_value("ctok", "inner", "val", rows="PLAIN_T", cols="PLAIN_D") | indent_except_first(4)}}
+
+                tl.atomic_add(
+                    tl.broadcast_to(
+                        OUT + ({{preagg_addr("ckey", "atomic_inner")}}),
+                        [PLAIN_T, PLAIN_D],
+                    ),
+                    val.to(OUT_DTYPE),
+                    mask=clive[:, None] & inner_mask[None, :],
+                    sem="relaxed",
+                )
+        return
+{% endif %}
+{% if DOT %}
+    # Pre-aggregate on the matrix cores: row i of SAME @ values sums the tokens
+    # sharing token i's destination, added by the first of them (exact for a
+    # 0/1 matrix). Dead tokens contribute zero and start no segment.
+    tok_live = tok_mask & valid
+    raw_key = key.to(KEY_DTYPE)
+    same = raw_key[:, None] == raw_key[None, :]
+    earlier = same & tok_live[None, :] & (pos[None, :] < pos[:, None])
+    seg_end = (tl.sum(earlier.to(tl.int32), 1) == 0) & tok_live
+    out_key = tl.where(seg_end, raw_key, 0).to(INDEX_DTYPE)[:, None]
+    tok_key = tl.where(tok_live, raw_key, 0).to(INDEX_DTYPE)[:, None]
+    onehot = same.to(OUT_DTYPE)
+    ptok = tok[:, None]
+    for it in tl.range(0, D_ITERS):
+        {{inner_block("D_ITERS", "BLOCK_D", "ATOMIC_VEC") | indent_except_first(2)}}
+
+        {{preagg_value("ptok", "inner", "val") | indent_except_first(2)}}
+
+        val = tl.where(tok_live[:, None], val.to(OUT_DTYPE), 0.0)
+        # 0 * inf is nan, so the product would carry a non-finite value to
+        # every destination in the block.
+        if tl.max(tl.where(tl.abs(val) < float("inf"), 0, 1)) > 0:
+            tl.atomic_add(
+                tl.broadcast_to(
+                    OUT + ({{preagg_addr("tok_key", "atomic_inner")}}),
+                    [BLOCK_T, BLOCK_D],
+                ),
+                val,
+                mask=tok_live[:, None] & inner_mask[None, :],
+                sem="relaxed",
+            )
+        else:
+            acc = tl.dot(onehot, val, out_dtype=tl.float32)
+            tl.atomic_add(
+                tl.broadcast_to(
+                    OUT + ({{preagg_addr("out_key", "atomic_inner")}}),
+                    [BLOCK_T, BLOCK_D],
+                ),
+                acc.to(OUT_DTYPE),
+                mask=seg_end[:, None] & inner_mask[None, :],
+                sem="relaxed",
+            )
+{% else %}
+    packed = tl.sort((dest << LOG_BLOCK_T) | pos.to(KEY_DTYPE))
+    skey = packed >> LOG_BLOCK_T
+    sorted_pos = (packed & (BLOCK_T - 1)).to(INDEX_DTYPE)
+    if TOK_SHIFT:
+        ptok = (tok_start + sorted_pos)[:, None]
+    else:
+        ptok = tl.minimum(tok_start + sorted_pos, NUM_TOKENS - 1)[:, None]
+    # Sums runs of equal skey and adds each run's sum at its end.
+    next_key = tl.gather(skey, tl.minimum(pos + 1, BLOCK_T - 1), 0)
+    seg_end = (skey < NUM_KEYS) & ((skey != next_key) | (pos == BLOCK_T - 1))
+    out_key = tl.where(seg_end, skey, 0).to(INDEX_DTYPE)[:, None]
+    # Keys are below the output's storage size, so INDEX_DTYPE holds them.
+    seg_key = tl.broadcast_to(skey.to(INDEX_DTYPE)[:, None], (BLOCK_T, BLOCK_D))
+
+    # The sort is amortized over D_ITERS inner blocks so BLOCK_T can stay
+    # large (more pre-aggregation) while the register tile stays small.
+    for it in tl.range(0, D_ITERS):
+        {{inner_block("D_ITERS", "BLOCK_D", "ATOMIC_VEC") | indent_except_first(2)}}
+
+        {{preagg_value("ptok", "inner", "val") | indent_except_first(2)}}
+
+        _, acc = tl.associative_scan((seg_key, val), 0, _preagg_segmented_sum)
+        # The address drops out_key when there is a single destination.
+        tl.atomic_add(
+            tl.broadcast_to(
+                OUT + ({{preagg_addr("out_key", "atomic_inner")}}), [BLOCK_T, BLOCK_D]
+            ),
+            acc.to(OUT_DTYPE),
+            mask=seg_end[:, None] & inner_mask[None, :],
+            sem="relaxed",
+        )
+{{segmented_sum()}}
+{% endif %}

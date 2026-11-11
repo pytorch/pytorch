@@ -39,6 +39,7 @@ from ...utils import (
     _rocm_version_tuple,
     _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES,
     _TDM_MIN_INNERMOST_REQUEST_BYTES,
+    ceildiv,
     commit_tdm_operand_layout,
     get_backend_num_stages,
     get_default_kpack,
@@ -407,6 +408,113 @@ class ROCmFlexDecodeConfig(FlexDecodeConfig):
     matrix_instr_nonkdim: int = 0
     waves_per_eu: int = 0
     kpack: int = 1
+
+
+@dataclasses.dataclass
+class ScatterPreaggConfig:
+    """
+    Config for the scatter pre-aggregation template (kernel/scatter_preagg.py).
+    Each program pre-aggregates block_t tokens, then loops over d_iters slices
+    of block_d along the inner (row) dim, reusing the block's grouping.
+    """
+
+    block_t: int
+    block_d: int
+    d_iters: int
+    num_stages: int
+    num_warps: int
+
+
+@dataclasses.dataclass
+class ROCmScatterPreaggConfig(ScatterPreaggConfig):
+    """Scatter pre-aggregation config with ROCm-specific kernel arguments."""
+
+    waves_per_eu: int = 0
+
+
+@dataclasses.dataclass
+class ScatterPreaggTarget:
+    """
+    Device properties and backend choices the scatter pre-aggregation template
+    and its heuristics scale with.
+    """
+
+    warp_size: int
+    # Per-block shared memory limit, which Triton enforces at compile time.
+    shared_mem_bytes: int
+    num_sms: int
+    # Elements per atomic on the sort path (0 leaves it to the compiler).
+    atomic_vec: int = 0
+    # Bytes per lane of plain atomics on outputs under 2GB (0: atomic_vec).
+    plain_atomic_bytes: int = 0
+    # Whether fp16 rows may pre-aggregate with a matrix product.
+    fp16_matrix_preagg: bool = False
+    # Up to this many destinations, blocks of 128 or more tokens always sort, as
+    # the default configs' blocks are on all but small scatters.
+    always_sorted_keys: int = 64
+    # Output copies for the atomics to take turns over: each takes at least
+    # writes_per_copy writes per element, and all of them at most max_copy_bytes,
+    # as zeroing and summing them costs about as much as the contention they
+    # save on uniform keys. A hot destination takes one atomic per token block,
+    # which serializes enough to pay for the copies' two extra kernels only from
+    # min_copy_tokens tokens (fewer for single columns, whose blocks are cheap).
+    max_copies: int = 8
+    writes_per_copy: int = 16
+    max_copy_bytes: int = 4 << 20
+    min_copy_tokens: int = 1 << 18
+    min_copy_tokens_single_column: int = 1 << 14
+    # Adaptive atomic-path tuning knobs, measured on ROCm.
+    max_hist_bins: int = 2048
+    hist_bins_per_token: int = 2
+    hot_count_fraction: int = 32
+    top_count_fraction: int = 64
+    min_dot_hot_count: int = 2
+    min_sort_hot_count: int = 8
+    min_top_count: int = 4
+    min_plain_rows: int = 128
+    min_plain_tokens: int = 128
+    min_dot_tokens: int = 32
+    plain_max_d_per_warp: int = 4
+    matrix_min_block_t: int = 16
+    matrix_max_block_t: int = 128
+    matrix_min_block_d: int = 32
+
+    def warps(self, threads: int) -> int:
+        """Warps of ``threads`` lanes in all: configs keep per-lane work fixed."""
+        return max(1, threads // self.warp_size)
+
+    def plain_max_d(self) -> int:
+        return self.plain_max_d_per_warp * self.warp_size
+
+    def matrix_preagg(
+        self, dtype: torch.dtype, num_inner: int, inner_contiguous: bool
+    ) -> bool:
+        """
+        Whether blocks pre-aggregate with a 0/1 matrix product rather than a
+        sort and segmented scan. This keeps packed fp16 atomics; rows narrower
+        than 32 leave the matrix cores too little work per block.
+        """
+        return (
+            self.fp16_matrix_preagg
+            and dtype == torch.float16
+            and inner_contiguous
+            and num_inner >= 32
+        )
+
+
+def _shared_memory_per_block(props: Any) -> int | None:
+    """
+    Shared memory a kernel may use on a device with properties ``props``: the
+    opt-in limit where there is one, as Triton allows kernels that much.
+    """
+    for attr in (
+        "shared_memory_per_block_optin",
+        "shared_memory_per_block",
+        "local_mem_size",
+    ):
+        if hasattr(props, attr):
+            return int(getattr(props, attr))
+    return None
 
 
 class BaseHeuristicSingleton(type):
@@ -1170,16 +1278,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             if torch.cuda.is_available():
                 device = torch.cuda.current_device()
                 props = torch.cuda.get_device_properties(device)
-                if hasattr(props, "shared_memory_per_block_optin"):
-                    sm_available = int(props.shared_memory_per_block_optin)
-                elif hasattr(props, "shared_memory_per_block"):
-                    sm_available = int(props.shared_memory_per_block)
-                else:
-                    return None
             elif torch.xpu.is_available():
                 props = torch.xpu.get_device_properties()
-                sm_available = int(props.local_mem_size)
             else:
+                return None
+            sm_available = _shared_memory_per_block(props)
+            if sm_available is None:
                 return None
         except Exception:
             # If device properties cannot be queried, return None
@@ -1389,6 +1493,130 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             flex_decode_configs.append(default_config)
 
         return flex_decode_configs
+
+    # Scatter pre-aggregation helpers
+    def should_use_scatter_preagg_template(self, device: torch.device) -> bool:
+        """Whether this backend supports the scatter pre-aggregation template."""
+        return False
+
+    def get_scatter_preagg_target(self, device: torch.device) -> ScatterPreaggTarget:
+        """
+        The properties of ``device`` the scatter pre-aggregation template uses.
+        """
+        props = DeviceProperties.create(device)
+        device_props = get_interface_for_device(device).get_device_properties(device)
+        shared_mem_bytes = _shared_memory_per_block(device_props)
+        if shared_mem_bytes is None:
+            raise NotImplementedError(
+                f"no shared memory size for scatter pre-aggregation on {device}"
+            )
+        return ScatterPreaggTarget(
+            warp_size=props.warp_size_or_default,
+            shared_mem_bytes=shared_mem_bytes,
+            num_sms=props.multi_processor_count,
+        )
+
+    def _scatter_preagg_config(
+        self,
+        num_tokens: int,
+        num_inner: int,
+        max_block_d: int,
+        tile_elems: int,
+        threads: int,
+        target: ScatterPreaggTarget,
+    ) -> ScatterPreaggConfig:
+        from ...runtime.runtime_utils import next_power_of_2
+
+        block_d = min(next_power_of_2(num_inner), max_block_d)
+        if num_inner % block_d != 0:
+            # Prefer a block that divides the inner size: ragged blocks need
+            # clamped (non-vectorizable) indexing.
+            divisor = num_inner & -num_inner
+            if divisor >= 8:
+                block_d = min(divisor, max_block_d)
+        if num_inner % block_d != 0:
+            # Ragged blocks change the layout chosen for the sort/scan, which
+            # then takes about 16 bytes of shared memory per element.
+            tile_elems = min(
+                tile_elems, 1 << ((target.shared_mem_bytes // 16).bit_length() - 1)
+            )
+        block_t = next_power_of_2(max(1, tile_elems // block_d))
+        # Past 256 tokens per inner element the sort costs more than it saves.
+        block_t = max(32, min(1024, 256 * block_d, block_t))
+        # Keep at least two programs per SM on small scatters.
+        while (
+            block_t > 32
+            and ceildiv(num_tokens, block_t) * ceildiv(num_inner, block_d)
+            < 2 * target.num_sms
+        ):
+            block_t //= 2
+
+        # Fewest programs along the inner dim (one sort per token block) that
+        # still keep 1024 programs in flight; the best split was measured not
+        # to depend on the SM count.
+        num_blocks = ceildiv(num_inner, block_d)
+        token_programs = ceildiv(num_tokens, block_t)
+        d_iters = 1
+        for cand in range(min(num_blocks, 64), 0, -1):
+            if num_blocks % cand == 0 and token_programs * (num_blocks // cand) >= 1024:
+                d_iters = cand
+                break
+        return ScatterPreaggConfig(block_t, block_d, d_iters, 1, target.warps(threads))
+
+    def _scatter_preagg_default_config(
+        self,
+        num_tokens: int,
+        num_inner: int,
+        dtype: torch.dtype,
+        inner_contiguous: bool,
+        num_keys: int | None,
+        target: ScatterPreaggTarget,
+    ) -> ScatterPreaggConfig:
+        # 4K-element tiles on 128 threads: larger sorts cost more than they
+        # save, and 16-wide slices (32 past 64-wide rows) give blocks enough
+        # tokens to collapse hot destinations. Strided rows take thin slices.
+        if not inner_contiguous:
+            max_block_d = 8
+        else:
+            max_block_d = 16 if num_inner <= 64 else 32
+        return self._scatter_preagg_config(
+            num_tokens, num_inner, max_block_d, 4096, 128, target
+        )
+
+    def get_scatter_preagg_configs(
+        self,
+        num_tokens: int,
+        num_inner: int,
+        dtype: torch.dtype,
+        *,
+        target: ScatterPreaggTarget,
+        inner_contiguous: bool = True,
+        num_keys: int | None = None,
+        max_autotune: bool = False,
+    ) -> list[ScatterPreaggConfig]:
+        """The default config first, then any autotuning candidates."""
+        default = self._scatter_preagg_default_config(
+            num_tokens, num_inner, dtype, inner_contiguous, num_keys, target
+        )
+        configs = [default]
+        if max_autotune:
+            # Vary the slice width, then the tile size and thread count of the
+            # default's slices.
+            block_ds = (16, 32, 64, 128) if inner_contiguous else (8, 16)
+            candidates = [(block_d, 4096, 128) for block_d in block_ds]
+            candidates += [
+                (default.block_d, tile_elems, threads)
+                for tile_elems, threads in itertools.product(
+                    (2048, 4096, 8192), (128, 256)
+                )
+            ]
+            for max_block_d, tile_elems, threads in candidates:
+                cfg = self._scatter_preagg_config(
+                    num_tokens, num_inner, max_block_d, tile_elems, threads, target
+                )
+                if cfg not in configs:
+                    configs.append(cfg)
+        return configs
 
 
 class CPUConfigHeuristic(BaseConfigHeuristic):
@@ -2288,6 +2516,55 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             flex_decode_configs.append(default_config)
 
         return flex_decode_configs
+
+    def get_scatter_preagg_target(self, device: torch.device) -> ScatterPreaggTarget:
+        # Use two elements per thread for sorted 32-bit atomics and one word per
+        # lane for plain atomics.
+        return dataclasses.replace(
+            super().get_scatter_preagg_target(device),
+            atomic_vec=2,
+            plain_atomic_bytes=4,
+            fp16_matrix_preagg=True,
+        )
+
+    def should_use_scatter_preagg_template(self, device: torch.device) -> bool:
+        return device.type == "cuda"
+
+    def _scatter_preagg_default_config(
+        self,
+        num_tokens: int,
+        num_inner: int,
+        dtype: torch.dtype,
+        inner_contiguous: bool,
+        num_keys: int | None,
+        target: ScatterPreaggTarget,
+    ) -> ScatterPreaggConfig:
+        if target.matrix_preagg(dtype, num_inner, inner_contiguous):
+            # 64-wide slices pay only on wide rows with mostly distinct keys.
+            wide = num_inner > 128 and (num_keys is None or num_keys >= num_tokens)
+            max_block_d = 64 if wide else 32
+            return self._scatter_preagg_config(
+                num_tokens,
+                num_inner,
+                max_block_d,
+                64 * max_block_d,
+                target.warp_size,
+                target,
+            )
+        cfg = super()._scatter_preagg_default_config(
+            num_tokens, num_inner, dtype, inner_contiguous, num_keys, target
+        )
+        if dtype != torch.float32 or not inner_contiguous:
+            return cfg
+        # More threads offset the sort branch's register pressure.
+        if 1 < num_inner <= 8:
+            return ROCmScatterPreaggConfig(
+                **dataclasses.asdict(cfg) | {"num_warps": target.warps(256)},
+                waves_per_eu=4,
+            )
+        if cfg.block_d * cfg.d_iters >= 256:
+            return dataclasses.replace(cfg, num_warps=target.warps(256))
+        return cfg
 
 
 class XPUConfigHeuristic(BaseConfigHeuristic):
