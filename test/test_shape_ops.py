@@ -439,6 +439,9 @@ class TestShapeOps(TestCase):
 
     @dtypes(*all_passthru_types())
     @dtypesIfCUDA(*all_passthru_types_and(torch.chalf))
+    @dtypesIfXPU(*all_passthru_types_and(torch.chalf))
+    # https://github.com/intel/torch-xpu-ops/issues/6137
+    @expectedFailure("xpu", torch.float32)
     def test_flip(self, device, dtype):
         make_from_data = partial(torch.tensor, device=device, dtype=dtype)
         make_from_size = partial(make_tensor, device=device, dtype=dtype)
@@ -872,7 +875,7 @@ class TestShapeOpsCPUOnly(TestCase):
         torch.flip(qt, dims=(0,))
 
 
-instantiate_device_type_tests(TestShapeOps, globals(), allow_mps=True)
+instantiate_device_type_tests(TestShapeOps, globals(), allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestShapeOpsCPUOnly, globals(), only_for="cpu")
 
 if __name__ == "__main__":
