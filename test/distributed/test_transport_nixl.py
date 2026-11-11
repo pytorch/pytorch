@@ -385,11 +385,8 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         ):
             self.test_transport_asyncio_put_get()
             first, second = self.make_transport_pair()
-            self.assertEqual(first.max_notification_size(), 0)
-            with self.assertRaises(NotImplementedError):
-                first.send_notification(second.peer_id, b"x")
-            with self.assertRaises(NotImplementedError):
-                first.wait_notifications()
+            first.send_notification(second.peer_id, b"x").wait()
+            self.assertEqual(self._receive(second), [(first.peer_id, b"x")])
         for agent in _Agent.agents.values():
             self.assertEqual(list(agent.backends), [plugin])
             self.assertEqual(agent.registrations, [])

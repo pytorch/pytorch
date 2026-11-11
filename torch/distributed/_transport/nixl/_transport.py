@@ -36,9 +36,9 @@ if TYPE_CHECKING:
     from .._api import Memory
 
 
-# UCX sends notifications as active messages without a fixed size limit; this
-# keeps them small control messages.
-_MAX_NOTIFICATION_SIZE = 64 << 10
+# Fits every NIXL network plugin: GPUNetIO caps a notification, including the
+# sender's name, at 8 KiB.
+_MAX_NOTIFICATION_SIZE = 4 << 10
 
 
 def _load_backend() -> Any:
@@ -63,12 +63,13 @@ class NIXLTransport(Transport):
     when selected. Transfers require registered views; raw tensors are rejected
     rather than allocated or registered implicitly.
 
-    Notifications are supported with the UCX plugin; peer ids are agent names.
-    Through NIXL 1.5.2, UCX sends a transfer's notification only when the
-    initiator checks the transfer (ai-dynamo/nixl#2439; later versions also send
-    it from NIXL's progress thread), and NIXL cannot signal arriving
-    notifications, so a thread polls transfers that carry a notification, and
-    incoming notifications while a ``wait_notifications`` Work is pending.
+    Notifications use the plugin's NIXL support; NIXL rejects them on plugins
+    without it, such as storage plugins. Peer ids are agent names. A plugin may
+    send a transfer's notification only when the initiator checks the transfer,
+    as UCX does through NIXL 1.5.2 (ai-dynamo/nixl#2439), and NIXL cannot signal
+    arriving notifications, so a thread polls transfers that carry a
+    notification, and incoming notifications while a ``wait_notifications`` Work
+    is pending.
     """
 
     def __init__(
@@ -204,7 +205,7 @@ class NIXLTransport(Transport):
         return self._name
 
     def max_notification_size(self) -> int:
-        return _MAX_NOTIFICATION_SIZE if self._plugin == "UCX" else 0
+        return _MAX_NOTIFICATION_SIZE
 
     def send_notification(
         self, peer: PeerId, payload: bytes, *, timeout: float | None = None
@@ -225,14 +226,14 @@ class NIXLTransport(Transport):
 
     def poll_notifications(self) -> list[Notification]:
         with self._locked(None):
-            self._check_receive()
+            self._ensure_open()
             self._drain_notifications()
             received, self._received = self._received, []
         return received
 
     def wait_notifications(self, *, timeout: float | None = None) -> Work:
         with self._locked(timeout):
-            self._check_receive()
+            self._ensure_open()
             self._drain_notifications()
             if self._received:
                 future: _ThreadFuture[None] = _ThreadFuture()
@@ -243,11 +244,6 @@ class NIXLTransport(Transport):
                 future = self._available
                 self._start_progress()
         return _FutureWork(future, self._timeout if timeout is None else timeout)
-
-    def _check_receive(self) -> None:
-        self._ensure_open()
-        if not self.max_notification_size():
-            raise NotImplementedError("transport does not support notifications")
 
     def _drain_notifications(self) -> None:
         # Caller holds _operation_lock.
