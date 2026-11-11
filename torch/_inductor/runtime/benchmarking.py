@@ -569,7 +569,7 @@ class TritonBenchmarker(Benchmarker):
 
 
 # AMD Infinity Cache (MALL) size by gfx target; torch's device properties do not
-# report it. Unknown archs get Triton's 256 MB flush size.
+# report it. Unknown archs are assumed to have a 256 MB MALL.
 _ROCM_MALL_SIZE = {
     "gfx908": 0,  # MI100
     "gfx90a": 0,  # MI200
@@ -584,6 +584,43 @@ def _rocm_mall_size() -> int:
     props = torch.cuda.get_device_properties(torch.cuda.current_device())
     arch = getattr(props, "gcnArchName", "").split(":", 1)[0]
     return _ROCM_MALL_SIZE.get(arch, 256 * 1024 * 1024)
+
+
+@functools.cache
+def _rocm_read_kernel() -> Any:
+    import triton
+    import triton.language as tl
+
+    @triton.jit
+    def _read(in_ptr, out_ptr, n, BLOCK: tl.constexpr):  # type: ignore[no-untyped-def]
+        pid = tl.program_id(0)
+        acc = tl.zeros([BLOCK], dtype=tl.float32)
+        for start in range(pid * BLOCK, n, tl.num_programs(0) * BLOCK):
+            offs = start + tl.arange(0, BLOCK)
+            acc += tl.load(in_ptr + offs, mask=offs < n, other=0.0)
+        tl.store(out_ptr + pid, tl.sum(acc))
+
+    return _read
+
+
+def _rocm_read_flush(buffer: torch.Tensor, passes: int) -> Callable[[], None]:
+    """Return a flush that reads all of `buffer` `passes` times with plain loads.
+
+    ATen's vectorized loads are nontemporal on gfx942 (MI300), so they do not
+    allocate in the Infinity Cache and a buffer.sum() flush evicts nothing there.
+    Triton's default loads do allocate.
+    """
+    kernel = _rocm_read_kernel()
+    props = torch.cuda.get_device_properties(buffer.device)
+    grid = (props.multi_processor_count * 8,)
+    partials = torch.empty(grid, dtype=torch.float32, device=buffer.device)
+    n = buffer.numel()
+
+    def flush() -> None:
+        for _ in range(passes):
+            kernel[grid](buffer, partials, n, BLOCK=2048, num_warps=8)
+
+    return flush
 
 
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
@@ -706,7 +743,8 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         - estimation_iters: Optionally, the number of iterations to run `_callable`
         during runtime estimation.
         - memory_warmup_iters: Optionally, the number of iterations to flush the L2
-        cache before starting benchmarking.
+        cache before starting benchmarking. On ROCm each flush reads the buffer
+        twice, so half as many (rounded up) flushes run.
         - benchmark_iters: Optionally, the number of iterations to run `_callable`
         during the benchmarking.
         - max_benchmark_duration: Optionally, the maximum duration of the benchmarking,
@@ -767,23 +805,22 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
         # (CUDA). On ROCm, flush by reading the buffer instead: zero_() leaves it
         # dirty in the L2 / Infinity Cache and the timed call then pays the
-        # write-back. Read a float32 buffer, since summing int32 first writes an
-        # int64 copy. Read it twice: one pass does not evict operands the callable
-        # has just reused from the Infinity Cache.
+        # write-back. Read it with a Triton kernel, since ATen's loads skip the
+        # Infinity Cache on MI300 (see _rocm_read_flush). Read it twice: one pass
+        # does not evict operands the callable has just reused from the Infinity
+        # Cache.
         buffer = torch.empty(
             self.get_flush_size(device_type) // 4,
             dtype=torch.float32 if torch.version.hip else torch.int,
             device=device_type,
         )
         buffer.zero_()
+        flush: Callable[[], Any]
         if torch.version.hip:
-
-            def flush(read: Callable[[], Any] = buffer.sum) -> None:
-                read()
-                read()
-
-            # each flush reads the buffer twice; keep the warmup's total reads
-            memory_warmup_iters //= 2
+            passes = 2
+            flush = _rocm_read_flush(buffer, passes)
+            # keep the warmup's total reads
+            memory_warmup_iters = -(-memory_warmup_iters // passes)
         else:
             flush = buffer.zero_
 
@@ -826,7 +863,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
         # explicitly delete the buffer, sometimes helps memory
         # footprint metrics in OSS Inductor performance benchmarks
-        del buffer
+        del flush, buffer
 
         # Return based on the requested mode
         if return_mode == "all":
