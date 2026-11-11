@@ -22,6 +22,7 @@ use pyo3::prelude::*;
 fn _cfg_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pyapi::init, m)?)?;
     m.add_function(wrap_pyfunction!(pyapi::compile, m)?)?;
+    m.add_function(wrap_pyfunction!(pyapi::decode, m)?)?;
     m.add_function(wrap_pyfunction!(pyapi::builtin_passes, m)?)?;
     m.add_class::<pyapi::CfgFunction>()?;
     Ok(())
