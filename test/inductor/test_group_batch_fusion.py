@@ -1046,13 +1046,15 @@ class TestGroupBatchFusion(TestCase):
             generate_fusion_from_config,
         )
 
-        self.assertEqual(
-            generate_fusion_from_config({"batch_linear_lhs": {}}, pre_grad=True), []
-        )
+        # batch_linear_lhs is registered post grad. The old pre-grad key is
+        # forwarded by group_batch_fusion_passes; the E2E test above covers it.
         self.assertEqual(
             len(generate_fusion_from_config({"batch_linear_lhs": {}}, pre_grad=False)),
             1,
         )
+        # Other cross-stage fusion options still fail loudly.
+        with self.assertRaises(KeyError):
+            generate_fusion_from_config({"group_linear": {}}, pre_grad=True)
 
     @torch._inductor.config.patch(
         pre_grad_fusion_options={"batch_linear_lhs": {"min_fuse_set_size": 2}},

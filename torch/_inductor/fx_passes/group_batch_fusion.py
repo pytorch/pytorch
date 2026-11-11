@@ -115,6 +115,11 @@ class GroupBatchFusionBase:
 PRE_GRAD_FUSIONS: dict[str, GroupBatchFusionBase] = {}
 POST_GRAD_FUSIONS: dict[str, GroupBatchFusionBase] = {}
 
+# Fusions whose option moved from pre_grad_fusion_options to
+# post_grad_fusion_options. The old key keeps working by forwarding the option
+# to the post-grad pass; see group_batch_fusion_passes.
+_PRE_GRAD_OPTIONS_FORWARDED_TO_POST_GRAD = OrderedSet(["batch_linear_lhs"])
+
 
 def register_fusion(name: str, pre_grad=True):
     def decorator(fusion_cls: GroupBatchFusionBase):
@@ -1803,16 +1808,17 @@ def generate_fusion_from_config(config_options: dict[str, Any], pre_grad=True):
             continue
         fusion_cls = registry.get(name)
         if fusion_cls is None:
-            if pre_grad and name in POST_GRAD_FUSIONS:
+            if pre_grad and name in _PRE_GRAD_OPTIONS_FORWARDED_TO_POST_GRAD:
                 # The post-grad pass honors this option; see
                 # group_batch_fusion_passes.
                 continue
-            log.warning(
-                "Skipping %s fusion option %s: not registered for this stage",
-                "pre-grad" if pre_grad else "post-grad",
-                name,
+            other = (
+                "post_grad_fusion_options" if pre_grad else "pre_grad_fusion_options"
             )
-            continue
+            raise KeyError(
+                f"{name} is not a {'pre-grad' if pre_grad else 'post-grad'} "
+                f"fusion; set it in {other}."
+            )
         _options = graph_search_options.copy()
         _options.update({k: v for k, v in options.items() if k != "devices"})
         fusions.append(fusion_cls(graph_search_options=_options))  # type: ignore[operator]
@@ -1834,10 +1840,9 @@ def group_batch_fusion_passes(
         )
     else:
         post_grad_options = dict(config.post_grad_fusion_options)
-        # A pre-grad option for a fusion that only exists post grad must keep
-        # working; run it post grad instead of silently dropping it.
-        for name, options in config.pre_grad_fusion_options.items():
-            if name in POST_GRAD_FUSIONS and name not in post_grad_options:
+        # Keep the old pre-grad key working for fusions that moved post grad.
+        for name in _PRE_GRAD_OPTIONS_FORWARDED_TO_POST_GRAD:
+            if name in config.pre_grad_fusion_options and name not in post_grad_options:
                 warning_once(
                     log,
                     "Fusion option %s is post-grad; running it post grad. "
@@ -1845,7 +1850,7 @@ def group_batch_fusion_passes(
                     "post_grad_fusion_options.",
                     name,
                 )
-                post_grad_options[name] = options
+                post_grad_options[name] = config.pre_grad_fusion_options[name]
         fbgemm_fusion_keys = [
             x
             for x in post_grad_options
