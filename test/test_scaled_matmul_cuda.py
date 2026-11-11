@@ -64,6 +64,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     isRocmArchAnyOf,
     MI350_ARCH,
+    MI450_ARCH,
     NAVI4_ARCH,
     NAVI_ARCH,
     parametrize,
@@ -3583,55 +3584,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @unittest.skipIf(not torch.version.hip, "The MX scale layout is fixed by arch and ROCm version only on ROCm")
-    @runOnRocmArch(("gfx1250",))
-    @parametrize("recipe", ["mxfp8", "mxfp4"])
-    def test_rocm_gfx1250_mx_swizzle(self, device, recipe) -> None:
-        # K=256 so the permutation is not the identity. Constant scales would
-        # hide a wrong order.
-        M, K, N = 128, 256, 128
-        BLOCK_SIZE = 32
-        A_ref = torch.randn((M, K), device=device, dtype=torch.bfloat16) * 1000
-        B_ref = torch.randn((N, K), device=device, dtype=torch.bfloat16) * 1000
-        A_scale = data_to_mx_scale(A_ref, BLOCK_SIZE, recipe)
-        B_scale = data_to_mx_scale(B_ref, BLOCK_SIZE, recipe)
-
-        def quantize(ref, scale, rows):
-            blocks = scale.reshape(rows * ceil_div(K, BLOCK_SIZE), 1)
-            if recipe == "mxfp8":
-                q = (ref.reshape(-1, BLOCK_SIZE) / blocks.float()).reshape(rows, K)
-                return q.clamp(-F8E4M3_MAX_VAL, F8E4M3_MAX_VAL).to(torch.float8_e4m3fn)
-            q = (ref.reshape(-1, BLOCK_SIZE) / blocks.bfloat16()).reshape(rows, K)
-            return _bfloat16_to_float4_e2m1fn_x2(q.clamp(-FP4_MAX_VAL, FP4_MAX_VAL))
-
-        A, B = quantize(A_ref, A_scale, M), quantize(B_ref, B_scale, N)
-        C_ref = A_ref @ B_ref.t()
-        sqnr_target = 15.0 if recipe == "mxfp4" else 15.8
-
-        C = scaled_mm(
-            A, B.t(),
-            to_mx_swizzled_gfx1250(A_scale), ScalingType.BlockWise1x32,
-            to_mx_swizzled_gfx1250(B_scale), ScalingType.BlockWise1x32,
-            swizzle_a=SwizzleType.SWIZZLE_128, swizzle_b=SwizzleType.SWIZZLE_128,
-            output_dtype=torch.bfloat16,
-        )
-        sqnr = compute_error(C_ref, C).item()
-        self.assertGreater(sqnr, sqnr_target, f"SWIZZLE_128 gave sqnr {sqnr}")
-
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            r"requires SWIZZLE_128 scales\. Pass swizzle_a=swizzle_b=SwizzleType\.SWIZZLE_128",
-        ):
-            scaled_mm(
-                A, B.t(),
-                A_scale, ScalingType.BlockWise1x32,
-                B_scale, ScalingType.BlockWise1x32,
-                swizzle_a=SwizzleType.NO_SWIZZLE, swizzle_b=SwizzleType.NO_SWIZZLE,
-                output_dtype=torch.bfloat16,
-            )
-
-    @onlyAccelerator
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
-    @unittest.skipIf(not torch.version.hip, "The MX scale layout is fixed by arch and ROCm version only on ROCm")
     @parametrize("recipe", ["mxfp8", "mxfp4"])
     def test_rocm_v1_mx_takes_unswizzled_scales(self, device, recipe) -> None:
         # v1 `_scaled_mm` has no swizzle argument, so it takes the default
@@ -5436,6 +5388,74 @@ print("tunableop_keys_ok")
                 swizzle_b=[SwizzleType.SWIZZLE_32_4_4, ],
             )
 
+        # A full swizzle list that is not SWIZZLE_128 is rejected before the
+        # size check, on every ROCm arch.
+        if torch.version.hip:
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                r"NVFP4 block scaling on ROCm requires gfx1250 with ROCm 10\.0 and SWIZZLE_128",
+            ):
+                _ = torch.nn.functional.scaled_mm(
+                    x,
+                    w.t(),
+                    [x_scale, global_scale],
+                    [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                    [w_scale, global_scale],
+                    [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                    swizzle_a=[SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
+                    swizzle_b=[SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
+                )
+
+
+
+    @onlyAccelerator
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @unittest.skipIf(not torch.version.hip, "The MX scale layout is fixed by arch and ROCm version only on ROCm")
+    @runOnRocmArch(MI450_ARCH)
+    @parametrize("recipe", ["mxfp8", "mxfp4"])
+    def test_rocm_gfx1250_mx_swizzle(self, device, recipe) -> None:
+        # K=256 so the permutation is not the identity. Constant scales would
+        # hide a wrong order.
+        M, K, N = 128, 256, 128
+        BLOCK_SIZE = 32
+        A_ref = torch.randn((M, K), device=device, dtype=torch.bfloat16) * 1000
+        B_ref = torch.randn((N, K), device=device, dtype=torch.bfloat16) * 1000
+        A_scale = data_to_mx_scale(A_ref, BLOCK_SIZE, recipe)
+        B_scale = data_to_mx_scale(B_ref, BLOCK_SIZE, recipe)
+
+        def quantize(ref, scale, rows):
+            blocks = scale.reshape(rows * ceil_div(K, BLOCK_SIZE), 1)
+            if recipe == "mxfp8":
+                q = (ref.reshape(-1, BLOCK_SIZE) / blocks.float()).reshape(rows, K)
+                return q.clamp(-F8E4M3_MAX_VAL, F8E4M3_MAX_VAL).to(torch.float8_e4m3fn)
+            q = (ref.reshape(-1, BLOCK_SIZE) / blocks.bfloat16()).reshape(rows, K)
+            return _bfloat16_to_float4_e2m1fn_x2(q.clamp(-FP4_MAX_VAL, FP4_MAX_VAL))
+
+        A, B = quantize(A_ref, A_scale, M), quantize(B_ref, B_scale, N)
+        C_ref = A_ref @ B_ref.t()
+        sqnr_target = 15.0 if recipe == "mxfp4" else 15.8
+
+        C = scaled_mm(
+            A, B.t(),
+            to_mx_swizzled_gfx1250(A_scale), ScalingType.BlockWise1x32,
+            to_mx_swizzled_gfx1250(B_scale), ScalingType.BlockWise1x32,
+            swizzle_a=SwizzleType.SWIZZLE_128, swizzle_b=SwizzleType.SWIZZLE_128,
+            output_dtype=torch.bfloat16,
+        )
+        sqnr = compute_error(C_ref, C).item()
+        self.assertGreater(sqnr, sqnr_target, f"SWIZZLE_128 gave sqnr {sqnr}")
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"requires SWIZZLE_128 scales\. Pass swizzle_a=swizzle_b=SwizzleType\.SWIZZLE_128",
+        ):
+            scaled_mm(
+                A, B.t(),
+                A_scale, ScalingType.BlockWise1x32,
+                B_scale, ScalingType.BlockWise1x32,
+                swizzle_a=SwizzleType.NO_SWIZZLE, swizzle_b=SwizzleType.NO_SWIZZLE,
+                output_dtype=torch.bfloat16,
+            )
 
 instantiate_device_type_tests(TestFP8MatmulDevice, globals(), allow_xpu=True, allow_mps=True)
 instantiate_device_type_tests(TestFP8MatmulCudaOnly, globals(), only_for=("cuda",))

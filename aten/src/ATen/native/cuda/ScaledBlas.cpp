@@ -228,7 +228,7 @@ static void check_mx_swizzle(const at::Tensor& t, SwizzleType swizzle_a, Swizzle
   }
   TORCH_CHECK_NOT_IMPLEMENTED(
       swizzle_a != SwizzleType::SWIZZLE_128,
-      "SWIZZLE_128 block scales require gfx1250");
+      "SWIZZLE_128 block scales require gfx1250 with ROCm 7.14");
   TORCH_CHECK_NOT_IMPLEMENTED(
       swizzle_a != SwizzleType::SWIZZLE_32_8 || prefers_swizzle_32_8(t),
       "SWIZZLE_32_8 block scales require gfx950 with ROCm 7.13 (MX FP4) or ROCm 7.14 (MX FP8)");
@@ -1561,11 +1561,6 @@ _scaled_nvfp4_nvfp4(
     TORCH_CHECK_VALUE(global_scale_b.has_value(),
         "For two-level-scaled NVFP4, global_scale_b must have a value");
     alpha = global_scale_a.value().mul(global_scale_b.value());
-#ifdef USE_ROCM
-    // TBD: keep this product on device and pass it as the GEMM alpha pointer
-    // (device pointer mode) instead of copying it to a host scalar.
-    alpha = at::scalar_tensor(alpha->item<float>(), at::TensorOptions().dtype(at::kFloat));
-#endif
   }
   // A and B are packed fp4. The block scales are e4m3 with one value per 16
   // unpacked K elements, so the packed K is doubled when counting scales.
@@ -1608,6 +1603,14 @@ _scaled_nvfp4_nvfp4(
   TORCH_CHECK_VALUE(scale_a.is_contiguous() && scale_b.is_contiguous(),
         "For Blockwise scaling both scales should be contiguous");
 
+#ifdef USE_ROCM
+  if (alpha.has_value()) {
+    // TBD: keep this product on device and pass it as the GEMM alpha pointer
+    // (device pointer mode) instead of copying it to a host scalar.
+    alpha = at::scalar_tensor(alpha->item<float>(), at::TensorOptions().dtype(at::kFloat));
+  }
+#endif
+
   auto scaling_choice_a = ScalingType::BlockWise1x16;
   auto scaling_choice_b = ScalingType::BlockWise1x16;
   return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, swizzle_a, swizzle_b, bias, false /* use_fast_accum */, out, epilogue, std::nullopt, alpha);
@@ -1644,12 +1647,11 @@ void check_swizzle_lengths(ScaledGemmImplementation impl,
           swizzle_a.size() == n && swizzle_b.size() == n,
           "For ROCM NVFP4 gemm, swizzle_a and swizzle_b must each have ", n,
           " value", n == 1 ? "" : "s", ", got ", swizzle_a.size(), " and ", swizzle_b.size());
-      // Arch support is checked by _scaled_nvfp4_nvfp4. NO_SWIZZLE reaches
-      // that check so the rejection names gfx1250.
-      TORCH_CHECK_VALUE(
-          (swizzle_a[0] == SwizzleType::NO_SWIZZLE || swizzle_a[0] == SwizzleType::SWIZZLE_128) &&
-              swizzle_a[0] == swizzle_b[0],
-          "For ROCM NVFP4 gemm, swizzle_a and swizzle_b must both be NO_SWIZZLE or both be SWIZZLE_128");
+      // Same rejection as the v2 validator, for callers that skip meta.
+      TORCH_CHECK_NOT_IMPLEMENTED(
+          swizzle_a[0] == SwizzleType::SWIZZLE_128 && swizzle_b[0] == SwizzleType::SWIZZLE_128,
+          "NVFP4 block scaling on ROCm requires gfx1250 with ROCm 10.0 and SWIZZLE_128 scales. "
+          "Pass swizzle_a=swizzle_b=SwizzleType.SWIZZLE_128 and scales in the gfx1250 order.");
       if (two_level) {
         TORCH_CHECK_VALUE(
             swizzle_a[1] == SwizzleType::NO_SWIZZLE && swizzle_b[1] == SwizzleType::NO_SWIZZLE,
