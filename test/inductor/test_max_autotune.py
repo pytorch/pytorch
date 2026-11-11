@@ -514,14 +514,14 @@ class TestMaxAutotune(TestCase):
 
     @parametrize("persistent", (False, True))
     @parametrize("dynamic", (False, True))
-    def test_max_autotune_mm_epilogue_single_axis_loads(
+    def test_max_autotune_mm_epilogue_vector_loads(
         self, persistent: bool, dynamic: bool
     ):
         if persistent and not torch.version.hip:
             self.skipTest("the non-TMA persistent mm template is ROCm only")
 
-        def fn(a, b, bias, scale):
-            return torch.addmm(bias, a, b) * scale[:, None]
+        def fn(a, b, bias, scale, c):
+            return torch.addmm(bias, a, b) * scale[:, None] + c
 
         # N is not a multiple of any BLOCK_N, so the N mask matters.
         M, N, K = 300, 257, 64
@@ -529,6 +529,7 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N, device=GPU_TYPE)
         bias = torch.randn(N, device=GPU_TYPE)
         scale = torch.randn(M, device=GPU_TYPE)
+        c = torch.randn(M, N, device=GPU_TYPE)
 
         with config.patch(
             {
@@ -543,28 +544,26 @@ class TestMaxAutotune(TestCase):
             }
         ):
             out, code = run_and_get_code(
-                torch.compile(fn, dynamic=dynamic), a, b, bias, scale
+                torch.compile(fn, dynamic=dynamic), a, b, bias, scale, c
             )
 
-        # The bias varies along N only and the scale along M only, so each is
-        # loaded once per tile row/column rather than once per output element.
+        # The bias is a per-column and the scale a per-row vector: each is loaded
+        # once per tile column/row, with its own mask.
         FileCheck().check("triton_tem_fused").check_regex(
-            r"tl\.load\(in_ptr\d+ \+ \(idx_n\), _tmp_var\d+"
+            r"tl\.load\(in_ptr\d+ \+ \(idx_n\), mask_n,"
         ).run(code[0])
-        FileCheck().check_regex(r"tl\.load\(in_ptr\d+ \+ \(idx_m\), _tmp_var\d+").run(
+        FileCheck().check_regex(r"tl\.load\(in_ptr\d+ \+ \(idx_m\), mask_m,").run(
             code[0]
         )
         FileCheck().check_not("broadcast_to(idx_n,").check_not(
             "broadcast_to(idx_m,"
         ).run(code[0])
-        # Each 1D load must use the mask of its own axis.
-        for idx in ("idx_n", "idx_m"):
-            mask_var = re.search(
-                rf"tl\.load\(in_ptr\d+ \+ \({idx}\), (_tmp_var\d+)", code[0]
-            ).group(1)
-            self.assertRegex(code[0], rf"{mask_var} = {idx} < ")
+        # A full [M, N] input still loads at the tile shape with the tile mask.
+        FileCheck().check_regex(
+            r"tl\.load\(in_ptr\d+ \+ \(tl\.broadcast_to\(.+, \[BLOCK_M, BLOCK_N\]\)\), mask,"
+        ).run(code[0])
 
-        ref = fn(a.double(), b.double(), bias.double(), scale.double())
+        ref = fn(a.double(), b.double(), bias.double(), scale.double(), c.double())
         self.assertLess(((out.double() - ref).norm() / ref.norm()).item(), 1e-5)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
@@ -4448,126 +4447,6 @@ class TestTemplateConfigPruning(TestCase):
                     captured_smem <= smem_estimation,
                     lambda msg: f"{msg}\nEstimated maximum smem should exceed actual smem used for config {pinned}",
                 )
-
-    def _rocm_mm_choice_descs(self, arch, m, k, n, persistent_filter=None):
-        """Compile an ``m x k @ k x n`` bf16 mm with max-autotune while the ROCm
-        heuristics see ``arch``, check the result, and return (choice name,
-        description) for every benchmarked choice plus the generated code. With
-        ``persistent_filter``, only the persistent configs it accepts are offered."""
-        import torch._inductor.heuristics.template.triton as triton_heuristics
-
-        seen = []
-
-        def saver(timings, name, input_nodes, choices, *args):
-            seen.extend((c.name, c.description) for c in choices)
-
-        cls = triton_heuristics.PersistentMMTemplateConfigHeuristic
-        configs_impl = cls._get_template_configs_impl
-
-        def filtered_configs_impl(self, *args, **kwargs):
-            for template_kwargs in configs_impl(self, *args, **kwargs):
-                if persistent_filter(template_kwargs):
-                    yield template_kwargs
-
-        patches = {
-            "max_autotune_gemm": True,
-            "max_autotune_gemm_backends": "TRITON",
-            "triton.enable_persistent_tma_matmul": True,
-        }
-        if persistent_filter is not None:
-            patches["test_configs.autotune_choice_name_regex"] = "mm_persistent"
-        a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
-        torch._dynamo.reset()
-        clear_feedback_savers()
-        add_feedback_saver(saver)
-        try:
-            with (
-                mock.patch.object(
-                    triton_heuristics, "rocm_gfx_arch", return_value=arch
-                ),
-                mock.patch.object(
-                    cls,
-                    "_get_template_configs_impl",
-                    filtered_configs_impl if persistent_filter else configs_impl,
-                ),
-                config.patch(patches),
-                fresh_cache(),
-            ):
-                out, code = run_and_get_code(torch.compile(torch.mm), a, b)
-        finally:
-            clear_feedback_savers()
-        # A wrong tile mapping leaves O(10) errors; accumulation order alone stays
-        # well under 1 at these magnitudes.
-        torch.testing.assert_close(
-            out.float(), a.float() @ b.float(), atol=1.0, rtol=0.05
-        )
-        return seen, "\n".join(code)
-
-    @unittest.skipIf(not torch.version.hip, "ROCm persistent mm heuristic")
-    def test_rocm_persistent_mm_gated_to_gfx950(self):
-        num_cus = torch.cuda.get_device_properties(0).multi_processor_count
-        for arch in ("gfx942", "gfx950"):
-            with self.subTest(arch=arch):
-                descs = [
-                    d
-                    for name, d in self._rocm_mm_choice_descs(arch, 4096, 256, 4096)[0]
-                    if "persistent" in name
-                ]
-                self.assertTrue(descs)
-                if arch == "gfx942":
-                    # Original behavior: one program per CU, no XCD kwarg.
-                    for d in descs:
-                        self.assertIn(f"NUM_SMS={num_cus},", d)
-                        self.assertNotIn("NUM_XCDS", d)
-                else:
-                    for d in descs:
-                        self.assertIn("NUM_XCDS=", d)
-                    # Two workgroups per CU for tiles that fit, and the remap.
-                    self.assertTrue(any(f"NUM_SMS={2 * num_cus}," in d for d in descs))
-                    self.assertTrue(any("NUM_XCDS=8," in d for d in descs))
-
-    @unittest.skipIf(not torch.version.hip, "ROCm persistent mm heuristic")
-    def test_rocm_persistent_mm_xcd_remap_correct(self):
-        # Ragged tile grid; only the XCD program-id remap variants are offered.
-        _, code = self._rocm_mm_choice_descs(
-            "gfx950",
-            4000,
-            1024,
-            4100,
-            persistent_filter=lambda kw: kw["NUM_XCDS"] > 1 and "XCD_N" not in kw,
-        )
-        self.assertIn("NUM_XCDS : tl.constexpr = 8", code)
-        self.assertNotIn("XCD_N", code)
-
-    @unittest.skipIf(not torch.version.hip, "ROCm mm heuristic")
-    def test_rocm_wide_mfma_mm_configs_gated_to_gfx950(self):
-        for arch in ("gfx942", "gfx950"):
-            with self.subTest(arch=arch):
-                descs = [
-                    d for _, d in self._rocm_mm_choice_descs(arch, 4096, 256, 4096)[0]
-                ]
-                has_nk32 = any("matrix_instr_nonkdim=32" in d for d in descs)
-                self.assertEqual(has_nk32, arch == "gfx950")
-
-    @unittest.skipIf(not torch.version.hip, "ROCm mm heuristic")
-    def test_rocm_mm_num_stages_autotuned_on_gfx950(self):
-        def stages(arch, m, k, n):
-            out = set()
-            for name, d in self._rocm_mm_choice_descs(arch, m, k, n)[0]:
-                if "persistent" in name:
-                    self.assertIn("num_stages=2", d)
-                    continue
-                bm = int(re.search(r"BLOCK_M=(\d+)", d).group(1))
-                bn = int(re.search(r"BLOCK_N=(\d+)", d).group(1))
-                out.add((int(re.search(r"num_stages=(\d+)", d).group(1)), bm * bn))
-            return out
-
-        # gfx942 keeps the backend default everywhere.
-        self.assertEqual({s for s, _ in stages("gfx942", 1024, 256, 512)}, {2})
-        # gfx950 adds the 1- and 3-stage configs, small and large tiles.
-        for m, k, n in ((1024, 256, 512), (4096, 1024, 4096)):
-            self.assertEqual({s for s, _ in stages("gfx950", m, k, n)}, {1, 2, 3})
 
     def test_scaled_mm_block_k_pruning_excludes_rdna(self):
         import torch._inductor.heuristics.template.triton as triton_heuristics

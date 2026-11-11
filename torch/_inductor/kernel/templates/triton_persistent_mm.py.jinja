@@ -12,21 +12,6 @@
 
     # persistent kernel: each CTA processes multiple tiles
     start_pid = tl.program_id(0).to(INDEX_DTYPE)
-    {% if NUM_XCDS is defined and NUM_XCDS > 1 %}
-    # Workgroups are dispatched round-robin over the XCDs, which have separate L2s.
-    # Renumber programs so that consecutive (grouped) tiles run on the same XCD.
-    num_pids = tl.num_programs(0).to(INDEX_DTYPE)
-    pids_per_xcd = (num_pids + NUM_XCDS - 1) // NUM_XCDS
-    tall_xcds = (num_pids - 1) % NUM_XCDS + 1
-    xcd = start_pid % NUM_XCDS
-    local_pid = start_pid // NUM_XCDS
-    if xcd < tall_xcds:
-        start_pid = xcd * pids_per_xcd + local_pid
-    else:
-        start_pid = (
-            tall_xcds * pids_per_xcd + (xcd - tall_xcds) * (pids_per_xcd - 1) + local_pid
-        )
-    {% endif %}
     grid_m = tl.cdiv(M, BLOCK_M)
     grid_n = tl.cdiv(N, BLOCK_N)
     num_tiles = grid_m * grid_n
@@ -84,7 +69,9 @@
         rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
         idx_m = rm[:, None]
         idx_n = rn[None, :]
-        mask = (idx_m < M) & (idx_n < N)
+        mask_m = idx_m < M
+        mask_n = idx_n < N
+        mask = mask_m & mask_n
 
         # inductor generates a suffix
-        {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=8, val_shape=("BLOCK_M", "BLOCK_N"), index_shapes=(("BLOCK_M", "1"), ("1", "BLOCK_N")))}}
+        {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=8, val_shape=("BLOCK_M", "BLOCK_N"), vector_masks=("mask_m", "mask_n"))}}
