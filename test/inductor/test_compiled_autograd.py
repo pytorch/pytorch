@@ -4586,6 +4586,16 @@ class CompiledAutograd1(torch.nn.Module):
         ):
             fn()
 
+    def test_disallow_implicit_grad_accumulation_not_supported(self):
+        a = torch.randn(3, requires_grad=True)
+        loss = a.sin().sum()
+        with torch._dynamo.compiled_autograd._enable(lambda gm: gm):
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "disallow_implicit_grad_accumulation=True is not supported with Compiled Autograd",
+            ):
+                loss.backward(disallow_implicit_grad_accumulation=True)
+
     def test_anomaly_mode_backward(self):
         def fn():
             class MyFn(torch.autograd.Function):
