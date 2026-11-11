@@ -893,6 +893,66 @@ class TestRealProxyTensor(TestCase):
         )
         self.assertTrue(torch_fn_absent, "torch_fn metadata should be absent when mode is disabled")
 
+    def test_real_metadata_fake_mode_is_shared_within_each_graph(self):
+        from torch._guards import detect_fake_mode
+
+        linear = torch.nn.Linear(4, 3)
+        constant = torch.arange(3.0)
+
+        def f(x):
+            return torch.var_mean(linear(x) + constant, dim=0)
+
+        x = torch.randn(4, 5).t()
+        trace = make_fx(f, tracing_mode="real")
+        modes = []
+        for _ in range(2):
+            gm = trace(x)
+            metadata = [node.meta.get("val") for node in gm.graph.nodes]
+            mode = detect_fake_mode(metadata)
+            self.assertIsNotNone(mode)
+            modes.append(mode)
+
+            placeholder = next(
+                node for node in gm.graph.nodes if node.op == "placeholder"
+            )
+            self.assertEqual(placeholder.meta["val"].shape, x.shape)
+            self.assertEqual(placeholder.meta["val"].stride(), x.stride())
+
+            attrs = [node for node in gm.graph.nodes if node.op == "get_attr"]
+            self.assertTrue(
+                any(isinstance(getattr(gm, n.target), torch.nn.Parameter) for n in attrs)
+            )
+            self.assertTrue(any(getattr(gm, n.target) is constant for n in attrs))
+            for node in attrs:
+                self.assertIs(node.meta["val"].fake_mode, mode)
+
+            outputs = next(
+                node.meta["val"]
+                for node in gm.graph.nodes
+                if node.target == torch.ops.aten.var_mean.correction
+            )
+            self.assertEqual(len(outputs), 2)
+            for output in outputs:
+                self.assertIs(output.fake_mode, mode)
+            self.assertEqual(gm(x), f(x))
+
+        self.assertIsNot(modes[0], modes[1])
+
+    def test_decomposition_interpreter_reuses_metadata_fake_mode(self):
+        from torch._guards import detect_fake_mode
+
+        def f(x, y):
+            return torch.sin(x + y)
+
+        x, y = torch.randn(3), torch.randn(3)
+        gm = make_fx(f)(x, y)
+        graph = torch.fx.Graph()
+        DecompositionInterpreter(gm, graph).run(x, y)
+        self.assertIsNotNone(
+            detect_fake_mode([node.meta.get("val") for node in graph.nodes])
+        )
+        self.assertEqual(torch.fx.GraphModule(gm, graph)(x, y), f(x, y))
+
 class TestFakeProxyTensor(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1007,67 +1067,6 @@ def forward(self, x_1):
 
         fake_mode = detect_fake_mode([node.meta.get('val', None) for node in out.graph.nodes])
         self.assertEqual(fake_mode, existing_fake_mode)
-
-    def test_real_metadata_fake_mode_is_shared_within_each_graph(self):
-        from torch._guards import detect_fake_mode
-
-        linear = torch.nn.Linear(4, 3)
-        constant = torch.arange(3.0)
-
-        def f(x):
-            return torch.var_mean(linear(x) + constant, dim=0)
-
-        x = torch.randn(4, 5).t()
-        trace = make_fx(f, tracing_mode="real")
-        modes = []
-        for _ in range(2):
-            gm = trace(x)
-            metadata = [node.meta.get("val") for node in gm.graph.nodes]
-            mode = detect_fake_mode(metadata)
-            self.assertIsNotNone(mode)
-            modes.append(mode)
-
-            placeholder = next(
-                node for node in gm.graph.nodes if node.op == "placeholder"
-            )
-            self.assertEqual(placeholder.meta["val"].shape, x.shape)
-            self.assertEqual(placeholder.meta["val"].stride(), x.stride())
-
-            attrs = [node for node in gm.graph.nodes if node.op == "get_attr"]
-            self.assertTrue(
-                any(isinstance(getattr(gm, n.target), torch.nn.Parameter) for n in attrs)
-            )
-            self.assertTrue(any(getattr(gm, n.target) is constant for n in attrs))
-            for node in attrs:
-                self.assertIs(node.meta["val"].fake_mode, mode)
-
-            outputs = next(
-                node.meta["val"]
-                for node in gm.graph.nodes
-                if node.target == torch.ops.aten.var_mean.correction
-            )
-            self.assertEqual(len(outputs), 2)
-            for output in outputs:
-                self.assertIs(output.fake_mode, mode)
-            self.assertEqual(gm(x), f(x))
-
-        self.assertIsNot(modes[0], modes[1])
-
-    def test_decomposition_interpreter_reuses_metadata_fake_mode(self):
-        from torch._guards import detect_fake_mode
-
-        def f(x, y):
-            return torch.sin(x + y)
-
-        x, y = torch.randn(3), torch.randn(3)
-        gm = make_fx(f)(x, y)
-        graph = torch.fx.Graph()
-        DecompositionInterpreter(gm, graph).run(x, y)
-        self.assertIsNotNone(
-            detect_fake_mode([node.meta.get("val") for node in graph.nodes])
-        )
-        self.assertEqual(torch.fx.GraphModule(gm, graph)(x, y), f(x, y))
-
 
 def _get_node(fx_g, cond):
     for n in fx_g.graph.nodes:
