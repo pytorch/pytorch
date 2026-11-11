@@ -626,12 +626,16 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 f"invalid class type {input_tensor_type} in TensorWithTFOverrideVariable.from_tensor_var"
             )
         # The new subclass tensor instance is a newly constructed object in this frame;
-        # its mutation tracking will be handled by the caller (or AttributeMutationNew),
-        # so it must not inherit an existing object's source or mutation_type.
+        # it must not inherit an existing object's source or mutation_type.
         kwargs.pop("source", None)
         kwargs.pop("mutation_type", None)
         var = cls(class_type=class_type, **kwargs)
         var.install_global(tx)
+        from torch._dynamo.side_effects import AttributeMutationNew
+
+        tx.output.side_effects._track_obj(
+            object(), var, mutation_type_cls=AttributeMutationNew
+        )
         return var
 
     def install_global(self, tx: "InstructionTranslatorBase") -> None:

@@ -2078,6 +2078,56 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         opt_f3 = torch.compile(f3, backend="eager")
         self.assertEqual(f3(x), opt_f3(x))
 
+    def test_subclass_attribute_mutation_and_tracking(self):
+        class SubWithAttr(torch.Tensor):
+            def __init__(self, *args, **kwargs):
+                self.tag = 1
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        def f(x):
+            s = SubWithAttr(x)
+            return s * 2, s.tag
+
+        x = torch.randn(3)
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        res, tag = opt_f(x)
+        self.assertEqual(res, x * 2)
+        self.assertEqual(tag, 1)
+
+        def f_unpack(x):
+            s = SubWithAttr(x)
+            a, b, c = s
+            return a + b + c
+
+        opt_unpack = torch.compile(f_unpack, backend="eager", fullgraph=True)
+        self.assertEqual(f_unpack(x), opt_unpack(x))
+
+    def test_as_subclass_requires_grad_graph_input(self):
+        class Sub(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        def f_req_grad(x):
+            s = x.as_subclass(Sub)
+            s.requires_grad_(True)
+            return s * 2
+
+        x = torch.randn(3, requires_grad=False)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(f_req_grad, backend="eager", fullgraph=True)(x)
+
+        def f_req_grad_setattr(x):
+            s = x.as_subclass(Sub)
+            s.requires_grad = True
+            return s * 2
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(f_req_grad_setattr, backend="eager", fullgraph=True)(x)
+
     def test_subclass_method_override(self):
         class MyTensor(torch.Tensor):
             def sum(self, dim=None, keepdim=False):
