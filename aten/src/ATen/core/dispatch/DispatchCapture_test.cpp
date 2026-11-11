@@ -97,10 +97,21 @@ void variadicKernel(const c10::OperatorHandle& /*op*/, torch::jit::Stack* stack)
   torch::jit::push(*stack, 1, 2);
 }
 
+// Takes one value and returns two.
+void variadicReturnsKernel(
+    const c10::OperatorHandle& /*op*/,
+    torch::jit::Stack* stack) {
+  torch::jit::drop(*stack, 1);
+  torch::jit::push(*stack, 1, 2);
+}
+
 TORCH_LIBRARY(_test_dispatch_capture, m) {
   m.def(
       "_test_dispatch_capture::variadic(...) -> (...)",
       torch::CppFunction::makeFromBoxedFunction<&variadicKernel>());
+  m.def(
+      "_test_dispatch_capture::variadic_returns(int a) -> (...)",
+      torch::CppFunction::makeFromBoxedFunction<&variadicReturnsKernel>());
 }
 
 TEST(DispatchCaptureTest, CallReportsEveryStepOfTheChain) {
@@ -182,6 +193,23 @@ TEST(DispatchCaptureTest, BoxedCallOfAVariadicSchemaReportsTheWholeStack) {
   EXPECT_EQ(sink.enters[0].num_inputs, 3u);
   ASSERT_EQ(sink.exits.size(), 1u);
   EXPECT_EQ(sink.exits[0].num_outputs, 2u);
+}
+
+TEST(DispatchCaptureTest, VariadicReturnsStopAtTheArguments) {
+  const auto op = c10::Dispatcher::singleton().findSchemaOrThrow(
+      "_test_dispatch_capture::variadic_returns", "");
+  // The first value is the caller's, as on a stack shared with an interpreter.
+  torch::jit::Stack stack{7, 5};
+  RecordingSink sink;
+  {
+    Installed installed(&sink);
+    op.callBoxed(&stack);
+  }
+  ASSERT_EQ(sink.enters.size(), 1u);
+  EXPECT_EQ(sink.enters[0].num_inputs, 1u);
+  ASSERT_EQ(sink.exits.size(), 1u);
+  EXPECT_EQ(sink.exits[0].num_outputs, 2u);
+  EXPECT_EQ(stack.size(), 3u);
 }
 
 TEST(DispatchCaptureTest, ThrowingKernelReportsItsExit) {
