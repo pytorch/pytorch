@@ -96,6 +96,8 @@ from torch._dynamo.source import (
     is_from_optimizer_source,
     is_from_skip_guard_source,
     is_from_unspecialized_builtin_nn_module_source,
+    PropertyAccessorSource,
+    PropertyNameSource,
     TensorProperty,
     TensorPropertySource,
 )
@@ -211,6 +213,8 @@ from .utils import (
     dict_keys,
     enumerate_items_with_dict_position,
     get_current_stream,
+    get_property_accessor,
+    get_property_name,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
     guard_failures,
@@ -986,6 +990,8 @@ def _get_closure_vars() -> dict[str, object]:
             "___namedtuple_fields": lambda x: x._fields,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "___get_current_stream": get_current_stream,
+            "___get_property_accessor": get_property_accessor,
+            "___get_property_name": get_property_name,
             "___cow_tensor_matches": _cow_tensor_matches,
             "__math_isnan": math.isnan,
             "__numpy_isnan": None if np is None else np.isnan,
@@ -2325,6 +2331,24 @@ class GuardBuilder(GuardBuilderBase):
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
                 )
+        elif istype(source, PropertyAccessorSource):
+            if not base_guard_manager:
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=property.__dict__[source.member].__get__,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, PropertyNameSource):
+            if not base_guard_manager:
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=get_property_name,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, FloatTensorSource):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")

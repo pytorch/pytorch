@@ -32,6 +32,7 @@ from torch._C._dynamo import (
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     handle_observed_exception,
+    ObservedAttributeError,
     ObservedTypeError,
     raise_observed_exception,
     raise_type_error,
@@ -2375,7 +2376,9 @@ def _resolve_descriptor_get(
             if obj.source
             else None
         )
-        prop_vt = variables.PropertyVariable.create(type_attr, prop_source)
+        prop_vt = variables.PropertyVariable.from_descriptor(
+            tx, type_attr, source=prop_source
+        )
         return prop_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.MemberDescriptorType):
         md_vt = variables.MemberDescriptorVariable.create(type_attr, source)
@@ -2550,6 +2553,15 @@ def generic_getattr(
     # Side effects: check for pending attribute mutations.
     if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
         if not isinstance(obj, variables.UserDefinedObjectVariable):
+            if name == "__name__" and isinstance(obj, variables.PropertyVariable):
+                # Deleting prop_name restores the getter-name fallback.
+                try:
+                    return obj._name_getter(tx)
+                except ObservedAttributeError:
+                    if default is _NO_DEFAULT:
+                        raise
+                    handle_observed_exception(tx)
+                    return default  # type: ignore[return-value]
             value = tx.output.side_effects.load_attr(obj, name)
             # A pending store of a descriptor onto a class lands in cls.__dict__,
             # so reading it back has to run tp_descr_get the way type_getattro

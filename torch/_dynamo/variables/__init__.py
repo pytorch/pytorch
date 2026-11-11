@@ -65,7 +65,6 @@ from .descriptors import (
     MemberDescriptorVariable,
     MethodDescriptorVariable,
     MethodWrapperVariable,
-    PropertyVariable,
     StaticMethodVariable,
     TupleGetterVariable,
     WrapperDescriptorVariable,
@@ -178,6 +177,7 @@ from .nn_module import (
     UnspecializedNNModuleVariable,
 )
 from .optimizer import OptimizerVariable
+from .properties import PropertyVariable
 from .sdpa import SDPAParamsVariable
 from .sets import (
     DictKeySetVariable,
@@ -223,6 +223,7 @@ from .user_defined import (
     UserDefinedListVariable,
     UserDefinedObjectVariable,
     UserDefinedOrderedDictVariable,
+    UserDefinedPropertyVariable,
     UserDefinedSetVariable,
     UserDefinedTupleVariable,
     UserDefinedVariable,

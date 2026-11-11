@@ -3231,6 +3231,7 @@ tuple_new = tuple.__new__
 tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
 list_methods = {method for method in list.__dict__.values() if callable(method)}
 list_getitem = list.__getitem__
+property_methods = {method for method in property.__dict__.values() if callable(method)}
 
 deque_methods = {
     method for method in collections.deque.__dict__.values() if callable(method)
@@ -4752,6 +4753,40 @@ def import_submodule(mod: types.ModuleType) -> None:
     for filename in sorted(os.listdir(os.path.dirname(cast(str, mod.__file__)))):
         if filename.endswith(".py") and filename[0] != "_":
             importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
+
+
+def get_property_accessor(obj: property, name: str) -> Any:
+    return property.__dict__[name].__get__(obj)
+
+
+def get_property_name(obj: property) -> tuple[Any, ...]:
+    if type(obj) is property:
+        # property_copy preserves prop_name without looking up the old getter.
+        obj = property.getter(obj, object())
+        if sys.version_info < (3, 13):
+            obj.__doc__ = None
+            # property_traverse visits get/set/del/doc/name, omitting NULL fields.
+            # The replacement getter and explicit doc are always non-NULL.
+            # https://github.com/python/cpython/blob/3.11/Objects/descrobject.c
+            # https://github.com/python/cpython/blob/3.12/Objects/descrobject.c
+            offset = 2 + (obj.fset is not None) + (obj.fdel is not None)
+            return tuple(gc.get_referents(obj)[offset:])
+    # Distinguish a missing name from a name explicitly set to None.
+    try:
+        return (property.__dict__["__name__"].__get__(obj),)
+    except AttributeError:
+        return ()
+
+
+def initialize_property(obj: property, fget: Any, fset: Any, fdel: Any) -> None:
+    # A non-None doc avoids reading a getter whose mutations have not replayed.
+    # Only plain attribute setters/doc slots are supported by the tracing model.
+    property.__init__(obj, fget, fset, fdel, "")
+    # Leave __doc__ to traced attribute replay, including deletion.
+    try:
+        object.__delattr__(obj, "__doc__")
+    except AttributeError:
+        pass
 
 
 def object_has_getattribute(value: object) -> bool:
