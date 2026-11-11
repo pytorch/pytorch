@@ -66,6 +66,7 @@ from .codegen.common import (
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
+    IndexingOptions,
     texpr,
     TMACompatibilityChecker,
     TritonKernel,
@@ -362,6 +363,8 @@ class SubgraphInfo:
     body: IndentedBuffer
     template_mask: str | None = None
     template_out_shape: str | tuple[str] | None = None
+    # Row/column index name -> (mask, block shape); see store_output's vector_masks.
+    template_vector_masks: dict[str, tuple[str, tuple[str, str]]] | None = None
     compute: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     indexing_code: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     loads: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
@@ -731,6 +734,8 @@ class TritonTemplateKernel(TritonKernel):
         self.stores: IndentedBuffer = FakeIndentedBuffer()
         self.template_mask: str | None = None
         self.template_out_shape: str | tuple[str] | None = None
+        self.template_vector_masks: dict[str, tuple[str, tuple[str, str]]] | None = None
+        self._in_epilogue_load = False
         self.ops_handler: V.WrapperHandler | None = None  # type: ignore[name-defined]
         self.root_var_renames: dict[str, str] = {}
 
@@ -1644,6 +1649,7 @@ class TritonTemplateKernel(TritonKernel):
         indent_width: int = 4,
         val_shape: tuple[str] | None = None,
         block_indexing: bool = False,
+        vector_masks: tuple[str, str] | None = None,
     ):
         """Generates store-output input producers fusion, applies output epilogue fusions,
         and stores the final output unless it has been optimized away.
@@ -1658,6 +1664,10 @@ class TritonTemplateKernel(TritonKernel):
                 store_output is indented in the kernel definition.
             block_indexing (bool): Are the input indices presented as offsets for creating the block (e.g.
                 inputs to TMA) or are they tensors that should be passed in directly.
+            vector_masks (Optional[Tuple[str, str]]): For a 2D output whose indices are a column and a row
+                vector (idx_m = rm[:, None], idx_n = rn[None, :]), the mask of each, e.g. ("mask_m", "mask_n").
+                An epilogue input indexed by one of them alone, such as an addmm bias, is then loaded once per
+                tile row or column instead of once per output element.
         """
         subgraph_idx = next(self.store_output_ctr)
         subgraph_name = self._get_store_output_subgraph_name(subgraph_idx)
@@ -1815,6 +1825,20 @@ class TritonTemplateKernel(TritonKernel):
                 contiguous_index = self._setup_contiguous_index_state(
                     indices, index_symbols, lengths, mask
                 )
+                if vector_masks is not None:
+                    if (
+                        len(indices) != 2
+                        or not isinstance(val_shape, tuple)
+                        or len(val_shape) != 2
+                    ):
+                        raise AssertionError(
+                            "vector_masks requires a 2D output with val_shape"
+                        )
+                    block_m, block_n = val_shape[0], val_shape[-1]
+                    self.template_vector_masks = {
+                        indices[0]: (vector_masks[0], (block_m, "1")),
+                        indices[1]: (vector_masks[1], ("1", block_n)),
+                    }
                 output_index = self.output_node.get_layout().make_indexer()(
                     index_symbols
                 )
@@ -2025,6 +2049,39 @@ class TritonTemplateKernel(TritonKernel):
         )
         return f"tl.load({name} + ({index}), {mask}, other=0.0)"
 
+    def load(self, name: str, index: sympy.Expr):
+        self._in_epilogue_load = True
+        try:
+            return super().load(name, index)
+        finally:
+            self._in_epilogue_load = False
+
+    def _vector_indexing(self, index: sympy.Expr) -> IndexingOptions | None:
+        """
+        Indexing for an epilogue load of a per-row or per-column vector (e.g. an
+        addmm bias indexed by idx_n): load it with the vector's own shape and
+        mask and let it broadcast at its use.
+        """
+        if (
+            not self._in_epilogue_load
+            or self._load_mask is not None
+            or self.template_vector_masks is None
+            or len(index.free_symbols) != 1
+        ):
+            return None
+        vector = self.template_vector_masks.get(str(next(iter(index.free_symbols))))
+        if vector is None:
+            return None
+        mask, shape = vector
+        return IndexingOptions(
+            self.index_to_str(index),
+            OrderedSet([mask]),
+            f"[{shape[0]}, {shape[1]}]",
+            False,
+            index,
+            expand_shape=shape,
+        )
+
     def indexing(
         self,
         index: sympy.Expr,
@@ -2040,6 +2097,8 @@ class TritonTemplateKernel(TritonKernel):
         """
         Override the default indexing to use our custom mask and output shape.
         """
+        if (options := self._vector_indexing(index)) is not None:
+            return options
         return super().indexing(
             index,
             dense_indexing=False,

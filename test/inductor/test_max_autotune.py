@@ -512,6 +512,62 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
+    @parametrize("persistent", (False, True))
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_mm_epilogue_vector_loads(
+        self, persistent: bool, dynamic: bool
+    ):
+        if persistent and not torch.version.hip:
+            self.skipTest("the non-TMA persistent mm template is ROCm only")
+
+        def fn(a, b, bias, scale, c):
+            return torch.addmm(bias, a, b) * scale[:, None] + c
+
+        # M and N are not multiples of any BLOCK_M/BLOCK_N, so the masks matter.
+        # The small sizes cap the tile at 64x128x16, which keeps every fp32 config
+        # within gfx942's 64 KB of LDS.
+        M, N, K = 50, 100, 16
+        a = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+        bias = torch.randn(N, device=GPU_TYPE)
+        scale = torch.randn(M, device=GPU_TYPE)
+        c = torch.randn(M, N, device=GPU_TYPE)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "benchmark_template_fusion": False,
+                "triton.enable_persistent_tma_matmul": persistent,
+                "triton.native_matmul": False,
+                "test_configs.autotune_choice_name_regex": "mm_persistent"
+                if persistent
+                else r"^triton_mm_\d+$",
+            }
+        ):
+            out, code = run_and_get_code(
+                torch.compile(fn, dynamic=dynamic), a, b, bias, scale, c
+            )
+
+        # The bias is a per-column and the scale a per-row vector: each is loaded
+        # once per tile column/row, with its own mask.
+        FileCheck().check("triton_tem_fused").check_regex(
+            r"tl\.load\(in_ptr\d+ \+ \(idx_n\), mask_n,"
+        ).run(code[0])
+        FileCheck().check_regex(r"tl\.load\(in_ptr\d+ \+ \(idx_m\), mask_m,").run(
+            code[0]
+        )
+        FileCheck().check_not("broadcast_to(idx_n,").check_not(
+            "broadcast_to(idx_m,"
+        ).run(code[0])
+        # A full [M, N] input still loads at the tile shape with the tile mask.
+        FileCheck().check_regex(
+            r"tl\.load\(in_ptr\d+ \+ \(tl\.broadcast_to\(.+, \[BLOCK_M, BLOCK_N\]\)\), mask,"
+        ).run(code[0])
+
+        ref = fn(a.double(), b.double(), bias.double(), scale.double(), c.double())
+        self.assertLess(((out.double() - ref).norm() / ref.norm()).item(), 1e-5)
+
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))

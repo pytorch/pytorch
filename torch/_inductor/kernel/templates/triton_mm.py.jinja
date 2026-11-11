@@ -66,7 +66,9 @@
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N).to(INDEX_DTYPE)
     idx_m = rm[:, None]
     idx_n = rn[None, :]
-    mask = (idx_m < M) & (idx_n < N)
+    mask_m = idx_m < M
+    mask_n = idx_n < N
+    mask = mask_m & mask_n
 
     # inductor generates a suffix
-    {{store_output(("idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
+    {{store_output(("idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"), vector_masks=("mask_m", "mask_n"))}}
