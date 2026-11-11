@@ -574,7 +574,7 @@ class _LocalizedTensor(torch.Tensor):
         return torch.cat(outputs, dim=-1)
 
 
-def _localization_supported_or_warn(device: int) -> bool:
+def _localization_supported_or_warn(device: int, *, stacklevel: int = 4) -> bool:
     """True if ``device`` supports green-context localization; otherwise
     warn (once per process per device) and return False so
     :func:`localize` can skip the parameter instead of raising."""
@@ -591,7 +591,7 @@ def _localization_supported_or_warn(device: int) -> bool:
         f"CUDA device {device} does not support green-context "
         "localization (requires a CUDA 13.4+ driver and hardware with "
         ">= 2 locality domains); skipping localization.",
-        stacklevel=5,
+        stacklevel=stacklevel,
     )
     return False
 
@@ -833,7 +833,7 @@ def localize(
                     "localize() is discarding a live .grad on a parameter with "
                     "requires_grad=True; localization is inference-only and does "
                     "not backprop through the fork/join split.",
-                    stacklevel=4,
+                    stacklevel=3,
                 )
             p.grad = None
         # swap_tensors inspects the parameter's autograd edge when anything
@@ -931,7 +931,7 @@ def _localize_graph_module(
         p = getattr(submod, attr_name, None)
         if p is None or isinstance(p, _LocalizedTensor) or not p.is_cuda:
             return
-        if not _localization_supported_or_warn(p.device.index):
+        if not _localization_supported_or_warn(p.device.index, stacklevel=5):
             return
         wid = id(p)
         new = seen.get(wid)
