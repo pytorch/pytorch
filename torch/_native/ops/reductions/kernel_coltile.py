@@ -12,6 +12,8 @@ from typing import Any, NamedTuple
 import cutlass
 import cutlass.cute as cute
 from cutlass import const_expr, Int32, Int64
+from cutlass._mlir.dialects import llvm
+from cutlass.cutlass_dsl import dsl_user_op, T as _T
 
 import torch
 
@@ -60,8 +62,30 @@ _WIDE_ACC_THREADS_PER_BLOCK = 64  # 3-field traits (Welford): see above
 # Multi-field lane replays partially unroll their 32-lane loop by this factor. On B200,
 # fp32 argmax and bf16 var_mean columns (16, R, 1024) at R = 2048-8192 compiled in
 # 0.4-1.2s instead of the static replay's 1.2-12.2s, running at 0.65-1.00x of its speed.
-# Single-field replays stay static: rolled, fp32 sums ran at as little as 0.46x.
+# Single-field replays stay static: before per-load stride copies (see _opaque_stride),
+# rolled fp32 sums ran at as little as 0.46x the speed of static ones.
 _ORDERED_LANE_UNROLL = 4
+
+
+@dsl_user_op
+def _opaque_stride(stride, load, *, loc=None, ip=None):
+    """Widen a copy of the 32-bit stride that NVVM cannot relate to other loads' copies.
+
+    NVVM's codegen time grows superlinearly with the runtime-stride addresses in one
+    block; a copy per load keeps each load's addresses apart. Widening after the copy
+    keeps each address one 32 x 32 -> 64-bit multiply-add."""
+    copy = llvm.inline_asm(
+        _T.i32(),
+        [Int32(stride).ir_value(loc=loc, ip=ip)],
+        f"mov.b32 $0, $1; // load {load}",
+        "=r,r",
+        has_side_effects=False,
+        is_align_stack=False,
+        asm_dialect=llvm.AsmDialect.AD_ATT,
+        loc=loc,
+        ip=ip,
+    )
+    return Int64(Int32(copy))
 
 
 class ColConfig(NamedTuple):
@@ -246,6 +270,10 @@ class _OrderedColReduce:
         # their leaf masks, and the shared-memory merge for one-warp rows, ran B200 argmax
         # at up to 1.4x and var_mean at up to 2.4x on exact views; sums were within noise.
         self.exact = plan.shape == "looped" and plan.tms[0].exact
+        # Exact single-field replays of several loads address each load through its own
+        # stride copy (see _opaque_stride) and ask for two blocks per SM, without which
+        # ptxas front-loads more loads at lower occupancy.
+        self.per_load = trait.nfields == 1 and plan.batches[0][2] > 1 and self.exact
 
     @property
     def cache_sig(self) -> tuple[Any, ...]:
@@ -265,6 +293,7 @@ class _OrderedColReduce:
             grid=[cute.ceil_div(num_o, WARP), self.partitions, 1],
             block=[WARP, self.plan.wpr, 1],
             stream=stream,
+            min_blocks_per_mp=2 if self.per_load else 0,
         )
 
     @cute.jit
@@ -342,6 +371,9 @@ class _OrderedColReduce:
         replay = cute.make_layout((plan.vec, WARP, loads))
         load_tree = []
         for load in cutlass.range_constexpr(loads):
+            if const_expr(self.per_load):
+                by_load = cute.make_layout(self.R, stride=_opaque_stride(C, load))
+                rows = cute.make_tensor(rows.iterator, by_load)
             lane_roots = [
                 cute.make_rmem_tensor(cute.make_layout(WARP), dtype)
                 for dtype in trait.fdtypes
@@ -460,10 +492,12 @@ def reduce_ordered_col(
     if plan is None or plan.shape not in ("looped", "split") or plan.vec_linear:
         return None
     # Single-field traits replay all 32 lanes' leaves statically, compiling in 0.35 s at
-    # R = 2048, 1.5 s at R = 8192 and 4.3 s at R = 24576 (fp32/bf16, C = 2048).
-    # Multi-field traits roll lanes but replay a static lane tree per load, taking 1.3 s
-    # at R = 8192 and 2.5-3.1 s at R = 8193-16384 (fp32). The indexed tree takes
-    # 0.3-0.75 s, so cap replays at tile.MAX_UNROLL leaves (looped rows up to 8192).
+    # R = 2048 (fp32/bf16, C = 2048). With per-load stride copies, exact replays of 512
+    # leaves per warp (R = 8192) compile in 1.5-2.4 s instead of 9.2-10.2 s (B200
+    # fp32/bf16/fp16 sums, fp32/bf16 amax). Multi-field traits roll lanes but replay a
+    # static lane tree per load, taking 1.3 s at R = 8192 and 2.5-3.1 s at
+    # R = 8193-16384 (fp32). The indexed tree takes 0.3-0.75 s, so cap replays at
+    # tile.MAX_UNROLL leaves (looped rows up to 8192).
     # Plans past one planner batch always exceed the cap.
     if sum(b[2] for b in plan.batches) * WARP * plan.vec > tile.MAX_UNROLL:
         return None
