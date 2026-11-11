@@ -212,6 +212,7 @@ from .variables.lists import (
 from .variables.misc import CellVariable, NullVariable, UnknownVariable
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
+    _is_skipped_constant_property,
     generic_delitem,
     generic_getattr,
     generic_getiter,
@@ -1973,6 +1974,9 @@ class InstructionTranslatorBase(
                     )
                 e.skip_frame = True
                 raise
+            # Nested fallback would retain a caller resume on each loop iteration.
+            if self.parent is not None and self.parent.maybe_has_backedge():
+                self.raise_loop_graph_break(self.f_code, e)
             reason = (
                 "Encountered graph break that we cannot resume from. "
                 "Compiling up to the previous resumable state, "
@@ -3380,38 +3384,34 @@ class InstructionTranslatorBase(
         self._load_attr(argval)
 
     def LOAD_METHOD(self, inst: Instruction) -> None:
-        self._load_attr(inst.argval)
-        obj = self.pop()
         if sys.version_info >= (3, 13):
-            self.push(obj)
+            self._load_attr(inst.argval)
             self.PUSH_NULL(inst)
         else:
-            # always follow the NULL + fn convention, since if obj
-            # is actually a method, self is already bound to it, so it
-            # doesn't need to be passed in as an arg.
+            obj = self.pop()
+            # Push NULL before lookup so nested graph breaks preserve the call stack.
             self.PUSH_NULL(inst)
             self.push(obj)
+            self._load_attr(inst.argval)
 
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop().realize()
         try:
-            result = generic_getattr(self, obj, attr)
+            if not _is_skipped_constant_property(self, obj, attr):
+                result = generic_getattr(self, obj, attr)
+                self.push(result)
+                return
         except Unsupported:
             if not obj.is_python_constant():
                 raise
-            # An eager getattr would run a user-defined __get__ at trace time
-            # and bake its result into the graph.
-            if isinstance(obj, variables.UserDefinedClassVariable) and isinstance(
-                inspect.getattr_static(
-                    type(obj.lookup_cls_mro_attr(attr)), "__get__", None
-                ),
-                types.FunctionType,
-            ):
+            if isinstance(
+                obj, variables.UserDefinedClassVariable
+            ) and obj.getattr_needs_tracing(self, attr):
                 raise
-            source = AttrSource(obj.source, attr) if obj.source else None
-            result = VariableTracker.build(
-                self, getattr(obj.as_python_constant(), attr), source=source
-            )
+        source = AttrSource(obj.source, attr) if obj.source else None
+        result = VariableTracker.build(
+            self, getattr(obj.as_python_constant(), attr), source=source
+        )
         self.push(result)
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
@@ -4242,14 +4242,7 @@ class InstructionTranslatorBase(
                 if flags & 0x01:
                     defaults = self.pop()
 
-        fn = NestedUserFunctionVariable(  # noqa: RVT001
-            fn_name,
-            code,
-            self.f_globals,
-            defaults,
-            kwdefaults,
-            closure,
-        )
+        ann = None
         if annotations:
             if not isinstance(annotations, TupleVariable):
                 raise AssertionError(
@@ -4265,8 +4258,18 @@ class InstructionTranslatorBase(
                 ann_items,
                 mutation_type=ValueMutationNew(),
             )
-            fn.annotations = ann
-        self.push(fn)
+
+        self.push(
+            NestedUserFunctionVariable(  # noqa: RVT001
+                fn_name,
+                code,
+                self.f_globals,
+                defaults,
+                kwdefaults,
+                closure,
+                ann,
+            )
+        )
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = self.pop()
@@ -5003,8 +5006,10 @@ class InstructionTranslatorBase(
 
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
-            attr = attr.call_function(self, [VariableTracker.build(self, 1)], {})
-            fn.annotations = attr
+            fn.annotate = attr
+            fn.annotations = attr.call_function(
+                self, [VariableTracker.build(self, 1)], {}
+            )
         elif flags & 0x08:
             fn.closure = attr
         elif flags & 0x04:
@@ -5366,7 +5371,7 @@ class InstructionTranslatorBase(
 
     @staticmethod
     def raise_loop_graph_break(
-        code: types.CodeType, exc: Unsupported | UserError
+        code: types.CodeType, exc: Unsupported | UserError | StepUnsupported
     ) -> NoReturn:
         unimplemented(
             gb_type="graph break in loop",
@@ -6027,12 +6032,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 f"Avoid calling the function `{fn_qualname}`.",
             ]
             if "_dynamo" not in func.get_filename():
-                hints += [
-                    f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{fn_qualname}` "
-                    "to force tracing into the function. "
-                    "More graph breaks may occur as a result of attempting to trace into the function.",
-                    "Please file an issue to PyTorch.",
-                ]
+                if not trace_rules.is_weakref_finalize_registry_code(func.get_code()):
+                    hints.append(
+                        f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{fn_qualname}` "
+                        "to force tracing into the function. "
+                        "More graph breaks may occur as a result of attempting to trace into the function."
+                    )
+                hints.append("Please file an issue to PyTorch.")
             unimplemented(
                 gb_type="Attempted to inline function marked as skipped",
                 context=f"qualname: {fn_qualname}, name: {func.get_name()}, "
