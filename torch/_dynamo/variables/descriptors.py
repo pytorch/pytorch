@@ -129,8 +129,15 @@ def _vt_cls_modeling(vt: VariableTracker, py_type: type) -> type | None:
         if cpython_type is None:
             continue
         types = cpython_type if isinstance(cpython_type, tuple) else (cpython_type,)
-        if py_type in types:
+        # Only a class vt is an instance of: another class's slot impls assume
+        # their own representation, e.g. IntConstantVariable's fold a constant
+        # and cannot run on a SymNodeVariable that also models int.
+        if py_type in types and isinstance(vt, subclass):
             return subclass
+    # An exact py_type instance has no Python overrides, so its own VT's slots
+    # are py_type's C slots, e.g. SymNodeVariable for int.__neg__ on a SymInt.
+    if vt.python_type() is py_type:
+        return type(vt)
     return None
 
 

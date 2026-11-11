@@ -4183,6 +4183,11 @@ class BoolBuiltinVariable(TypeVariable):
             raise_type_error(tx, f"bool expected at most 1 argument, got {len(args)}")
         if not args:
             return ConstantVariable.create(False)
+        # bool(a) on a lazy constant stays lazy; generic_is_true would realize
+        # it and guard on its value.
+        result = _try_computed_lazy_constant(bool, args)
+        if result is not None:
+            return result
         # Emulate PyBool_Type.tp_vectorcall which boils down to PyObject_IsTrue.
         return generic_is_true(tx, args[0])
 
