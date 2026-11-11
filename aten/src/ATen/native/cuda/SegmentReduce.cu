@@ -96,16 +96,12 @@ __global__ void segment_reduce_forward_kernel(
     const index_t* lengths_data,
     const index_t* lengths_cumsum_data,
     const int64_t segment_count,
-    const int64_t lengths_stride_axis,
     bool is_initial_set,
     scalar_t initial_value,
     const int64_t outer_offset,
     const int64_t inner_offset,
-    const int64_t data_stride_axis,
     const int64_t data_size_axis,
-    const int64_t output_stride_axis,
-    const int64_t output_size_axis,
-    const int64_t lengths_cumsum_stride_axis) {
+    const int64_t output_size_axis) {
   int64_t idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (idx >= (outer_offset * segment_count * inner_offset)) {
     return;
@@ -114,15 +110,16 @@ __global__ void segment_reduce_forward_kernel(
   int64_t lane_id = idx % inner_offset;   // lane_id is the inner_idx
   int64_t outer_idx = row_id / segment_count;
   int64_t dim_idx = row_id % segment_count;
+  // The buffers are dense row-major, so index them by sizes: a contiguous
+  // tensor's size-1 dims can carry any stride.
 
-  int64_t offset_idx = outer_idx * lengths_cumsum_stride_axis * (segment_count + 1) + dim_idx;
+  int64_t offset_idx = outer_idx * (segment_count + 1) + dim_idx;
   index_t offset_start = lengths_cumsum_data[offset_idx];
   index_t offset_end = lengths_cumsum_data[offset_idx + 1];
 
   // ===== step2: apply reduction
   for (index_t j = offset_start; j < offset_end; ++j) {
-    int64_t data_index = outer_idx * data_stride_axis * data_size_axis
-                         + j * data_stride_axis + lane_id;
+    int64_t data_index = (outer_idx * data_size_axis + j) * inner_offset + lane_id;
     const auto data = values_data[data_index];
     // TODO: There is no need to branch with every element
     if (reduction == ReductionType::MAX) {
@@ -142,7 +139,7 @@ __global__ void segment_reduce_forward_kernel(
   }
 
   // ===== step3: finalize reduction
-  int64_t lengths_idx = outer_idx * lengths_stride_axis * segment_count + dim_idx;
+  int64_t lengths_idx = outer_idx * segment_count + dim_idx;
   CUDA_KERNEL_ASSERT(lengths_data[lengths_idx] >= 0);
   if (lengths_data[lengths_idx] == 0 && !is_initial_set &&
       reduction == ReductionType::MEAN) {
@@ -152,8 +149,7 @@ __global__ void segment_reduce_forward_kernel(
       !at::_isnan(initial_value)) {
     initial_value = initial_value / lengths_data[lengths_idx];
   }
-  int64_t output_index = outer_idx * output_stride_axis * output_size_axis
-                         + dim_idx * output_stride_axis + lane_id;
+  int64_t output_index = (outer_idx * output_size_axis + dim_idx) * inner_offset + lane_id;
   output_data[output_index] = initial_value;
 }
 
@@ -168,15 +164,11 @@ __global__ void segment_reduce_backward_kernel(
     const index_t* lengths_data,
     const index_t* lengths_cumsum_data,
     const int64_t segment_count,
-    const int64_t lengths_stride_axis,
     scalar_t initial_prod_value,
     const int64_t outer_offset,
     const int64_t inner_offset,
-    const int64_t data_stride_axis,
     const int64_t data_size_axis,
-    const int64_t output_stride_axis,
-    const int64_t output_size_axis,
-    const int64_t lengths_cumsum_stride_axis) {
+    const int64_t output_size_axis) {
   int64_t idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (idx >= (outer_offset * segment_count * inner_offset)) {
     return;
@@ -185,26 +177,26 @@ __global__ void segment_reduce_backward_kernel(
   int64_t lane_id = idx % inner_offset;  // lane_id is the inner_idx
   int64_t outer_idx = row_id / segment_count;
   int64_t dim_idx = row_id % segment_count;
+  // The buffers are dense row-major, so index them by sizes: a contiguous
+  // tensor's size-1 dims can carry any stride.
 
-  int64_t lengths_idx = outer_idx * lengths_stride_axis * segment_count + dim_idx;
+  int64_t lengths_idx = outer_idx * segment_count + dim_idx;
   auto segment_length = lengths_data[lengths_idx];
   if (segment_length == 0) {
     return;
   }
 
-  int64_t offset_idx = outer_idx * lengths_cumsum_stride_axis * (segment_count + 1) + dim_idx;
+  int64_t offset_idx = outer_idx * (segment_count + 1) + dim_idx;
   index_t offset_start = lengths_cumsum_data[offset_idx];
   index_t offset_end = lengths_cumsum_data[offset_idx + 1];
 
-  int64_t output_index = outer_idx * output_stride_axis * output_size_axis
-                         + dim_idx * output_stride_axis + lane_id;
+  int64_t output_index = (outer_idx * output_size_axis + dim_idx) * inner_offset + lane_id;
 
   if (reduction == ReductionType::MAX ||
       reduction == ReductionType::MIN) {
     int64_t counter = 0;
     for (int64_t j = offset_start; j < offset_end; ++j) {
-      int64_t data_index = outer_idx * data_stride_axis * data_size_axis
-                           + j * data_stride_axis + lane_id;
+      int64_t data_index = (outer_idx * data_size_axis + j) * inner_offset + lane_id;
       if (at::_isnan(values_data[data_index]) ||
           values_data[data_index] == output_data[output_index]) {
         grad_input_data[data_index] = grad_data[output_index];
@@ -217,8 +209,7 @@ __global__ void segment_reduce_backward_kernel(
       return;
     }
     for (int64_t j = offset_start; j < offset_end; ++j) {
-      int64_t data_index = outer_idx * data_stride_axis * data_size_axis
-                           + j * data_stride_axis + lane_id;
+      int64_t data_index = (outer_idx * data_size_axis + j) * inner_offset + lane_id;
       if (grad_input_data[data_index] > 0) {
         grad_input_data[data_index] =
             grad_input_data[data_index] / counter;
@@ -227,22 +218,19 @@ __global__ void segment_reduce_backward_kernel(
   } else if (reduction == ReductionType::MEAN) {
     auto grad_val = grad_data[output_index] / segment_length;
     for (int64_t j = offset_start; j < offset_end; ++j) {
-      int64_t data_index = outer_idx * data_stride_axis * data_size_axis
-                           + j * data_stride_axis + lane_id;
+      int64_t data_index = (outer_idx * data_size_axis + j) * inner_offset + lane_id;
       grad_input_data[data_index] = grad_val;
     }
   } else if (reduction == ReductionType::SUM) {
     const auto& grad_val = grad_data[output_index];
     for (int64_t j = offset_start; j < offset_end; ++j) {
-      int64_t data_index = outer_idx * data_stride_axis * data_size_axis
-                           + j * data_stride_axis + lane_id;
+      int64_t data_index = (outer_idx * data_size_axis + j) * inner_offset + lane_id;
       grad_input_data[data_index] = grad_val;
     }
   } else if (reduction == ReductionType::PROD) {
     const auto& grad_val = grad_data[output_index] * output_data[output_index];
     for (int64_t j = offset_start; j < offset_end; ++j) {
-      int64_t data_index = outer_idx * data_stride_axis * data_size_axis
-                           + j * data_stride_axis + lane_id;
+      int64_t data_index = (outer_idx * data_size_axis + j) * inner_offset + lane_id;
       if (at::_isnan(values_data[data_index]) ||
           values_data[data_index] == 0) {
         // explicitly compute exclusive prod
@@ -250,8 +238,7 @@ __global__ void segment_reduce_backward_kernel(
         int64_t prod_idx;
         for (int64_t k = offset_start; k < offset_end; ++k) {
           if (k != j) {
-            prod_idx = outer_idx * data_stride_axis * data_size_axis
-                       + k * data_stride_axis + lane_id;
+            prod_idx = (outer_idx * data_size_axis + k) * inner_offset + lane_id;
             exclusive_prod *= values_data[prod_idx];
           }
         }
@@ -305,14 +292,8 @@ Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
 
   num_blocks = std::max(num_blocks, (int64_t)1);
 
-  // Strides of the dense row-major buffers, from sizes: a contiguous tensor's
-  // size-1 dims can carry any stride. axis is the last dim of lengths/offsets.
-  int64_t data_stride_axis = inner_offset;
   auto data_size_axis = data_contig.size(axis);
-  int64_t output_stride_axis = inner_offset;
   auto output_size_axis = output_contig.size(axis);
-  int64_t lengths_stride_axis = 1;
-  int64_t offsets_stride_axis = 1;
 
   AT_DISPATCH_INDEX_TYPES(
       lengths_or_offsets_contig.scalar_type(), "_segment_reduce_cuda_lengths_offsets_backward_kernel1", ([&] {
@@ -352,15 +333,11 @@ Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
                       lengths_data,
                       offsets_data,
                       segment_count,
-                      lengths_stride_axis,
                       initial_prod_value,
                       outer_offset,
                       inner_offset,
-                      data_stride_axis,
                       data_size_axis,
-                      output_stride_axis,
-                      output_size_axis,
-                      offsets_stride_axis
+                      output_size_axis
                     );
               C10_CUDA_KERNEL_LAUNCH_CHECK();
             }));
@@ -436,14 +413,8 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
 
   num_blocks = std::max(num_blocks, (int64_t)1);
 
-  // Strides of the dense row-major buffers, from sizes: a contiguous tensor's
-  // size-1 dims can carry any stride. axis is the last dim of lengths/offsets.
-  int64_t data_stride_axis = inner_offset;
   auto data_size_axis = data.size(axis);
-  int64_t output_stride_axis = inner_offset;
   auto output_size_axis = output.size(axis);
-  int64_t lengths_stride_axis = 1;
-  int64_t offsets_stride_axis = 1;
 
   AT_DISPATCH_INDEX_TYPES(
       lengths_or_offsets.scalar_type(), "_segment_reduce_cuda_kernel1", ([&] {
@@ -486,16 +457,12 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
                         lengths_data_ptr,
                         offsets_data_ptr,
                         segment_count,
-                        lengths_stride_axis,
                         initial.has_value(),
                         initial_value,
                         outer_offset,
                         inner_offset,
-                        data_stride_axis,
                         data_size_axis,
-                        output_stride_axis,
-                        output_size_axis,
-                        offsets_stride_axis
+                        output_size_axis
                       );
                 C10_CUDA_KERNEL_LAUNCH_CHECK();
               } else {
