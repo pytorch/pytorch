@@ -225,9 +225,8 @@ XPUGeneratorImpl::XPUGeneratorImpl(
 
 void XPUGeneratorImpl::set_current_seed(uint64_t seed) {
   std::lock_guard<std::mutex> lock(state_->mutex_);
-  if (C10_LIKELY(
-          at::xpu::currentStreamCaptureStatus() ==
-          at::xpu::CaptureStatus::Executing)) {
+  if (at::xpu::currentStreamCaptureStatus() ==
+      at::xpu::CaptureStatus::Executing) [[likely]] {
     state_->seed_ = seed;
     state_->philox_offset_per_thread_ = 0;
   } else {
