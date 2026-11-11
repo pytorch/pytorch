@@ -1133,7 +1133,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_CHECK(
         !hasMultipleBackends(),
         "ProcessGroup reconfigure APIs do not support process groups with multiple backends.");
-    return getDefaultBackend()->reconfigure(opts);
+    auto op_id =
+        firePreHook(HookOpName::RECONFIGURE, /*async_op=*/true, /*root=*/-1);
+    auto work = getDefaultBackend()->reconfigure(opts);
+    firePostHook(HookOpName::RECONFIGURE, /*async_op=*/true, op_id, work);
+    return work;
   }
 
   // Window & One-sided (RMA) API. Forwards to the default backend; see
@@ -1144,15 +1148,26 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   virtual c10::intrusive_ptr<Window> new_window(
       const std::optional<at::Tensor>& tensor = std::nullopt) {
-    return getDefaultBackend()->new_window(tensor);
+    auto op_id =
+        firePreHook(HookOpName::NEW_WINDOW, /*async_op=*/false, /*root=*/-1);
+    auto window = getDefaultBackend()->new_window(tensor);
+    firePostHook(
+        HookOpName::NEW_WINDOW,
+        /*async_op=*/false,
+        op_id,
+        /*work=*/nullptr,
+        /*group=*/{},
+        window);
+    return window;
   }
 
   // Hook API. Abort hooks forward to the default backend; pre/post collective
   // hooks are registered on the process group and fire around every collective
-  // issued through it (see firePreHook / firePostHook). Hooks are keyed by an
-  // opaque hook_id so they can be individually unregistered. Registration is
-  // expected to happen at setup time, not concurrently with collectives. See
-  // Hooks.hpp.
+  // issued through it, and around splitGroup, new_window and reconfigure (not
+  // when called on a Backend directly or overridden by a Python subclass; see
+  // firePreHook / firePostHook). Hooks are keyed by an opaque hook_id so they
+  // can be individually unregistered. Registration is expected to happen at
+  // setup time, not concurrently with collectives. See Hooks.hpp.
   virtual bool supportsAbortHooks() const {
     return getDefaultBackend()->supportsAbortHooks();
   }
@@ -1163,21 +1178,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   virtual void unregisterAbortHook(int64_t hook_id) {
     getDefaultBackend()->unregisterAbortHook(hook_id);
-  }
-
-  // Completion hooks forward to the default backend for the same reason abort
-  // hooks do: completion is detected inside the backend, not by the dispatcher
-  // kernels that fire the pre/post hooks below.
-  virtual bool supportsCompletionHooks() const {
-    return getDefaultBackend()->supportsCompletionHooks();
-  }
-
-  virtual void registerCompletionHook(int64_t hook_id, CompletionHook hook) {
-    getDefaultBackend()->registerCompletionHook(hook_id, std::move(hook));
-  }
-
-  virtual void unregisterCompletionHook(int64_t hook_id) {
-    getDefaultBackend()->unregisterCompletionHook(hook_id);
   }
 
   virtual void registerPreHook(int64_t hook_id, PreHook hook) {
@@ -1262,13 +1262,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   std::optional<at::Device> bound_device_id_;
 
-  // Pre/post collective hooks, keyed by an opaque hook_id, fired around every
-  // collective. They are invoked from the dispatcher kernels (Ops.cpp) rather
-  // than here, so they fire wherever a c10d op is dispatched -- including
-  // replay of a captured graph that re-dispatches the op directly. See
-  // Hooks.hpp. Ordered, so hooks fire in hook_id order: a consumer that has to
-  // observe another hook's state (or be observed by it) picks its id instead of
-  // depending on an unspecified traversal.
+  // Pre/post hooks, keyed by an opaque hook_id, fired around every collective
+  // and around splitGroup, new_window and reconfigure. Collectives invoke them
+  // from the dispatcher kernels (Ops.cpp) rather than here, so they fire
+  // wherever a c10d op is dispatched -- including replay of a captured graph
+  // that re-dispatches the op directly. See Hooks.hpp. Ordered, so hooks fire
+  // in hook_id order: a consumer that has to observe another hook's state (or
+  // be observed by it) picks its id instead of depending on an unspecified
+  // traversal.
   std::map<int64_t, PreHook> preHooks_;
   std::map<int64_t, PostHook> postHooks_;
   // Monotonic id correlating a pre-hook call with its matching post-hook call.
@@ -1288,7 +1289,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       bool async_op,
       int64_t root,
       std::vector<at::Tensor> input_tensors,
-      std::vector<at::Tensor> output_tensors) {
+      std::vector<at::Tensor> output_tensors,
+      std::optional<c10::Device> device = std::nullopt) {
     int64_t op_id = hookOpIdCounter_++;
     if (!preHooks_.empty()) {
       PreHookArgs args{
@@ -1297,7 +1299,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
           std::move(input_tensors),
           std::move(output_tensors),
           root,
-          op_id};
+          op_id,
+          device};
       for (auto& entry : preHooks_) {
         entry.second(args);
       }
@@ -1306,12 +1309,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
  public:
-  // Fire registered pre-hooks for a collective and return the op_id assigned to
-  // it (0 when no hooks are registered). The tensor lists are only copied /
+  // Fire registered pre-hooks for an operation and return the op_id assigned
+  // to it (0 when no hooks are registered). The tensor lists are only copied /
   // flattened into the hook args when a pre-hook is registered, so the common
   // no-hook path adds no work. Overloaded for the various collective tensor
-  // shapes (flat, list-of-lists, single tensor, none). Invoked from the
-  // dispatcher kernels in Ops.cpp; see firePostHook for the matching post-hook.
+  // shapes (flat, list-of-lists, single tensor, none, device). Invoked from the
+  // dispatcher kernels in Ops.cpp and from the ProcessGroup methods that are
+  // not dispatcher ops; see firePostHook for the matching post-hook.
   int64_t firePreHook(
       HookOpName name,
       bool async_op,
@@ -1378,17 +1382,31 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return firePreHookImpl(name, async_op, root, {}, {});
   }
 
-  // Fire registered post-hooks for a collective, correlated with the matching
+  // For tensorless ops dispatched for a device (barrier).
+  int64_t firePreHook(
+      HookOpName name,
+      bool async_op,
+      int64_t root,
+      c10::Device device) {
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
+    }
+    return firePreHookImpl(name, async_op, root, {}, {}, device);
+  }
+
+  // Fire registered post-hooks for an operation, correlated with the matching
   // pre-hook via op_id.
   void firePostHook(
       HookOpName name,
       bool async_op,
       int64_t op_id,
-      const c10::intrusive_ptr<Work>& work) {
+      const c10::intrusive_ptr<Work>& work,
+      const c10::intrusive_ptr<ProcessGroup>& group = {},
+      const c10::intrusive_ptr<Window>& window = {}) {
     if (postHooks_.empty()) {
       return;
     }
-    PostHookArgs args{name, async_op, work, op_id};
+    PostHookArgs args{name, async_op, work, op_id, group, window};
     for (auto& entry : postHooks_) {
       entry.second(args);
     }

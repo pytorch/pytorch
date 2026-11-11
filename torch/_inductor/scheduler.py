@@ -5712,7 +5712,9 @@ def _occupancy_before_and_after_fusion(
     regs_per_block_unfused = unfused_n_regs * threads_per_block
     regs_per_block_fused = fused_n_regs * threads_per_block
 
-    blocks_unfused = regs_per_sm // regs_per_block_unfused
+    # Clamping blocks_fused as well would turn (fused=0, unfused=1) from 0/1
+    # (reject) into 1/1 (accept).
+    blocks_unfused = max(regs_per_sm // regs_per_block_unfused, 1)
     blocks_fused = regs_per_sm // regs_per_block_fused
 
     return blocks_unfused, blocks_fused
