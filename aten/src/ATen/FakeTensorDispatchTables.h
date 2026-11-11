@@ -13,7 +13,8 @@ class OperatorHandle;
 namespace at::impl {
 
 // C++-side copy of the Python decomp/meta/prims/op_impl registries, and of the
-// ops FakeTensorMode decomposes under static shapes
+// ops FakeTensorMode decomposes under static shapes and
+// cpp_meta_supports_symint_ops
 //
 // The tables are kept in sync by hooks at the Python registration sites, which
 // call fakeDispatchTableAdd/Remove:
@@ -37,6 +38,9 @@ namespace at::impl {
 //                sparse inputs. Direct dictionary edits and mode-method
 //                overrides are not mirrored; Python's first-dispatch
 //                classification cache is unchanged.
+//   - CppMetaSupportsSymint: cpp_meta_supports_symint_ops, initialized once by
+//                torch._meta_registrations. Later set mutations are not
+//                mirrored.
 //
 // This does not store the Python callables and is backed by c10::LeftRight
 enum class FakeDispatchCategory {
@@ -49,6 +53,7 @@ enum class FakeDispatchCategory {
   // torch.library.custom_op(...).register_fake
   CustomOpImpl,
   StaticShapeDecomp,
+  CppMetaSupportsSymint,
   NumCategories
 };
 
@@ -101,5 +106,9 @@ inline bool fakeDispatchCategoriesHave(
 // alias's op_impl is deliberately absent from OpImpl: the C++ fake fallback
 // preserves its recorded dispatch keys when running its C++ Meta kernel.
 TORCH_API bool cppFakeNotImplemented(const c10::OperatorHandle& op);
+
+// Python's cpp_meta_supports_symint: prefer the C++ Meta kernel to
+// decomposition for ops in CppMetaSupportsSymint or with the view_copy tag.
+TORCH_API bool fakeCppMetaSupportsSymint(const c10::OperatorHandle& op);
 
 } // namespace at::impl

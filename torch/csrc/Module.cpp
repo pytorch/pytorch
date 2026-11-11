@@ -2766,6 +2766,15 @@ PyObject* initModule() {
             category, c10::OperatorName(name, overload));
       };
     };
+    auto query_for = [](bool (*fn)(const c10::OperatorHandle&)) {
+      return [fn](const std::string& name, const std::string& overload) {
+        const c10::OperatorName op_name(name, overload);
+        const auto op = c10::Dispatcher::singleton().findSchema(op_name);
+        TORCH_CHECK_VALUE(
+            op.has_value(), "operator ", op_name, " does not exist");
+        return fn(*op);
+      };
+    };
     py_module.def(
         "_fake_dispatch_register_decomp",
         add_for(FakeDispatchCategory::Decomp));
@@ -2786,6 +2795,9 @@ PyObject* initModule() {
     py_module.def(
         "_fake_dispatch_register_static_shape_decomp",
         add_for(FakeDispatchCategory::StaticShapeDecomp));
+    py_module.def(
+        "_fake_dispatch_register_cpp_meta_supports_symint",
+        add_for(FakeDispatchCategory::CppMetaSupportsSymint));
     py_module.def(
         "_fake_dispatch_deregister_decomp",
         [](const std::string& name, const std::string& overload) {
@@ -2810,13 +2822,10 @@ PyObject* initModule() {
         });
     py_module.def(
         "_cpp_fake_not_implemented",
-        [](const std::string& name, const std::string& overload) {
-          const c10::OperatorName op_name(name, overload);
-          const auto op = c10::Dispatcher::singleton().findSchema(op_name);
-          TORCH_CHECK_VALUE(
-              op.has_value(), "operator ", op_name, " does not exist");
-          return at::impl::cppFakeNotImplemented(*op);
-        });
+        query_for(at::impl::cppFakeNotImplemented));
+    py_module.def(
+        "_fake_dispatch_cpp_meta_supports_symint",
+        query_for(at::impl::fakeCppMetaSupportsSymint));
     py_module.def(
         "_fake_dispatch_deregister_op_impl",
         [](const std::string& name, const std::string& overload) {

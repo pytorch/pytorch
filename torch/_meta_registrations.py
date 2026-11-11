@@ -9614,7 +9614,16 @@ def _register_static_shape_decomps(ops: Iterable[torch._ops.OperatorBase]) -> No
             )
 
 
+def _register_cpp_meta_supports_symint_ops() -> None:
+    for op in cpp_meta_supports_symint_ops:
+        schema = op._schema
+        torch._C._fake_dispatch_register_cpp_meta_supports_symint(
+            schema.name, schema.overload_name
+        )
+
+
 activate_meta()
 # Initial decorators run before their function names are bound in the module.
 _register_static_shape_decomps(decomposition_table)
 torch._decomp._static_shape_decomps_initialized = True
+_register_cpp_meta_supports_symint_ops()
