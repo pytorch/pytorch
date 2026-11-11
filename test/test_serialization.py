@@ -182,6 +182,11 @@ class Int4Tensor(torch.Tensor):
 
 
 class SerializationMixin:
+    # TestOldSerialization sets this to True since it serializes in the legacy
+    # (non-zip) format, which cannot be opened with weights_only=True (see
+    # torch.serialization._legacy_load).
+    _serializes_in_legacy_format = False
+
     def _test_serialization_data(self):
         a = [torch.randn(5, 5).float() for i in range(2)]
         b = [a[i % 2] for i in range(4)]  # 0-3
@@ -283,10 +288,12 @@ class SerializationMixin:
         buf = io.BytesIO(serialized)
         utf8_bytes = b'\xc5\xbc\xc4\x85\xc4\x85\xc3\xb3\xc5\xbc\xc4\x85\xc5\xbc'
         utf8_str = utf8_bytes.decode('utf-8')
-        loaded_utf8 = torch.load(buf, weights_only=weights_only, encoding='utf-8')
+        # This is embedded legacy-format (non-zip) data and uses encoding=, so it
+        # can only be read with weights_only=False.
+        loaded_utf8 = torch.load(buf, weights_only=False, encoding='utf-8')
         self.assertEqual(loaded_utf8, [utf8_str, torch.zeros(1, dtype=torch.float), 2])
         buf.seek(0)
-        loaded_bytes = torch.load(buf, weights_only=weights_only, encoding='bytes')
+        loaded_bytes = torch.load(buf, weights_only=False, encoding='bytes')
         self.assertEqual(loaded_bytes, [utf8_bytes, torch.zeros(1, dtype=torch.float), 2])
 
     def test_serialization(self):
@@ -573,9 +580,11 @@ class SerializationMixin:
         b += [a[0].storage()]
         b += [a[0].reshape(-1)[1:4].clone().storage()]
         path = download_file('https://download.pytorch.org/test_data/legacy_serialized.pt')
-        if weights_only:
+        # TestOldSerialization coerces loads to weights_only=False, so only assert
+        # the rejection where the load actually runs with weights_only=True.
+        if weights_only and not self._serializes_in_legacy_format:
             with self.assertRaisesRegex(RuntimeError,
-                                        "Cannot use ``weights_only=True`` with files saved in the legacy .tar format."):
+                                        "Cannot use ``weights_only=True`` with files saved in the legacy non-zipfile format."):
                 c = torch.load(path, weights_only=weights_only)
         c = torch.load(path, weights_only=False)
         self.assertEqual(b, c, atol=0, rtol=0)
@@ -656,7 +665,8 @@ class SerializationMixin:
         def check_map_locations(map_locations, dtype, intended_device):
             for fileobject_lambda in fileobject_lambdas:
                 for map_location in map_locations:
-                    tensor = torch.load(fileobject_lambda(), map_location=map_location)
+                    # Downloaded fixture (gpu_tensors.pt) is in the legacy (non-zip) format.
+                    tensor = torch.load(fileobject_lambda(), map_location=map_location, weights_only=False)
 
                     self.assertEqual(tensor.device, intended_device)
                     self.assertEqual(tensor.dtype, dtype)
@@ -738,7 +748,8 @@ class SerializationMixin:
 
         error_msg = r'Attempting to deserialize object on a CUDA device'
         with self.assertRaisesRegex(RuntimeError, error_msg):
-            _ = torch.load(buf)
+            # Embedded fixture is in the legacy (non-zip) format.
+            _ = torch.load(buf, weights_only=False)
 
     def test_serialization_filelike_api_requirements(self):
         filemock = FilelikeMock(b'', has_readinto=False)
@@ -855,7 +866,8 @@ class SerializationMixin:
                       b'\x00\x00\x00\x00')
 
         buf = io.BytesIO(serialized)
-        (s1, s2) = torch.load(buf)
+        # Embedded fixture is in the legacy (non-zip) format.
+        (s1, s2) = torch.load(buf, weights_only=False)
         self.assertEqual(s1[0], 0)
         self.assertEqual(s2[0], 0)
         self.assertEqual(s1.data_ptr() + 4, s2.data_ptr())
@@ -904,6 +916,7 @@ class serialization_method:
     def __init__(self, use_zip):
         self.use_zip = use_zip
         self.torch_save = torch.save
+        self.torch_load = torch.load
 
     def __enter__(self, *args, **kwargs):
         def wrapper(*args, **kwargs):
@@ -913,9 +926,19 @@ class serialization_method:
             return self.torch_save(*args, **kwargs)
 
         torch.save = wrapper
+        if not self.use_zip:
+            # The legacy (non-zip) format cannot be opened with weights_only=True
+            # (see torch.serialization._legacy_load), so load everything with
+            # weights_only=False to keep exercising the legacy round-trip path.
+            def load_wrapper(*args, **kwargs):
+                kwargs['weights_only'] = False
+                return self.torch_load(*args, **kwargs)
+
+            torch.load = load_wrapper
 
     def __exit__(self, *args, **kwargs):
         torch.save = self.torch_save
+        torch.load = self.torch_load
 
 Point = namedtuple('Point', ['x', 'y'])
 
@@ -956,16 +979,44 @@ class TestBothSerialization(TestCase):
 
             torch.save(x, f_old, _use_new_zipfile_serialization=False)
             f_old.seek(0)
-            x_old_load = torch.load(f_old, weights_only=weights_only)
-            self.assertEqual(x_old_load, x_new_load)
+            if weights_only:
+                # The legacy (non-zip) format cannot be opened with weights_only=True.
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Cannot use ``weights_only=True`` with files saved in the legacy non-zipfile format.",
+                ):
+                    torch.load(f_old, weights_only=weights_only)
+            else:
+                x_old_load = torch.load(f_old, weights_only=weights_only)
+                self.assertEqual(x_old_load, x_new_load)
 
         with AlwaysWarnTypedStorageRemoval(True), warnings.catch_warnings(record=True) as w:
             with tempfile.NamedTemporaryFile() as f_new, tempfile.NamedTemporaryFile() as f_old:
                 test(f_new, f_old)
             self.assertTrue(len(w) == 0, msg=lambda msg: f"{msg}\nExpected no warnings but got {[str(x) for x in w]}")
 
+    def test_weights_only_rejects_legacy_format(self, device):
+        # The legacy (non-zip) pickle format routes through _legacy_load, whose
+        # storage-view handling can be abused into a use-after-free during an
+        # otherwise weights_only=True load, so that format must be rejected
+        # outright rather than unpickled (same stance as the tar and TorchScript
+        # formats).
+        x = {"w": torch.ones(4, device=device)}
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(x, f, _use_new_zipfile_serialization=False)
+            f.seek(0)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Cannot use ``weights_only=True`` with files saved in the legacy non-zipfile format.",
+            ):
+                torch.load(f, weights_only=True)
+            f.seek(0)
+            self.assertEqual(torch.load(f, weights_only=False), x)
+
 
 class TestOldSerialization(TestCase, SerializationMixin):
+    _serializes_in_legacy_format = True
+
     @parametrize("load_mode", ["default", "fake_tensor_mode", "map_location_meta"])
     def test_load_preserves_storage_sharing(self, load_mode):
         self._test_load_preserves_storage_sharing(load_mode)
@@ -5131,7 +5182,8 @@ class TestSerializationAccelerator(TestCase):
         def check_map_locations(map_locations, dtype, intended_device):
             for fileobject_lambda in fileobject_lambdas:
                 for map_location in map_locations:
-                    tensor = torch.load(fileobject_lambda(), map_location=map_location)
+                    # Downloaded fixture (gpu_tensors.pt) is in the legacy (non-zip) format.
+                    tensor = torch.load(fileobject_lambda(), map_location=map_location, weights_only=False)
 
                     self.assertEqual(tensor.device, intended_device)
                     self.assertEqual(tensor.dtype, dtype)
@@ -5157,7 +5209,8 @@ class TestSerializationAccelerator(TestCase):
 
         for fileobject_lambda in fileobject_lambdas:
             for map_location in map_locations:
-                tensor = torch.load(fileobject_lambda(), map_location=map_location)
+                # Downloaded fixture (gpu_tensors.pt) is in the legacy (non-zip) format.
+                tensor = torch.load(fileobject_lambda(), map_location=map_location, weights_only=False)
                 self.assertEqual(tensor.device, intended_device)
                 self.assertEqual(tensor.dtype, torch.float)
                 self.assertEqual(
