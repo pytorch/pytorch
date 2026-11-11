@@ -101,19 +101,18 @@ test_failures = {
 # in-process compilation as part of their expected flow (async compile runs
 # the in-process path first; progressive compilation's fast scheme is one),
 # or their graphs reference test-local classes, which GraphPickler cannot
-# pickle, so the in-process fallback is expected.
+# pickle, so the in-process fallback is expected. Keyed by base name; the
+# device suffix is stripped before matching since the fallback reasons are
+# device-independent.
 _EXPECTED_IN_PROCESS_COMPILE = frozenset(
     {
         "test_async",
         "test_progressive",
-        "test_aoti_eager_dtype_device_layout_cpu",
-        "test_aoti_eager_dtype_device_layout_cuda",
-        "test_device_context_with_python_scalar_cpu",
-        "test_dont_constant_fold_cpu",
-        "test_dont_constant_fold_cuda",
-        "test_inductor_multiple_specializations_cuda",
-        "test_sdpa_unaligned_mask_freezing_cpu",
-        "test_sdpa_unaligned_mask_freezing_cuda",
+        "test_aoti_eager_dtype_device_layout",
+        "test_device_context_with_python_scalar",
+        "test_dont_constant_fold",
+        "test_inductor_multiple_specializations",
+        "test_sdpa_unaligned_mask_freezing",
     }
 )
 
@@ -141,7 +140,10 @@ class TestSubprocess(TestCase):
             # Deliberate serialization bypasses (e.g. HOPs, triton kernel
             # wrappers, non pickle-safe ops) are expected, so they are allowed
             # through.
-            if self._testMethodName not in _EXPECTED_IN_PROCESS_COMPILE:
+            name = self._testMethodName
+            if device := getattr(self, "device", ""):
+                name = name.removesuffix(f"_{device}")
+            if name not in _EXPECTED_IN_PROCESS_COMPILE:
                 self.assertEqual(
                     FxCompile._compile_stats[_InProcessFxCompile].codegen_and_compile,
                     _SerializedFxCompile._stat_serialize_fallbacks,
