@@ -1,14 +1,12 @@
 # Owner(s): ["module: inductor"]
 
-import unittest
-
 import torch
 import torch._inductor
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification
-from torch.utils._triton import has_triton
+from torch.utils._triton import has_triton_for_device
 
 
 try:
@@ -226,6 +224,11 @@ class _TestSelectCat(torch.nn.Module):
 class TestSplitCatAten(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    def setUp(self):
+        if not has_triton_for_device(self.device_type):
+            self.skipTest(f"requires Triton on {self.device_type}")
+        super().setUp()
+
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
             return False
@@ -252,7 +255,6 @@ class TestSplitCatAten(TestCase):
         res_grad = {key: param.grad for key, param in traced.named_parameters()}
         self.assertTrue(self.compare_dict_tensors(ref_grad, res_grad, rtol, atol))
 
-    @unittest.skipIf(not has_triton(), "requires triton")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -295,7 +297,6 @@ class TestSplitCatAten(TestCase):
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @unittest.skipIf(not has_triton(), "requires triton")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -321,7 +322,6 @@ class TestSplitCatAten(TestCase):
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @unittest.skipIf(not has_triton(), "requires triton")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -346,7 +346,6 @@ class TestSplitCatAten(TestCase):
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @unittest.skipIf(not has_triton(), "requires triton")
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
