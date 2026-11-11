@@ -179,7 +179,10 @@ kernel void index_put_serial(
     constant uint4& ndim_nindices_numel,
     device ErrorMessages* error_buffer,
     uint thread_index [[thread_position_in_grid]]) {
-  (void)thread_index; // Suppress unused variable warning
+  if (thread_index != 0) {
+    TORCH_REPORT_ERROR(error_buffer, "index_put_serial expected one thread");
+    return;
+  }
   for (uint idx = 0; idx < ndim_nindices_numel.z; ++idx) {
     index_put_impl(
         output,
@@ -237,6 +240,109 @@ kernel void index_put_accumulate(
       output_offs / sizeof(T),
       input[offs.y / sizeof(T)]);
 }
+
+// The unused output and input bindings match the other index kernel arguments.
+kernel void index_put_offsets(
+    device char* output,
+    device const char* input,
+    constant IndexAB* indices,
+    constant int64_t* sizes,
+    constant int64_t* output_strides,
+    constant int64_t* input_strides,
+    constant int64_t* indices_strides,
+    constant int64_t* index_sizes,
+    constant int64_t* index_strides,
+    constant uint4& ndim_nindices_numel,
+    device ErrorMessages* error_buffer,
+    device int64_t* offsets,
+    uint thread_index [[thread_position_in_grid]]) {
+  const auto offs = index_get_offsets(
+      sizes,
+      output_strides,
+      input_strides,
+      indices_strides,
+      ndim_nindices_numel.x,
+      thread_index);
+  bool error = false;
+  const auto output_offs = index_apply_indices<ulong>(
+      offs.xz,
+      indices,
+      index_sizes,
+      index_strides,
+      ndim_nindices_numel.y,
+      error,
+      error_buffer);
+  offsets[thread_index] = error ? -1 : int64_t(output_offs);
+}
+
+template <typename T, bool one_dimensional>
+kernel void index_put_accumulate_grouped(
+    device T* output,
+    device const char* input,
+    device const int64_t* offsets,
+    device const int64_t* order,
+    constant int64_t* sizes,
+    constant int64_t* input_strides,
+    constant uint2& ndim_numel,
+    uint thread_index [[thread_position_in_grid]]) {
+  const auto offset = offsets[thread_index];
+  if (offset < 0 || (thread_index > 0 && offset == offsets[thread_index - 1])) {
+    return;
+  }
+  // Each group is serial, so the largest group limits parallelism.
+  T result = output[offset / sizeof(T)];
+  uint i = thread_index;
+  constexpr uint batch_size = 8;
+  for (;
+       i + batch_size <= ndim_numel.y && offsets[i + batch_size - 1] == offset;
+       i += batch_size) {
+    T values[batch_size];
+#pragma unroll
+    for (uint j = 0; j < batch_size; ++j) {
+      const auto input_offs = one_dimensional
+          ? int(order[i + j]) * int(input_strides[0])
+          : offsets_from_thread_index(
+                int(order[i + j]), sizes, ndim_numel.x, input_strides)[0];
+      values[j] = *reinterpret_cast<device const T*>(input + input_offs);
+    }
+#pragma unroll
+    for (uint j = 0; j < batch_size; ++j) {
+      result += values[j];
+    }
+  }
+  for (; i < ndim_numel.y && offsets[i] == offset; ++i) {
+    const auto input_offs = one_dimensional
+        ? int(order[i]) * int(input_strides[0])
+        : offsets_from_thread_index(
+              int(order[i]), sizes, ndim_numel.x, input_strides)[0];
+    const auto value = *reinterpret_cast<device const T*>(input + input_offs);
+    result += value;
+  }
+  output[offset / sizeof(T)] = result;
+}
+
+#define REGISTER_INDEX_ACCUMULATE_GROUPED(SUFFIX, DTYPE, ONE_DIMENSIONAL)     \
+  template [[host_name("index_put_accumulate_grouped_" #SUFFIX)]] kernel void \
+  index_put_accumulate_grouped<DTYPE, ONE_DIMENSIONAL>(                       \
+      device DTYPE*,                                                          \
+      device const char*,                                                     \
+      device const int64_t*,                                                  \
+      device const int64_t*,                                                  \
+      constant int64_t*,                                                      \
+      constant int64_t*,                                                      \
+      constant uint2&,                                                        \
+      uint thread_index [[thread_position_in_grid]])
+
+REGISTER_INDEX_ACCUMULATE_GROUPED(float, float, false);
+REGISTER_INDEX_ACCUMULATE_GROUPED(half, half, false);
+REGISTER_INDEX_ACCUMULATE_GROUPED(bfloat, bfloat, false);
+REGISTER_INDEX_ACCUMULATE_GROUPED(float2, float2, false);
+REGISTER_INDEX_ACCUMULATE_GROUPED(half2, half2, false);
+REGISTER_INDEX_ACCUMULATE_GROUPED(float_1d, float, true);
+REGISTER_INDEX_ACCUMULATE_GROUPED(half_1d, half, true);
+REGISTER_INDEX_ACCUMULATE_GROUPED(bfloat_1d, bfloat, true);
+REGISTER_INDEX_ACCUMULATE_GROUPED(float2_1d, float2, true);
+REGISTER_INDEX_ACCUMULATE_GROUPED(half2_1d, half2, true);
 
 #define REGISTER_INDEX_OP(OP_NAME, SUFFIX, DTYPE)                   \
   template [[host_name("index_" #OP_NAME "_" #SUFFIX)]] kernel void \
