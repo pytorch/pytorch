@@ -57,13 +57,10 @@ _cpp_fake_mode_tls = _CppFakeModeTLS()
 
 
 def _is_cpp_fake_mode_active() -> bool:
-    # Whether a C++ FakeTensorMode is installed on this thread, or entered and
-    # not yet exited, or suspended by _disable_current_modes, as a
-    # TorchDispatchMode still counts for is_in_torch_dispatch_mode() while it
-    # is taken out of its slot. Dynamo, which traces and builds guards inside
-    # _disable_current_modes, folds this to a constant guarded on calling it
-    # again (constant_fold_functions_need_guards), so the fold and the guard
-    # at frame entry agree.
+    # - Installed: a mode is in the C++ slot now.
+    # - Suspended: _disable_current_modes() removed a mode and is holding it
+    #   for restoration.
+    # - Stack nonempty: at least one entered C++ fake-mode context is still open.
     return (
         _is_cpp_fake_mode_set()
         or _cpp_fake_mode_tls.suspended
