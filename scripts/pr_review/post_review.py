@@ -491,7 +491,8 @@ def _compose(
                 f"An approval from {names} of {approval.commit[:12]} meets "
                 "merge_rules.yaml's approval requirement for these files, so "
                 "this review blocks only on problems in the changes made since "
-                "that commit.",
+                "that commit, and on code here that changes to the base since "
+                "then have broken.",
                 "",
             ]
         lines += [

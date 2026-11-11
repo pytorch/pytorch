@@ -2304,6 +2304,7 @@ class TestAnApprovedPrGetsAComment(unittest.TestCase):
             body["body"],
         )
         self.assertIn("blocks only on problems in the changes made since", body["body"])
+        self.assertIn("changes to the base since then have broken", body["body"])
         self.assertNotIn("posted as a comment", body["body"])
         self.assertEqual(dismissed(gh), [], "a request after the approval is withdrawn")
 

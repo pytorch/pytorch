@@ -19,6 +19,10 @@ no attributes from the PR (`--attr-source` is the empty tree), so its
 `.gitattributes` cannot pick merge or diff drivers. Every other failure, and a
 result over the size cap, writes a one-line note, so the review never fails for
 this file.
+
+With `--since approval`, a file that limits the review to the changes since
+also says when the base moved since the approval and which files it changed,
+so the review can block on code here that the base has broken since.
 """
 
 from __future__ import annotations
@@ -94,6 +98,13 @@ APPROVAL_NOTES = {
     ),
 }
 NOTES = {"review": REVIEW_NOTES, "approval": APPROVAL_NOTES}
+BASE_MOVED = (
+    "\n# The base moved since the maintainer's approval: the approved commit's "
+    "merge base was {old}, and this run's is {new}.{listing}\n"
+)
+BASE_LISTED = " The files the base changed in between:"
+BASE_UNLISTED = " The files the base changed in between are not listed."
+BASE_MAX_FILES = 200
 
 
 def narrows(text: str) -> bool:
@@ -102,6 +113,37 @@ def narrows(text: str) -> bool:
         text.startswith(APPROVAL_NOTES[key].split("{sha}")[0])
         for key in ("header", "base_only")
     )
+
+
+def one_line(name: str) -> str:
+    return "".join(c if c.isprintable() else repr(c)[1:-1] for c in name)
+
+
+def base_moved(text: str, previous_base: str, base: str, max_bytes: int) -> str:
+    """An approval interdiff that narrows the review, plus a note when the base
+    moved since the approval, so the review can tell a break the base caused
+    (a removed function the PR still calls) from one present when approved.
+
+    A ghstack base branch is pushed by the PR's author, so a listed name is
+    escaped to one line. Without room for the list the note alone is added;
+    without room for that, the size note replaces the file and the review
+    blocks as usual."""
+    if previous_base == base:
+        return text
+    proc = git("diff", "--name-only", "-z", previous_base, base)
+    names = os.fsdecode(proc.stdout).split("\0") if proc.returncode == 0 else []
+    names = [n for n in names if n]
+    lines = [f"#   {one_line(n)}" for n in names[:BASE_MAX_FILES]]
+    if len(names) > BASE_MAX_FILES:
+        lines.append(f"#   ...and {len(names) - BASE_MAX_FILES} more")
+    choices = [BASE_MOVED.format(old=previous_base, new=base, listing=BASE_UNLISTED)]
+    if lines:
+        listed = BASE_MOVED.format(old=previous_base, new=base, listing=BASE_LISTED)
+        choices.insert(0, listed + "".join(f"{ln}\n" for ln in lines))
+    for note in choices:
+        if len((text + note).encode()) <= max_bytes:
+            return text + note
+    return APPROVAL_NOTES["too_large"]
 
 
 REPO = Path(".")
@@ -221,6 +263,8 @@ def main(argv: list[str] | None = None) -> int:
         text = notes["failed"]
     if len(text.encode()) > args.max_bytes:
         text = notes["too_large"]
+    if args.since == "approval" and narrows(text):
+        text = base_moved(text, args.previous_base, args.base, args.max_bytes)
     args.out.write_text(text)
     if args.output and args.since == "approval" and narrows(text):
         with args.output.open("a") as f:

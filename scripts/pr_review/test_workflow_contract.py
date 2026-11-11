@@ -7143,6 +7143,14 @@ class TestTheApprovalInterdiffReachesTheReview(unittest.TestCase):
         self.assertIn("approved this same commit", notes["same"])
         self.assertNotIn("approved this same commit", section)
         self.assertIn("any other note, review as usual", section)
+        # A break the base caused since the approval blocks under its own label,
+        # keyed on the note interdiff.py adds when the base moved.
+        self.assertIn(
+            "# The base moved since the maintainer's approval", interdiff.BASE_MOVED
+        )
+        self.assertIn("the base moved since the maintainer's approval", section)
+        self.assertIn("Broken by changes on the base since the approval:", section)
+        self.assertIn("the approval predates that change", section)
 
 
 class TestTheProvenanceGuardsRejectWhenTheyDisagree(unittest.TestCase):
