@@ -154,6 +154,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     """
 
     supports_caching = False
+    supports_size_divisibility_checks = False
 
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
