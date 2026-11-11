@@ -2,6 +2,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/ceil_div.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/NormBackwardHeuristics.h>
 #include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -70,11 +71,13 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
   const auto len = c10::safe_conv<uint32_t>(saved_v.numel() / saved_v.size(dim), "uint32_t");
   const auto dtype = scalarToMetalTypeString(saved_v);
   constexpr auto simd = c10::metal::simdgroup_size;
-  const auto col_groups = at::ceil_div(slices, simd);
-  const auto splits = std::clamp<uint32_t>(occupancy_threadgroups() / col_groups, 1, at::ceil_div(len, simd));
-  const auto partial = dim == 0
-      ? Tensor()
-      : at::empty({splits, slices}, saved_v.options().dtype(at::toOpMathType(saved_v.scalar_type())));
+  const auto row_cfg = select_norm_row_config(slices, len, occupancy_threadgroups());
+  const auto tiles = select_norm_column_config(len, slices, occupancy_threadgroups());
+  const auto opmath_options = saved_v.options().dtype(at::toOpMathType(saved_v.scalar_type()));
+  const auto row_part = dim == 0 && row_cfg.chunks > 1
+      ? std::make_optional(at::empty({row_cfg.rows, row_cfg.chunks, 2}, opmath_options))
+      : std::nullopt;
+  const auto partial = dim == 0 ? Tensor() : at::empty({tiles.splits, slices}, opmath_options);
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -88,34 +91,42 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
         getMPSProfiler().endProfileKernel(pso, stream);
       };
       if (dim == 0) {
-        constexpr auto ilp = c10::metal::ILP_PER_THREAD;
-        const auto threads = std::min(at::ceil_div(len, ilp), c10::metal::max_threadgroup_size);
-        const auto variant = threads * ilp < len ? "looped"sv : "single_row"sv;
-        run(fmt::format("weight_norm_backward_{}_{}", variant, dtype),
-            MTLSizeMake(threads, slices, 1),
-            MTLSizeMake(threads, 1, 1),
-            grad_w,
-            saved_v,
-            saved_g,
-            saved_norms,
-            grad_v,
-            len,
-            grad_g);
+        const std::array<uint32_t, 4> dims{row_cfg.rows, row_cfg.row_size, row_cfg.lanes, row_cfg.chunk_size};
+        for (const auto pass : row_cfg.passes()) {
+          run(fmt::format("weight_norm_backward_{}_{}", pass, dtype),
+              MTLSizeMake(row_cfg.chunks * row_cfg.threads, row_cfg.row_groups, 1),
+              MTLSizeMake(row_cfg.threads, 1, 1),
+              grad_w,
+              saved_v,
+              saved_g,
+              saved_norms,
+              grad_v,
+              row_part,
+              dims,
+              grad_g);
+        }
       } else {
         const auto tile = MTLSizeMake(simd, simd, 1);
         const std::array<uint32_t, 2> rows_cols = {len, slices};
+        const std::optional<Tensor> unused;
         run(fmt::format("weight_norm_backward_cols_dot_{}", dtype),
-            MTLSizeMake(col_groups * simd, splits * simd, 1),
-            tile,
+            MTLSizeMake(tiles.col_groups * tiles.tx, tiles.splits * tiles.ty, 1),
+            MTLSizeMake(tiles.tx, tiles.ty, 1),
             grad_w,
             saved_v,
+            unused,
+            unused,
             partial,
+            unused,
+            unused,
             rows_cols);
-        run("weight_norm_backward_cols_sum",
-            MTLSizeMake(slices, 1, 1),
-            MTLSizeMake(simd, 1, 1),
-            partial,
-            std::array<uint32_t, 2>{splits, slices});
+        if (tiles.splits > 1) {
+          run("weight_norm_backward_cols_sum",
+              MTLSizeMake(slices, 1, 1),
+              MTLSizeMake(simd, 1, 1),
+              partial,
+              std::array<uint32_t, 2>{tiles.splits, slices});
+        }
         // Every thread of a tile writes simd rows of one contiguous block, so reads and writes stay close in memory.
         constexpr auto rows_per_tile = simd * simd;
         run(fmt::format("weight_norm_backward_cols_{}{}", dtype, mtlIdxSuffix(offsetsFitIn<uint32_t>(saved_v))),
