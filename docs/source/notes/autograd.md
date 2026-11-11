@@ -393,8 +393,12 @@ such an accumulation is needed, we raise an error instead. This is useful for fi
 places in your code relies on autograd to accumulate gradients, when you might actually
 want to do it explicitly so you can have finer control over it. For example, you may
 want to control what precision the accumulation or how the rounding is performed
-when casting to the desired precision. Notably, however, this does NOT cover when grad
-is accumulated on the ``.grad`` field across several ``.backward()`` calls.
+when casting to the desired precision.
+
+Note that while a leaf tensor used twice during a forward raises an error during backward
+under this flag, a leaf tensor that is only used once, but whose ``.grad`` field is
+accumulated into over several ``.backward()`` calls is not covered by this flag and does
+NOT raise an error.
 
 ```python
 a = torch.randn(3, requires_grad=True)
