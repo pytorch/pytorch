@@ -6,7 +6,6 @@ import itertools
 import math
 import os
 import re
-import traceback
 import unittest
 import warnings
 from collections import defaultdict
@@ -24,9 +23,8 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
     is_fake_tensor,
-    UnsupportedFakeTensorException,
 )
-from torch._subclasses.fake_utils import _check_alias_info, outputs_alias_inputs
+from torch._subclasses.fake_utils import outputs_alias_inputs
 from torch.fx.experimental.symbolic_shapes import (
     constrain_range,
     ShapeEnv as SymbolicShapeEnv,
@@ -69,6 +67,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import (
     clone_input_helper,
+    fake_tensor_modes,
     first_sample,
     HardwareClassification,
     IS_CI,
@@ -2966,6 +2965,30 @@ fake_backward_mps_xfails = {
 }
 
 
+# CPU OpInfos whose samples are supported by the initial C++ fake fallback.
+cpp_fake_ops = {
+    "abs",
+    "acos",
+    "add",
+    "ceil",
+    "clone",
+    "cos",
+    "exp",
+    "floor",
+    "isinf",
+    "log",
+    "mean",
+    "mul",
+    "neg",
+    "sin",
+    "sqrt",
+    "sub",
+    "t",
+    "transpose",
+    "view_as_real",
+}
+
+
 @unMarkDynamoStrictTest
 class TestFakeTensor(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -2985,7 +3008,12 @@ class TestFakeTensor(TestCase):
         cache_crosscheck.start()
         self.addCleanup(cache_crosscheck.stop)
 
-    def _test_fake_helper(self, device, dtype, op, context):
+    def _test_fake_helper(self, device, dtype, op, context, mode_cls):
+        if mode_cls is CppFakeTensorMode:
+            if TEST_WITH_TORCHDYNAMO:
+                self.skipTest("Dynamo does not support C++ fakes as inputs yet")
+            if torch.device(device).type != "cpu" or op.name not in cpp_fake_ops:
+                self.skipTest("not yet covered by the C++ fake fallback tests")
         name = op.name
         if op.variant_test_name:
             name += "." + op.variant_test_name
@@ -2994,7 +3022,7 @@ class TestFakeTensor(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
-            mode = FakeTensorMode()
+            mode = mode_cls()
 
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -3002,7 +3030,7 @@ class TestFakeTensor(TestCase):
                 allow_dynamic_output_shape_ops=True
             )
 
-            allow_dynamic_output_shape_mode = FakeTensorMode(
+            allow_dynamic_output_shape_mode = mode_cls(
                 shape_env=allow_dynamic_output_shape_shape_env
             )
 
@@ -3069,9 +3097,11 @@ class TestFakeTensor(TestCase):
                     )
 
                 except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
-                    pass
+                    if mode_cls is CppFakeTensorMode:
+                        raise
                 except torch._subclasses.fake_tensor.UnsupportedOperatorException:
-                    pass
+                    if mode_cls is CppFakeTensorMode:
+                        raise
                 except torch._subclasses.fake_tensor.DynamicOutputShapeException:
                     self.assertTrue(
                         name in dynamic_output_op_tests
@@ -3159,8 +3189,9 @@ class TestFakeTensor(TestCase):
         | fake_mps_xfails
     )
     @ops(op_db, dtypes=OpDTypes.any_one)
-    def test_fake(self, device, dtype, op):
-        self._test_fake_helper(device, dtype, op, contextlib.nullcontext)
+    @fake_tensor_modes
+    def test_fake(self, device, dtype, op, mode_cls):
+        self._test_fake_helper(device, dtype, op, contextlib.nullcontext, mode_cls)
 
     @skipOps(
         {
@@ -3171,7 +3202,8 @@ class TestFakeTensor(TestCase):
         | fake_mps_xfails
     )
     @ops(op_db, dtypes=OpDTypes.any_one)
-    def test_fake_autocast(self, device, dtype, op):
+    @fake_tensor_modes
+    def test_fake_autocast(self, device, dtype, op, mode_cls):
         device_type = torch.device(device).type
         if op.name in fake_autocast_device_skips[device_type]:
             self.skipTest("Skip failing test")
@@ -3179,7 +3211,7 @@ class TestFakeTensor(TestCase):
         def context_fn():
             return torch.amp.autocast(device_type)
 
-        self._test_fake_helper(device, dtype, op, context_fn)
+        self._test_fake_helper(device, dtype, op, context_fn, mode_cls)
 
     def _test_fake_crossref_helper(self, device, dtype, op, context):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
@@ -3244,99 +3276,6 @@ class TestFakeTensor(TestCase):
             self.assertEqual(strided_result.layout, torch.strided)
 
 
-class TestCppFakeFallbackOpInfoDevice(TestCase):
-    hw_classification = HardwareClassification.CPU
-
-    # Compare CPU samples accepted by C++ input conversion and fake fallback.
-    # UnsupportedFakeTensorException from conversion and the fallback's explicit
-    # NotImplementedError rejection exclude samples. Without a support baseline,
-    # this sweep cannot detect regressions that turn supported samples into
-    # rejections; newly supported samples are compared automatically.
-    @skipIfTorchDynamo("Dynamo does not support C++ fakes as inputs yet")
-    @torch._dynamo.config.patch(
-        fake_tensor_cache_enabled=True, fake_tensor_cache_crosscheck_enabled=True
-    )
-    @ops(op_db, dtypes=OpDTypes.any_one)
-    def test_fake_fallback_matches_python(self, device, dtype, op):
-        def convert(mode, sample):
-            inputs = (sample.input, sample.args, sample.kwargs)
-            return pytree.tree_map_only(torch.Tensor, mode.from_tensor, inputs)
-
-        def run(mode, inputs):
-            inp, args, kwargs = inputs
-            with mode:
-                return op(inp, *args, **kwargs)
-
-        compared = 0
-        for sample in op.sample_inputs(device, dtype, requires_grad=False):
-            # The C++ side first, as it rejects much of op_db
-            mode = CppFakeTensorMode()
-            try:
-                inputs = convert(mode, sample)
-            except UnsupportedFakeTensorException:
-                continue
-            cpp_error = None
-            try:
-                out = run(mode, inputs)
-            except Exception as e:
-                rejected = "fake tensor fallback does not support" in str(e)
-                if type(e) is NotImplementedError and rejected:
-                    continue
-                cpp_error = e
-            python_mode = FakeTensorMode()
-            python_inputs = convert(python_mode, sample)
-            python_error = None
-            try:
-                expected = run(python_mode, python_inputs)
-            except Exception as e:
-                python_error = e
-            compared += 1
-            if cpp_error is not None or python_error is not None:
-                # Match exception types and reject C++ internal asserts.
-                # Meta kernels and Python fake implementations word errors differently.
-                same = type(cpp_error) is type(python_error)
-                if not same or "INTERNAL ASSERT" in str(cpp_error):
-                    msg = f"C++ raised {cpp_error!r}; Python raised {python_error!r}"
-                    if cpp_error is not None and python_error is not None:
-                        msg += "\nPython traceback:\n" + "".join(
-                            traceback.format_exception(python_error)
-                        )
-                    raise AssertionError(msg) from (cpp_error or python_error)
-                continue
-            expected_leaves, expected_spec = pytree.tree_flatten(expected)
-            out_leaves, out_spec = pytree.tree_flatten(out)
-            self.assertEqual(out_spec, expected_spec)
-            tensor_pairs = [
-                (e, o)
-                for e, o in zip(
-                    pytree.tree_leaves(python_inputs), pytree.tree_leaves(inputs)
-                )
-                if isinstance(e, torch.Tensor)
-            ]
-            for e, o in zip(expected_leaves, out_leaves):
-                if not isinstance(e, torch.Tensor):
-                    self.assertIs(type(o), type(e))
-                    self.assertEqual(o, e)
-                    continue
-                self.assertIsInstance(o, torch.Tensor)
-                self.assertIs(torch._C._maybe_get_fake_mode(o), mode)
-                self.assertEqual(
-                    (o.shape, o.dtype, o.device, o.layout),
-                    (e.shape, e.dtype, e.device, e.layout),
-                )
-                self.assertEqual((o.is_conj(), o.is_neg()), (e.is_conj(), e.is_neg()))
-                if e.layout == torch.strided:
-                    # Fake-vs-fake parity includes size-one and empty tensor strides.
-                    self.assertEqual(o.stride(), e.stride())
-                    self.assertEqual(o.storage_offset(), e.storage_offset())
-                # Check each input and earlier output, preserving the alias mapping.
-                for py_tensor, cpp_tensor in tensor_pairs:
-                    _check_alias_info("C++ fake", e, py_tensor, o, cpp_tensor)
-                tensor_pairs.append((e, o))
-        if compared == 0:
-            self.skipTest("no supported sample to compare")
-
-
 class TestForwardADWithScalars(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -3385,9 +3324,6 @@ instantiate_device_type_tests(TestCompositeCompliance, globals(), allow_xpu=True
 instantiate_device_type_tests(TestMathBits, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFakeTensor, globals(), allow_xpu=True, allow_mps=True)
-instantiate_device_type_tests(
-    TestCppFakeFallbackOpInfoDevice, globals(), only_for=("cpu",)
-)
 instantiate_device_type_tests(TestTags, globals(), only_for="cpu")
 instantiate_device_type_tests(TestForwardADWithScalars, globals(), allow_xpu=True)
 
