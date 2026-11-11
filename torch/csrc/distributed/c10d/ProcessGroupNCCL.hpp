@@ -379,6 +379,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // instead of the tensor output.
     c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
 
+    bool hasFutureResult() const override {
+      return true;
+    }
+
     float getDuration() const override;
 
     uint64_t getSequencenumber() const override;
@@ -592,16 +596,27 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Run desync debug. This function is called by watchdog at time of timeout.
     void run();
 
-    // Log work start to store.
+    // Buffer a work start for the next flush().
     void logWorkStart(WorkNCCL& work);
 
-    // Log work end to store.
+    // Buffer a work end for the next flush().
     void logWorkEnd(WorkNCCL& work);
+
+    // Publish buffered start/end updates. Each trace key retains only its
+    // latest value, so one write per key per pass replaces one per work. Normal
+    // watchdog passes call this after releasing workMetaListMutex_. Timeout and
+    // error reporting may call it while holding the mutex so state is published
+    // before the report or dump.
+    void flush();
 
    private:
     // Whether desync debug is enabled.
     // If false, all functions are no-op.
     bool enabled_{false};
+
+    // Buffered until flush().
+    std::optional<std::pair<uint64_t, std::string>> pendingStart_;
+    std::optional<std::pair<uint64_t, std::string>> pendingEnd_;
 
     // From ProcessGroupNCCL
     int rank_;
@@ -997,6 +1012,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void waitForPendingWorks() override;
 
   void enableCollectivesTiming() override;
+  bool collectivesTimingEnabled() const override {
+    return enableTiming_.load();
+  }
 
   c10::intrusive_ptr<Backend> split(
       const c10::intrusive_ptr<Store>& store,
