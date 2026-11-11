@@ -1123,7 +1123,10 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
       } else {
         linearIndex = index;
         if (i>0) {
-           strideBefore = src.stride(i-1); // stride after undefined dimensions
+           // Stride after undefined dimensions. Use the contiguous stride rather
+           // than src.stride(i-1): a contiguous src can have an arbitrary stride
+           // on a size-1 dim, but the kernels index src as dense.
+           strideBefore = strides[i-1];
         }
       }
     } else if (linearIndex.defined()) {
