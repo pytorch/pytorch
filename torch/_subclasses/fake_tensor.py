@@ -404,9 +404,6 @@ def maybe_set_real_tensor(x: object, real: Tensor | None) -> None:
             torch._C._set_real_tensor(x, real)
 
 
-# The item memo of a fake. A C++ fake keeps it on the C++ tensor, which like
-# SymNumberMemoDescriptor drops it once the tensor is mutated or fake_mode's
-# epoch changes, except that a backed SymFloat is kept across epochs.
 def maybe_get_item_memo(x: object) -> _ItemMemo | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.item_memo
