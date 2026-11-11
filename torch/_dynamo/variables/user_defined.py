@@ -88,9 +88,11 @@ from ..utils import (
     deque_methods,
     deque_rev_iterator,
     dict_methods,
+    float_methods,
     frozenset_methods,
     get_custom_getattr,
     has_torch_function,
+    int_methods,
     is_lru_cache_wrapped_function,
     is_namedtuple_cls,
     is_pybind11_enum_member,
@@ -105,6 +107,7 @@ from ..utils import (
     proxy_args_kwargs,
     raise_args_mismatch,
     set_methods,
+    str_methods,
     tensortype_to_dtype,
     tracked_repr,
     tuple_methods,
@@ -5198,10 +5201,6 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
 
 _CONSTANT_BASE_TYPES = (int, float, str)
 
-_constant_base_methods: dict[type, set[Any]] = {
-    t: {m for m in t.__dict__.values() if callable(m)} for t in _CONSTANT_BASE_TYPES
-}
-
 
 class UserDefinedConstantVariable(UserDefinedObjectVariable):
     """
@@ -5232,17 +5231,17 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable):
 
 class UserDefinedIntVariable(UserDefinedConstantVariable, IntConstantVariable):
     _constant_base = int
-    _base_methods = _constant_base_methods[int]
+    _base_methods = int_methods
 
 
 class UserDefinedFloatVariable(UserDefinedConstantVariable, FloatConstantVariable):
     _constant_base = float
-    _base_methods = _constant_base_methods[float]
+    _base_methods = float_methods
 
 
 class UserDefinedStrVariable(UserDefinedConstantVariable, StrConstantVariable):
     _constant_base = str
-    _base_methods = _constant_base_methods[str]
+    _base_methods = str_methods
 
 
 class IntWrapperVariable(UserDefinedObjectVariable):
