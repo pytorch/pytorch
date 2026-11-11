@@ -688,14 +688,22 @@ __device__ __forceinline__ T reduce_tiles(const T* __restrict__ p, uint64_t begi
     acc[u] = init;
   }
   for (uint64_t base = begin; base < end; base += kReduceUnroll * tile) {
-    GVec<T, kWidth> v[kReduceUnroll][kLoads];
+    Vec<T, kWidth> v[kReduceUnroll][kLoads];
 #pragma unroll
     for (int u = 0; u < kReduceUnroll; ++u) {
       const uint64_t tile_base = base + u * tile < end ? base + u * tile : base;
 #pragma unroll
       for (int l = 0; l < kLoads; ++l) {
-        v[u][l] = *reinterpret_cast<const GVec<T, kWidth>*>(
-            p + tile_base + static_cast<uint64_t>(l * kBlock + threadIdx.x) * kWidth);
+        const T* q = p + tile_base + static_cast<uint64_t>(l * kBlock + threadIdx.x) * kWidth;
+        if constexpr (kVectorized) {
+          const auto g = *reinterpret_cast<const GVec<T, kWidth>*>(q);
+#pragma unroll
+          for (int k = 0; k < kWidth; ++k) {
+            v[u][l].v[k] = g.v[k];
+          }
+        } else {
+          v[u][l].v[0] = *q;
+        }
       }
     }
 #pragma unroll
