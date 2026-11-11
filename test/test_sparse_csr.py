@@ -2908,6 +2908,7 @@ class TestSparseCSRDevice(TestCase):
             fill = -99
             out, buf = self._with_strided_values(actual, fill)
             values = out.values()
+            values.fill_(fill)  # so that a lost write is caught
             torch.sparse.sampled_addmm(c, a, b, alpha=alpha, beta=beta, out=out)
             self._check_written_through_view(out, buf, values, actual.to_dense(), fill)
             if actual.dim() == 4:
