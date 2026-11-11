@@ -1,0 +1,22 @@
+# Every manywheel builder image that .github/workflows/build-manywheel-images.yml
+# builds, as name:tag. Keep it equal to that workflow's matrix;
+# .github/scripts/test_manywheel_images.py checks this, and that every image the
+# Linux binary build matrix uses is listed.
+#
+# It lives under .ci/docker on purpose. A ciflow/binaries run pulls the builder
+# images tagged with the hash of this directory (get-docker-tag in the generated
+# Linux binary workflows), and main publishes all the variants it builds for a
+# tree. A variant that is added only to the workflow matrix leaves the hash as it
+# is, so main never publishes it for a tree that already exists and PR runs
+# cannot pull it from Docker Hub. Listing it here changes the hash, which sends
+# the PR's runs to the images its own ciflow/docker run builds.
+manylinux2_28-builder:cuda13.4
+manylinux2_28-builder:cuda13.2
+manylinuxaarch64-builder:cuda13.4
+manylinuxaarch64-builder:cuda13.2
+manylinux2_28-builder:rocm10.0
+manylinux2_28-builder:rocm10.1
+manylinux2_28-builder:rocm-preview
+manylinux2_28-builder:cpu
+manylinux2_28_aarch64-builder:cpu-aarch64
+manylinux2_28-builder:xpu
