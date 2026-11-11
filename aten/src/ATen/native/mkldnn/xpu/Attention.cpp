@@ -160,7 +160,10 @@ bool can_use_mem_efficient_attention(
         std::to_array<bool (*)(sdp::sdp_params const&, bool)>(
             {sdp::check_nonzero_sequence_lengths_dense,
              sdp::check_last_dim_stride_equals_1_dense<false>,
-             sdp::check_batch_size_and_num_heads_dense<false>});
+             sdp::check_batch_size_and_num_heads_dense<
+                 true /*supports GQA*/,
+                 true /*requires_same_num_heads*/,
+                 true /*supports_mqa*/>});
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;

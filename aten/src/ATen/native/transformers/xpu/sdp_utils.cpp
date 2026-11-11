@@ -176,7 +176,10 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
           check_for_dropout,
           check_nested_tensor,
           check_tensor_shapes,
-          check_batch_size_and_num_heads_dense<true /*supports GQA*/>,
+          check_batch_size_and_num_heads_dense<
+              true /*supports GQA*/,
+              true /*requires_same_num_heads*/,
+              true /*supports_mqa*/>,
           check_nonzero_sequence_lengths_dense,
           check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim*/>,
           check_flash_causal_non_square_seqlens,

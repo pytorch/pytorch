@@ -3863,7 +3863,6 @@ class TestSDPAAccelerator(NNTestCase):
 
     @tf32_off()
     @skipIfRocm
-    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     @parametrize("enable_gqa", [False, True])
     def test_mqa_singleton_head_broadcast(self, device, enable_gqa):
@@ -3898,7 +3897,6 @@ class TestSDPAAccelerator(NNTestCase):
 
     @tf32_off()
     @skipIfRocm
-    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     @parametrize("dtype", [torch.float32, torch.float16])
     @parametrize(
@@ -3982,7 +3980,6 @@ class TestSDPAAccelerator(NNTestCase):
             )
 
     @skipIfRocm
-    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     def test_mem_efficient_attention_gqa_dropout(self, device):
         """GQA should preserve query-head dropout and mask semantics."""
@@ -4014,7 +4011,7 @@ class TestSDPAAccelerator(NNTestCase):
         attn_mask_expanded = attn_mask.detach().clone().requires_grad_()
 
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-            torch.cuda.manual_seed(1234)
+            torch.manual_seed(1234)
             actual = scaled_dot_product_attention(
                 query,
                 key,
@@ -4024,7 +4021,7 @@ class TestSDPAAccelerator(NNTestCase):
                 scale=0.37,
                 enable_gqa=True,
             )
-            torch.cuda.manual_seed(1234)
+            torch.manual_seed(1234)
             expected = scaled_dot_product_attention(
                 query_expanded,
                 key_expanded,
@@ -4137,7 +4134,6 @@ class TestSDPAAccelerator(NNTestCase):
             self.assertEqual(actual_grad, expected_grad, atol=5e-4, rtol=4e-4)
 
     @skipIfRocm(msg="AOTriton bottom-right causal attention writes NaN into fully masked rows when another process shares the GPU")
-    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Memory efficient attention is not supported on this system",
@@ -4508,7 +4504,6 @@ class TestSDPAAccelerator(NNTestCase):
             self.assertEqual(grad.numel(), 0)
 
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
-    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @parametrize(
         "fused_kernel",
         [SDPBackend.FLASH_ATTENTION, ] if TEST_XPU else [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION],
@@ -5227,7 +5222,6 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertEqual(actual_grad, expected_grad)
 
     @skipIfRocm
-    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_mem_efficient_attention_vmap_gqa_backward(self, device):
         """Exercise GQA backward with a per-query-head mask under vmap."""
