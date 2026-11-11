@@ -7064,6 +7064,30 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         # when get_min_choice() is called during prologue fusion
                         run_and_get_code(compiled_f, a, b)
 
+    def test_fuse_epilogue_zero_unfused_occupancy(self):
+        from torch._inductor.scheduler import _fuse_epilogue
+
+        # 64-wide wavefronts: 200 regs * 8 warps * 64 lanes > 65536 regs per CU
+        device_props = DeviceProperties(
+            type="hip",
+            index=0,
+            multi_processor_count=304,
+            cc=94,
+            regs_per_multiprocessor=65536,
+            warp_size=64,
+        )
+        self.assertFalse(
+            _fuse_epilogue(
+                ms1=0.1,
+                ms2=0.3,
+                unfused_n_regs=200,
+                fused_n_regs=240,
+                fused_n_spills=0,
+                num_warps=8,
+                device_props=device_props,
+            )
+        )
+
 
 class _TDMFakeSizeVars:
     """Sizevars stand-in for the descriptor-checker host tests.
