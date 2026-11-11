@@ -345,6 +345,14 @@ class DeviceOpOverrides:
         """
         return False
 
+    def has_aten_c_shims(self) -> bool:
+        """Whether torchgen-ed AOTI C shims exist for the aten ops Inductor falls
+        back to on this device. Only consulted for PrivateUse1 devices; when
+        False, the AOTI C++ wrapper dispatches aten fallbacks through the
+        proxy executor instead.
+        """
+        return True
+
     def import_get_raw_stream_as(self, name: str) -> str:
         raise NotImplementedError
 

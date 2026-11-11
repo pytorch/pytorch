@@ -327,6 +327,13 @@ int munmap(void* addr, size_t length) {
 #ifdef USE_MTIA
 #include <torch/csrc/inductor/aoti_runtime/utils_mtia.h>
 #endif // USE_MTIA
+
+// A PrivateUse1 backend defines USE_PRIVATEUSE1 through
+// DeviceInterface.get_cpp_device_options.
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_PRIVATEUSE1)
+#include <torch/csrc/stable/c/shim.h>
+#define AOTI_USE_PRIVATEUSE1
+#endif
 #include <torch/csrc/inductor/aoti_runtime/constant_type.h>
 
 // At codegen time, we write out a binary file called constants.bin.
@@ -1236,6 +1243,93 @@ void mtia_memcpy_h2d(
       aoti_torch_copy_(dst_handle, src_handle, /*non_blocking=*/0));
 }
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
+
+#ifdef AOTI_USE_PRIVATEUSE1
+// The stable C ABI has no raw PrivateUse1 allocator or memcpy, so the constant
+// blob is the storage of a uint8 tensor from the backend's eager allocator, and
+// copies dispatch to the backend's registered copy_ kernel.
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
+RAIIDataPtr RAII_privateuse1Malloc(size_t num_bytes, int32_t device_index) {
+  if (num_bytes == 0) {
+    return RAIIDataPtr(nullptr, [](void*) {});
+  }
+  const int64_t size = static_cast<int64_t>(num_bytes);
+  const int64_t stride = 1;
+  AtenTensorHandle handle = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
+      1,
+      &size,
+      &stride,
+      aoti_torch_dtype_uint8(),
+      aoti_torch_device_type_privateuse1(),
+      device_index,
+      &handle));
+  RAIIAtenTensorHandle tensor(handle);
+  void* data_ptr = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(tensor.get(), &data_ptr));
+  // Constants are laid out at AOTI_CONST_ALIGNMENT-aligned offsets from the
+  // blob base, so the allocator must hand out an aligned base.
+  AOTI_RUNTIME_CHECK(
+      reinterpret_cast<uintptr_t>(data_ptr) % AOTI_CONST_ALIGNMENT == 0,
+      "PrivateUse1 allocator returned a constant blob not aligned to " +
+          std::to_string(AOTI_CONST_ALIGNMENT) + " bytes");
+  auto deleter = [handle = tensor.release()](void* /*ptr*/) noexcept {
+    auto err = aoti_torch_delete_tensor_object(handle);
+    if (err != AOTI_TORCH_SUCCESS) {
+      std::cerr
+          << "Failed to free PrivateUse1 memory in AOTInductor model: error code "
+          << err << '\n';
+    }
+  };
+  return RAIIDataPtr(data_ptr, deleter);
+}
+
+// Copy into a PrivateUse1 device buffer. The source is host memory unless a
+// device is given (update_constant_buffer with device tensors). non_blocking=0
+// only orders the copy on the current stream, so callers that publish the
+// destination to other streams must synchronize the device.
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
+void privateuse1_memcpy(
+    void* dst,
+    const void* src,
+    size_t num_bytes,
+    int32_t device_index,
+    int32_t src_device_type = aoti_torch_device_type_cpu(),
+    int32_t src_device_index = 0) {
+  if (num_bytes == 0) {
+    return;
+  }
+  const int64_t size = static_cast<int64_t>(num_bytes);
+  const int64_t stride = 1;
+  AtenTensorHandle dst_handle = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
+      dst,
+      1,
+      &size,
+      &stride,
+      0,
+      aoti_torch_dtype_uint8(),
+      aoti_torch_device_type_privateuse1(),
+      device_index,
+      &dst_handle));
+  RAIIAtenTensorHandle dst_tensor(dst_handle);
+  AtenTensorHandle src_handle = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
+      // NOLINTNEXTLINE(*const-cast*)
+      const_cast<void*>(src),
+      1,
+      &size,
+      &stride,
+      0,
+      aoti_torch_dtype_uint8(),
+      src_device_type,
+      src_device_index,
+      &src_handle));
+  RAIIAtenTensorHandle src_tensor(src_handle);
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_copy_(dst_handle, src_handle, /*non_blocking=*/0));
+}
+#endif // AOTI_USE_PRIVATEUSE1
 } // anonymous namespace
 
 namespace torch::aot_inductor {
@@ -1302,8 +1396,9 @@ inline size_t pinnedAsyncConstantsCopyCpuThreads() {
 
 using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
-// valid device strs are: cpu, cuda, cuda:0, cuda:1, ...
-// Update the list here if more devices are supported in the future
+// valid device strs are: cpu, cuda, cuda:0, cuda:1, ..., plus the name the
+// PrivateUse1 backend registered at runtime (e.g. npu, npu:0).
+// Update the list here if more in-tree devices are supported in the future
 inline void parse_device_str(
     const std::string& device_str,
     int32_t& device_type,
@@ -1311,6 +1406,20 @@ inline void parse_device_str(
   std::regex re("(cpu|cuda|xpu|mps|mtia)(:([0-9]+))?");
   std::smatch sm;
   bool matched = std::regex_match(device_str, sm, re);
+#ifdef AOTI_USE_PRIVATEUSE1
+  if (!matched) {
+    // c10::Device knows the registered PrivateUse1 name and validates the index
+    uint32_t parsed_type = 0;
+    const char* str = device_str.c_str();
+    auto err = torch_parse_device_string(str, &parsed_type, &device_idx);
+    const uint32_t pu1 = aoti_torch_device_type_privateuse1();
+    AOTI_RUNTIME_CHECK(
+        err == AOTI_TORCH_SUCCESS && parsed_type == pu1,
+        "Invalid device: " + device_str);
+    device_type = aoti_torch_device_type_privateuse1();
+    return;
+  }
+#endif
   AOTI_RUNTIME_CHECK(matched, "Invalid device: " + device_str);
 
   if (sm[1].str() == "cpu") {
@@ -1423,6 +1532,15 @@ class AOTInductorModelBase {
     }
 #endif
 
+#ifdef AOTI_USE_PRIVATEUSE1
+    if (device_type_ == aoti_torch_device_type_privateuse1()) {
+      if (device_idx_ == -1) {
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_get_current_device_index(&device_idx_));
+      }
+    }
+#endif
+
 #ifdef USE_CUDA
     if (device_idx_ == -1) {
       AOTI_RUNTIME_CUDA_CHECK(cudaGetDevice(&device_idx_));
@@ -1515,6 +1633,13 @@ class AOTInductorModelBase {
     run_finished_ = std::make_optional<sycl::event*>(new sycl::event(
         static_cast<sycl::queue*>(stream)->ext_oneapi_submit_barrier()));
 #else // !USE_CUDA && !USE_XPU
+#ifdef AOTI_USE_PRIVATEUSE1
+    // The C ABI has no portable event, so block until the device is idle for
+    // run_finished_ to be accurate.
+    if (device_type_ == aoti_torch_device_type_privateuse1()) {
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_synchronize_device(device_idx_));
+    }
+#endif
     run_finished_ = true;
 #endif // USE_CUDA
   }
@@ -1580,6 +1705,11 @@ class AOTInductorModelBase {
           static_cast<sycl::queue*>(stream)->ext_oneapi_submit_barrier()));
 
 #else // !USE_CUDA && !USE_XPU
+#ifdef AOTI_USE_PRIVATEUSE1
+      if (device_type_ == aoti_torch_device_type_privateuse1()) {
+        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_synchronize_device(device_idx_));
+      }
+#endif
       run_finished_ = true;
 #endif // USE_CUDA
 
@@ -1637,6 +1767,8 @@ class AOTInductorModelBase {
       constant_blob_ = RAII_gpuMalloc(blob_size);
 #elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
       constant_blob_ = RAII_mtiaMalloc(blob_size, device_idx_);
+#elif defined(AOTI_USE_PRIVATEUSE1)
+      constant_blob_ = RAII_privateuse1Malloc(blob_size, device_idx_);
 #else
       constant_blob_ = RAII_cpuMalloc(blob_size);
 #endif
@@ -1854,6 +1986,12 @@ class AOTInductorModelBase {
       return constants_ptr;
 #elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
       mtia_memcpy_h2d(
+          internal_ptr,
+          _get_constants_start() + bytes_read,
+          data_size,
+          device_idx_);
+#elif defined(AOTI_USE_PRIVATEUSE1)
+      privateuse1_memcpy(
           internal_ptr,
           _get_constants_start() + bytes_read,
           data_size,
