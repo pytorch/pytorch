@@ -112,6 +112,8 @@ class Sink final : public c10::DispatchCaptureSink {
 
 thread_local Sink tls_sink;
 
+// Raw pointers and PyObject* results below: these functions become entries of
+// the C function table that the Rust runtime calls.
 void captureBegin() {
   auto trace = std::make_unique<TcfgTrace>();
   trace->world = snapshotWorld();
@@ -249,7 +251,8 @@ bool bindOperands(Binder& b, const c10::FunctionSchema& schema) {
       if (b.bind(0, 0) && b.bind(1, 1)) {
         return true;
       }
-      // Reflected operators (2 - x calls rsub(x, 2)).
+      // Reflected operators (2 - x calls rsub(x, 2)). If neither order binds,
+      // the reason reported is the one of the order tried first.
       Binder reflected(b.pyop, b.call);
       if (reflected.bind(1, 0) && reflected.bind(0, 1)) {
         b.args = std::move(reflected.args);
@@ -277,6 +280,22 @@ bool matchResult(const c10::IValue& out, PyObject* result) {
       return false;
     }
     return true;
+  }
+  return false;
+}
+
+// Whether a kernel argument is a tensor or a list with a tensor in it, such as
+// the Tensor?[] indices of aten::index.
+bool holdsTensor(const c10::IValue& v) {
+  if (v.isTensor()) {
+    return true;
+  }
+  if (v.isList()) {
+    for (const auto& e : v.toListRef()) {
+      if (e.isTensor()) {
+        return true;
+      }
+    }
   }
   return false;
 }
@@ -322,7 +341,7 @@ TcfgSite* siteFromTraceImpl(
     }
     // Arguments no operand supplies are defaults filled in by the argument
     // parser; they are the same for every call of this shape.
-    if (call.inputs[a].isTensor() || call.inputs[a].isTensorList()) {
+    if (holdsTensor(call.inputs[a])) {
       reason = "a tensor argument does not come from an operand";
       return nullptr;
     }
@@ -406,7 +425,8 @@ void initCfgBindings(PyObject* module) {
   // records lists (op, dispatch key, depth, is_redispatch) for every kernel
   // the dispatcher invoked.
   // With detail, a record is a dict that also has the rest of what the capture
-  // kept about it.
+  // kept about it. A capture keeps the arguments and results of every
+  // top-level call alive until it ends.
   m.def(
       "_cfg_dispatch_trace",
       [](const py::object& fn, bool detail) -> py::tuple {
