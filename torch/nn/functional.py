@@ -6183,7 +6183,7 @@ def normalize(
     input: Tensor,
     p: float = 2.0,
     dim: int = 1,
-    eps: float = 1e-12,
+    eps: float | None = None,
     out: Tensor | None = None,
 ) -> Tensor:
     r"""Perform :math:`L_p` normalization of inputs over specified dimension.
@@ -6200,7 +6200,9 @@ def normalize(
         input: input tensor of any shape
         p (float): the exponent value in the norm formulation. Default: 2
         dim (int or tuple of ints): the dimension to reduce. Default: 1
-        eps (float): small value to avoid division by zero. Default: 1e-12
+        eps (float, optional): small value to avoid division by zero. Default: 1e-12,
+            except for half precision inputs, where 1e-12 rounds to zero and the
+            default is ``torch.finfo(torch.float16).eps``
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
     """
@@ -6208,11 +6210,15 @@ def normalize(
         return handle_torch_function(
             normalize, (input, out), input, p=p, dim=dim, eps=eps, out=out
         )
+    norm = input.norm(p, dim, keepdim=True)
+    if eps is None:
+        # 1e-12 rounds to zero in float16 and would not clamp anything
+        eps = torch.finfo(norm.dtype).eps if norm.dtype == torch.float16 else 1e-12
     if out is None:
-        denom = input.norm(p, dim, keepdim=True).clamp_min(eps).expand_as(input)
+        denom = norm.clamp_min(eps).expand_as(input)
         return input / denom
     else:
-        denom = input.norm(p, dim, keepdim=True).clamp_min_(eps).expand_as(input)
+        denom = norm.clamp_min_(eps).expand_as(input)
         return torch.div(input, denom, out=out)
 
 
