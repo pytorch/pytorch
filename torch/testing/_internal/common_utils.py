@@ -6213,7 +6213,7 @@ def disable_gc():
 def find_library_location(lib_name: str) -> Path:
     # return the shared library file in the installed folder if it exists,
     # otherwise the file in the build folder
-    torch_root = Path(torch.__file__).resolve().parent
+    torch_root = Path(torch.__file__).parent
     path = torch_root / 'lib' / lib_name
     if os.path.exists(path):
         return path

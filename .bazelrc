@@ -1,0 +1,32 @@
+# Actions get a fixed PATH instead of the invoking shell's, so cached results
+# do not depend on who ran the build.
+common --incompatible_strict_action_env
+
+# Without this, Bazel adds an empty __init__.py to every directory that holds
+# Python files, which would turn test/ into a package.
+common --incompatible_default_to_explicit_init_py
+
+# Launch Python programs through a shell script. The default launcher is a
+# Python script, so the system's python3 would run before rules_python's.
+common --@rules_python//python/config_settings:bootstrap_impl=script
+
+# Same variable the pip build reads to pick a CUDA toolkit.
+common --action_env=CUDA_PATH
+
+# Lets the native build notice changes under third_party/.
+common --workspace_status_command=tools/bazel/workspace_status.sh
+
+# Tests run in a sandbox that lays out their files itself, so skip building a
+# second copy of every test's file tree.
+common --nobuild_runfile_links
+
+# Short names for the settings of the tests in tools/bazel/BUILD.bazel.
+common --flag_alias=pytest_args=//tools/bazel:pytest_args
+common --flag_alias=rerun=//tools/bazel:rerun
+
+# Number of test cases that may use the GPUs at once.
+common --local_resources=gpu=8
+
+test --test_output=errors
+
+try-import %workspace%/user.bazelrc

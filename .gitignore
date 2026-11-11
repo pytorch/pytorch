@@ -305,8 +305,8 @@ cmake-build-debug
 # Scratch space for agent-authored throwaway files
 agent_space/
 
-# Downloaded bazel
-tools/bazel
+# Machine-specific Bazel flags
+user.bazelrc
 
 # Visual Studio Code files
 .vs

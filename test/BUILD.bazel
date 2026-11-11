@@ -1,0 +1,91 @@
+load("@pypi//:requirements.bzl", "all_requirements")
+load("@torch_tests//:tests.bzl", "CASES", "TESTS")
+load("//tools/bazel:torch_test.bzl", "torch_cases", "torch_test")
+
+# C++ tests that the CMake build compiles along with PyTorch.
+filegroup(
+    name = "native_srcs",
+    srcs = glob([
+        "cpp/**",
+        "inductor/CMakeLists.txt",
+        "inductor/custom_ops.cpp",
+        "mobile/nnc/**",
+    ]),
+    visibility = ["//:__pkg__"],
+)
+
+# Python files that some test imports. Each test depends on the ones it
+# imports itself, through TESTS.
+IMPORTED = {file: True for files in TESTS.values() for file in files}.keys()
+
+# Everything else under test/: expected outputs, fixtures, and scripts that
+# tests launch. Nothing records which test reads which of these, so every test
+# gets all of them.
+filegroup(
+    name = "data",
+    srcs = glob(
+        ["**"],
+        exclude = ["**/__pycache__/**"] + IMPORTED,
+    ) + ["//:pytest.ini"],
+)
+
+# //test/... skips these, which test/run_test.py leaves out on this platform
+# or runs in a way that has no equivalent here yet.
+MANUAL = [
+    # Run once per backend, each time with different environment variables.
+    "distributed/algorithms/quantization/test_quantization",
+    "distributed/test_distributed_spawn",
+    # Left out of CUDA builds.
+    "distributions/test_constraints",
+    # Left out on Python 3.12 and later.
+    "functorch/test_dims",
+    "functorch/test_memory_efficient_fusion",
+    "functorch/test_parsing",
+    "functorch/test_rearrange",
+    "torch_np/numpy_tests/core/test_multiarray",
+    # Fails on purpose: CI uses it to check that failures get reported.
+    "test_ci_sanity_check_fail",
+    # For XPU builds.
+    "test_xpu",
+    "test_xpu_expandable_segments",
+]
+
+# test/cpython/v3_13 holds CPython 3.13's own tests. Like test/run_test.py,
+# run such a directory only under its Python version.
+PYTHON_ONLY = {
+    test: "@rules_python//python/config_settings:is_python_" + test.split("/")[1][1:].replace("_", ".")
+    for test in TESTS
+    if test.startswith("cpython/")
+}
+
+# The tests of each file that test/run_test.py runs, named like its entry there:
+# //test:test_nn runs the file's cases, //test:test_nn/<case> one of them.
+[
+    torch_test(
+        name = test,
+        srcs = files,
+        cases = CASES.get(test, {}),
+        data = [":data"],
+        imports = ["."],
+        tags = ["manual"] if test in MANUAL else [],
+        target_compatible_with = select({
+            PYTHON_ONLY[test]: [],
+            "//conditions:default": ["@platforms//:incompatible"],
+        }) if test in PYTHON_ONLY else [],
+        # Like CI's test image, every test gets everything in the lock file.
+        deps = all_requirements,
+    )
+    for test, files in TESTS.items()
+]
+
+# The cases of every test file that can run here. @torch_tests has a second
+# Bazel build this (see tools/bazel/extensions.bzl), and CASES above is the result.
+torch_cases(
+    name = "cases",
+    listings = [test + ".cases" for test in TESTS if test not in PYTHON_ONLY] + select({
+        python: [test + ".cases" for test in PYTHON_ONLY if PYTHON_ONLY[test] == python]
+        for python in {python: None for python in PYTHON_ONLY.values()}
+    } | {"//conditions:default": []}),
+    tags = ["manual"],
+    tests = TESTS,
+)

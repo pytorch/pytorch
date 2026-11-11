@@ -1,0 +1,5 @@
+.git
+.venv
+agent_space
+build
+third_party

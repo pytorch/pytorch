@@ -1,0 +1,21 @@
+module(name = "pytorch")
+
+bazel_dep(name = "bazel_skylib", version = "1.8.2")
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "rules_python", version = "2.4.6")
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.defaults(python_version = "3.14")
+python.toolchain(python_version = "3.14")
+use_repo(python, "python_3_14_host")
+
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+pip.parse(
+    hub_name = "pypi",
+    python_version = "3.14",
+    requirements_lock = "//tools/bazel:requirements_lock.txt",
+)
+use_repo(pip, "pypi")
+
+torch = use_extension("//tools/bazel:extensions.bzl", "torch")
+use_repo(torch, "torch_tests")

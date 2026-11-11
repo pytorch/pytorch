@@ -1,0 +1,5 @@
+# What CI's test image has: its Python requirements plus Triton, which CI builds
+# from source (.ci/docker/common/install_triton.sh). This is the release with
+# the version in .ci/docker/triton_version.txt.
+-r ../../.ci/docker/requirements-ci.txt
+triton==3.9.0

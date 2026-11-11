@@ -1,0 +1,122 @@
+load("@rules_python//python:py_library.bzl", "py_library")
+load("//tools/bazel:torch_native.bzl", "torch_native")
+load("//tools/bazel:torch_tree.bzl", "torch_tree")
+
+exports_files(["pytest.ini"])
+
+# What the CMake build adds to the Python packages, as paths in its install
+# tree. A build run directly in this checkout leaves some of these in the source
+# tree too, so the globs below skip them.
+INSTALLED_DIRS = [
+    # The distribution's metadata, installed as torch-<version>.dist-info. Its
+    # entry points are how torch.distributed finds the built-in backends.
+    "torch.dist-info",
+    "torch/_inductor/kernel/vendored_templates/cutedsl/kernels",
+    "torch/bin",
+    "torch/include",
+    "torch/lib",
+    "torch/lib64",
+    "torch/share",
+    "torch/test",
+    "torchgen/packaged",
+]
+
+INSTALLED_FILES = [
+    "torch/_C.so",
+    "torch/_C/_VariableFunctions.pyi",
+    "torch/_C/__init__.pyi",
+    "torch/_C/_nn.pyi",
+    "torch/_VF.pyi",
+    "torch/nn/functional.pyi",
+    "torch/return_types.pyi",
+    "torch/testing/_internal/generated/annotated_fn_args.py",
+    "torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h",
+    "torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h",
+    "torch/utils/data/datapipes/datapipe.pyi",
+    "torch/version.py",
+]
+
+INSTALLED = INSTALLED_FILES + [d + "/**" for d in INSTALLED_DIRS]
+
+# The C++ libraries, the torch._C extension and the generated Python files,
+# built by the same CMake build that `pip install .` runs.
+torch_native(
+    name = "torch_native",
+    srcs = glob(
+        [
+            ".ci/docker/ci_commit_pins/nccl*.txt",
+            # CMake checks that every submodule is checked out, used or not.
+            "android/libs/fbjni/**",
+            "aten/**",
+            "c10/**",
+            "caffe2/**",
+            "cmake/**",
+            "tools/**",
+            "torch/**",
+            "torchgen/**",
+        ],
+        exclude = INSTALLED_FILES + [
+            "**/__pycache__/**",
+            # Only the Python sources listed below are build inputs, so
+            # editing the others does not rebuild the native code.
+            "torch/**/*.py",
+        ],
+    ) + glob([
+        "torch/_tensor_docs.py",
+        "torch/_torch_docs.py",
+        "torch/_utils_internal.py",
+        "torch/utils/data/datapipes/**/*.py",
+    ]) + [
+        ".gitmodules",
+        "CMakeLists.txt",
+        "LICENSE",
+        "README.md",
+        "build_variables.bzl",
+        "pyproject.toml",
+        "version.txt",
+        "//test:native_srcs",
+    ],
+    dirs = INSTALLED_DIRS,
+    files = INSTALLED_FILES,
+)
+
+# The Python of the torch, torchgen and functorch packages, with its bytecode.
+py_library(
+    name = "torch_python",
+    srcs = glob(
+        [
+            "functorch/**/*.py",
+            "torch/**/*.py",
+            "torchgen/**/*.py",
+        ],
+        exclude = INSTALLED,
+    ),
+    precompile = "enabled",
+    # Bazel compiles a file again whenever it changes, so Python need not read
+    # the source to check that its bytecode is current.
+    precompile_invalidation_mode = "unchecked_hash",
+)
+
+# Everything the torch wheel installs: those packages with their data files and
+# the native build outputs.
+torch_tree(
+    name = "torch_tree",
+    data = glob(
+        [
+            "torch/**",
+            "torchgen/**",
+        ],
+        exclude = INSTALLED + [
+            "**/*.py",
+            "**/__pycache__/**",
+            # C++ sources, which the wheel leaves out as well.
+            "torch/csrc/**",
+            "torch/headeronly/**",
+            "torch/lib/**",
+            "torch/nativert/**",
+        ],
+    ),
+    library = ":torch_python",
+    native = ":torch_native",
+    visibility = ["//visibility:public"],
+)

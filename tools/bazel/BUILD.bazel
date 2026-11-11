@@ -1,0 +1,56 @@
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
+
+exports_files([
+    "list_tests.py",
+    "requirements_lock.txt",
+    "run_test.py",
+])
+
+py_binary(
+    name = "build_torch",
+    srcs = ["build_torch.py"],
+    # The build requirements from pyproject.toml, the tools that drive them,
+    # and the MKL that CI builds against.
+    deps = [
+        "@pypi//cmake",
+        "@pypi//mkl_include",
+        "@pypi//mkl_static",
+        "@pypi//ninja",
+        "@pypi//numpy",
+        "@pypi//packaging",
+        "@pypi//pip",
+        "@pypi//pyyaml",
+        "@pypi//scikit_build_core",
+        "@pypi//setuptools",
+        "@pypi//six",
+        "@pypi//typing_extensions",
+    ],
+)
+
+# Settings of the tests that torch_test.bzl declares. .bazelrc gives each a
+# short name for the command line.
+
+# More options for pytest, as one string: --pytest_args="-k test_conv2d"
+string_flag(
+    name = "pytest_args",
+    build_setting_default = "",
+    visibility = ["//visibility:public"],
+)
+
+# Results are kept until an input changes. A new value here runs the cases
+# again: --rerun=2
+string_flag(
+    name = "rerun",
+    build_setting_default = "",
+    visibility = ["//visibility:public"],
+)
+
+# On the path of every test program (see site/sitecustomize.py).
+py_library(
+    name = "site",
+    srcs = ["site/sitecustomize.py"],
+    imports = ["site"],
+    visibility = ["//visibility:public"],
+)
