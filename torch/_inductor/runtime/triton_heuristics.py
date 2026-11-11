@@ -971,6 +971,21 @@ class CachingAutotuner(KernelInterface):
         self.__dict__ = {**unpinned, **state}
         self._plugins = get_caching_autotuner_plugins(self)
 
+    def precompile_and_save(self, stream) -> None:
+        """Package the first valid config without running synthetic inputs."""
+        if not self.launchers:
+            self.precompile()
+        launcher = self.launchers[0]
+        self._release_static_launchers_except(launcher)
+        self.launchers = [launcher]
+        self._prune_compile_results_to_launcher(launcher)
+        TritonBundler.put_winner(launcher.cache_hash)
+        if launcher.store_cubin:
+            if self.device_props.type == "cpu":
+                self.save_cpu_kernel(launcher)
+            else:
+                self.save_gpu_kernel(stream, launcher)
+
     def _precompile_worker(self):
         if self.compile_results:
             for result in self.compile_results:
