@@ -9,6 +9,7 @@ from torch.utils._quantize_tensor_validation import (
 )
 
 from ... import cutedsl_utils as cu
+from .blockscaled_tma.blockscaled_tma_layout import _get_quant_block_size
 from .utils import _device_capability
 
 
@@ -27,6 +28,7 @@ def _quantize_tensor_impl(
         raise ValueError("quantize_tensor supports only fp16, bf16, and fp32 input")
 
     quant_format = _get_quant_format(qdata_dtype, scaling_algorithm, scaling_type)
+    quant_block_size = _get_quant_block_size(scaling_type)
     if quant_format == _TensorQuantFormat.MXFP8:
         axes = _quantize_tensor_validate_inputs(
             quant_format,
@@ -51,6 +53,7 @@ def _quantize_tensor_impl(
             axes,
             scaling_type_use_square_block_size,
             is_scale_swizzled,
+            quant_block_size=quant_block_size,
         )
     )
 
@@ -68,6 +71,7 @@ def _quantize_tensor_dual_impl(
         raise ValueError("dual quantization supports only fp16, bf16, and fp32 input")
 
     quant_format = _get_quant_format(qdata_dtype, scaling_algorithm, scaling_type)
+    quant_block_size = _get_quant_block_size(scaling_type)
     if quant_format == _TensorQuantFormat.MXFP8:
         axes = _quantize_tensor_dual_validate_inputs(
             quant_format,
@@ -86,7 +90,9 @@ def _quantize_tensor_dual_impl(
     from .blockscaled_tma.blockscaled_tma_impl import _blockscaled_tma_impl_dual
 
     ordered = (min(axes), max(axes))
-    outputs = _blockscaled_tma_impl_dual(input, dim=ordered)
+    outputs = _blockscaled_tma_impl_dual(
+        input, dim=ordered, quant_block_size=quant_block_size
+    )
     return list((*outputs[2:], *outputs[:2]) if axes != ordered else outputs)
 
 

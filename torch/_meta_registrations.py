@@ -7578,6 +7578,7 @@ def meta_quantize_tensor(
     scaling_type_use_square_block_size: bool = False,
 ) -> list[torch.Tensor]:
     from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_layout import (
+        _get_quant_block_size,
         infer_blockscaled_tma_outputs,
     )
     from torch.nn.functional import SwizzleType
@@ -7591,6 +7592,7 @@ def meta_quantize_tensor(
         lambda: "quantize_tensor supports only fp16, bf16, and fp32 input",
     )
     quant_format = _get_quant_format(qdata_dtype, scaling_algorithm, scaling_type)
+    quant_block_size = _get_quant_block_size(scaling_type)
     axes = _quantize_tensor_validate_inputs(
         quant_format, input, dim, swizzle_type, scaling_type_use_square_block_size
     )
@@ -7600,6 +7602,7 @@ def meta_quantize_tensor(
         scaling_type_use_square_block_size,
         swizzle_type == SwizzleType.SWIZZLE_32_4_4.value,
         False,
+        quant_block_size=quant_block_size,
     )
 
 
@@ -7614,6 +7617,7 @@ def meta_quantize_tensor_dual(
     scaling_type_use_square_block_size: bool = False,
 ) -> list[torch.Tensor]:
     from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_layout import (
+        _get_quant_block_size,
         infer_blockscaled_tma_outputs,
     )
 
@@ -7626,10 +7630,13 @@ def meta_quantize_tensor_dual(
         lambda: "quantize_tensor_dual supports only fp16, bf16, and fp32 input",
     )
     quant_format = _get_quant_format(qdata_dtype, scaling_algorithm, scaling_type)
+    quant_block_size = _get_quant_block_size(scaling_type)
     axes = _quantize_tensor_dual_validate_inputs(
         quant_format, input, dim, swizzle_type, scaling_type_use_square_block_size
     )
-    return infer_blockscaled_tma_outputs(input, axes, False, True, True)
+    return infer_blockscaled_tma_outputs(
+        input, axes, False, True, True, quant_block_size=quant_block_size
+    )
 
 
 @register_meta([aten._scaled_mm_v2.default])

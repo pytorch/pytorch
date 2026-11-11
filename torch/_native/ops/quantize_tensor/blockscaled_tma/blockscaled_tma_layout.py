@@ -27,6 +27,14 @@ _CUDA_GRID_Z_MAX = 2**16 - 1
 _CUDA_TMA_MAX_DIM = 2**32
 
 
+def _get_quant_block_size(scaling_type: int) -> tuple[int, int]:
+    from torch.nn.functional import ScalingType
+
+    if scaling_type == ScalingType.BlockWise1x32.value:
+        return (1, 32)
+    raise ValueError(f"unsupported quantization scaling type: {scaling_type}")
+
+
 def _layout_ceil_div(num: int, den: int) -> int:
     return num // den + (num % den != 0)
 
@@ -43,6 +51,7 @@ class _BlockscaledTmaSpec(NamedTuple):
     do_dim_m: bool
     is_square_scaling: bool
     is_scale_swizzled: bool
+    quant_block_size: tuple[int, int]
     s_num_row_blk_k: int | None
     s_num_col_blk_k: int | None
     s_num_row_blk_m: int | None
@@ -107,8 +116,17 @@ def _validate_blockscaled_tma_input(
     is_scale_swizzled: bool,
     *,
     dual: bool,
+    quant_block_size: tuple[int, int],
 ) -> None:
     r"""Validate caller-visible input metadata before materializing the tensor."""
+
+    if quant_block_size != (1, 32):
+        raise NotImplementedError(
+            f"unsupported quantization block size: {quant_block_size}"
+        )
+    outer_block_size, inner_block_size = quant_block_size
+    if is_square_scaling:
+        outer_block_size = inner_block_size
 
     if not is_scale_swizzled and is_square_scaling:
         raise ValueError("compact scales do not support square scaling")
@@ -118,18 +136,21 @@ def _validate_blockscaled_tma_input(
 
     row_axis, quant_axis = dim
     row_size, quant_size = input.shape[row_axis], input.shape[quant_axis]
-    if is_square_scaling and row_size % 32 != 0:
+    if is_square_scaling and row_size % outer_block_size != 0:
         raise ValueError(
-            f"32x32 scaling requires input axis {row_axis} to be divisible by 32; "
+            f"{outer_block_size}x{inner_block_size} scaling requires input axis "
+            f"{row_axis} to be divisible by {outer_block_size}; "
             f"got size {row_size}"
         )
-    if dual and row_size % 32 != 0:
+    if dual and row_size % inner_block_size != 0:
         raise ValueError(
-            f"quantized axis {row_axis} must be divisible by 32; got size {row_size}"
+            f"quantized axis {row_axis} must be divisible by {inner_block_size}; "
+            f"got size {row_size}"
         )
-    if quant_size % 32 != 0:
+    if quant_size % inner_block_size != 0:
         raise ValueError(
-            f"quantized axis {quant_axis} must be divisible by 32; got size {quant_size}"
+            f"quantized axis {quant_axis} must be divisible by {inner_block_size}; "
+            f"got size {quant_size}"
         )
 
 
@@ -167,6 +188,7 @@ def _plan_blockscaled_tma_launch(
         input_dtype=input.dtype,
         quant_orientation_id=spec.quant_orientation_id,
         is_square_scaling=spec.is_square_scaling,
+        quant_block_size=spec.quant_block_size,
     )
     if plan.grid_k > _CUDA_GRID_X_MAX or plan.grid_m > _CUDA_GRID_Y_MAX:
         raise ValueError(
@@ -185,6 +207,7 @@ def _plan_matrix_input(
     is_scale_swizzled: bool,
     *,
     dual: bool,
+    quant_block_size: tuple[int, int],
 ) -> _MatrixInputLayout:
     r"""Plan matrix and batch axes for the 2D or 4D TMA kernel without copying.
 
@@ -206,6 +229,8 @@ def _plan_matrix_input(
         is_square_scaling (bool): Whether square-block scaling is requested.
         is_scale_swizzled (bool): Whether swizzled scale storage is requested.
         dual (bool): Whether to quantize both matrix axes.
+        quant_block_size (tuple[int, int]): Base quantization block dimensions.
+          Currently only ``(1, 32)`` is supported.
     """
 
     ndim = input.ndim
@@ -223,7 +248,12 @@ def _plan_matrix_input(
         raise ValueError(f"expected two distinct quantization axes, got {dim}")
     matrix_axes = tuple(sorted(normalized))
     _validate_blockscaled_tma_input(
-        input, normalized, is_square_scaling, is_scale_swizzled, dual=dual
+        input,
+        normalized,
+        is_square_scaling,
+        is_scale_swizzled,
+        dual=dual,
+        quant_block_size=quant_block_size,
     )
     physical_axes = tuple(sorted(range(ndim), key=lambda axis: -input.stride(axis)))
     physical_matrix_axes = tuple(axis for axis in physical_axes if axis in matrix_axes)
@@ -397,6 +427,7 @@ def _build_blockscaled_tma_spec(
     dual: bool,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
+    quant_block_size: tuple[int, int],
 ) -> _BlockscaledTmaSpec:
     r"""Build a launch spec from the planned canonical 2D/4D layout."""
 
@@ -410,12 +441,12 @@ def _build_blockscaled_tma_spec(
     s_num_row_blk_k = s_num_col_blk_k = None
     if do_dim_k:
         s_num_row_blk_k = _layout_ceil_div(M, 128)
-        s_num_col_blk_k = _layout_ceil_div(K, 128)
+        s_num_col_blk_k = _layout_ceil_div(K, quant_block_size[1] * 4)
 
     s_num_row_blk_m = s_num_col_blk_m = None
     if do_dim_m:
         s_num_row_blk_m = _layout_ceil_div(K, 128)
-        s_num_col_blk_m = _layout_ceil_div(M, 128)
+        s_num_col_blk_m = _layout_ceil_div(M, quant_block_size[1] * 4)
 
     if do_dim_k and do_dim_m:
         quant_orientation_id = _QUANT_ORIENTATION_DIM_KM
@@ -434,6 +465,7 @@ def _build_blockscaled_tma_spec(
         do_dim_m=do_dim_m,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
+        quant_block_size=quant_block_size,
         s_num_row_blk_k=s_num_row_blk_k,
         s_num_col_blk_k=s_num_col_blk_k,
         s_num_row_blk_m=s_num_row_blk_m,
@@ -447,18 +479,26 @@ def infer_blockscaled_tma_outputs(
     is_square_scaling: bool,
     is_scale_swizzled: bool,
     dual: bool,
+    *,
+    quant_block_size: tuple[int, int],
 ) -> list[torch.Tensor]:
     """Mirror kernel output allocation and layout without importing CuTeDSL."""
     ordered = (min(dim), max(dim))
     kernel_dim = ordered if dual else dim
     layout = _plan_matrix_input(
-        input, kernel_dim, is_square_scaling, is_scale_swizzled, dual=dual
+        input,
+        kernel_dim,
+        is_square_scaling,
+        is_scale_swizzled,
+        dual=dual,
+        quant_block_size=quant_block_size,
     )
     spec = _build_blockscaled_tma_spec(
         layout,
         dual=dual,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
+        quant_block_size=quant_block_size,
     )
     batch = (spec.B_product,) if spec.is_batched else ()
     result_k = result_m = None
@@ -471,7 +511,7 @@ def infer_blockscaled_tma_outputs(
         scale_shape = (
             (1, spec.s_num_row_blk_k * spec.s_num_col_blk_k * 512)
             if is_scale_swizzled
-            else (spec.M, spec.K // 32)
+            else (spec.M, spec.K // spec.quant_block_size[1])
         )
         scale_k = torch.empty(
             (*batch, *scale_shape), device=input.device, dtype=torch.float8_e8m0fnu

@@ -46,7 +46,12 @@ class _BlockscaledTma:
         is_square_scaling: bool,
         is_scale_swizzled: bool,
         is_batched: bool,
+        quant_block_size: tuple[int, int],
     ) -> None:
+        if quant_block_size != (1, 32):
+            raise AssertionError(
+                f"unsupported quantization block size: {quant_block_size}"
+            )
         self.input_element_type = input_element_type
         self.tile_m_size = tile_m_size
         self.tile_k_size = tile_k_size
@@ -56,6 +61,7 @@ class _BlockscaledTma:
         self.is_square_scaling = is_square_scaling
         self.is_scale_swizzled = is_scale_swizzled
         self.is_batched = is_batched
+        self.quant_block_size = quant_block_size
 
     @cute.kernel
     def kernel(
@@ -111,9 +117,10 @@ class _BlockscaledTma:
         is_batched = cutlass.const_expr(self.is_batched)
         is_square_scaling = cutlass.const_expr(self.is_square_scaling)
         is_scale_swizzled = cutlass.const_expr(self.is_scale_swizzled)
-        scale_group_size = 32
+        scale_group_size = cutlass.const_expr(self.quant_block_size[1])
         qdata_storage_element_type = cutlass.Float8E4M3FN
-        qdata_storage_elements_per_group = 32
+        qdata_storage_elements_per_group = scale_group_size
+        # Dim-m stages 32 rows; the quantization block size must divide this stage.
         qdata_storage_elements_per_32 = 32
         do_dim_k = quant_orientation != _QUANT_ORIENTATION_DIM_M
         do_dim_m = quant_orientation != _QUANT_ORIENTATION_DIM_K
@@ -128,13 +135,13 @@ class _BlockscaledTma:
             M = cute.assume(M, divby=128)
             K = cute.assume(K, divby=128)
         elif cutlass.const_expr(quant_orientation == _QUANT_ORIENTATION_DIM_K):
-            K = cute.assume(K, divby=32)
+            K = cute.assume(K, divby=scale_group_size)
         elif cutlass.const_expr(quant_orientation == _QUANT_ORIENTATION_DIM_M):
-            M = cute.assume(M, divby=32)
+            M = cute.assume(M, divby=scale_group_size)
             K = cute.assume(K, divby=16)
         else:
-            M = cute.assume(M, divby=32)
-            K = cute.assume(K, divby=32)
+            M = cute.assume(M, divby=scale_group_size)
+            K = cute.assume(K, divby=scale_group_size)
 
         # create smem scratchpad
         smem = SmemAllocator()
@@ -408,13 +415,18 @@ class _BlockscaledTma:
             # * read input data from smem and quantize in registers
             # * keep scale to registers
             # * store qdata in smem, overwriting the first half of input data (to save smem)
+            if cutlass.const_expr(scale_group_size != 32):
+                raise AssertionError("dim-k quantization supports only block size 32")
             groups_per_row_k = tile_k_size // scale_group_size
+            rows_per_stage_k = _MIN_CTA_THREADS_128 // groups_per_row_k
             row_owned_k = tile_m_size == _DIM_K_TILE_M_SIZE_128
             if cutlass.const_expr(row_owned_k):
                 threads_per_row_k = _MIN_CTA_THREADS_128 // tile_m_size
                 iters = groups_per_row_k // threads_per_row_k
             else:
-                iters = tile_m_size // (scale_group_size if is_square_scaling else 32)
+                iters = tile_m_size // (
+                    scale_group_size if is_square_scaling else rows_per_stage_k
+                )
             tidfrgInputK = cute.composition(sInput, data_k_tv_layout)
             # pyrefly: ignore[unbound-name]
             tidfrgOutputK = cute.composition(sOutputK, output_k_tv_layout)
@@ -568,7 +580,7 @@ class _BlockscaledTma:
                                         0
                                     )
             else:
-                # Short tiles distribute (row, 1x32 group) pairs across all threads. The fused 1D path
+                # Short tiles distribute (row, quantization group) pairs across all threads. The fused 1D path
                 # is group-major; square scaling is warp/block-major. Both need individual scale stores
                 # because their slots are strided across rows.
                 if cutlass.const_expr(is_square_scaling):
@@ -579,7 +591,8 @@ class _BlockscaledTma:
                     # pyrefly: ignore[unbound-name]
                     local_group_k = tidx % groups_per_row_k
                     local_row_k = tidx // groups_per_row_k
-                    row_step_k = 32
+                    # pyrefly: ignore[unbound-name]
+                    row_step_k = rows_per_stage_k
                 # pyrefly: ignore[unbound-name]
                 for it in cutlass.range_constexpr(iters):
                     input_row_k = (
@@ -632,9 +645,9 @@ class _BlockscaledTma:
         is_batched = cutlass.const_expr(self.is_batched)
         is_square_scaling = cutlass.const_expr(self.is_square_scaling)
         is_scale_swizzled = cutlass.const_expr(self.is_scale_swizzled)
-        scale_group_size = 32
+        scale_group_size = cutlass.const_expr(self.quant_block_size[1])
         qdata_storage_element_type = cutlass.Float8E4M3FN
-        qdata_storage_elements_per_group = 32
+        qdata_storage_elements_per_group = scale_group_size
 
         do_dim_k = quant_orientation != _QUANT_ORIENTATION_DIM_M
         do_dim_m = quant_orientation != _QUANT_ORIENTATION_DIM_K
@@ -852,7 +865,10 @@ class _BlockscaledTma:
                         (groups_per_row_k, rows_per_stage),
                         (scale_group_size, row_blocks),
                     ),
-                    stride=((tile_m_size * 32, 1), (tile_m_size, rows_per_stage)),
+                    stride=(
+                        (tile_m_size * scale_group_size, 1),
+                        (tile_m_size, rows_per_stage),
+                    ),
                 )
                 output_k_tv_layout = data_k_tv_layout
         else:
@@ -1010,13 +1026,14 @@ def _blockscaled_tma_compile_log_key(
     is_square_scaling: bool,
     is_scale_swizzled: bool,
     is_batched: bool,
+    quant_block_size: tuple[int, int],
 ) -> str:
     return (
         f"dtype={input_dtype} orientation={quant_orientation} "
         f"tile={tile_m_size}x{tile_k_size} cluster_k={cluster_k} "
         f"masking={needs_boundary_masking} rounding=RTNE "
         f"square={is_square_scaling} scale_swizzled={is_scale_swizzled} "
-        f"is_batched={is_batched}"
+        f"is_batched={is_batched} quant_block_size={quant_block_size}"
     )
 
 
@@ -1034,6 +1051,7 @@ def _compile_blockscaled_tma(
     is_square_scaling: bool,
     is_scale_swizzled: bool,
     is_batched: bool,
+    quant_block_size: tuple[int, int],
 ) -> Callable[..., None]:
     input_element_type = torch2cute[input_dtype]
     do_dim_k = quant_orientation != _QUANT_ORIENTATION_DIM_M
@@ -1049,6 +1067,7 @@ def _compile_blockscaled_tma(
         is_square_scaling,
         is_scale_swizzled,
         is_batched,
+        quant_block_size,
     )
 
     mInput = _make_dynamic_matrix_fake(input_element_type, is_batched)
