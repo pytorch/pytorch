@@ -12,7 +12,7 @@ import enum
 import operator
 import types
 from collections.abc import Callable
-from typing import Any, cast, Literal, overload, Self, TYPE_CHECKING
+from typing import Any, cast, Literal, overload, TYPE_CHECKING
 from typing_extensions import TypeIs
 
 import torch
@@ -106,20 +106,6 @@ class ConstantVariable(VariableTracker):
     The create() method intelligently constructs appropriate variable types for
     nested collections.
     """
-
-    # The builtin literal types have their own subclasses below; the base class
-    # holds the other common_constant_types (torch.dtype, NotImplemented, ...).
-    _cpython_type = None
-
-    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
-        # Route ConstantVariable(v) to the subclass modeling type(v), so every
-        # construction path (create(), clone(), direct calls) agrees.
-        if cls is ConstantVariable and (args or "value" in kwargs):
-            value = args[0] if args else kwargs["value"]
-            if np is not None and isinstance(value, np.number):
-                value = value.item()
-            cls = _CONSTANT_VT_FOR_TYPE.get(type(value), ConstantVariable)
-        return super().__new__(cls)
 
     @staticmethod
     def is_constant_vt(vt: VariableTracker) -> TypeIs[ConstantVariable]:
@@ -235,6 +221,10 @@ class ConstantVariable(VariableTracker):
                     return CONSTANT_VARIABLE_FALSE
             if value is NotImplemented:
                 return CONSTANT_VARIABLE_NOT_IMPLEMENTED
+
+        cls = _CONSTANT_VT_FOR_TYPE.get(type(value))
+        if cls is not None:
+            return cls(value, **kwargs)
 
         source = kwargs.get("source")
 
@@ -668,9 +658,9 @@ _CONSTANT_VT_CLASSES = frozenset((ConstantVariable, *_CONSTANT_VT_FOR_TYPE.value
 
 
 # These interned singletons back ConstantVariable.create itself.
-CONSTANT_VARIABLE_NONE = ConstantVariable(None)  # noqa: RVT001
-CONSTANT_VARIABLE_TRUE = ConstantVariable(True)  # noqa: RVT001
-CONSTANT_VARIABLE_FALSE = ConstantVariable(False)  # noqa: RVT001
+CONSTANT_VARIABLE_NONE = NoneConstantVariable(None)  # noqa: RVT001
+CONSTANT_VARIABLE_TRUE = BoolConstantVariable(True)  # noqa: RVT001
+CONSTANT_VARIABLE_FALSE = BoolConstantVariable(False)  # noqa: RVT001
 CONSTANT_VARIABLE_NOT_IMPLEMENTED = ConstantVariable(NotImplemented)  # noqa: RVT001
 
 
