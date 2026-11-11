@@ -111,10 +111,8 @@ def launch(fn: "Function", device: int, ins: Any, *args: Any) -> None:
     This calls fn(read-only ins, *args, stream), so kernels are compiled with the stream
     as their last parameter and callers do not pass it.
 
-    Compiled kernels launched through here must treat outputs as write-only scratch: a
-    replay allocates them uninitialized and repeats only the launches. While recording,
-    every compiled-kernel call must come through here; a direct call is missing from
-    the replay.
+    While recording, launches must follow LaunchRecord's replay contract; a direct
+    compiled-kernel call is missing from the replay.
     """
     record = _RECORD.get()
     if record is not None:
@@ -127,10 +125,12 @@ class LaunchRecord:
     """The launches that computed outputs from `x`, replayable on any input that matches
     x's dtype, device, sizes, strides, storage offset, storage size and pointer alignment.
 
-    Callers must ensure that no torch op writes data to a buffer a launch has seen
-    (resizes that do not grow the storage are fine), that launch outputs are write-only
-    scratch (a replay allocates them uninitialized and repeats only the launches), and
-    that every compiled-kernel call goes through launch(): finish() catches a direct
+    A replay allocates every buffer uninitialized and repeats only the launches, so
+    callers must ensure that no recorded launch depends on an output buffer's contents
+    from before the recorded launches wrote it (later launches may read earlier
+    launches' outputs, e.g. FusedTwoStage's parts), that every compiled-kernel call goes
+    through launch(), and that no torch op writes data to a launch buffer while
+    recording (resizes that do not grow the storage are fine). finish() catches a direct
     call only when it writes a storage no launch has seen and a launch then reads that
     storage, or that storage is returned without a launch writing it.
     finish() returns None unless every operand views `x` or a buffer whose storage first
@@ -138,8 +138,8 @@ class LaunchRecord:
     views a distinct such buffer. Torch-op results that a launch reads, or that are
     returned without a launch writing them, therefore decline, as do operands that view
     `x` at another dtype than `x.dtype`, or a buffer at another dtype than its first
-    sighting; the write-only-scratch contract is what protects tensors first passed as
-    launch outputs. Buffers are keyed by storage, since views made below autograd do not
+    sighting; the first rule above is what protects tensors first passed as launch
+    outputs. Buffers are keyed by storage, since views made below autograd do not
     record their base.
     """
 
@@ -212,7 +212,9 @@ class LaunchRecord:
 
 @contextmanager
 def recording(x: torch.Tensor) -> Iterator[LaunchRecord]:
-    """Record the launches made from `x` in this context."""
+    """Record the launches made from `x` in this context. Recordings must not nest: a
+    nested recording hides its launches from the outer one, so the outer replay can be
+    incomplete or finish() declines."""
     record = LaunchRecord(x)
     token = _RECORD.set(record)
     try:
