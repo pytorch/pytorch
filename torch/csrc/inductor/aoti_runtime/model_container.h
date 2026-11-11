@@ -47,10 +47,12 @@ struct ConstantBufferSet {
   std::shared_ptr<std::vector<ConstantHandle>> array;
   ConstantState fold_state{ConstantState::NONE};
 
-  void* ensure_blob(size_t blob_size) {
+  void* ensure_blob(size_t blob_size, [[maybe_unused]] int32_t device_idx) {
     if (!blob) {
 #if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
       blob = RAII_gpuMalloc(blob_size);
+#elif defined(AOTI_USE_PRIVATEUSE1)
+      blob = RAII_privateuse1Malloc(blob_size, device_idx);
 #else
       blob = RAII_cpuMalloc(blob_size);
 #endif
@@ -797,8 +799,8 @@ class AOTInductorModelContainer {
             /* device_index = */ 0,
             &tensor_handle));
       } else {
-        auto* constants_blob_ptr =
-            static_cast<uint8_t*>(target.ensure_blob(blob_size_));
+        auto* constants_blob_ptr = static_cast<uint8_t*>(
+            target.ensure_blob(blob_size_, model.get_device_idx()));
 
         // Move the data to container handled blob.
         uint8_t* internal_constants_ptr =
@@ -856,6 +858,22 @@ class AOTInductorModelContainer {
               static_cast<size_t>(constant_size),
               cudaMemcpyDefault);
         }
+#elif defined(AOTI_USE_PRIVATEUSE1)
+        // The source is a CPU tensor (allow_h2d_copy) or a device tensor; the
+        // backend's copy_ kernel picks H2D or D2D.
+        int32_t src_device_type = 0;
+        int32_t src_device_idx = 0;
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_get_device_type(tensor, &src_device_type));
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_get_device_index(tensor, &src_device_idx));
+        privateuse1_memcpy(
+            internal_constants_ptr,
+            user_constant_ptr,
+            static_cast<size_t>(constant_size),
+            model.get_device_idx(),
+            src_device_type,
+            src_device_idx);
 #else
         memcpy(internal_constants_ptr, user_constant_ptr, constant_size);
 #endif
@@ -906,6 +924,12 @@ class AOTInductorModelContainer {
     // (on any stream) sees the updated weights.
     AOTI_RUNTIME_CUDA_CHECK(cudaStreamSynchronize(0));
 #endif // USE_CUDA
+#ifdef AOTI_USE_PRIVATEUSE1
+    // copy_ only orders the copies on the current stream; make the updated
+    // constants visible to runs on any stream, as the CUDA path does above.
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_synchronize_device(model.get_device_idx()));
+#endif // AOTI_USE_PRIVATEUSE1
   }
 
   void swap_constant_buffer() {
