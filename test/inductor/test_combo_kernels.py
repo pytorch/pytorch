@@ -185,7 +185,6 @@ _OUT_OF_RESOURCES = "out of resource: shared memory"
 
 
 @unittest.skipUnless(HAS_TRITON, "needs triton for CompilationError")
-@instantiate_parametrized_tests
 class ComboKernelBenchmarkCompileErrorTests(TestCase):
     """A compile-pool failure must not decide anything: the in-process benchmark
     does, so the verdict is the same whether or not the pool is in use."""
@@ -203,7 +202,7 @@ class ComboKernelBenchmarkCompileErrorTests(TestCase):
             subtest(BrokenProcessPool(), name="broken_pool"),
         ],
     )
-    def test_pool_failure_defers_to_in_process_benchmark(self, device, pool_error):
+    def test_pool_failure_defers_to_in_process_benchmark(self, pool_error):
         future = _RaisingFuture(pool_error)
         self.assertFalse(self._speedup(_StubComboScheduler(future, ms=float("inf"))))
 
@@ -211,19 +210,19 @@ class ComboKernelBenchmarkCompileErrorTests(TestCase):
         self.assertTrue(self._speedup(scheduler))
         self.assertTrue(scheduler.combo_benchmarked)
 
-    def test_in_process_loop_carried_error_allows_combo(self, device):
+    def test_in_process_loop_carried_error_allows_combo(self):
         scheduler = _StubComboScheduler(benchmark_exc=_compilation_error(_LOOP_CARRIED))
         self.assertTrue(self._speedup(scheduler))
         self.assertFalse(scheduler.combo_benchmarked)
 
-    def test_in_process_unrelated_compilation_error_propagates(self, device):
+    def test_in_process_unrelated_compilation_error_propagates(self):
         from triton.compiler.errors import CompilationError
 
         exc = _compilation_error(_OUT_OF_RESOURCES)
         with self.assertRaises(CompilationError):
             self._speedup(_StubComboScheduler(benchmark_exc=exc))
 
-    def test_loop_carried_error_is_recognized_on_both_sides_of_the_pool(self, device):
+    def test_loop_carried_error_is_recognized_on_both_sides_of_the_pool(self):
         loop_carried = _is_loop_carried_compile_error
         self.assertTrue(loop_carried(_compilation_error(_LOOP_CARRIED)))
         self.assertTrue(loop_carried(SubprocException(_LOOP_CARRIED, "triton_")))
@@ -231,7 +230,7 @@ class ComboKernelBenchmarkCompileErrorTests(TestCase):
         # The message alone must not be enough to swallow an unrelated failure.
         self.assertFalse(loop_carried(ValueError(_LOOP_CARRIED)))
 
-    def test_every_subkernel_compiles_before_any_benchmark_blocks(self, device):
+    def test_every_subkernel_compiles_before_any_benchmark_blocks(self):
         # Awaiting a subkernel before the rest are submitted serializes the group
         # behind Triton's GIL-bound frontend.
         scheduler = _RecordingScheduler()
@@ -244,7 +243,7 @@ class ComboKernelBenchmarkCompileErrorTests(TestCase):
             ["compile"] * 3 + ["await", "benchmark"] * 3 + ["combo"],
         )
 
-    def test_cached_benchmark_skips_pool_compilation(self, device):
+    def test_cached_benchmark_skips_pool_compilation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             module = SimpleNamespace(
                 __file__=str(Path(temp_dir) / "cached.py"), triton_=object()
@@ -275,7 +274,7 @@ class ComboKernelBenchmarkCompileErrorTests(TestCase):
 
 
 class ComboKernelPartitionLoggingTests(TestCase):
-    def test_large_pointwise_separation_debug_log_uses_companion_context(self, device):
+    def test_large_pointwise_separation_debug_log_uses_companion_context(self):
         large_x = int(LARGE_NUMELS) + 1
         large_node = _PartitionLoggingNode()
         small_node = _PartitionLoggingNode()
@@ -332,7 +331,7 @@ class ComboKernelPartitionLoggingTests(TestCase):
         ]
         self.assertEqual(len(large_pointwise_logs), 2)
 
-    def test_long_reduction_separation_debug_log_uses_companion_context(self, device):
+    def test_long_reduction_separation_debug_log_uses_companion_context(self):
         long_node = _PartitionLoggingNode(rnumel=4096)
         short_node = _PartitionLoggingNode(rnumel=1024)
         equivalent_long_node = _PartitionLoggingNode(rnumel=4096)
@@ -393,7 +392,7 @@ class ComboKernelPartitionLoggingTests(TestCase):
         ]
         self.assertEqual(len(long_reduction_logs), 2)
 
-    def test_long_reduction_log_with_very_large_reduction_split(self, device):
+    def test_long_reduction_log_with_very_large_reduction_split(self):
         long_node = _PartitionLoggingNode(rnumel=4096)
         very_large_node = _PartitionLoggingNode(rnumel=4096)
         short_node = _PartitionLoggingNode(rnumel=1024)
@@ -443,7 +442,7 @@ class ComboKernelPartitionLoggingTests(TestCase):
             1,
         )
 
-    def test_partition_separation_debug_log_cache_clears_with_inductor_caches(self, device):
+    def test_partition_separation_debug_log_cache_clears_with_inductor_caches(self):
         large_x = int(LARGE_NUMELS) + 1
         large_node = _PartitionLoggingNode()
         small_node = _PartitionLoggingNode()
@@ -525,7 +524,6 @@ def _compile_persistent_and_looped_reductions():
     )
 
 
-@instantiate_parametrized_tests
 class ComboKernelTests(TestCase):
     check_model_gpu = check_model_gpu
     check_model_cpu = check_model
@@ -1086,7 +1084,7 @@ class ComboKernelTests(TestCase):
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_triton()
-    def test_persistent_and_looped_reductions_are_separated(self, device):
+    def test_persistent_and_looped_reductions_are_separated(self):
         kernels = _compile_persistent_and_looped_reductions()
         if torch._inductor.config.combo_kernel_per_subkernel_blocks:
             # Each sub-kernel gets its own XBLOCK, so both kinds can share a combo.
@@ -1835,7 +1833,7 @@ class ComboKernelBenchmarkTests(TestCase):
         self.assertTrue(4 < torch._inductor.metrics.generated_kernel_count <= 10)
 
     @requires_triton()
-    def test_persistent_and_looped_reductions_benchmark(self, device):
+    def test_persistent_and_looped_reductions_benchmark(self):
         # Benchmarking, not the partitioner, decides whether to combine them. It always
         # accepts combos of kernels this small.
         self.assertListEqual(
@@ -2487,7 +2485,6 @@ class ComboKernelDynamicShapesTestsPerSubkernelBlocks(ComboKernelDynamicShapesTe
     combo_kernel_per_subkernel_blocks = True
 
 
-@instantiate_parametrized_tests
 class ComboKernelCompileTimeAutotuneTests(TestCase):
     """Compile-time per-subkernel autotune: each combo subkernel autotunes its blocks
     standalone at compile time; winners are stitched into the combo's launch config."""
@@ -2885,10 +2882,22 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         self.assertNotIn("'stitched_num_warps'", " ".join(code))
 
 
-@instantiate_parametrized_tests
 class ComboKernelPDLTests(TestCase):
-    """Tests for PDL (Programmatic Dependent Launch) support in combo kernels."""
+    """Tests for PDL (Programmatic Dependent Launch) in combo kernels.
 
+    CUDA SM90+ only, for two independent reasons:
+
+    1. The gate is SM90OrLater, an NVIDIA compute-capability check that
+       is always False on a non-CUDA accelerator.
+    2. Bypassing it would not help: the feature is hardcoded to CUDA in
+       TritonKernel._enable_pdl_codegen(), whose return expression is
+       device.type == 'cuda' and get_device_capability()[0] >= 9.
+       Measured on Ascend 910B2 with triton.enable_pdl=True: the emitted
+       kernel still carries launch_pdl=False.
+
+    So this is an upstream gate that never consults a non-CUDA backend,
+    not a measured statement that the backend lacks PDL.
+    """
     def setUp(self):
         super().setUp()
         torch._inductor.metrics.reset()
@@ -2913,7 +2922,11 @@ class ComboKernelPDLTests(TestCase):
 
     @requires_triton()
     @skipIfRocm
-    @unittest.skipIf(not SM90OrLater, "PDL requires SM90 or later (Hopper+)")
+    @unittest.skipIf(
+        not SM90OrLater,
+        "CUDA SM90+ only: PDL uses gdc_wait/gdc_launch, and "
+        "_enable_pdl_codegen() hardcodes device.type == cuda",
+    )
     def test_pdl_codegen_in_combo_kernel(self, device):
         """Test that PDL flag and gdc calls are generated in combo kernels."""
 
@@ -2953,7 +2966,11 @@ class ComboKernelPDLTests(TestCase):
 
     @requires_triton()
     @skipIfRocm
-    @unittest.skipIf(not SM90OrLater, "PDL requires SM90 or later (Hopper+)")
+    @unittest.skipIf(
+        not SM90OrLater,
+        "CUDA SM90+ only: PDL uses gdc_wait/gdc_launch, and "
+        "_enable_pdl_codegen() hardcodes device.type == cuda",
+    )
     def test_pdl_combo_kernel_pointwise(self, device):
         """Test that pointwise combo kernels produce correct results with PDL."""
 
@@ -2996,7 +3013,11 @@ class ComboKernelPDLTests(TestCase):
 
     @requires_triton()
     @skipIfRocm
-    @unittest.skipIf(not SM90OrLater, "PDL requires SM90 or later (Hopper+)")
+    @unittest.skipIf(
+        not SM90OrLater,
+        "CUDA SM90+ only: PDL uses gdc_wait/gdc_launch, and "
+        "_enable_pdl_codegen() hardcodes device.type == cuda",
+    )
     def test_pdl_combo_kernel_reduction(self, device):
         """Test that reduction combo kernels produce correct results with PDL."""
 
@@ -3014,7 +3035,6 @@ class ComboKernelPDLTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
 
 
-@instantiate_parametrized_tests
 class ComboKernelTestsMaxAutotune(TestCase):
     def setUp(self):
         super().setUp()
@@ -3204,7 +3224,7 @@ class ComboKernelTestsMaxAutotune(TestCase):
 
     @requires_triton()
     @torch._inductor.config.patch("combo_kernel_autotune_grouping", True)
-    def test_combo_autotune_grouping_by_metadata_fingerprint(self, device):
+    def test_combo_autotune_grouping_by_metadata_fingerprint(self):
         """Sub-kernels share a group iff every per-sub-kernel heuristic input
         is identical; any difference in the fingerprint separates them.
         """
@@ -3408,7 +3428,6 @@ class ComboKernelTestsMaxAutotune(TestCase):
         )
 
 
-@instantiate_parametrized_tests
 class ComboKernelMetadataTests(TestCase):
     def setUp(self):
         super().setUp()
@@ -3757,7 +3776,6 @@ class _ScheduleFirstFakeCombo:
         return self.buffers
 
 
-@instantiate_parametrized_tests
 class ComboKernelPeakMemoryTests(InductorTestCase):
     """Coverage for memory-aware combo-kernel acceptance and commit logic."""
 
@@ -3805,7 +3823,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         }
         return scheduler
 
-    def test_custom_grouping_used_without_memory_gate(self, device):
+    def test_custom_grouping_used_without_memory_gate(self):
         from torch._inductor.scheduler import Scheduler
 
         nodes = [_ScheduleFirstFakeNode(f"node{i}") for i in range(3)]
@@ -3848,7 +3866,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             self.assertIs(scheduler.name_to_fused_node[node.get_name()], combo)
 
     @parametrize("custom_grouping", [False, True])
-    def test_custom_grouping_warning_with_memory_gate(self, device, custom_grouping):
+    def test_custom_grouping_warning_with_memory_gate(self, custom_grouping):
         from torch._inductor.scheduler import ForeachKernelSchedulerNode, Scheduler
 
         scheduler = self._make_schedule_first_scheduler([])
@@ -3879,7 +3897,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         else:
             warning_once.assert_not_called()
 
-    def test_schedule_first_create_combo_with_memory_gate(self, device):
+    def test_schedule_first_create_combo_with_memory_gate(self):
         from torch._inductor.scheduler import Scheduler
 
         nodes = [_ScheduleFirstFakeNode(f"node{i}") for i in range(2)]
@@ -3945,7 +3963,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertEqual(driver_calls, [(0, 2, eligible, 0, True)])
         self.assertEqual(scheduler.nodes, [combo])
 
-    def test_schedule_first_collects_across_kahn_layers(self, device):
+    def test_schedule_first_collects_across_kahn_layers(self):
         from torch._inductor.scheduler import Scheduler
 
         producer = _ScheduleFirstFakeNode("producer")
@@ -3965,7 +3983,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
 
         self.assertEqual(members, [child, independent])
 
-    def test_schedule_first_rejects_ancestor(self, device):
+    def test_schedule_first_rejects_ancestor(self):
         from torch._inductor.scheduler import Scheduler
 
         producer = _ScheduleFirstFakeNode("producer")
@@ -3984,7 +4002,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
 
         self.assertEqual(members, [producer])
 
-    def test_schedule_first_rejects_cycle_from_stale_ancestors(self, device):
+    def test_schedule_first_rejects_cycle_from_stale_ancestors(self):
         from torch._inductor.scheduler import FusedSchedulerNode, Scheduler
 
         p = _ScheduleFirstFakeNode("P")
@@ -4049,7 +4067,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
 
         self.assertEqual(members, [first])
 
-    def test_schedule_first_stops_at_max_distance_and_member_limit(self, device):
+    def test_schedule_first_stops_at_max_distance_and_member_limit(self):
         from torch._inductor.scheduler import Scheduler
 
         nodes = [_ScheduleFirstFakeNode(f"node{i}") for i in range(4)]
@@ -4067,7 +4085,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertEqual(bounded, nodes[:3])
         self.assertEqual(capped, nodes[:2])
 
-    def test_schedule_first_topologically_sorts_only_region(self, device):
+    def test_schedule_first_topologically_sorts_only_region(self):
         from torch._inductor.scheduler import Scheduler
 
         first = _ScheduleFirstFakeNode("first", buffers=("first_buf",))
@@ -4101,7 +4119,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertEqual(result, [combo])
         self.assertEqual(local_nodes, [dependency, combo])
 
-    def test_schedule_first_rejects_cycle_between_region_combos(self, device):
+    def test_schedule_first_rejects_cycle_between_region_combos(self):
         from torch._inductor.scheduler import Scheduler
 
         first_a = _ScheduleFirstFakeNode("first_a", buffers=("first_a_buf",))
@@ -4144,7 +4162,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
 
         self.assertIsNone(result)
 
-    def test_schedule_first_accepts_multiple_combos_per_region(self, device):
+    def test_schedule_first_accepts_multiple_combos_per_region(self):
         from torch._inductor.scheduler import Scheduler
 
         nodes = [_ScheduleFirstFakeNode(f"node{i}") for i in range(4)]
@@ -4203,7 +4221,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertEqual(finalized, combos)
         self.assertEqual(finalized_end, 4)
 
-    def test_schedule_first_speedup_failure_does_not_consume_region(self, device):
+    def test_schedule_first_speedup_failure_does_not_consume_region(self):
         from torch._inductor.scheduler import Scheduler
 
         nodes = [_ScheduleFirstFakeNode(f"node{i}") for i in range(3)]
@@ -4263,7 +4281,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertEqual(finalized, [nodes[0], combo])
         self.assertEqual(finalized_end, 3)
 
-    def test_schedule_first_halving_caches_speedup_results(self, device):
+    def test_schedule_first_halving_caches_speedup_results(self):
         from torch._inductor.scheduler import Scheduler
 
         nodes = [_ScheduleFirstFakeNode(f"node{i}") for i in range(4)]
@@ -4323,7 +4341,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertEqual(finalized, [nodes[0], nodes[1], combo])
         self.assertEqual(finalized_end, 4)
 
-    def test_schedule_first_memory_checks_all_region_combos_once(self, device):
+    def test_schedule_first_memory_checks_all_region_combos_once(self):
         from torch._inductor.scheduler import ComboKernelMemoryContext, Scheduler
 
         nodes = [_PeakMemFakeNode(f"node{i}") for i in range(5)]
@@ -4387,7 +4405,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         step_of = estimate.call_args.kwargs["step_of"]
         self.assertEqual([step_of(node) for node in nodes], [0, 0, 1, 2, 2])
 
-    def test_schedule_first_halving_recollects_disjoint_regions(self, device):
+    def test_schedule_first_halving_recollects_disjoint_regions(self):
         from torch._inductor.scheduler import Scheduler
 
         nodes = [_ScheduleFirstFakeNode(f"node{i}") for i in range(8)]
@@ -4695,7 +4713,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             combo_nodes, local_nodes = result
             return combo_nodes[0], local_nodes
 
-    def test_threshold_gating(self, device):
+    def test_threshold_gating(self):
         """abs_thr/pct_thr set to 0 or a too-small bound reject."""
         ONE_MB = 1024 * 1024
         a = _PeakMemFakeNode("a")
@@ -4738,7 +4756,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         combo, local_nodes = result
         self.assertIs(local_nodes[0], combo)
 
-    def test_region_carry_in_uses_post_free_boundary(self, device):
+    def test_region_carry_in_uses_post_free_boundary(self):
         a = _PeakMemFakeNode("a")
         consume_a = _PeakMemFakeNode("consume_a")
         c = _PeakMemFakeNode("c")
@@ -4767,7 +4785,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
         self.assertIsNotNone(result)
 
-    def test_region_carry_in_changes_gate_decision(self, device):
+    def test_region_carry_in_changes_gate_decision(self):
         prefix = _PeakMemFakeNode("prefix")
         a = _PeakMemFakeNode("a")
         consume_a = _PeakMemFakeNode("consume_a")
@@ -4851,7 +4869,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
             f"(tight={peak_tight}, permissive={peak_permissive})",
         )
 
-    def test_estimate_region_peak_memory(self, device):
+    def test_estimate_region_peak_memory(self):
         from torch._inductor import memory as mem_mod
 
         # Window [0, 5] with three buffers + one out-of-window node:
@@ -4894,20 +4912,19 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertEqual(peak, 350)
 
 
-# instantiate_device_type_tests only instantiates members in the subclass's own
-# __dict__, so a subclass that merely sets a config flag runs none of the tests it
-# inherits. Copy the inherited test methods into each per-subkernel subclass before
-# instantiation so they actually run under that configuration.
 def _npu_inherit_tests(child, parent):
-    for name, obj in vars(parent).items():
-        if name.startswith("test_") and name not in vars(child):
-            setattr(child, name, obj)
+    for _n, _o in vars(parent).items():
+        if _n.startswith('test_') and _n not in vars(child):
+            setattr(child, _n, _o)
 
 
 _npu_inherit_tests(ComboKernelTestsPerSubkernelBlocks, ComboKernelTests)
-_npu_inherit_tests(ComboKernelBenchmarkTestsPerSubkernelBlocks, ComboKernelBenchmarkTests)
 _npu_inherit_tests(
-    ComboKernelDynamicShapesTestsPerSubkernelBlocks, ComboKernelDynamicShapesTests
+    ComboKernelBenchmarkTestsPerSubkernelBlocks, ComboKernelBenchmarkTests
+)
+_npu_inherit_tests(
+    ComboKernelDynamicShapesTestsPerSubkernelBlocks,
+    ComboKernelDynamicShapesTests,
 )
 
 
@@ -4962,14 +4979,14 @@ instantiate_device_type_tests(
 class ComboKernelPeakMemoryPureLogicTests(TestCase):
     """Peak-memory tests that need no accelerator at all.
 
-    They live in a class of their own because ComboKernelPeakMemoryTests is
-    instantiated with except_for="cpu"; keeping them there would drop them from
-    CPU-only runs.
+    They sit in their own class because ComboKernelPeakMemoryTests is
+    instantiated with except_for="cpu"; keeping them there would drop
+    them from CPU-only runs.
     """
 
-    combo_kernel_peak_memory_fake_only = True
-
-    test_estimate_region_peak_memory = ComboKernelPeakMemoryTests.test_estimate_region_peak_memory
+    test_estimate_region_peak_memory = (
+        ComboKernelPeakMemoryTests.test_estimate_region_peak_memory
+    )
 
 
 instantiate_device_type_tests(
