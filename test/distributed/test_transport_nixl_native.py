@@ -155,6 +155,38 @@ def _connect_rank_worker(rank, port):
         asyncio.run(transport.close_async(timeout=5))
 
 
+def _next_notifications(transport):
+    transport.wait_notifications(timeout=10).wait()
+    return transport.poll_notifications()
+
+
+def _notification_worker(rank, connection, progress_thread):
+    with new_transport(
+        "nixl", "cpu", timeout=10, enable_prog_thread=progress_thread
+    ) as transport:
+        connection.send_bytes(transport.bind())
+        transport.connect(_receive(connection))
+        data = torch.full((1 << 20,), rank + 1, dtype=torch.uint8)
+        memory = transport.register_memory(data)
+        connection.send_bytes(memory.to_remote_buffer().serialize())
+        remote = NIXLRemoteBuffer.deserialize(_receive(connection))
+        if rank == 0:
+            # Never waited on before the reply: the transport sends it itself.
+            work = transport.write(
+                memory.to_view(), remote, async_op=True, notification=b"written"
+            )
+            if _next_notifications(transport) != [(remote.peer_id, b"read")]:
+                raise AssertionError("unexpected notification")
+            work.wait()
+            connection.send_bytes(b"done")
+        else:
+            if _next_notifications(transport) != [(remote.peer_id, b"written")]:
+                raise AssertionError("unexpected notification")
+            torch.testing.assert_close(data, torch.ones_like(data))
+            transport.send_notification(remote.peer_id, b"read").wait()
+            _receive(connection)  # Stay open until the reply arrives.
+
+
 def _run_worker(worker, *args):
     # Some NIXL 0.6-1.5 wheels segfault at exit on hosts with libefa, whose UCX modules
     # load a second libnl-route-3: https://github.com/ai-dynamo/nixl/issues/2428
@@ -173,6 +205,15 @@ class TestNIXLNative(TestCase):
         connections = multiprocessing.Pipe()
         self._spawn(
             _native_worker,
+            [(connection, progress_thread) for connection in connections],
+            connections,
+        )
+
+    @parametrize("progress_thread", [True, False])
+    def test_two_process_notifications(self, progress_thread):
+        connections = multiprocessing.Pipe()
+        self._spawn(
+            _notification_worker,
             [(connection, progress_thread) for connection in connections],
             connections,
         )
