@@ -40,6 +40,14 @@ void checkSameDtype(
   }
 }
 
+// AVG is lowered to SUM plus a div_ that fails for bool only after the
+// collective has run, so reject it up front.
+void checkReduceOpDtype(const at::Tensor& tensor, const ::c10d::ReduceOp& op) {
+  TORCH_CHECK_TYPE(
+      tensor.scalar_type() != at::kBool || op != ::c10d::ReduceOp::AVG,
+      "Cannot use ReduceOp.AVG with boolean inputs");
+}
+
 // Scale `tensor` in place by the PREMUL_SUM factor carried on the c10d
 // ReduceOp supplement. torchcomms read this from its own ReduceOp::factor().
 void applyPreMulFactor(at::Tensor& tensor, const ::c10d::ReduceOp& op) {
@@ -421,12 +429,15 @@ void ProcessGroupXCCL::initXcclResources() {
   if (abort_comm) {
     abortXcclComm();
   } else if (abort_process_on_timeout_or_error_) {
-    TC_LOG(ERROR) << "Aborting process due to error: " << xcclException.what();
-    runAbortHooks();
-    ::abort();
+    abortProcess(std::string("error: ") + xcclException.what());
   }
   // @allow-raw-throw: its what() is logged above before it is thrown
   throw std::move(xcclException);
+}
+
+bool ProcessGroupXCCL::isInitialized() {
+  return init_state_ == InitializationState::INITIALIZED &&
+      xccl_comm_ != nullptr;
 }
 
 void ProcessGroupXCCL::abort() {
@@ -522,11 +533,6 @@ void ProcessGroupXCCL::abortXcclComm() {
     }
     xccl_comm_ = nullptr;
   }
-  if (abort_process_on_timeout_or_error_) {
-    TC_LOG(ERROR, this) << "Aborting process due to error or timeout";
-    runAbortHooks();
-    ::abort();
-  }
 }
 
 void ProcessGroupXCCL::stopWatchdog() {
@@ -547,6 +553,13 @@ void ProcessGroupXCCL::stopWatchdog() {
       timeout_thread_.detach(); // NOLINT(facebook-hte-BadCall-detach)
     }
   }
+}
+
+[[noreturn]] void ProcessGroupXCCL::abortProcess(const std::string& reason) {
+  TC_LOG(ERROR, this) << "Aborting process on rank " << rank_ << " due to "
+                      << reason;
+  runAbortHooks();
+  ::abort();
 }
 
 int64_t ProcessGroupXCCL::getCommPtr() const {
@@ -708,50 +721,50 @@ c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::batch_op_issue(
   // reached, so recv-before-send on both peers (e.g. batch_isend_irecv with
   // irecv first) deadlocks. Sends first avoids this; relative order within
   // sends and within recvs is preserved.
-  for (const auto& op : ops) {
-    if (op.type != BatchSendRecv::P2POp::OpType::SEND) {
-      continue;
+  try {
+    for (const auto& op : ops) {
+      if (op.type != BatchSendRecv::P2POp::OpType::SEND) {
+        continue;
+      }
+
+      auto result = xccl_api_->send(
+          op.tensor.data_ptr(),
+          op.tensor.numel(),
+          getXcclDataType(op.tensor),
+          op.peer,
+          xccl_comm_,
+          stream);
+
+      if (result != onecclSuccess) [[unlikely]] {
+        throw XCCLException(
+            *xccl_api_, "XCCL send failed in batch_op_issue", result);
+      }
     }
 
-    auto result = xccl_api_->send(
-        op.tensor.data_ptr(),
-        op.tensor.numel(),
-        getXcclDataType(op.tensor),
-        op.peer,
-        xccl_comm_,
-        stream);
+    for (const auto& op : ops) {
+      if (op.type != BatchSendRecv::P2POp::OpType::RECV) {
+        continue;
+      }
 
-    if (result != onecclSuccess) [[unlikely]] {
-      XCCL_CHECK_IGNORE(
-          xccl_api_,
-          xccl_api_->groupEnd(), // Clean up group on error
-          "XCCL groupEnd failed during error cleanup after send failure in batch_op_issue");
-      throw XCCLException(
-          *xccl_api_, "XCCL send failed in batch_op_issue", result);
+      auto result = xccl_api_->recv(
+          op.tensor.data_ptr(),
+          op.tensor.numel(),
+          getXcclDataType(op.tensor),
+          op.peer,
+          xccl_comm_,
+          stream);
+
+      if (result != onecclSuccess) [[unlikely]] {
+        throw XCCLException(
+            *xccl_api_, "XCCL recv failed in batch_op_issue", result);
+      }
     }
-  }
-
-  for (const auto& op : ops) {
-    if (op.type != BatchSendRecv::P2POp::OpType::RECV) {
-      continue;
-    }
-
-    auto result = xccl_api_->recv(
-        op.tensor.data_ptr(),
-        op.tensor.numel(),
-        getXcclDataType(op.tensor),
-        op.peer,
-        xccl_comm_,
-        stream);
-
-    if (result != onecclSuccess) [[unlikely]] {
-      XCCL_CHECK_IGNORE(
-          xccl_api_,
-          xccl_api_->groupEnd(), // Clean up group on error
-          "XCCL groupEnd failed during error cleanup after recv failure in batch_op_issue");
-      throw XCCLException(
-          *xccl_api_, "XCCL recv failed in batch_op_issue", result);
-    }
+  } catch (...) {
+    XCCL_CHECK_IGNORE(
+        xccl_api_,
+        xccl_api_->groupEnd(),
+        "XCCL groupEnd failed during error cleanup in batch_op_issue");
+    throw;
   }
 
   XCCL_CHECK(
@@ -816,6 +829,7 @@ c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::all_reduce(
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(tensor);
   checkTensorDevice(tensor);
+  checkReduceOpDtype(tensor, op);
 
   TracingGuard tracingGuard(
       name_, comm_size_, "all_reduce", rank_, sequence_number_, tensor, tensor);
@@ -851,7 +865,7 @@ c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::all_reduce(
           tensor.data_ptr(), // In-place operation
           tensor.numel(),
           dataType,
-          getXcclReduceOp(maybe_new_op, xccl_comm_, dataType),
+          getXcclReduceOp(maybe_new_op, xccl_comm_, tensor),
           xccl_comm_,
           stream),
       "XCCL allReduce failed");
@@ -879,6 +893,7 @@ c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::reduceImpl(
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(tensor);
   checkTensorDevice(tensor);
+  checkReduceOpDtype(tensor, op);
 
   TracingGuard tracingGuard(
       name_, comm_size_, "reduce", root, sequence_number_, tensor, tensor);
@@ -901,7 +916,7 @@ c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::reduceImpl(
           tensor.data_ptr(),
           tensor.numel(),
           dataType,
-          getXcclReduceOp(maybe_new_op, xccl_comm_, dataType),
+          getXcclReduceOp(maybe_new_op, xccl_comm_, tensor),
           root,
           xccl_comm_,
           stream),
