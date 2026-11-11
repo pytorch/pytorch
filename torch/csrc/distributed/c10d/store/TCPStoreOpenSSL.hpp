@@ -1,0 +1,87 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+
+#include <ATen/DynamicLibrary.h>
+#include <c10/util/Exception.h>
+#include <fmt/format.h>
+
+namespace c10d::detail {
+
+// Runtime OpenSSL bindings; no OpenSSL headers or link dependency required.
+using PasswordCallback = int (*)(char*, int, int, void*);
+
+#define TCPSTORE_OPENSSL_FUNCTIONS(_)                                      \
+  _(const void*, TLS_method, ())                                           \
+  _(void*, SSL_CTX_new, (const void*))                                     \
+  _(void, SSL_CTX_free, (void*))                                           \
+  _(long, SSL_CTX_ctrl, (void*, int, long, void*))                         \
+  _(int, SSL_CTX_use_certificate_chain_file, (void*, const char*))         \
+  _(int, SSL_CTX_use_PrivateKey_file, (void*, const char*, int))           \
+  _(int, SSL_CTX_check_private_key, (const void*))                         \
+  _(void, SSL_CTX_set_default_passwd_cb, (void*, PasswordCallback))        \
+  _(void, SSL_CTX_set_default_passwd_cb_userdata, (void*, void*))          \
+  _(int, SSL_CTX_load_verify_locations, (void*, const char*, const char*)) \
+  _(void, SSL_CTX_set_verify, (void*, int, void*))                         \
+  _(int, SSL_CTX_set_num_tickets, (void*, size_t))                         \
+  _(uint64_t, SSL_CTX_set_options, (void*, uint64_t))                      \
+  _(void*, SSL_new, (void*))                                               \
+  _(void, SSL_free, (void*))                                               \
+  _(void, SSL_set_bio, (void*, void*, void*))                              \
+  _(void, SSL_set_connect_state, (void*))                                  \
+  _(void, SSL_set_accept_state, (void*))                                   \
+  _(int, SSL_do_handshake, (void*))                                        \
+  _(int, SSL_read, (void*, void*, int))                                    \
+  _(int, SSL_peek, (void*, void*, int))                                    \
+  _(int, SSL_write, (void*, const void*, int))                             \
+  _(int, SSL_get_error, (const void*, int))                                \
+  _(long, SSL_get_verify_result, (const void*))                            \
+  _(const void*, BIO_s_mem, ())                                            \
+  _(void*, BIO_new, (const void*))                                         \
+  _(int, BIO_read, (void*, void*, int))                                    \
+  _(int, BIO_write, (void*, const void*, int))                             \
+  _(size_t, BIO_ctrl_pending, (void*))                                     \
+  _(unsigned long, ERR_get_error, ())                                      \
+  _(void, ERR_error_string_n, (unsigned long, char*, size_t))              \
+  _(void, ERR_clear_error, ())                                             \
+  _(const char*, X509_verify_cert_error_string, (long))
+
+struct OpenSSL {
+#define TCPSTORE_DECLARE(ret, name, args) ret(*name) args = nullptr;
+  TCPSTORE_OPENSSL_FUNCTIONS(TCPSTORE_DECLARE)
+#undef TCPSTORE_DECLARE
+
+  OpenSSL() {
+    std::string errors;
+    for (const char* name : {"libssl.so.3", "libssl.so.1.1", "libssl.so"}) {
+      try {
+        // libcrypto symbols resolve through this libssl's own dependency, so
+        // the versions always match.
+        at::DynamicLibrary lib(name, nullptr, /*leak_handle=*/true);
+#define TCPSTORE_LOAD(ret, name, args) \
+  name = reinterpret_cast<ret(*) args>(lib.sym(#name));
+        TCPSTORE_OPENSSL_FUNCTIONS(TCPSTORE_LOAD)
+#undef TCPSTORE_LOAD
+        return;
+      } catch (const c10::DynamicLibraryError& e) {
+        errors += fmt::format("; {}", e.what_without_backtrace());
+      }
+    }
+    C10_THROW_ERROR(
+        DistStoreError,
+        "TCPStore TLS requires OpenSSL >= 1.1.1 (libssl.so.3, libssl.so.1.1 or "
+        "libssl.so)" +
+            errors);
+  }
+};
+
+inline const OpenSSL& openssl() {
+  static const OpenSSL lib;
+  return lib;
+}
+
+#undef TCPSTORE_OPENSSL_FUNCTIONS
+
+} // namespace c10d::detail
