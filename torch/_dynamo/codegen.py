@@ -339,6 +339,8 @@ class PyCodegen:
             if (
                 isinstance(value.mutation_type, ValueMutationExisting)
                 or self.value_from_source
+                # Unrealized lazy constants have no graph value for export to capture
+                or (isinstance(value, LazyConstantVariable) and not value.is_realized())
             ):
                 return self(value.source)
 

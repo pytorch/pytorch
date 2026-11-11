@@ -2017,7 +2017,9 @@ def _scrubbed_inductor_config_for_logging() -> str | None:
 
     if torch._inductor.config:
         try:
-            inductor_config_copy = torch._inductor.config.get_config_copy()
+            # Skips entries excluded from saved configs, such as custom passes,
+            # which can hold arbitrary objects.
+            inductor_config_copy = torch._inductor.config.get_serializable_config_copy()
         except (TypeError, AttributeError, RuntimeError, AssertionError):
             inductor_conf_str = "Inductor Config cannot be pickled"
 
@@ -2051,7 +2053,7 @@ def _functorch_config_for_logging() -> str | None:
         return None
 
     try:
-        functorch_config_copy = torch._functorch.config.get_config_copy()
+        functorch_config_copy = torch._functorch.config.get_serializable_config_copy()
     except (TypeError, AttributeError, RuntimeError, AssertionError):
         return None
 

@@ -750,6 +750,21 @@ class LazyConstantVariableTests(TestCase):
             self.assertEqual(lst, [c, t.sin()])
         self.assertEqual(counter.frame_count, 1)
 
+    def test_lazy_constant_returned_from_export(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.name = "modattr"
+
+            def forward(self, x):
+                return x.sin(), self.name, (self.name, 1), "p" + self.name
+
+        x = torch.ones(2)
+        gm, _ = torch._dynamo.export(M())(x)
+        self.assertEqual(gm(x), M()(x))
+        ep = torch.export.export(M(), (x,), strict=True)
+        self.assertEqual(ep.module()(x), M()(x))
+
 
 class ComputedLazyConstantTests(TestCase):
     hw_classification = HardwareClassification.GENERIC

@@ -197,7 +197,7 @@ void TensorImpl::set_fake_device(c10::Device fake_device) {
   if (fake_device.type() == c10::DeviceType::Meta && extra_meta_ != nullptr) {
     const auto& mode = extra_meta_->fake_tensor_mode_;
     TORCH_CHECK(
-        mode == nullptr || mode->allow_meta_,
+        mode == nullptr || mode->mode->allow_meta_,
         "device.type must not be 'meta' when allow_meta is False");
   }
 
@@ -399,7 +399,7 @@ void TensorImpl::release_resources() {
   if (extra_meta_ && extra_meta_->fake_constant_) {
     auto mode = extra_meta_->fake_tensor_mode_;
     TORCH_INTERNAL_ASSERT(mode);
-    mode->clear_constant(this);
+    mode->mode->clear_constant(this);
   }
   autograd_meta_.reset();
   if (storage_) {
@@ -737,7 +737,7 @@ void TensorImpl::copy_generic_tensor_metadata(
       dest_impl->extra_meta_->fake_constant_) {
     auto mode = dest_impl->extra_meta_->fake_tensor_mode_;
     TORCH_INTERNAL_ASSERT(mode);
-    mode->set_constant(dest_impl, nullptr);
+    mode->mode->set_constant(dest_impl, nullptr);
   }
   if (src_impl->extra_meta_ != nullptr) {
     dest_impl->extra_meta_ = src_impl->extra_meta_->clone();
