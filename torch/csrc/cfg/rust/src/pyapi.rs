@@ -1,7 +1,7 @@
 //! The Python face of the crate: compiled functions, and the view of a region
 //! handed to passes written in Python.
 
-use crate::bytecode::OpcodeTable;
+use crate::bytecode::{self, OpcodeTable};
 use crate::capi::{self, TcfgApi, TCFG_API_VERSION};
 use crate::frontend;
 use crate::ir::*;
@@ -10,7 +10,7 @@ use crate::spec::{self, CfgPass, PassCx, Pipeline, PyPass, Unit, ValueObs};
 use crate::vm::{Compiled, Options};
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyCapsule, PyDict, PyList, PyTuple};
+use pyo3::types::{PyBytes, PyCapsule, PyDict, PyList, PyTuple};
 use std::cell::Cell;
 use std::ptr::null_mut;
 use std::sync::atomic::Ordering;
@@ -27,6 +27,22 @@ pub fn init(capsule: &Bound<'_, PyCapsule>) -> PyResult<()> {
     }
     capi::set_api(api);
     Ok(())
+}
+
+/// The instructions the frontend sees in a code object, as (offset, opcode
+/// name, argument, jump target) tuples.
+#[pyfunction]
+pub fn decode(
+    py: Python<'_>,
+    code: &Bound<'_, PyAny>,
+) -> PyResult<Vec<(u32, String, u32, Option<u32>)>> {
+    let table = OpcodeTable::load(py)?;
+    let co_code = code.getattr("co_code")?;
+    let co_code = co_code.downcast::<PyBytes>()?;
+    Ok(bytecode::decode(&table, co_code)
+        .into_iter()
+        .map(|ins| (ins.off, table.names[ins.code as usize].clone(), ins.arg, ins.target))
+        .collect())
 }
 
 #[pyfunction]
