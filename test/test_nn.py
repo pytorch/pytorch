@@ -7874,14 +7874,27 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     def test_rmsnorm_mixed_dtype_weight_dispatches_to_fused(self, device):
-        X = torch.randn(64, 256, dtype=torch.bfloat16, device=device)
+        X = torch.randn(64, 256, dtype=torch.bfloat16, device=device, requires_grad=True)
         w = torch.randn(256, dtype=torch.float32, device=device)
-        with warnings.catch_warnings(record=True) as ws:
-            warnings.simplefilter("always")
-            torch.nn.functional.rms_norm(X, (256,), w, 1e-5)
-        self.assertFalse(
-            any("Cannot dispatch to fused" in str(w_.message) for w_ in ws)
+        Y = torch.nn.functional.rms_norm(X, (256,), w, 1e-5)
+        # The composite fallback gives ToCopyBackward0.
+        self.assertEqual(Y.grad_fn.name(), "FusedRmsNormBackward0")
+
+    @onlyCUDA
+    def test_rmsnorm_mixed_dtype_weight_unsupported(self, device):
+        # rms_norm sends these pairs to the composite, so call the fused ops directly.
+        cases = (
+            (torch.bfloat16, torch.float16, "expect parameter to have scalar type of Float"),
+            (torch.float64, torch.float32, "all inputs must share same datatype"),
         )
+        for X_dtype, w_dtype, msg in cases:
+            X = torch.randn(4, 8, dtype=X_dtype, device=device)
+            w = torch.randn(8, dtype=w_dtype, device=device)
+            rstd = torch.ones(4, 1, device=device)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.ops.aten._fused_rms_norm(X, [8], w, 1e-5)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.ops.aten._fused_rms_norm_backward(X, X, [8], rstd, w, [True, True])
 
     # Shapes reach each MPS layer_norm backward path the OpInfo samples miss: rows split into chunks (2, 20001), rows
     # too long for registers (2, 4097), one threadgroup per row with wide weight and bias grad tiles split across rows

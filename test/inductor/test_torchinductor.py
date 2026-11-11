@@ -19209,13 +19209,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     # Default mode elides the downcast-upcast pairs that would expose a weight grad
     # rounded to the input dtype, so emulate_precision_casts keeps them. Lite mode runs
     # the kernel and checks its outputs against the meta dtype.
+    @skip_if_device(
+        lambda device: device != "cuda",
+        "only the CUDA kernel takes a mixed-dtype weight",
+    )
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize("mode", ("default", "lite"))
     @config.patch(emulate_precision_casts=True)
     def test_rms_norm_mixed_dtype_weight_backward(self, dtype, mode):
-        if self.device != "cuda":
-            raise unittest.SkipTest("only the CUDA kernel takes a mixed-dtype weight")
-
         def f(x, weight):
             # A literal stays static in the dynamic-shapes suites. Lite mode fails on a
             # symbolic normalized_shape for any weight dtype.

@@ -1590,7 +1590,7 @@ void cuComputeGradInput(
       // Optimization for ROCm MI100
       for( int l = 0; l < N ; l += numx) {
         int idx = l + thrx;
-        const T_ACC gamma_idx = static_cast<T_ACC>((idx<N) ? gamma[idx] : T(0));
+        const T_ACC gamma_idx = (idx<N) ? static_cast<T_ACC>(gamma[idx]) : T_ACC(0);
         const T_ACC c_h = static_cast<T_ACC>((idx<N) ? k_input[idx] : T(0));
         const T_ACC c_loss = static_cast<T_ACC>((idx<N) ? k_dout[idx] : T(0));
         if constexpr (!rms_norm){
@@ -2032,6 +2032,9 @@ std::tuple<Tensor, Tensor> _fused_rms_norm_cuda(
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
+  if (is_mixed_type(input, weight)) {
+    check_mixed_data_type(input, weight);
+  }
   auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, weight);
   auto M = M_N.first;
   auto N = M_N.second;
@@ -2087,6 +2090,9 @@ std::tuple<Tensor, Tensor> _fused_rms_norm_backward_cuda(
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
+  if (is_mixed_type(input, weight)) {
+    check_mixed_data_type(input, weight);
+  }
 
   auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, weight);
   auto M = M_N.first;
