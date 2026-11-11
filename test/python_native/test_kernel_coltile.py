@@ -254,10 +254,9 @@ class TestKernelColTile(TestCase):
         else:
             trait, out = T.ArgMaxOps(acc=cutlass.Float32), torch.int64
         # Stage one keys the input dtype; tiled stage two keys only the output dtypes.
-        stage1_key, stage2_key = ("coltile", key, dtype), ("coltile2t", key, (out,))
-        for k in [k for k in ct._CACHE if k[:3] in (stage1_key, stage2_key)]:
-            del ct._CACHE[k]
-        got = ct.reduce_col_tile(trait, key, x, out)
+        tkey = f"{key}_c4095_geom"
+        stage1_key, stage2_key = ("coltile", tkey, dtype), ("coltile2t", tkey, (out,))
+        got = ct.reduce_col_tile(trait, tkey, x, out)
         # Stage-one keys end with TileReduce.cache_sig.
         varied = {
             "vec": (1, 2),
