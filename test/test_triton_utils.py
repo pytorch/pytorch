@@ -6,11 +6,17 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.utils import _triton as triton_utils
 
 
 class TestTritonUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _run_triton_backend_load_failure(self, exc, env):
         driver_mod = importlib.import_module("triton.runtime.driver")
         fake_driver = SimpleNamespace(
@@ -85,6 +91,10 @@ class TestTritonUtils(TestCase):
                         triton_utils.triton_backend()
             finally:
                 triton_utils.triton_backend.cache_clear()
+
+
+class TestTritonUtilsCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
 
     def test_cuda_tma_device_rejects_rocm_with_cpu_backend(self):
         triton_utils.has_triton_cuda_tma_device.cache_clear()

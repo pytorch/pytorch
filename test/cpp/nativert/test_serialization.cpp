@@ -414,4 +414,53 @@ TEST(SerializationTest, NoneInputValueHasNullProducer) {
   FAIL() << "Could not find the None input 'optional_arg' on 'some.op.default'";
 }
 
+// Deserializes a graph whose signature declares numSpecs user inputs while the
+// graph itself has numInputs inputs, and expects the count mismatch error.
+void expectInputCountMismatch(size_t numSpecs, size_t numInputs) {
+  std::vector<torch::_export::Argument> inputs;
+  std::vector<torch::_export::InputSpec> specs;
+  for (size_t i = 0; i < std::max(numSpecs, numInputs); ++i) {
+    torch::_export::Argument arg;
+    arg.set_as_tensor(makeTensorArg("x" + std::to_string(i)));
+    if (i < numInputs) {
+      inputs.push_back(arg);
+    }
+    if (i < numSpecs) {
+      torch::_export::UserInputSpec userInput;
+      userInput.set_arg(arg);
+      torch::_export::InputSpec spec;
+      spec.set_user_input(userInput);
+      specs.push_back(spec);
+    }
+  }
+  torch::_export::Graph jsonGraph;
+  jsonGraph.set_inputs(inputs);
+  torch::_export::GraphSignature sig;
+  sig.set_input_specs(specs);
+  torch::_export::GraphModule graphModule;
+  graphModule.set_graph(jsonGraph);
+  graphModule.set_signature(sig);
+
+  try {
+    jsonToGraph(graphModule);
+  } catch (const std::exception& e) {
+    EXPECT_NE(
+        std::string(e.what()).find(
+            "Graph signature declares " + std::to_string(numSpecs) +
+            " inputs but the graph has " + std::to_string(numInputs)),
+        std::string::npos)
+        << e.what();
+    return;
+  }
+  FAIL() << "Expected an input count mismatch error";
+}
+
+TEST(SerializationTest, MoreGraphInputsThanInputSpecs) {
+  expectInputCountMismatch(1, 2);
+}
+
+TEST(SerializationTest, MoreInputSpecsThanGraphInputs) {
+  expectInputCountMismatch(2, 1);
+}
+
 } // namespace torch::nativert
