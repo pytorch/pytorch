@@ -3348,6 +3348,23 @@ class TestTorchDeviceType(TestCase):
                 expected = expected.view(-1, *([1] * (got.dim() - 1))).expand_as(got)
                 self.assertEqual(got, expected, atol=0, rtol=0)
 
+    @onlyCUDA
+    @dtypes(torch.uint8, torch.int16, torch.half)
+    def test_cumsum_cumprod_last_dim_unaligned(self, device, dtype):
+        # Long rows with an odd length that start one element into their storage. On ROCm these
+        # are split into chunks and read without vector accesses.
+        for shape in ((1_000_003,), (3, 100_003)):
+            if dtype.is_floating_point:
+                op = torch.cumprod
+                x = torch.tensor([-1, 1], dtype=dtype)[torch.randint(2, shape)]
+            else:
+                op = torch.cumsum
+                x = make_tensor(shape, dtype=dtype, device="cpu")
+            expected = op(x, -1, dtype=dtype)
+            x_off = torch.empty(x.numel() + 1, dtype=dtype, device=device)[1:].view(shape)
+            x_off.copy_(x)
+            self.assertEqual(op(x_off, -1, dtype=dtype), expected, atol=0, rtol=0)
+
     def _test_cumminmax_helper(self, x, fn, expected_val, expected_ind):
         val, ind = fn(x, -1)
         self.assertEqual(val, expected_val, atol=0, rtol=0)
