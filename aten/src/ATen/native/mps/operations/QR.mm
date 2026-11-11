@@ -35,12 +35,12 @@ static GeqrfParams<> get_geqrf_params(const Tensor& A, const Tensor& tau) {
   TORCH_CHECK_NOT_IMPLEMENTED(A.dim() <= c10::metal::max_ndim, "MPS QR: at most ", c10::metal::max_ndim, " dims");
   TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(A) && canUse32BitIndexMath(tau),
                               "MPS QR requires tensors addressable with 32-bit indices");
-  GeqrfParams params{.num_batch_dims = c10::safe_conv<int32_t>(A.dim() - 2, "int32_t")};
+  GeqrfParams params{.num_batch_dims = c10::safe_conv<int32_t>(A.dim() - 2, "number of batch dimensions in A")};
   for (const auto dim : c10::irange(A.dim())) {
-    params.A_sizes[dim] = c10::safe_conv<uint32_t>(A.size(dim), "uint32_t");
-    params.A_strides[dim] = c10::safe_conv<uint32_t>(A.stride(dim), "uint32_t");
+    params.A_sizes[dim] = c10::safe_conv<uint32_t>(A.size(dim), "A size");
+    params.A_strides[dim] = c10::safe_conv<uint32_t>(A.stride(dim), "A stride");
     if (dim < tau.dim()) {
-      params.tau_strides[dim] = c10::safe_conv<uint32_t>(tau.stride(dim), "uint32_t");
+      params.tau_strides[dim] = c10::safe_conv<uint32_t>(tau.stride(dim), "tau stride");
     }
   }
   return params;
