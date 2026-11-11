@@ -93,7 +93,7 @@ class MaybeOwned final {
   // chains of borrowing by default! (Note you could get that behavior
   // with MaybeOwned<T>::borrowed(*rhs) if you wanted it.)
   MaybeOwned(const MaybeOwned& rhs) : isBorrowed_(rhs.isBorrowed_) {
-    if (C10_LIKELY(rhs.isBorrowed_)) {
+    if (rhs.isBorrowed_) [[likely]] {
       MaybeOwnedTraits<T>::assignBorrow(borrow_, rhs.borrow_);
     } else {
       new (&own_) T(rhs.own_);
@@ -104,7 +104,7 @@ class MaybeOwned final {
     if (this == &rhs) {
       return *this;
     }
-    if (C10_UNLIKELY(!isBorrowed_)) {
+    if (!isBorrowed_) [[unlikely]] {
       if (rhs.isBorrowed_) {
         own_.~T();
         MaybeOwnedTraits<T>::assignBorrow(borrow_, rhs.borrow_);
@@ -113,7 +113,7 @@ class MaybeOwned final {
         own_ = rhs.own_;
       }
     } else {
-      if (C10_LIKELY(rhs.isBorrowed_)) {
+      if (rhs.isBorrowed_) [[likely]] {
         MaybeOwnedTraits<T>::assignBorrow(borrow_, rhs.borrow_);
       } else {
         MaybeOwnedTraits<T>::destroyBorrow(borrow_);
@@ -130,7 +130,7 @@ class MaybeOwned final {
       std::is_nothrow_move_constructible_v<T> &&
       std::is_nothrow_move_assignable_v<borrow_type>)
       : isBorrowed_(rhs.isBorrowed_) {
-    if (C10_LIKELY(rhs.isBorrowed_)) {
+    if (rhs.isBorrowed_) [[likely]] {
       MaybeOwnedTraits<T>::assignBorrow(borrow_, rhs.borrow_);
     } else {
       new (&own_) T(std::move(rhs.own_));
@@ -147,7 +147,7 @@ class MaybeOwned final {
     if (this == &rhs) {
       return *this;
     }
-    if (C10_UNLIKELY(!isBorrowed_)) {
+    if (!isBorrowed_) [[unlikely]] {
       if (rhs.isBorrowed_) {
         own_.~T();
         MaybeOwnedTraits<T>::assignBorrow(borrow_, rhs.borrow_);
@@ -156,7 +156,7 @@ class MaybeOwned final {
         own_ = std::move(rhs.own_);
       }
     } else {
-      if (C10_LIKELY(rhs.isBorrowed_)) {
+      if (rhs.isBorrowed_) [[likely]] {
         MaybeOwnedTraits<T>::assignBorrow(borrow_, rhs.borrow_);
       } else {
         MaybeOwnedTraits<T>::destroyBorrow(borrow_);
@@ -185,7 +185,7 @@ class MaybeOwned final {
       // NOLINTNEXTLINE(*-noexcept-destructor)
       std::is_nothrow_destructible_v<T> &&
       std::is_nothrow_destructible_v<borrow_type>) {
-    if (C10_UNLIKELY(!isBorrowed_)) {
+    if (!isBorrowed_) [[unlikely]] {
       own_.~T();
     } else {
       MaybeOwnedTraits<T>::destroyBorrow(borrow_);
