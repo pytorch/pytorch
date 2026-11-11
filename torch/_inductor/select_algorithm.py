@@ -1826,11 +1826,15 @@ class TritonTemplateKernel(TritonKernel):
                     indices, index_symbols, lengths, mask
                 )
                 if vector_masks is not None:
-                    if len(indices) != 2 or val_shape is None or len(val_shape) != 2:
+                    if (
+                        len(indices) != 2
+                        or not isinstance(val_shape, tuple)
+                        or len(val_shape) != 2
+                    ):
                         raise AssertionError(
                             "vector_masks requires a 2D output with val_shape"
                         )
-                    block_m, block_n = val_shape
+                    block_m, block_n = val_shape[0], val_shape[-1]
                     self.template_vector_masks = {
                         indices[0]: (vector_masks[0], (block_m, "1")),
                         indices[1]: (vector_masks[1], ("1", block_n)),
