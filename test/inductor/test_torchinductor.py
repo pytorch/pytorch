@@ -20960,10 +20960,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # operations is the same for compiled and eager execution.
         def fn(x):
             y = x * 2 + x
-            out = [y.float(), y > 50, (~x) // 3, (x << 3).float(), (x - 100) // 3]
-            if x.dtype.is_signed:
-                out.append((x // -1).float())
-            return out
+            return [y.float(), y > 50, (~x).float(), (x << 3).float(), (x - 100).float()]
 
         info = torch.iinfo(dtype)
         spread = torch.arange(-128, 128) * max(1, info.max // 127)

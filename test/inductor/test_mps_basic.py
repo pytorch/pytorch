@@ -57,15 +57,21 @@ class MPSBasicTests(TestCase):
             check_lowp=False,
         )
 
-    @parametrize("dtype", [torch.int8, torch.int16])
-    def test_small_int_truncdiv_min_by_neg1(self, dtype):
-        # Truncating division of the minimum value by -1 must wrap like eager
+    @parametrize("dtype", [torch.uint8, torch.int8, torch.int16])
+    def test_small_int_division_wraps(self, dtype):
+        # Floor and truncating division, including min // -1, must wrap like eager
         def fn(x):
-            return torch.div(x, -1, rounding_mode="trunc").float()
+            out = [(~x) // 3, (x - 100) // 3]
+            if x.dtype.is_signed:
+                out.append((x // -1).float())
+                out.append(torch.div(x, -1, rounding_mode="trunc").float())
+            return out
 
         info = torch.iinfo(dtype)
-        x = torch.tensor([info.min, info.min + 1, -1, 0, 1, info.max], dtype=dtype)
-        self.common(fn, (x.to(self.device),), check_lowp=False)
+        spread = torch.arange(-128, 128) * max(1, info.max // 127)
+        edges = torch.tensor([info.min, info.min + 1, -1, 0, 1, info.max - 1, info.max])
+        x = torch.cat([spread, edges]).to(dtype).to(self.device)
+        self.common(fn, (x,), check_lowp=False)
 
     def test_log(self):
         self.common(lambda x: x.log(), (torch.rand(1024),))
