@@ -612,7 +612,7 @@ def _kl_continuous_bernoulli_uniform(p, q):
             torch.ge(q.low, p.support.lower_bound),
             torch.le(q.high, p.support.upper_bound),
         ),
-        torch.ones_like(result) * inf,
+        inf,
         result,
     )
 
@@ -881,7 +881,7 @@ def _kl_uniform_continuous_bernoulli(p, q):
             torch.ge(p.high, q.support.upper_bound),
             torch.le(p.low, q.support.lower_bound),
         ),
-        torch.ones_like(result) * inf,
+        inf,
         result,
     )
 
