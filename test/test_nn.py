@@ -16775,17 +16775,18 @@ class TestNNDeviceType(NNTestCase):
                     )
 
     def test_functional_batch_norm_non_1d_params(self, device):
-
         x = torch.randn(3, 5, 4, 4, device=device)
         w_base = torch.randn(5, 1, 1, 1, device=device)
         b_base = torch.randn(1, 5, device=device)
 
-        contexts = [contextlib.nullcontext()]
-        if self.device_type == "cuda":
-            contexts.append(torch.backends.cudnn.flags(enabled=False))
-
-        for ctx in contexts:
+        cudnn_modes = [True, False] if self.device_type == "cuda" else [True]
+        for cudnn_enabled in cudnn_modes:
             for training in (True, False):
+                ctx = (
+                    contextlib.nullcontext()
+                    if cudnn_enabled
+                    else torch.backends.cudnn.flags(enabled=False)
+                )
                 with ctx:
                     w = w_base.clone().requires_grad_()
                     b = b_base.clone().requires_grad_()
@@ -16810,7 +16811,45 @@ class TestNNDeviceType(NNTestCase):
                     self.assertEqual(w.grad.view(-1), w_ref.grad)
                     self.assertEqual(b.grad.view(-1), b_ref.grad)
 
-    @skipMPS
+        empty_out = F.batch_norm(
+            torch.empty(0, 5, 2, 2, device=device),
+            torch.zeros(5, device=device),
+            torch.ones(5, device=device),
+            weight=w_base.detach(),
+            bias=b_base.detach(),
+            training=True,
+        )
+        self.assertEqual(empty_out.shape, (0, 5, 2, 2))
+
+    @skipIfTorchDynamo("decompositions.py expects 1D running_mean and running_var")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "decompositions.py expects 1D running_mean and running_var")
+    def test_functional_batch_norm_non_1d_running_stats(self, device):
+        x = torch.randn(3, 5, 4, 4, device=device)
+        w = torch.randn(5, device=device)
+        b = torch.randn(5, device=device)
+
+        cudnn_modes = [True, False] if self.device_type == "cuda" else [True]
+        for cudnn_enabled in cudnn_modes:
+            for training in (True, False):
+                ctx = (
+                    contextlib.nullcontext()
+                    if cudnn_enabled
+                    else torch.backends.cudnn.flags(enabled=False)
+                )
+                with ctx:
+                    rm = torch.zeros(5, 1, device=device)
+                    rv = torch.ones(1, 5, device=device)
+                    rm_ref = rm.view(-1).clone()
+                    rv_ref = rv.view(-1).clone()
+
+                    out = F.batch_norm(x, rm, rv, weight=w, bias=b, training=training)
+                    out_ref = F.batch_norm(
+                        x, rm_ref, rv_ref, weight=w, bias=b, training=training
+                    )
+                    self.assertEqual(out, out_ref)
+                    self.assertEqual(rm.view(-1), rm_ref)
+                    self.assertEqual(rv.view(-1), rv_ref)
+
     def test_batch_norm_update_stats_invalid_shapes(self, device):
         # Only CPU and CUDA batch_norm_update_stats were updated; out-of-tree backends may crash.
         if self.device_type not in ("cpu", "cuda"):

@@ -568,6 +568,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   const Tensor& running_mean = running_mean_opt.value_or(Tensor());
   const Tensor& running_var = running_var_opt.value_or(Tensor());
 
+  auto flatten_param = [](const Tensor& t) {
+    return (t.defined() && t.dim() != 1) ? t.reshape({-1}) : t;
+  };
+  auto flatten_stats = [&](const Tensor& t) {
+    if (!t.defined() || t.dim() == 1) {
+      return t;
+    }
+    // Preserve aliasing when training mutates running stats in place.
+    return training ? t.view({-1}) : t.reshape({-1});
+  };
+
   if (input.sym_numel() == 0) {
     auto num_features = input.dim() > 1 ? input.sym_sizes()[1] : SymInt(0);
     Tensor reserve = at::empty({0}, input.options().dtype(kByte));
@@ -578,8 +589,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
 
     // don't return view of input, don't return empty tensor because it will break gradient chain
     auto out = input.clone();
-    if (weight.defined()) out = out * weight[0];
-    if (bias.defined()) out = out + bias[0];
+    if (weight.defined()) out = out * flatten_param(weight)[0];
+    if (bias.defined()) out = out + flatten_param(bias)[0];
     return std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t>(
         std::move(out),
         std::move(save_mean),
@@ -608,14 +619,20 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     check_dims_match_num_input_features("bias", std::move(num_features), bias.sym_numel());
   }
 
-  BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, training, eps);
+  Tensor weight_1d = flatten_param(weight);
+  Tensor bias_1d = flatten_param(bias);
+  Tensor running_mean_1d = flatten_stats(running_mean);
+  Tensor running_var_1d = flatten_stats(running_var);
+
+  BatchNormBackend backend = _select_batch_norm_backend(
+      input, weight_1d, bias_1d, running_mean_1d, running_var_1d, training, eps);
 
   if (backend == BatchNormBackend::Cudnn) {
     auto input_c = input.contiguous(input.suggest_memory_format());
-    auto weight_c = weight.contiguous();
-    auto bias_c = bias.contiguous();
-    auto rmean_c = running_mean.defined() ? running_mean.contiguous() : running_mean;
-    auto rvar_c = running_var.defined() ? running_var.contiguous() : running_var;
+    auto weight_c = weight_1d.contiguous();
+    auto bias_c = bias_1d.contiguous();
+    auto rmean_c = running_mean_1d.defined() ? running_mean_1d.contiguous() : running_mean_1d;
+    auto rvar_c = running_var_1d.defined() ? running_var_1d.contiguous() : running_var_1d;
 
     auto [output, save_mean, save_var, reserve] =
         at::cudnn_batch_norm(input_c, weight_c, bias_c, rmean_c, rvar_c,
@@ -631,32 +648,22 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     return std::tuple_cat(
              at::miopen_batch_norm(
                input.contiguous(input.suggest_memory_format()),
-               weight.contiguous(),
-               bias.contiguous(),
-               running_mean.defined() ? running_mean.contiguous() : running_mean,
-               running_var.defined() ? running_var.contiguous() : running_var,
+               weight_1d.contiguous(),
+               bias_1d.contiguous(),
+               running_mean_1d.defined() ? running_mean_1d.contiguous() : running_mean_1d,
+               running_var_1d.defined() ? running_var_1d.contiguous() : running_var_1d,
                training, momentum, eps),
              std::tuple<Tensor>(reserve),
              std::make_tuple(2));
   }
 
-  auto flatten_param = [](const Tensor& t) {
-    return (t.defined() && t.dim() != 1) ? t.reshape({-1}) : t;
-  };
-  auto flatten_stats = [&](const Tensor& t) {
-    if (!t.defined() || t.dim() == 1) {
-      return t;
-    }
-    // Preserve aliasing when training mutates running stats in place.
-    return training ? t.view({-1}) : t.reshape({-1});
-  };
   return std::tuple_cat(
            at::native_batch_norm(
              input,
-             flatten_param(weight),
-             flatten_param(bias),
-             flatten_stats(running_mean),
-             flatten_stats(running_var),
+             weight_1d,
+             bias_1d,
+             running_mean_1d,
+             running_var_1d,
              training,
              momentum,
              eps),
