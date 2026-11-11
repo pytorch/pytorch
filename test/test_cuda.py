@@ -3105,7 +3105,7 @@ raise RuntimeError("device assert did not fire")
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
         with self.assertRaisesRegex(
             RuntimeError,
-            r"value cannot be safely converted without overflow: output\.numel\(\)",
+            r"value cannot be converted to type int32_t without overflow",
         ):
             y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
 
@@ -3386,6 +3386,31 @@ torch.cuda.synchronize()
                     ]
                 )
                 self.assertTrue(r != 0)
+
+    @unittest.skipIf(
+        TEST_WITH_ROCM or IS_WINDOWS,
+        "ROCm and Windows kernel asserts don't print the message",
+    )
+    def test_fixed_cuda_assert_async_msg(self):
+        for value in ["0", "0j"]:
+            with self.subTest(value=value):
+                r = subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        f"""\
+import torch
+
+torch._assert_async(torch.tensor({value}, device='cuda'), 'assert_async custom message')
+torch.cuda.synchronize()
+""",
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn("assert_async custom message", r.stdout)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "FAIL")
     def test_cublas_multiple_threads_same_device(self):
