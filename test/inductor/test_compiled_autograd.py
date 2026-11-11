@@ -5426,6 +5426,10 @@ def wrap_test_class(orig_cls):
             ]
             dct[name] = make_wrapped(fn, ctx_fns)
 
+    # Without a GPU the inductor-backend tests are left unwrapped (see above), so
+    # only GPU jobs run them under compiled autograd. Inheriting a GENERIC label
+    # would make those jobs skip them too.
+    dct["hw_classification"] = None
     cls = type(
         orig_cls.__name__ + "WithCompiledAutograd",
         (orig_cls,),
@@ -5566,6 +5570,12 @@ known_graph_breaks_tests = {
     "test_checkpointing_without_reentrant_memory_savings",  # reentrant .backward
     "test_dtensor_basic",  # torch._dynamo.exc.Unsupported: Failed to convert args/kwargs to proxy
     "test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent",  # subclass constructor
+    # DTensor backward calls torch._C helpers that dynamo skips
+    # (_is_contiguous_or_false, _DTensor_compute_global_tensor_info), so these
+    # graph break once compiled autograd traces the backward.
+    "test_tp_linear_3d_input_dynamic_backward_style_colwise",
+    "test_tp_linear_3d_input_dynamic_backward_style_rowwise",
+    "test_dtensor_unbacked_rebuilt_sym_max_inductor",
     "test_retain_grad",  # retains_grad_hooks
     "test_retain_grad_cycle",  # retains_grad_hooks
     "test_retain_grad_inplace",  # retains_grad_hooks
@@ -5730,10 +5740,6 @@ xfail_divergence_from_eager = {
 
 skipped_tests = set()
 skipped_tests.add("test_graph_queue_callback")
-
-if not HAS_GPU_AND_TRITON:
-    # Found Tesla M60 which is too old to be supported by the triton GPU compiler
-    skipped_tests.add("test_type_conversions")
 
 if IS_S390X:
     skipped_tests.add("test_deep_reentrant")

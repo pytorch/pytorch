@@ -175,8 +175,8 @@ class WorkerServerTest(TestCase):
 
     def test_fr_trace_json_selects_a_backend(self) -> None:
         with local_worker_server() as pool:
-            # No argument reads the default instance, the one ProcessGroupGloo
-            # records into; naming a backend reads that backend's instance.
+            # No argument reads the default instance, gloo's; naming a
+            # backend reads that backend's instance.
             # Both are empty here, so this covers the routing, not the content.
             for path in (
                 "/handler/fr_trace_json",

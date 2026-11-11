@@ -76,6 +76,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_utils import (
+    decorateIf,
     disable_gc,
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -160,6 +161,11 @@ class SingleCondModel(torch.nn.Module):
 class MooType:
     def __init__(self, x):
         self.x = x
+
+
+class MethodHolder:
+    def scale(self, x):
+        return x * 2
 
 
 class CustomCompiledFunction(torch._dynamo.aot_compile.SerializableCallable):
@@ -1723,6 +1729,24 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             compiled_fn.save_compiled_function(self.path())
         self.assertIn("Cfg", str(cm.exception))
 
+    def test_load_guards_state_inside_fake_mode(self):
+        def fn(x):
+            return x + 1
+
+        opts = {"guard_filter_fn": torch.compiler.keep_tensor_guards_unsafe}
+        compiled = torch.compile(fn, fullgraph=True, backend="eager", options=opts)
+        compiled = compiled.aot_compile(((torch.randn(3),), {}))
+        # The TENSOR_MATCH guard on x is rebuilt with from_meta_and_device, which
+        # rejects fakes; unpickling the meta template under the active mode
+        # would make one
+        with FakeTensorMode() as mode:
+            guards_state = load_guards_state(compiled._artifacts.guards_state)
+            fake_key = torch._C._TorchDispatchModeKey.FAKE
+            self.assertIs(torch._C._get_dispatch_mode(fake_key), mode)
+        x = guards_state.output_graph.local_scope["x"]
+        self.assertTrue(torch._subclasses.fake_tensor.is_fake_tensor(x))
+        self.assertEqual(x.device, torch.device("cpu"))
+
     def test_aot_compile_reloads_a_helpers_annotations(self):
         # The shipping path: an annotated helper reached through
         # runtime_env.closure keeps the annotations that pickle and drops the
@@ -2432,6 +2456,37 @@ from user code:
                     ]
                 },
             ).aot_compile(((torch.ones(3),), {}))
+
+    def test_aot_compile_user_method_code_guard(self):
+        # obj.scale(x) guards scale's __code__ on the class __dict__ source.
+        # skip_guard_on_globals_unsafe keeps that local-rooted guard, so it is
+        # saved as a code check, and the loaded artifact still enforces it.
+        def fn(obj, x):
+            return obj.scale(x) + 1
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        obj, x = MethodHolder(), torch.ones(3)
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            backend=backend,
+            options={"guard_filter_fn": torch.compiler.skip_guard_on_globals_unsafe},
+        ).aot_compile(((obj, x), {}))
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(obj, x), fn(obj, x))
+
+        original = MethodHolder.scale.__code__
+        MethodHolder.scale.__code__ = (lambda self, x: x * 3).__code__
+        try:
+            with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+                loaded(obj, x)
+        finally:
+            MethodHolder.scale.__code__ = original
 
     def test_aot_compile_basic_fn_inductor(self):
         def fn(x, y):
@@ -9324,6 +9379,11 @@ from user code:
         )
         _run_in_subprocess(functools.partial(_subprocess_load_then_compile, path))
 
+    @decorateIf(
+        unittest.skip("inlined comprehensions are 3.12+"),
+        lambda params: params["mint_site"] == "comprehension"
+        and sys.version_info < (3, 12),
+    )
     @parametrize("mint_site", ("install_global", "resume_function", "comprehension"))
     def test_mint_skips_a_name_baked_in_by_another_process(self, mint_site):
         # A load in a fresh process binds names its own counter is still behind:

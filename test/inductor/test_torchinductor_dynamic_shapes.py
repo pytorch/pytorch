@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import importlib
+import inspect
 import math
 import operator
 import os
@@ -28,6 +29,7 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_FBCODE,
     MI350_ARCH,
@@ -40,10 +42,10 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CPU,
     HAS_GPU,
     HAS_MPS,
     patch_inductor_backend,
+    RUN_CPU,
 )
 
 
@@ -81,11 +83,6 @@ test_failures = {
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
-    # This fails on periodic CPU shards but passes on other CPU configurations,
-    # so skip it instead of producing unexpected successes.
-    "test_index_propagation_to_dtype_inf_dynamic_shapes": TestFailure(
-        ("cpu",), is_skip=True
-    ),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
@@ -106,12 +103,22 @@ if any(os.getenv("BUILD_ENVIRONMENT", "").endswith(x) for x in ("-debug", "-asan
 
 
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
+    def skip_dynamic_failures(test):
+        if inspect.unwrap(test).__name__ in (
+            "test_conv_transpose2d_forward_triton",
+            "test_conv_transpose2d_output_padding_triton",
+            "test_conv_transpose1d_triton_fallback",
+        ):
+            return unittest.skip("Expected codegen failure under dynamic shapes")(test)
+        return test
+
     return make_test_cls_with_patches(
         cls,
         "DynamicShapes",
         "_dynamic_shapes",
         (torch._dynamo.config, "assume_static_by_default", False),
         xfail_prop=xfail_prop,
+        decorator=skip_dynamic_failures,
     )
 
 
@@ -169,9 +176,10 @@ class DynamicShapesOpTests:
         )
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class DynamicShapesCpuTests(DynamicShapesOpTests, TestCase):
+        hw_classification = HardwareClassification.CPU
         common = check_model
         device = "cpu"
 
@@ -255,14 +263,11 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
         )
 
 
+@unittest.skipIf(not HAS_GPU, "Triton not available")
 class TestInductorDynamic(DynamicShapesTestCase):
     compile_fn = staticmethod(partial(torch.compile, dynamic=True))
 
     def setUp(self):
-        # HAS_CUDA_AND_TRITON also checks compute capability to skip tests
-        # on older devices
-        if not HAS_GPU:
-            self.skipTest("Triton not available")
         torch._dynamo.reset()
         super().setUp()
         # this should be in setUpClass, but device-generic tests
@@ -1645,5 +1650,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
+    if (RUN_CPU or HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")
