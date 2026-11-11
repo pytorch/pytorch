@@ -3285,7 +3285,11 @@ class TestTorchDeviceType(TestCase):
         for shape, dim in cases:
             x = torch.randn(shape, dtype=dtype, device=device)
             expected = torch.logcumsumexp(x.cpu().double(), dim).to(dtype)
-            self.assertEqual(torch.logcumsumexp(x, dim), expected)
+            tol = {}
+            if not TEST_WITH_ROCM and dtype == torch.float and shape[dim] > 4096:
+                # CUDA scans each column serially, so float32 rounding error grows with the scan length.
+                tol = {"atol": 1e-5, "rtol": 2e-5}
+            self.assertEqual(torch.logcumsumexp(x, dim), expected, **tol)
 
     def _test_cumminmax_helper(self, x, fn, expected_val, expected_ind):
         val, ind = fn(x, -1)
