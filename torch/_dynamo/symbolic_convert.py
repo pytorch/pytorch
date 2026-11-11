@@ -1907,7 +1907,7 @@ class InstructionTranslatorBase(
 
         # Store the latest 20 bytecode execution for the process,
         # Used repr for byte processing and limiting the length to 2048
-        if self.is_verbose:
+        if self._is_verbose:
             try:
                 stack_repr = repr(self.stack)
             except ValueError:
@@ -5547,7 +5547,7 @@ class InstructionTranslatorBase(
             logging.DEBUG
         )
         # Read once: config attribute access is slow and step() is hot.
-        self.is_verbose: bool = config.verbose
+        self._is_verbose: bool = config.verbose
         linecache.lazycache(f_code.co_filename, f_globals)
 
 
