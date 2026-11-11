@@ -36,7 +36,7 @@ constexpr int kSslErrorWantRead = 2;
 constexpr int kSslErrorZeroReturn = 6;
 constexpr long kX509VOk = 0;
 
-// Plaintext encrypted per SSL_write, bounding the buffered ciphertext.
+// Plaintext per SSL_write, bounding the BIO buffer, not the full response.
 constexpr size_t kWriteChunk = 1 << 20;
 // TLS records carry up to 16KiB of plaintext and less than 64 bytes overhead.
 constexpr size_t kRecordSize = 16 * 1024;
@@ -592,13 +592,14 @@ bool TLSSession::recvSome(int socket, std::optional<Deadline> deadline) {
     auto remaining = std::chrono::ceil<std::chrono::milliseconds>(
         *deadline - std::chrono::steady_clock::now());
     auto pfd = tcputil::getPollfd(socket, POLLIN);
-    int res = 0;
-    SYSCHECK_ERR_RETURN_NEG1(
-        res = tcputil::poll(
-            &pfd,
-            1,
-            static_cast<int>(
-                std::clamp<int64_t>(remaining.count(), 0, INT_MAX))))
+    int res = tcputil::poll(
+        &pfd,
+        1,
+        static_cast<int>(std::clamp<int64_t>(remaining.count(), 0, INT_MAX)));
+    // Retry interrupted polls here so each attempt recomputes the deadline.
+    if (res < 0 && errno != EINTR) {
+      C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(errno));
+    }
     if (res > 0) {
       break;
     }
