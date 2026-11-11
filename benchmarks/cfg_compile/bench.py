@@ -91,9 +91,21 @@ def workloads(size, device):
     return [
         ("chain of 9 ops", chain, (r(size), r(size))),
         ("for loop, 10 x (3 ops + branch)", for_loop, (r(size), r(size), 10)),
-        ("while loop on a tensor value", while_loop, (torch.ones(size, device=device),)),
-        ("2-layer MLP (addmm)", mlp, (r(8, size), r(size, size), r(size), r(size, size), r(size))),
-        ("Python loop over 8 tensors", python_heavy, ([r(size) for _ in range(8)], 2.0)),
+        (
+            "while loop on a tensor value",
+            while_loop,
+            (torch.ones(size, device=device),),
+        ),
+        (
+            "2-layer MLP (addmm)",
+            mlp,
+            (r(8, size), r(size, size), r(size), r(size, size), r(size)),
+        ),
+        (
+            "Python loop over 8 tensors",
+            python_heavy,
+            ([r(size) for _ in range(8)], 2.0),
+        ),
     ]
 
 
@@ -155,7 +167,9 @@ def compare(fns, args, device, budget_ns=2e8, rounds=5):
 
 def compiled_modes(fn, modes=MODES):
     return {
-        mode: fn if mode == "eager" else torch.cfg_compile(fn, fallback=False, **MODE_OPTIONS[mode])
+        mode: fn
+        if mode == "eager"
+        else torch.cfg_compile(fn, fallback=False, **MODE_OPTIONS[mode])
         for mode in modes
     }
 
@@ -164,13 +178,24 @@ def bench_workloads(sizes, device):
     rows = []
     for size in sizes:
         for name, fn, args in workloads(size, device):
-            rows.append({"name": name, "size": size, "ns": compare(compiled_modes(fn), args, device)})
+            rows.append(
+                {
+                    "name": name,
+                    "size": size,
+                    "ns": compare(compiled_modes(fn), args, device),
+                }
+            )
     return rows
 
 
 def bench_ops(device):
     return [
-        {"name": name, "ns": compare(compiled_modes(fn, ["eager", "generic", "unboxed"]), args, device)}
+        {
+            "name": name,
+            "ns": compare(
+                compiled_modes(fn, ["eager", "generic", "unboxed"]), args, device
+            ),
+        }
         for name, fn, args in single_ops(device)
     ]
 
@@ -218,7 +243,9 @@ def bench_autograd(device):
     fns = compiled_modes(chain, ["eager", "unboxed"])
     return {
         "forward": compare(fns, (x, w), device),
-        "forward_backward": compare({k: forward_backward(f) for k, f in fns.items()}, (x, w), device),
+        "forward_backward": compare(
+            {k: forward_backward(f) for k, f in fns.items()}, (x, w), device
+        ),
     }
 
 
@@ -228,12 +255,17 @@ def bench_narrowing(device):
     pipeline = torch.cfg_compile.Pipeline
     y = torch.randn(1, 16, device=device)
     out = {}
-    for label, pipe in (("default", pipeline.default()), ("narrowing", pipeline.narrowing())):
+    for label, pipe in (
+        ("default", pipeline.default()),
+        ("narrowing", pipeline.narrowing()),
+    ):
         compiled = torch.cfg_compile(shape_branch, pipeline=pipe, fallback=False)
         timings = {}
         for batch in (1, 8):
             x = torch.randn(batch, 16, device=device)
-            timings[batch] = compare({"eager": shape_branch, "cfg": compiled}, (x, y), device)
+            timings[batch] = compare(
+                {"eager": shape_branch, "cfg": compiled}, (x, y), device
+            )
         for batch in (1, 8, 3, 1, 64, 1, 2):
             compiled(torch.randn(batch, 16, device=device), y)
         stats = compiled.stats()["blocks"]
@@ -248,7 +280,10 @@ def bench_narrowing(device):
 def bench_unboxing(device):
     args = (torch.randn(64, device=device), torch.randn(64, device=device), 10)
     out = {}
-    for name, fn, a in (("chain of 9 ops", chain, args[:2]), ("for loop, 10 x (3 ops + branch)", for_loop, args)):
+    for name, fn, a in (
+        ("chain of 9 ops", chain, args[:2]),
+        ("for loop, 10 x (3 ops + branch)", for_loop, args),
+    ):
         compiled = torch.cfg_compile(fn, fallback=False)
         for _ in range(3):
             compiled(*a)
@@ -257,8 +292,12 @@ def bench_unboxing(device):
             compiled(*a)
         after = compiled.stats()
         out[name] = {
-            "kernel_results_per_call": (after["unboxed_results"] - before["unboxed_results"]) / 100,
-            "python_objects_per_call": (after["boxed_later"] - before["boxed_later"]) / 100,
+            "kernel_results_per_call": (
+                after["unboxed_results"] - before["unboxed_results"]
+            )
+            / 100,
+            "python_objects_per_call": (after["boxed_later"] - before["boxed_later"])
+            / 100,
         }
     return out
 
@@ -271,7 +310,11 @@ def chart(title, labels, values, axis, low=0.0, high=None):
     high = high if high is not None else max(values) * 1.15
     labels = ", ".join(f'"{label}"' for label in labels)
     values = ", ".join(f"{v:.2f}" for v in values)
-    init = '%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "' + COLOR + '"}}}}%%'
+    init = (
+        '%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "'
+        + COLOR
+        + '"}}}}%%'
+    )
     return (
         f"```mermaid\n{init}\nxychart-beta horizontal\n"
         f'    title "{title}"\n    x-axis [{labels}]\n'
@@ -288,11 +331,15 @@ def report(results, charts):
     )
 
     out.append("### Workloads\n")
-    out.append("| workload | size | eager | generic | sites | skip autograd | unboxed | speedup |")
+    out.append(
+        "| workload | size | eager | generic | sites | skip autograd | unboxed | speedup |"
+    )
     out.append("|---|---:|---:|---:|---:|---:|---:|---:|")
     for row in results["workloads"]:
         cells = " | ".join(f"{row['ns'][m]:,.0f}" for m in MODES)
-        out.append(f"| {row['name']} | {row['size']} | {cells} | **{speedup(row, 'unboxed'):.2f}x** |")
+        out.append(
+            f"| {row['name']} | {row['size']} | {cells} | **{speedup(row, 'unboxed'):.2f}x** |"
+        )
     out.append("")
     if charts:
         for size in sorted({row["size"] for row in results["workloads"]}):
@@ -335,7 +382,11 @@ def report(results, charts):
                 [row["name"] for row in rows],
                 [row["ns"]["eager"] - row["ns"]["unboxed"] for row in rows],
                 "ns saved (eager - cfg)",
-                low=min(0.0, min(row["ns"]["eager"] - row["ns"]["unboxed"] for row in rows) * 1.15),
+                low=min(
+                    0.0,
+                    min(row["ns"]["eager"] - row["ns"]["unboxed"] for row in rows)
+                    * 1.15,
+                ),
             )
         )
 
@@ -343,35 +394,50 @@ def report(results, charts):
     out.append("### Warm-up (for loop, 64 elements)\n")
     out.append("| step | time (us) |")
     out.append("|---|---:|")
-    out.append(f"| `torch.cfg_compile(fn)`: bytecode to SSA | {warm['build'] / 1e3:,.1f} |")
+    out.append(
+        f"| `torch.cfg_compile(fn)`: bytecode to SSA | {warm['build'] / 1e3:,.1f} |"
+    )
     for i, t in enumerate(warm["calls"]):
         out.append(f"| call {i + 1} | {t / 1e3:,.1f} |")
     out.append(f"| steady state | {warm['steady'] / 1e3:,.1f} |")
     out.append(f"| eager | {warm['eager'] / 1e3:,.1f} |")
     out.append("")
     if warm["break_even_calls"] is not None:
-        out.append(f"The one-off cost is paid back after about {warm['break_even_calls']:.0f} calls.\n")
+        out.append(
+            f"The one-off cost is paid back after about {warm['break_even_calls']:.0f} calls.\n"
+        )
     if charts:
         out.append(
             chart(
                 "Cost of the first calls",
-                [f"call {i + 1}" for i in range(len(warm["calls"]))] + ["steady state", "eager"],
-                [t / 1e3 for t in warm["calls"]] + [warm["steady"] / 1e3, warm["eager"] / 1e3],
+                [f"call {i + 1}" for i in range(len(warm["calls"]))]
+                + ["steady state", "eager"],
+                [t / 1e3 for t in warm["calls"]]
+                + [warm["steady"] / 1e3, warm["eager"] / 1e3],
                 "time per call (us)",
             )
         )
 
     grad = results["autograd"]
-    out.append("### With a gradient (chain of 9 ops, 64 elements, one input requires grad)\n")
+    out.append(
+        "### With a gradient (chain of 9 ops, 64 elements, one input requires grad)\n"
+    )
     out.append("| | eager | cfg | speedup |")
     out.append("|---|---:|---:|---:|")
-    for key, label in (("forward", "forward"), ("forward_backward", "forward + backward")):
+    for key, label in (
+        ("forward", "forward"),
+        ("forward_backward", "forward + backward"),
+    ):
         ns = grad[key]
-        out.append(f"| {label} | {ns['eager']:,.0f} | {ns['unboxed']:,.0f} | {ns['eager'] / ns['unboxed']:.2f}x |")
+        out.append(
+            f"| {label} | {ns['eager']:,.0f} | {ns['unboxed']:,.0f} | {ns['eager'] / ns['unboxed']:.2f}x |"
+        )
     out.append("")
 
     out.append("### Shape-dependent control flow\n")
-    out.append("| pipeline | batch 1: eager | cfg | batch 8: eager | cfg | profile runs per block | versions per block |")
+    out.append(
+        "| pipeline | batch 1: eager | cfg | batch 8: eager | cfg | profile runs per block | versions per block |"
+    )
     out.append("|---|---:|---:|---:|---:|---|---|")
     for label, row in results["narrowing"].items():
         ns = row["ns"]
@@ -386,22 +452,30 @@ def report(results, charts):
     out.append("| workload | kernel results per call | of which got a Python object |")
     out.append("|---|---:|---:|")
     for name, row in results["unboxing"].items():
-        out.append(f"| {name} | {row['kernel_results_per_call']:.0f} | {row['python_objects_per_call']:.0f} |")
+        out.append(
+            f"| {name} | {row['kernel_results_per_call']:.0f} | {row['python_objects_per_call']:.0f} |"
+        )
     out.append("")
     return "\n".join(out)
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--sizes", type=int, nargs="+", default=[4, 64, 1024])
     parser.add_argument("--json", help="also write the raw results to this file")
-    parser.add_argument("--charts", action="store_true", help="add Mermaid charts to the tables")
+    parser.add_argument(
+        "--charts", action="store_true", help="add Mermaid charts to the tables"
+    )
     args = parser.parse_args()
 
     if not torch.cfg_compile.is_available():
-        raise SystemExit("this build has no cfg_compile runtime; build with USE_CFG_COMPILE=1")
+        raise SystemExit(
+            "this build has no cfg_compile runtime; build with USE_CFG_COMPILE=1"
+        )
     torch.set_num_threads(args.threads)
     with torch.no_grad():
         results = {
