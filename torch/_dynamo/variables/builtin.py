@@ -635,8 +635,7 @@ class TypeVariable(VariableTracker):
             # staticmethod.__get__ returns the wrapped C function
             return VariableTracker.build(tx, attr, source)
         if cls_attr is not NO_SUCH_SUBOBJ:
-            none_vt = ConstantVariable.create(None)
-            result = _resolve_descriptor_get(tx, cls_attr, none_vt, self, source, name)
+            result = _resolve_descriptor_get(tx, cls_attr, None, self, source, name)
         else:
             metacls_source = self.source and TypeSource(self.source)
             metacls = VariableTracker.build(tx, type(fn), metacls_source)
