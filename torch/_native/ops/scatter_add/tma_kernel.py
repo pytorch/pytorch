@@ -61,6 +61,7 @@ from cutlass import BFloat16, Float16, Float32, Int32, Int64
 import torch
 from torch._native.instrumentation import instrumented_cutedsl_cache
 
+from ...cutedsl.hw_caps import caps
 from ._ptx import cvta_smem, make_bulk_reduce_add
 
 
@@ -444,7 +445,7 @@ def tma_scatter_add_into(
     M, N = src.shape
     chunk_elems = _chunk_elems_for(src.dtype)
     compiled = _compile_tma_scatter(src.dtype)
-    sm = torch.cuda.get_device_properties(out.device).multi_processor_count
+    sm = caps(out.device.index).sm_count
 
     grid_x, grid_y, chunks_per_cta = _plan_grid(M, N, chunk_elems, sm)
     num_chunks = (N + chunk_elems - 1) // chunk_elems
