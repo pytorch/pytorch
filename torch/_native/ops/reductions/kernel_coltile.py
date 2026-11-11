@@ -12,6 +12,8 @@ from typing import Any, Literal, NamedTuple
 import cutlass
 import cutlass.cute as cute
 from cutlass import const_expr, Int32, Int64
+from cutlass._mlir.dialects import llvm
+from cutlass.cutlass_dsl import dsl_user_op, T as _T
 
 import torch
 
@@ -69,14 +71,38 @@ _ORDERED_TILE_CHOICES = (8, 16, WARP)
 # Multi-field lane replays partially unroll their 32-lane loop by this factor. On B200,
 # fp32 argmax and bf16 var_mean columns (16, R, 1024) at R = 2048-8192 compiled in
 # 0.4-1.2s instead of the static replay's 1.2-12.2s, running at 0.65-1.00x of its speed.
-# Single-field replays stay static: rolled, fp32 sums ran at as little as 0.46x.
+# Single-field replays stay static: before per-load stride copies (see _opaque_stride),
+# rolled fp32 sums ran at as little as 0.46x the speed of static ones.
 _ORDERED_LANE_UNROLL = 4
+
+
+@dsl_user_op
+def _opaque_stride(stride, load, *, loc=None, ip=None):
+    """Widen a copy of the 32-bit stride that NVVM cannot relate to other loads' copies.
+
+    NVVM's codegen time grows superlinearly with the runtime-stride addresses in one
+    block; a copy per load keeps each load's addresses apart. Widening after the copy
+    keeps each address one 32 x 32 -> 64-bit multiply-add."""
+    copy = llvm.inline_asm(
+        _T.i32(),
+        [Int32(stride).ir_value(loc=loc, ip=ip)],
+        f"mov.b32 $0, $1; // load {load}",
+        "=r,r",
+        has_side_effects=False,
+        is_align_stack=False,
+        asm_dialect=llvm.AsmDialect.AD_ATT,
+        loc=loc,
+        ip=ip,
+    )
+    return Int64(Int32(copy))
 
 
 class OrderedColConfig(NamedTuple):
     # Minimum useful 32-column blocks (partials * columns / WARP), whatever tile_columns
-    # is. Views the selector skips (batched, or below min_blocks) take the default
-    # mapping, so a non-default entry compiles a second kernel for the same R.
+    # is. Looped views the selector skips (other dtypes, batched, non-32-bit
+    # accumulators, other outputs, or below min_blocks; see select_ordered_col_config)
+    # take the default mapping, so a non-default entry compiles a second kernel for the
+    # same R. Split views it skips decline.
     min_blocks: int
     worker_warps: int = _ORDERED_WORKER_WARPS
     tile_columns: int = WARP
@@ -465,6 +491,11 @@ class _OrderedColReduce:
         ragged = plan.shape == "split" and plan.split[1] != plan.split[2]
         whole = plan.shape == "split" and not ragged or self.exact
         self.full_tiles = full_tiles and whole
+        # Unmasked single-field replays of several loads address each load through its
+        # own stride copy (see _opaque_stride) and ask for two blocks per SM, without
+        # which ptxas front-loads more loads at lower occupancy.
+        unmasked = self.full_tiles or self.exact
+        self.per_load = trait.nfields == 1 and plan.batches[0][2] > 1 and unmasked
 
     @property
     def cache_sig(self) -> tuple[Any, ...]:
@@ -493,6 +524,7 @@ class _OrderedColReduce:
             grid=[cute.ceil_div(num_o, self.tile_columns), self.partitions, 1],
             block=[self.tile_columns, self.workers, 1],
             stream=stream,
+            min_blocks_per_mp=2 if self.per_load else 0,
         )
 
     @cute.jit
@@ -521,7 +553,7 @@ class _OrderedColReduce:
         return tile._reduce_vec(vals, self.plan.vec, self.trait.combine)
 
     @cute.jit
-    def _warp_root(self, col_rows, split_base, partition, active, warp):
+    def _warp_root(self, col_rows, split_base, partition, active, warp, C):
         """Replay one original warp's tree over its share of the rows."""
         trait, plan = self.trait, self.plan
         op, nf = trait.combine, const_expr(trait.nfields)
@@ -548,6 +580,9 @@ class _OrderedColReduce:
         replay = cute.make_layout((plan.vec, WARP, loads))
         load_tree = []
         for load in cutlass.range_constexpr(loads):
+            if const_expr(self.per_load):
+                by_load = cute.make_layout(self.R, stride=_opaque_stride(C, load))
+                rows = cute.make_tensor(rows.iterator, by_load)
             lane_roots = [
                 cute.make_rmem_tensor(cute.make_layout(WARP), dtype)
                 for dtype in trait.fdtypes
@@ -606,7 +641,7 @@ class _OrderedColReduce:
             # One warp replays the whole row, so its root needs no shared-memory merge.
             # Only looped plans run one warp; like the indexed tree, seed the identity
             # so -0 sums become +0.
-            root = self._warp_root(col_rows, split_base, partition, active, Int32(0))
+            root = self._warp_root(col_rows, split_base, partition, active, Int32(0), C)
             final = op(ident, root)
         else:
             groups = const_expr(plan.wpr // plan.kchunk)
@@ -622,13 +657,15 @@ class _OrderedColReduce:
             ]
             if const_expr(self.workers == plan.wpr):
                 # One original warp per worker needs no loop.
-                root = self._warp_root(col_rows, split_base, partition, active, worker)
+                root = self._warp_root(
+                    col_rows, split_base, partition, active, worker, C
+                )
                 for f in cutlass.range_constexpr(nf):
                     roots[f][lane, worker] = root[f]
             else:
                 for warp in cutlass.range(worker, plan.wpr, self.workers):
                     warp_root = self._warp_root(
-                        col_rows, split_base, partition, active, warp
+                        col_rows, split_base, partition, active, warp, C
                     )
                     for f in cutlass.range_constexpr(nf):
                         roots[f][lane, warp] = warp_root[f]
@@ -697,6 +734,8 @@ def reduce_ordered_col(
     default. Split plans run only with a config, explicit or selected; looped plans
     default to OrderedColConfig(0).
     """
+    if config is not None:
+        _check_ordered_mapping(config.worker_warps, config.tile_columns)
     if not x.is_cuda:
         raise AssertionError(f"want a CUDA input, got {x.device}")
     device = x.get_device()
@@ -720,10 +759,13 @@ def reduce_ordered_col(
     if plan is None or plan.shape not in ("looped", "split") or plan.vec_linear:
         return None
     # Single-field traits replay all 32 lanes' leaves statically, compiling in 0.35 s at
-    # R = 2048, 1.5 s at R = 8192 and 4.3 s at R = 24576 (fp32/bf16, C = 2048).
-    # Multi-field traits roll lanes but replay a static lane tree per load, taking 1.3 s
-    # at R = 8192 and 2.5-3.1 s at R = 8193-16384 (fp32). The indexed tree takes
-    # 0.3-0.75 s, so cap replays at tile.MAX_UNROLL leaves (looped rows up to 8192).
+    # R = 2048 (fp32/bf16, C = 2048). With per-load stride copies, unmasked replays of
+    # 512 leaves per warp (looped R = 8192, whole split partitions at R = 32768-131072)
+    # compile in 1.5-2.4 s instead of 9.2-10.2 s (B200 fp32/bf16/fp16 sums, fp32/bf16
+    # amax). Multi-field traits roll lanes but replay a static lane tree per load,
+    # taking 1.3 s at R = 8192 and 2.5-3.1 s at R = 8193-16384 (fp32). The indexed tree
+    # takes 0.3-0.75 s, so cap replays at tile.MAX_UNROLL leaves (looped rows up to
+    # 8192).
     # Plans past one planner batch always exceed the cap.
     if sum(b[2] for b in plan.batches) * WARP * plan.vec > tile.MAX_UNROLL:
         return None

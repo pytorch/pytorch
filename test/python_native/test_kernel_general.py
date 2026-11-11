@@ -416,11 +416,16 @@ class TestKernelGeneral(TestCase):
         )
         self.assertEqual(op.cache_sig, plain.cache_sig)
         key = ("test_uniform_welford_tree", type(trait).__name__, dtype) + op.cache_sig
+        # plain compiles the shared key for contiguous geometry, or reuses an earlier
+        # case's kernel, so a strided or offset op runs a kernel built for other geometry.
+        dense = [torch.empty_like(out) for out in outs]
+        kg._launch(plain, key, [kg._flat(x.contiguous())], dense)
         kg._launch(op, key, [kg._flat(x)], outs)
         with torch.backends.python_native.cutedsl.disabled():
             var, mean = torch.var_mean(x.double(), dim=1)
         expected = [var.float(), mean.float()][: len(outs)]
         atol, rtol = (1e-3, 1e-4) if shift else (1e-5, 1e-5)
+        self.assertEqual(dense, expected, atol=atol, rtol=rtol)
         self.assertEqual(outs, expected, atol=atol, rtol=rtol)
 
     def test_uniform_welford_tree_counts_share_kernels(self):
