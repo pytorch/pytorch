@@ -442,7 +442,7 @@ class ComboKernelPartitionLoggingTests(TestCase):
             1,
         )
 
-    def test_partition_separation_debug_log_cache_clears_with_inductor_caches(self):
+    def test_partition_separation_debug_log_cache_clears_with_inductor_caches(self, device):
         large_x = int(LARGE_NUMELS) + 1
         large_node = _PartitionLoggingNode()
         small_node = _PartitionLoggingNode()
@@ -510,7 +510,7 @@ def _kernel_groups(fn, *inps):
     )
 
 
-def _compile_persistent_and_looped_reductions():
+def _compile_persistent_and_looped_reductions(device):
     def fn(a, b, c):
         return a.sum(-1), b.sum(-1), c.sum(-1)
 
@@ -1084,8 +1084,8 @@ class ComboKernelTests(TestCase):
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_triton()
-    def test_persistent_and_looped_reductions_are_separated(self):
-        kernels = _compile_persistent_and_looped_reductions()
+    def test_persistent_and_looped_reductions_are_separated(self, device):
+        kernels = _compile_persistent_and_looped_reductions(device)
         if torch._inductor.config.combo_kernel_per_subkernel_blocks:
             # Each sub-kernel gets its own XBLOCK, so both kinds can share a combo.
             self.assertListEqual(kernels, [("reduction", [512, 768, 2048])])
@@ -1833,11 +1833,11 @@ class ComboKernelBenchmarkTests(TestCase):
         self.assertTrue(4 < torch._inductor.metrics.generated_kernel_count <= 10)
 
     @requires_triton()
-    def test_persistent_and_looped_reductions_benchmark(self):
+    def test_persistent_and_looped_reductions_benchmark(self, device):
         # Benchmarking, not the partitioner, decides whether to combine them. It always
         # accepts combos of kernels this small.
         self.assertListEqual(
-            _compile_persistent_and_looped_reductions(),
+            _compile_persistent_and_looped_reductions(device),
             [("reduction", [512, 768, 2048])],
         )
 
@@ -3356,9 +3356,7 @@ class ComboKernelTestsMaxAutotune(TestCase):
 
     @requires_triton()
     @parametrize("compile_time_autotune", [False, True])
-    def test_combo_kernel_coordesc_tunes_largest_subkernel_first(
-        self, compile_time_autotune
-    ):
+    def test_combo_kernel_coordesc_tunes_largest_subkernel_first(self, device, compile_time_autotune):
         def fn(a, b, c):
             return (
                 torch.nn.functional.relu(a),
@@ -3742,7 +3740,7 @@ class _ScheduleFirstFakeNode:
         self.name = name
         self.ancestors = OrderedSet(ancestors)
         self.buffers = OrderedSet(buffers)
-        self.device = torch.device(torch.device(device).type, 0) if device is None else device
+        self.device = torch.device("cuda", 0) if device is None else device
         self.scheduler = None
         self.unmet_dependencies = [
             SimpleNamespace(name=dep) for dep in unmet_dependencies
@@ -4827,7 +4825,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         to a permissive memory-gated baseline. Both runs pin
         combo_kernel_max_distance so candidate formation is identical
         and only the acceptance threshold differs."""
-        model = ComboKernelPeakMemoryTests._make_wide_resnet_like().to(device).eval()
+        model = type(self)._make_wide_resnet_like().to(device).eval()
         x = torch.randn(1, 3, 224, 224, device=device)
 
         def compile_and_measure_peak(**cfg):
