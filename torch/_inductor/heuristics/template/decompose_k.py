@@ -18,10 +18,9 @@ from ...kernel.decompose_k import (
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
 from ...utils import (
-    _ROCM_DECOMPOSE_K_ARCHS,
+    _rocm_decompose_k_auto,
     ceildiv,
     get_k_splits,
-    rocm_gfx_arch,
     use_triton_blackwell_tma_template,
 )
 from ...virtualized import V
@@ -43,8 +42,9 @@ def decompose_k_split_bounds(device: torch.device) -> tuple[int, int]:
     H100 and MI350X and checking that no split that beat ATen gets filtered out.
     """
     device_properties = DeviceProperties.create(device)
-    if device_properties.type == "hip" and rocm_gfx_arch() in _ROCM_DECOMPOSE_K_ARCHS:
-        # MI350X: at least 32 output tiles and at most 64 MiB of FP32 workspace.
+    if device_properties.type == "hip" and _rocm_decompose_k_auto():
+        # MI350X default (-1 splits): at least 32 output tiles and at most 64 MiB of
+        # FP32 workspace. An explicit split count is not pruned, as before.
         return 32, 64 * 1024 * 1024
     if device_properties.type != "cuda":
         return 0, 0
