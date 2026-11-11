@@ -3321,8 +3321,8 @@ def destroy_process_group(
         #
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
-        _world.group_count = 0
         _world._local_sync_group_counts.clear()
+        _world.group_count = 0
     else:
         if _TORCHCOMM_AVAILABLE:
             # A single comm may be shared across multiple device types (e.g. a
@@ -3444,8 +3444,8 @@ def _abort_process_group(
         #
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
-        _world.group_count = 0
         _world._local_sync_group_counts.clear()
+        _world.group_count = 0
     else:
         pg.abort()
         del _world.pg_map[pg]
