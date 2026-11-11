@@ -130,9 +130,11 @@ if CPP_FAKETENSOR:
         allow_non_fake_inputs=False,
         **kwargs,
     ):
-        if not allow_fallback_kernels or allow_non_fake_inputs or kwargs:
+        if not allow_fallback_kernels or kwargs:
             raise NotImplementedError("CppFakeTensorMode has no such options yet")
-        return CppFakeTensorMode(shape_env=shape_env)
+        return CppFakeTensorMode(
+            shape_env=shape_env, allow_non_fake_inputs=allow_non_fake_inputs
+        )
 
     FakeTensorModeCls = CppFakeTensorMode
 else:
@@ -2172,6 +2174,30 @@ def forward(self, x_1):
                 torch.select(x, dim=1, index=10)
             with self.assertRaisesRegex(IndexError, "index .* out of range"):
                 torch.select(x, dim=1, index=-10)
+
+    @fake_tensor_modes
+    @parametrize("previous", [False, True])
+    def test_allow_non_fake_inputs(self, mode_cls, previous):
+        from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
+
+        self.assertFalse(mode_cls().allow_non_fake_inputs)
+        mode = mode_cls(allow_non_fake_inputs=True)
+        self.assertTrue(mode.allow_non_fake_inputs)
+        mode.allow_non_fake_inputs = False
+        self.assertFalse(mode.allow_non_fake_inputs)
+        self.assertTrue(mode.allow_meta)
+        self.assertTrue(mode._allow_unsafe_data_ptr_access)
+        # allow_non_fake_inputs_temporarily restores the previous value, also
+        # when the body raises
+        mode.allow_non_fake_inputs = previous
+        with allow_non_fake_inputs_temporarily(mode):
+            self.assertTrue(mode.allow_non_fake_inputs)
+        self.assertEqual(mode.allow_non_fake_inputs, previous)
+        with self.assertRaisesRegex(ValueError, "raised in the body"):
+            with allow_non_fake_inputs_temporarily(mode):
+                self.assertTrue(mode.allow_non_fake_inputs)
+                raise ValueError("raised in the body")
+        self.assertEqual(mode.allow_non_fake_inputs, previous)
 
 
 instantiate_parametrized_tests(TestFakeTensor)
