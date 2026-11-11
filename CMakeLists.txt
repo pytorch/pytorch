@@ -398,8 +398,9 @@ cmake_dependent_option(USE_ROCM_CK_GEMM "Use ROCm Composable Kernel for GEMMs" O
 set(TORCH_CK_GEMM_ARCH_LIST "gfx90a;gfx942;gfx950" CACHE STRING
     "Semicolon-separated GPU archs Composable Kernel GEMM is built and enabled for")
 cmake_dependent_option(USE_ROCM_CK_SDPA "Use ROCm Composable Kernel for SDPA" ON "USE_ROCM;NOT WIN32" OFF)
-# Off by default because enabling gfx12 adds CK SDPA code generation and compile
-# cost to ROCm builds that already target gfx1200/gfx1201.
+# Off by default because enabling gfx11/gfx12 adds CK SDPA code generation and
+# compile cost to ROCm builds that already target those arches.
+cmake_dependent_option(USE_ROCM_CK_SDPA_GFX11 "Also build ROCm Composable Kernel SDPA for gfx11 (RDNA3, RDNA3.5)" OFF "USE_ROCM_CK_SDPA" OFF)
 cmake_dependent_option(USE_ROCM_CK_SDPA_GFX12 "Also build ROCm Composable Kernel SDPA for gfx12 (RDNA4)" OFF "USE_ROCM_CK_SDPA" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(USE_CUDNN "Use cuDNN" ON "USE_CUDA" OFF)
@@ -434,13 +435,8 @@ cmake_dependent_option(USE_NCCL_EP "Build NCCL EP library" OFF
                        "USE_NCCL;USE_CUDA" OFF)
 cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
-# On macOS, NNPACK's FFT-based convolutions are slower than im2col + Accelerate and spread NaN/Inf
-# across the whole tile, see https://github.com/pytorch/pytorch/issues/157237
-if(APPLE AND NOT IOS)
-  option(USE_NNPACK "Use NNPACK" OFF)
-else()
-  option(USE_NNPACK "Use NNPACK" ON)
-endif()
+# NNPACK has been removed; still reported via caffe2/core/macros.h.in
+set(USE_NNPACK OFF)
 cmake_dependent_option(USE_NUMA "Use NUMA. Only available on Linux." ON "LINUX"
                        OFF)
 cmake_dependent_option(USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on."

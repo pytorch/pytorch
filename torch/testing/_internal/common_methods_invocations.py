@@ -2981,9 +2981,11 @@ def error_inputs_multinomial(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(x, args=(3, False,)),
                      error_regex="cannot sample n_sample > prob_dist")
 
-    x = torch.empty(16777217, dtype=dtype, device=device)
-    yield ErrorInput(SampleInput(x, args=(3,)),
-                     error_regex="number of categories cannot exceed")
+    # CPU and CUDA sample with replacement from a double CDF past 2^24 categories
+    if torch.device(device).type not in ('cpu', 'cuda'):
+        x = torch.empty(16777217, dtype=dtype, device=device)
+        yield ErrorInput(SampleInput(x, args=(3, True)),
+                         error_regex="number of categories cannot exceed")
 
     inputs = ((1., -1., 1.), (1., inf, 1.), (1., -inf, 1.), (1., 1., nan))
 
@@ -6543,6 +6545,8 @@ def sample_inputs_istft(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(mt((10, 2)), kwargs=dict(n_fft=10))
     yield SampleInput(mt((6, 3)), kwargs=dict(n_fft=6, onesided=False))
     yield SampleInput(mt((6, 4)), kwargs=dict(n_fft=10, onesided=True))
+    yield SampleInput(mt((13, 1)), kwargs=dict(n_fft=25, center=False))
+    yield SampleInput(mt((25, 1)), kwargs=dict(n_fft=25, center=False, onesided=False))
 
     for center in [False, True]:
         yield SampleInput(mt((10, 10, 6)), kwargs=dict(n_fft=10, center=center))
@@ -17281,7 +17285,7 @@ op_db: list[OpInfo] = [
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[onlyOn(["cuda", "mps"]), skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support')],
+        decorators=[onlyOn(("cuda", "mps")), skipCUDAIf(not PLATFORM_SUPPORTS_FP8, 'Requires FP8 support')],
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),

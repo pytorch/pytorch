@@ -35,6 +35,7 @@ from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
 from torch.testing._internal.common_utils import (
+    add_skip_condition,
     IS_CI,
     IS_WINDOWS,
     LazyVal,
@@ -186,6 +187,11 @@ def skipDeviceIf(cond, msg, *, device):
                     raise unittest.SkipTest(msg)
                 return fn(self, *args, **kwargs)
 
+            add_skip_condition(
+                inner,
+                lambda cls: type(device) is str and vars(cls).get("_device_at_collection") == device,
+                msg,
+            )
             return inner
 
     else:

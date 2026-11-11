@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import HardwareClassification, TestCas
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, skipIfMPS, \
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
-    skipIfCrossRef, set_warn_always_context
+    skipIfCrossRef, set_warn_always_context, decorateIf
 from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
 from typing import Any
@@ -482,6 +482,30 @@ class TestSparseOnlyCPU(TestSparseBase):
                 RuntimeError,
                 "sspaddmm: expected 'mat2' to have strided layout, got 'mat2' with layout Sparse"):
             self_sp.sspaddmm(mat1_sparse, mat2_sparse)
+
+        out_dense = torch.randn(m, n, dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "sspaddmm: expected 'out' to have sparse layout, got 'out' with layout Strided"):
+            torch.sspaddmm(self_sp, mat1_sparse, mat2_dense, out=out_dense)
+
+        self_dense = torch.randn(m, n, dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "sspaddmm: expected 'self' to have sparse layout, got 'self' with layout Strided"):
+            torch.sspaddmm(self_dense, mat1_sparse, mat2_dense)
+
+        self_3d = torch.zeros(m, n, 2, dtype=dtype, device=device).to_sparse()
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "sspaddmm: Argument #1: matrices expected, got 3D tensor"):
+            torch.sspaddmm(self_3d, mat1_sparse, mat2_dense)
+
+        self_hybrid = torch.zeros(m, n, 2, dtype=dtype, device=device).to_sparse(2)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "sspaddmm: Argument #1: scalar values expected, got 1D values"):
+            torch.sspaddmm(self_hybrid, mat1_sparse, mat2_dense)
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
@@ -1952,6 +1976,10 @@ class TestSparse(TestSparseBase):
     @precisionOverride({torch.bfloat16: 5e-2, torch.float16: 5e-2})
     @dtypes(torch.double, torch.cdouble, torch.bfloat16, torch.float16)
     @dtypesIfMPS(torch.float32, torch.complex64, torch.bfloat16, torch.float16)
+    @decorateIf(
+        unittest.skip('addmm_sparse_cuda is not implemented for BFloat16 and Half'),
+        lambda p: (p['dtype'] is torch.bfloat16 or p['dtype'] is torch.float16) and p['device'].startswith('cuda'),
+    )
     def test_sparse_addmm(self, device, dtype, coalesced):
         if (dtype is torch.bfloat16 or dtype is torch.float16) and device.startswith("cuda"):
             self.skipTest('addmm_sparse_cuda is not implemented for BFloat16 and Half')
@@ -2178,31 +2206,38 @@ class TestSparse(TestSparseBase):
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
     def test_norm(self, device, dtype, coalesced):
+        norm = torch.linalg.vector_norm
+
         def test_shape(sparse_dims, nnz, with_size):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)
-            y = x.coalesce()
-            self.assertEqual(
-                torch.linalg.vector_norm(x),
-                torch.linalg.vector_norm(y._values()),
-            )
+            all_dims = list(range(x.dim()))
+            dense = x.to_dense()
+            ref = norm(dense)
+            ref_keepdim = norm(dense, dim=all_dims, keepdim=True)
+            self.assertEqual(norm(x), ref)
+            self.assertEqual(norm(x, keepdim=True), ref_keepdim)
+            self.assertEqual(norm(x, dtype=dtype), ref)
+            # torch.norm reaches norm_sparse through a different wrapper
+            self.assertEqual(x.norm(2), ref)
+            self.assertEqual(x.norm(2, all_dims, keepdim=True), ref_keepdim)
+            self.assertEqual(x.norm(2, all_dims, False, dtype=dtype), ref)
 
         test_shape(3, 10, 100)
         test_shape(4, 10, [100, 100, 100, 5, 5, 5, 0])
         test_shape(4, 0, [0, 0, 100, 5, 5, 5, 0])
 
-        # Unsupported arguments should error
-        kwarg_error_pairs = [
-            ({'keepdim': True},
-             RuntimeError, r'norm_sparse currently does not support keepdim=True'),
-            ({'dim': 0},
-             RuntimeError, r'norm_sparse currently only supports full reductions'),
-            ({'dtype': torch.double, 'ord': 0},
-             RuntimeError, r"norm_sparse currently does not support 'dtype' argument"),
-        ]
         x = self._gen_sparse(3, 10, 100, dtype, device, coalesced)[0]
-        for kwargs, err, msg in kwarg_error_pairs:
-            with self.assertRaisesRegex(err, msg):
-                torch.linalg.vector_norm(x, **kwargs)
+        with self.assertRaisesRegex(RuntimeError, "only supports full reductions"):
+            norm(x, dim=0)
+
+        with self.assertRaisesRegex(RuntimeError, "floating point or complex"):
+            norm(x, dtype=torch.int32)
+        wrong_domain = torch.float64 if dtype.is_complex else torch.complex128
+        with self.assertRaisesRegex(RuntimeError, "dtype should be"):
+            norm(x, dtype=wrong_domain)
+        narrower = torch.complex32 if dtype.is_complex else torch.float16
+        with self.assertRaisesRegex(RuntimeError, "without narrowing"):
+            norm(x, dtype=narrower)
 
     @coalescedonoff
     @dtypes(torch.double)
@@ -3450,6 +3485,10 @@ class TestSparse(TestSparseBase):
     @skipIfMPS
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @parametrize('requires_grad', (True, False))
+    @decorateIf(
+        unittest.skip('requires_grad=True requires a floating point or complex dtype'),
+        lambda p: p['requires_grad'] and (not (p['dtype'].is_floating_point or p['dtype'].is_complex)),
+    )
     def test_empty_full(self, device, dtype, requires_grad):
         if requires_grad and not (dtype.is_floating_point or dtype.is_complex):
             self.skipTest(f'requires_grad==True requires float or complex dtype, got {dtype}')
@@ -4495,6 +4534,7 @@ class TestSparseUnaryUfuncs(TestCase):
         self.assertEqual(_sparse_to_dense(output), expected)
 
     @_sparse_unary_ops
+    @decorateIf(unittest.skip("Skipped! Out not supported"), lambda p: not p["op"].supports_out)
     def test_out(self, device, dtype, op):
         if not op.supports_out:
             self.skipTest("Skipped! Out not supported")
@@ -4509,6 +4549,7 @@ class TestSparseUnaryUfuncs(TestCase):
         self.assertEqual(out, expect)
 
     @_sparse_unary_ops
+    @decorateIf(unittest.skip("Skipped! Out not supported"), lambda p: p["op"].inplace_variant is None)
     def test_inplace(self, device, dtype, op):
         if op.inplace_variant is None:
             self.skipTest("Skipped! Out not supported")
@@ -4547,7 +4588,7 @@ class TestSparseUnaryUfuncs(TestCase):
         actual = op(sparse_input)
         self.assertEqual(expect, _sparse_to_dense(actual))
 
-    @ops(sparse_unary_ufuncs, dtypes=OpDTypes.supported,
+    @ops([op for op in sparse_unary_ufuncs if op.supports_autograd], dtypes=OpDTypes.supported,
          allowed_dtypes=[torch.double, torch.cdouble])
     def test_sparse_fn_grad(self, device, dtype, op):
         if not op.supports_autograd:
@@ -5514,6 +5555,10 @@ class TestSparseAny(TestCase):
     @suppress_warnings
     @ops(binary_ufuncs_with_sparse_support)
     @all_sparse_layouts('layout', include_strided=False)
+    @decorateIf(
+        unittest.skip('OpInfo does not support this sparse layout'),
+        lambda p: not p['op'].supports_sparse_layout(p['layout']),
+    )
     def test_binary_operation(self, layout, device, dtype, op):
         if not op.supports_sparse_layout(layout):
             self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')

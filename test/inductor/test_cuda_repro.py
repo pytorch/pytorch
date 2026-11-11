@@ -125,6 +125,7 @@ def _make_conv(dtype=None):
 @instantiate_parametrized_tests
 class CudaReproTests(TestCase):
     device = device_type
+    _device_at_collection = device_type
     common = check_model_cuda
 
     def test_mm_out_dtype_compile(self):
@@ -1985,6 +1986,11 @@ class CudaReproTests(TestCase):
     @unittest.skipIf(
         not (TEST_CUDA or TEST_XPU),
         "requires CUDA or XPU: the cast runs on every non-CPU device",
+    )
+    @skipIfXpu(
+        msg="triton-xpu folds the fp32 -> fp16 precision barrier and the "
+        "compiled-vs-eager check assumes cuDNN rounding; "
+        "intel/intel-xpu-backend-for-triton#7491, torch-xpu-ops: 4358"
     )
     @config.patch(emulate_precision_casts_on_saved_tensors=True)
     def test_conv_bias_rounds_before_log_softmax(

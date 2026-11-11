@@ -8,7 +8,6 @@ import gc
 import importlib.util
 import json
 import os
-import pickle
 import random
 import subprocess
 import sys
@@ -79,6 +78,7 @@ from torch.testing._internal.common_utils import (
     _restore_fp32_precision,
     _snapshot_fp32_precision,
     cuda_python_error_check,
+    decorateIf,
     EXPANDABLE_SEGMENTS,
     freeze_rng_state,
     gcIfJetson,
@@ -1283,6 +1283,9 @@ print("RETRIED")
             torch.backends.cuda.preferred_blas_library("default")
             _check_default()
 
+    @unittest.skipIf(
+        not has_cusolver() and (not has_hipsolver()), "cuSOLVER/hipSOLVER not available"
+    )
     def test_current_solver_handle(self):
         if not has_cusolver() and not has_hipsolver():
             self.skipTest("cuSOLVER/hipSOLVER not available")
@@ -3106,7 +3109,7 @@ raise RuntimeError("device assert did not fire")
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
         with self.assertRaisesRegex(
             RuntimeError,
-            r"value cannot be safely converted without overflow: output\.numel\(\)",
+            r"value cannot be converted to type int32_t without overflow",
         ):
             y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
 
@@ -3387,6 +3390,31 @@ torch.cuda.synchronize()
                     ]
                 )
                 self.assertTrue(r != 0)
+
+    @unittest.skipIf(
+        TEST_WITH_ROCM or IS_WINDOWS,
+        "ROCm and Windows kernel asserts don't print the message",
+    )
+    def test_fixed_cuda_assert_async_msg(self):
+        for value in ["0", "0j"]:
+            with self.subTest(value=value):
+                r = subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        f"""\
+import torch
+
+torch._assert_async(torch.tensor({value}, device='cuda'), 'assert_async custom message')
+torch.cuda.synchronize()
+""",
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn("assert_async custom message", r.stdout)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "FAIL")
     def test_cublas_multiple_threads_same_device(self):
@@ -4948,6 +4976,10 @@ exit(2)
     )
     @serialTest()
     @blas_library_context("cublas")
+    @unittest.skipIf(
+        TEST_CUDA and torch.cuda.get_device_capability()[0] != 9,
+        "The regression requires an SM90 split-K cuBLAS kernel",
+    )
     def test_graph_capture_cublas_workspace_separate_graphs(self):
         if torch.cuda.get_device_capability()[0] != 9:
             self.skipTest("The regression requires an SM90 split-K cuBLAS kernel")
@@ -5009,6 +5041,10 @@ exit(2)
     )
     @serialTest()
     @blas_library_context("cublas")
+    @unittest.skipIf(
+        TEST_CUDA and torch.cuda.get_device_capability()[0] != 9,
+        "The regression requires an SM90 split-K cuBLAS kernel",
+    )
     def test_graph_capture_cublas_workspace_cross_thread(self):
         if torch.cuda.get_device_capability()[0] != 9:
             self.skipTest("The regression requires an SM90 split-K cuBLAS kernel")
@@ -8820,33 +8856,6 @@ class TestCudaAllocator(TestCase):
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
-    def test_memory_snapshot_script(self):
-        try:
-            torch._C._cuda_clearCublasWorkspaces()
-            torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history("state", stacks="python")
-
-            @torch.jit.script
-            def foo():
-                return torch.rand(311, 411, device="cuda")
-
-            x = foo()
-
-            ss = torch.cuda.memory._snapshot()["segments"]
-            found_it = False
-            for seg in ss:
-                for b in seg["blocks"]:
-                    if b["requested_size"] == 311 * 411 * 4:
-                        self.assertEqual(b["frames"][0]["name"], "foo")
-                        found_it = True
-            self.assertTrue(found_it)
-
-        finally:
-            torch.cuda.memory._record_memory_history(None)
-
-    @unittest.skipIf(
-        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
-    )
     def test_memory_snapshot_skip_actions(self):
         """Test that skip_actions parameter correctly filters out specified action types."""
         # Test cases: (skip_actions, description)
@@ -9469,62 +9478,6 @@ print(value, end="")
             torch.cuda.memory.empty_cache()
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device="cuda")
-
-    @unittest.skipIf(
-        not ((IS_X86 or IS_ARM64) and IS_LINUX), "cpp traces are linux x86/aarch64 only"
-    )
-    @unittest.skipIf(
-        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
-    )
-    def test_cpp_memory_snapshot_pickle(self):
-        from torch.utils.cpp_extension import load_inline
-
-        source = """
-        #include <torch/csrc/cuda/memory_snapshot.h>
-        py::object do_snapshot() {
-            std::string data = torch::cuda::_memory_snapshot_pickled();
-            return py::bytes(data);
-        }
-        void record(bool e, bool ctx) {
-            torch::cuda::_record_memory_history(e, ctx, 10, ctx, ctx);
-        }
-        """
-        m = load_inline(
-            name="snapshot", cpp_sources=[source], functions=["do_snapshot", "record"]
-        )
-        for ctx in (False, True):
-            try:
-                m.record(True, ctx)
-
-                @torch.jit.script
-                def the_script_fn():
-                    return torch.rand(311, 411, device="cuda")
-
-                def run():
-                    t = the_script_fn()
-                    return pickle.loads(m.do_snapshot())
-
-                mem = run()
-                found = False
-                for s in mem["segments"]:
-                    for b in s["blocks"]:
-                        if b["state"] == "active_allocated":
-                            if b["requested_size"] == 311 * 411 * 4:
-                                if ctx:
-                                    frame_text = str(b["frames"])
-                                    # C++ frame
-                                    self.assertTrue("::rand" in frame_text)
-                                    # script frame
-                                    self.assertTrue("the_script_fn" in frame_text)
-                                    # python frame
-                                    self.assertTrue("case.py" in frame_text)
-                                found = True
-                last_action = mem["device_traces"][0][-1]
-                self.assertEqual(last_action["action"], "alloc")
-                self.assertEqual(last_action["size"], 311 * 411 * 4)
-                self.assertTrue(found)
-            finally:
-                m.record(False, False)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
     @unittest.skipIf(
@@ -13408,6 +13361,10 @@ class TestCudaOptims(TestCase):
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=[torch.float32],
     )
+    @decorateIf(
+        unittest.skip("Optimizer does not support fused on this device"),
+        lambda p: p["device"].split(":")[0] not in p["optim_info"].supports_fused_on,
+    )
     def test_grad_scaling_autocast_fused_optimizers(self, device, dtype, optim_info):
         device = device.split(":")[0]
         if device not in optim_info.supports_fused_on:
@@ -14235,25 +14192,18 @@ class TestCudaAutocast(TestAutocast):
             loss = output.sum()
         loss.backward()
 
-    def test_autocast_cat_jit(self):
-        # Reported at https://github.com/pytorch/pytorch/issues/38958
-
-        class Model(torch.nn.Module):
-            def forward(self):
-                a = torch.randn(1)
-                b = torch.randn(1)
-                c = torch.cat((a, b), 0)
-                d = torch.stack([c, c], 0)
-                return d
-
-        # The JIT here doesn't really matter, we just need to call
-        # cat via the boxed API
-        model = Model()
-        model_jit_script = torch.jit.script(model)
-
+    def test_autocast_boxed_cpu_cat_stack(self):
+        unit = torch.jit.CompilationUnit(
+            "def boxed_cat_stack(a: Tensor, b: Tensor) -> Tensor:\n"
+            "    c = torch.cat([a, b], 0)\n"
+            "    return torch.stack([c, c], 0)\n"
+        )
+        a = torch.randn(1, device="cpu")
+        b = torch.randn(1, device="cpu")
         with torch.autocast("cuda", enabled=True):
-            model()
-            model_jit_script()
+            result = unit.boxed_cat_stack(a, b)
+        c = torch.cat([a, b], 0)
+        self.assertEqual(result, torch.stack([c, c], 0))
 
     # cudnn RNNs require special backend handling (weights are cast to FP16 and reflattened)
     # so they get a dedicated test.
@@ -15293,6 +15243,16 @@ class TestCudaGreenContextsPlatformCheck(TestCase):
             green_contexts._get_driver_version.cache_clear()
 
 
+_skip_sm_splitting_unsupported = decorateIf(
+    unittest.skip("SM splitting requires CUDA driver 13.1+ and at least 32 SMs"),
+    lambda p: PLATFORM_SUPPORTS_GREEN_CONTEXT
+    and (
+        torch.cuda.green_contexts._get_driver_version() < 13010
+        or torch.cuda.get_device_properties(p["device"]).multi_processor_count < 32
+    ),
+)
+
+
 @unittest.skipIf(
     not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported"
 )
@@ -15426,6 +15386,12 @@ print(resource.sm_count, torch.cuda.is_initialized(), int(_check_cuda_bindings(d
         self.assertEqual(result, torch.arange(32, device=device) + 1)
 
     @serialTest()
+    @decorateIf(
+        unittest.skip("Co-scheduled groups larger than 2 require SM90+"),
+        lambda p: PLATFORM_SUPPORTS_GREEN_CONTEXT
+        and torch.cuda.get_device_capability(p["device"])[0] < 9,
+    )
+    @_skip_sm_splitting_unsupported
     def test_greencontext_recursive_sm_partitions(self, device):
         from torch.cuda.green_contexts import GreenContext, SMPartition
 
@@ -15456,6 +15422,7 @@ print(resource.sm_count, torch.cuda.is_initialized(), int(_check_cuda_bindings(d
 
     @parametrize("workqueue_scope", [None, "balanced", "device_ctx"])
     @serialTest()
+    @_skip_sm_splitting_unsupported
     def test_greencontext_split(self, device, workqueue_scope):
         from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
         from torch.cuda.green_contexts import GreenContext
@@ -15485,6 +15452,7 @@ print(resource.sm_count, torch.cuda.is_initialized(), int(_check_cuda_bindings(d
         self._check_disjoint_sm_ids(contexts, device)
 
     @parametrize("backfill", [False, True])
+    @_skip_sm_splitting_unsupported
     def test_greencontext_split_discovery(self, device, backfill):
         from torch.cuda.green_contexts import SMPartition
 
@@ -15509,6 +15477,7 @@ print(resource.sm_count, torch.cuda.is_initialized(), int(_check_cuda_bindings(d
             {"coscheduled_sm_count": 2, "backfill": (False, True)},
         ],
     )
+    @_skip_sm_splitting_unsupported
     def test_greencontext_split_broadcasts_scalars(self, device, options):
         from torch.cuda.green_contexts import SMPartition
 
@@ -15518,6 +15487,12 @@ print(resource.sm_count, torch.cuda.is_initialized(), int(_check_cuda_bindings(d
         self.assertEqual([part.sm_count for part in parts], [2, 2])
         self.assertEqual(remainder.sm_count, source.sm_count - 4)
 
+    @decorateIf(
+        unittest.skip("Co-scheduled groups larger than 2 require SM90+"),
+        lambda p: PLATFORM_SUPPORTS_GREEN_CONTEXT
+        and torch.cuda.get_device_capability(p["device"])[0] < 9,
+    )
+    @_skip_sm_splitting_unsupported
     def test_greencontext_split_backfill(self, device):
         from torch.cuda.green_contexts import SMPartition
 
@@ -15553,6 +15528,7 @@ print(resource.sm_count, torch.cuda.is_initialized(), int(_check_cuda_bindings(d
             ),
         ],
     )
+    @_skip_sm_splitting_unsupported
     def test_greencontext_split_invalid_arguments(self, device, kwargs, message):
         from torch.cuda.green_contexts import SMPartition
 
@@ -15615,6 +15591,13 @@ print(count, torch.cuda.is_initialized(), int(_check_cuda_bindings(drv.cuCtxGetC
                 query(torch.cuda.device_count())
 
     @parametrize("visibility", ["ordinal", "uuid", "partial_uuid"])
+    @unittest.skipIf(
+        not (
+            PLATFORM_SUPPORTS_GREEN_CONTEXT
+            and torch.cuda.green_contexts._is_locality_software_supported()
+        ),
+        "Locality domains require CUDA driver and cuda.bindings 13.4+",
+    )
     def test_greencontext_locality_nvml(self, device, visibility):
         from torch.cuda import green_contexts
 
@@ -15686,6 +15669,13 @@ if process.exitcode != 0:
         self.assertEqual(value, 1)
 
     @parametrize("visible", ["", "GPU-invalid"])
+    @unittest.skipIf(
+        not (
+            PLATFORM_SUPPORTS_GREEN_CONTEXT
+            and torch.cuda.green_contexts._is_locality_software_supported()
+        ),
+        "Locality domains require CUDA driver and cuda.bindings 13.4+",
+    )
     def test_greencontext_locality_invalid_visibility(self, visible):
         from torch.cuda import green_contexts
 
@@ -15714,6 +15704,12 @@ finally:
         self.assertEqual(result.stdout.strip(), "3")
 
     @serialTest()
+    @_skip_sm_splitting_unsupported
+    @decorateIf(
+        unittest.skip("Locality domains require CUDA driver and cuda.bindings 13.4+"),
+        lambda p: PLATFORM_SUPPORTS_GREEN_CONTEXT
+        and not torch.cuda.green_contexts._is_locality_software_supported(),
+    )
     def test_greencontext_locality_split(self, device):
         from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
         from torch.cuda.green_contexts import GreenContext
@@ -15749,6 +15745,12 @@ finally:
         self._check_disjoint_sm_ids(contexts, device)
 
     @serialTest()
+    @_skip_sm_splitting_unsupported
+    @decorateIf(
+        unittest.skip("Locality domains require CUDA driver and cuda.bindings 13.4+"),
+        lambda p: PLATFORM_SUPPORTS_GREEN_CONTEXT
+        and not torch.cuda.green_contexts._is_locality_software_supported(),
+    )
     def test_greencontext_locality_recursive_split(self, device):
         from torch.cuda.green_contexts import GreenContext, SMPartition
 
@@ -15777,6 +15779,12 @@ finally:
         ]
         self._check_disjoint_sm_ids(contexts, device)
 
+    @_skip_sm_splitting_unsupported
+    @decorateIf(
+        unittest.skip("Locality domains require CUDA driver and cuda.bindings 13.4+"),
+        lambda p: PLATFORM_SUPPORTS_GREEN_CONTEXT
+        and not torch.cuda.green_contexts._is_locality_software_supported(),
+    )
     def test_greencontext_locality_backfill(self, device):
         from torch.cuda.green_contexts import SMPartition
 
@@ -15956,6 +15964,11 @@ class TestExecuteOnStreams(TestCase):
     @parametrize("stream_kind", ["ordinary", "green", "mixed"])
     @parametrize("num_streams, fail_at", [(1, None), (2, None), (1, 0), (2, 0), (2, 1)])
     @serialTest()
+    @decorateIf(
+        unittest.skip("Green contexts are not supported"),
+        lambda p: p["stream_kind"] != "ordinary"
+        and not PLATFORM_SUPPORTS_GREEN_CONTEXT,
+    )
     def test_execute_on_streams(
         self, device: str, stream_kind: str, num_streams: int, fail_at: int | None
     ) -> None:
@@ -16016,6 +16029,11 @@ class TestExecuteOnStreams(TestCase):
     @parametrize("stream_kind", ["ordinary", "green", "mixed"])
     @parametrize("fail_at", [None, 0, 1])
     @serialTest()
+    @decorateIf(
+        unittest.skip("Green contexts are not supported"),
+        lambda p: p["stream_kind"] != "ordinary"
+        and not PLATFORM_SUPPORTS_GREEN_CONTEXT,
+    )
     def test_execute_on_streams_multiple_devices(
         self, device: str, stream_kind: str, fail_at: int | None
     ) -> None:
@@ -16055,6 +16073,11 @@ class TestExecuteOnStreams(TestCase):
     @unittest.skipIf(not TEST_CUDA_GRAPH, "requires CUDA graph support")
     @parametrize("stream_kind", ["ordinary", "green", "mixed"])
     @serialTest()
+    @decorateIf(
+        unittest.skip("Green contexts are not supported"),
+        lambda p: p["stream_kind"] != "ordinary"
+        and not PLATFORM_SUPPORTS_GREEN_CONTEXT,
+    )
     def test_capture_replay(self, device: str, stream_kind: str) -> None:
         contexts, streams = self._make_streams(
             [torch.device(device).index] * 2, stream_kind
@@ -16104,6 +16127,10 @@ class TestLocalizedAllocator(TestCase):
 
     @parametrize("no_split", [False, True])
     @serialTest()
+    @decorateIf(
+        unittest.skip("requires CUDA 13.4 and a multi-domain GPU"),
+        lambda p: not torch.cuda.green_contexts._is_locality_software_supported(),
+    )
     def test_localized_allocation(self, device: str, no_split: bool) -> None:
         from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
         from torch.cuda.green_contexts import get_num_locality_domains
@@ -16139,6 +16166,10 @@ class TestLocalizedAllocator(TestCase):
             del reused
             torch.cuda.current_stream(device).synchronize()
 
+    @decorateIf(
+        unittest.skip("requires CUDA 13.4 and a multi-domain GPU"),
+        lambda p: not torch.cuda.green_contexts._is_locality_software_supported(),
+    )
     def test_invalid_locality_domain(self, device: str) -> None:
         from torch.cuda.green_contexts import get_num_locality_domains
 
@@ -16149,6 +16180,10 @@ class TestLocalizedAllocator(TestCase):
                 torch.cuda.LocalizedAllocator(domain, device=device)
 
     @serialTest()
+    @decorateIf(
+        unittest.skip("requires CUDA 13.4 and a multi-domain GPU"),
+        lambda p: not torch.cuda.green_contexts._is_locality_software_supported(),
+    )
     def test_shutdown_with_localized_pool_cycle(self, device: str) -> None:
         self._require_localization(device)
         code = """
@@ -16180,6 +16215,10 @@ raise RuntimeError("localized pool shutdown")
         self.assertNotIn("Exception ignored", result.stderr)
 
     @serialTest()
+    @decorateIf(
+        unittest.skip("requires CUDA 13.4 and a multi-domain GPU"),
+        lambda p: not torch.cuda.green_contexts._is_locality_software_supported(),
+    )
     def test_tensor_outlives_pool_and_allocator(self, device: str) -> None:
         self._require_localization(device)
         allocator = torch.cuda.LocalizedAllocator(0, device=device)
@@ -16200,6 +16239,10 @@ raise RuntimeError("localized pool shutdown")
         self.assertNotIn(ptr, owner_ref()._records)
 
     @serialTest()
+    @decorateIf(
+        unittest.skip("requires CUDA 13.4 and a multi-domain GPU"),
+        lambda p: not torch.cuda.green_contexts._is_locality_software_supported(),
+    )
     def test_reclamation_waits_for_allocation_stream(self, device: str) -> None:
         self._require_localization(device)
         allocator = torch.cuda.LocalizedAllocator(0, device=device)
@@ -16437,6 +16480,7 @@ instantiate_parametrized_tests(TestGreenContextStreamPool)
 
 
 class TestCudaArchList(TestCase):
+    @unittest.skipIf(torch.cuda._is_compiled(), "CUDA is compiled")
     def test_get_arch_list_empty_when_cuda_not_compiled(self):
         if torch.cuda._is_compiled():
             self.skipTest("CUDA is compiled")

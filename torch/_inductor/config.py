@@ -2013,6 +2013,12 @@ class cpp:
     # set to torch.get_num_threads()
     threads = -1
 
+    # Decompose output-only FP32 aten._scaled_dot_product_flash_attention_for_cpu
+    # into Inductor ops; eligibility is in fx_passes/post_grad.py and numerics (incl.
+    # a NaN difference from native) in Note [CPU flash attention accumulation order].
+    # No size heuristic, so benchmark the model before enabling.
+    enable_cpu_flash_attention_decomposition: bool = False
+
     # Do not generate loops when the condition doesn't hold, like:
     # for(long i0=4096; i0<4096; i0+=1)
     no_redundant_loops = (
@@ -2023,6 +2029,11 @@ class cpp:
     # in cpp_prefix.h) instead of at::vec::vec_reduce_all, whose tree path is
     # GCC-only. Changes the rounding of horizontal float sums.
     simd_horizontal_reduction: bool = False
+
+    # Compute vectorized float exp with Vectorized<float>::exp_u20, an inline
+    # polynomial accurate to within 2 ULP. The CPU flash attention kernel uses
+    # exp_u20 for its softmax.
+    vec_exp_u20: bool = False
 
     # Assume number of threads is dynamic, don't specialize thread number.
     # Kernels don't recompile on thread number changes with this flag on.
@@ -2153,6 +2164,15 @@ class cpp:
 
     force_inline_kernel = (
         os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_KERNEL", "0") == "1"
+    )
+
+    # Always inline the Welford helpers in cpp_prefix.h (welford_combine and
+    # welford_vec_reduce_all), which the compiler can otherwise leave as calls in
+    # Welford reduction loops. Code size can grow. The arithmetic is the same, but
+    # with enable_unsafe_math_opt_flag or FP contraction the compiler can optimize
+    # across the inlined code, which can change results in the last bits.
+    force_inline_welford = (
+        os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_WELFORD", "0") == "1"
     )
 
     # Use static constexpr or static const for int array
