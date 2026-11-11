@@ -1,5 +1,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
+#include <algorithm>
 #include <list>
 #include <utility>
 #include <c10/util/env.h>
@@ -62,6 +63,37 @@ DispatchCaptureSink* setDispatchCaptureSink(DispatchCaptureSink* sink) {
   }
   impl::tls_dispatch_capture_sink_ = sink;
   return prev;
+}
+
+void Dispatcher::callBoxedWithCaptureSink(
+    const OperatorHandle& op,
+    DispatchCaptureSink& sink,
+    DispatchKeySet dispatchKeySet,
+    const KernelFunction& kernel,
+    bool isRedispatch,
+    Stack* stack) {
+  // Operators registered without a schema, or with variadic arguments, only
+  // know their stack: all of it is reported.
+  const auto clamp = [&](size_t n) { return std::min(n, stack->size()); };
+  const bool fixed_arguments = op.hasSchema() && !op.schema().is_vararg();
+  const size_t num_inputs = fixed_arguments
+      ? clamp(op.schema().arguments().size())
+      : stack->size();
+  const size_t base = stack->size() - num_inputs;
+  sink.onKernelEnter(
+      op,
+      dispatchKeySet,
+      isRedispatch,
+      c10::ArrayRef<const c10::IValue>(stack->data() + base, num_inputs));
+  impl::DispatchCaptureExitGuard exitGuard(sink, op);
+  kernel.callBoxed(op, dispatchKeySet, stack);
+  const bool fixed_returns = op.hasSchema() && !op.schema().is_varret();
+  // Variadic returns are everything the kernel left above its arguments.
+  const size_t num_outputs = fixed_returns
+      ? clamp(op.schema().returns().size())
+      : stack->size() - clamp(base);
+  exitGuard.finish(c10::ArrayRef<const c10::IValue>(
+      stack->data() + (stack->size() - num_outputs), num_outputs));
 }
 
 namespace detail {
