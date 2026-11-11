@@ -199,6 +199,8 @@ void scaled_gemm(
 enum class CublasGroupedScaleLayout : uint8_t {
   Scalar,
   PerBatchScalar,
+  Vec128F32,
+  Block128x128F32,
 };
 
 inline bool cublaslt_grouped_gemm_arch_supported() {

@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     find_free_port,
     IS_SANDCASTLE,
     LazyVal,
+    preserves_unittest_skip_marks,
     retry_on_connect_failures,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
@@ -884,6 +885,7 @@ else:
 # subprocesses to join.
 
 
+@preserves_unittest_skip_marks("join_or_run")
 class MultiProcessTestCase(TestCase):
     MAIN_PROCESS_RANK = -1
     # This exit code is used to indicate that the test code had an error and
@@ -1444,6 +1446,7 @@ def spawn_threads_and_init_comms(
     return wrapper
 
 
+@preserves_unittest_skip_marks("join_or_run")
 class MultiThreadedTestCase(TestCase):
     """
     Test runner that runs all tests with the in-proc process group using
@@ -1830,6 +1833,7 @@ class DynamoDistributedMultiProcTestCase(DistributedTestBase):
         self.run_test(test_name, parent_pipe)
 
 
+@preserves_unittest_skip_marks("_worker_run_main_wait")
 class MultiProcContinuousTest(TestCase):
     # Class variables:
     MAIN_PROCESS_RANK = -1

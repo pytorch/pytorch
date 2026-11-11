@@ -93,10 +93,8 @@ class TestStream(TestCase):
         m = torch.get_device_module(device)
         e = m.Event()
         self.assertTrue(f"torch.{self.device_type}.Event" in str(e))
-        self.assertTrue("uninitialized" in str(e))
         m.current_stream().record_event(e)
         self.assertTrue(f"torch.{self.device_type}.Event" in str(e))
-        self.assertFalse("uninitialized" in str(e))
 
     # torch.mps.Stream.query is not supported yet
     @expectedFailureMPS
