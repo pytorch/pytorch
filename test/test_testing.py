@@ -3135,6 +3135,7 @@ class TestImports(TestCase):
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
                            "torch._inductor.kernel.flex_gemm.compile_pool",  # depends on cutlass
                            "torch._inductor.kernel.flex_gemm.output_layout_cutedsl",  # depends on cutlass
+                           "torch._inductor.kernel.flex.flex_helion_kernels",  # depends on helion
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
                            "torch.distributed.debug._frontend",  # depends on tabulate
                            "torch.distributed.examples",  # requires CUDA and torchvision

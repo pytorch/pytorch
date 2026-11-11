@@ -1397,6 +1397,28 @@ def _collect_nested_region_inductor_config_patches_for_hash(
     )
 
 
+def _uses_helion_flex_attention(gm: torch.fx.GraphModule) -> bool:
+    """Whether ``gm`` calls flex_attention (forward or backward) with
+    BACKEND="HELION"."""
+    # The kernel_options argument of each flex_attention HOP.
+    kernel_options_index = {
+        torch.ops.higher_order.flex_attention: 6,
+        torch.ops.higher_order.flex_attention_backward: 11,
+    }
+    for module in gm.modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
+        for target, index in kernel_options_index.items():
+            for node in module.graph.find_nodes(op="call_function", target=target):
+                kernel_options = node.args[index]
+                if (
+                    isinstance(kernel_options, dict)
+                    and kernel_options.get("BACKEND") == "HELION"
+                ):
+                    return True
+    return False
+
+
 class FxGraphHashDetails:
     """
     Object to capture all the details for a compiled FX graph relevant to computing
@@ -1676,6 +1698,16 @@ class FxGraphHashDetails:
                     self.user_defined_triton_source.append(
                         (kernel_source, constant_args, configs)
                     )
+
+        # A BACKEND="HELION" flex_attention lowers to Helion kernels whose code
+        # depends on Helion's source and settings, which the graph does not hold.
+        self.helion_flex_attention_key: str | None = None
+        if gm is not None and _uses_helion_flex_attention(gm):
+            from torch._inductor.kernel.flex.flex_helion_attention import (
+                helion_cache_key,
+            )
+
+            self.helion_flex_attention_key = helion_cache_key()
 
         no_tensor_inputs = not any(isinstance(x, torch.Tensor) for x in example_inputs)
         # This device index is usually already encoded by the device of the inputs
