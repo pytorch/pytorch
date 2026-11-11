@@ -6148,8 +6148,72 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 
 class NCCLTraceTest(NCCLTraceTestBase):
     hw_classification = HardwareClassification.CUDA
+    _dnm_timing = None
+
+    # DO NOT MERGE: diagnostics for pytorch/pytorch#203759.
+    def _dnm_report(self, full, ok):
+        import socket
+        import subprocess
+
+        dev = self.local_device
+        props = torch.cuda.get_device_properties(dev)
+        fields = (
+            "record_id",
+            "collective_seq_id",
+            "state",
+            "duration_ms",
+            "time_created_ns",
+            "time_discovered_started_ns",
+            "time_discovered_completed_ns",
+        )
+        info = {
+            "ok": ok,
+            "rank": self.rank,
+            "test": self.id(),
+            "host": socket.gethostname(),
+            "runner": os.environ.get("RUNNER_NAME"),
+            "device": str(dev),
+            "gpu_name": props.name,
+            "pci_bus_id": getattr(props, "pci_bus_id", None),
+            "pci_device_id": getattr(props, "pci_device_id", None),
+            "uuid": str(getattr(props, "uuid", "")),
+            "gcn_arch": getattr(props, "gcnArchName", None),
+            "visible": {
+                k: os.environ.get(k)
+                for k in (
+                    "HIP_VISIBLE_DEVICES",
+                    "ROCR_VISIBLE_DEVICES",
+                    "CUDA_VISIBLE_DEVICES",
+                    "TORCH_DIST_USE_NCCL2",
+                )
+            },
+            "loadavg": open("/proc/loadavg").read().strip(),
+            "timing": self._dnm_timing,
+            "entries": [
+                {k: e.get(k) for k in fields} for e in full.get("entries", [])
+            ],
+        }
+        print("DNM203759 " + json.dumps(info, default=str), flush=True)
+        if ok:
+            return
+        print("DNM203759_TRACE " + json.dumps(full, default=str), flush=True)
+        if self.rank != 0:
+            return
+        for cmd in (
+            ["amd-smi", "static", "-p"],
+            ["amd-smi", "metric", "-c", "-p", "-u"],
+            ["amd-smi", "process"],
+        ):
+            try:
+                out = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=60
+                ).stdout
+            except Exception as e:  # noqa: BLE001
+                out = f"{type(e).__name__}: {e}"
+            print(f"DNM203759_CMD {' '.join(cmd)}\n{out}", flush=True)
 
     def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
+        full = t
         ver = t["version"]
         self.assertEqual(ver, "2.10")
         comm_lib_version = t["comm_lib_version"]
@@ -6205,7 +6269,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertTrue(before_test < event_created_time < now)
             if timing_enabled:
                 # very loose bounds, measured 0.036 ms on devgpu
-                self.assertTrue(0 < last["duration_ms"] < 100)
+                d = last["duration_ms"]
+                ok = 0 < d < 100
+                self._dnm_report(full, ok)
+                self.assertTrue(ok, f"DNM203759 duration_ms={d!r}")
             else:
                 self.assertTrue("duration_ms" not in last)
         else:
@@ -6247,16 +6314,40 @@ class NCCLTraceTest(NCCLTraceTestBase):
     def test_short_json(self, timing_enabled, include_collectives):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
+        self._short_json_body(timing_enabled, include_collectives)
+
+    # DO NOT MERGE: repeats the #203759 case so one CI job samples it many times.
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("rep", range(200))
+    def test_dnm_203759_short_json_repeat(self, rep):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        self._short_json_body(True, True)
+
+    def _short_json_body(self, timing_enabled, include_collectives):
         pg = self._create_process_group_nccl()
         if timing_enabled:
             pg._enable_collectives_timing()
         device = self.local_device
         self.set_thread_name("fr_test_thread")
         a = torch.full((3, 4), float(self.rank), device=device)
+        user_start = torch.cuda.Event(enable_timing=True)
+        user_end = torch.cuda.Event(enable_timing=True)
+        t0 = time.monotonic_ns()
+        user_start.record()
         for _ in range(2):
             f = pg.allreduce(a)
+        t1 = time.monotonic_ns()
         f.wait()
+        user_end.record()
         torch.cuda.synchronize(device=device)
+        t2 = time.monotonic_ns()
+        self._dnm_timing = {
+            "enqueue_ms": (t1 - t0) / 1e6,
+            "wait_sync_ms": (t2 - t1) / 1e6,
+            "user_stream_ms": user_start.elapsed_time(user_end),
+        }
         pg._wait_for_pending_works()
         t = json.loads(
             torch._C._distributed_c10d._dump_nccl_trace_json(
