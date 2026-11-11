@@ -2479,6 +2479,40 @@ class TestMetaKernelRegistrations(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
             op(inp, other, out=out)
 
+    @parametrize("shift", ["lshift", "rshift"])
+    @parametrize("other_dtype", [None, torch.int8, torch.int64])
+    def test_shift_bool_input_promotes_like_eager(self, shift, other_dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/202731.
+        # A bool operand shifted by an integer promotes rather than being
+        # rejected, so the meta has to agree with eager on the result dtype.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        op_packet = getattr(torch.ops.aten, f"__{shift}__")
+        inp = torch.tensor([True, False])
+        if other_dtype is None:
+            op, other = op_packet.Scalar, 1
+        else:
+            op, other = op_packet.Tensor, torch.ones(2, dtype=other_dtype)
+
+        expected = op(inp, other)
+        with FakeTensorMode() as mode:
+            fake_other = other if other_dtype is None else mode.from_tensor(other)
+            result = op(mode.from_tensor(inp), fake_other)
+
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result.shape, expected.shape)
+
+    @parametrize("shift", ["lshift", "rshift"])
+    def test_shift_all_bool_is_rejected(self, shift):
+        # Eager has no kernel when promotion leaves the result bool.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        op = getattr(torch.ops.aten, f"__{shift}__").Tensor
+        with FakeTensorMode() as mode:
+            inp = mode.from_tensor(torch.tensor([True, False]))
+            with self.assertRaisesRegex(RuntimeError, "integral dtype"):
+                op(inp, inp)
+
     @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
     def test_scatter_add_out_index_dtype_mismatch(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/194103.
