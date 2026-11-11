@@ -1837,12 +1837,16 @@ static bool index_add_sorted_rocm(
         const Tensor long_scratch =
             at::empty({max_long_chunks, scratch_feature_tile}, result.options());
 
-        // Explicit return type: a deduced one would instantiate the bf16-only
-        // values_per_thread == 2 kernels from the discarded branch below.
+        // The values_per_thread == 2 kernels are bf16-only. The discarded
+        // branch below still names this lambda with 2, and the lambda can be
+        // instantiated from there (it is implicitly constexpr in C++23), so
+        // clamp to 1 for other types, as launch_dense does for vectorized.
         const auto launch_long_passes = [&](auto values_per_thread_constant,
                                             int block_size) -> void {
           constexpr int values_per_thread =
-              decltype(values_per_thread_constant)::value;
+              std::is_same_v<scalar_t, c10::BFloat16>
+              ? decltype(values_per_thread_constant)::value
+              : 1;
           const int long_grid = static_cast<int>(std::min<int64_t>(
               max_long_chunks,
               multiprocessor_count * (values_per_thread == 2 ? 16 : 8)));
