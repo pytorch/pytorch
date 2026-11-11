@@ -15,8 +15,9 @@ These are a collection of scripts that are to be used for release activities.
 #### XPU dependency selection
 
 `third_party/xpu.txt` pins a SHA on main and tracks `release/X.Y` on release branches.
-Before running `apply-release-changes.sh`, create the matching torch-xpu-ops branch from the branch-cut XPU pin.
-The script writes its branch name into `xpu.txt`; CMake fetches the full branch ref and checks out its resolved SHA.
+Create the matching torch-xpu-ops branch from the branch-cut XPU pin before building XPU.
+`apply-release-changes.sh` writes its name into `xpu.txt` and warns but continues if it cannot resolve the branch.
+CMake fetches the full branch ref and checks out its resolved SHA.
 XPU wheels include `torch/xpu.txt`, which records the dependency SHA.
 
 #### Promoting packages

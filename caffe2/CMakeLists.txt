@@ -1267,7 +1267,7 @@ if(USE_XPU)
   if(TORCH_XPU_OPS_REF MATCHES "^release/[0-9]+\\.[0-9]+$")
     set(TORCH_XPU_OPS_REF "refs/heads/${TORCH_XPU_OPS_REF}")
   elseif(NOT (_ref_length EQUAL 40 AND TORCH_XPU_OPS_REF MATCHES "^[0-9a-f]+$"))
-    message(FATAL_ERROR "Invalid torch-xpu-ops ref: ${TORCH_XPU_OPS_REF}; expected a full SHA or release/X.Y")
+    message(FATAL_ERROR "Invalid ref in third_party/xpu.txt: ${TORCH_XPU_OPS_REF}; expected 40 lowercase hexadecimal characters or release/X.Y")
   endif()
   if(NOT EXISTS "${TORCH_XPU_OPS_DIR}/.git")
     execute_process(
@@ -1289,11 +1289,11 @@ if(USE_XPU)
   set(TORCH_XPU_OPS_RESOLVED_COMMIT "${TORCH_XPU_OPS_REF}")
   if(NOT TORCH_XPU_OPS_CURRENT_COMMIT STREQUAL TORCH_XPU_OPS_REF)
     execute_process(
-      COMMAND git fetch --quiet "${TORCH_XPU_OPS_REPO_URL}" "${TORCH_XPU_OPS_REF}"
+      COMMAND git fetch --quiet origin "${TORCH_XPU_OPS_REF}"
       WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
       RESULT_VARIABLE _exitcode)
     if(NOT _exitcode EQUAL 0)
-      message(FATAL_ERROR "Fail to fetch ${TORCH_XPU_OPS_REPO_URL} ref ${TORCH_XPU_OPS_REF}")
+      message(FATAL_ERROR "Fail to fetch torch-xpu-ops ref ${TORCH_XPU_OPS_REF} from origin")
     endif()
   endif()
   if(TORCH_XPU_OPS_REF MATCHES "^refs/heads/")
