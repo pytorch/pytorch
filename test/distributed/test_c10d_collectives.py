@@ -17,6 +17,7 @@ from c10d_backend_common import (
     C10dBackendTest,
     C10dBackendTestContinuous,
     instantiate_backend_tests,
+    skip_unsupported,
 )
 
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
@@ -254,7 +255,7 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
 
     def test_gather_into_tensor(self):
         if not self.supports_gather_single:
-            self.skipTest(f"{self.backend_name} does not support gather_single")
+            skip_unsupported(self, "gather_single")
         tensor = self._tensor(4, torch.float32)
         output = (
             torch.empty(self.world_size * 4, device=self.device)
@@ -388,6 +389,8 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
         for count in COUNTS:
             for dtype in self.dtypes:
                 for op in self._reduce_ops(dtype):
+                    if op == dist.ReduceOp.AVG and not self.supports_reduce_avg:
+                        continue
                     for async_op in ASYNC_OPS:
                         with self.subTest(
                             count=count, dtype=dtype, op=op, async_op=async_op
@@ -577,15 +580,15 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
         reduced = torch.full((4,), float(self.rank + 1), device=self.device)
         sent = torch.full((4,), float(self.rank), device=self.device)
         received = torch.empty_like(sent)
-        current = torch.cuda.current_stream(self.device)
+        current = torch.accelerator.current_stream(self.device)
         stream = None
         if side:
-            stream = torch.cuda.Stream(self.device)
+            stream = torch.Stream(self.device)
             stream.wait_stream(current)
             current.synchronize()
         pg._start_coalescing(self.device)
         # A window may span streams; sync ops run on the stream they are issued on.
-        with torch.cuda.stream(stream):
+        with torch.get_device_module(self.device_type).stream(stream):
             dist.all_to_all_single(a2a_out, a2a_in, async_op=async_op)
             dist.all_reduce(reduced, async_op=async_op)
         if p2p:
@@ -641,7 +644,9 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
     def test_float8_transport(self):
         if not self.float8_dtypes:
             self.skipTest(f"{self.backend_name} does not support Float8")
-        if torch.cuda.get_device_capability(self.device) < (9, 0):
+        if self.device_type == "cuda" and torch.cuda.get_device_capability(
+            self.device
+        ) < (9, 0):
             self.skipTest("Float8 collectives require sm90 or newer")
         tests = (
             self._test_broadcast,
@@ -675,6 +680,12 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
             for op in (dist.ReduceOp.SUM, dist.ReduceOp.AVG):
                 for async_op in ASYNC_OPS:
                     for collective in (dist.all_reduce, dist.reduce):
+                        if (
+                            collective is dist.reduce
+                            and op == dist.ReduceOp.AVG
+                            and not self.supports_reduce_avg
+                        ):
+                            continue
                         with self.subTest(
                             collective=collective.__name__,
                             dtype=dtype,
@@ -751,10 +762,12 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
         # synchronous barrier: once it returns the stream must have drained
         # (stream.query()). Only the synchronous path (async_op=False) host-
         # blocks; an async barrier stays stream-ordered and is not tested here.
-        if self.device_type != "cuda":
-            self.skipTest(f"{self.backend_name} host-block test requires CUDA")
-        stream = torch.cuda.current_stream()
-        torch.cuda._sleep(1_000_000_000)
+        if self.device_type == "cpu":
+            self.skipTest(
+                f"{self.backend_name} host-block test requires an accelerator"
+            )
+        stream = torch.accelerator.current_stream()
+        torch.get_device_module(self.device_type)._sleep(1_000_000_000)
         self.assertFalse(
             stream.query(), "precondition: enqueued work should leave stream busy"
         )
@@ -768,7 +781,7 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
         default_pg = dist.distributed_c10d._get_default_group()
         parent_backend = default_pg._get_backend(self.device)
         if not parent_backend.supports_splitting:
-            self.skipTest(f"{self.backend_name} does not support split_group")
+            skip_unsupported(self, "split_group")
         if self.device_type != "cpu":
             default_pg.bound_device_id = self.device
         # Initialize the parent communicator before splitting.
@@ -798,7 +811,7 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
         default_pg = dist.distributed_c10d._get_default_group()
         parent_backend = default_pg._get_backend(self.device)
         if not parent_backend.supports_splitting:
-            self.skipTest(f"{self.backend_name} does not support split_group")
+            skip_unsupported(self, "split_group")
         if self.device_type != "cpu":
             default_pg.bound_device_id = self.device
         dist.all_reduce(torch.ones(4, device=self.device))
@@ -843,35 +856,35 @@ class AbstractIsolatedCollectivesTest(CollectivesTestMixin, C10dBackendTest):
     ranks, so they keep fresh rank processes."""
 
     def test_collective_preserves_current_device(self):
-        if self.device_type != "cuda":
-            self.skipTest(f"{self.backend_name} does not use CUDA")
+        if self.device_type == "cpu":
+            self.skipTest(f"{self.backend_name} does not use an accelerator")
         self._init_pg()
         tensor = torch.ones(4, device=self.device)
-        other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
-        torch.cuda.set_device(other_device)
+        other_device = torch.device(self.device_type, (self.rank + 1) % self.world_size)
+        torch.accelerator.set_device_index(other_device)
 
         dist.all_reduce(tensor)
 
-        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        self.assertEqual(torch.accelerator.current_device_index(), other_device.index)
         self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
 
     def test_all_gather_mixed_devices(self):
-        if self.device_type != "cuda":
-            self.skipTest(f"{self.backend_name} does not use CUDA")
+        if self.device_type == "cpu":
+            self.skipTest(f"{self.backend_name} does not use an accelerator")
         self._init_pg()
         tensor = self._tensor(4, torch.float32)
-        other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
+        other_device = torch.device(self.device_type, (self.rank + 1) % self.world_size)
         outputs = [torch.empty_like(tensor) for _ in range(self.world_size)]
         outputs[-1] = torch.empty(4, device=other_device)
-        torch.cuda.set_device(other_device)
+        torch.accelerator.set_device_index(other_device)
 
         work = dist.all_gather(outputs, tensor, async_op=True)
 
-        self.assertEqual(torch.cuda.current_device(), other_device.index)
+        self.assertEqual(torch.accelerator.current_device_index(), other_device.index)
         work.wait()
-        self.assertEqual(torch.cuda.current_device(), other_device.index)
-        torch.cuda.synchronize(self.device)
-        torch.cuda.synchronize(other_device)
+        self.assertEqual(torch.accelerator.current_device_index(), other_device.index)
+        torch.accelerator.synchronize(self.device)
+        torch.accelerator.synchronize(other_device)
         for rank, output in enumerate(outputs):
             self.assertEqual(
                 output,
@@ -881,7 +894,10 @@ class AbstractIsolatedCollectivesTest(CollectivesTestMixin, C10dBackendTest):
     def test_gather_single(self):
         self._init_pg()
         if not self.supports_gather_single:
-            with self.assertRaisesRegex(RuntimeError, "does not support gather_single"):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "does not support gather_single|gather_into_tensor_' is not currently implemented",
+            ):
                 self._test_gather_single(4, torch.float32, False)
             return
         self._test_transport_matrix(self._test_gather_single)
@@ -896,10 +912,10 @@ class AbstractIsolatedCollectivesTest(CollectivesTestMixin, C10dBackendTest):
                 dist.gather_single(input, output, dst=0)
 
     def test_all_to_all_rejects_mixed_devices(self):
-        if self.device_type != "cuda":
-            self.skipTest(f"{self.backend_name} does not use CUDA")
+        if self.device_type == "cpu":
+            self.skipTest(f"{self.backend_name} does not use an accelerator")
         self._init_pg()
-        other_device = torch.device("cuda", (self.rank + 1) % self.world_size)
+        other_device = torch.device(self.device_type, (self.rank + 1) % self.world_size)
         inputs = [
             torch.full((1,), float(self.rank), device=self.device)
             for _ in range(self.world_size)

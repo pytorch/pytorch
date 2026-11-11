@@ -11,12 +11,12 @@ if not dist.is_available():
     sys.exit(0)
 
 from c10d_backend_common import (
+    ACCELERATOR_BACKENDS,
     C10dBackendTest,
-    CUDA_BACKENDS,
     instantiate_backend_tests,
 )
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_XPU, xfailIf
 
 
 ASYNC_OPS = (False, True)
@@ -30,8 +30,13 @@ class AbstractCUDAGraphsTest(C10dBackendTest):
         )
 
     def _capture_and_replay(self, op, async_op):
-        graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
+        device_module = torch.get_device_module(self.device_type)
+        graph = (
+            device_module.XPUGraph()
+            if self.device_type == "xpu"
+            else device_module.CUDAGraph()
+        )
+        with device_module.graph(graph):
             work = op()
             if async_op:
                 self.assertIsNotNone(work)
@@ -39,7 +44,7 @@ class AbstractCUDAGraphsTest(C10dBackendTest):
             else:
                 self.assertIsNone(work)
         graph.replay()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     def _test_all_reduce(self, dtype, async_op):
         tensor = self._tensor(dtype)
@@ -166,11 +171,13 @@ class AbstractCUDAGraphsTest(C10dBackendTest):
         )
         self.assertEqual(output, expected)
 
+    # oneCCL cannot record these collectives in a SYCL graph.
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/3570
     def test_collectives(self):
         self._init_pg()
         warmup = torch.ones(1, device=self.device)
         dist.all_reduce(warmup)
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         tests = (
             self._test_all_reduce,
@@ -200,7 +207,7 @@ class AbstractCUDAGraphsTest(C10dBackendTest):
             self.skipTest(f"{self.backend_name} barrier does not support CUDA graphs")
         self._init_pg()
         dist.all_reduce(torch.ones(1, device=self.device))
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         for async_op in ASYNC_OPS:
             self._capture_and_replay(
                 lambda: dist.barrier(
@@ -215,7 +222,7 @@ class AbstractCUDAGraphsTest(C10dBackendTest):
             self.skipTest(f"{self.backend_name} does not support coalescing")
         self._init_pg()
         dist.all_reduce(torch.ones(1, device=self.device))
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         pg = dist.distributed_c10d._get_default_group()
         reduced = self._tensor(torch.float32)
         n = 4 * self.world_size
@@ -234,10 +241,11 @@ class AbstractCUDAGraphsTest(C10dBackendTest):
         ranks = torch.arange(self.world_size, device=self.device)
         self.assertEqual(a2a_out, ranks.repeat_interleave(4).float())
 
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/3570
     def test_complex_collectives(self):
         self._init_pg()
         dist.all_reduce(torch.ones(1, device=self.device))
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         for dtype in self.complex_dtypes:
             for async_op in ASYNC_OPS:
                 for test in (
@@ -254,7 +262,7 @@ class AbstractCUDAGraphsTest(C10dBackendTest):
 
 
 instantiate_backend_tests(
-    globals(), "CUDAGraphs", AbstractCUDAGraphsTest, CUDA_BACKENDS
+    globals(), "CUDAGraphs", AbstractCUDAGraphsTest, ACCELERATOR_BACKENDS
 )
 
 

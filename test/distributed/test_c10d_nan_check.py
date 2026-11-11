@@ -21,6 +21,7 @@ from c10d_backend_common import (
     C10D_BACKENDS,
     C10dBackendTest,
     instantiate_backend_tests,
+    skip_unsupported,
 )
 
 from torch._C._distributed_c10d import NanCheckHook
@@ -34,24 +35,28 @@ DETECTING_TESTS = ("test_nan_in_input_detected", "test_env_var_auto_attach")
 
 class AbstractNanCheckHookTest(C10dBackendTest):
     def setUp(self):
+        detecting = self._testMethodName in DETECTING_TESTS
+        # Skip before spawning, so the SIGABRT exit-code check is never armed.
+        if detecting and "nan_check_hook" in self.gap_issues:
+            skip_unsupported(self, "nan_check_hook")
         super().setUp()
         # Set after super().setUp(): MultiProcessTestCase.setUp() resets the
         # dict, and the parent only consults it when joining the children.
-        if self.device_type == "cuda" and self._testMethodName in DETECTING_TESTS:
-            # CUDA and ROCm can report the device trap as a runtime exception.
+        if self.device_type != "cpu" and detecting:
+            # Accelerators can report the device trap as a runtime exception.
             # _assert_nan_detected normalizes that path with os._exit(SIGABRT).
             self.special_return_code_checks = {
                 getattr(self, self._testMethodName).__wrapped__: signal.SIGABRT
             }
 
     def _assert_nan_detected(self, tensor):
-        if self.device_type == "cuda":
+        if self.device_type != "cpu":
             with core_dumps_disabled():
                 try:
                     dist.all_reduce(tensor)
-                    torch.cuda.synchronize()
+                    torch.accelerator.synchronize()
                 except Exception:
-                    # os._exit, not sys.exit: the CUDA context is poisoned, so
+                    # os._exit, not sys.exit: the device context is poisoned, so
                     # unwinding through tearDown's destroy_process_group can hang
                     # waiting on collectives that will never complete.
                     os._exit(signal.SIGABRT)
@@ -130,8 +135,8 @@ class AbstractNanCheckHookTest(C10dBackendTest):
 
         NanCheckHook.attach(dist.group.WORLD).remove()
         dist.all_reduce(t)
-        if self.device_type == "cuda":
-            torch.cuda.synchronize()
+        if self.device_type != "cpu":
+            torch.accelerator.synchronize()
 
     def test_env_var_auto_attach(self):
         os.environ["TORCH_DIST_NAN_CHECK"] = "1"
