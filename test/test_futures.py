@@ -16,6 +16,10 @@ def add_one(fut):
     return fut.wait() + 1
 
 
+class CustomError(Exception):
+    pass
+
+
 class TestFuture(TestCase):
     def test_set_exception(self) -> None:
         # This test is to ensure errors can propagate across futures.
@@ -47,6 +51,58 @@ class TestFuture(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Got the following error"):
             cb_fut = f.then(cb)
             cb_fut.wait()
+
+    def test_set_exception_is_error(self) -> None:
+        # set_exception completes the C++ future with an error and raises the
+        # original exception object.
+        err = CustomError("Intentional")
+        f = Future[T]()  # type: ignore[valid-type]
+        # pyrefly: ignore [bad-argument-type]
+        f.set_exception(err)
+        self.assertTrue(f.done())
+        with self.assertRaises(CustomError) as ctx:
+            f.wait()
+        self.assertIs(ctx.exception, err)
+        with self.assertRaises(CustomError) as ctx:
+            f.value()
+        self.assertIs(ctx.exception, err)
+
+        with self.assertRaises(CustomError) as ctx:
+            torch.futures.collect_all([f]).wait()
+        self.assertIs(ctx.exception, err)
+        with self.assertRaises(CustomError) as ctx:
+            torch.futures.wait_all([f])
+        self.assertIs(ctx.exception, err)
+
+        # C++ collectAll exits early on a child error; it only sees the error
+        # if the C++ future has it.
+        f = Future[T]()  # type: ignore[valid-type]
+        pending = Future[T]()  # type: ignore[valid-type]
+        fut_all = torch.futures.collect_all([f, pending])
+        # pyrefly: ignore [bad-argument-type]
+        f.set_exception(err)
+        self.assertTrue(fut_all.done())
+        with self.assertRaises(CustomError) as ctx:
+            fut_all.wait()
+        self.assertIs(ctx.exception, err)
+        # pyrefly: ignore [bad-argument-type]
+        pending.set_result(None)
+
+        # Callbacks still run; one that ignores the error completes normally.
+        self.assertEqual(f.then(lambda fut: 1).wait(), 1)
+
+        with self.assertRaisesRegex(RuntimeError, "completed once"):
+            # pyrefly: ignore [bad-argument-type]
+            f.set_exception(err)
+        f = Future[int]()
+        f.set_result(1)
+        with self.assertRaisesRegex(RuntimeError, "completed once"):
+            # pyrefly: ignore [bad-argument-type]
+            f.set_exception(err)
+        self.assertEqual(f.wait(), 1)
+        with self.assertRaisesRegex(TypeError, "exception instance"):
+            # pyrefly: ignore [bad-argument-type]
+            Future()._set_exception("not an exception")
 
     def test_set_exception_multithreading(self) -> None:
         # Ensure errors can propagate when one thread waits on future result

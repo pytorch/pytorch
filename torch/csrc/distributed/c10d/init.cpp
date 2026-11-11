@@ -5132,9 +5132,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             Python ``Work`` subclasses may override this to return a
             ``torch.futures.Future``. FlightRecorder calls it once per op as
             the op is issued, so overrides must be cheap and must not block.
-            FlightRecorder records the op as completed once the future
-            completes. A ``torch.futures.Future()`` can't report failure: any
-            value, including one set with ``set_exception``, counts as success.
+            FlightRecorder retires the op once the future completes
+            successfully; if it fails (e.g. ``set_exception``) the op stays
+            un-retired.
            )")
           .def(
               "get_future",

@@ -1389,12 +1389,13 @@ class FlightRecorderHookPythonWorkTest(TestCase):
         self.assertEqual([e["retired"] for e in new], [True, False], msg=str(new))
         self.assertEqual(new[0]["state"], "completed", msg=str(new))
 
-        # A torch.futures.Future() can't report failure: set_exception
-        # completes it too.
+        # A failed op stays un-retired.
         futs[1].set_exception(RuntimeError("failed"))
+        with self.assertRaisesRegex(RuntimeError, "failed"):
+            futs[1].wait()
         new = entries()[before:]
-        self.assertEqual([e["retired"] for e in new], [True, True], msg=str(new))
-        self.assertEqual(new[1]["state"], "completed", msg=str(new))
+        self.assertEqual([e["retired"] for e in new], [True, False], msg=str(new))
+        self.assertEqual(new[1]["state"], "scheduled", msg=str(new))
         hook.remove()
 
 
