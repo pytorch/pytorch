@@ -306,6 +306,28 @@ op_assert_equal_tol_table = {
     (torch.int16, torch.ops.aten.linspace.Scalar_Tensor): (0, 1),
     (torch.int32, torch.ops.aten.linspace.Scalar_Tensor): (0, 1),
     (torch.int64, torch.ops.aten.linspace.Scalar_Tensor): (0, 1),
+    # For integer dtypes the CUDA/XPU kernels evaluate pow() in float32 while the
+    # decomposition uses float64, so e.g. pow(3, 3) can truncate to 26 instead of 27.
+    (torch.int8, torch.ops.aten.logspace.default): (0, 1),
+    (torch.uint8, torch.ops.aten.logspace.default): (0, 1),
+    (torch.int16, torch.ops.aten.logspace.default): (0, 1),
+    (torch.int32, torch.ops.aten.logspace.default): (0, 1),
+    (torch.int64, torch.ops.aten.logspace.default): (0, 1),
+    (torch.int8, torch.ops.aten.logspace.Tensor_Tensor): (0, 1),
+    (torch.uint8, torch.ops.aten.logspace.Tensor_Tensor): (0, 1),
+    (torch.int16, torch.ops.aten.logspace.Tensor_Tensor): (0, 1),
+    (torch.int32, torch.ops.aten.logspace.Tensor_Tensor): (0, 1),
+    (torch.int64, torch.ops.aten.logspace.Tensor_Tensor): (0, 1),
+    (torch.int8, torch.ops.aten.logspace.Tensor_Scalar): (0, 1),
+    (torch.uint8, torch.ops.aten.logspace.Tensor_Scalar): (0, 1),
+    (torch.int16, torch.ops.aten.logspace.Tensor_Scalar): (0, 1),
+    (torch.int32, torch.ops.aten.logspace.Tensor_Scalar): (0, 1),
+    (torch.int64, torch.ops.aten.logspace.Tensor_Scalar): (0, 1),
+    (torch.int8, torch.ops.aten.logspace.Scalar_Tensor): (0, 1),
+    (torch.uint8, torch.ops.aten.logspace.Scalar_Tensor): (0, 1),
+    (torch.int16, torch.ops.aten.logspace.Scalar_Tensor): (0, 1),
+    (torch.int32, torch.ops.aten.logspace.Scalar_Tensor): (0, 1),
+    (torch.int64, torch.ops.aten.logspace.Scalar_Tensor): (0, 1),
 }
 
 
