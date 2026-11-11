@@ -271,6 +271,9 @@ class TestColumnConfig(TestCase):
             (torch.bfloat16, "amax", 131072, 256, 16, (torch.bfloat16,), (32, 32)),
             (torch.bfloat16, "mean", 32768, 1024, 4, (torch.float32,), (32, 32)),
         ],
+        name_fn=lambda dtype, key, rows, columns, *_: (
+            f"{key}_{str(dtype)[6:]}_{rows}x{columns}"
+        ),
     )
     def test_sm107_ordered_profiles(
         self, dtype, key, rows, columns, partials, outputs, expected
@@ -288,6 +291,9 @@ class TestColumnConfig(TestCase):
             (torch.bfloat16, "amax", 131072, 256, 16, (torch.float32,)),
             (torch.bfloat16, "var0", 8192, 4096, 1, (torch.float32,)),
         ],
+        name_fn=lambda dtype, key, rows, columns, partials, outputs: (
+            f"{key}_{str(dtype)[6:]}_{rows}x{columns}_to_{str(outputs[0])[6:]}"
+        ),
     )
     def test_sm107_ordered_needs_measured_outputs(
         self, dtype, key, rows, columns, partials, outputs
@@ -387,6 +393,7 @@ class TestColumnConfig(TestCase):
             {"alignment": 8},
             {"key": "prod"},
         ],
+        name_fn=lambda updates: "_".join(updates),
     )
     def test_sm107_column_guards(self, updates):
         """Keep a 256 MiB SM107 anchor that breaks one guard on generic policies."""
@@ -426,6 +433,9 @@ class TestColumnConfig(TestCase):
             (torch.float32, "sum", 65536, 256, 8, (torch.float32,), 32),
             (torch.bfloat16, "var0", 8192, 4096, 1, (torch.bfloat16,), 64),
         ],
+        name_fn=lambda dtype, key, rows, columns, *_: (
+            f"{key}_{str(dtype)[6:]}_{rows}x{columns}"
+        ),
     )
     def test_sm107_ordered_needs_full_tiles(
         self, dtype, key, rows, columns, partials, outputs, expected
@@ -479,8 +489,12 @@ class TestColumnConfig(TestCase):
         )
         self.assertEqual(cfg is not None, welford_outs == 1)
 
-    @parametrize("kwargs", [{"threads_per_block": 128}, {"npar": 7}, {"vec": 2}])
-    @parametrize("cc", [(10, 3), (10, 7)])
+    @parametrize(
+        "kwargs",
+        [{"threads_per_block": 128}, {"npar": 7}, {"vec": 2}],
+        name_fn=lambda kwargs: "_".join(f"{k}_{v}" for k, v in kwargs.items()),
+    )
+    @parametrize("cc", [(10, 3), (10, 7)], name_fn=lambda cc: f"sm{cc[0]}{cc[1]}")
     def test_explicit_geometry_disables_policy(self, cc, kwargs):
         """Honor explicit column geometry without rewriting it through policy, even at
         SM107's rubin_sum_c4096_tiled anchor."""

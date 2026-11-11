@@ -377,7 +377,7 @@ def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
 # looped route stops at R = 8192, the longest looped row within reduce_ordered_col's
 # replay cap of tile.MAX_UNROLL leaves (see the compile timings there). Each R compiles
 # once per mapping (see kernel_coltile.OrderedColConfig.min_blocks) and stride width.
-# Input dtypes of the B200 launch policies, which the ordered route shares.
+# Input dtypes of the B200 launch policies.
 _B200_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 _B200_CCS = ((10, 0),)
 # The one-field traits of the B200 ragged-column rule (kernel_coltile.select_col_config).
@@ -386,6 +386,10 @@ _B200_RAGGED_COL_ONE_FIELD = (SumOps, ProdOps, MeanOps, AMaxOps, AMinOps)
 _B200_STRIDED_ONE_FIELD = (SumOps, ProdOps, MeanOps)
 # The B200 index rules' traits; they also need 32-bit accumulators (int32 indices).
 _B200_INDEX = (ArgMaxOps, ArgMinOps)
+# The b200_strided_c256 rule's traits besides Welford (see select_general_config):
+# sum, mean, amax, amin and the index traits were measured under c256, while prod,
+# nansum and the norms were not, so they keep the default config.
+_B200_STRIDED_C256 = (SumOps, MeanOps, AMaxOps, AMinOps, *_B200_INDEX)
 # Input dtypes and view-size anchors of the SM107 launch policies, and the one-field
 # trait types they measured (by rule name). Their rules are named rubin_*. They come from
 # SM107 measurements at the _SM107_SIZES anchors; unlike the B200 rules, the ratios are
@@ -411,15 +415,16 @@ def _sm107_outputs(
     return (natural,) * nouts
 
 
-_ORDERED_COL_DTYPES = _B200_DTYPES
-# Routing ccs, deliberately separate from the launch-policy _B200_CCS: the route and the
-# policies are measured and extended independently. kernel_coltile._ORDERED_COL_CONFIGS
-# has no (10, 0) entries: B200 split views reached through _reduce and the
-# b200_ragged_c4095_ordered hand-off take the selector's fallback,
-# OrderedColConfig(0, tile_columns=WARP, full_tiles=...), which its B200 full-tile rules
-# narrow to 16-column tiles at some shapes. Its (10, 7) entries are reached through
+# Routing dtypes and ccs, deliberately separate from the launch-policy _B200_DTYPES and
+# _B200_CCS: the route and the policies are measured and extended independently.
+# kernel_coltile._ORDERED_COL_CONFIGS has no (10, 0) entries: only B200 split views
+# routed through _reduce take the selector's fallback, OrderedColConfig(0,
+# tile_columns=WARP, full_tiles=...), which its B200 full-tile rules narrow to 16-column
+# tiles at some shapes. The looped views of the b200_ragged_c4095_ordered hand-off get
+# None and run on OrderedColConfig(0). Its (10, 7) entries are reached through
 # select_col_config hand-offs; entries for architectures outside _ORDERED_COL_CCS,
 # _B200_CCS and (10, 7) serve direct reduce_ordered_col calls only.
+_ORDERED_COL_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 _ORDERED_COL_CCS = ((10, 0),)
 _ORDERED_COL_MIN_R = 128
 _ORDERED_COL_MAX_R = 8192
@@ -561,10 +566,7 @@ def select_general_config(
     if (
         strided_row
         and count in (256, 257)
-        and (
-            trait_type in (SumOps, MeanOps, AMaxOps, AMinOps, *_B200_INDEX)
-            or welford_outs == nouts
-        )
+        and (trait_type in _B200_STRIDED_C256 or welford_outs == nouts)
     ):
         return _GeneralConfig(kernel_order="inner_tree", rule="b200_strided_c256")
     if wide and trait_type in _B200_INDEX:
