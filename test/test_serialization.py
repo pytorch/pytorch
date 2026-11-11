@@ -24,6 +24,7 @@ import zipfile
 from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass
+from multiprocessing.reduction import ForkingPickler
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1064,6 +1065,13 @@ class TestOldSerialization(TestCase, SerializationMixin):
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
 
+    def test_set_from_file_invalid_size(self):
+        # 2**61 + 1 elements of size 8 wraps around to 8 bytes
+        for size, msg in ((2, "wrong byte size"), (2**61 + 1, "overflows"), (-1, "invalid storage size")):
+            buf = io.BytesIO(size.to_bytes(8, "little", signed=True) + b"\x00" * 8)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.UntypedStorage(8)._set_from_file(buf, None, False, 8)
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=False):
             return super().run(*args, **kwargs)
@@ -1100,17 +1108,36 @@ class TestSerialization(TestCase, SerializationMixin):
 
         test(io.BytesIO())
 
-    def test_serialization_zipfile_actually_jit(self):
-        with tempfile.NamedTemporaryFile() as f:
-            torch.jit.save(torch.jit.script(torch.nn.Linear(3, 4)), f)
-            f.seek(0)
-            with self.assertRaisesRegex(
-                RuntimeError,
-                re.escape("Cannot use ``weights_only=True`` with TorchScript archives passed to ``torch.load``")
-            ):
-                torch.load(f, weights_only=True)
-            f.seek(0)
-            torch.load(f, weights_only=False)
+    @parametrize('weights_only', (True, False))
+    def test_serialization_rejects_torchscript_archives(self, weights_only):
+        cu = torch.jit.CompilationUnit('def forward(x: Tensor) -> Tensor:\n    return x + 1\n')
+        archive = cu.forward.save_to_buffer()
+        with TemporaryFileName() as filename:
+            with open(filename, "wb") as f:
+                f.write(archive)
+            for source in (filename, io.BytesIO(archive)):
+                if IS_FBCODE:
+                    if weights_only:
+                        with self.assertRaisesRegex(
+                            RuntimeError,
+                            re.escape(
+                                "Cannot use ``weights_only=True`` with TorchScript archives "
+                                "passed to ``torch.load``"
+                            ),
+                        ):
+                            torch.load(source, weights_only=True)
+                    else:
+                        loaded = torch.load(source, weights_only=False)
+                        x = torch.arange(3)
+                        self.assertEqual(loaded(x), cu.forward(x))
+                else:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        re.escape("TorchScript archives are no longer supported by torch.load")
+                    ) as cm:
+                        torch.load(source, weights_only=weights_only)
+                    self.assertIn("older PyTorch version", str(cm.exception))
+                    self.assertIn("original model to torch.export", str(cm.exception))
 
     # Ensure large zip64 serialization works properly
     @serialTest()
@@ -5403,6 +5430,17 @@ class TestEmptySubclass(torch.Tensor):
     ...
 
 
+class TestMakeSubclassWithDispatch(torch.Tensor):
+    @staticmethod
+    def __new__(cls, elem):
+        return torch.Tensor._make_subclass(cls, elem)
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        with torch._C._DisableTorchDispatch():
+            return func(*args, **(kwargs or {}))
+
+
 class TestSubclassSerialization(TestCase):
     def test_tensor_subclass_wrapper_serialization(self):
         wrapped_tensor = torch.rand(2)
@@ -5484,6 +5522,55 @@ class TestSubclassSerialization(TestCase):
             f.seek(0)
             with safe_globals([TestEmptySubclass]):
                 tensor2 = torch.load(f)
+
+    @parametrize("roundtrip", ["deepcopy", "torch_save", "pickle", "forking_pickler"])
+    def test_wrapper_subclass_with_storage_offset_roundtrip(self, roundtrip):
+        a, b = torch.arange(12.0), torch.arange(12.0) + 100
+        t = TwoTensor(a[4:8], b[4:8])
+        self.assertEqual(t.storage_offset(), 4)
+        if roundtrip == "deepcopy":
+            new = deepcopy(t)
+        elif roundtrip == "torch_save":
+            with BytesIOContext() as f:
+                torch.save(t, f)
+                f.seek(0)
+                with safe_globals([TwoTensor]):
+                    new = torch.load(f)
+        elif roundtrip == "pickle":
+            new = pickle.loads(pickle.dumps(t))
+        else:
+            new = ForkingPickler.loads(ForkingPickler.dumps(t))
+        self.assertIs(type(new), TwoTensor)
+        self.assertFalse(torch._C._has_storage_data(new))
+        # deepcopy clones, which resets the offset of the inner tensors.
+        if roundtrip != "deepcopy":
+            self.assertEqual(new.storage_offset(), t.storage_offset())
+        self.assertEqual(new.a, t.a)
+        self.assertEqual(new.b, t.b)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
+    def test_storageless_subclass_is_not_saved_as_wrapper(self):
+        # An MKLDNN tensor has no storage, unlike the placeholder storage of a
+        # wrapper subclass. Saving it must fail rather than silently drop its data.
+        t = TestMakeSubclassWithDispatch(torch.randn(4).to_mkldnn())
+        self.assertFalse(torch._C._has_storage(t))
+        with BytesIOContext() as f:
+            with self.assertRaisesRegex(NotImplementedError, "Cannot access storage"):
+                torch.save(t, f)
+
+    def test_empty_view_of_real_storage_subclass_keeps_storage(self):
+        base = torch.arange(8.0)
+        t = TestMakeSubclassWithDispatch(base[2:2])
+        self.assertEqual(t.data_ptr(), 0)
+        with BytesIOContext() as f:
+            torch.save(t, f)
+            f.seek(0)
+            with safe_globals([TestMakeSubclassWithDispatch]):
+                loaded = torch.load(f)
+        self.assertIs(type(loaded), TestMakeSubclassWithDispatch)
+        self.assertTrue(torch._C._has_storage_data(loaded))
+        self.assertEqual(loaded.storage_offset(), 2)
+        self.assertEqual(loaded.untyped_storage().nbytes(), base.untyped_storage().nbytes())
 
     @skipIfTorchDynamo("name 'SYNTHETIC_LOCAL' is not defined")
     def test_safe_globals_for_weights_only(self):

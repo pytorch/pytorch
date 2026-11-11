@@ -1778,6 +1778,18 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         res_act = fn_opt(x)
         self.assertEqual(res_exp, res_act)
 
+    def test_construct_parameter_subclass(self):
+        class MyParam(torch.nn.Parameter):
+            pass
+
+        def fn(x):
+            return MyParam(x, requires_grad=False)
+
+        x = torch.randn(2)
+        out = compile_full_eager(fn)(x)
+        self.assertIs(type(out), MyParam)
+        self.assertEqual(out, x)
+
     def test_subclass_with_disabled_torch_function(self):
         class MySubclass(torch.Tensor):
             __torch_function__ = torch._C._disabled_torch_function_impl
@@ -1986,6 +1998,38 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
 
         self.assertEqual(res, ref)
         self.assertEqual(res[0].bar, ref[0].bar)
+
+    @parametrize("op", ("linear", "module", "matmul"))
+    @parametrize("property_first", (False, True))
+    def test_constructed_subclass_method_descriptor_guard(self, op, property_first):
+        class MySubclass(torch.Tensor):
+            def __init__(self, data):
+                super().__init__()
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        weight = torch.randn(3, 4)
+        linear = torch.nn.Linear(4, 3)
+
+        def fn(x):
+            x = MySubclass(x)
+            if op == "linear":
+                t = torch.nn.functional.linear(x, weight)
+            elif op == "module":
+                t = linear(x)
+            else:
+                t = x @ weight.T
+            if property_first:
+                return t.shape, t.dtype, t.device, t.numel(), t.dim(), t.is_complex()
+            return t.numel(), t.dtype, t.dim(), t.is_complex(), t.shape, t.device
+
+        x = torch.randn(2, 4)
+        opt_fn = torch.compile(fn, backend="eager")
+        expected = fn(x)
+        self.assertEqual(opt_fn(x), expected)
+        self.assertEqual(opt_fn(x), expected)
 
     def test_as_subclass_attr_mutation(self):
         # Make sure the attribute mutation for newly constructed tensor subclass
@@ -2681,6 +2725,44 @@ s50 > 3""",
         x3 = CtxSubclassTensor(torch.ones(2), 4)
         _check_recompiles(self, lambda x: x * x, (x,), (x2,), False)
         _check_recompiles(self, lambda x: x * x, (x,), (x3,), True)
+
+    @parametrize("custom_guard", [False, True])
+    def test_tensor_subclass_metadata_recompile_hint(self, custom_guard):
+        class CustomGuardTensor(CtxSubclassTensor):
+            @classmethod
+            def __metadata_guard__(cls, original, current):
+                return original == current
+
+        tensor_type = CustomGuardTensor if custom_guard else CtxSubclassTensor
+        failures = []
+        compiled = torch._dynamo.optimize(
+            backend="eager",
+            nopython=True,
+            guard_fail_fn=lambda failure: failures.append(failure.reason),
+        )(lambda x: x * x)
+
+        compiled(tensor_type(torch.ones(2), 3))
+        compiled(tensor_type(torch.ones(2), 3))
+        self.assertEqual(failures, [])
+        compiled(tensor_type(torch.ones(2), 2))
+
+        self.assertEqual(len(failures), 1)
+        class_name = f"{tensor_type.__module__}.{tensor_type.__qualname__}"
+        if custom_guard:
+            expected_hint = (
+                f"(HINT: {class_name}.__metadata_guard__() rejected the metadata "
+                "for x. Keep the metadata stable or change the check "
+                "if this difference is safe.)"
+            )
+        else:
+            expected_hint = (
+                f"(HINT: Metadata from {class_name}.__tensor_flatten__() for "
+                "x no longer matches what Dynamo saw during compilation. "
+                "This metadata can affect tensor subclass behavior; keep it stable "
+                "or define __metadata_guard__() if some differences are safe.)"
+            )
+        self.assertIn("___check_metadata_", failures[0])
+        self.assertIn(expected_hint, failures[0])
 
     def test_tensor_subclass_ctx_recursive_guards(self):
         x0 = torch.ones(2, 2)
