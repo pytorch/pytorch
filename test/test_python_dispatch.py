@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    fake_tensor_modes,
     first_sample,
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -1958,11 +1959,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         self.assertFalse(is_in_torch_dispatch_mode(include_infra_modes=False))
 
     @skipIfTorchDynamo("uses torch.compile")
-    @parametrize(
-        "mode_cls",
-        [FakeTensorMode, CppFakeTensorMode],
-        name_fn=lambda cls: cls.__name__,
-    )
+    @fake_tensor_modes
     @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
     def test_mode_detection_compiles(self, mode_cls):
         @torch.compile(backend="eager", fullgraph=True)
