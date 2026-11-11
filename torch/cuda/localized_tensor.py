@@ -1,6 +1,6 @@
-r"""Locality-domain-aware tensor subclass and localization helpers.
+"""Locality-domain-aware tensor subclass and the public ``localize`` helper.
 
-The :func:`localize` helper walks an
+The public API surface is just :func:`localize`, which walks an
 ``nn.Module`` and replaces the parameters of every localizable layer --
 an ``nn.Linear``'s weight and bias, by default -- with a tensor subclass
 that splits along ``dim 0`` across the device's CUDA locality domains.
@@ -8,8 +8,7 @@ Forward calls on the layer then run the op as parallel branches on
 green-context-backed streams that occupy disjoint SM partitions.
 
 Which ops (and which layers) qualify is entirely a matter of what is in
-the ``_LOCALIZABLE_OPS`` registry. Use :func:`register_localizable_op` to
-register additional ops.
+the ``_LOCALIZABLE_OPS`` registry; see :func:`register_localizable_op`.
 
 Typical use::
 
@@ -40,7 +39,7 @@ if TYPE_CHECKING:
 
     import torch.nn as nn
 
-__all__ = ["localize", "register_localizable_op"]
+__all__ = ["localize"]
 
 
 # ---------------------------------------------------------------------------
