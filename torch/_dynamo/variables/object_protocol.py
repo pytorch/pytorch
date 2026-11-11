@@ -2327,7 +2327,7 @@ def _is_skipped_constant_property(
         return False
     obj = obj.realize()
     if (
-        type(obj) is not variables.ConstantVariable
+        not variables.ConstantVariable.is_constant_vt(obj)
         or tx.output.side_effects.has_pending_mutation_of_attr(obj, name)
         or obj.lookup_tp_getset_member(name) is not None
     ):
