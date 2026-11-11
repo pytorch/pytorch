@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 import torch
-from torch.testing._internal.common_cuda import TEST_CUPTI, TEST_CUPTI_V13_3
+from torch.testing._internal.common_cuda import TEST_CUPTI, TEST_CUPTI_V13_5
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -18,20 +18,23 @@ from torch.testing._internal.common_utils import (
 
 
 # These tests drive the real libcupti through _PyLibCupti, so they import its symbols;
-# cupti-python imports its enums at load, so guard the import on TEST_CUPTI. TEST_CUPTI_V13_3
-# additionally requires a loaded libcupti >= 13.3 (the v2 user-defined-record API the wrapper
-# targets) -- e.g. the 13.3 wheel LD_PRELOADed; torch's bundled libcupti is typically 13.1.
+# cupti-python imports its enums at load, so guard the import on TEST_CUPTI. TEST_CUPTI_V13_5
+# additionally requires a CUDA >= 13.5 build and a loaded libcupti >= 13.5 (the Cuspy test
+# floor; the v2 user-defined-record API the wrapper targets landed in 13.3) -- e.g. the 13.5
+# wheel LD_PRELOADed; torch's bundled libcupti is typically 13.1.
 if TEST_CUPTI:
     from torch.profiler._cuspy.cupti_python import CUPTI_SUCCESS, CuptiError, pylibcupti
 
 
-@unittest.skipIf(not TEST_CUPTI_V13_3, "requires a loaded libcupti >= 13.3")
+@unittest.skipIf(
+    not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + a loaded libcupti >= 13.5"
+)
 @instantiate_parametrized_tests
 class TestPyLibCuptiCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     def test_get_version(self):
-        self.assertGreaterEqual(pylibcupti().get_version(), 130300)
+        self.assertGreaterEqual(pylibcupti().get_version(), 130500)
 
     @parametrize(
         "runtime,outcome",
