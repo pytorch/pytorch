@@ -2439,15 +2439,6 @@ class triton:
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = os.environ.get("TORCHINDUCTOR_DIVISIBLE_BY_16", "1") == "1"
 
-    # With dynamic shapes a symbolic size argument (e.g. xnumel) can't be proven
-    # divisible by 16, so Triton masks element by element and can't vectorize. When
-    # this is on and the size hint is divisible by 16, guard on it and tell Triton;
-    # a call that breaks the guard recompiles. Callers that skip Dynamo's guards
-    # (e.g. skip_guard_eval_unsafe, guard_filter_fn dropping it) must turn this off.
-    guard_size_divisible_by_16 = (
-        os.environ.get("TORCHINDUCTOR_GUARD_SIZE_DIVISIBLE_BY_16", "1") == "1"
-    )
-
     # On AMD/HIP, annotate pointer args with tt.pointer_range=32 when the
     # tensor storage provably fits in 2 GB. This lets Triton emit efficient
     # buffer load/store ops. Disable if a Triton compiler bug is triggered.

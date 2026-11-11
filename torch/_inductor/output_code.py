@@ -553,6 +553,9 @@ class CompiledFxGraph(OutputCode):
     inductor_provenance_mapping_str: str | None
     inductor_provenance_stack_traces_str: str | None
     kernel_free_cudagraph: bool
+    # Whether lowering guarded on sizes being divisible (see
+    # triton_utils._guard_multiple_of).
+    has_size_divisibility_guards: bool
 
     cudagraph_info: CudagraphCachedInfo | None
     partition_maps: list[GraphPartitionMap] | None
@@ -649,6 +652,7 @@ class CompiledFxGraph(OutputCode):
         self.output_strides = output_strides
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
         self.kernel_free_cudagraph = graph.kernel_free_cudagraph
+        self.has_size_divisibility_guards = bool(graph.size_divisibility_guards)
         self.metrics_deltas = metrics_deltas
         self.counter_deltas = counter_deltas
         self.guards_expr = None

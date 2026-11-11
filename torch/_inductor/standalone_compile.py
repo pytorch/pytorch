@@ -543,22 +543,33 @@ def _standalone_context(
 
     resolved_fake_mode = _resolve_fake_mode(gm, dynamic_shapes, fake_mode)
     tracing_context = torch._guards.TracingContext(resolved_fake_mode)
-    with (
-        torch._guards.tracing(tracing_context),
-        CacheArtifactManager.with_fresh_cache(),
-        config.patch("triton.autotune_at_compile_time", True),
-        torch._functorch.config.patch(
-            {
-                "bundled_autograd_cache": aot,
-                # Standalone artifacts are saved immediately after compile_fx
-                # returns. Training graphs normally lower the backward lazily on
-                # first backward(), so force it while the artifact recorder is
-                # still active.
-                "force_non_lazy_backward_lowering": True,
-            }
-        ),
-    ):
-        yield
+    # Loading an artifact doesn't check the guards compiling it adds.
+    compile_context = torch._guards.CompileContext.try_get()
+    prior_guards_may_be_skipped = (
+        compile_context.guards_may_be_skipped if compile_context else False
+    )
+    try:
+        if compile_context is not None:
+            compile_context.guards_may_be_skipped = True
+        with (
+            torch._guards.tracing(tracing_context),
+            CacheArtifactManager.with_fresh_cache(),
+            config.patch("triton.autotune_at_compile_time", True),
+            torch._functorch.config.patch(
+                {
+                    "bundled_autograd_cache": aot,
+                    # Standalone artifacts are saved immediately after compile_fx
+                    # returns. Training graphs normally lower the backward lazily on
+                    # first backward(), so force it while the artifact recorder is
+                    # still active.
+                    "force_non_lazy_backward_lowering": True,
+                }
+            ),
+        ):
+            yield
+    finally:
+        if compile_context is not None:
+            compile_context.guards_may_be_skipped = prior_guards_may_be_skipped
 
 
 def standalone_compile(

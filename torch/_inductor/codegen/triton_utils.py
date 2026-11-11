@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+import re
 import warnings
 from typing import Any
 
@@ -16,7 +17,7 @@ from torch.utils._sympy.functions import Mod
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._triton import has_triton_block_ptr
 
-from .. import config
+from .. import config, ir
 from ..runtime.hints import AttrsDescriptorWrapper, DeviceProperties
 from ..utils import (
     _type_of,
@@ -392,11 +393,15 @@ def _is_tensor_within_2gb(arg: TensorArg) -> bool:
         return False
 
 
-# (Dynamo frame_id, code location) -> frame_compile_id of the compile that guarded on
-# divisibility. Later compiles of the frame don't, so a size that breaks the guards
-# costs at most one recompile rather than one per guarded expression. The code
-# location tells apart a frame_id reused after torch._dynamo.reset().
-_divisibility_guarded_compile: dict[tuple[object, ...], int] = {}
+# Dynamo frame_id -> frame_compile_id of the compile that guarded on divisibility.
+# Later compiles of the frame don't, so a size that breaks the guards costs at most
+# one recompile rather than one per guarded expression. torch._dynamo.reset()
+# clears it, along with the frame ids.
+_divisibility_guarded_compile: dict[int, int] = {}
+
+# Kernel args that are a range tree's numel, where divisibility lets loads and
+# stores vectorize; strides and other sizes would only add recompiles.
+_NUMEL_ARG = re.compile(r"(?:[xyz]|r\d+_)numel(?:_\d+)?")
 
 
 def _strict_min_max_constrained_symbols(shape_env: Any) -> OrderedSet[sympy.Symbol]:
@@ -417,14 +422,124 @@ def _strict_min_max_constrained_symbols(shape_env: Any) -> OrderedSet[sympy.Symb
     return result
 
 
+def size_divisibility_guards_may_be_skipped() -> bool:
+    """
+    Whether nothing may check a guard this compile adds, or a failed one can't
+    recompile.
+    """
+    from torch._dynamo import config as dynamo_config, eval_frame
+
+    compile_context = CompileContext.try_get()
+    return (
+        (compile_context is not None and compile_context.guards_may_be_skipped)
+        or eval_frame._stance.skip_guard_eval_unsafe
+        or eval_frame._stance.stance in ("fail_on_recompile", "eager_on_recompile")
+        or dynamo_config.error_on_recompile
+    )
+
+
+def _divisibility_guard_frame(shape_env: Any) -> tuple[int, int] | None:
+    """
+    (frame_id, frame_compile_id) of the Dynamo frame compile we're in, which turns
+    a failed guard into a recompile, or None if there's no such compile.
+    """
+    compile_context = CompileContext.try_get()
+    if compile_context is None:
+        return None
+    compile_id = compile_context.compile_id
+    tracing_context = TracingContext.try_get()
+    if (
+        compile_id is None
+        or compile_id.frame_id is None
+        or compile_id.frame_compile_id is None
+        or compile_id.compiled_autograd_id is not None
+        # a ShapeEnv of its own
+        or tracing_context is None
+        or tracing_context.fake_mode is None
+        or tracing_context.fake_mode.shape_env is not shape_env
+        # Dynamo has already built its guards, e.g. for a backward compiled lazily
+        # on first use, and would drop this one
+        or shape_env.frozen
+        or size_divisibility_guards_may_be_skipped()
+    ):
+        return None
+    from torch._inductor.compile_fx import fx_compile_mode, FxCompileMode
+
+    # a serialized compile guards on a copy of the ShapeEnv
+    if fx_compile_mode != FxCompileMode.NORMAL:
+        return None
+    return compile_id.frame_id, compile_id.frame_compile_id
+
+
+def may_add_size_divisibility_guards(shape_env: Any = None) -> bool:
+    """
+    Whether this compile (lowering with shape_env, by default the tracing context's)
+    may add divisibility guards. Part of the FX graph cache key: a hit re-adds the
+    cached graph's guards, which a compile that wouldn't have added them may not be
+    able to keep or check. Coarse on purpose, so the key can be computed before
+    lowering: a min/max range or hint_override on any symbol turns guards off for
+    the whole graph, and the per-frame record makes the key depend on this
+    process's compile history.
+    """
+    if shape_env is None:
+        tracing_context = TracingContext.try_get()
+        if tracing_context is None or tracing_context.fake_mode is None:
+            return False
+        shape_env = tracing_context.fake_mode.shape_env
+    if shape_env is None or (frame := _divisibility_guard_frame(shape_env)) is None:
+        return False
+    frame_id, frame_compile_id = frame
+    # compile ids only grow within a frame, so a larger one is from before a reset
+    guarded = _divisibility_guarded_compile.get(frame_id)
+    return (
+        (guarded is None or guarded >= frame_compile_id)
+        # a mark_dynamic hint_override is a hint, not the input's size, so a guard
+        # built from it can fail on the very call being compiled
+        and not shape_env.var_to_hint_override
+        # a user-given range (mark_dynamic min/max) turns any guard on it into an
+        # error
+        and not _strict_min_max_constrained_symbols(shape_env)
+    )
+
+
+def note_size_divisibility_guards_loaded() -> None:
+    """
+    A cached graph brought its divisibility guards; count its compile as the one
+    that guards, as _guard_multiple_of would have.
+    """
+    tracing_context = TracingContext.try_get()
+    if tracing_context is None or tracing_context.fake_mode is None:
+        return
+    shape_env = tracing_context.fake_mode.shape_env
+    if shape_env is None or (frame := _divisibility_guard_frame(shape_env)) is None:
+        return
+    frame_id, frame_compile_id = frame
+    _divisibility_guarded_compile.setdefault(frame_id, frame_compile_id)
+
+
+def _wrapper_bound_symbols(graph: Any) -> OrderedSet[sympy.Symbol]:
+    """Symbols the wrapper reads straight off its inputs."""
+    result: OrderedSet[sympy.Symbol] = OrderedSet()
+    for value in graph.graph_inputs.values():
+        if isinstance(value, sympy.Symbol):
+            result.add(value)
+        elif isinstance(value, ir.TensorBox):
+            for dim in (*value.get_size(), *value.get_stride()):
+                if isinstance(dim, sympy.Symbol):
+                    result.add(dim)
+    return result
+
+
 def _guard_multiple_of(expr: sympy.Expr, alignment: int) -> bool:
     """
-    If a backed symbolic size is a multiple of alignment at its hint, guard on it
-    staying one; see config.triton.guard_size_divisible_by_16.
+    With dynamic shapes a symbolic numel can't be proven divisible by 16, so Triton
+    masks element by element and can't vectorize. If a backed numel is a multiple of
+    alignment at its hint, guard on it staying one (a call that breaks the guard
+    recompiles) and tell Triton. The wrapper checks it again on every call, in case
+    something skipped the guard.
     """
     if (
-        not config.triton.guard_size_divisible_by_16
-        or config.unsafe_skip_cache_dynamic_shape_guards
+        config.unsafe_skip_cache_dynamic_shape_guards
         or not isinstance(expr, sympy.Expr)
         or not expr.is_integer
         or not expr.free_symbols
@@ -432,51 +547,38 @@ def _guard_multiple_of(expr: sympy.Expr, alignment: int) -> bool:
         or V.graph.aot_mode
     ):
         return False
-    # only under Dynamo, which turns the guard into a recompile
-    compile_id = CompileContext.current_compile_id()
-    tracing_context = TracingContext.try_get()
+    # the outermost graph's wrapper runs the check
+    root = V.graph
+    while (parent := getattr(root, "parent", None)) is not None:
+        root = parent
+    wrapper = getattr(root, "wrapper_code", None)
+    if wrapper is None or not wrapper.supports_size_divisibility_checks:
+        return False
+    if (may_add := root.may_add_size_divisibility_guards) is None:
+        may_add = root.may_add_size_divisibility_guards = (
+            may_add_size_divisibility_guards(V.graph.sizevars.shape_env)
+        )
+    if not may_add:
+        return False
     sizevars = V.graph.sizevars
-    shape_env = sizevars.shape_env
-    if (
-        compile_id is None
-        or compile_id.frame_id is None
-        or compile_id.frame_compile_id is None
-        or compile_id.compiled_autograd_id is not None
-        # a ShapeEnv of its own, e.g. standalone_compile from example inputs
-        or tracing_context is None
-        or tracing_context.fake_mode is None
-        or tracing_context.fake_mode.shape_env is not shape_env
-        # Dynamo has already built its guards, e.g. for a backward compiled lazily
-        # on first use, and would drop this one
-        or shape_env.frozen
-    ):
-        return False
-    frame = (compile_id.frame_id, *shape_env.co_fields.values())
-    # compile ids only grow within a frame, so a larger one is from before a reset
-    guarded = _divisibility_guarded_compile.get(frame)
-    if guarded is not None and guarded < compile_id.frame_compile_id:
-        return False
     # see through precomputed sizes (ps0 = u0 * s1) to the symbols they use
     expr = sizevars.remove_precomputed_replacements(expr)
     if free_unbacked_symbols(expr):
         return False
-    hint = sizevars.optimization_hint(expr, fallback=1)
+    hint = sizevars.guarding_hint_or_throw(expr)
     if hint == 0 or hint % alignment != 0:
         return False
-    # a user-given range (mark_dynamic min/max) turns any guard on it into an error
-    constrained = getattr(V.graph, "_strict_min_max_constrained_symbols", None)
-    if constrained is None:
-        constrained = _strict_min_max_constrained_symbols(shape_env)
-        setattr(V.graph, "_strict_min_max_constrained_symbols", constrained)  # noqa: B010
-    if expr.free_symbols & constrained:
+    # the wrapper's check can only read symbols it binds from its inputs
+    if (bound := root.wrapper_bound_symbols) is None:
+        bound = root.wrapper_bound_symbols = _wrapper_bound_symbols(root)
+    if not expr.free_symbols <= bound:
         return False
-    # a mark_dynamic hint_override is a hint, not the input's size, so a guard
-    # built from it can fail on the very call being compiled
-    if any(s in shape_env.var_to_hint_override for s in expr.free_symbols):
+    frame = _divisibility_guard_frame(sizevars.shape_env)
+    if frame is None or not sizevars.guard_or_false(sympy.Eq(Mod(expr, alignment), 0)):
         return False
-    if not sizevars.guard_or_false(sympy.Eq(Mod(expr, alignment), 0)):
-        return False
-    _divisibility_guarded_compile[frame] = compile_id.frame_compile_id
+    frame_id, frame_compile_id = frame
+    _divisibility_guarded_compile[frame_id] = frame_compile_id
+    root.size_divisibility_guards.add((expr, alignment))
     return True
 
 
@@ -490,7 +592,7 @@ def config_of(
 ) -> Any:
     """
     guard_size_divisibility: for Inductor's own kernels, also mark divisible the
-    symbolic sizes _guard_multiple_of can guard on.
+    symbolic numels _guard_multiple_of can guard on.
     """
     if indices is None:
         indices = list(range(len(args)))
@@ -520,7 +622,11 @@ def config_of(
                 return False
             if V.graph.sizevars.statically_known_multiple_of(x.expr, alignment):  # type: ignore[arg-type]
                 return True
-            return guard_size_divisibility and _guard_multiple_of(x.expr, alignment)
+            return (
+                guard_size_divisibility
+                and _NUMEL_ARG.fullmatch(x.name) is not None
+                and _guard_multiple_of(x.expr, alignment)
+            )
         if isinstance(x, WorkspaceArg):
             # We allocate the workspace ourselves, so it is always aligned
             return True

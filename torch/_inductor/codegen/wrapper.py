@@ -2320,6 +2320,9 @@ class PythonWrapperCodegen(CodeGen):
 
     supports_caching: bool = True  # Whether the output code is cacheable.
     preserve_zero_dim_tensor_args: bool = False
+    # Whether codegen_size_divisibility_checks runs, so kernels may assume sizes
+    # divisible that Dynamo guards.
+    supports_size_divisibility_checks: bool = True
 
     def __init__(self):
         super().__init__()
@@ -3638,6 +3641,41 @@ class PythonWrapperCodegen(CodeGen):
                 return
         self.header.splice(kernel_defs)
 
+    def codegen_size_divisibility_checks(self) -> None:
+        """
+        Kernels compiled assuming a size is a multiple of 16 are safe only while
+        Dynamo's guard on it runs; raise rather than run them if it didn't.
+        """
+        # the outermost wrapper checks once, before any kernel (subgraph and
+        # partition wrappers may not even have the symbols)
+        if (
+            getattr(V.graph, "parent", None) is not None
+            or self is not V.graph.wrapper_code
+            or is_codegen_graph_partition_subgraph(self)
+        ):
+            return
+        for expr, alignment in V.graph.size_divisibility_guards:
+            msg = (
+                f"Inductor compiled kernels assuming {expr} % {alignment} == 0, "
+                "which Dynamo guards, but the guard was skipped (e.g. the "
+                "skip_guard_eval_unsafe stance was turned on after compiling, or "
+                "the compiled graph was called directly). Compile with a "
+                "guard_filter_fn so Inductor doesn't rely on its guards. "
+                f"Got {expr} = "
+            )
+            if V.graph.cpp_wrapper:
+                size = self.codegen_cpp_sizevar(expr, simplify=False)
+                self.wrapper_call.writeline(
+                    f"if (({size}) % {alignment} != 0) {{ "
+                    f'throw std::runtime_error("{msg}" + std::to_string({size})); }}'
+                )
+            else:
+                size = self.codegen_python_sizevar(expr, simplify=False)
+                self.wrapper_call.writeline(
+                    f"if ({size}) % {alignment}: "
+                    f"raise RuntimeError({msg!r} + str({size}))"
+                )
+
     def _generate(self, is_inference):
         if config.profile_bandwidth:
             self.write_triton_header_once()
@@ -3650,6 +3688,7 @@ class PythonWrapperCodegen(CodeGen):
                 self.generate_start_graph()
 
             self.run_wrapper_ir_passes(is_inference)
+            self.codegen_size_divisibility_checks()
 
             if config.triton.store_cubin and not config.triton.autotune_at_compile_time:
                 self.generate_reset_kernel_saved_flags()

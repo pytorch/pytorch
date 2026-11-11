@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import sys
 import tempfile
 import types
@@ -2496,8 +2497,11 @@ class TestMakeLaunchersMemory(TestCase):
 
 @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
 class TestGuardSizeDivisibleBy16(TestCase):
-    """config.triton.guard_size_divisible_by_16: a backed symbolic size whose hint is a
-    multiple of 16 is guarded to stay one and passed to Triton as divisible by 16."""
+    """A backed symbolic numel whose hint is a multiple of 16 is guarded to stay one
+    and passed to Triton as divisible by 16."""
+
+    # in the wrapper's check of a guarded size
+    CHECK = "which Dynamo guards"
 
     @staticmethod
     def fn(*xs):
@@ -2516,7 +2520,11 @@ class TestGuardSizeDivisibleBy16(TestCase):
         ]
 
     def setUp(self):
+        from torch._inductor.utils import triton_version_uses_attrs_dict
+
         super().setUp()
+        if not triton_version_uses_attrs_dict():
+            self.skipTest("checks the attrs dict form of triton_meta configs")
         torch._dynamo.reset()
         torch._dynamo.utils.counters.clear()
 
@@ -2529,12 +2537,10 @@ class TestGuardSizeDivisibleBy16(TestCase):
         self.assertEqual(compiled(*xs), fn(*xs))
 
     def xnumel_divisible(self, code):
-        from torch._inductor.utils import triton_version_uses_attrs_dict
-
-        if not triton_version_uses_attrs_dict():
-            self.skipTest("checks the attrs dict form of triton_meta configs")
-        # in_ptr0..2, out_ptr0, xnumel
-        return "(4,): [['tt.divisibility', 16]]" in code
+        signature = re.search(r"'signature': \{([^}]*)\}", code)
+        self.assertIsNotNone(signature)
+        args = re.findall(r"'(\w+)':", signature.group(1))
+        return f"({args.index('xnumel')},): [['tt.divisibility', 16]]" in code
 
     def test_recompiles_once_on_non_multiple(self):
         from torch._inductor.utils import run_and_get_code
@@ -2544,10 +2550,12 @@ class TestGuardSizeDivisibleBy16(TestCase):
         out, code = run_and_get_code(compiled, *xs)
         self.assertEqual(out, self.fn(*xs))
         self.assertTrue(self.xnumel_divisible("\n".join(code)))
+        # the wrapper checks the size in case the guard is skipped
+        self.assertIn(self.CHECK, "\n".join(code))
         for n in (8192, 4096 * 33):
             self.check(compiled, n)
         self.assertEqual(self.num_graphs(), 1)
-        # breaks the guard: one recompile, and the new graph doesn't guard again
+        # breaks the guard: one recompile, to a graph that serves any size
         self.check(compiled, 4097)
         self.assertEqual(self.num_graphs(), 2)
         for n in (4104, 1000003, 4096, 8192):
@@ -2584,15 +2592,42 @@ class TestGuardSizeDivisibleBy16(TestCase):
             self.check(compiled, n)
         self.assertEqual(self.num_graphs(), 1)
 
+        # a failed guard couldn't recompile
         torch._dynamo.reset()
         torch._dynamo.utils.counters.clear()
-        with config.patch({"triton.guard_size_divisible_by_16": False}):
+        with (
+            torch._dynamo.config.patch(error_on_recompile=True),
+            # not the graph above from the FX graph cache
+            config.patch(force_disable_caches=True),
+        ):
             compiled = torch.compile(self.fn, dynamic=True)
             xs = self.inputs(4096)
             _, code = run_and_get_code(compiled, *xs)
             self.assertFalse(self.xnumel_divisible("\n".join(code)))
+            self.assertNotIn(self.CHECK, "\n".join(code))
             self.check(compiled, 4097)
         self.assertEqual(self.num_graphs(), 1)
+
+    def test_not_specialized_standalone_compile(self):
+        # loading a standalone_compile artifact doesn't check the guards
+        guarded = []
+        guard = triton_utils._guard_multiple_of
+
+        def record(expr, alignment):
+            result = guard(expr, alignment)
+            guarded.append(result)
+            return result
+
+        def backend(gm, example_inputs):
+            return torch._inductor.standalone_compile(
+                gm, example_inputs, dynamic_shapes="from_tracing_context"
+            )
+
+        compiled = torch.compile(self.fn, dynamic=True, backend=backend)
+        with patch.object(triton_utils, "_guard_multiple_of", record):
+            self.check(compiled, 4096)
+        self.assertTrue(guarded)
+        self.assertFalse(any(guarded))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_not_specialized_unbacked(self):
@@ -2640,10 +2675,151 @@ class TestGuardSizeDivisibleBy16(TestCase):
         self.assertEqual(compiled(*xs), self.fn(*xs))
         self.assertEqual(self.num_graphs(), 1)
 
+    def add_one(self, compiled, n, call=None):
+        # in place into a view of a larger buffer, so a write past n shows
+        base = torch.zeros(n + 64, device=GPU_TYPE)
+        if call is None:
+            compiled(base[:n])
+        else:
+            call(base[:n])
+        self.assertTrue(bool((base[:n] == 1).all()))
+        self.assertEqual(int((base[n:] != 0).sum()), 0)
+
+    def skipped_guard_raises(self):
+        # vLLM-style: call the compiled graph directly, skipping Dynamo's guards
+        from torch._inductor.compile_fx import compile_fx
+
+        graphs = []
+
+        def backend(gm, example_inputs):
+            graphs.append((compile_fx(gm, example_inputs), example_inputs))
+            return graphs[-1][0]
+
+        def fn(x):
+            x.add_(1)
+
+        self.add_one(torch.compile(fn, dynamic=True, backend=backend), 4096)
+        self.assertEqual(len(graphs), 1)
+        graph, example_inputs = graphs[0]
+        # x and its size, in some order
+        self.assertEqual(len(example_inputs), 2)
+
+        def call(x):
+            graph(
+                *[
+                    x if isinstance(e, torch.Tensor) else x.numel()
+                    for e in example_inputs
+                ]
+            )
+
+        self.add_one(None, 4112, call)
+        with self.assertRaisesRegex(RuntimeError, self.CHECK):
+            self.add_one(None, 4097, call)
+
+    def test_skipped_guard_raises(self):
+        self.skipped_guard_raises()
+
+    @config.patch({"cpp_wrapper": True})
+    def test_skipped_guard_raises_cpp_wrapper(self):
+        self.skipped_guard_raises()
+
+    def test_not_specialized_with_guard_filter_fn(self):
+        # a guard_filter_fn may drop the guard
+        def fn(x):
+            x.add_(1)
+
+        compiled = torch.compile(
+            fn,
+            dynamic=True,
+            options={"guard_filter_fn": lambda guards: [False for _ in guards]},
+        )
+        for n in (4096, 4097):
+            self.add_one(compiled, n)
+        self.assertEqual(self.num_graphs(), 1)
+
+    @config.patch({"fx_graph_cache": True, "force_disable_caches": False})
+    def test_not_specialized_with_guard_filter_fn_cache_hit(self):
+        # a cached graph that guards mustn't serve a compile whose guards are dropped
+        def fn(x):
+            x.add_(1)
+
+        with fresh_cache():
+            self.add_one(torch.compile(fn, dynamic=True), 4096)
+            torch._dynamo.reset()
+            compiled = torch.compile(
+                fn,
+                dynamic=True,
+                options={"guard_filter_fn": lambda guards: [False for _ in guards]},
+            )
+            for n in (4096, 4097):
+                self.add_one(compiled, n)
+
+    @config.patch({"fx_graph_cache": True, "force_disable_caches": False})
+    def test_not_specialized_with_size_range_cache_hit(self):
+        # a cached graph's guards are re-added on a hit, and guarding a dim with a
+        # user-given range is a constraint violation
+        with fresh_cache():
+            self.check(torch.compile(self.fn, dynamic=True), 4096)
+            torch._dynamo.reset()
+            compiled = torch.compile(self.fn)
+            for n in (4096, 4097):
+                xs = self.inputs(n)
+                for x in xs:
+                    torch._dynamo.mark_dynamic(x, 0, min=16, max=1 << 20)
+                self.assertEqual(compiled(*xs), self.fn(*xs))
+            self.assertEqual(self.num_graphs(), 2)
+
+    def test_reset_clears_guarded_frames(self):
+        self.check(torch.compile(self.fn, dynamic=True), 4096)
+        self.assertTrue(triton_utils._divisibility_guarded_compile)
+        torch._dynamo.reset()
+        self.assertFalse(triton_utils._divisibility_guarded_compile)
+
+    @config.patch({"graph_partition": True})
+    def test_checks_only_in_outer_wrapper(self):
+        # a partition's wrapper may not have every symbol; the outer one checks
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x, y):
+            return x * 2, (y.cpu() + 1).to(x.device) * 3
+
+        compiled = torch.compile(fn, dynamic=True, mode="reduce-overhead")
+        x, y = torch.randn(4096, device=GPU_TYPE), torch.randn(2048, device=GPU_TYPE)
+        out, code = run_and_get_code(compiled, x, y)
+        self.assertEqual(out, fn(x, y))
+        self.assertIn("def partition_0", code[0])
+        # one check each for x's and y's sizes
+        self.assertEqual(code[0].count(self.CHECK), 2)
+
+    @config.patch({"fx_graph_cache": True, "force_disable_caches": False})
+    def test_at_most_one_recompile_per_frame_cache_hit(self):
+        # a graph loaded from the FX graph cache counts as the compile that guards
+        def fn(a, b):
+            return a.float() * 2, b.float() + 1
+
+        def check(n, m):
+            a, b = self.inputs(n, count=1)[0], self.inputs(m, count=1)[0]
+            self.assertEqual(compiled(a, b), fn(a, b))
+
+        with fresh_cache():
+            compiled = torch.compile(fn, dynamic=True)
+            check(4096, 2048)
+            # as in a new process
+            torch._dynamo.reset()
+            torch._dynamo.utils.counters.clear()
+            compiled = torch.compile(fn, dynamic=True)
+            check(4096, 2048)
+            self.assertEqual(
+                torch._dynamo.utils.counters["inductor"]["fxgraph_cache_hit"], 1
+            )
+            check(4097, 2048)
+            check(4097, 2049)
+            self.assertEqual(self.num_graphs(), 2)
+
     def test_backward(self):
-        # Only the backward has a kernel over x's 8 * s0 elements: the forward reduces
-        # to s0, whose hint 4098 isn't a multiple of 16, but 8 * 4098 is. Nothing the
-        # forward could save for the backward is 8 * s0 elements but x itself.
+        # Only the backward has a kernel over all of x (s0 * s1 elements, s1 = 8): the
+        # forward reduces to s0, whose hint 4098 isn't a multiple of 16, but 8 * 4098
+        # is. Nothing the forward could save for the backward is that size but x.
         def fn(x):
             return x.float().pow(2).sum(1)
 
