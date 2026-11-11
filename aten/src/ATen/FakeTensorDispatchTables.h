@@ -27,7 +27,7 @@ namespace at::impl {
 //               torch._subclasses.fake_impls.op_implementations_dict, via
 //               register_op_impl / _deregister_op_impl, except aten::alias.
 //               (Predicate-based op_impls are not mirrored here;
-//               cppFakeNotImplemented re-implements the built-in predicates.)
+//               FakeFallbackKernel.cpp re-implements the built-in predicates.)
 //   - PrimMeta: prims ops that define a prim_meta_impl, via torch._prims
 //   - PythonCIA: Python CompositeImplicitAutograd overrides, via
 //                OpOverload.py_impl

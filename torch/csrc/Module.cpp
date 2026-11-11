@@ -3094,6 +3094,8 @@ Call this whenever a new thread is created in order to propagate values from
                 functorch_config.attr("fake_tensor_allow_meta").cast<bool>(),
                 functorch_config
                     .attr("fake_tensor_allow_unsafe_data_ptr_access")
+                    .cast<bool>(),
+                functorch_config.attr("fake_tensor_propagate_real_tensors")
                     .cast<bool>());
             if (!creation_traceback.is_none()) {
               mode->creation_traceback_ = std::make_shared<c10::SafePyObject>(

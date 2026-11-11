@@ -17,9 +17,11 @@
 
 // Note [C++ fake fallback]
 // The C++ counterpart of FakeTensorMode.__torch_dispatch__ for C++ fakes. It
-// runs an op whose tensor inputs are fakes of one mode on one device.
+// runs an op whose tensor inputs are fakes of one mode on one device, or a
+// constructor under a mode.
 // Decompositions and CompositeImplicitAutograd kernels run with the mode entered
-// and return outputs as is. Otherwise, the op
+// and return outputs as is. Otherwise, op_implementations handlers run with the
+// mode uninstalled. If none handles the op, it
 // runs on the inputs' meta storage through its Meta kernel (its sparse Meta
 // kernel for sparse inputs), and the new outputs become fakes of that mode on
 // that device, as Python's wrap_meta_outputs_with_default_device_logic does.
@@ -33,9 +35,9 @@
 // So that ops do not give results Python's FakeTensorMode would not, it raises
 // NotImplementedError where Python runs something other than these,
 // apart from the known divergences in the TODOs below:
-//  - ops Python runs through a Python implementation (op_implementations,
-//    custom op fake kernels, prim metas; the remaining fake_try_* callbacks
-//    in c10/core/impl/PyInterpreter.h);
+//  - ops Python runs through custom op fake kernels or prim metas (the remaining
+//    fake_try_* callbacks in c10/core/impl/PyInterpreter.h);
+//  - handlers that allocate unbacked sizes;
 //  - ops run under the Python dispatcher, whose Python-dispatcher-only Meta
 //    registrations do not run here;
 //  - symbolic inputs (sizes, strides or scalars), for which Python decomposes
@@ -182,6 +184,12 @@ bool is_tensor_constructor(const c10::FunctionSchema& schema) {
       schema.returns()[0].type() == c10::TensorType::get();
 }
 
+bool has_op_impl_predicate(const c10::OperatorHandle& op) {
+  return is_tensor_constructor(op.schema()) ||
+      (op.operator_name().name.starts_with("aten::_foreach_") &&
+       op.hasComputedKernelForDispatchKey(c10::DispatchKey::Meta));
+}
+
 // See cppFakeNotImplemented; categories is the op's fakeDispatchTableCategories
 bool cpp_fake_not_implemented(const c10::OperatorHandle& op, uint32_t categories) {
   using at::impl::FakeDispatchCategory;
@@ -195,10 +203,7 @@ bool cpp_fake_not_implemented(const c10::OperatorHandle& op, uint32_t categories
     }
   }
   return op.hasTag(at::Tag::dynamic_output_shape) ||
-      op.hasTag(at::Tag::data_dependent_output) ||
-      is_tensor_constructor(op.schema()) ||
-      (op.operator_name().name.starts_with("aten::_foreach_") &&
-       op.hasComputedKernelForDispatchKey(c10::DispatchKey::Meta));
+      op.hasTag(at::Tag::data_dependent_output) || has_op_impl_predicate(op);
 }
 
 bool cpp_meta_supports_symint(
@@ -246,16 +251,20 @@ void fakeFallback(
   if (mode == nullptr) {
     unsupported(op, "fake tensors without a mode");
   }
+  if (mode->propagate_real_tensors_) {
+    unsupported(op, "propagate_real_tensors");
+  }
   // Python's FakeTensorMode is out of the FAKE dispatch mode slot while its
   // __torch_dispatch__ runs, apart from what it runs under `with self:`
   // (decompositions, say), so a Python Meta kernel calling active_fake_mode()
   // sees no fake mode; so here
   UnsetFakeTensorModeGuard unset_mode;
 
+  bool has_device_arguments = false;
   for (const auto idx : c10::irange(num_arguments)) {
     const auto& ivalue = (*stack)[arguments_begin + idx];
     if (ivalue.isDevice()) {
-      unsupported(op, "device arguments");
+      has_device_arguments = true;
     }
     if (is_symbolic(ivalue)) {
       unsupported(op, "symbolic shapes");
@@ -334,7 +343,7 @@ void fakeFallback(
           meta_keyset = meta_keyset.add(c10::DispatchKey::SparseCsrMeta);
         }
       });
-  if (!device.has_value()) {
+  if (!device.has_value() && !is_tensor_constructor(schema)) {
     unsupported(op, "ops without fake tensor inputs");
   }
   using at::impl::FakeDispatchCategory;
@@ -374,11 +383,37 @@ void fakeFallback(
       }
     }
   }
-  // Python CIA kernels were considered above, before the other fake handlers.
-  const auto python_cia =
-      at::impl::fakeDispatchCategoryBit(FakeDispatchCategory::PythonCIA);
-  if (cpp_fake_not_implemented(op, categories & ~python_cia)) {
-    unsupported(op, "ops with a Python fake implementation");
+  if (has(FakeDispatchCategory::PrimMeta) ||
+      has(FakeDispatchCategory::CustomOpImpl)) {
+    unsupported(op, "custom op fake kernels and prim metas");
+  }
+  // Integer indexing works without unbacked sizes; bool indexing calls nonzero.
+  const bool is_index_tensor =
+      schema.name() == "aten::index" && schema.overload_name() == "Tensor";
+  const bool allocates_unbacked = schema.name() == "aten::_spdiags" ||
+      schema.name() == "aten::_pack_padded_sequence" ||
+      schema.name() == "aten::_padded_dense_to_jagged_forward";
+  if (allocates_unbacked ||
+      (!is_index_tensor &&
+       (op.hasTag(at::Tag::dynamic_output_shape) ||
+        op.hasTag(at::Tag::data_dependent_output)))) {
+    unsupported(op, "ops with data-dependent outputs");
+  }
+  // Constructors finalize their own output devices.
+  const auto common_device = device.value_or(c10::Device(c10::kCPU));
+  if (has(FakeDispatchCategory::OpImpl) || has_op_impl_predicate(op)) {
+    // Sparse constructors have dense inputs; keep their checks thread-local.
+    at::impl::SparseTensorInvariantChecksGuard checks_off(false);
+    if ((*c10::impl::getGlobalPyInterpreter())
+            ->fake_try_op_impl(op, stack, mode, common_device)) {
+      return;
+    }
+  }
+  if (has_device_arguments) {
+    unsupported(op, "device arguments");
+  }
+  if (!device.has_value()) {
+    unsupported(op, "ops without fake tensor inputs");
   }
   if (meta_keyset.empty()) {
     meta_keyset = c10::DispatchKeySet(c10::DispatchKey::Meta);
