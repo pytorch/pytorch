@@ -505,10 +505,10 @@ def fold_row_aligned(
 ):
     """Fold a ragged tm.N-wide row with aligned wide interior loads and scalar edges.
 
-    Requires vec * itemsize == TRANSFER_ALIGNMENT (TileReduce checks it) and rows packed
-    at stride N from a 16-byte aligned base, so the logical prefix below matches the
-    pointer's alignment (reduce_row_tile checks it). TileReduce and reduce_row_tile also
-    reject empty rows: one would fold nothing and return trait.init(), which is no
+    Requires vec * itemsize == TRANSFER_ALIGNMENT (TileReduce derives vec) and rows
+    packed at stride N from a 16-byte aligned base, so the logical prefix below matches
+    the pointer's alignment (reduce_row_tile checks it). TileReduce and reduce_row_tile
+    also reject empty rows: one would fold nothing and return trait.init(), which is no
     result for min, max or arg traits.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
@@ -806,6 +806,10 @@ class TileReduce:
         itree: Any = None,
         ragged_vector=False,
         # Values per output for the general-axis uniform Welford tree; None disables it.
+        # Whole loads are unmasked, so with T = threads_per_block and loads = count // T
+        # the runtime chunk count must fall in the same bucket: strictly between
+        # loads * T and (loads + 1) * T with a tail, exactly loads * T without one.
+        # ReduceBlock keeps the two consistent.
         uniform_tree_count: int | None = None,
         # Rows per equal-count Welford tree in scalar column folds, after each block's
         # leading cnt % col_group rows fold online; 1 disables it.
@@ -851,10 +855,6 @@ class TileReduce:
             # base, which only the driver (reduce_row_tile) can check.
             if N < 1:
                 raise ValueError(f"ragged vectors require nonempty rows, got {N=}")
-            if vec is None or vec * itemsize != TRANSFER_ALIGNMENT:
-                raise ValueError(
-                    f"ragged vectors require vec * itemsize == {TRANSFER_ALIGNMENT}, got {vec=} {itemsize=}"
-                )
             if use_tma:
                 raise ValueError("ragged vectors cannot use TMA")
             if combine:
@@ -944,7 +944,7 @@ class TileReduce:
                 itemsize,
                 threads_per_row,
                 N // vec_size(N, itemsize) if use_tma else 1,
-                vec=vec if ragged_vector else None,
+                vec=TRANSFER_ALIGNMENT // itemsize if ragged_vector else None,
             )
             if axis == "row" and order == "linear"
             else None
