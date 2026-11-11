@@ -503,6 +503,84 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a.size(), deepcopy(a).size())
         self.assertEqual(a, deepcopy(a))
 
+    @onlyNativeDeviceTypes
+    def test_has_storage_data(self, device):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        base = torch.arange(12.0, device=device)
+        empty_view = base[4:4]
+        self.assertEqual(empty_view.data_ptr(), 0)
+        for t in (base, base[2:6], empty_view, torch.nn.Parameter(base)):
+            self.assertTrue(torch._C._has_storage_data(t))
+
+        other = torch.arange(12.0, device=device)
+        wrappers = [TwoTensor(base[off:off + 4], other[off:off + 4]) for off in (0, 4)]
+        self.assertEqual(wrappers[1].storage_offset(), 4)
+        with FakeTensorMode():
+            fake = torch.empty(4, device=device)
+        vmapped = []
+        torch.func.vmap(lambda x: vmapped.append(x) or x)(base)
+        for t in (
+            *wrappers,
+            fake,
+            torch.empty(0, device=device),
+            torch.empty(4, device="meta"),
+            base.to_sparse(),
+            vmapped[0],
+        ):
+            self.assertFalse(torch._C._has_storage_data(t))
+
+    @skipXLA
+    @skipCUDAIf(TEST_CUDAMALLOCASYNC, "COW requires allocation stream metadata")
+    def test_has_storage_data_does_not_materialize_cow(self, device):
+        t = torch.arange(4.0, device=device)
+        cow = torch._lazy_clone(t)
+        self.assertTrue(torch._C._is_cow_tensor(cow))
+        self.assertTrue(torch._C._has_storage_data(cow))
+        self.assertTrue(torch._C._is_cow_tensor(cow))
+        self.assertTrue(torch._C._is_cow_tensor(t))
+
+    @onlyNativeDeviceTypes
+    def test_has_storage_data_ignores_data_access_checks(self, device):
+        # _has_storage_data must not raise for storages whose data access is
+        # forbidden, e.g. CUDA graph outputs overwritten by a later replay, or
+        # fake tensors made under tracing.
+        real = torch.arange(4.0, device=device)
+        meta = torch.empty(4, device="meta")
+        for t in (real, meta):
+            torch._C._set_storage_data_ptr_access_error_msg(
+                t.untyped_storage()._cdata, "forbidden"
+            )
+            with self.assertRaisesRegex(RuntimeError, "forbidden"):
+                t.const_data_ptr()
+        self.assertTrue(torch._C._has_storage_data(real))
+        self.assertFalse(torch._C._has_storage_data(meta))
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode() as mode:
+            mode._allow_unsafe_data_ptr_access = False
+            fake = torch.empty(4, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer"):
+            fake.data_ptr()
+        self.assertFalse(torch._C._has_storage_data(fake))
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCm >= 5.3 required for graphs")
+    @skipCUDAIf(TEST_CUDAMALLOCASYNC, "COW requires allocation stream metadata")
+    def test_has_storage_data_ignores_cow_read_check_in_cuda_graph_capture(self, device):
+        # Reading a COW storage made before a capture raises inside the capture.
+        cow = torch._lazy_clone(torch.arange(4.0, device=device))
+        self.assertTrue(torch._C._is_cow_tensor(cow))
+        out = torch.zeros(4, device=device)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            with self.assertRaisesRegex(RuntimeError, "Materialize COW graph inputs"):
+                cow.const_data_ptr()
+            self.assertTrue(torch._C._has_storage_data(cow))
+            out.add_(1)
+        self.assertTrue(torch._C._is_cow_tensor(cow))
+
     def check_internal_mem_overlap(self, inplace_op, num_inputs,
                                    dtype, device,
                                    expected_failure=False):
