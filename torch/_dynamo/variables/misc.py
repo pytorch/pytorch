@@ -828,25 +828,30 @@ class AutogradFunctionVariable(VariableTracker):
                 )
         return result
 
-    _inherited_setup_context_guard = functools.partial(
-        GuardBuilder.ID_MATCH,
-        recompile_hint=(
-            "PyTorch uses a custom Function's setup_context to decide whether "
-            "Function.apply passes ctx to forward: the inherited method means it "
-            "does; a custom method means it does not. Dynamo traced this call "
-            "with ctx and guards setup_context because replacing it would make "
-            "Function.apply call forward without ctx."
+    _inherited_setup_context_guard = staticmethod(
+        functools.partial(
+            GuardBuilder.ID_MATCH,
+            recompile_hint=(
+                "This torch.autograd.Function.apply call uses the inherited "
+                "setup_context, so forward receives ctx (a "
+                "torch.autograd.function.FunctionCtx). Dynamo guards the exact "
+                "setup_context method because a custom method would change how "
+                "forward is called. This check also runs under torch.no_grad()."
+            ),
         ),
     )
-    _overridden_setup_context_guard = functools.partial(
-        GuardBuilder.ID_MATCH,
-        recompile_hint=(
-            "PyTorch uses a custom Function's setup_context to decide whether "
-            "Function.apply passes ctx to forward: the inherited method means it "
-            "does; a custom method means it does not. Dynamo traced this call "
-            "without ctx and, when tracking gradients, traced setup_context to "
-            "prepare ctx for backward. It guards this method because replacing "
-            "it could change how forward is called or how ctx is prepared."
+    _overridden_setup_context_guard = staticmethod(
+        functools.partial(
+            GuardBuilder.ID_MATCH,
+            recompile_hint=(
+                "This torch.autograd.Function.apply call uses a custom "
+                "setup_context, so forward receives no ctx. When this call tracks "
+                "gradients, setup_context prepares ctx (a "
+                "torch.autograd.function.FunctionCtx) for backward. Dynamo guards "
+                "the exact setup_context function because replacing it could "
+                "change the forward or backward path. This check also runs under "
+                "torch.no_grad(), even if the replacement is another custom method."
+            ),
         ),
     )
 
