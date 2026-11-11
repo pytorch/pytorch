@@ -58,6 +58,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
+    preserves_device_selection,
     skipMeta,
     skipXPUIf,
 )
@@ -83,6 +84,7 @@ from torch.testing._internal.common_utils import (
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     skipIfWindows,
+    skipIfXpu,
     slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
@@ -16360,6 +16362,7 @@ class TestMultithreadAutograd(TestCase):
         self.assertEqual(err_count[0], 1)
         self.assertEqual(res, "foo")
 
+    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
     def test_dataparallel_saved_tensors_hooks(self):
         def pack(x):
             warnings.warn("pack")
@@ -18017,6 +18020,8 @@ class TestSACAmbientSavedTensorsHooks(_TestSACAmbientSavedTensorsHooksBase):
 
 @skipIfTorchDynamo("SAC hook interaction under compile tested elsewhere")
 class TestSACAmbientSavedTensorsHooksDeviceType(_TestSACAmbientSavedTensorsHooksBase):
+    setUp = preserves_device_selection(_TestSACAmbientSavedTensorsHooksBase.setUp)
+
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
