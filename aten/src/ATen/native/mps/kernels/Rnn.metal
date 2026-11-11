@@ -15,9 +15,9 @@ kernel void lstm_cell_forward(
     constant uint& hidden_size,
     uint2 pos [[thread_position_in_grid]]) {
   const idx_t h = hidden_size, col = pos.x, row = pos.y;
-  const idx_t idx = row * h + col, offset = row * 4 * h + col;
+  const idx_t idx = row * h + col, offset = row * kLstmGates * h + col;
   float4 g;
-  for (uint k = 0; k < 4; ++k) {
+  for (uint k = 0; k < kLstmGates; ++k) {
     g[k] = float(gates[offset + k * h]) + float(recurrent[offset + k * h]) +
         float(bias[col + k * h]);
     gates[offset + k * h] = T(g[k]);

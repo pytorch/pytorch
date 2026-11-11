@@ -2,6 +2,8 @@
 
 #include <c10/metal/common.h>
 
+C10_METAL_CONSTEXPR uint32_t kLstmGates = 4;
+
 // Threads don't interact, so this only caps the threadgroup. Measured up to 7%
 // faster than the default of 1024.
 C10_METAL_CONSTEXPR uint32_t kCellMaxThreadsPerThreadgroup = 128;
