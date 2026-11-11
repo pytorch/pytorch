@@ -838,10 +838,10 @@ class AOTCompiledFunction:
             if guard_scope is None:
                 self._guard_scope = _GuardScope.RECONSTRUCTED
                 guard_scope = self.fn.__globals__
-            # Seeded AFTER forward_callable, never before: on the default path this
-            # IS fn.__globals__, and PyFunction_New caches __builtins__ at creation,
-            # so the __builtins__ written below cannot rewire the bytecode's lookups.
-            # The builtins-dict key below is an ordinary global and does; see there.
+            # Seeded AFTER forward_callable: on the default path guard_scope IS
+            # fn.__globals__, which forward_callable already seeds with __builtins__.
+            # The builtins-dict key below is an ordinary global, so seeding it here
+            # still affects bytecode lookups.
             self._seed_guard_scope(guard_scope, guards_state)
             self._artifacts.guard_manager = load_guard_manager(
                 guards_state,
@@ -974,8 +974,9 @@ class AOTCompiledFunction:
                 snapshot is None or scope[builtins_key] is not snapshot
             ):
                 continue
-            # forward_callable builds fn.__globals__ as a plain dict, so unlike an
-            # exec'd module namespace it carries no __builtins__ to derive from.
+            # A caller-supplied scope can be a hand-built dict with no
+            # __builtins__ to derive from; fn.__globals__ always carries the one
+            # forward_callable seeds.
             if "__builtins__" not in scope:
                 scope["__builtins__"] = builtins.__dict__
             scope[builtins_key] = get_builtins_dict(scope)
