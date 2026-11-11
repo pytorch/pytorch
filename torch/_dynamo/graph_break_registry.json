@@ -653,6 +653,18 @@
       ]
     }
   ],
+  "GB6328": [
+    {
+      "Gb_type": "numpy.dtype with non-native byte order",
+      "Context": "as_proxy {dtype}",
+      "Explanation": "torch.compile cannot preserve numpy.dtype byte order when lowering {dtype} into the FX graph. Using the scalar type name would silently change results for endian-sensitive ops such as astype/view.",
+      "Hints": [
+        "Use a native-endian dtype inside the compiled region.",
+        "Move the endian-sensitive cast/view outside torch.compile.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0042": [
     {
       "Gb_type": "Encountered non user function variable during invoke_subgraph HOP tracing",
