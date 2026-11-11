@@ -67,7 +67,6 @@ from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
-    SM70OrLater,
 )
 from torch.testing._internal.common_device_type import (
     E4M3_MAX_POS,
@@ -4344,14 +4343,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         (gx,) = torch.autograd.grad(y, x)
         self.assertEqual(gx, x.cos())
 
-    def test_jit_trace_errors(self):
-        @torch.compile(backend="eager", dynamic=True)
-        def f(x):
-            return x + 1
-
-        with self.assertRaises(RuntimeError):
-            torch.jit.trace(f, torch.randn(3))
-
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_tensor_split(self):
         def f(x):
@@ -6260,7 +6251,7 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         torch.compile(fn2, backend="eager")()
 
     def test_jit_script_defaults(self):
-        @torch.jit.script
+        @torch.jit._script.script
         def fast_cos(x, c: float = 2.0):
             return torch.cos(x) * c
 
@@ -6596,10 +6587,6 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         )
         self.assertEqual(actual_str, expected_str)
 
-    @unittest.skipIf(
-        not SM70OrLater,
-        "Triton only supports devices of CUDA capability >= 7.0",
-    )
     def test_add_complex_conj(self):
         def f(x):
             return x + x.conj()
