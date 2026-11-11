@@ -21,6 +21,7 @@
 #include <dlfcn.h>
 #endif
 
+#include <cmath>
 #include <cstring>
 #include <memory>
 #include <sstream>
@@ -70,7 +71,7 @@ struct Record {
 struct TcfgTrace {
   std::vector<Record> records;
   std::vector<int32_t> open;
-  World world;
+  World world{};
   int32_t top_level = 0;
   // Top-level calls recorded by captures nested inside this one.
   int32_t nested_top_level = 0;
@@ -226,6 +227,8 @@ struct TcfgSite {
   explicit TcfgSite(c10::OperatorHandle op_) : op(std::move(op_)) {}
   TcfgSite(const TcfgSite&) = delete;
   TcfgSite& operator=(const TcfgSite&) = delete;
+  TcfgSite(TcfgSite&&) = delete;
+  TcfgSite& operator=(TcfgSite&&) = delete;
   ~TcfgSite() {
     for (auto& g : guards) {
       Py_XDECREF(g.identity);
@@ -277,8 +280,11 @@ bool sameLibraryAsTorch(void* fn) {
 #endif
 }
 
+// The same value as far as a kernel can tell: NaN matches NaN, and 0.0 does
+// not match -0.0.
 bool sameDouble(double a, double b) {
-  return std::memcmp(&a, &b, sizeof(double)) == 0;
+  return (a == b && std::signbit(a) == std::signbit(b)) ||
+      (std::isnan(a) && std::isnan(b));
 }
 
 // Types whose identity pins their value, so that the argument the parser
@@ -482,7 +488,9 @@ struct Binder {
     return true;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const TcfgPyOp& pyop;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const Record& call;
   std::vector<OperandGuard> guards;
   std::vector<ArgTemplate> args;
@@ -940,7 +948,8 @@ struct Unbox<at::OptionalIntArrayRef> {
     if (!h.present) {
       return std::nullopt;
     }
-    return at::IntArrayRef(h.values.data(), h.values.size());
+    return at::OptionalIntArrayRef(
+        std::in_place, h.values.data(), h.values.size());
   }
 };
 
@@ -1232,6 +1241,8 @@ struct StackLease {
   }
   StackLease(const StackLease&) = delete;
   StackLease& operator=(const StackLease&) = delete;
+  StackLease(StackLease&&) = delete;
+  StackLease& operator=(StackLease&&) = delete;
   ~StackLease() {
     stack->clear();
     depth--;
@@ -1530,8 +1541,11 @@ void initCfgBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   m.def("_cfg_c_api", []() {
-    return py::reinterpret_steal<py::object>(PyCapsule_New(
-        const_cast<TcfgApi*>(&api_table), "torch._C._cfg_c_api", nullptr));
+    // PyCapsule_New takes a non-const pointer; the table is only read.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+    auto* api = const_cast<TcfgApi*>(&api_table);
+    return py::reinterpret_steal<py::object>(
+        PyCapsule_New(api, "torch._C._cfg_c_api", nullptr));
   });
 
   // Runs fn under a dispatch capture and returns (result, records) where
