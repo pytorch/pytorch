@@ -396,6 +396,7 @@ batch_fusion = True
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions()` to see available fusions.
 # batch fusion options:
 # batch_linear
+# batch_linear_lhs
 # cat_linear
 # batch_layernorm
 # batch_tanh
