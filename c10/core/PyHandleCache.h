@@ -48,7 +48,7 @@ class PyHandleCache {
   template <typename F>
   PyObject* ptr_or(F slow_accessor) const {
     PyObject* d = data_.load(std::memory_order_acquire);
-    if (C10_LIKELY(d != nullptr)) {
+    if (d != nullptr) [[likely]] {
       return d;
     }
     auto* r = slow_accessor();
