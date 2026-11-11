@@ -1003,13 +1003,9 @@ def _from_tensor_shape_env(
 
 @typing.final
 class CppFakeTensorMode(torch._C._CppFakeTensorMode):
-    # The Python object of a C++ FakeTensorMode, which the Python parts of fake
-    # dispatch run against. Its fakes and the fake mode slot keep it alive, so
-    # it must not hold a fake: GC cannot see the reference back from the fake.
-    # Hence __slots__; a subclass could add a __dict__, so it is final, which
-    # getCppFakeTensorModeHandle enforces by accepting only this exact type. See
-    # Note [C++ FakeTensorMode handle] in torch/csrc/FakeTensorMode.cpp.
-    __slots__ = ("_creation_traceback",)
+    # State belongs to C++; a collected wrapper can be recreated around it.
+    # See Note [C++ FakeTensorMode Python object lifetime].
+    __slots__ = ()
 
     def __init__(
         self, *, shape_env: ShapeEnv | None = None, allow_non_fake_inputs: bool = False
@@ -1017,17 +1013,25 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
         import torch._functorch.config
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
-        super().__init__(FakeTensorConverter(copy_data=copy_data), shape_env)
-        self._creation_traceback = CapturedTraceback.extract()
+        super().__init__(
+            FakeTensorConverter(copy_data=copy_data),
+            shape_env,
+            creation_traceback=CapturedTraceback.extract(),
+        )
+        self._attach_python_object()
         self.allow_non_fake_inputs = allow_non_fake_inputs
 
-    # Where the mode was created, like FakeTensorMode.stack. Unlike it, this is
-    # formatted on each access (only error messages read it), and its source
-    # lines are looked up then, without the module's globals, so they can be
-    # missing for a module loaded through a loader (e.g. from a zip).
+    @classmethod
+    def _from_cpp_mode(cls, cpp_mode: object) -> Self:
+        self = cls.__new__(cls)
+        torch._C._CppFakeTensorMode.__init__(self, cpp_mode)
+        return self
+
+    # Symbolized on demand, without retaining the creation frame's locals.
     @property
     def stack(self) -> str:
-        return "".join(self._creation_traceback.format())
+        tb = self._creation_traceback
+        return "" if tb is None else "".join(tb.format())
 
     # Same as FakeTensorMode.avoid_device_init
     @property
