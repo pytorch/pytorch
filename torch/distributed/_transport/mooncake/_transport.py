@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import os
 import socket
 import time
@@ -41,13 +42,66 @@ def _load_backend() -> Any:
         ) from error
 
 
+# Mooncake reads MC_USE_IPV6 at its first engine initialize, then listens and
+# dials with only that address family for the rest of the process. Tracks the
+# family of engines created here; engines created elsewhere are not covered.
+_ipv6: bool | None = None
+
+
+def _ipv6_mode() -> bool | None:
+    """Return whether this process uses IPv6, or None if not yet decided."""
+    if _ipv6 is not None:
+        return _ipv6
+    return True if "MC_USE_IPV6" in os.environ else None
+
+
 def _format_host(host: str) -> str:
     host = host.strip("[]")
-    if ":" not in host:
+    try:
+        ipv6 = ipaddress.ip_address(host).version == 6
+    except ValueError:
+        # Hostname: Mooncake resolves it in whichever family is in use.
         return host
-    if "MC_USE_IPV6" not in os.environ:
-        raise ValueError("Mooncake requires MC_USE_IPV6 to be set for IPv6 hosts")
+    mode = _ipv6_mode()
+    if mode is not None and ipv6 != mode:
+        family = "IPv6" if mode else "IPv4"
+        raise ValueError(
+            f"Mooncake is using {family} in this process (see MC_USE_IPV6); "
+            f"got {host!r}, pass an {family} host"
+        )
+    if not ipv6:
+        return host
+    # Process-wide: also inherited by child processes.
+    os.environ.setdefault("MC_USE_IPV6", "1")
     return f"[{host}]"
+
+
+def _default_host() -> str:
+    """Return a local IP so peers need not resolve this hostname.
+
+    Prefers IPv6, then IPv4, skipping loopback and link-local addresses and
+    addresses of a family other than the one already in use. Falls back to the
+    hostname if it does not resolve or no address remains.
+    """
+    hostname = socket.gethostname()
+    try:
+        infos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError):
+        return hostname
+    mode = _ipv6_mode()
+    ips = [
+        ipaddress.ip_address(sockaddr[0])
+        for family, _, _, _, sockaddr in infos
+        if family in (socket.AF_INET, socket.AF_INET6)
+    ]
+    ips = [
+        ip
+        for ip in ips
+        if not (ip.is_loopback or ip.is_link_local)
+        and (mode is None or (ip.version == 6) == mode)
+    ]
+    ips.sort(key=lambda ip: ip.version != 6)
+    return str(ips[0]) if ips else hostname
 
 
 class MooncakeTransport(Transport):
@@ -61,6 +115,12 @@ class MooncakeTransport(Transport):
     descriptors carry no opaque metadata blob. Mooncake is an optional
     dependency, imported only when selected. Transfers require registered views;
     raw tensors are rejected rather than allocated or registered implicitly.
+
+    ``host`` defaults to a local IP, IPv6 preferred, so peers need not resolve
+    this hostname. Mooncake uses one address family per process: an IPv6 host
+    sets ``MC_USE_IPV6`` process-wide (inherited by children), and an IP of the
+    other family raises. On dual-stack hosts, pass an IPv4 ``host`` to the first
+    transport to use IPv4. Peers must use the same family.
 
     There is no per-peer disconnect; ``close`` releases all peers. A failed
     transfer fails only its Work. A timed-out transfer also pins its local
@@ -93,14 +153,21 @@ class MooncakeTransport(Transport):
         super().__init__(device)
         if self.device is not None and self.device.type not in ("cpu", "cuda"):
             raise ValueError("Mooncake transport requires a CPU or CUDA device")
-        host = socket.gethostname() if host is None else host
-        if not host or not protocol:
+        if host == "" or not protocol:
             raise ValueError("host and protocol cannot be empty")
         _validate_timeout(timeout)
-        host = _format_host(host)
         backend = _load_backend()
+        host = _format_host(_default_host() if host is None else host)
+        if not host:
+            raise ValueError("host cannot be empty")
         engine = backend.TransferEngine()
-        if engine.initialize(host, metadata_server, protocol, device_name) != 0:
+        # Record before initialize: Mooncake locks the family when it first reads
+        # its config, which most failed initializes reach.
+        global _ipv6
+        if _ipv6 is None:
+            _ipv6 = "MC_USE_IPV6" in os.environ
+        result = engine.initialize(host, metadata_server, protocol, device_name)
+        if result != 0:
             raise RuntimeError("Mooncake transport initialization failed")
         self._backend = backend
         self._engine: Any = engine
