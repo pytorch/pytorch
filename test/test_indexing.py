@@ -2055,7 +2055,6 @@ class TestIndexingDevice(TestCase):
         return (x, index, src)
 
     @onlyNativeDeviceTypes
-    @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029
     def test_index_copy_deterministic(self, device: torch.device) -> None:
         for dim in range(3):
             x, index, src = self._prepare_data_for_index_copy_and_add_deterministic(
@@ -2077,7 +2076,6 @@ class TestIndexingDevice(TestCase):
             self.assertEqual(x0, y0, atol=0, rtol=0)
 
     @onlyNativeDeviceTypes
-    @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029
     def test_index_add_deterministic(self, device: torch.device) -> None:
         for dim in range(3):
             x, index, src = self._prepare_data_for_index_copy_and_add_deterministic(
