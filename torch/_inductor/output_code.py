@@ -246,6 +246,10 @@ def _get_runtime_cudagraph_fail_reason(
             f"expected one accelerator device, got {device_types}"
         )
     device_type = device_types[0]
+    if not config.triton.cudagraph_trees and device_type != "cuda":
+        return format_default_skip_message(
+            f"non-Tree cudagraph capture requires CUDA, got {device_type!r}"
+        )
     if reason := check_current_accelerator_for_cudagraphs(device_type):
         return reason
     if reason := check_rng_state_for_cudagraphs(device_type):

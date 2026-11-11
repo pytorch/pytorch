@@ -2377,37 +2377,23 @@ def cudagraphify_impl(
         if isinstance(x, torch.Tensor) and idx not in static_input_idxs:
             index_expanded_dims_and_copy_(static_inputs[idx], x, expanded_dims)
 
-    accelerator = torch.accelerator.current_accelerator()
-    if accelerator is None:
-        raise RuntimeError("Expected a current accelerator, but found none")
-
-    torch.accelerator.synchronize()
-    stream = torch.cuda.Stream() if accelerator.type == "cuda" else torch.Stream()
-    stream.wait_stream(torch.accelerator.current_stream())
-    with stream:
+    # warmup
+    torch.cuda.synchronize()
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    # copy static_inputs because it will be cleared in model
+    with torch.cuda.stream(stream):
         model(list(static_inputs))
     stream.synchronize()
-    torch.accelerator.current_stream().wait_stream(stream)
-    torch.accelerator.synchronize()
+    torch.cuda.current_stream().wait_stream(stream)
+    torch.cuda.synchronize()
 
-    if accelerator.type == "cuda":
-        if not isinstance(stream, torch.cuda.Stream):
-            raise AssertionError("Expected a CUDA stream for CUDA graph capture")
-        num_rng_states = max(
-            8, 1 + sum(isinstance(x, torch.Generator) for x in static_inputs)
-        )
-        graph = torch.cuda.CUDAGraph(num_rng_states=num_rng_states)
-        graph_context = torch.cuda.graph(
-            graph,
-            stream=stream,
-            capture_error_mode="thread_local",
-        )
-        stream_context = contextlib.nullcontext()
-    else:
-        graph = torch.accelerator.Graph(capture_error_mode="thread_local")
-        graph_context = graph
-        stream_context = stream
-    with stream_context, graph_context:
+    # record
+    num_rng_states = max(
+        8, 1 + sum(isinstance(x, torch.Generator) for x in static_inputs)
+    )
+    graph = torch.cuda.CUDAGraph(num_rng_states=num_rng_states)
+    with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local"):
         static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)

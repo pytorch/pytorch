@@ -380,6 +380,31 @@ class TestCUDAGraphUtils(TestCase):
         self.assertIsNotNone(reason)
         self.assertIn("expected one accelerator device", reason)
 
+    def test_non_tree_mps_runtime_cudagraph_fallback(self):
+        from torch._inductor.output_code import (
+            _get_runtime_cudagraph_fail_reason,
+            cudagraph_post_compile,
+        )
+        from torch._inductor.utils import BoxedBool
+
+        compiled_graph = mock.Mock(device_types={"mps"})
+        compiled_graph.cudagraph_info.cudagraph_fail_reasons = []
+        compiled_graph.fx_kwargs = {"is_inference": True, "is_backward": False}
+        compiled_graph.disabled_cudagraphs_reason = None
+        original_callable = compiled_graph.current_callable
+        cudagraphs = BoxedBool(True)
+
+        with inductor_config.patch(
+            {"triton.cudagraph_trees": False, "cudagraph_policy": None}
+        ):
+            reason = _get_runtime_cudagraph_fail_reason(compiled_graph)
+            cudagraph_post_compile([], compiled_graph, cudagraphs, {}, None)
+
+        self.assertIsNotNone(reason)
+        self.assertIn("non-Tree cudagraph capture requires CUDA", reason)
+        self.assertFalse(cudagraphs.value)
+        self.assertIs(compiled_graph.current_callable, original_callable)
+
 
 class TestUtils(TestCase):
     def test_python_subprocess_env_prioritizes_loaded_torch(self):
