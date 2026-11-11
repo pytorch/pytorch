@@ -558,4 +558,27 @@ REGISTER_DISPATCH(cpublas::gemm_no_downcast_stub, &cpublas::cpublas_gemm_no_down
 REGISTER_DISPATCH(cpublas::axpy_stub, &cpublas::cpublas_axpy_impl)
 REGISTER_DISPATCH(cpublas::copy_stub, &cpublas::cpublas_copy_impl)
 
+#if defined(CPU_CAPABILITY_DEFAULT)
+namespace cpublas {
+// Call DEFAULT here for the stable ABI shim, where its specialization is
+// defined, to avoid -Wundefined-var-template in shim_common.cpp.
+void gemm_no_downcast_default(
+    at::ScalarType type,
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    const Scalar& alpha,
+    const void* a, int64_t lda,
+    const void* b, int64_t ldb,
+    const Scalar& beta,
+    void* c, int64_t ldc) {
+  auto* default_impl = gemm_no_downcast_stub.DEFAULT;
+  TORCH_CHECK(
+      default_impl != nullptr,
+      "cpublas::gemm_no_downcast_stub.DEFAULT is not registered");
+  default_impl(
+      type, transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+}
+}  // namespace cpublas
+#endif
+
 }  // namespace at::native
