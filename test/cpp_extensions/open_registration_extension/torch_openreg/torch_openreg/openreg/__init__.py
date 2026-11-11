@@ -89,3 +89,11 @@ __all__ = [
     "get_rng_state",
     "set_rng_state",
 ]
+
+
+def _inductor_backend_init():
+    # Runs on the first Inductor compile, so importing torch_openreg does not
+    # pull in torch._inductor.
+    from ._inductor import register_inductor_backend
+
+    register_inductor_backend()
