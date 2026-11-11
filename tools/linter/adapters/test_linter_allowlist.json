@@ -263,7 +263,6 @@
   "test/dynamo/test_callback.py",
   "test/dynamo/test_check_type_id.py",
   "test/dynamo/test_compile.py",
-  "test/dynamo/test_compiler_bisector.py",
   "test/dynamo/test_contains_protocol.py",
   "test/dynamo/test_ctx_manager.py",
   "test/dynamo/test_cudagraphs.py",
