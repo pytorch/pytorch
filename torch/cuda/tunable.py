@@ -463,8 +463,9 @@ def set_numerical_check_tolerances(
 
 
 def _clear_all() -> None:
-    r"""Drop all in-memory tuning results. Testing only: lets a test start from
-    an empty results manager instead of relying on globally disjoint shapes."""
+    r"""Drop all in-memory tuning results and close the results file. Testing
+    only: lets a test start from an empty results manager instead of relying on
+    globally disjoint shapes."""
     torch._C._cuda_tunableop_clear_all()  # type: ignore[attr-defined]
 
 
