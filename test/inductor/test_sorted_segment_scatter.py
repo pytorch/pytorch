@@ -1,6 +1,9 @@
 # Owner(s): ["module: inductor"]
 
 import math
+import os
+import subprocess
+import sys
 
 import torch
 from torch._dynamo.utils import counters
@@ -114,6 +117,43 @@ class TestSortedSegmentScatter(TestCase):
             self.assertEqual(self._rewrites(*mk(torch.float32)), 0)
         with config.patch(fx_wrapper=True):
             self.assertEqual(self._rewrites(*mk(torch.float32)), 0)
+
+    @config.patch(
+        sorted_segment_scatter_enabled=True, sorted_segment_scatter_min_index_size=1
+    )
+    def test_compile_broadcast_source(self):
+        # a [1, D] source broadcasts over the index and must stay on the default lowering
+        idx = torch.randint(0, 501, (4096,), device=GPU_TYPE)
+        base = torch.randn(501, 64, device=GPU_TYPE)
+        src = torch.randn(1, 64, device=GPU_TYPE)
+        torch._dynamo.reset()
+        counters.clear()
+        out = torch.compile(lambda b, i, s: b.index_put((i,), s, accumulate=True))(
+            base, idx, src
+        )
+        self.assertEqual(counters["inductor"]["sorted_segment_scatter_applied"], 0)
+        ref = base.index_put((idx,), src, accumulate=True)
+        torch.testing.assert_close(out, ref)
+
+    def test_legacy_env_aliases(self):
+        code = (
+            "from torch._inductor import config; print(config.sorted_segment_scatter_"
+            "enabled, config.sorted_segment_scatter_min_index_size)"
+        )
+        prefix = "TORCHINDUCTOR_SORTED_SEGMENT_SCATTER"
+        env = {k: v for k, v in os.environ.items() if not k.startswith(prefix)}
+
+        def read(**extra):
+            out = subprocess.check_output(
+                [sys.executable, "-c", code], env={**env, **extra}, text=True
+            )
+            return out.split()[-2:]
+
+        self.assertEqual(read(), ["False", "1000000"])
+        old = {prefix: "1", f"{prefix}_MIN_INDEX": "123"}
+        self.assertEqual(read(**old), ["True", "123"])
+        new = {f"{prefix}_ENABLED": "0", f"{prefix}_MIN_INDEX_SIZE": "456"}
+        self.assertEqual(read(**old, **new), ["False", "456"])
 
     @parametrize("dtype", [torch.float32, torch.bfloat16])
     @config.patch(
