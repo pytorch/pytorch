@@ -1437,10 +1437,13 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # created on call_function. Any exception needs to be propagated to tx
             # for Dynamo to behave correctly
             tracer.push(arg)
-            with self.inline_tracer.link_gi_exc_state():
+            tracer.exn_vt_stack.push_segment(tracer.gi_exc_state)
+            try:
                 if exc:
                     self.throw_pending()
                 return tracer.inline_call_()
+            finally:
+                tracer.exn_vt_stack.pop_segment()
         except ObservedUserStopIteration:
             # PEP 479: pre-3.12 has no STOPITERATION_ERROR opcode, so convert a
             # StopIteration that escapes the generator body to RuntimeError here
@@ -1557,10 +1560,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
         return self.inline_tracer.frame_state == FrameState.FRAME_CREATED
 
     def _frame_state_finished(self) -> bool:
-        return self.inline_tracer.frame_state in {
-            FrameState.FRAME_COMPLETED,
-            FrameState.FRAME_CLEARED,
-        }
+        state = self.inline_tracer.frame_state
+        return state is FrameState.FRAME_COMPLETED or state is FrameState.FRAME_CLEARED
 
     def _frame_state_suspended(self) -> bool:
         return self.inline_tracer.frame_state in {
