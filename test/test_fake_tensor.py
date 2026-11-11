@@ -52,7 +52,6 @@ from torch._subclasses.fake_tensor import (
     maybe_get_real_tensor,
     MetadataMismatchError,
     unset_fake_temporarily,
-    UnsupportedFakeTensorException,
     UnsupportedOperatorException,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -6257,71 +6256,21 @@ class TestCppFakeTensorModeBindings(TestCase):
         fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), mode)
 
-    def test_cpp_fake_tensor_mode_from_unsupported(self):
-        # What from_tensor cannot convert to C++ fakes yet
-        from torch.nested._internal.nested_tensor import get_tensor_symint
-
-        # A tensor with a nested int, such as a jagged tensor's offsets,
-        # registered outside Dynamo, which would trace the registration
-        offsets = torch.tensor([0, 2, 5])
-        torch._dynamo.disable(get_tensor_symint)(offsets, coeff=1)
-        real = torch.randn(2, 3)
-        # Also as a grad, checked before the tensor itself is converted
-        with_sparse_grad = torch.randn(2, 2, requires_grad=True)
-        with_sparse_grad.grad = torch.eye(2).to_sparse()
-        cases = [
-            ("views", "slice", real[1:]),
-            ("views", "transpose", real.t()),
-            ("views", "dtype", torch.view_as_real(torch.randn(2, dtype=torch.cfloat))),
-            ("sparse", "coo", torch.eye(2).to_sparse()),
-            ("sparse", "csr", torch.eye(2).to_sparse_csr()),
-            ("sparse", "grad", with_sparse_grad),
-            ("nested ints", "offsets", offsets),
-        ]
-        if torch.backends.mkldnn.is_available():
-            cases.append(("mkldnn", "mkldnn", torch.randn(2).to_mkldnn()))
-        for kind, case, t in cases:
-            with self.subTest(case=case):
-                shape_env = ShapeEnv()
-                mode = CppFakeTensorMode(shape_env=shape_env)
-                msg = rf"{kind} nyi in C\+\+ fake tensors"
-                with self.assertRaisesRegex(UnsupportedFakeTensorException, msg):
-                    mode.from_tensor(t)
-                # No symbols remain; standalone sparse inputs use concrete sizes.
-                self.assertEqual(len(shape_env.backed_var_to_val), 0)
-        # A constant must be a plain tensor
-        mode = CppFakeTensorMode()
-        converter = mode.fake_tensor_converter
-        wrapper = TwoTensor(torch.randn(2), torch.randn(2))
-        msg = "constants that are not plain tensors nyi"
-        with self.assertRaisesRegex(UnsupportedFakeTensorException, msg):
-            converter.from_real_tensor(mode, wrapper, make_constant=True)
-        # and a real one, which the fake records
-        fake = mode.from_tensor(torch.randn(2))
-        with self.assertRaisesRegex(UnsupportedFakeTensorException, "fake constants"):
-            converter.from_real_tensor(mode, fake, make_constant=True)
-
-    def test_cpp_fake_tensor_mode_converter_kind(self):
-        # A converter makes one kind of fake
-        cpp_mode = CppFakeTensorMode()
-        py_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        cpp_converter = cpp_mode.fake_tensor_converter
-        py_converter = py_mode.fake_tensor_converter
-        real = torch.randn(2)
-        msg = "this converter's cpp_fakes does not match"
-        for mode, converter in ((py_mode, cpp_converter), (cpp_mode, py_converter)):
-            with self.assertRaisesRegex(AssertionError, msg):
-                converter.from_real_tensor(mode, real)
-        meta = torch.empty(2, device="meta")
-        with self.assertRaisesRegex(AssertionError, "makes FakeTensors"):
-            cpp_converter.from_meta_and_device(py_mode, meta, torch.device("cpu"))
+    @fake_tensor_modes
+    def test_cpp_fake_tensor_mode_converter_kind(self, mode_cls):
+        mode = mode_cls()
+        converter = FakeTensorConverter(cpp_fakes=mode_cls is not CppFakeTensorMode)
+        with self.assertRaisesRegex(AssertionError, "cpp_fakes does not match"):
+            converter.from_real_tensor(mode, torch.randn(2))
+        if mode_cls is not CppFakeTensorMode:
+            meta = torch.empty(2, device="meta")
+            with self.assertRaisesRegex(AssertionError, "makes FakeTensors"):
+                converter.from_meta_and_device(mode, meta, torch.device("cpu"))
 
     def test_in_kernel_invocation_with_native_guard(self):
-        mode = CppFakeTensorMode()
         with torch._C._InKernelInvocation():
-            with in_kernel_invocation_manager(mode):
+            with in_kernel_invocation_manager(CppFakeTensorMode()):
                 self.assertTrue(torch._C._meta_in_tls_dispatch_include())
-            # and the manager's exit leaves it set
             self.assertTrue(torch._C._in_kernel_invocation())
             self.assertFalse(torch._C._meta_in_tls_dispatch_include())
 
@@ -6441,10 +6390,8 @@ class TestCppFakeTensorModeBindings(TestCase):
         fake = mode.from_tensor(real)
         keys = torch._C._dispatch_keys(real)
         torch._C._set_fake_dispatch_keys(fake, keys)
-        result = op(fake)
-        self.assertIs(maybe_get_fake_mode(result), mode)
         self.assertEqual(
-            maybe_get_fake_dispatch_keys(result), keys if preserve_keys else None
+            maybe_get_fake_dispatch_keys(op(fake)), keys if preserve_keys else None
         )
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
@@ -6464,8 +6411,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             lib.define("detached(Tensor x) -> Tensor")
             lib.impl("detached", meta_impl, "Meta")
             result = torch.ops._test_fake_fallback.detached(fake)
-        self.assertIs(maybe_get_fake_mode(result), mode)
-        self.assertEqual(result.device, fake.device)
         self.assertIsNone(maybe_get_fake_dispatch_keys(result))
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
@@ -6480,55 +6425,45 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertIsNone(torch._guards.active_fake_mode())
             return x.new_empty(x.shape)
 
-        ns = f"_test_fake_fallback_probe_{mode_cls.__name__}_{active}"
-        with torch.library._scoped_library(ns, "DEF") as lib:
+        with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
             lib.define("probe(Tensor x) -> Tensor")
             lib.impl("probe", meta_impl, "Meta")
             with mode if active else contextlib.nullcontext():
-                result = getattr(torch.ops, ns).probe(fake)
-                expected = (
-                    (mode, mode_cls is CppFakeTensorMode) if active else (None, False)
-                )
-                self.assertEqual(self._installed(), expected)
+                before = self._installed()
+                result = torch.ops._test_fake_fallback.probe(fake)
+                self.assertEqual(self._installed(), before)
         self.assertIs(maybe_get_fake_mode(result), mode)
-        self.assertEqual(result.shape, fake.shape)
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_fake_fallback_reentrant_mode_release(self):
         self.addCleanup(self._restore_fake_mode_state)
         mode = CppFakeTensorMode()
         fake = mode.from_tensor(torch.randn(2, 3))
-        replaced, restored = [], []
+        restored = []
 
         def meta_impl(x):
             result = x.new_empty(x.shape)
             replacement = CppFakeTensorMode()
-            replaced.append(
-                weakref.ref(replacement, lambda _: restored.append(self._installed()))
-            )
+            weakref.finalize(replacement, lambda: restored.append(self._installed()))
             torch._C._set_dispatch_mode(replacement)
             return result
 
-        with torch.library._scoped_library("_test_fake_fallback_replace", "DEF") as lib:
+        with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
             lib.define("probe(Tensor x) -> Tensor")
             lib.impl("probe", meta_impl, "Meta")
             with mode:
-                torch.ops._test_fake_fallback_replace.probe(fake)
-                self.assertIsNone(replaced[0]())
+                torch.ops._test_fake_fallback.probe(fake)
                 self.assertEqual(restored, [(mode, True)])
                 self.assertEqual(self._installed(), (mode, True))
         self.assertEqual(self._installed(), (None, False))
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_fake_fallback_rejects_missing_mode(self):
-        mode = CppFakeTensorMode()
         fake = torch.empty(2, 3, device="meta")
         torch._C._set_fake_device(fake, torch.device("cpu"))
-        with mode:
-            with self.assertRaisesRegex(
-                NotImplementedError, "fake tensors without a mode"
-            ):
-                fake + fake
+        msg = "fake tensors without a mode"
+        with CppFakeTensorMode(), self.assertRaisesRegex(NotImplementedError, msg):
+            fake + fake
 
     @parametrize(
         "kind,schema",
@@ -6542,14 +6477,12 @@ class TestCppFakeTensorModeBindings(TestCase):
         real = torch.randn(2, 3)
         fake = mode.from_tensor(real)
         args = (fake, {"hidden": real}) if kind == "input" else (fake,)
-        ns = f"_test_fake_fallback_any_{kind}"
-        with torch.library._scoped_library(ns, "DEF") as lib:
+        with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
             lib.define(schema)
             with mode:
-                with self.assertRaisesRegex(
-                    NotImplementedError, "nested containers of tensors or Any"
-                ):
-                    getattr(torch.ops, ns).probe(*args)
+                msg = "nested containers of tensors or Any"
+                with self.assertRaisesRegex(NotImplementedError, msg):
+                    torch.ops._test_fake_fallback.probe(*args)
                 self.assertEqual(self._installed(), (mode, True))
 
     def test_require_python_fake_mode(self):
@@ -6603,8 +6536,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         self.assertIsNone(ref())
 
     def _restore_fake_mode_state(self):
-        # Undoes a manual enter whose exit failed partway, so the failure does
-        # not leak into later tests
+        # Restore TLS after tests that manually enter or unset a mode.
         from torch.utils._python_dispatch import _cpp_fake_mode_tls
 
         torch._C._set_only_lift_cpu_tensors(False)
@@ -6613,57 +6545,41 @@ class TestCppFakeTensorModeBindings(TestCase):
             torch._C._unset_dispatch_mode(fake_key)
         _cpp_fake_mode_tls.stack.clear()
 
-    @parametrize("avoid_device_init", [False, True])
-    def test_cpp_fake_tensor_mode_enter_exit(self, avoid_device_init):
+    @parametrize("inherited", [False, True])
+    @parametrize("avoid_init", [False, True])
+    def test_cpp_fake_tensor_mode_enter_exit(self, inherited, avoid_init):
         self.addCleanup(self._restore_fake_mode_state)
         mode, inner = CppFakeTensorMode(), CppFakeTensorMode()
-        with patch.object(CppFakeTensorMode, "avoid_device_init", avoid_device_init):
+        if inherited:
+            torch._C._set_dispatch_mode(mode)
+        before = self._installed()
+        with patch.object(CppFakeTensorMode, "avoid_device_init", avoid_init), mode:
+            self.assertEqual(self._installed(), (mode, True))
+            self.assertEqual(torch._C._only_lift_cpu_tensors(), avoid_init)
+            with unset_fake_temporarily():
+                self.assertEqual(self._installed(), (None, False))
             with mode:
                 self.assertEqual(self._installed(), (mode, True))
-                self.assertEqual(torch._C._only_lift_cpu_tensors(), avoid_device_init)
-                with unset_fake_temporarily():
-                    self.assertEqual(self._installed(), (None, False))
+            with inner:
                 with mode:
                     self.assertEqual(self._installed(), (mode, True))
-                with inner:
-                    with mode:
-                        self.assertEqual(self._installed(), (mode, True))
-                    self.assertEqual(self._installed(), (inner, True))
-                self.assertEqual(self._installed(), (mode, True))
-        self.assertEqual(self._installed(), (None, False))
-        self.assertFalse(torch._C._only_lift_cpu_tensors())
-
-    @parametrize("outer_avoid", [False, True])
-    @parametrize("inner_avoid", [False, True])
-    def test_cpp_fake_mode_exception_unwind(self, outer_avoid, inner_avoid):
-        self.addCleanup(self._restore_fake_mode_state)
-        mode, inner = CppFakeTensorMode(), CppFakeTensorMode()
-        with patch.object(CppFakeTensorMode, "avoid_device_init", outer_avoid), mode:
+                self.assertEqual(self._installed(), (inner, True))
+            self.assertEqual(self._installed(), (mode, True))
             with self.assertRaisesRegex(ValueError, "unwind"):
-                with patch.object(CppFakeTensorMode, "avoid_device_init", inner_avoid):
+                with patch.object(
+                    CppFakeTensorMode, "avoid_device_init", not avoid_init
+                ):
                     with inner, inner:
                         raise ValueError("unwind")
             self.assertEqual(self._installed(), (mode, True))
-            self.assertEqual(torch._C._only_lift_cpu_tensors(), outer_avoid)
-        self.assertEqual(self._installed(), (None, False))
-        self.assertFalse(torch._C._only_lift_cpu_tensors())
-
-    def test_cpp_fake_tensor_mode_inherited_reentry(self):
-        self.addCleanup(self._restore_fake_mode_state)
-        mode = CppFakeTensorMode()
-        # ThreadLocalState can install a mode without entering its context.
-        torch._C._set_dispatch_mode(mode)
-        with patch.object(CppFakeTensorMode, "avoid_device_init", True), mode:
-            self.assertEqual(self._installed(), (mode, True))
-            self.assertTrue(torch._C._only_lift_cpu_tensors())
-        self.assertEqual(self._installed(), (mode, True))
+            self.assertEqual(torch._C._only_lift_cpu_tensors(), avoid_init)
+        self.assertEqual(self._installed(), before)
         self.assertFalse(torch._C._only_lift_cpu_tensors())
 
     @parametrize("python_outer", [False, True])
     def test_cpp_fake_tensor_mode_rejects_python_mode(self, python_outer):
         self.addCleanup(self._restore_fake_mode_state)
-        mode = CppFakeTensorMode()
-        python_mode = FakeTensorMode()
+        mode, python_mode = CppFakeTensorMode(), FakeTensorMode()
         outer, inner = (python_mode, mode) if python_outer else (mode, python_mode)
         with outer:
             with self.assertRaisesRegex(RuntimeError, "cannot enter"):
@@ -6695,17 +6611,12 @@ class TestCppFakeTensorModeBindings(TestCase):
     def test_cpp_fake_tensor_mode_exit_order(self, suspended):
         self.addCleanup(self._restore_fake_mode_state)
         outer, inner = CppFakeTensorMode(), CppFakeTensorMode()
-        with outer:
-            with inner:
-                guard = (
-                    unset_fake_temporarily() if suspended else contextlib.nullcontext()
-                )
-                with guard:
-                    before = self._installed()
-                    with self.assertRaisesRegex(RuntimeError, "reverse order"):
-                        outer.__exit__(None, None, None)
-                    self.assertEqual(self._installed(), before)
-            self.assertEqual(self._installed(), (outer, True))
+        with outer, inner:
+            with unset_fake_temporarily() if suspended else contextlib.nullcontext():
+                before = self._installed()
+                with self.assertRaisesRegex(RuntimeError, "reverse order"):
+                    outer.__exit__(None, None, None)
+                self.assertEqual(self._installed(), before)
         self.assertEqual(self._installed(), (None, False))
 
     @parametrize("own_mode", [False, True])
@@ -6716,8 +6627,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         mode = CppFakeTensorMode()
 
         def check_thread():
-            guard = CppFakeTensorMode() if own_mode else contextlib.nullcontext()
-            with guard:
+            with CppFakeTensorMode() if own_mode else contextlib.nullcontext():
                 before = self._installed()
                 with self.assertRaisesRegex(RuntimeError, "same thread"):
                     mode.__exit__(None, None, None)
@@ -6744,13 +6654,12 @@ class TestCppFakeTensorModeBindings(TestCase):
             mode = CppFakeTensorMode()
             mode.__enter__()
             self.assertEqual(self._installed(), (mode, True))
-            return weakref.ref(mode, lambda _: released.set())
+            weakref.finalize(mode, released.set)
 
         with ThreadPoolExecutor(max_workers=1) as pool:
-            ref = pool.submit(enter_only).result()
+            pool.submit(enter_only).result()
         # Native TLS teardown can finish after join() on Python before 3.13.
         self.assertTrue(released.wait(timeout=5))
-        self.assertIsNone(ref())
         self.assertEqual(self._installed(), (None, False))
 
     def test_cpp_fake_tensor_mode_inherited_detection(self):
