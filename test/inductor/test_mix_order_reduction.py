@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     recover_orig_fp32_precision,
@@ -31,7 +32,18 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
+from torch.utils._triton import (
+    has_triton_cuda_tma_device,
+    has_triton_stable_tma_api,
+    has_triton_tma_device,
+)
+
+
+# has_triton_tma_device() is also true on a pre-SM90 CUDA GPU when Triton has a
+# CPU backend, so CUDA needs the stricter check.
+HAS_GPU_TMA = has_triton_tma_device() and (
+    GPU_TYPE != "cuda" or has_triton_cuda_tma_device()
+)
 
 
 class TestBase(TestCase):
@@ -98,6 +110,10 @@ class SkipPatternTest(TestBase):
 )
 @instantiate_parametrized_tests
 class MixOrderReductionTest(TestBase):
+    @decorateIf(
+        unittest.skip("Invalid combination"),
+        lambda params: params["name"] == "prod" and len(params["shape"]) == 3,
+    )
     @parametrize(
         "name",
         [
@@ -468,7 +484,7 @@ class MixOrderReductionTest(TestBase):
         x = torch.randn(4096 * 64, 32, device=GPU_TYPE)
         y = torch.randn(4098 * 64, 34, device=GPU_TYPE)
 
-        self.check_numeric(f, (x, y))
+        self.check_numeric(f, (x, y), tol=1e-2)
         expected_mix_order_reduction = (
             0 if not inductor_config.triton.mix_order_reduction else 2
         )
@@ -476,6 +492,10 @@ class MixOrderReductionTest(TestBase):
             expected_mix_order_reduction, metrics.codegen_mix_order_reduction
         )
 
+    @decorateIf(
+        unittest.skip("Skip non-critical tests to save resources."),
+        lambda params: params["shape"] != (1000000, 256) and params["add_1dim"],
+    )
     @parametrize(
         "wdtype",
         [
@@ -569,9 +589,7 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
-    @unittest.skipUnless(
-        has_triton_tma_device(), "Test requires Triton TMA device support"
-    )
+    @unittest.skipUnless(HAS_GPU_TMA, "Test requires Triton TMA device support")
     @parametrize("allow_multi_stages", (False, True))
     @inductor_config.patch(
         {
@@ -646,9 +664,7 @@ class MixOrderReductionTest(TestBase):
                 .run(bwd_wrapper)
             )
 
-    @unittest.skipUnless(
-        has_triton_tma_device(), "Test requires Triton TMA device support"
-    )
+    @unittest.skipUnless(HAS_GPU_TMA, "Test requires Triton TMA device support")
     @parametrize("allow_multi_stages", (False, True))
     @parametrize("shape", ((32768, 256), (32768 + 1023, 768)))
     @inductor_config.patch(

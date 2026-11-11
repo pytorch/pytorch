@@ -16,7 +16,7 @@ from torch._dynamo.debug_utils import InputReader
 from torch._inductor import config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.triton import FixedTritonConfig
-from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
+from torch._inductor.runtime.hints import DeviceProperties, TRITON_MAX_BLOCK
 from torch._inductor.runtime.runtime_utils import get_max_y_grid, is_power_of_2
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
@@ -58,7 +58,9 @@ max_block: int = TRITON_MAX_BLOCK["X"]
 
 def _get_no_split_threshold() -> int:
     if torch.cuda.is_available():
-        props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        props = DeviceProperties.create(
+            torch.device("cuda", torch.cuda.current_device())
+        )
         # These tests reduce the whole view to one output, so xnumel is 1.
         return V.choices._inner_reduction_no_split_threshold(
             props, xnumel=1, num_sm=props.multi_processor_count
@@ -1799,6 +1801,19 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         actual = compiled_fn(t)
         self.assertTrue((actual == 4).all())
 
+    @largeTensorTest("3GB", inductor=True)
+    def test_large_input_small_output_uses_tma_store(self):
+        def fn(a):
+            return a[: 128 * 512].reshape(128, 512) + 4
+
+        t = torch.zeros(2**31, dtype=torch.int8, device=GPU_TYPE)
+        actual, (code,) = run_and_get_code(torch.compile(fn), t)
+        self.assertEqual(actual, fn(t))
+        self.assertIn("tl.program_id(0).to(tl.int64)", code)
+        self.assertNotIn("tl.make_tensor_descriptor(in_ptr0", code)
+        self.assertIn("tl.make_tensor_descriptor(out_ptr0", code)
+        self.assertIn(".store([(xoffset).to(tl.int32)]", code)
+
     def test_slice_constant_offset_disables_tma(self):
         """TMA requires 16-byte aligned base; x[1:] with float32 yields 4-byte offset."""
 
@@ -2679,7 +2694,7 @@ class TritonHostSideTMAConfigTestCUDA(InductorTestCase):
             return x + 1
 
         x = torch.randn(1024, device=GPU_TYPE)
-        with self.assertWarnsRegex(UserWarning, "no effect"):
+        with self.assertWarnsRegex(UserWarning, "host-side TMA will be skipped"):
             result, code_list = run_and_get_code(torch.compile(fn), x)
         self.assertTrue(torch.allclose(result, fn(x)))
         self.assertNotIn("host_tma_descriptor_args", "\n".join(code_list))

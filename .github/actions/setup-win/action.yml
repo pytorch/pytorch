@@ -9,9 +9,9 @@ inputs:
   python-version:
     required: false
     type: string
-    default: "3.10"
+    default: "3.11"
     description: |
-      The python version to be used. Will be 3.10 by default
+      The python version to be used. Will be 3.11 by default
 
 runs:
   using: composite

@@ -158,7 +158,7 @@ class Tensor(torch._C.TensorBase):
                     not torch._C._has_storage(self)
                     and self.device.type == torch._C._get_privateuse1_backend_name()
                 )
-                or (type(self) is not Tensor and self.data_ptr() == 0)
+                or (type(self) is not Tensor and not torch._C._has_storage_data(self))
             ):
                 new_tensor = self.clone()
                 if type(new_tensor) is not type(self):
@@ -459,7 +459,11 @@ class Tensor(torch._C.TensorBase):
                 isinstance(self, torch._subclasses.functional_tensor.FunctionalTensor)
                 or (
                     not torch._subclasses.fake_tensor.is_fake_tensor(self)
-                    and self.data_ptr() == 0
+                    # Wrapper subclasses have a placeholder storage with no data. A
+                    # tensor with no storage at all (e.g. MKLDNN) is not a wrapper:
+                    # saving it as one would drop its data.
+                    and torch._C._has_storage(self)
+                    and not torch._C._has_storage_data(self)
                 )
             )
         ):
@@ -603,10 +607,10 @@ class Tensor(torch._C.TensorBase):
             create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
                 products. Defaults to ``False``.
-            inputs (Sequence[Tensor] or dict[str, Tensor], optional): Inputs w.r.t. which
+            inputs (Sequence[Tensor] or Mapping[str, Tensor], optional): Inputs w.r.t. which
                 the gradient will be accumulated into ``.grad``. All other tensors will be
                 ignored. If not provided, the gradient is accumulated into all the leaf
-                Tensors that were used to compute the :attr:`tensors`. A dict of tensors
+                Tensors that were used to compute the :attr:`tensors`. A mapping of tensors
                 (e.g. ``dict(model.named_parameters())``) is also accepted.
                 Defaults to ``None``.
         """

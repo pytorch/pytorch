@@ -155,8 +155,8 @@ bool check_nvfp4_recipe_single_scale(
 
 /**
  * Both inputs must be fp8
- * A, B must only have 1 scale each, A: {Blockwise_1x128 (float), B:
- * {Blockwise_128x128 (float)
+ * A, B must only have 1 scale each, A: {Blockwise_1x128 (float/e8m0fnu), B:
+ * {Blockwise_128x128 (float/e8m0fnu)
  */
 bool check_deepseek_recipe(
     ScalingType expected_recipe_a,
@@ -177,11 +177,19 @@ bool check_deepseek_recipe(
     return false;
   }
 
-  // Need {Blockwise_1x128, float} for A, {Blockwise_128x128, float} for B
+  // Need expected recipe with float scales, or e8m0fnu scales (both must
+  // match). e8m0fnu scales are used by DeepSeek-V4-Flash but only enabled
+  // on XPU for now; TODO for CUDA/ROCm.
   if (recipe_a[0] != expected_recipe_a) return false;
-  if (scales_a[0].scalar_type() != ScalarType::Float) return false;
   if (recipe_b[0] != expected_recipe_b) return false;
-  if (scales_b[0].scalar_type() != ScalarType::Float) return false;
+  auto scale_dtype_a = scales_a[0].scalar_type();
+  bool e8m0_allowed = scales_a[0].is_xpu();
+  if (scale_dtype_a != ScalarType::Float &&
+      !(e8m0_allowed && scale_dtype_a == ScalarType::Float8_e8m0fnu)) {
+    return false;
+  }
+  // scale_dtype_b is implied to be valid once it matches scale_dtype_a.
+  if (scale_dtype_a != scales_b[0].scalar_type()) return false;
 
   return true;
 }
@@ -244,6 +252,12 @@ bool check_mxfp4_recipe(
   if (scales_b[0].scalar_type() != ScalarType::Float8_e8m0fnu) return false;
 
   return true;
+}
+
+bool is_valid_cublaslt_input_pair(c10::ScalarType type_a, c10::ScalarType type_b) {
+  return (type_a == ScalarType::Float8_e4m3fn || type_a == ScalarType::Float8_e5m2) &&
+      (type_b == ScalarType::Float8_e4m3fn || type_b == ScalarType::Float8_e5m2) &&
+      (type_a == ScalarType::Float8_e4m3fn || type_b == ScalarType::Float8_e4m3fn);
 }
 
 namespace {
@@ -570,18 +584,15 @@ void validate_scaled_mm_v2_inputs(
   }
 }
 
-// Recipe-independent validation for `_scaled_grouped_mm_v2`. Mirrors the
-// non-recipe checks at the top of `_scaled_grouped_mm_cuda_v2` so that
-// torch.compile tracing fails fast with the same messages users get in eager.
-// Per-recipe scale-shape checks (`_check_scales_*`), the device-capability
-// gate, and the `find_scaled_gemm_impl` dispatch stay in the kernel -- they
-// depend on layout/arch and the (data-dependent) offset values.
-//
-// Uses sym_size() so dynamic-shape tracing through Dynamo still goes through
-// this path -- raw size() throws on symbolic shapes.
+// Shape, offset, and recipe-specific output-dtype validation for v2.
+// Python meta checks output dtype and offset contiguity for FakeTensor and
+// compile. Other input checks run during execution. Scale layouts, device
+// capabilities, and backend selection are validated by the kernel.
 void validate_scaled_grouped_mm_v2_inputs(
     const Tensor& mat_a,
     const Tensor& mat_b,
+    ArrayRef<int64_t> recipe_a,
+    ArrayRef<int64_t> recipe_b,
     at::OptionalTensorRef offs,
     at::OptionalTensorRef bias,
     ArrayRef<int64_t> contraction_dim,
@@ -620,10 +631,27 @@ void validate_scaled_grouped_mm_v2_inputs(
   if (offs.has_value()) {
     TORCH_CHECK_VALUE(offs->dim() == 1, "offs has to be 1D");
     TORCH_CHECK_VALUE(offs->dtype() == at::kInt, "Offsets have to be int32");
+    TORCH_CHECK_VALUE(offs->is_contiguous(), "Offsets have to be contiguous");
   }
 
   const auto out_dtype_ = out_dtype.value_or(ScalarType::BFloat16);
-  TORCH_CHECK_VALUE(out_dtype_ == ScalarType::BFloat16, "Only bf16 high precision output types are supported for grouped gemm");
+  TORCH_CHECK_VALUE(
+      out_dtype_ == ScalarType::BFloat16 || out_dtype_ == ScalarType::Half || out_dtype_ == ScalarType::Float,
+      "Only bf16, fp16, and fp32 high precision output types are supported for grouped gemm");
+  const bool same_recipe = recipe_a.size() == 1 && recipe_b.size() == 1 && recipe_a[0] == recipe_b[0];
+  const bool rowwise = same_recipe && recipe_a[0] == static_cast<int64_t>(ScalingType::RowWise);
+  const bool tensorwise = same_recipe && recipe_a[0] == static_cast<int64_t>(ScalingType::TensorWise);
+  const auto vec128 = static_cast<int64_t>(ScalingType::BlockWise1x128);
+  const auto block128 = static_cast<int64_t>(ScalingType::BlockWise128x128);
+  const bool fp32_block = recipe_a.size() == 1 && recipe_b.size() == 1 &&
+      (recipe_a[0] == vec128 || recipe_a[0] == block128) &&
+      (recipe_b[0] == vec128 || recipe_b[0] == block128) &&
+      (recipe_a[0] == vec128 || recipe_b[0] == vec128);
+  const bool bf16_only = !tensorwise && !fp32_block;
+  TORCH_CHECK_VALUE(
+      !bf16_only || out_dtype_ == ScalarType::BFloat16,
+      rowwise ? "Rowwise grouped GEMM requires BFloat16 output"
+              : "Grouped scaling configuration requires BFloat16 output");
 }
 
 }  // at::scaled
