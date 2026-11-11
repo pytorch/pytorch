@@ -612,7 +612,7 @@ namespace {
 
 template <class T>
 void DLPack_Capsule_Destructor(PyObject* data) {
-  if (C10_LIKELY(!PyCapsule_IsValid(data, at::DLPackTraits<T>::capsule))) {
+  if (!PyCapsule_IsValid(data, at::DLPackTraits<T>::capsule)) [[likely]] {
     // early out, see DLPack spec: if a consuming library sets the capsule
     // name to something else, they own it and we don't need to do anything
     return;
@@ -2914,7 +2914,7 @@ Call this whenever a new thread is created in order to propagate values from
         TORCH_CHECK(fake.is_fake(), "Expected a fake tensor");
         auto* impl = fake.unsafeGetTensorImpl();
         if (auto mode = impl->fake_tensor_mode()) {
-          impl->set_fake_sym_memo(name, std::move(memo), mode->epoch_);
+          impl->set_fake_sym_memo(name, std::move(memo), mode->mode->epoch_);
         }
       },
       py::arg("fake"),
@@ -2933,7 +2933,7 @@ Call this whenever a new thread is created in order to propagate values from
         if (!mode) {
           return std::nullopt;
         }
-        return impl->fake_sym_memo(name, mode->epoch_);
+        return impl->fake_sym_memo(name, mode->mode->epoch_);
       },
       py::arg("fake"),
       py::arg("name"));
@@ -2965,7 +2965,7 @@ Call this whenever a new thread is created in order to propagate values from
             std::make_shared<c10::SafePyObject>(
                 memo.inc_ref().ptr(), getPyInterpreter()),
             keep_across_epochs ? std::nullopt
-                               : std::optional<uint64_t>(mode->epoch_));
+                               : std::optional<uint64_t>(mode->mode->epoch_));
       },
       py::arg("fake"),
       py::arg("memo"),
@@ -2983,7 +2983,7 @@ Call this whenever a new thread is created in order to propagate values from
         if (!mode) {
           return py::none();
         }
-        auto memo = impl->fake_item_memo(mode->epoch_);
+        auto memo = impl->fake_item_memo(mode->mode->epoch_);
         if (!memo) {
           return py::none();
         }
@@ -2997,7 +2997,7 @@ Call this whenever a new thread is created in order to propagate values from
     TORCH_CHECK(t.is_fake(), "Expected a fake tensor");
     auto mode = t.unsafeGetTensorImpl()->fake_tensor_mode();
     TORCH_CHECK(mode, "Fake tensor has no associated FakeTensorMode");
-    const auto& constant = mode->get_constant(t.unsafeGetTensorImpl());
+    const auto& constant = mode->mode->get_constant(t.unsafeGetTensorImpl());
     if (!constant) {
       return py::none();
     }
@@ -3017,7 +3017,7 @@ Call this whenever a new thread is created in order to propagate values from
         }
         auto mode = fake.unsafeGetTensorImpl()->fake_tensor_mode();
         TORCH_CHECK(mode, "Fake tensor has no associated FakeTensorMode");
-        mode->set_constant(
+        mode->mode->set_constant(
             fake.unsafeGetTensorImpl(),
             constant ? constant->getIntrusivePtr() : nullptr);
       },
@@ -3105,7 +3105,9 @@ Call this whenever a new thread is created in order to propagate values from
       "_from_meta_and_device",
       [](const at::Tensor& meta,
          c10::Device device,
-         const std::shared_ptr<c10::FakeTensorMode>& mode) {
+         const std::shared_ptr<c10::FakeTensorMode>& cpp_mode) {
+        auto mode = std::make_shared<c10::FakeTensorModeHandle>(
+            c10::FakeTensorModeHandle{cpp_mode});
         // A functional or functorch wrapper would be copied as a wrapper whose
         // inner tensor is not fake. Checked first, as reading a subclass's
         // device can run its __torch_dispatch__.
@@ -3542,7 +3544,7 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "TensorWise",
           at::blas::ScalingType::TensorWise,
-          "Single scale per-tensor")
+          "Single scale per tensor or per group for grouped GEMM")
       .value(
           "RowWise", at::blas::ScalingType::RowWise, "Scale per-row of tensor")
       .value(
@@ -3777,6 +3779,21 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def(
       "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
+  // True iff x has a storage with a non-null data pointer, i.e. False for
+  // wrapper subclasses at any storage offset. Never raises and never
+  // materializes COW storages. See Note [Invalid Python Storages].
+  py_module.def("_has_storage_data", [](const at::Tensor& x) {
+    if (!x.has_storage()) {
+      return false;
+    }
+    auto* storage =
+        x.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl();
+    // Nothing is mutated here: the pointer is only read. Unlike the checked
+    // accessors, _mutable_data_ptr_no_checks() neither materializes a COW
+    // storage nor raises for storages whose data access is forbidden (e.g.
+    // FakeTensor storages).
+    return storage->_mutable_data_ptr_no_checks().get() != nullptr;
+  });
 
   // See Note [C++ in_kernel_invocation].
   torch::impl::py_context_manager<c10::impl::InKernelInvocationGuard>(
