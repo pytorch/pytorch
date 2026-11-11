@@ -45,12 +45,13 @@ from ..exc import (
     unimplemented,
     Unsupported,
 )
-from ..guards import GuardBuilder, install_guard
+from ..guards import GuardBuilder, install_guard, is_safe_dict_key
 from ..source import (
     AttrSource,
     DictGetItemSource,
     is_constant_source,
     is_from_local_source,
+    LocalSource,
     TypeDictSource,
 )
 from ..utils import (
@@ -576,10 +577,51 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         item: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4657-L4668
+        relational_result = self._maybe_relational_dict_contains(tx, item)
+        if relational_result is not None:
+            return relational_result
+
         key = self._lookup_key(tx, item)
         value = self.items.get(key)
         contains = value is not None and type(value) is not variables.DeletedVariable
         self.install_dict_contains_guard(tx, key, key_present=contains)
+        return VariableTracker.build(tx, contains)
+
+    def _maybe_relational_dict_contains(
+        self,
+        tx: "InstructionTranslatorBase",
+        item: VariableTracker,
+    ) -> VariableTracker | None:
+        if (
+            self.source is None
+            or item.source is None
+            or not isinstance(self.source, LocalSource)
+            or not isinstance(item.source, LocalSource)
+            or tx.output.side_effects.is_modified(self)
+            or not isinstance(item, variables.LazyVariableTracker)
+            or item.is_realized()
+        ):
+            return None
+
+        real_dict = tx.output.resolve_source_value(self.source)
+        real_key = item.original_value()
+        if (
+            type(real_dict) is not dict
+            or not is_safe_dict_key(real_key)
+            or not all(is_safe_dict_key(key) for key in real_dict)
+        ):
+            return None
+
+        contains = dict.__contains__(real_dict, real_key)
+        install_guard(
+            item.source.make_guard(
+                functools.partial(
+                    GuardBuilder.RELATIONAL_DICT_CONTAINS,
+                    dict_source=self.source,
+                    expected=contains,
+                )
+            )
+        )
         return VariableTracker.build(tx, contains)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -965,7 +1007,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if not self.is_mutable():
             return super().mp_ass_subscript_impl(tx, key, value)
 
-        # value=None signals delete (CPython NULL sentinel).
         self.install_dict_keys_match_guard()
         if isinstance(self, OrderedDictVariable):
             _guard_nan_key(key)
