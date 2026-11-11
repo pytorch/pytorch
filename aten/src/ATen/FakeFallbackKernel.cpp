@@ -17,19 +17,18 @@
 
 // Note [C++ fake fallback]
 // The C++ counterpart of FakeTensorMode.__torch_dispatch__ for C++ fakes. It
-// runs an op whose tensor inputs are fakes of one mode on one device. An op
-// Python decomposes runs through its torch._decomp decomposition or its
-// (Python, else native) CompositeImplicitAutograd kernel with the mode entered,
-// as Python's `with self:` does. Its sub-ops dispatch back to Fake, and its
-// outputs are returned as is. Otherwise it runs through its Meta kernel (its
-// sparse Meta kernel for sparse inputs), and the new outputs become fakes of
-// that mode on that device, as Python's wrap_meta_outputs_with_default_device_logic
-// does. Python Meta registrations that torch._meta_registrations installs as
-// Meta kernels run here like C++ ones.
+// runs an op whose tensor inputs are fakes of one mode on one device.
+// Decompositions and CompositeImplicitAutograd kernels run with the mode entered
+// and return outputs as is. Otherwise, the op
+// runs on the inputs' meta storage through its Meta kernel (its sparse Meta
+// kernel for sparse inputs), and the new outputs become fakes of that mode on
+// that device, as Python's wrap_meta_outputs_with_default_device_logic does.
+// Python Meta registrations
+// that torch._meta_registrations installs as Meta kernels run here like C++
+// ones.
 //
-// The mode is uninstalled for this fallback, then re-entered for decomposition.
-// Entering also sets Python's mode detection and, under avoid_device_init,
-// the lift flag, and sends factories inside decompositions to fake dispatch.
+// The mode is uninstalled while this fallback runs, except for decomposition.
+// Other callbacks that need an active mode must run outside that scope.
 //
 // So that ops do not give results Python's FakeTensorMode would not, it raises
 // NotImplementedError where Python runs something other than these,
@@ -218,11 +217,6 @@ bool cppFakeNotImplemented(const c10::OperatorHandle& op) {
   return cpp_fake_not_implemented(op, fakeDispatchTableCategories(op.operator_name()));
 }
 
-bool fakeCppMetaSupportsSymint(const c10::OperatorHandle& op) {
-  return cpp_meta_supports_symint(
-      op, fakeDispatchTableCategories(op.operator_name()));
-}
-
 } // namespace at::impl
 
 namespace {
@@ -349,7 +343,6 @@ void fakeFallback(
   const auto has = [&](FakeDispatchCategory category) {
     return at::impl::fakeDispatchCategoriesHave(categories, category);
   };
-  const bool has_sparse_inputs = !meta_keyset.empty();
   if (!has(FakeDispatchCategory::Meta) &&
       !cpp_meta_supports_symint(op, categories)) {
     const bool has_cia =
@@ -357,7 +350,7 @@ void fakeFallback(
     // Probe every native CIA op too: export writes py_kernels directly,
     // bypassing the registration hook that sets the PythonCIA bit.
     const bool try_decomp =
-        (has(FakeDispatchCategory::StaticShapeDecomp) && !has_sparse_inputs) ||
+        (has(FakeDispatchCategory::StaticShapeDecomp) && meta_keyset.empty()) ||
         has(FakeDispatchCategory::PythonCIA) || has_cia;
     if (try_decomp) {
       const auto& interpreter = *c10::impl::getGlobalPyInterpreter();
@@ -387,7 +380,7 @@ void fakeFallback(
   if (cpp_fake_not_implemented(op, categories & ~python_cia)) {
     unsupported(op, "ops with a Python fake implementation");
   }
-  if (!has_sparse_inputs) {
+  if (meta_keyset.empty()) {
     meta_keyset = c10::DispatchKeySet(c10::DispatchKey::Meta);
   } else if (!op.hasComputedKernelForDispatchKey(
                  meta_keyset.highestPriorityTypeId())) {

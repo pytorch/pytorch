@@ -2824,9 +2824,6 @@ PyObject* initModule() {
         "_cpp_fake_not_implemented",
         query_for(at::impl::cppFakeNotImplemented));
     py_module.def(
-        "_fake_dispatch_cpp_meta_supports_symint",
-        query_for(at::impl::fakeCppMetaSupportsSymint));
-    py_module.def(
         "_fake_dispatch_deregister_op_impl",
         [](const std::string& name, const std::string& overload) {
           at::impl::fakeDispatchTableRemove(

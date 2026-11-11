@@ -107,8 +107,4 @@ inline bool fakeDispatchCategoriesHave(
 // preserves its recorded dispatch keys when running its C++ Meta kernel.
 TORCH_API bool cppFakeNotImplemented(const c10::OperatorHandle& op);
 
-// Python's cpp_meta_supports_symint: prefer the C++ Meta kernel to
-// decomposition for ops in CppMetaSupportsSymint or with the view_copy tag.
-TORCH_API bool fakeCppMetaSupportsSymint(const c10::OperatorHandle& op);
-
 } // namespace at::impl
