@@ -84,6 +84,23 @@ class TestCallSite(TestCase):
         self.rejects(not_a_tensor, "unary", lambda: torch.stack((x, y)), (x, y))
         self.rejects("the result is not the kernel output", "unary", lambda: [-x], x)
 
+    def test_resolution_chain(self):
+        x, y = torch.randn(2, 3), torch.randn(2, 3)
+        chain = self.site("binary", lambda: x + y, x, y)[1].info()["chain"]
+        self.assertEqual(chain, ["AutogradCPU", "CPU"])
+        chain = self.site("binary", lambda: x.__iadd__(y), x, y)[1].info()["chain"]
+        self.assertEqual(chain, ["AutogradCPU", "ADInplaceOrView", "CPU"])
+        # A kernel that calls other operators ends the chain.
+        chain = self.site("unary", lambda: x.T, x)[1].info()["chain"]
+        self.assertEqual(chain, ["AutogradCPU"])
+
+    def test_rejects_a_torch_function_mode(self):
+        x, y = torch.randn(3), torch.randn(3)
+        with torch.overrides.BaseTorchFunctionMode():
+            self.rejects(
+                "a torch function mode is active", "binary", lambda: x + y, x, y
+            )
+
 
 @unittest.skipUnless(UNDISTURBED, "the test configuration changes dispatch")
 class TestDispatchCapture(TestCase):

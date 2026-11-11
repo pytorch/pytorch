@@ -1,7 +1,9 @@
 #include <torch/csrc/cfg/cfg.h>
 
+#include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/core/dispatch/DispatchCapture.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <c10/core/GradMode.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -15,6 +17,23 @@
 #include <vector>
 
 namespace {
+
+// The dispatcher state a kernel resolution depends on besides its arguments.
+struct World {
+  uint64_t tls_included;
+  uint64_t tls_excluded;
+  bool grad_enabled;
+  bool torch_function_mode;
+};
+
+World snapshotWorld() {
+  const auto tls = c10::impl::tls_local_dispatch_key_set();
+  return World{
+      tls.included_.raw_repr(),
+      tls.excluded_.raw_repr(),
+      c10::GradMode::is_enabled(),
+      at::impl::torch_function_mode_enabled()};
+}
 
 struct Record {
   c10::OperatorHandle op;
@@ -38,6 +57,7 @@ struct Record {
 struct TcfgTrace {
   std::vector<Record> records;
   std::vector<int32_t> open;
+  World world{};
   int32_t top_level = 0;
   // Top-level calls recorded by captures nested inside this one.
   int32_t nested_top_level = 0;
@@ -94,6 +114,7 @@ thread_local Sink tls_sink;
 
 void captureBegin() {
   auto trace = std::make_unique<TcfgTrace>();
+  trace->world = snapshotWorld();
   tls_sink.active.push_back(std::move(trace));
   if (tls_sink.active.size() == 1) {
     tls_sink.previous = c10::setDispatchCaptureSink(&tls_sink);
@@ -179,6 +200,7 @@ struct TcfgSite {
   explicit TcfgSite(c10::OperatorHandle op_) : op(std::move(op_)) {}
 
   c10::OperatorHandle op;
+  std::vector<c10::DispatchKey> chain;
   std::vector<ArgTemplate> args;
 };
 
@@ -267,6 +289,10 @@ TcfgSite* siteFromTraceImpl(
     reason = "not a single dispatcher call";
     return nullptr;
   }
+  if (trace.world.torch_function_mode) {
+    reason = "a torch function mode is active";
+    return nullptr;
+  }
   size_t call_index = 0;
   while (trace.records[call_index].depth != 0) {
     call_index++;
@@ -310,6 +336,31 @@ TcfgSite* siteFromTraceImpl(
     return nullptr;
   }
 
+  // The resolution chain: the call, then every kernel that did nothing but
+  // redispatch the same operator once.
+  std::vector<size_t> chain{call_index};
+  while (true) {
+    const auto parent = static_cast<int32_t>(chain.back());
+    int32_t only_child = -1;
+    int32_t children = 0;
+    for (size_t i = chain.back() + 1; i < trace.records.size(); i++) {
+      if (trace.records[i].parent == parent) {
+        children++;
+        only_child = static_cast<int32_t>(i);
+      }
+    }
+    if (children != 1) {
+      break;
+    }
+    const Record& child = trace.records[only_child];
+    if (!child.is_redispatch || child.op != call.op) {
+      break;
+    }
+    chain.push_back(static_cast<size_t>(only_child));
+  }
+  for (size_t i : chain) {
+    site->chain.push_back(trace.records[i].ks.highestPriorityTypeId());
+  }
   site->args = std::move(binder.args);
   return site.release();
 }
@@ -319,6 +370,11 @@ PyObject* siteInfo(const TcfgSite* site) {
   const auto& schema = site->op.schema();
   py::dict info;
   info["op"] = toString(site->op.operator_name());
+  py::list chain;
+  for (auto k : site->chain) {
+    chain.append(c10::toString(k));
+  }
+  info["chain"] = chain;
   py::list args;
   for (size_t a = 0; a < site->args.size(); a++) {
     const ArgTemplate& arg = site->args[a];
