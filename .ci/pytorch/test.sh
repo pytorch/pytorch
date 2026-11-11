@@ -627,8 +627,7 @@ test_python_smoke_b200() {
 test_python_smoke_xpu() {
   # Smoke tests for XPU client
   time python test/run_test.py --include test_transformers test_xpu $PYTHON_TEST_EXTRA_OPTION
-  # Temporary disable sycl-tla backend test for XPU since it's not stable yet. We will re-enable it once the stability is improved.
-  # time test_xpu_sycl_tla_backend
+  time test_xpu_sycl_tla_backend
   assert_git_not_dirty
 }
 
@@ -723,7 +722,6 @@ test_xpu_sycl_tla_backend() {
   # shellcheck disable=SC1091
   source  /opt/intel/oneapi/mkl/latest/env/vars.sh
   sycl_tla_dir=$(realpath "./third_party/sycl-tla")
-  # sycl-tla pin is the v0.8 tag commit
   rm -rf "${sycl_tla_dir}" && git init -q "${sycl_tla_dir}"
   git -C "${sycl_tla_dir}" fetch -q --depth 1 https://github.com/intel/sycl-tla.git "$(get_pinned_commit sycl-tla)"
   git -C "${sycl_tla_dir}" checkout -q FETCH_HEAD
