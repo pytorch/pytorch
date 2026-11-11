@@ -1465,6 +1465,28 @@ partitioned_scatter_force: bool = (
     os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_FORCE", "0") == "1"
 )
 
+# Sorted segment-reduce lowering for index_put(accumulate=True) into a small table
+# (fx_passes/sorted_segment_scatter.py). Runs before partitioned scatter and rewrites
+# a functional index_put with a single 1-D index when the table has <= 64K static rows
+# of width >= 64 and the index has at least sorted_segment_scatter_min_index_size
+# entries (by size hint). CUDA/ROCm with Triton only; skipped in deterministic mode and
+# under cpp_wrapper/AOTInductor. Numerics: bf16/fp16 accumulate in fp32 and round once,
+# unlike eager and the flag-off path, and rows with no updates turn -0.0 into +0.0.
+# TORCHINDUCTOR_SORTED_SEGMENT_SCATTER and ..._MIN_INDEX are accepted as older aliases.
+sorted_segment_scatter_enabled: bool = (
+    os.environ.get(
+        "TORCHINDUCTOR_SORTED_SEGMENT_SCATTER_ENABLED",
+        os.environ.get("TORCHINDUCTOR_SORTED_SEGMENT_SCATTER", "0"),
+    )
+    == "1"
+)
+sorted_segment_scatter_min_index_size: int = int(
+    os.environ.get(
+        "TORCHINDUCTOR_SORTED_SEGMENT_SCATTER_MIN_INDEX_SIZE",
+        os.environ.get("TORCHINDUCTOR_SORTED_SEGMENT_SCATTER_MIN_INDEX", "1000000"),
+    )
+)
+
 
 class _collective:
     auto_select: bool = False
