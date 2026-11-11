@@ -80,6 +80,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import all_types_complex_float8_and
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
+    fake_tensor_modes,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -164,8 +165,9 @@ class _TestFakeTensorHelpers:
 class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def test_fake_mode_dispatch_api(self):
-        mode = FakeTensorMode()
+    @fake_tensor_modes
+    def test_fake_mode_dispatch_api(self, mode_cls):
+        mode = mode_cls()
         mode_key = torch._C._TorchDispatchModeKey.FAKE
         with mode:
             self.assertIs(torch._C._get_dispatch_mode(mode_key), mode)
@@ -2172,6 +2174,30 @@ def forward(self, x_1):
                 torch.select(x, dim=1, index=10)
             with self.assertRaisesRegex(IndexError, "index .* out of range"):
                 torch.select(x, dim=1, index=-10)
+
+    @fake_tensor_modes
+    @parametrize("previous", [False, True])
+    def test_allow_non_fake_inputs(self, mode_cls, previous):
+        from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
+
+        self.assertFalse(mode_cls().allow_non_fake_inputs)
+        mode = mode_cls(allow_non_fake_inputs=True)
+        self.assertTrue(mode.allow_non_fake_inputs)
+        mode.allow_non_fake_inputs = False
+        self.assertFalse(mode.allow_non_fake_inputs)
+        self.assertTrue(mode.allow_meta)
+        self.assertTrue(mode._allow_unsafe_data_ptr_access)
+        # allow_non_fake_inputs_temporarily restores the previous value, also
+        # when the body raises
+        mode.allow_non_fake_inputs = previous
+        with allow_non_fake_inputs_temporarily(mode):
+            self.assertTrue(mode.allow_non_fake_inputs)
+        self.assertEqual(mode.allow_non_fake_inputs, previous)
+        with self.assertRaisesRegex(ValueError, "raised in the body"):
+            with allow_non_fake_inputs_temporarily(mode):
+                self.assertTrue(mode.allow_non_fake_inputs)
+                raise ValueError("raised in the body")
+        self.assertEqual(mode.allow_non_fake_inputs, previous)
 
 
 instantiate_parametrized_tests(TestFakeTensor)
@@ -6065,31 +6091,6 @@ class TestCppFakeTensorModeBindings(TestCase):
         meta = torch.empty((), device="meta")
         fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
         self.assertIs(torch._C._maybe_get_fake_mode(fake), mode)
-
-    @parametrize("previous", [False, True])
-    def test_cpp_fake_tensor_mode_allow_non_fake_inputs(self, previous):
-        from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
-
-        # Defaults to False, like FakeTensorMode, and is stored on the C++ mode
-        # apart from its other flags
-        self.assertFalse(CppFakeTensorMode().allow_non_fake_inputs)
-        mode = CppFakeTensorMode(allow_non_fake_inputs=True)
-        self.assertTrue(mode.allow_non_fake_inputs)
-        mode.allow_non_fake_inputs = False
-        self.assertFalse(mode.allow_non_fake_inputs)
-        self.assertTrue(mode.allow_meta)
-        self.assertTrue(mode._allow_unsafe_data_ptr_access)
-        # allow_non_fake_inputs_temporarily restores the previous value, also
-        # when the body raises
-        mode.allow_non_fake_inputs = previous
-        with allow_non_fake_inputs_temporarily(mode):
-            self.assertTrue(mode.allow_non_fake_inputs)
-        self.assertEqual(mode.allow_non_fake_inputs, previous)
-        with self.assertRaisesRegex(ValueError, "raised in the body"):
-            with allow_non_fake_inputs_temporarily(mode):
-                self.assertTrue(mode.allow_non_fake_inputs)
-                raise ValueError("raised in the body")
-        self.assertEqual(mode.allow_non_fake_inputs, previous)
 
     # Dynamo keeps references that stop the mode being collected
     @xfailIfTorchDynamo
