@@ -48,7 +48,7 @@ static constexpr int64_t BYTES_PER_THREAD = 16;
 static constexpr int64_t BYTES_PER_BLOCK = BYTES_PER_THREAD * BLOCK_SIZE;
 // 16-byte dst vectors each thread converts per step in the vectorized cast.
 static constexpr int64_t CAST_VECS_PER_THREAD = 2;
-// The same, on SM 10.7 for calls above a tuned size, see
+// The same, on SM 10.7 for calls at or above a tuned size, see
 // get_cast_vecs_per_thread.
 static constexpr int64_t SM107_WIDE_CAST_VECS_PER_THREAD = 4;
 static_assert(
@@ -67,22 +67,6 @@ static __host__ __device__ inline bool is_vectorized_cast(int64_t chunk_bytes) {
   // Tuned: smaller chunks are faster with the per-element loop.
   constexpr int64_t kMinVectorizedCastBytes = 8 * 1024;
   return chunk_bytes >= kMinVectorizedCastBytes;
-}
-
-// Vectors per thread per step for the vectorized chunks of a mixed-dtype call
-// that writes `out_bytes` on `device`.
-static int64_t get_cast_vecs_per_thread(
-    int64_t out_bytes,
-    c10::DeviceIndex device) {
-  // Tuned on SM 10.7 with SM107_WIDE_CAST_VECS_PER_THREAD = 4 and
-  // CAST_VECS_PER_THREAD = 2: the wide one was faster at and above this size,
-  // slower below.
-  constexpr int64_t kMinSm107WideCastBytes = 8 * 1024 * 1024;
-  const cudaDeviceProp* prop = at::cuda::getDeviceProperties(device);
-  const bool sm107 = prop->major == 10 && prop->minor == 7;
-  return sm107 && out_bytes >= kMinSm107WideCastBytes
-      ? SM107_WIDE_CAST_VECS_PER_THREAD
-      : CAST_VECS_PER_THREAD;
 }
 
 template <typename T>
@@ -544,7 +528,8 @@ static __global__ void chunk_cat_cuda_kernel(
     int64_t dst_to_src_ratio) {
   if constexpr (cast_vecs_per_thread == SM107_WIDE_CAST_VECS_PER_THREAD) {
 #if __CUDA_ARCH__ / 100 != 10
-    // Only launched on SM 10.7, so other archs compile a stub.
+    // Only launched on SM 10.7, which can run sm_100 code, so archs outside
+    // SM 10.x compile a stub.
     CUDA_KERNEL_ASSERT(
         false &&
         "chunk_cat_cuda_kernel with SM107_WIDE_CAST_VECS_PER_THREAD "
@@ -633,6 +618,32 @@ static inline int64_t get_chunk_size(
     chunk_size += pad_tensor_chunk_size;
   }
   return chunk_size;
+}
+
+// Vectors per thread per step for the vectorized chunks of a mixed-dtype call.
+static int64_t get_cast_vecs_per_thread(
+    TensorList tensors,
+    int64_t dim,
+    int64_t num_chunks,
+    int64_t dst_elem_size) {
+#ifdef USE_ROCM
+  return CAST_VECS_PER_THREAD;
+#else
+  const cudaDeviceProp* prop =
+      at::cuda::getDeviceProperties(tensors[0].device().index());
+  if (prop->major != 10 || prop->minor != 7) {
+    return CAST_VECS_PER_THREAD;
+  }
+  // Tuned on SM 10.7 with SM107_WIDE_CAST_VECS_PER_THREAD = 4 and
+  // CAST_VECS_PER_THREAD = 2: the wide one was faster at and above this size,
+  // slower below.
+  constexpr int64_t kMinSm107WideCastBytes = 8 * 1024 * 1024;
+  const int64_t out_bytes =
+      get_chunk_size(tensors, dim, num_chunks, dst_elem_size) * num_chunks *
+      get_leading_dim(tensors[0].sizes(), dim);
+  return out_bytes >= kMinSm107WideCastBytes ? SM107_WIDE_CAST_VECS_PER_THREAD
+                                             : CAST_VECS_PER_THREAD;
+#endif
 }
 
 // Get metadata for chunk_cat.
@@ -733,13 +744,11 @@ void _chunk_cat_out_cuda_contiguous(
     int64_t src_elem_size) {
   const auto device = tensors[0].device();
   // The vectorized cast's vectors per thread set the grid, so they are chosen
-  // before the metadata, from the size of `out`.
+  // before the metadata, from the inputs.
   int64_t cast_vecs_per_thread = 0;
   if constexpr (!std::is_same_v<dst_t, src_t>) {
-    const int64_t out_bytes =
-        get_chunk_size(tensors, dim, num_chunks, dst_elem_size) * num_chunks *
-        get_leading_dim(tensors[0].sizes(), dim);
-    cast_vecs_per_thread = get_cast_vecs_per_thread(out_bytes, device.index());
+    cast_vecs_per_thread =
+        get_cast_vecs_per_thread(tensors, dim, num_chunks, dst_elem_size);
   }
   // `get_chunk_cat_metadata` must return vectors and `pack_vecs` cannot be
   // moved into `get_chunk_cat_metadata`. Otherwise `packed` would point to
@@ -802,9 +811,11 @@ void _chunk_cat_out_cuda_contiguous(
                  pad_tensor_chunk_sizes.end(),
                  is_vectorized_cast)) {
     launch(chunk_cat_cuda_kernel<dst_t, src_t, 0>);
+#ifndef USE_ROCM
   } else if (cast_vecs_per_thread == SM107_WIDE_CAST_VECS_PER_THREAD) {
     launch(
         chunk_cat_cuda_kernel<dst_t, src_t, SM107_WIDE_CAST_VECS_PER_THREAD>);
+#endif
   } else {
     launch(chunk_cat_cuda_kernel<dst_t, src_t, CAST_VECS_PER_THREAD>);
   }
