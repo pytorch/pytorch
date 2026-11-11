@@ -15,6 +15,9 @@ name: In Progress PR Review Run
 #   publish  verdict JSON -> S3, then posts it as a PR review (the too-large
 #            notice when `review` found the diff over MAX_DIFF_BYTES), or puts
 #            back the review `announce` marked; never runs PR code
+#   withdraw runs instead of the others when `no automated review` was added:
+#            dismisses the automated change requests still standing
+#            (GITHUB_TOKEN with pull-requests: write only, like `announce`)
 #
 # Nothing here changes a label. Dr. CI reads the verdict row and decides
 # `ready for review` from it together with CI status.
@@ -75,7 +78,8 @@ env:
   # automatic re-review; see IS_DONE in `prepare`.
   DONE_LABEL: "ready for review"
   # Opt-out: a PR carrying this label is never reviewed, whatever triggered
-  # the run. Stage 1 skips it too; this copy decides.
+  # the run. Stage 1 skips it too; this copy decides. Adding it runs only
+  # `withdraw`, which dismisses the automated change requests still standing.
   OPT_OUT_LABEL: "no automated review"
   # Skip PRs too large to review usefully or affordably. Recorded as
   # skipped_too_large rather than silently dropped.
@@ -110,6 +114,8 @@ jobs:
       # From the trusted API, not the artifact — see the corroboration step.
       is_fork: ${{ steps.freshness.outputs.is_fork }}
       trigger_event: ${{ steps.coords.outputs.trigger_event }}
+      # REVIEW_LABEL, or OPT_OUT_LABEL for a run that only withdraws.
+      trigger_label: ${{ steps.coords.outputs.trigger_label }}
       # False when the PR is draft or unlabelled per the trusted API. Distinct
       # from `fresh`: ineligible means we should never have been invoked at all,
       # so nothing is recorded; stale means a real request was superseded.
@@ -253,6 +259,7 @@ jobs:
           BASE_SHA=$(jq -r '.base_sha'   "$FILE")
           IS_FORK=$(jq -r '.is_fork'     "$FILE")
           TRIGGER=$(jq -r '.trigger_event' "$FILE")
+          TRIGGER_LABEL=$(jq -r '.trigger_label' "$FILE")
 
           [[ "$PR_NUM"   =~ ^[0-9]+$ ]]        || { echo "::error::bad pr_number";  exit 1; }
           [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]  || { echo "::error::bad head_sha";   exit 1; }
@@ -260,6 +267,9 @@ jobs:
           [[ "$IS_FORK"  =~ ^(true|false)$ ]]  || { echo "::error::bad is_fork";    exit 1; }
           [[ "$TRIGGER"  =~ ^(labeled|synchronize|reopened|ready_for_review)$ ]] || {
             echo "::error::bad trigger_event"; exit 1;
+          }
+          [ "$TRIGGER_LABEL" = "$REVIEW_LABEL" ] || [ "$TRIGGER_LABEL" = "$OPT_OUT_LABEL" ] || {
+            echo "::error::bad trigger_label"; exit 1;
           }
 
           # Authenticate the artifact against trusted event metadata. Without
@@ -274,6 +284,7 @@ jobs:
             echo "pr_number=$PR_NUM"
             echo "head_sha=$HEAD_SHA"
             echo "trigger_event=$TRIGGER"
+            echo "trigger_label=$TRIGGER_LABEL"
           } >> "$GITHUB_OUTPUT"
 
       - name: Corroborate the claimed PR against the trusted API
@@ -283,6 +294,7 @@ jobs:
           PR_NUMBER: ${{ steps.coords.outputs.pr_number }}
           HEAD_SHA: ${{ steps.coords.outputs.head_sha }}
           TRIGGER_EVENT: ${{ steps.coords.outputs.trigger_event }}
+          TRIGGER_LABEL: ${{ steps.coords.outputs.trigger_label }}
           REPO: ${{ github.repository }}
           EVENT_HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
           EVENT_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
@@ -335,13 +347,14 @@ jobs:
                         'if any(.labels[]?.name; ascii_downcase == ($l | ascii_downcase)) then "true" else "false" end' <<<"$PR_JSON")
           # The opt-out, read now rather than trusted from Stage 1, so a label
           # added while the capture was in flight still counts. No trigger
-          # overrides it.
+          # overrides it. A run the opt-out label triggered never reviews,
+          # even if the label is already gone again; `withdraw` handles it.
           OPTED_OUT=$(jq -r --arg l "$OPT_OUT_LABEL" \
                         'if any(.labels[]?.name; ascii_downcase == ($l | ascii_downcase)) then "true" else "false" end' <<<"$PR_JSON")
           if [ "$IS_DRAFT" != "false" ] || [ "$HAS_LABEL" != "true" ] \
-             || [ "$OPTED_OUT" != "false" ] \
+             || [ "$OPTED_OUT" != "false" ] || [ "$TRIGGER_LABEL" != "$REVIEW_LABEL" ] \
              || { [ "$IS_DONE" = "true" ] && [ "$TRIGGER_EVENT" != "labeled" ]; }; then
-            echo "::notice::PR #${PR_NUMBER} is not eligible (draft=${IS_DRAFT}, labelled=${HAS_LABEL}, opted_out=${OPTED_OUT}, done=${IS_DONE}, trigger=${TRIGGER_EVENT}); no review, no rows"
+            echo "::notice::PR #${PR_NUMBER} is not eligible (draft=${IS_DRAFT}, labelled=${HAS_LABEL}, opted_out=${OPTED_OUT}, done=${IS_DONE}, trigger=${TRIGGER_EVENT}, trigger_label=${TRIGGER_LABEL}); no review, no rows"
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -976,7 +989,7 @@ jobs:
         with:
           use_bedrock: "true"
           # See stage B for these three.
-          allowed_bots: "pytorch-bot[bot]"
+          allowed_bots: "pytorch-bot[bot],meta-codesync[bot]"
           github_token: ${{ github.token }}
           allowed_non_write_users: "*"
           # No Write, no hooks, no --add-dir: stage A writes nothing. Its
@@ -1037,11 +1050,14 @@ jobs:
         uses: anthropics/claude-code-action@9ca9355b36297178e28d37c799d1c9c8a28e6507 # Claude Code 2.1.280
         with:
           use_bedrock: "true"
-          # The actor is whoever applied the `in progress` label in Stage 1.
-          # pytorch-bot applies it on `@pytorchbot pre-review accept` once
-          # every assigned reviewer has accepted, and the action rejects bot
-          # actors unless listed here. Name it exactly; never "*".
-          allowed_bots: "pytorch-bot[bot]"
+          # The actor is whoever triggered Stage 1: on `labeled`, whoever
+          # applied `in progress`; on a push, the pusher. The action rejects
+          # bot actors unless listed here. pytorch-bot applies the label on
+          # `@pytorchbot pre-review accept` once every assigned reviewer has
+          # accepted. On a co-dev PR, meta-codesync pushes each re-export of
+          # the internal diff, so it is the actor of the re-reviews those
+          # pushes trigger. Name each bot exactly; never "*".
+          allowed_bots: "pytorch-bot[bot],meta-codesync[bot]"
           # On a push, the actor is the pusher, usually the PR author, and most
           # contributors lack write access. Without `github_token` the action
           # trades this job's OIDC token for a Claude App token, and that
@@ -1049,10 +1065,11 @@ jobs:
           # before the model ran (pytorch/pytorch#196943). This job's own token
           # skips the exchange and is `contents: read`, so the job that reads PR
           # code holds no repository write permission. `allowed_non_write_users`
-          # works only with `github_token` and skips the action's actor check;
-          # the gate is the `in progress` label, which `prepare` re-reads from
-          # the API. It also turns on a subprocess secret scrub that this job
-          # opts out of; see CLAUDE_CODE_SUBPROCESS_ENV_SCRUB above.
+          # works only with `github_token` and skips the action's write-access
+          # check, not its bot check (`allowed_bots` above); the gate is the
+          # `in progress` label, which `prepare` re-reads from the API. It
+          # also turns on a subprocess secret scrub that this job opts out of;
+          # see CLAUDE_CODE_SUBPROCESS_ENV_SCRUB above.
           github_token: ${{ github.token }}
           allowed_non_write_users: "*"
           # Everything under `claude_args:` is ARGUMENT TEXT - `|` is a literal
@@ -1374,3 +1391,30 @@ jobs:
           PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
           RUN_ID: ${{ github.run_id }}
         run: python3 scripts/pr_review/post_review.py --restore-pending
+
+  withdraw:
+    needs: prepare
+    # Only for a run that adding the opt-out label triggered. post_review.py
+    # reads the label again before dismissing anything. Like `announce`:
+    # GITHUB_TOKEN only, no environment, no AWS role, no pull-request code.
+    # No row is written; the opt-out path never writes one.
+    if: needs.prepare.outputs.trigger_label == 'no automated review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Withdraw the automated change requests
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
+          OPT_OUT_LABEL: ${{ env.OPT_OUT_LABEL }}
+        run: python3 scripts/pr_review/post_review.py --withdraw-opted-out
