@@ -205,7 +205,7 @@ impl OpcodeTable {
     pub fn load(py: Python<'_>) -> PyResult<OpcodeTable> {
         let version = py.version_info();
         if (version.major, version.minor) != (3, 12) {
-            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+            return Err(pyo3::exceptions::PyNotImplementedError::new_err(format!(
                 "torch.cfg_compile only understands CPython 3.12 bytecode, not {}.{}",
                 version.major, version.minor
             )));
