@@ -846,8 +846,8 @@ class MixOrderReductionTest(TestBase):
             return row * x, (p * x).sum(0), p
 
         args = [torch.randn(32768, 256, device=GPU_TYPE) for _ in range(3)]
-        out, kernels, mor = self._run_absorbing_producers(f, args)
-        self.assertEqual(mor, 1)
+        out, kernels, mix_order_kernels = self._run_absorbing_producers(f, args)
+        self.assertEqual(mix_order_kernels, 1)
         # producer, both reductions and the epilogue in one kernel
         self.assertEqual(kernels, 1)
         self._assert_close_to_fp32_eager(out, f(*args))
@@ -875,9 +875,9 @@ class MixOrderReductionTest(TestBase):
         M, N = (4096, 4096) if read == "transposed" else (32768, 256)
         args = [torch.randn(M, N, device=GPU_TYPE) for _ in range(3)]
         args.append(torch.randperm(M, device=GPU_TYPE))
-        out, kernels, mor = self._run_absorbing_producers(f, args)
+        out, kernels, mix_order_kernels = self._run_absorbing_producers(f, args)
         self._assert_close_to_fp32_eager(out, f(*args))
-        self.assertEqual(mor, 1)
+        self.assertEqual(mix_order_kernels, 1)
         self.assertEqual(kernels, 2)
 
     def test_absorbed_producer_cycle_through_unfused_node(self):
@@ -894,9 +894,9 @@ class MixOrderReductionTest(TestBase):
         M, N = 32768, 256
         args = [torch.randn(M, N, device=GPU_TYPE) for _ in range(3)]
         args.append(torch.randn(N, N, device=GPU_TYPE))
-        out, kernels, mor = self._run_absorbing_producers(f, args)
+        out, kernels, mix_order_kernels = self._run_absorbing_producers(f, args)
         self._assert_close_to_fp32_eager(out, f(*args))
-        self.assertEqual(mor, 1)
+        self.assertEqual(mix_order_kernels, 1)
         _, base_kernels, _ = self._run_absorbing_producers(f, args, absorb=False)
         self.assertEqual(kernels, base_kernels)
 
