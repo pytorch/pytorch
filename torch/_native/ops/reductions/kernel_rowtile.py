@@ -1076,7 +1076,7 @@ def reduce_row_tile(
         raise ValueError("ragged vectors cannot use TMA")
     # Rows of whole vectors have no edges; normal path selection folds them with one
     # kernel per vector class rather than one per width.
-    whole = N % (tile.TRANSFER_ALIGNMENT // x.element_size()) == 0
+    whole = tile.align_bytes(N, x.element_size()) == tile.TRANSFER_ALIGNMENT
     ragged_vector = ragged_vector and not whole
     itree, arch = None, None
     if order == "inner_tree" and final and threads_per_row is None:
