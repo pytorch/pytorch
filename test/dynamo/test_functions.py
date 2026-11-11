@@ -3052,6 +3052,14 @@ partial_fn = functools.partial(fn, scale=2)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_union_type_hasattr(self):
+        def fn(x, t):
+            return x + 1, hasattr(t, "__name__"), hasattr(t, "__args__")
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(fn(x, int | None), opt_fn(x, int | None))
+
     @make_test
     def test_list_clear(a, b):
         tmp = [a + 1, a + 2]
