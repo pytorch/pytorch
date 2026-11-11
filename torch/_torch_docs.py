@@ -13466,6 +13466,11 @@ Returns:
     `itertools.combinations` or `itertools.combinations_with_replacement` on these
     lists, and finally convert the resulting list into tensor.
 
+    Exception: when ``r == 0``, this returns an empty 1-D tensor of shape ``(0,)``
+    rather than a 2-D tensor of shape ``(1, 0)`` corresponding to the single empty
+    tuple from ``itertools.combinations(..., 0)`` / ``combinations_with_replacement``.
+    For ``r > 0``, the result is always 2-D with shape ``(num_combinations, r)``.
+
 Example::
 
     >>> a = [1, 2, 3]
@@ -13489,6 +13494,8 @@ Example::
             [2, 2],
             [2, 3],
             [3, 3]])
+    >>> torch.combinations(tensor_a, r=0)
+    tensor([], dtype=torch.int64)
 
 """,
 )
