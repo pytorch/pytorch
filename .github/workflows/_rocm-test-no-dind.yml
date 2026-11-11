@@ -145,6 +145,7 @@ jobs:
       - name: Job pod ROCm version
         if: always()
         continue-on-error: true
+        timeout-minutes: 5
         shell: bash
         run: |
           set -euo pipefail
@@ -158,6 +159,7 @@ jobs:
       - name: Job pod system info
         if: always()
         continue-on-error: true
+        timeout-minutes: 5
         shell: bash
         run: |
           set -euo pipefail
@@ -165,10 +167,12 @@ jobs:
           rocm-sdk version || true
           whoami
           id
+          df -h /dev/shm
 
       - name: Job pod amd-smi
         if: always()
         continue-on-error: true
+        timeout-minutes: 5
         shell: bash
         run: |
           set -euo pipefail
@@ -182,6 +186,7 @@ jobs:
       - name: Job pod rocminfo
         if: always()
         continue-on-error: true
+        timeout-minutes: 5
         shell: bash
         run: |
           set -euo pipefail
@@ -192,6 +197,7 @@ jobs:
           rocminfo
 
       - name: Job pod GPU check
+        timeout-minutes: 5
         shell: bash
         run: |
           set -euo pipefail
