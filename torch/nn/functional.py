@@ -5325,8 +5325,13 @@ def interpolate(  # noqa: F811
             )
         # Two levels are necessary to prevent TorchScript from touching
         # are_deterministic_algorithms_enabled.
+        # Use the native path only for non-HIP CUDA; preserve fallbacks elsewhere.
         if not torch.jit.is_scripting():
-            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
+            if (
+                not input.is_cpu
+                and not (input.is_cuda and torch.version.hip is None)
+                and torch.are_deterministic_algorithms_enabled()
+            ):
                 # Use slow decomp whose backward will be in terms of index_put
                 # importlib is required because the import cannot be top level
                 # (cycle) and cannot be nested (TS doesn't support)
@@ -5643,7 +5648,7 @@ def grid_sample(
             used internally will actually be trilinear. However, when the input is 4-D,
             the interpolation mode will legitimately be bilinear. Likewise
             ``mode='bicubic'`` is tricubic on a 5-D input, the separable cubic kernel
-            extended over the third axis; CPU and CUDA, ROCm included, implement the 5-D case.
+            extended over the third axis; CPU, XPU and CUDA, ROCm included, implement the 5-D case.
         padding_mode (str): padding mode for outside grid values
             ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
@@ -7480,6 +7485,14 @@ def scaled_grouped_mm(
     Applies a grouped scaled matrix-multiply, grouped_mm(mat_a, mat_b) where the scaling of mat_a and mat_b are described by
     scale_recipe_a and scale_recipe_b respectively.
 
+    When ``scale_recipe_a`` and ``scale_recipe_b`` are each the single recipe ``TensorWise``,
+    each float32 scale contains either a single value shared by all groups
+    or one value per group in a contiguous 1D tensor. Each input may use either scale layout.
+    Both inputs must be ``float8_e4m3fn`` or ``float8_e5m2``, with at least one ``float8_e4m3fn`` input.
+    At most 1024 groups are supported.
+    TensorWise scaling requires CUDA 13.4 or later on SM9.x-SM11.x; swizzle metadata is ignored.
+    It supports bfloat16, float16, and float32 outputs. Other scaling recipes require bfloat16 output.
+
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
         scale_recipe_a: Enum describing how mat_a has been scaled
@@ -7489,9 +7502,11 @@ def scaled_grouped_mm(
         swizzle_b: Enum describing the swizzling pattern (if any) of scale_b
         bias: optional bias term to be added to the output
         offs: optional offsets into the source tensors denoting group start indices
-        output_dtype: dtype used for the output tensor
+        output_dtype: output dtype; bfloat16, float16, or float32 when both recipes are solely
+          ``TensorWise``; other recipes require bfloat16
         contraction_dim: describe which dimensions are :math:`K` in the matmul.
-        use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
+        use_fast_accum: enable/disable tensor-core fast accumulation for cuBLASLt
+            recipes and CUDA RowWise scaling. MSLK recipes and ROCm ignore this flag.
     """
 
     scale_a = _expand_single_value(scale_a)

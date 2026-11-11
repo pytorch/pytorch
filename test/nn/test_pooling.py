@@ -39,6 +39,7 @@ from torch.testing._internal.common_nn import (
     NNTestCase,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     gcIfJetson,
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -48,6 +49,7 @@ from torch.testing._internal.common_utils import (
     skipIfMPS,
     slowTest,
     subtest,
+    TEST_WITH_TORCHDYNAMO,
     TEST_WITH_UBSAN,
     TestCase,
 )
@@ -192,6 +194,29 @@ class TestPoolingNN(NNTestCase):
                 torch.empty([2, 2, 2])
             ),
         )
+
+    def test_adaptive_avg_pooling_backward_fails_meta(self):
+        # Meta must reject the same shapes as eager so fake tensors and compile match
+        backward2d = torch.ops.aten._adaptive_avg_pool2d_backward
+        backward3d = torch.ops.aten._adaptive_avg_pool3d_backward
+        cl = torch.channels_last
+        ndim_msg = "Expected dimensions"
+        dim_msg = "must have the same size at dim"
+        cases = [
+            (backward2d, (1, 2, 7), (1, 2, 3, 3), None, ndim_msg),
+            (backward2d, (1, 3, 7, 7), (1, 2, 3, 3), None, dim_msg),
+            (backward2d, (1, 2, 7, 7), (1, 3, 3, 3), cl, dim_msg),
+            (backward3d, (1, 2, 7, 7), (1, 2, 3, 3, 3), None, ndim_msg),
+            (backward3d, (1, 3, 7, 7, 7), (1, 2, 3, 3, 3), None, dim_msg),
+        ]
+        for op, grad_shape, input_shape, memory_format, msg in cases:
+            grad_output = torch.empty(grad_shape, device="meta")
+            input = torch.empty(input_shape, device="meta")
+            if memory_format is not None:
+                grad_output = grad_output.to(memory_format=memory_format)
+                input = input.to(memory_format=memory_format)
+            with self.assertRaisesRegex(ValueError, msg):
+                op(grad_output, input)
 
     @parametrize_test("dtype", [torch.bfloat16, torch.float16])
     @parametrize_test(
@@ -414,7 +439,7 @@ class TestPoolingNN(NNTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: kernel_size",
+            "value cannot be converted to type int without overflow",
         ):
             avgpool(inp)
 
@@ -817,12 +842,31 @@ class TestPoolingNNDevice(NNTestCase):
     def test_adaptive_avg_pooling_backward_fails(self, device):
         grad_output = torch.randn(1, 2, 7, device=device)
         input = torch.randn(1, 2, 3, 3, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected dimensions"):
+        with self.assertRaisesRegex(ValueError, "Expected dimensions"):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, input)
+
+        grad_output = torch.randn(1, 3, 7, 7, device=device)
+        input = torch.randn(1, 2, 3, 3, device=device)
+        with self.assertRaisesRegex(ValueError, "must have the same size at dim"):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, input)
+
+        # channels_last takes the channel count from input and strides
+        # grad_output with it, so it runs off grad_output rather than grad_input
+        grad_output = torch.randn(1, 2, 7, 7, device=device)
+        grad_output = grad_output.to(memory_format=torch.channels_last)
+        input = torch.randn(1, 3, 3, 3, device=device)
+        input = input.to(memory_format=torch.channels_last)
+        with self.assertRaisesRegex(ValueError, "must have the same size at dim"):
             torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, input)
 
         grad_output = torch.randn(1, 2, 7, 7, device=device)
         input = torch.randn(1, 2, 3, 3, 3, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected dimensions"):
+        with self.assertRaisesRegex(ValueError, "Expected dimensions"):
+            torch.ops.aten._adaptive_avg_pool3d_backward(grad_output, input)
+
+        grad_output = torch.randn(1, 3, 7, 7, 7, device=device)
+        input = torch.randn(1, 2, 3, 3, 3, device=device)
+        with self.assertRaisesRegex(ValueError, "must have the same size at dim"):
             torch.ops.aten._adaptive_avg_pool3d_backward(grad_output, input)
 
     def test_adaptive_max_pooling_backward_fails(self, device):
@@ -920,19 +964,19 @@ class TestPoolingNNDevice(NNTestCase):
                 output_size=[1, 1, 1],
             )(samples)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(("cpu", "cuda"))
     def test_MaxPool3d_errors(self, device):
         samples = torch.randn(1, 3, 10, 10, 10, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: kernel_size",
+            "value cannot be converted to type int without overflow",
         ):
             nn.MaxPool3d(
                 kernel_size=9223372036854775803,
             )(samples)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: dilation",
+            "value cannot be converted to type int without overflow",
         ):
             nn.MaxPool3d(
                 kernel_size=2,
@@ -945,38 +989,38 @@ class TestPoolingNNDevice(NNTestCase):
                 kernel_size=-1,
             )(samples)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(("cpu", "cuda"))
     def test_MaxPool2d_dilation_overflow(self, device):
         samples = torch.randn(1, 3, 10, 10, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: dilation",
+            "value cannot be converted to type int without overflow",
         ):
             nn.MaxPool2d(
                 kernel_size=2,
                 dilation=(1, 9223372036854775803),
             )(samples)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(("cpu", "cuda"))
     def test_AvgPool3d_stride_overflow(self, device):
         samples = torch.randn(1, 3, 10, 10, 10, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: stride",
+            "value cannot be converted to type int without overflow",
         ):
             nn.AvgPool3d(
                 kernel_size=2,
                 stride=(1, 1, 9223372036854775803),
             )(samples)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(("cpu", "cuda"))
     def test_pooling_backward_overflow(self, device):
         input2d = torch.randn(1, 1, 4, 4, device=device)
         grad2d = torch.randn(1, 1, 2, 2, device=device)
         indices2d = torch.zeros(1, 1, 2, 2, dtype=torch.long, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: kernel_size",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ops.aten.avg_pool2d_backward(
                 grad2d,
@@ -990,7 +1034,7 @@ class TestPoolingNNDevice(NNTestCase):
             )
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: dilation",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ops.aten.max_pool2d_with_indices_backward(
                 grad2d,
@@ -1008,7 +1052,7 @@ class TestPoolingNNDevice(NNTestCase):
         indices3d = torch.zeros(1, 1, 2, 2, 2, dtype=torch.long, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: stride",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ops.aten.avg_pool3d_backward(
                 grad3d,
@@ -1022,7 +1066,7 @@ class TestPoolingNNDevice(NNTestCase):
             )
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: dilation",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ops.aten.max_pool3d_with_indices_backward(
                 grad3d,
@@ -1280,6 +1324,10 @@ torch.{device_type}.synchronize()
 
     @parametrize_test("kernel", ["max", "avg"])
     @parametrize_test("pooling_dims", [1, 2, 3])
+    @decorateIf(
+        unittest.skip("Skipping to avoid abort"),
+        lambda p: p["kernel"] == "max" and p["pooling_dims"] == 1,
+    )
     def test_pooling_shape(self, device, kernel, pooling_dims):
         """Test the output shape calculation for pooling functions"""
 
@@ -1356,6 +1404,15 @@ torch.{device_type}.synchronize()
 
         for mf in (torch.contiguous_format, torch.channels_last, "non_contiguous"):
             helper((2, 3, 6, 6), mf)
+
+    def test_adaptive_avg_pool2d_size_one_channel_stride(self, device):
+        # (B, 1, H, W) is contiguous whatever the stride of the size-1 dim.
+        x = torch.randn(1, 3, 5, 6, device=device).transpose(0, 1)
+        self.assertTrue(x.is_contiguous())
+        expected = F.adaptive_avg_pool2d(
+            x.clone(memory_format=torch.contiguous_format), (2, 3)
+        )
+        self.assertEqual(F.adaptive_avg_pool2d(x, (2, 3)), expected)
 
     def test_adaptive_avg_pool3d_output_size_one(self, device):
         x = torch.randn(
@@ -2225,6 +2282,12 @@ torch.{device_type}.synchronize()
 
     @expectedFailureMPS  # float64
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
+    # expectedFailureMeta already skips Dynamo; expose that skip before sharding.
+    @decorateIf(
+        unittest.skip("test doesn't currently work with dynamo"),
+        lambda p: TEST_WITH_TORCHDYNAMO
+        and torch.device(p["device"]).type in ("cpu", "cuda"),
+    )
     def test_fractional_max_pool2d(self, device):
         with set_default_dtype(torch.double):
             x = torch.randn(1, 2, 7, 7, requires_grad=True, device=device)
@@ -2296,6 +2359,12 @@ torch.{device_type}.synchronize()
 
     @expectedFailureMPS  # float64
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
+    # expectedFailureMeta already skips Dynamo; expose that skip before sharding.
+    @decorateIf(
+        unittest.skip("test doesn't currently work with dynamo"),
+        lambda p: TEST_WITH_TORCHDYNAMO
+        and torch.device(p["device"]).type in ("cpu", "cuda"),
+    )
     def test_fractional_max_pool3d(self, device):
         with set_default_dtype(torch.double):
             x = torch.randn(1, 2, 7, 7, 7, requires_grad=True, device=device)
@@ -2542,6 +2611,38 @@ class TestPoolingNNCudaOnly(NNTestCase):
         # grad_input, which would materialize a full-size int64 mask (OOM).
         self.assertEqual(grad_input[..., ph * k :, :].count_nonzero().item(), 0)
         self.assertEqual(grad_input[..., :, pw * k :].count_nonzero().item(), 0)
+
+    # With 33 planes of 8192 x 8192, the last plane starts at element 2^31.
+    # output_size=128 overflows the int32 gradInput plane offset; 8192 also overflows
+    # the output and indices plane offsets. The last plane is checked against the same
+    # plane pooled on its own. See #197461.
+    @largeTensorTest(lambda self, device, size: (10 if size == 128 else 36) * 2**30)
+    @parametrize_test("size", [128, 8192])
+    def test_adaptive_max_pool2d_large_plane_offset(self, device, size):
+        x = torch.randn(33, 1, 8192, 8192, device=device, dtype=torch.half)
+        x.requires_grad_()
+        out, idx = F.adaptive_max_pool2d(x, size, return_indices=True)
+        (grad,) = torch.autograd.grad(out.sum(), x)
+        x_last = x[-1:].detach().requires_grad_()
+        out_last, idx_last = F.adaptive_max_pool2d(x_last, size, return_indices=True)
+        (grad_last,) = torch.autograd.grad(out_last.sum(), x_last)
+        self.assertEqual(out[-1:], out_last)
+        self.assertEqual(idx[-1:], idx_last)
+        self.assertEqual(grad[-1:], grad_last)
+
+    # A single 46341 x 46341 plane has more than 2^31 elements, so the argmax of the
+    # last element does not fit in int32.
+    @largeTensorTest("12GB", device="cuda")
+    def test_adaptive_max_pool2d_large_single_plane(self, device):
+        n = 46341
+        x = torch.zeros(1, 1, n, n, device=device, dtype=torch.half)
+        x[..., -1, -1] = 1
+        x.requires_grad_()
+        out, idx = F.adaptive_max_pool2d(x, 1024, return_indices=True)
+        self.assertEqual(idx[0, 0, -1, -1].item(), n * n - 1)
+        (grad,) = torch.autograd.grad(out.sum(), x)
+        self.assertEqual(grad[0, 0, -1, -1].item(), 1)
+        self.assertEqual(grad.sum(dtype=torch.float).item(), 1024 * 1024)
 
     @parametrize_test("channels_last", [False, True])
     @parametrize_test(

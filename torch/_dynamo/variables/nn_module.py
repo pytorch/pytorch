@@ -61,7 +61,6 @@ from ..source import (
     UnspecializedNNModuleSource,
 )
 from ..utils import (
-    enumerate_items_with_dict_position,
     get_custom_getattr,
     get_fake_value,
     is_lazy_module,
@@ -80,7 +79,7 @@ from ..utils import (
 from .base import Method, typestr, ValueMutationNew, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lazy import LazyVariableTracker
-from .user_defined import UserDefinedObjectVariable
+from .user_defined import can_guard_class_function_code, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
@@ -186,7 +185,10 @@ def guard_to_detect_forward_monkeypatching(
     # To keep the guard overhead down, we just guard on the `forward` being
     # not present in the mod __dict__. The common case of patching forward
     # method adds `forward` in the instance __dict__, whereas the unpatched
-    # `forward` sits in the type(mod).__dict__
+    # `forward` sits in the type(mod).__dict__. Patching the class's forward is
+    # caught only for UnspecializedNNModuleVariable, by its call_function's code
+    # guard on the type(mod).__dict__ source. The specialized NNModuleVariable
+    # path does not guard the class's forward (known gap).
     if source:
         if "forward" in mod.__dict__ and callable(mod.__dict__["forward"]):
             # Monkeypatched forward method, guard on call-relevant structure.
@@ -1473,13 +1475,18 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 fn_vt = VariableTracker.build(tx, fn, source=source, realize=True)
                 return fn_vt.call_function(tx, [self] + list(args), kwargs)
             else:
-                # Ideally we would have just used VariableTracker.build(tx, fn,
-                # source=source) but that introduces guard on the
-                # `forward.__code__` object. Given that we already guard on the
-                # forward not present in generic dict, we don't need this guard.
-                return VariableBuilder.create_internal_user_function(
-                    fn, source=source
-                ).call_function(tx, [self] + list(args), kwargs)
+                # This call skips resolve_type_attr, so guard the class
+                # function's __code__ here the same way (forward, or a
+                # user-defined __call__).
+                if source is not None and can_guard_class_function_code(tx, fn):
+                    fn_vt = variables.UserFunctionVariable.create_with_source(
+                        fn, source
+                    )
+                else:
+                    fn_vt = VariableBuilder.create_internal_user_function(
+                        fn, source=source
+                    )
+                return fn_vt.call_function(tx, [self] + list(args), kwargs)
 
     def call_method(
         self,
@@ -1586,6 +1593,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        from .builder import _dict_input_snapshot
+
         if (
             tx.output.side_effects.is_attribute_mutation(self)
             and name
@@ -1673,8 +1682,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 return key, value
 
             result = dict(
-                build_key_value(i, k, v)
-                for i, k, v in enumerate_items_with_dict_position(hooks_dict)
+                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(hooks_dict)
             )
 
             # noqa: RVT001

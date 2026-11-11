@@ -538,6 +538,10 @@ struct ConvParams {
          (input.scalar_type() == at::kHalf && mkldnn_fp16_device_check()))) {
       return true;
     }
+    // Without ACL, oneDNN runs dense and transposed convolutions via gemm, which is slower than Slow2d
+    if (mkldnn_lacks_aarch64_kernels() && !input.is_mkldnn() && (groups == 1 || transposed)) {
+      return false;
+    }
     return (input.is_mkldnn()) || // input is mkldnn Tensor
       (input.device().is_cpu() &&
        input.scalar_type() == kFloat && // only on CPU Float Tensors
@@ -1331,6 +1335,12 @@ static ConvBackend _select_conv_backend(
     } else {
       return ConvBackend::Miopen;
     }
+#if AT_MKLDNN_ENABLED()
+  } else if (mkldnn_lacks_aarch64_kernels() && !need_backward && !input.is_mkldnn() &&
+             params.use_cpu_depthwise3x3_winograd(input, weight, bias)) {
+    // Faster than oneDNN's gemm-based convolution when oneDNN lacks optimized kernels
+    return ConvBackend::Winograd3x3Depthwise;
+#endif
   } else if (params.use_mkldnn(input, weight)) {
     if (params.transposed) {
       return ConvBackend::MkldnnTranspose;

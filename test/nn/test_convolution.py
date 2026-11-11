@@ -46,6 +46,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_nn import _test_module_empty_input, NNTestCase
 from torch.testing._internal.common_utils import (
+    decorateIf,
     download_file,
     dtype2prec_DONTUSE,
     gradcheck,
@@ -3722,6 +3723,10 @@ class TestConvolutionNNDevice(NNTestCase):
         self.assertEqual(grad_weight.shape, weight.shape)
 
     @skipCUDAIfRocmHipBlasltVersionLessThan((1, 2, 0))
+    @decorateIf(
+        unittest.skip("ROCm not available"),
+        lambda p: torch.device(p["device"]).type == "cuda" and not TEST_WITH_ROCM,
+    )
     @onlyAccelerator
     @largeTensorTest("40GB")
     @largeTensorTest("24GB", "cpu")
@@ -3860,6 +3865,19 @@ class TestConvolutionNNCPU(NNTestCase):
     """CPU-specific convolution tests."""
 
     hw_classification = HardwareClassification.CPU
+
+    @unittest.skipIf(
+        torch.backends.nnpack.is_available()
+        and not torch.backends.mkldnn.is_available(),
+        "NNPACK's FFT-based convolution spreads NaN across the tile",
+    )
+    @parametrize_test("batch_size", [4, 16, 32])
+    def test_conv1d_nan_does_not_spread(self, batch_size):
+        # See https://github.com/pytorch/pytorch/issues/157237
+        x = torch.randn(batch_size, 1, 24)
+        x[3, 0, 9] = float("nan")
+        y = F.conv1d(x, torch.randn(1, 1, 3))
+        self.assertEqual(y[3, 0].isnan().nonzero().flatten().tolist(), [7, 8, 9])
 
     def test_conv_contiguous_for_oneDNN(self):
         # See https://github.com/pytorch/pytorch/issues/80837.

@@ -3,9 +3,14 @@ import sys
 from tempfile import NamedTemporaryFile
 
 import torch.package.package_exporter
-from torch.testing._internal.common_utils import IS_WINDOWS, TestCase
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    preserves_unittest_skip_marks,
+    TestCase,
+)
 
 
+@preserves_unittest_skip_marks()
 class PackageTestCase(TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
