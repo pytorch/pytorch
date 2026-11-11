@@ -53,6 +53,7 @@ C10_HOST_DEVICE inline c10::complex<T> log2(const c10::complex<T>& x) {
 #if defined(_LIBCPP_VERSION) || \
     (defined(__GLIBCXX__) && !defined(_GLIBCXX11_USE_C99_COMPLEX))
 HIDDEN_NAMESPACE_BEGIN(_detail)
+// See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 // Note [ Complex Square root in libc++]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -426,7 +427,7 @@ C10_HOST_DEVICE inline c10::complex<T> log1p(const c10::complex<T>& z) {
   T y = z.imag();
   T zabs = std::abs(z);
   T theta = std::atan2(y, x + T(1));
-  if (zabs < 0.5) {
+  if (zabs < T(0.5)) {
     T r = x * (T(2) + x) + y * y;
     if (r == 0) { // handle underflow
       return {x, theta};
