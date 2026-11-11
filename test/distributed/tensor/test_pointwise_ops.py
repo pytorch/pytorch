@@ -532,50 +532,80 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         # When value > threshold, Partial(max)/Partial(min) must not be preserved,
         # and sharding propagation should redistribute to Replicate.
         mesh = self.build_device_mesh()
-        full = torch.tensor(
-            [[-1.0, 3.0], [1.0, -2.0]] * self.world_size, device=self.device_type
-        )
-        x = distribute_tensor(full, mesh, [Shard(0)])
 
-        # Test Partial(max)
-        m_max = x.amax(dim=0)
-        self.assertEqual(m_max.placements, (Partial("max"),))
+        # Test Partial(max) with rank-dependent data where rank 0 has values <= threshold
+        # and subsequent ranks have values > threshold.
+        # If Partial(max) were incorrectly preserved when value > threshold, rank 0 would evaluate
+        # threshold(-2.0, 0, 5) = 5.0 locally, causing an incorrect reduced max of 5.0 instead of 2.0.
+        local_max = map_local_for_rank(
+            self.rank,
+            lambda rank: torch.tensor(
+                [float(rank) * 4.0 - 2.0], device=self.device_type
+            ),
+        )
+        dt_max = DTensor.from_local(local_max, mesh, [Partial("max")])
 
         # value <= threshold: preserves Partial(max)
-        y_max_ok = torch.nn.functional.threshold(m_max, 0.0, 0.0)
+        y_max_ok = torch.nn.functional.threshold(dt_max, 0.0, 0.0)
         self.assertEqual(y_max_ok.placements, (Partial("max"),))
+        expected_max = float((self.world_size - 1) * 4.0 - 2.0)
         self.assertEqual(
-            y_max_ok.full_tensor(),
-            torch.nn.functional.threshold(full.amax(dim=0), 0.0, 0.0),
+            y_max_ok.redistribute(mesh, [Replicate()]).to_local(),
+            torch.tensor([max(expected_max, 0.0)], device=self.device_type),
         )
 
         # value > threshold: redistributes to Replicate
-        y_max_redist = torch.nn.functional.threshold(m_max, 0.0, 5.0)
+        y_max_redist = torch.nn.functional.threshold(dt_max, 0.0, 5.0)
         self.assertEqual(y_max_redist.placements, (Replicate(),))
         self.assertEqual(
-            y_max_redist.full_tensor(),
-            torch.nn.functional.threshold(full.amax(dim=0), 0.0, 5.0),
+            y_max_redist.to_local(),
+            torch.tensor(
+                [expected_max if expected_max > 0.0 else 5.0],
+                device=self.device_type,
+            ),
         )
 
-        # Test Partial(min)
-        m_min = x.amin(dim=0)
-        self.assertEqual(m_min.placements, (Partial("min"),))
+        # Test Partial(min) with rank-dependent data
+        local_min = map_local_for_rank(
+            self.rank,
+            lambda rank: torch.tensor(
+                [float(rank) * 4.0 - 2.0], device=self.device_type
+            ),
+        )
+        dt_min = DTensor.from_local(local_min, mesh, [Partial("min")])
 
         # value <= threshold: preserves Partial(min)
-        y_min_ok = torch.nn.functional.threshold(m_min, 0.0, 0.0)
+        y_min_ok = torch.nn.functional.threshold(dt_min, 0.0, 0.0)
         self.assertEqual(y_min_ok.placements, (Partial("min"),))
         self.assertEqual(
-            y_min_ok.full_tensor(),
-            torch.nn.functional.threshold(full.amin(dim=0), 0.0, 0.0),
+            y_min_ok.redistribute(mesh, [Replicate()]).to_local(),
+            torch.tensor([0.0], device=self.device_type),
         )
 
         # value > threshold: redistributes to Replicate
-        y_min_redist = torch.nn.functional.threshold(m_min, 0.0, 5.0)
+        y_min_redist = torch.nn.functional.threshold(dt_min, 0.0, 5.0)
         self.assertEqual(y_min_redist.placements, (Replicate(),))
         self.assertEqual(
-            y_min_redist.full_tensor(),
-            torch.nn.functional.threshold(full.amin(dim=0), 0.0, 5.0),
+            y_min_redist.to_local(),
+            torch.tensor([5.0], device=self.device_type),
         )
+
+        # Test unsigned integer dtype with negative scalar value.
+        # In uint8, -1 wraps to 255 in C++ kernel, so value (255) > threshold (3).
+        # Sharding propagation must evaluate value > threshold in uint8 and redistribute to Replicate.
+        local_uint8 = map_local_for_rank(
+            self.rank,
+            lambda rank: torch.tensor(
+                [rank + 1], dtype=torch.uint8, device=self.device_type
+            ),
+        )
+        dt_uint8 = DTensor.from_local(local_uint8, mesh, [Partial("max")])
+        y_uint8_neg = torch.nn.functional.threshold(dt_uint8, 3, -1)
+        self.assertEqual(y_uint8_neg.placements, (Replicate(),))
+
+        # When value <= threshold in uint8, Partial(max) is preserved
+        y_uint8_ok = torch.nn.functional.threshold(dt_uint8, 3, 1)
+        self.assertEqual(y_uint8_ok.placements, (Partial("max"),))
 
     @with_comms
     def test_mul_div_scalar_partial(self):

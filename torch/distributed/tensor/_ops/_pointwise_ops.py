@@ -354,15 +354,18 @@ def _register_threshold() -> None:
             and not isinstance(value, TensorMeta)
         ):
             try:
-                is_non_decreasing = bool(value <= threshold)
+                # Cast threshold and value according to input tensor dtype to match C++ kernel semantics
+                if isinstance(args[0], TensorMeta) and args[0].dtype is not None:
+                    t_casted = torch.tensor(threshold, dtype=args[0].dtype).item()
+                    v_casted = torch.tensor(value, dtype=args[0].dtype).item()
+                    is_non_decreasing = bool(v_casted <= t_casted)
+                else:
+                    is_non_decreasing = bool(value <= threshold)
             except Exception:
                 is_non_decreasing = False
 
-        if is_non_decreasing:
-            strategies = inner_non_dec(op, args, kwargs)
-        else:
-            strategies = inner_default(op, args, kwargs)
-
+        fn = inner_non_dec if is_non_decreasing else inner_default
+        strategies = fn(op, args, kwargs)
         kw_names = [k for k, v in kwargs.items() if isinstance(v, TensorMeta)]
         if not kw_names:
             return strategies
@@ -374,7 +377,7 @@ def _register_threshold() -> None:
     register_single_dim_strategy(
         aten.threshold.default,
         schema_info=RuntimeSchemaInfo(
-            static_argnum=1, static_kwargkey=["threshold", "value", "out"]
+            static_argnum=1, static_kwargkey=["threshold", "value"]
         ),
         allow_uneven_sharding=True,
         allow_unbacked_sharding=True,
