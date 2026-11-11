@@ -24,11 +24,7 @@ from .blockscaled_tma_plan import (
     _QUANT_ORIENTATION_DIM_KM,
     _QUANT_ORIENTATION_DIM_M,
 )
-from .utils import (
-    _blockscaled_quantize_group,
-    _store_swizzled_scale_groups_as_uint,
-    _store_unswizzled_scale_groups_as_uint,
-)
+from .utils import _blockscaled_quantize_group, _store_scale_groups_as_uint
 
 
 _DIM_K_TILE_M_SIZE_128 = 128
@@ -274,7 +270,7 @@ class _BlockscaledTma:
             )
 
         if cutlass.const_expr(is_batched):
-            if cutlass.const_expr(do_dim_k and is_scale_swizzled):
+            if cutlass.const_expr(do_dim_k):
                 mScaleKLogical = mScaleKLogical[(None, None, batch_idx)]
             if cutlass.const_expr(do_dim_m):
                 mScaleMLogical = mScaleMLogical[(None, None, batch_idx)]
@@ -382,7 +378,7 @@ class _BlockscaledTma:
                 (tile_m_idx < M // tile_m_size) & (tile_k_idx < K // tile_k_size)
             )
             if use_full_tile_m:
-                _store_swizzled_scale_groups_as_uint(
+                _store_scale_groups_as_uint(
                     mScaleMLogical,
                     rScaleM,
                     output_row_m,
@@ -399,7 +395,7 @@ class _BlockscaledTma:
                             rScaleMPadded[group] = rScaleM[group]
                 scale_row_m_in_bounds = output_row_m < cute.ceil_div(K, 128) * 128
                 if scale_row_m_in_bounds:
-                    _store_swizzled_scale_groups_as_uint(
+                    _store_scale_groups_as_uint(
                         mScaleMLogical,
                         rScaleMPadded,
                         output_row_m,
@@ -521,32 +517,22 @@ class _BlockscaledTma:
                 )
                 if cutlass.const_expr(not is_scale_swizzled):
                     compact_scale_cols = K // scale_group_size
-                    compact_store_row = (
-                        input_row_k + cutlass.Int64(batch_idx) * M
-                        if cutlass.const_expr(is_batched)
-                        else input_row_k
-                    )
                     if use_full_tile_k and compact_scale_cols % iters == 0:
-                        _store_unswizzled_scale_groups_as_uint(
+                        _store_scale_groups_as_uint(
                             mScaleKLogical,
                             rScaleK,  # pyrefly: ignore[unbound-name]
-                            compact_store_row,
+                            input_row_k,
                             scale_col_k,
-                            compact_scale_cols,
                             iters,
                         )
                     elif input_row_k < M:
                         for it in cutlass.range_constexpr(iters):
-                            if scale_col_k + it < compact_scale_cols:
-                                compact_scale_offset = cutlass.Int64(
-                                    compact_store_row
-                                ) * cutlass.Int64(compact_scale_cols) + cutlass.Int64(
-                                    scale_col_k + it
-                                )
+                            col = scale_col_k + it
+                            if col < compact_scale_cols:
                                 # pyrefly: ignore[unbound-name]
-                                mScaleKLogical[compact_scale_offset] = rScaleK[it]
+                                mScaleKLogical[(input_row_k, col)] = rScaleK[it]
                 elif use_full_tile_k:
-                    _store_swizzled_scale_groups_as_uint(
+                    _store_scale_groups_as_uint(
                         mScaleKLogical,
                         rScaleK,  # pyrefly: ignore[unbound-name]
                         input_row_k,
@@ -561,7 +547,7 @@ class _BlockscaledTma:
                             if scale_col_k + it < K // scale_group_size:
                                 # pyrefly: ignore[unbound-name]
                                 rScaleKPadded[it] = rScaleK[it]
-                    _store_swizzled_scale_groups_as_uint(
+                    _store_scale_groups_as_uint(
                         mScaleKLogical,
                         rScaleKPadded,
                         input_row_k,
@@ -604,18 +590,8 @@ class _BlockscaledTma:
                     if cutlass.const_expr(not is_scale_swizzled):
                         if input_row_k < M:
                             if scale_col_k < K // scale_group_size:
-                                compact_store_row = (
-                                    input_row_k + cutlass.Int64(batch_idx) * M
-                                    if cutlass.const_expr(is_batched)
-                                    else input_row_k
-                                )
-                                compact_scale_offset = cutlass.Int64(
-                                    compact_store_row
-                                ) * cutlass.Int64(
-                                    K // scale_group_size
-                                ) + cutlass.Int64(scale_col_k)
                                 # pyrefly: ignore[unbound-name]
-                                mScaleKLogical[compact_scale_offset] = rScaleK[it]
+                                mScaleKLogical[(input_row_k, scale_col_k)] = rScaleK[it]
                     elif use_full_tile_k:
                         # pyrefly: ignore[unbound-name]
                         mScaleKLogical[(input_row_k, scale_col_k)] = rScaleK[it]
@@ -790,10 +766,16 @@ class _BlockscaledTma:
                     )
                 mScaleKLogical = cute.make_tensor(mScaleK.iterator, scale_k_layout)
             else:
-                # Compact scale storage is flat. The kernel supplies its row
-                # stride explicitly so dynamic output dimensions do not add a
-                # second dynamic tensor stride to every scale-store address.
-                mScaleKLogical = mScaleK
+                scale_k_cols = K // scale_group_size
+                scale_k_layout = cute.make_layout(
+                    (M, scale_k_cols), stride=(scale_k_cols, 1)
+                )
+                if cutlass.const_expr(is_batched):
+                    scale_k_layout = cute.append(
+                        scale_k_layout,
+                        cute.make_layout(batch_count, stride=M * scale_k_cols),
+                    )
+                mScaleKLogical = cute.make_tensor(mScaleK.iterator, scale_k_layout)
 
             groups_per_row_k = tile_k_size // scale_group_size
             row_owned_k = tile_m_size == _DIM_K_TILE_M_SIZE_128
