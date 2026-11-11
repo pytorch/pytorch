@@ -17,13 +17,14 @@ from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed._composable.replicate_with_fsdp import replicate
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
-from torch.distributed.fsdp._fully_shard._fsdp_param import (
+from torch.distributed.fsdp._flex_shard.placements.shard_all_gather import (
     _get_all_gather_output_layouts,
-    ShardedState,
 )
+from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.fsdp.experimental import (
     all_gather_output_fn_with_native_copy,
     AllGatherInput,
+    DefaultAllGatherLayout,
 )
 from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -495,15 +496,17 @@ class TestFullyShardAllGatherExtensionsMultiThread(
 
             def forward(self, input: torch.Tensor) -> torch.Tensor:
                 state = fully_shard.state(self)
-                param_group = state._fsdp_param_group
+                param_group = state._fsdp_param_groups[0]
                 if param_group is None:
                     raise AssertionError("Expected an FSDP parameter group")
-                fsdp_params = {
-                    fsdp_param._module_info.param_name: fsdp_param
-                    for fsdp_param in param_group.fsdp_params
+                all_gathers = {
+                    fsdp_param._module_info.param_name: all_gather
+                    for fsdp_param, all_gather in zip(
+                        param_group.fsdp_params, param_group.all_gather.params
+                    )
                 }
-                weight = fsdp_params["weight"]
-                bias = fsdp_params["bias"]
+                weight = all_gathers["weight"]
+                bias = all_gathers["bias"]
                 self.storage_observations.append(
                     (
                         tuple(
@@ -512,7 +515,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
                         ),
                         tuple(
                             tensor.untyped_storage().size()
-                            for tensor in weight._unsharded_inner_tensors
+                            for tensor in weight.inner_tensors
                         ),
                         tuple(
                             tensor.untyped_storage().size()
@@ -545,20 +548,20 @@ class TestFullyShardAllGatherExtensionsMultiThread(
 
             output.sum().backward()
             state = fully_shard.state(model)
-            param_group = state._fsdp_param_group
+            param_group = state._fsdp_param_groups[0]
             if param_group is None:
                 raise AssertionError("Expected an FSDP parameter group")
-            for fsdp_param in param_group.fsdp_params:
+            for all_gather in param_group.all_gather.params:
                 self.assertTrue(
                     all(
                         tensor.untyped_storage().size() == 0
-                        for tensor in fsdp_param.all_gather_outputs
+                        for tensor in all_gather.all_gather_outputs
                     )
                 )
                 self.assertTrue(
                     all(
                         tensor.untyped_storage().size() == 0
-                        for tensor in fsdp_param._unsharded_inner_tensors
+                        for tensor in all_gather.inner_tensors
                     )
                 )
 
@@ -661,9 +664,8 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         local_weight.fsdp_post_all_gather = post_fn.__get__(local_weight)
 
     def _set_native_all_gather(self, model: nn.Module) -> None:
-        # FSDPModule has no setter for the all-gather copy-out yet
-        group = fully_shard.state(model)._fsdp_param_group
-        group._all_gather_output_fn = all_gather_output_fn_with_native_copy
+        native = DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
+        model.set_all_gather_layout(native)
 
     def _init_hsdp_mesh(self, shard_world_size: int) -> DeviceMesh:
         return init_device_mesh(
@@ -912,19 +914,19 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             model, reshard_after_forward=True, shard_placement_fn=lambda _: Shard(1)
         )
         self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
-        fsdp_param = fully_shard.state(model)._fsdp_param_group.fsdp_params[0]
+        all_gather = fully_shard.state(model)._fsdp_param_groups[0].all_gather.params[0]
         inp = torch.randn((2, 16), device=device_type)
         # Layouts are cached once the outputs that they are checked against exist
         model(inp)
         cached_layouts = {}
         for payload in ("tensor", "dim0", "tensor", "dim1", "flat", "dim1", "dim0"):
             self.assertEqual(model(inp), ref_model(inp))
-            layouts = fsdp_param.all_gather_output_layouts
+            layouts = all_gather.output_layouts
             self.assertIs(cached_layouts.setdefault(payload, layouts), layouts)
         # A fifth combination exceeds the cache, so an earlier one is checked again
         for payload in ("column", "tensor"):
             self.assertEqual(model(inp), ref_model(inp))
-        layouts = fsdp_param.all_gather_output_layouts
+        layouts = all_gather.output_layouts
         self.assertIsNot(layouts, cached_layouts["tensor"])
         # dims 1.0 and tensor(1) are rejected also while dim True (1) is cached
         payload = "bool_dim"
@@ -992,7 +994,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             s = Shard(int(payload == "complex"))
             fully_shard(model, reshard_after_forward=2, shard_placement_fn=lambda _: s)
             self._patch_extension(model[1], fsdp_pre_all_gather, fsdp_post_all_gather)
-            fsdp_params = fully_shard.state(model)._fsdp_param_group.fsdp_params
+            fsdp_params = fully_shard.state(model)._fsdp_param_groups[0].fsdp_params
             with self.assertRaisesRegex(NotImplementedError, re.escape(msg)):
                 model(inp).sum().backward()
             if msg != all_gather_msg:
@@ -1109,10 +1111,11 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         self.assertEqual(post_out_ids, [None] + [post_out_ids[1]] * 3)
         # FSDP keeps no references to the payloads of the 4 all-gathers
         self.assertEqual([ref() for ref in payload_refs], [None] * 8)
-        # The native op copies out unless a size-1 shard mesh skips the copy-out
+        # FSDP's default copy-out is the native op too, unless a size-1 shard
+        # mesh skips the copy-out
         with _CountOp(torch.ops.fsdp._all_gather_copy_out_.default) as copies:
             model(inp)
-        self.assertEqual(copies.count > 0, native_copy and shard_world_size > 1)
+        self.assertEqual(copies.count > 0, shard_world_size > 1)
 
     @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_smaller_payload(self):
@@ -1207,8 +1210,14 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         inp = torch.randn((2, 8), device=device_type)
         for _ in range(2):
             self.assertEqual(model(inp), inp @ weight.T)
-        fsdp_param = fully_shard.state(model)._fsdp_param_group.fsdp_params[0]
-        self.assertEqual(fsdp_param.all_gather_output_layouts, ())
+        all_gather = fully_shard.state(model)._fsdp_param_groups[0].all_gather.params[0]
+        self.assertEqual(all_gather.output_layouts, ())
+        # More shard ranks have nothing to all-gather, which raises, not StopIteration
+        model = nn.Linear(8, 8, bias=False, device=device_type)
+        fully_shard(model, mesh=init_device_mesh(device_type.type, (self.world_size,)))
+        self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
+        with self.assertRaisesRegex(ValueError, "without any payloads"):
+            model(inp)
 
 
 class TestAllGatherInputValidation(TestCase):

@@ -290,6 +290,9 @@ class TestPublicBindings(TestCase):
         private_allowlist = {
             "torch._inductor.codegen.cutlass.cuda_kernel",
             "torch._native.flydsl.intrinsics",  # depends on flydsl
+            # depends on spmd_types
+            "torch.distributed.fsdp._flex_shard.layout_adapters.spmd_types",
+            "torch.distributed.fsdp._flex_shard.placements._copy_kernels",  # triton
             # TODO(#133647): Remove the onnx._internal entries after
             # onnx and onnxscript are installed in CI.
             "torch.onnx._internal.exporter",
