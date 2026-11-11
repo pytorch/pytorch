@@ -113,6 +113,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    attr_getset,
     AttrMutationKind,
     GetSet,
     Member,
@@ -124,7 +125,12 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import ConstantVariable
+from .constant import (
+    ConstantVariable,
+    FloatConstantVariable,
+    IntConstantVariable,
+    StrConstantVariable,
+)
 from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
@@ -244,9 +250,6 @@ def is_forbidden_context_manager(ctx: object) -> bool:
         f_ctxs.append(WarningsChecker)
     except ImportError:
         pass
-
-    if m := sys.modules.get("torch.testing._internal.jit_utils"):
-        f_ctxs.append(m._AssertRaisesRegexWithHighlightContext)
 
     return ctx in f_ctxs
 
@@ -389,6 +392,22 @@ class UserDefinedVariable(VariableTracker):
 class UserDefinedClassVariable(UserDefinedVariable):
     # pyrefly: ignore[bad-override]
     value: type[object]
+
+    tp_getset = {
+        "__name__": attr_getset("__name__", lambda vt: vt.value),
+        "__qualname__": attr_getset("__qualname__", lambda vt: vt.value),
+        "__module__": attr_getset("__module__", lambda vt: vt.value),
+        "__doc__": attr_getset("__doc__", lambda vt: vt.value),
+        # missing:
+        # "__bases__": GetSet(...),
+        # "__mro__": GetSet(...),
+        # "__abstractmethods__": GetSet(...),
+        # "__dict__": GetSet(...),
+        # "__text_signature__": GetSet(...),
+        # "__annotations__": GetSet(...),
+        # "__annotate__": GetSet(...),
+        # "__type_params__": GetSet(...),
+    }
 
     def __init__(self, value: type[object], **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -4304,19 +4323,35 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # the method's closure sourcelessly and SourcelessBuilder fails on
             # a captured tensor (test_modes.py,
             # test_nested_torch_function_mode).
-            # Guard __code__ only via the cls.__dict__ source; a GetAttr accessor
-            # off TypeSource is not tag-safe.
-            if var_source is not None and can_guard_class_function_code(tx, type_attr):
-                im_func = variables.UserFunctionVariable.create_with_source(
-                    type_attr, var_source
-                )
+            fn_source = var_source or (
+                self.source and AttrSource(TypeSource(self.source), name)
+            )
+            # A.m and a.m.__func__ must share one VT, so that a write to
+            # A.m.__defaults__ is seen by a.m, before or after a.m is read.
+            se = tx.output.side_effects
+            if fn_source and type_attr in se:
+                fn_vt = VariableTracker.build(tx, type_attr, fn_source)
             else:
-                im_func = VariableBuilder.create_internal_user_function(
-                    type_attr,
-                    source=var_source
-                    or (self.source and AttrSource(TypeSource(self.source), name)),
-                )
-            return variables.UserMethodVariable(im_func, self, source=source)
+                from .. import trace_rules
+
+                # Guard __code__ only via the cls.__dict__ source; a GetAttr accessor
+                # off TypeSource is not tag-safe.
+                guard_code = can_guard_class_function_code(tx, type_attr)
+                if var_source is not None and guard_code:
+                    fn_vt = variables.UserFunctionVariable.create_with_source(
+                        type_attr, var_source
+                    )
+                else:
+                    fn_vt = VariableBuilder.create_internal_user_function(
+                        type_attr, source=fn_source
+                    )
+                # Track only what the builder would build too, or a later
+                # global read of an allow_in_graph function inlines it.
+                if fn_source and trace_rules.lookup_callable(type_attr) is None:
+                    fn_vt = se.track_object_existing(type_attr, fn_vt)
+            if not isinstance(fn_vt, variables.BaseUserFunctionVariable):
+                raise AssertionError(f"expected a function VT for {name}, got {fn_vt}")
+            return variables.UserMethodVariable(fn_vt, self, source=source)
         # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
@@ -5063,7 +5098,6 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable, ExceptionVar
         # was designed to model. self.exc_type here is an arbitrary
         # user-defined class, so import it from its actual defining module
         # instead.
-        from .constant import ConstantVariable
 
         codegen.add_push_null(
             lambda: codegen.load_import_from(
@@ -5075,12 +5109,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable, ExceptionVar
 
         def codegen_attr(name: str) -> None:
             attr = getattr(self, name)
-            if istype(attr, ConstantVariable):
-                if attr.value not in (True, False, None):
-                    raise AssertionError(
-                        f"attr.value must be True, False, or None, got {attr}"
-                    )
-            else:
+            if not attr.is_constant_match(True, False, None):
                 codegen.dup_top()
                 codegen(attr)
                 codegen.extend_output(codegen.rot_n(2))
@@ -5174,21 +5203,15 @@ _constant_base_methods: dict[type, set[Any]] = {
 }
 
 
-class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
+class UserDefinedConstantVariable(UserDefinedObjectVariable):
     """
-    Represents user-defined objects that subclass immutable constant types
-    (int, float, str).
+    Base for user-defined objects that subclass immutable constant types
+    (int, float, str). Each builtin base has a subclass below that also
+    inherits the builtin's constant VT, so its slots and methods come through
+    the MRO, as for UserDefinedListVariable and ListVariable.
     """
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
-        super().__init__(value, **kwargs)
-        for base in type(value).__mro__:
-            if base in _CONSTANT_BASE_TYPES:
-                self._constant_base = base
-                self._base_methods = _constant_base_methods[base]
-                break
-        else:
-            raise AssertionError(f"No constant base type found in MRO of {type(value)}")
+    _constant_base: type
 
     def as_python_constant(self) -> Any:
         return self.value
@@ -5196,6 +5219,30 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
     def as_proxy(self) -> Any:
         # Put the plain builtin in the graph, not the user subclass instance.
         return self._constant_base(self.value)
+
+    @staticmethod
+    def cls_for(value_type: type) -> "type[UserDefinedConstantVariable]":
+        base = next(b for b in value_type.__mro__ if b in _CONSTANT_BASE_TYPES)
+        return {
+            int: UserDefinedIntVariable,
+            float: UserDefinedFloatVariable,
+            str: UserDefinedStrVariable,
+        }[base]
+
+
+class UserDefinedIntVariable(UserDefinedConstantVariable, IntConstantVariable):
+    _constant_base = int
+    _base_methods = _constant_base_methods[int]
+
+
+class UserDefinedFloatVariable(UserDefinedConstantVariable, FloatConstantVariable):
+    _constant_base = float
+    _base_methods = _constant_base_methods[float]
+
+
+class UserDefinedStrVariable(UserDefinedConstantVariable, StrConstantVariable):
+    _constant_base = str
+    _base_methods = _constant_base_methods[str]
 
 
 class IntWrapperVariable(UserDefinedObjectVariable):
@@ -5488,12 +5535,8 @@ class DefaultDictVariable(ConstDictVariable):
 
         https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2233-L2254
         """
-        from .constant import ConstantVariable
 
-        if (
-            istype(self.default_factory, ConstantVariable)
-            and self.default_factory.value is None
-        ):
+        if self.default_factory.is_constant_none():
             raise_observed_exception(KeyError, tx, args=[key])
         default_var = self.default_factory.call_function(tx, [], {})
         self.call_method(tx, "__setitem__", [key, default_var], {})
@@ -5641,7 +5684,7 @@ class DefaultDictVariable(ConstDictVariable):
             if len(args) != 2:
                 raise_args_mismatch(tx, name, "2 args", f"{len(args)} args")
             if (
-                istype(args[0], ConstantVariable) and args[0].value == "default_factory"
+                args[0].is_constant_match("default_factory")
             ) and self.is_supported_factory(args[1]):
                 self.default_factory = args[1]
                 tx.output.side_effects.store_attr(

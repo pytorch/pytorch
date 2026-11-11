@@ -865,7 +865,7 @@ class SideEffects:
             user_cls,
             variables.user_defined._CONSTANT_BASE_TYPES,
         ):
-            variable_cls = variables.UserDefinedConstantVariable
+            variable_cls = variables.UserDefinedConstantVariable.cls_for(user_cls)
         elif variables.InspectVariable.is_matching_class(user_cls):
             variable_cls = variables.InspectVariable
         elif variables.SimpleNamespaceVariable.is_matching_cls(user_cls):
