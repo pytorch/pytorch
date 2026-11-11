@@ -8,7 +8,7 @@ from typing import Any
 
 import torch
 from torch._dynamo.utils import counters, is_node_meta_valid
-from torch._logging import trace_structured
+from torch._logging import trace_structured, warning_once
 from torch.fx.experimental.symbolic_shapes import free_symbols, statically_known_true
 from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
@@ -1803,6 +1803,10 @@ def generate_fusion_from_config(config_options: dict[str, Any], pre_grad=True):
             continue
         fusion_cls = registry.get(name)
         if fusion_cls is None:
+            if pre_grad and name in POST_GRAD_FUSIONS:
+                # The post-grad pass honors this option; see
+                # group_batch_fusion_passes.
+                continue
             log.warning(
                 "Skipping %s fusion option %s: not registered for this stage",
                 "pre-grad" if pre_grad else "post-grad",
@@ -1829,21 +1833,33 @@ def group_batch_fusion_passes(
             pre_grad=True,
         )
     else:
+        post_grad_options = dict(config.post_grad_fusion_options)
+        # A pre-grad option for a fusion that only exists post grad must keep
+        # working; run it post grad instead of silently dropping it.
+        for name, options in config.pre_grad_fusion_options.items():
+            if name in POST_GRAD_FUSIONS and name not in post_grad_options:
+                warning_once(
+                    log,
+                    "Fusion option %s is post-grad; running it post grad. "
+                    "Move it from pre_grad_fusion_options to "
+                    "post_grad_fusion_options.",
+                    name,
+                )
+                post_grad_options[name] = options
         fbgemm_fusion_keys = [
             x
-            for x in config.post_grad_fusion_options
+            for x in post_grad_options
             if (
                 x not in OPTIMUS_EXCLUDE_POST_GRAD
-                and config.post_grad_fusion_options[x].get("require_fbgemm", False)
+                and post_grad_options[x].get("require_fbgemm", False)
             )
         ]
         fbgemm_fusions = {
-            fusion: config.post_grad_fusion_options[fusion]
-            for fusion in fbgemm_fusion_keys
+            fusion: post_grad_options[fusion] for fusion in fbgemm_fusion_keys
         }
         non_fbgemm_fusions = {
-            fusion: config.post_grad_fusion_options[fusion]
-            for fusion in config.post_grad_fusion_options
+            fusion: post_grad_options[fusion]
+            for fusion in post_grad_options
             if fusion not in fbgemm_fusion_keys
         }
         fusions += generate_fusion_from_config(non_fbgemm_fusions, pre_grad=False)
