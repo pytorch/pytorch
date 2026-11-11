@@ -305,15 +305,9 @@ class FlexKernelOptions(TypedDict, total=False):
     """ROCm-specific waves per execution unit."""
 
     NUM_XCDS: NotRequired[int]
-    """Number of XCDs that the Triton forward and backward kernels remap their
-    programs across, so that the blocks of one (batch, head) share an XCD's L2.
-    Intended for multi-XCD AMD GPUs; a value set on other GPUs is honored but
-    not tuned for. Use the fwd_/bwd_ prefixes to set it for one direction.
-    Defaults to the device's XCD count on supported ROCm GPUs (currently
-    gfx950) and to 0 elsewhere; 0 disables the remap. The remap is skipped for
-    grids over HIP's grid-size limit; with dynamic shapes this adds a guard on
-    the input sizes, and with unbacked sizes the remap is skipped. Not used by
-    the decode, FLASH or FLYDSL kernels."""
+    """ROCm-specific number of XCDs to remap Triton kernel programs across, so
+    the blocks of one (batch, head) share an XCD's L2. Defaults to 8 on gfx950
+    and off elsewhere; 0 disables it. May add a size guard with dynamic shapes."""
 
     BACKEND: NotRequired[_Backend]
     """Selects a specific kernel backend.
@@ -2191,6 +2185,12 @@ def _apply_kernel_options(
                 f"Invalid BACKEND value '{kernel_options['BACKEND']}'. "
                 f"Must be one of {valid_backends}"
             )
+
+    for name, num_xcds in kernel_options.items():
+        if name in ("NUM_XCDS", "fwd_NUM_XCDS", "bwd_NUM_XCDS") and (
+            type(num_xcds) is not int or num_xcds < 0
+        ):
+            raise ValueError(f"{name} must be a non-negative int, got {num_xcds!r}")
 
     kernel_options.setdefault("BACKEND", "AUTO")
     kernel_options.setdefault("PRESCALE_QK", False)
