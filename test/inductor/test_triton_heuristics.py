@@ -2492,6 +2492,89 @@ class TestMakeLaunchersMemory(TestCase):
         self.assertEqual(len(fake_self.launchers), 1)
 
 
+class TestROCmReductionHeuristic(TestCase):
+    @staticmethod
+    def _hip_device():
+        return DeviceProperties(
+            type="hip",
+            index=0,
+            multi_processor_count=256,
+            cc="gfx950",
+            major=9,
+            regs_per_multiprocessor=65536,
+            max_threads_per_multi_processor=2048,
+            max_threads_per_block=1024,
+            warp_size=64,
+        )
+
+    def _outer(self, x, r, num_load=1):
+        from torch._inductor.heuristics.triton_codegen.reduction import (
+            ROCmReductionHeuristic,
+        )
+        from torch._inductor.runtime.hints import ReductionHint
+
+        cfgs = ROCmReductionHeuristic().get_configs(
+            size_hints={"x": x, "r0_": r},
+            inductor_meta={
+                "reduction_hint": ReductionHint.OUTER,
+                "num_load": num_load,
+            },
+            triton_meta={"device": self._hip_device()},
+        )
+        self.assertEqual(len(cfgs), 1)
+        c = cfgs[0]
+        return c.kwargs["XBLOCK"], c.kwargs["R0_BLOCK"], c.num_warps
+
+    def test_outer_config(self):
+        # single-load, large x: wide x / short r tile
+        self.assertEqual(self._outer(1048576, 2048), (512, 8, 2))
+        # single-load, mid-size x: too few programs at 512 wide, keep XBLOCK=64
+        self.assertEqual(self._outer(16384, 256), (64, 8, 4))
+        self.assertEqual(self._outer(524288, 2048), (64, 8, 4))
+        # small x: shrink XBLOCK to keep >= 256 programs, grow RBLOCK
+        self.assertEqual(self._outer(2048, 256), (8, 256, 8))
+        self.assertEqual(self._outer(256, 4096), (1, 2048, 8))
+        # multi-load: tile scales down with the number of loads
+        self.assertEqual(self._outer(1048576, 2048, num_load=2), (64, 32, 4))
+        self.assertEqual(self._outer(1048576, 2048, num_load=5), (64, 8, 4))
+
+    def test_persistent_inner_many_loads(self):
+        from torch._inductor.heuristics.triton_codegen.reduction import (
+            ROCmReductionHeuristic,
+        )
+        from torch._inductor.runtime.hints import ReductionHint
+
+        def cfg(num_load):
+            cfgs = ROCmReductionHeuristic().get_persistent_configs(
+                size_hints={"x": 8388608, "r0_": 256},
+                reduction_hint=ReductionHint.INNER,
+                inductor_meta={"num_load": num_load},
+                triton_meta={"device": self._hip_device()},
+            )
+            return [(c.kwargs["XBLOCK"], c.num_warps) for c in cfgs]
+
+        # many loads: default plus one row per program with two warps, autotuned
+        self.assertEqual(cfg(11), cfg(4) + [(1, 2)])
+        self.assertEqual(len(cfg(4)), 1)
+
+    @unittest.skipIf(not (torch.version.hip and HAS_GPU_AND_TRITON), "ROCm only")
+    def test_column_sum_dynamic_matches_eager(self):
+        for dtype in (torch.bfloat16, torch.float32):
+            for m in (1000, 65537, 1048573):
+                x = torch.randn(m, 256, device=GPU_TYPE, dtype=dtype)
+                y = torch.randn(m, 256, device=GPU_TYPE, dtype=dtype)
+                fn = torch.compile(
+                    lambda a, b: ((a.float() * b.float()).sum(0), a.float().sum(0)),
+                    dynamic=True,
+                )
+                ref = (
+                    (x.double() * y.double()).sum(0).float(),
+                    x.double().sum(0).float(),
+                )
+                # fp32 accumulation over up to 1M rows: reorder error ~1e-6 of sqrt(m)
+                torch.testing.assert_close(fn(x, y), ref, rtol=1e-3, atol=1e-2)
+
+
 if __name__ == "__main__":
     if IS_LINUX:
         run_tests()
