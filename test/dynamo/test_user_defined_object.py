@@ -3,6 +3,7 @@
 import _json
 import copy
 import dataclasses
+import datetime
 import os
 import re
 import sys
@@ -856,6 +857,187 @@ class TestUserDefinedClassDict(TestCase):
 
 class TestClassSetattr(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_set_doc(self):
+        def fn():
+            class X:
+                "elephant"
+
+            X.__doc__ = "banana"
+
+            try:
+                type(list).__dict__["__doc__"].__set__(list, "blah")
+            except TypeError as e:
+                set_error = str(e)
+
+            try:
+                type(X).__dict__["__doc__"].__delete__(X)
+            except TypeError as e:
+                delete_error = str(e)
+
+            return X.__doc__, set_error, delete_error
+
+        def type_doc_error(operation):
+            try:
+                operation()
+            except TypeError as e:
+                return str(e)
+            raise AssertionError("expected type.__doc__ descriptor to raise TypeError")
+
+        expected_errors = (
+            type_doc_error(
+                lambda: type(list).__dict__["__doc__"].__set__(list, "blah")
+            ),
+            type_doc_error(
+                lambda: type.__dict__["__doc__"].__delete__(type("X", (), {}))
+            ),
+        )
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, ("banana", *expected_errors))
+
+    def test_class_doc_setattr_persists(self):
+        class MyClass:
+            "original"
+
+        def fn():
+            MyClass.__doc__ = "updated"
+            return MyClass.__doc__
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), "updated")
+        self.assertEqual(MyClass.__doc__, "updated")
+
+    def test_class_doc_setattr_cache_hit(self):
+        class MyClass:
+            "original"
+
+        def fn(doc):
+            MyClass.__doc__ = doc
+            return MyClass.__doc__ + 1
+
+        counter = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        first = torch.tensor(1.0)
+        second = torch.tensor(2.0)
+        self.assertEqual(compiled(first), first + 1)
+        self.assertEqual(compiled(second), second + 1)
+        self.assertEqual(MyClass.__doc__, second)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_class_doc_descriptor_setter_persists(self):
+        class MyClass:
+            "original"
+
+        def fn(doc):
+            type.__dict__["__doc__"].__set__(MyClass, doc)
+            return MyClass.__doc__ + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        doc = torch.tensor(1.0)
+        self.assertEqual(compiled(doc), doc + 1)
+        self.assertEqual(MyClass.__doc__, doc)
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_trace_local_class_doc_dynamic_value_graph_breaks(self):
+        def fn(doc):
+            class MyClass:
+                "original"
+
+            MyClass.__doc__ = doc
+            return MyClass.__doc__
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(Unsupported):
+            compiled(torch.tensor(1.0))
+
+    def test_namedtuple_tree_map_class_doc_set(self):
+        from collections import namedtuple
+
+        from torch.utils._pytree import tree_map
+
+        Point = namedtuple("Point", ["x"])
+        original_doc = Point.__doc__
+
+        def fn(x):
+            result = tree_map(lambda value: value + 1, Point(x))
+            type(result).__doc__ = "updated"
+            return result.x + 1
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.tensor(1.0)
+        self.assertEqual(compiled(x), x + 2)
+        self.assertEqual(Point.__doc__, "updated")
+        self.assertNotEqual(Point.__doc__, original_doc)
+
+    def test_builtin_mutable_class_doc_set_graph_breaks(self):
+        import builtins
+
+        if not hasattr(builtins, "ExceptionGroup"):
+            self.skipTest("ExceptionGroup is unavailable")
+
+        original_doc = ExceptionGroup.__doc__
+
+        def fn():
+            type.__dict__["__doc__"].__set__(ExceptionGroup, "updated")
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(Unsupported):
+            compiled()
+        self.assertEqual(ExceptionGroup.__doc__, original_doc)
+
+    def test_immutable_non_builtin_class_doc_set_raises(self):
+        def fn():
+            try:
+                type.__dict__["__doc__"].__set__(datetime.date, "updated")
+            except TypeError as error:
+                return str(error)
+            raise AssertionError("expected type.__doc__ descriptor to raise TypeError")
+
+        expected = "cannot set '__doc__' attribute of immutable type 'date'"
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), expected)
+
+    def test_class_doc_descriptor_is_not_mutated_during_trace(self):
+        class DocDescriptor:
+            def __get__(self, obj, owner):
+                return "descriptor doc"
+
+        doc_descriptor = DocDescriptor()
+
+        class MyClass:
+            __doc__ = doc_descriptor
+
+        seen_during_compile = []
+
+        def backend(graph, example_inputs):
+            seen_during_compile.append(MyClass.__dict__["__doc__"] is doc_descriptor)
+            return graph.forward
+
+        def fn(doc):
+            MyClass.__doc__ = doc
+            return doc + 1
+
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        doc = torch.tensor(1.0)
+        self.assertEqual(compiled(doc), doc + 1)
+        self.assertEqual(seen_during_compile, [True])
+
+    def test_custom_metaclass_doc_set_graph_breaks(self):
+        class Meta(type):
+            def __setattr__(cls, name, value):
+                raise AssertionError("custom metaclass setter ran during tracing")
+
+        class MyClass(metaclass=Meta):
+            "original"
+
+        def fn():
+            MyClass.__doc__ = "updated"
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(Unsupported):
+            compiled()
+        self.assertEqual(MyClass.__doc__, "original")
 
     def test_setattr_class_attribute(self):
         class MyModule:
