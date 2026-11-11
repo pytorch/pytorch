@@ -28,6 +28,22 @@ from torch.testing._internal.common_utils import (
 _constant_vt_capture: list[VariableTracker] = []
 
 
+class _StrSubclass(str):  # noqa: SLOT000
+    pass
+
+
+class _IntSubclass(int):
+    pass
+
+
+class _FloatSubclass(float):
+    pass
+
+
+_GLOBAL_STR_SUBCLASS = _StrSubclass("g")
+_GLOBAL_INT_SUBCLASS = _IntSubclass(3)
+
+
 def _capture_constant_vt(ctx) -> None:
     tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
     flag_vt = tx.symbolic_locals.get("flag")
@@ -699,9 +715,9 @@ class LazyConstantVariableTests(TestCase):
 class ComputedLazyConstantTests(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def _check(self, fn, arg_sets, expected_frames):
+    def _check(self, fn, arg_sets, expected_frames, fullgraph=False):
         counter = CompileCounter()
-        opt_fn = torch.compile(fn, backend=counter)
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=fullgraph)
         for args in arg_sets:
             eager = fn(*args)
             compiled = opt_fn(*args)
@@ -1105,6 +1121,36 @@ class ComputedLazyConstantTests(TestCase):
             return t.sin(), a + b
 
         self._check(fn, [(t, 1, 2), (t, 3, 4)], expected_frames=2)
+
+    def test_sourceless_constant_subclass_operand_realizes(self):
+        # Output bytecode cannot rebuild a subclass instance created in the
+        # frame, so these fall back to guarding the lazy operand's value
+        t = torch.ones(2)
+        cases = [
+            (lambda t, a: (t.sin(), _StrSubclass("p") + a), "xyz", 3),
+            (lambda t, a: (t.sin(), a + _StrSubclass("p")), "xyz", 3),
+            (lambda t, a: (t.sin(), (_StrSubclass("p") + a) + a), "xyz", 3),
+            (lambda t, a: (t.sin(), _StrSubclass("p") == a), "xpz", 3),
+            (lambda t, a: (t.sin(), _IntSubclass(2) * a), (5, 6, 7), 2),
+            (lambda t, a: (t.sin(), _FloatSubclass(0.5) + a), (1.5, 2.5, 3.5), 2),
+        ]
+        for i, (fn, values, expected_frames) in enumerate(cases):
+            with self.subTest(case=i):
+                torch._dynamo.reset()
+                arg_sets = [(t, v) for v in values]
+                self._check(fn, arg_sets, expected_frames, fullgraph=True)
+
+    def test_sourced_constant_subclass_operand_does_not_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            (lambda t, a: (t.sin(), _GLOBAL_STR_SUBCLASS + a), "xyz"),
+            (lambda t, a: (t.sin(), _GLOBAL_INT_SUBCLASS * a), (5, 6, 7)),
+        ]
+        for i, (fn, values) in enumerate(cases):
+            with self.subTest(case=i):
+                torch._dynamo.reset()
+                arg_sets = [(t, v) for v in values]
+                self._check(fn, arg_sets, expected_frames=1, fullgraph=True)
 
     def test_computed_constant_in_branch_recompiles(self):
         t = torch.ones(2)
