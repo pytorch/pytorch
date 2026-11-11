@@ -709,14 +709,18 @@ class TestTensorCreation(TestCase):
         buf = torch.randn(numel + offset, device=device, dtype=torch.bfloat16)
         return buf[offset:].view(shape)
 
-    def _check_chunk_cat_bf16_to_fp32(self, tensors, dim, num_chunks):
+    def _chunk_cat_bf16_to_fp32(self, tensors, dim, num_chunks):
+        # Returns the kernel's output and the expected one, as int32 bits.
         expected = torch._chunk_cat([t.float() for t in tensors], dim, num_chunks)
         # Filled with a bit pattern no bf16 -> fp32 cast produces (a cast leaves
         # the low 16 bits zero), so an element the kernel never writes fails.
         out = torch.empty_like(expected)
         out.view(torch.int32).fill_(-1)
         torch._chunk_cat(tensors, dim, num_chunks, out=out)
-        self.assertEqual(out.view(torch.int32), expected.view(torch.int32))
+        return out.view(torch.int32), expected.view(torch.int32)
+
+    def _check_chunk_cat_bf16_to_fp32(self, tensors, dim, num_chunks):
+        self.assertEqual(*self._chunk_cat_bf16_to_fp32(tensors, dim, num_chunks))
 
     @onlyCUDA
     def test_chunk_cat_bf16_to_fp32_out(self, device):
@@ -733,7 +737,10 @@ class TestTensorCreation(TestCase):
             sizes, range(4), (0, 1), (1, 3)
         ):
             lead = [bf16((shift * num_chunks,), 1 - src_off)] if shift else []
-            check(lead + [bf16((size * num_chunks,), src_off)], 0, num_chunks)
+            with self.subTest(
+                size=size, shift=shift, src_off=src_off, num_chunks=num_chunks
+            ):
+                check(lead + [bf16((size * num_chunks,), src_off)], 0, num_chunks)
         # Small chunks next to a vectorized one in the same launch.
         small = [bf16((n * 8,), n % 2) for n in (1, 5, 129, 1025, vec - 1)]
         check(small + [bf16(((4 * vec + 7) * 8,), 1)] + small, 0, 8)
@@ -745,14 +752,16 @@ class TestTensorCreation(TestCase):
         # a misaligned dst, a partly padded last chunk, both src alignments.
         for src_off in (0, 1):
             check([bf16((5,)), bf16((2**21 + 3,), src_off)], 0, 8)
-        # dim=1: one chunk per row, above and below the threshold.
+        # dim=1: each row is split into two chunks, at, below and above the
+        # threshold.
         check([bf16((4, 2 * vec)), bf16((4, 7, 3)), bf16((4, 2 * vec + 3))], 1, 2)
-        # Every bf16 bit pattern (NaN payloads, infinities, -0, subnormals),
-        # from an aligned and a misaligned src.
+        # Every bf16 bit pattern (NaN payloads, infinities, -0, subnormals), in
+        # four 16-byte aligned dst chunks: with an aligned src, all go through
+        # the vector loads; with a misaligned src, all through per-element loads.
         bits = torch.arange(-(2**15), 2**15, device=device, dtype=torch.int32)
         all_bf16 = bits.to(torch.int16).view(torch.bfloat16)
         for off in (0, 1):
-            check([bf16((3,)), torch.cat([all_bf16[:off], all_bf16])[off:]], 0, 4)
+            check([torch.cat([all_bf16[:off], all_bf16])[off:]], 0, 4)
 
     @onlyCUDA
     @largeTensorTest("28GB", "cuda")
@@ -763,7 +772,14 @@ class TestTensorCreation(TestCase):
         bf16 = partial(self._bf16_view, device)
         tensors = [bf16((3,)), bf16((2**31 + 2**20 + 3,), 1), bf16((5,))]
         for num_chunks in (1, 2):
-            self._check_chunk_cat_bf16_to_fp32(tensors, 0, num_chunks)
+            out, expected = self._chunk_cat_bf16_to_fp32(tensors, 0, num_chunks)
+            # assertEqual's mismatch report would need far more memory than
+            # this test.
+            if not torch.equal(out, expected):
+                first = (out != expected).to(torch.uint8).argmax().item()
+                self.fail(f"num_chunks={num_chunks}: first mismatch at {first}")
+            # Free them before the next iteration allocates its own.
+            del out, expected
 
     def test_cat_out_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8))
