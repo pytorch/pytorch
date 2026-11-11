@@ -17,12 +17,14 @@ import logging
 
 import torch
 import torch.fx as fx
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,
     optimization_hint,
+    statically_known_true,
 )
-from torch.utils._triton import has_triton
+from torch.utils._triton import has_triton, has_triton_package
 
 
 log = logging.getLogger(__name__)
@@ -32,7 +34,8 @@ _MAX_ROWS = 65536
 _MIN_ROW_WIDTH = 64
 
 
-if has_triton():
+# has_triton_package() does not initialize CUDA at import, unlike has_triton()
+if has_triton_package():
     import triton
     import triton.language as tl
 
@@ -108,12 +111,15 @@ if has_triton():
         )
 
 
-@torch.library.custom_op("inductor::sorted_segment_index_add", mutates_args=())
+@torch.library.custom_op(
+    "inductor::sorted_segment_index_add", mutates_args=(), device_types="cuda"
+)
 def sorted_segment_index_add(
     src: torch.Tensor, index: torch.Tensor, num_rows: int
 ) -> torch.Tensor:
     """``out[index[i]] += src[i]`` for ``src`` of shape [M, D]; returns fp32 [num_rows, D]."""
     M, D = src.shape
+    torch._check(index.numel() == M)
     out = torch.zeros(num_rows, D, device=src.device, dtype=torch.float32)
     if M == 0:
         return out
@@ -144,9 +150,20 @@ def _hint(x):
     return int(x)
 
 
+def _call(graph: fx.Graph, target, args) -> fx.Node:
+    node = graph.call_function(target, args)
+    node.meta["val"] = target(
+        *(a.meta["val"] if isinstance(a, fx.Node) else a for a in args)
+    )
+    return node
+
+
 def sorted_segment_scatter_pass(graph: fx.Graph) -> int:
     """Rewrite qualifying index_put(accumulate=True) nodes; returns the number rewritten."""
     if not has_triton() or torch.are_deterministic_algorithms_enabled():
+        return 0
+    # the op launches a Python Triton kernel, which AOTInductor/cpp_wrapper cannot package
+    if config.cpp_wrapper or config.fx_wrapper:
         return 0
     min_index_size = config.sorted_segment_scatter_min_index_size
     n_rewritten = 0
@@ -165,7 +182,7 @@ def sorted_segment_scatter_pass(graph: fx.Graph) -> int:
             continue
         if iv.dim() != 1 or bv.dim() < 2 or sv.dim() != bv.dim():
             continue
-        if bv.device.type not in ("cuda", "hip") or iv.device != bv.device:
+        if bv.device.type != "cuda" or iv.device != bv.device:
             continue
         if sv.device != bv.device or bv.dtype not in (
             torch.float32,
@@ -180,37 +197,44 @@ def sorted_segment_scatter_pass(graph: fx.Graph) -> int:
             continue
         if list(bv.shape[1:]) != list(sv.shape[1:]):
             continue
+        # index_put broadcasts a [1, *T] source over the index; the op needs one row per index
+        if not statically_known_true(sv.shape[0] == iv.shape[0]):
+            continue
         n = bv.shape[0]
-        m = _hint(sv.shape[0])
+        m = _hint(iv.shape[0])
         width = 1
         for d in bv.shape[1:]:
             width *= d
         if m is None or m < min_index_size or n > _MAX_ROWS or width < _MIN_ROW_WIDTH:
             continue
         with graph.inserting_before(node):
-            src2 = graph.call_function(
-                aten.reshape.default, (src, [sv.shape[0], width])
+            src2 = _call(graph, aten.reshape.default, (src, [sv.shape[0], width]))
+            seg = _call(
+                graph,
+                torch.ops.inductor.sorted_segment_index_add.default,
+                (src2, idx, n),
             )
-            seg = graph.call_function(
-                torch.ops.inductor.sorted_segment_index_add.default, (src2, idx, n)
-            )
-            seg = graph.call_function(aten.reshape.default, (seg, list(bv.shape)))
+            seg = _call(graph, aten.reshape.default, (seg, list(bv.shape)))
             if bv.dtype == torch.float32:
-                new = graph.call_function(aten.add.Tensor, (base, seg))
+                new = _call(graph, aten.add.Tensor, (base, seg))
             else:
-                b32 = graph.call_function(
-                    torch.ops.prims.convert_element_type.default, (base, torch.float32)
+                b32 = _call(
+                    graph,
+                    torch.ops.prims.convert_element_type.default,
+                    (base, torch.float32),
                 )
-                new = graph.call_function(aten.add.Tensor, (b32, seg))
-                new = graph.call_function(
-                    torch.ops.prims.convert_element_type.default, (new, bv.dtype)
+                new = _call(graph, aten.add.Tensor, (b32, seg))
+                new = _call(
+                    graph,
+                    torch.ops.prims.convert_element_type.default,
+                    (new, bv.dtype),
                 )
         new.meta.update(node.meta)
         node.replace_all_uses_with(new)
         graph.erase_node(node)
         n_rewritten += 1
+        counters["inductor"]["sorted_segment_scatter_applied"] += 1
     if n_rewritten:
-        graph.eliminate_dead_code()
         log.debug("sorted_segment_scatter: rewrote %d index_put nodes", n_rewritten)
     return n_rewritten
 
