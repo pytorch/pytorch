@@ -7695,8 +7695,8 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
 
     if return_mean:
         mean.realize()
-        # The Welford mean of zero elements depends on the codegen path (0 from
-        # the accumulator identity, nan from sum / rnumel); eager returns nan.
+        # Replace the mean with nan when the reduction is empty, to match eager.
+        # The Welford mean is 0 there on most codegen paths.
         # Use value ranges rather than sympy assumptions: under
         # backed_size_oblivious, backed sizes are positive symbols that can be 0.
         rnumel_range = V.graph.sizevars.shape_env.bound_sympy(rnumel)
