@@ -6322,6 +6322,67 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertTrue(torch._C._in_kernel_invocation())
             self.assertFalse(torch._C._meta_in_tls_dispatch_include())
 
+    @parametrize("namespace", ("aten", "prims"))
+    def test_fake_fallback_python_impl_predicates(self, namespace):
+        # Compare C++ predicates with Python predicates and mirrored registry
+        # membership with its Python sources, not the full dispatch decision.
+        from torch._library.utils import lookup_op
+        from torch._subclasses.fake_impls import op_implementations_checks
+
+        cia = torch._C.DispatchKey.CompositeImplicitAutograd
+        # alias's op_impl only keeps the dispatch keys, which the fallback
+        # does too, so the C++ side runs its C++ Meta kernel
+        mismatched = set()
+        for name in torch._C._dispatch_get_all_op_names():
+            if not name.startswith(f"{namespace}::"):
+                continue
+            op = lookup_op(name)
+            python = (
+                cia in op.py_kernels
+                or (namespace == "prims" and hasattr(op, "prim_meta_impl"))
+                or any(check(op) for check, _ in op_implementations_checks)
+            )
+            names = (op._schema.name, op._schema.overload_name)
+            if torch._C._cpp_fake_not_implemented(*names) != python:
+                mismatched.add(op.name())
+        self.assertEqual(mismatched, {"aten::alias"} if namespace == "aten" else set())
+
+    @parametrize(
+        "schema,tags,expected",
+        (
+            ("op(Tensor x) -> Tensor", (), False),
+            ("op(int n) -> Tensor", (), True),
+            ("op(Any payload) -> Tensor", (), True),
+            ("op(Tensor x) -> Tensor", (torch.Tag.dynamic_output_shape,), True),
+            ("op(Tensor x) -> Tensor", (torch.Tag.data_dependent_output,), True),
+        ),
+    )
+    def test_fake_fallback_python_impl_predicates_custom(self, schema, tags, expected):
+        from torch._subclasses.fake_impls import op_implementations_checks
+
+        with torch.library._scoped_library("_test_fake_predicates", "DEF") as lib:
+            lib.define(schema, tags=tags)
+            op = torch.ops._test_fake_predicates.op.default
+            self.assertEqual(
+                any(check(op) for check, _ in op_implementations_checks), expected
+            )
+            self.assertEqual(
+                torch._C._cpp_fake_not_implemented("_test_fake_predicates::op", ""),
+                expected,
+            )
+
+    def test_fake_fallback_python_impl_custom_registration(self):
+        query = torch._C._cpp_fake_not_implemented
+        ns = "_test_fake_impl_query"
+        name = f"{ns}::op"
+        with torch.library._scoped_library(ns, "DEF") as lib:
+            lib.define("op(Tensor x) -> Tensor")
+            self.assertFalse(query(name, ""))
+            with torch.library._scoped_library(ns, "FRAGMENT") as impl_lib:
+                torch.library.register_fake(name, lambda x: x.clone(), lib=impl_lib)
+                self.assertTrue(query(name, ""))
+            self.assertFalse(query(name, ""))
+
     def test_fake_fallback_static_shape_decomps(self):
         from torch._decomp import decomposition_table, is_torch_decomp_decomposition
         from torch._library.utils import lookup_op

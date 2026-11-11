@@ -247,6 +247,10 @@ def register_op_impl(
                 raise AssertionError(
                     f"run_impl_check must be callable, got {type(run_impl_check)}"
                 )
+            # cppFakeNotImplemented in aten/src/ATen/FakeFallbackKernel.cpp
+            # re-implements the built-in predicates defined here; keep them in
+            # sync. Runtime callable registrations/removals are not mirrored.
+            # test_fake_fallback_python_impl_predicates checks aten and prims.
             op_implementations_checks.append((run_impl_check, op_impl))
 
         return op_impl
