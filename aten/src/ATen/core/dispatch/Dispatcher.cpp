@@ -1,5 +1,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
+#include <algorithm>
 #include <list>
 #include <utility>
 #include <c10/util/env.h>
@@ -40,6 +41,54 @@ static thread_local int64_t dispatch_trace_nesting_value_;
 void dispatch_trace_nesting_incr() { ++dispatch_trace_nesting_value_; }
 void dispatch_trace_nesting_decr() { --dispatch_trace_nesting_value_; }
 int64_t dispatch_trace_nesting_value() { return dispatch_trace_nesting_value_; }
+
+DispatchCaptureSink::~DispatchCaptureSink() = default;
+
+namespace impl {
+std::atomic<int> dispatch_capture_sink_count{0};
+
+static thread_local DispatchCaptureSink* tls_dispatch_capture_sink_ = nullptr;
+
+DispatchCaptureSink* tls_dispatch_capture_sink() {
+  return tls_dispatch_capture_sink_;
+}
+} // namespace impl
+
+DispatchCaptureSink* setDispatchCaptureSink(DispatchCaptureSink* sink) {
+  auto* prev = impl::tls_dispatch_capture_sink_;
+  if (sink != nullptr && prev == nullptr) {
+    impl::dispatch_capture_sink_count.fetch_add(1, std::memory_order_relaxed);
+  } else if (sink == nullptr && prev != nullptr) {
+    impl::dispatch_capture_sink_count.fetch_sub(1, std::memory_order_relaxed);
+  }
+  impl::tls_dispatch_capture_sink_ = sink;
+  return prev;
+}
+
+void Dispatcher::callBoxedWithCaptureSink(
+    const OperatorHandle& op,
+    DispatchCaptureSink& sink,
+    DispatchKeySet dispatchKeySet,
+    const KernelFunction& kernel,
+    bool isRedispatch,
+    Stack* stack) {
+  // Operators registered without a schema only know their stack.
+  const auto clamp = [&](size_t n) { return std::min(n, stack->size()); };
+  const size_t num_inputs =
+      op.hasSchema() ? clamp(op.schema().arguments().size()) : stack->size();
+  sink.onKernelEnter(
+      op,
+      dispatchKeySet,
+      isRedispatch,
+      c10::ArrayRef<const c10::IValue>(
+          stack->data() + (stack->size() - num_inputs), num_inputs));
+  impl::DispatchCaptureExitGuard exitGuard(sink, op);
+  kernel.callBoxed(op, dispatchKeySet, stack);
+  const size_t num_outputs =
+      op.hasSchema() ? clamp(op.schema().returns().size()) : stack->size();
+  exitGuard.finish(c10::ArrayRef<const c10::IValue>(
+      stack->data() + (stack->size() - num_outputs), num_outputs));
+}
 
 namespace detail {
 
