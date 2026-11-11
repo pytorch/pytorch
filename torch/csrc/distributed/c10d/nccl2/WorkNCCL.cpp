@@ -19,10 +19,6 @@
 
 namespace c10d::nccl2 {
 
-namespace {
-std::atomic<uint64_t> nextCompletionKey{1};
-} // namespace
-
 NCCLEventPool::NCCLEventPool(
     bool cacheEnabled,
     bool timingEnabled,
@@ -129,7 +125,6 @@ WorkNCCL::State::State(
           at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),
       workStartTime(std::chrono::steady_clock::now()),
       timeout(timeout),
-      completionKey(nextCompletionKey.fetch_add(1, std::memory_order_relaxed)),
       timingEnabled(comm->collectivesTimingEnabled()),
       events(std::make_shared<Events>(comm->getEventPool(), timingEnabled)),
       durationStartEvents(events),
@@ -195,54 +190,55 @@ bool WorkNCCL::State::setTerminalStatus(WorkStatus terminal_status) {
       terminal_status == WorkStatus::TIMEDOUT ||
       terminal_status == WorkStatus::ERROR);
 
-  WorkResult result = WorkResult::SUCCESS;
-  {
-    std::lock_guard<std::mutex> lock(terminalStatusMutex);
-    WorkStatus current = status();
-    if (current == WorkStatus::COMPLETED || current == WorkStatus::TIMEDOUT ||
-        current == WorkStatus::ERROR) {
-      return false;
-    }
-
-    if (terminal_status == WorkStatus::TIMEDOUT) {
-      result = WorkResult::TIMEOUT;
-      workException = std::make_exception_ptr(C10_BUILD_ERROR(
-          DistBackendError,
-          "Watchdog caught collective operation timeout: NCCL operation "
-          "timed out"));
-    } else if (terminal_status == WorkStatus::ERROR) {
-      result = WorkResult::COMM_ERROR;
-      workException = std::make_exception_ptr(
-          C10_BUILD_ERROR(DistBackendError, "NCCL operation failed"));
-    }
-    workStatus.store(terminal_status, std::memory_order_release);
+  std::lock_guard<std::mutex> lock(terminalStatusMutex);
+  WorkStatus current = status();
+  if (current == WorkStatus::COMPLETED || current == WorkStatus::TIMEDOUT ||
+      current == WorkStatus::ERROR) {
+    return false;
   }
-  futureWorkResult->markCompleted(c10::IValue(static_cast<uint8_t>(result)));
+
+  if (terminal_status == WorkStatus::TIMEDOUT) {
+    workException = std::make_exception_ptr(C10_BUILD_ERROR(
+        DistBackendError,
+        "Watchdog caught collective operation timeout: NCCL operation "
+        "timed out"));
+  } else if (terminal_status == WorkStatus::ERROR) {
+    workException = std::make_exception_ptr(
+        C10_BUILD_ERROR(DistBackendError, "NCCL operation failed"));
+  }
+  workStatus.store(terminal_status, std::memory_order_release);
   return true;
 }
 
-void WorkNCCL::State::notifyCompletion() {
-  // Called once per work, by the queue that popped it as COMPLETED, and only
-  // for success -- a timed-out or failed work reports nothing, because a
-  // consumer that read that as "finished" would lose the very fact a
-  // post-mortem needs.
-  if (!comm->hasCompletionHooks()) {
+void WorkNCCL::State::releaseEphemeralTimeout() {
+  if (ownedEphemeralTimeout.count() > 0 &&
+      !ephemeralTimeoutReleased.exchange(true)) {
+    comm->releaseEphemeralTimeout(ownedEphemeralTimeout);
+  }
+}
+
+void WorkNCCL::State::publishResult() {
+  // Exactly once, by whichever of the watchdog and a caller of the Work's own
+  // status methods gets here first. The future's callbacks run inline and may
+  // take locks of their own, including the GIL, so callers hold no lock --
+  // except reconfigure, which holds reconfigure_mutex_ and revoke_mutex_.
+  if (resultPublished.exchange(true, std::memory_order_acq_rel)) {
     return;
   }
-  std::optional<float> duration;
-  if (timingEnabled) {
-    try {
-      // cudaEventElapsedTime on two events that have already been observed to
-      // complete: no synchronization, and no NCCL call, so it is legal on the
-      // watchdog thread. Stock ProcessGroupNCCL's watchdog calls getDuration()
-      // from its own completion hook for the same reason.
-      duration = getDuration();
-    } catch (const std::exception& e) {
-      TC_LOG(WARNING, comm)
-          << "Cannot measure collective duration: " << e.what();
-    }
+  WorkResult result = WorkResult::SUCCESS;
+  switch (status()) {
+    case WorkStatus::COMPLETED:
+      break;
+    case WorkStatus::TIMEDOUT:
+      result = WorkResult::TIMEOUT;
+      break;
+    case WorkStatus::ERROR:
+      result = WorkResult::COMM_ERROR;
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "publishResult on a work still in flight");
   }
-  comm->runCompletionHooks(completionKey, duration);
+  futureWorkResult->markCompleted(c10::IValue(static_cast<uint8_t>(result)));
 }
 
 WorkNCCL::WorkStatus WorkNCCL::status() const {
@@ -310,7 +306,12 @@ void WorkNCCL::setHostBlocking(bool host_blocking) {
 
 WorkNCCL::WorkStatus WorkNCCL::checkStatus(
     std::optional<std::chrono::milliseconds> timeout) {
-  return state_->checkStatus(timeout);
+  WorkStatus current = state_->checkStatus(timeout);
+  if (current == WorkStatus::COMPLETED || current == WorkStatus::ERROR ||
+      current == WorkStatus::TIMEDOUT) {
+    state_->publishResult();
+  }
+  return current;
 }
 
 WorkNCCL::WorkStatus WorkNCCL::State::checkStatus(
@@ -351,10 +352,8 @@ WorkNCCL::WorkStatus WorkNCCL::State::checkStatus(
   if (status() == WorkStatus::INPROGRESS) {
     try {
       if (events->end->query()) {
-        if (setTerminalStatus(WorkStatus::COMPLETED) &&
-            ownedEphemeralTimeout.count() > 0 &&
-            !ephemeralTimeoutReleased.exchange(true)) {
-          comm->releaseEphemeralTimeout(ownedEphemeralTimeout);
+        if (setTerminalStatus(WorkStatus::COMPLETED)) {
+          releaseEphemeralTimeout();
         }
         return status();
       }
@@ -505,10 +504,6 @@ float WorkNCCL::State::getDuration() {
 
 uint64_t WorkNCCL::getSequencenumber() const {
   return state_->seq;
-}
-
-uint64_t WorkNCCL::getCompletionKey() const {
-  return state_->completionKey;
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
