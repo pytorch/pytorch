@@ -261,6 +261,13 @@ class NIXLTransport(Transport):
             self._progress_thread.start()
 
     def _progress(self) -> None:
+        # Polling needs _operation_lock, which serializes agent calls, so it
+        # never holds the lock across a whole sweep: _poll takes it per transfer
+        # and skips a transfer while another thread holds it, and a drain takes
+        # it for one get_new_notifs call. User calls usually wait for one native
+        # call instead of a sweep, but the lock is not fair, so some still wait
+        # for a sweep, and a call with timeout=0 can miss the lock. Removing the
+        # polling needs NIXL completion and notification callbacks.
         delay = 0.0
         try:
             while True:
@@ -273,9 +280,11 @@ class NIXLTransport(Transport):
                     ):
                         self._progress_thread = None
                         return
-                    done = [work for work in self._notifying if work._poll()]
+                    notifying = list(self._notifying)
+                done = [work for work in notifying if work._poll()]
+                with self._operation_lock:
                     self._notifying.difference_update(done)
-                    if self._available is not None:
+                    if self._available is not None and not self._closed:
                         try:
                             self._drain_notifications()
                         except Exception as failure:
