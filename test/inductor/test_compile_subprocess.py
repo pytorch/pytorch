@@ -326,6 +326,61 @@ class TestSubprocess(TestCase):
         unwrapped = CompiledFxGraphConstantsWithGm(gm).unwrap(_G())
         self.assertIs(unwrapped["c0"], pinned)
 
+    @requires_gpu()
+    def test_pinned_constants_pruned(self):
+        # Names pruned from graph.constants (e.g. by the CPP GEMM template)
+        # must not stay in pinned_constant_names, else unwrap fails on the
+        # deleted module attribute.
+        from collections import Counter
+        from types import SimpleNamespace
+
+        from torch._inductor.output_code import (
+            CompiledFxGraph,
+            CompiledFxGraphConstantsWithGm,
+        )
+        from torch._inductor.utils import BoxedBool
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        gm._x = x = torch.tensor([1.0])
+        # No _pruned attribute on gm: pruned constants are deleted from the
+        # module, like the CPP GEMM template does for weights.
+        graph = SimpleNamespace(
+            cache_key="",
+            cache_path=None,
+            cache_linemap=[],
+            device_types=[],
+            device_idxs=[],
+            mutated_inputs=[],
+            mutated_input_idxs=[],
+            constants={"c1": x},
+            allocated_constant_name={"c1": "_x"},
+            pinned_constant_names={"c0": "_pruned", "c1": "_x"},
+            torchbind_constants={},
+            opaque_value_type_classes={},
+            kernel_free_cudagraph=False,
+            partition_maps=None,
+        )
+        cfg = CompiledFxGraph(
+            None,
+            graph,
+            gm,
+            [],
+            None,
+            {},
+            Counter(),
+            BoxedBool(False),
+            [],
+            (),
+            None,
+            {},
+            (),
+            "",
+            "",
+        )
+        self.assertEqual(cfg.pinned_constant_names, {"c1": "_x"})
+        unwrapped = CompiledFxGraphConstantsWithGm(gm).unwrap(cfg)
+        self.assertIs(unwrapped["c1"], x)
+
 
 if RUN_CPU:
 
