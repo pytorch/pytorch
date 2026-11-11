@@ -5642,6 +5642,11 @@ def forward(self, arg0_1, arg1_1):
         self.assertCountEqual(clusters, [None, (2, 1, 1), (2, 1, 1)])
 
     @requires_gpu
+    @common_utils.decorateIf(
+        unittest.skip("compile-time autotuning only exists in inductor"),
+        lambda params: params["autotune_at_compile_time"]
+        and params["backend"] != "inductor",
+    )
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("autotune_at_compile_time", [True, False])
     def test_triton_kernel_restore_value(self, backend, autotune_at_compile_time):
@@ -8665,6 +8670,11 @@ else:
             add_compiled(x, y).mean()
 
     @requires_gpu
+    @common_utils.decorateIf(
+        unittest.skip("compile-time autotuning only exists in inductor"),
+        lambda params: params["autotune_at_compile_time"]
+        and params["backend"] != "inductor",
+    )
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("autotune_at_compile_time", [True, False])
     def test_triton_kernel_reset_to_zero(self, backend, autotune_at_compile_time):

@@ -9,10 +9,10 @@ from typing import Any
 import torch
 from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._logging import trace_structured
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import free_symbols, statically_known_true
 from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
-from torch.fx.passes.reinplace import _get_view_type, _is_view_op, _ViewType
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
@@ -511,7 +511,7 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
         ] += 1
 
 
-@register_fusion("batch_linear_lhs", pre_grad=False)
+@register_fusion("batch_linear_lhs")
 class BatchLinearLHSFusion(BatchFusion):
     """
     Batch linear left-hand side fusion. This pass tries to fuse the following patterns:
@@ -522,185 +522,113 @@ class BatchLinearLHSFusion(BatchFusion):
     We have a separate pass to eliminate contiguous transpose in a generic way.
     """
 
-    def _addmm_node_can_be_fused(self, node: torch.fx.Node) -> bool:
-        # pyre-fixme[7]: Incompatible return type
-        return (
-            # pyrefly: ignore [bad-return]
-            node.kwargs.get("beta", DEFAULT_BETA) == DEFAULT_BETA
-            and node.kwargs.get("alpha", DEFAULT_ALPHA) == DEFAULT_ALPHA  # type: ignore[return-value]
-        )
-
-    def _is_input_2d(self, node: torch.fx.Node) -> bool:
-        value = node.meta.get("val", node.meta.get("example_value"))
-        return value is not None and len(value.shape) == 2
-
-    @staticmethod
-    def _reaches_user_visible_output(
-        node: torch.fx.Node, graph: torch.fx.Graph
-    ) -> bool:
-        output_node = next(n for n in graph.nodes if n.op == "output")
-        args = output_node.args[0]
-        if not isinstance(args, (tuple, list)):
-            args = (args,)
-        visible_idxs = output_node.meta.get("user_visible_output_idxs")
-        if visible_idxs is None:
-            visible = OrderedSet(arg for arg in args if isinstance(arg, torch.fx.Node))
-        else:
-            visible = OrderedSet(
-                args[i]
-                for i in visible_idxs
-                if i < len(args) and isinstance(args[i], torch.fx.Node)
-            )
-        pending = [node]
-        seen = OrderedSet([node])
-        while pending:
-            cur = pending.pop()
-            multi_output_view = _get_view_type(cur.target) is _ViewType.MultiOutputView
-            for user in cur.users:
-                if user.op == "output" and cur in visible:
-                    return True
-                if _is_view_op(user.target) or (
-                    multi_output_view and user.target is operator.getitem
-                ):
-                    if user not in seen:
-                        seen.add(user)
-                        pending.append(user)
-        return False
-
-    def match(self, node: torch.fx.Node):
-        if CallFunctionVarArgs(aten.mm.default).match(node):
-            input_m, weight_m = node.args
-            bias_m = None
-        elif CallFunctionVarArgs(aten.addmm.default).match(
+    def match(self, node: torch.fx.Node) -> tuple[str, bool, Any] | None:
+        if CallFunctionVarArgs([torch.nn.functional.linear, torch._C._nn.linear]).match(
             node
-        ) and self._addmm_node_can_be_fused(node):
-            bias_m, input_m, weight_m = node.args[:3]
+        ) and is_linear_node_can_be_fused(node):
+            input = get_arg_value(node, 0, "input")
+            weight = get_arg_value(node, 1, "weight")
+            bias = get_arg_value(node, 2, "bias")
+            weight_val = weight.meta["example_value"]
+            # An empty projection adds no GEMM columns or fusion benefit, but
+            # grouping it with non-empty projections can change its eager stride.
+            if not statically_known_true(weight_val.shape[0] > 0):
+                return None
+            # Skip fusion when weight is a tensor subclass that can't handle aten.cat.
+            # fuse() calls torch.cat on the weight example_values, which fails for
+            # subclasses lacking aten.cat dispatch.  Probe it here so subclasses that
+            # do implement aten.cat (e.g. future torchao versions) still get fused.
+            if type(weight_val) not in (torch.Tensor, FakeTensor):
+                try:
+                    _ = torch.cat([weight_val[:1], weight_val[:1]], dim=0)
+                except (RuntimeError, TypeError):
+                    return None
+            bias_tensor = None
+            if bias is not None:
+                bias_tensor = bias.meta.get("example_value")
+                if (
+                    bias_tensor is None
+                    or bias_tensor.ndim != 1
+                    or not statically_known_true(
+                        bias_tensor.shape[0] == weight_val.shape[0]
+                    )
+                ):
+                    return None
+            group_key = ("batch_linear_lhs", bias is not None, input)
         else:
-            return None
-        if not self._is_input_2d(input_m) or not self._is_input_2d(weight_m):  # type: ignore[arg-type]
-            return None
-        # Replacing a mutated mm output with a split view can break autograd.
-        if any(_is_mutable_node(user.target) for user in node.users):
-            return None
-        # as_strided reinterprets the raw storage and would observe the wide
-        # GEMM row stride instead of the eager slice, so do not fuse across it.
-        if any(user.target is aten.as_strided.default for user in node.users):
-            return None
-        weight_val = weight_m.meta["val"]  # type: ignore[union-attr]
-        if not statically_known_true(weight_val.shape[1] > 0):
-            return None
-        if bias_m is not None:
-            if not isinstance(bias_m, torch.fx.Node):
-                return None
-            bias_val = bias_m.meta["val"]
-            if not (
-                isinstance(bias_val, torch.Tensor)
-                and bias_val.ndim == 1
-                and statically_known_true(bias_val.shape[0] == weight_val.shape[1])
-            ):
-                return None
-        group_key = (
-            "batch_linear_lhs",
-            input_m,
-            bias_m is not None,
-            str(weight_val.dtype),
-            str(weight_val.device),
-            str(weight_val.shape[0]),
-        )
+            group_key = None
         return group_key
 
     def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
-        """Fuse linear nodes into one wide GEMM and split the result."""
         batch_nodes = []
         batch_input = None
-        batch_weights = []
-        batch_biases = []
+        batch_weights, batch_weights_meta = [], []
+        batch_biases, batch_biases_meta = [], []
         split_sections = []
         for node in subset:
-            if CallFunctionVarArgs(aten.addmm.default).match(node):
-                bias, input, weight = node.args[:3]
-            else:
-                input, weight = node.args
-                bias = None
+            input = get_arg_value(node, 0, "input")
+            weight = get_arg_value(node, 1, "weight")
+            bias = get_arg_value(node, 2, "bias")
+            batch_nodes.append(node)
             if batch_input is None:
                 batch_input = input
-            elif batch_input is not input:
-                raise AssertionError(
-                    f"expected batch_input to be input, got {batch_input}"
-                )
-            batch_nodes.append(node)
+            else:
+                if batch_input is not input:
+                    raise AssertionError(
+                        f"expected batch_input to be input, got {batch_input}"
+                    )
             batch_weights.append(weight)
-            batch_biases.append(bias)
-            split_sections.append(weight.meta["val"].shape[1])  # type: ignore[union-attr]
+            batch_weights_meta.append(weight.meta["example_value"])
+            if bias:
+                batch_biases.append(bias)
+                batch_biases_meta.append(bias.meta["example_value"])
+            split_sections.append(weight.meta["example_value"].shape[0])
 
-        with graph.inserting_before(max(subset)):  # type: ignore[operator]
+        with graph.inserting_before(subset[0]):  # type: ignore[operator]
             cat_weights = graph.call_function(  # type: ignore[operator]
-                aten.cat.default, args=(batch_weights,), kwargs={"dim": 1}
+                torch.cat, args=(batch_weights,), kwargs={"dim": 0}
             )
-            cat_weights.meta["val"] = aten.cat(
-                [weight.meta["val"] for weight in batch_weights], dim=1
+            cat_weights.meta["example_value"] = torch.cat(batch_weights_meta, dim=0)
+            transposed_weights = graph.call_function(  # type: ignore[operator]
+                torch.transpose, args=(cat_weights, 0, 1)
             )
-            if batch_biases[0] is not None:
+            transposed_weights.meta["example_value"] = torch.transpose(
+                cat_weights.meta["example_value"], 0, 1
+            )
+            if len(batch_biases) > 0:
                 cat_biases = graph.call_function(  # type: ignore[operator]
-                    aten.cat.default, args=(batch_biases,), kwargs={"dim": 0}
+                    torch.cat, args=(batch_biases,), kwargs={"dim": 0}
                 )
-                cat_biases.meta["val"] = aten.cat(
-                    [bias.meta["val"] for bias in batch_biases], dim=0
-                )
+                cat_biases.meta["example_value"] = torch.cat(batch_biases_meta, dim=0)
                 fused_lhs = graph.call_function(  # type: ignore[operator]
-                    aten.addmm.default,
-                    args=(cat_biases, batch_input, cat_weights),
+                    torch.addmm,
+                    args=(cat_biases, batch_input, transposed_weights),
                 )
-                fused_lhs.meta["val"] = aten.addmm(
-                    cat_biases.meta["val"],
-                    batch_input.meta["val"],  # type: ignore[union-attr]
-                    cat_weights.meta["val"],
+                fused_lhs.meta["example_value"] = torch.addmm(
+                    cat_biases.meta["example_value"],
+                    batch_input.meta["example_value"],  # type: ignore[union-attr]
+                    transposed_weights.meta["example_value"],
                 )
             else:
                 fused_lhs = graph.call_function(  # type: ignore[operator]
-                    aten.mm.default,
-                    args=(batch_input, cat_weights),
+                    torch.mm,
+                    args=(batch_input, transposed_weights),
                 )
-                fused_lhs.meta["val"] = aten.mm(
-                    batch_input.meta["val"],  # type: ignore[union-attr]
-                    cat_weights.meta["val"],
+                fused_lhs.meta["example_value"] = torch.mm(
+                    batch_input.meta["example_value"],  # type: ignore[union-attr]
+                    transposed_weights.meta["example_value"],
                 )
             fused_lhs_list = graph.call_function(  # type: ignore[operator]
-                aten.split_with_sizes.default,
-                args=(fused_lhs, split_sections, 1),
+                torch.split, args=(fused_lhs, split_sections), kwargs={"dim": 1}
             )
-            split_values = aten.split_with_sizes(
-                fused_lhs.meta["val"], split_sections, 1
-            )
-            fused_lhs_list.meta["val"] = split_values
 
         for i, node in enumerate(batch_nodes):
             with graph.inserting_after(fused_lhs_list):  # type: ignore[operator]
-                getitem = graph.call_function(  # type: ignore[operator]
+                new_node = graph.call_function(  # type: ignore[operator]
                     operator.getitem, args=(fused_lhs_list, i)
                 )
-            getitem.meta.update(node.meta)
-            # The split slice keeps the wide GEMM row stride. Report it as-is
-            # so lowering materializes a copy when a consumer needs another
-            # layout, and never claim the eager contiguous (N_i, 1) stride.
-            getitem.meta["val"] = split_values[i]
-            if "example_value" in getitem.meta:
-                getitem.meta["example_value"] = split_values[i]
-
-            new_node = getitem
-            if self._reaches_user_visible_output(node, graph):  # type: ignore[arg-type]
-                # A user-visible output, possibly through a view chain, must
-                # keep eager strides and own storage. Lowering only enforces
-                # stride order for views and would accept the wide row stride,
-                # so materialize the slice here.
-                with graph.inserting_after(getitem):  # type: ignore[operator]
-                    new_node = graph.call_function(  # type: ignore[operator]
-                        aten.clone.default,
-                        args=(getitem,),
-                        kwargs={"memory_format": torch.contiguous_format},
-                    )
-                new_node.meta.update(node.meta)
             node.replace_all_uses_with(new_node)
+            new_node.meta.update(node.meta)
             graph.erase_node(node)  # type: ignore[operator]
         counters["inductor"]["batch_linear_lhs"] += 1
 
@@ -1796,19 +1724,11 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
 
 def generate_fusion_from_config(config_options: dict[str, Any], pre_grad=True):
     fusions: list[GroupBatchFusionBase] = []
-    registry = PRE_GRAD_FUSIONS if pre_grad else POST_GRAD_FUSIONS
     for name, options in config_options.items():
         # we skip all patterns from pattern_matcher passes (e.g., split_cat)
         if name not in PRE_GRAD_FUSIONS and name not in POST_GRAD_FUSIONS:
             continue
-        fusion_cls = registry.get(name)
-        if fusion_cls is None:
-            log.warning(
-                "Skipping %s fusion option %s: not registered for this stage",
-                "pre-grad" if pre_grad else "post-grad",
-                name,
-            )
-            continue
+        fusion_cls = PRE_GRAD_FUSIONS[name] if pre_grad else POST_GRAD_FUSIONS[name]
         _options = graph_search_options.copy()
         _options.update({k: v for k, v in options.items() if k != "devices"})
         fusions.append(fusion_cls(graph_search_options=_options))  # type: ignore[operator]
