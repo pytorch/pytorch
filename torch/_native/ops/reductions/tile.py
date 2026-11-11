@@ -91,6 +91,7 @@ class TileMap:
             )
         self.N = N
         # Fixed DAGs pass an N-independent vec; deriving it from N would change bits.
+        # Ragged vector rows pass the load width of their aligned interior.
         self.vec = vec_size(N, itemsize) if vec is None else vec
         self.threads_per_row = threads_per_row
         self.loads = loads
@@ -103,6 +104,7 @@ class TileMap:
             else exact
         )
         # vec must divide N to align every row and chunk; otherwise load by element.
+        # Ragged vector rows ignore wide_ok and load their aligned interior vec wide.
         self.wide_ok = N % self.vec == 0
 
     @property
@@ -860,7 +862,7 @@ class TileReduce:
             or not getattr(trait, "has_combine_equal", False)
         ):
             raise ValueError(
-                f"column groups need axis='col', vec=1, combine=False and a trait with combine_equal, got {type(trait).__name__} {col_group=} {axis=} {combine=} {vec=}"
+                f"column groups need axis='col', vec=1, combine=False and a trait with has_combine_equal, got {type(trait).__name__} {col_group=} {axis=} {combine=} {vec=}"
             )
         itemsize = dtype.width // 8 if dtype is not None else 0
         if ragged_vector:
@@ -1506,15 +1508,15 @@ class TileReduce:
         row0 = Int32(blk) * Int32(const_expr(rpb))
         live_lane = lane if lane < Int32(const_expr(rpb)) else Int32(0)
         run = live_lane * Int32(const_expr(pitch))
-        # combine_uniform ignores the count slot, so without weights it reads a constant.
-        take = lambda j: tuple(  # noqa: E731
-            fdtypes[f](sbuf[f][run + Int32(j)])
-            if const_expr(f < ncopy)
-            else fdtypes[f](sbuf[f][Int32(j)])
-            if const_expr(weights)
-            else fdtypes[f](count)
-            for f in range(nf)
-        )
+        # Per-field reads of partial j: staged fields from this lane's run, then a derived
+        # count's slot from the shared weight row, or a constant, which combine_uniform
+        # ignores.
+        reads = [lambda j, f=f: sbuf[f][run + Int32(j)] for f in range(ncopy)]
+        if const_expr(weights):
+            reads.append(lambda j: sbuf[ncopy][Int32(j)])
+        elif const_expr(count):
+            reads.append(lambda j: count)
+        take = lambda j: tuple(fdtypes[f](read(j)) for f, read in enumerate(reads))  # noqa: E731
 
         # A tile of every row in the block, one coalesced cp.async per (row, lane). INLINED at both
         # call sites: the DSL rejects a closure inside dynamic control flow, whatever it captures.
