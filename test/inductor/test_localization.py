@@ -1931,40 +1931,25 @@ def _install_bf16_gelu_decomp():
     def gelu_bf16(a, approximate="none"):
         return a * 0.5 * (1 + torch.erf(a * 0.7071067811865476))
 
-    saved = {}
-    for name in ("post_autograd", "pre_autograd"):
-        saved[name] = global_decomposition_table.get(name, {}).get(aten.gelu.default)
-    saved["top"] = decomposition_table.get(aten.gelu.default)
-    saved["inductor"] = inductor_decomp.decompositions.get(aten.gelu.default)
-
-    for table in (
+    tables = (
         decomposition_table,
         global_decomposition_table.get("post_autograd", {}),
         global_decomposition_table.get("pre_autograd", {}),
         inductor_decomp.decompositions,
-    ):
+    )
+    saved = [
+        {op: table[op] for op in (aten.gelu.default, aten.gelu.out) if op in table}
+        for table in tables
+    ]
+    for table in tables:
         table[aten.gelu.default] = gelu_bf16
-        if aten.gelu.out in table:
-            del table[aten.gelu.out]
+        table.pop(aten.gelu.out, None)
 
     def _restore():
-        for name, fn in (
-            ("post_autograd", saved["post_autograd"]),
-            ("pre_autograd", saved["pre_autograd"]),
-        ):
-            tbl = global_decomposition_table.get(name, {})
-            if fn is None:
-                tbl.pop(aten.gelu.default, None)
-            else:
-                tbl[aten.gelu.default] = fn
-        if saved["top"] is None:
-            decomposition_table.pop(aten.gelu.default, None)
-        else:
-            decomposition_table[aten.gelu.default] = saved["top"]
-        if saved["inductor"] is None:
-            inductor_decomp.decompositions.pop(aten.gelu.default, None)
-        else:
-            inductor_decomp.decompositions[aten.gelu.default] = saved["inductor"]
+        for table, entries in zip(tables, saved):
+            table.pop(aten.gelu.default, None)
+            table.pop(aten.gelu.out, None)
+            table.update(entries)
 
     return _restore
 
