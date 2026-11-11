@@ -35,6 +35,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_reduce_scatter_input_fn,
     _div_if_needed,
     _get_gradient_divide_factors,
+    _get_padded_split_sizes,
+    _get_reduce_scatter_slot_numels,
+    _with_all_gather_slot_pads,
+    _with_reduce_scatter_slot_pads,
     DefaultAllGather,
     DefaultReduceScatter,
     foreach_all_gather,
@@ -253,6 +257,24 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 all_gather_stream=all_gather_stream,
             )
 
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_fp32_comm_buffer_alignment(self):
+        param_sizes = self._get_param_sizes()
+        stream1, stream2 = device_module.Stream(), device_module.Stream()
+        for async_op, reshard_after_forward, comm_buffer_alignment in (
+            (False, True, 16),
+            (True, True, 128),
+            (False, 8, 16),
+        ):
+            self._test_all_gather(
+                param_sizes,
+                reshard_after_forward=reshard_after_forward,
+                async_op=async_op,
+                all_gather_copy_in_stream=stream1,
+                all_gather_stream=stream2,
+                comm_buffer_alignment=comm_buffer_alignment,
+            )
+
     def _test_all_gather(
         self,
         param_sizes: list[torch.Size],
@@ -260,8 +282,13 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         async_op: bool,
         all_gather_copy_in_stream,
         all_gather_stream,
+        comm_buffer_alignment: int = 1,
     ):
-        def all_gather(fsdp_param_group: FSDPParamGroup, group: dist.ProcessGroup):
+        def all_gather(
+            fsdp_param_group: FSDPParamGroup,
+            group: dist.ProcessGroup,
+            expect_padding: bool,
+        ):
             all_gather_comm = DefaultAllGather()
             all_gather_result = foreach_all_gather(
                 fsdp_param_group.fsdp_params,
@@ -271,12 +298,40 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 all_gather_stream=all_gather_stream,
                 device=self.device,
                 all_gather_comm=all_gather_comm,
+                comm_buffer_alignment=comm_buffer_alignment,
+            )
+            check_all_gather_buffer_alignment(
+                all_gather_result, group.size(), expect_padding
             )
             foreach_all_gather_copy_out(all_gather_result, fsdp_params, group)
             # Transition to unsharded state to register unsharded parameters
             for fsdp_param in fsdp_param_group.fsdp_params:
                 fsdp_param.init_unsharded_param()
             fsdp_param_group._to_unsharded()
+
+        def check_all_gather_buffer_alignment(
+            all_gather_result, world_size: int, expect_padding: bool
+        ):
+            slot_sizes = all_gather_result.all_gather_input_slot_sizes
+            split_sizes = all_gather_result.all_gather_input_split_sizes
+            element_size = all_gather_result.all_gather_output.element_size()
+            expected_slot_sizes = _get_padded_split_sizes(
+                split_sizes, comm_buffer_alignment, element_size
+            )
+            if expected_slot_sizes == split_sizes:
+                # Already aligned (or alignment disabled): keep the packed layout
+                self.assertFalse(expect_padding)
+                self.assertIsNone(slot_sizes)
+                slot_sizes = split_sizes
+            else:
+                self.assertEqual(slot_sizes, expected_slot_sizes)
+            if comm_buffer_alignment > 1:
+                for offset in itertools.accumulate(slot_sizes, initial=0):
+                    self.assertEqual(offset * element_size % comm_buffer_alignment, 0)
+            self.assertEqual(
+                all_gather_result.all_gather_output.numel(),
+                sum(slot_sizes) * world_size,
+            )
 
         def check_all_gathered_params(
             orig_params: list[nn.Parameter], module: nn.Module
@@ -299,8 +354,13 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             self.assertTrue(isinstance(param, DTensor))
             self.assertEqual(param.full_tensor(), orig_param)
 
-        # Run the foreach all-gather (including copy-in and copy-out)
-        all_gather(fsdp_param_group, fsdp_param_group.mesh_info.shard_process_group)
+        # Run the foreach all-gather (including copy-in and copy-out). The test
+        # params' shards are misaligned for the full shard group.
+        all_gather(
+            fsdp_param_group,
+            fsdp_param_group.mesh_info.shard_process_group,
+            expect_padding=comm_buffer_alignment > 1,
+        )
 
         # Check all-gather correctness
         check_all_gathered_params(orig_params, module)
@@ -318,6 +378,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         all_gather(
             fsdp_param_group,
             fsdp_param_group.post_forward_mesh_info.shard_process_group,
+            expect_padding=False,  # the post-forward shards may be aligned
         )
         check_all_gathered_params(orig_params, module)
 
@@ -345,11 +406,28 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 reduce_scatter_dtype=torch.float16,
             )
 
+    @skip_if_lt_x_gpu(1)
+    def test_reduce_scatter_comm_buffer_alignment(self):
+        param_sizes = self._get_param_sizes()
+        stream = device_module.Stream()
+        for reduce_scatter_dtype, comm_buffer_alignment in (
+            (torch.float32, 16),
+            (torch.float16, 16),
+            (torch.float32, 128),
+        ):
+            self._test_reduce_scatter(
+                param_sizes,
+                reduce_scatter_stream=stream,
+                reduce_scatter_dtype=reduce_scatter_dtype,
+                comm_buffer_alignment=comm_buffer_alignment,
+            )
+
     def _test_reduce_scatter(
         self,
         param_sizes: list[torch.Size],
         reduce_scatter_stream,
         reduce_scatter_dtype: torch.dtype,
+        comm_buffer_alignment: int = 1,
     ):
         # Set up the reference parameters and construct the FSDP group
         orig_params = self._init_params(param_sizes)
@@ -374,7 +452,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         all_reduce_stream = device_module.Stream()
         comm = DefaultReduceScatter()
         (
-            _,
+            reduce_scatter_input,
             _,
             _,
             post_reduce_event,
@@ -395,8 +473,29 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             all_reduce_hook=None,
             all_reduce_grads=True,
             partial_reduce_output=None,
+            comm_buffer_alignment=comm_buffer_alignment,
         )
         torch.get_device_module(device).current_stream().wait_event(post_reduce_event)
+        packed_numel = sum(
+            fsdp_param.padded_sharded_param_size.numel() for fsdp_param in fsdp_params
+        )
+        element_size = reduce_scatter_input.element_size()
+        sharded_numel = reduce_scatter_input.numel() // self.world_size
+        if comm_buffer_alignment == 1:
+            self.assertEqual(sharded_numel, packed_numel)
+        else:
+            self.assertGreater(sharded_numel, packed_numel)
+            self.assertEqual(sharded_numel * element_size % comm_buffer_alignment, 0)
+            if reduce_scatter_dtype == orig_params[0].dtype:
+                # Sharded grads are views into the reduce-scatter output
+                for fsdp_param in fsdp_params:
+                    local_grad = fsdp_param.sharded_param.grad.to_local()
+                    self.assertEqual(
+                        local_grad.storage_offset()
+                        * element_size
+                        % comm_buffer_alignment,
+                        0,
+                    )
 
         # Check reduce-scatter correctness
         (
@@ -608,6 +707,20 @@ class TestFullyShardPythonCustomOpRegistrations(TestCase):
         with self.assertRaises(RuntimeError):
             call("cpu")
 
+    def test_all_gather_copy_in_slot_sizes(self):
+        # Rank 1's row holds padded slots of 4 and 8 for inputs of 3 and 6
+        inputs = [torch.arange(3.0), torch.arange(6.0)]
+        output = torch.full((24,), -1.0)
+        all_gather_input, _ = torch.ops.fsdp.all_gather_copy_in(
+            inputs, output, [3, 6], 12, 1, [4, 8]
+        )
+        # The copy zeroes the pads
+        expected = torch.tensor([0, 1, 2, 0, 0, 1, 2, 3, 4, 5, 0, 0.0])
+        self.assertEqual(all_gather_input, expected)
+        # Padding does not relax the check that inputs match inp_split_sizes
+        with self.assertRaises(RuntimeError):
+            torch.ops.fsdp.all_gather_copy_in(inputs, output, [3, 5], 12, 1, [4, 8])
+
 
 class TestFullyShardDefaultAllGatherOutputFn(TestCase):
     # Only uint8 buffers hold bytes, not those of other 1-byte dtypes such as int8
@@ -701,6 +814,282 @@ class TestFullyShardNativeReduceScatterInputFn(TestCase):
 
 instantiate_device_type_tests(
     TestFullyShardNativeReduceScatterInputFn, globals(), only_for=("cpu", "cuda", "xpu")
+)
+
+
+class TestCommBufferAlignment(TestCase):
+    def test_get_padded_split_sizes(self):
+        split_sizes = [3944329, 6, 12, 16, 1, 0, 8]
+        for element_size in (1, 2, 4):
+            self.assertIs(
+                _get_padded_split_sizes(split_sizes, 1, element_size), split_sizes
+            )
+        # Alignment below the element size is a no-op
+        self.assertIs(_get_padded_split_sizes(split_sizes, 2, 4), split_sizes)
+        # bf16: 16 bytes = 8 elements
+        self.assertEqual(
+            _get_padded_split_sizes(split_sizes, 16, 2),
+            [3944336, 8, 16, 16, 8, 0, 8],
+        )
+        # fp32: 16 bytes = 4 elements
+        self.assertEqual(
+            _get_padded_split_sizes(split_sizes, 16, 4),
+            [3944332, 8, 12, 16, 4, 0, 8],
+        )
+        # uint8 (mixed-dtype all-gather): sizes are already bytes
+        self.assertEqual(
+            _get_padded_split_sizes(split_sizes, 16, 1),
+            [3944336, 16, 16, 16, 16, 0, 16],
+        )
+        self.assertEqual(
+            _get_padded_split_sizes(split_sizes, 128, 2),
+            [3944384, 64, 64, 64, 64, 0, 64],
+        )
+
+    def test_get_reduce_scatter_slot_numels(self):
+        numels = [6, 2, 3]
+        for alignment, world_size in ((1, 2), (16, 1)):
+            self.assertIs(
+                _get_reduce_scatter_slot_numels(
+                    numels, alignment, torch.float32, world_size
+                ),
+                numels,
+            )
+        self.assertEqual(
+            _get_reduce_scatter_slot_numels(numels, 16, torch.float32, 2), [8, 4, 4]
+        )
+        self.assertEqual(
+            _get_reduce_scatter_slot_numels(numels, 16, torch.bfloat16, 2), [8, 8, 8]
+        )
+
+    def test_all_gather_slot_pads(self):
+        world_size = 3
+        # Per rank: a (2, 2) chunk of a Shard(1) parameter, then 1 and 5 elements
+        split_sizes, outer_sizes = [4, 1, 5], [2, 1, 1]
+        packed = torch.randn(world_size, sum(split_sizes))
+        expected = [torch.empty(world_size * size) for size in split_sizes]
+        _default_all_gather_output_fn(
+            packed.flatten(),
+            expected,
+            split_sizes=split_sizes,
+            outer_sizes=outer_sizes,
+            world_size=world_size,
+        )
+        fn_calls: list[dict[str, list[int]]] = []
+
+        def record_output_fn(output_fn, all_gather_output, outputs, **kwargs):
+            fn_calls.append(kwargs)
+            for output in outputs:
+                self.assertTrue(output.is_contiguous())
+            output_fn(all_gather_output, outputs, **kwargs)
+
+        for output_fn, byte_buffer in itertools.product(
+            (_default_all_gather_output_fn, all_gather_output_fn_with_native_copy),
+            (False, True),
+        ):
+            # A uint8 buffer (mixed-dtype all-gather) has split sizes in bytes
+            buffer = packed.view(torch.uint8) if byte_buffer else packed
+            sizes = [size * buffer.size(1) // packed.size(1) for size in split_sizes]
+            slot_sizes = _get_padded_split_sizes(sizes, 16, buffer.element_size())
+            self.assertNotEqual(slot_sizes, sizes)
+            chunks = buffer.split(sizes, dim=1)
+            padded = torch.cat(
+                [
+                    torch.cat([chunk, chunk.new_full((world_size, slot - size), 7)], 1)
+                    for chunk, size, slot in zip(chunks, sizes, slot_sizes)
+                ],
+                dim=1,
+            )
+            fn_calls.clear()
+            outputs = [torch.empty(world_size * size) for size in split_sizes]
+            output_fn = functools.partial(record_output_fn, output_fn)
+            _with_all_gather_slot_pads(output_fn, slot_sizes)(
+                padded.flatten(),
+                outputs,
+                split_sizes=sizes,
+                outer_sizes=outer_sizes,
+                world_size=world_size,
+            )
+            self.assertEqual(outputs, expected, atol=0, rtol=0)
+            # The pads follow their real outputs as flat entries with outer size 1
+            pad_sizes = [slot - size for slot, size in zip(slot_sizes, sizes)]
+            self.assertEqual(
+                fn_calls,
+                [
+                    {
+                        "split_sizes": [sizes[0], sizes[1], pad_sizes[1]]
+                        + [sizes[2], pad_sizes[2]],
+                        "outer_sizes": [2, 1, 1, 1, 1],
+                        "world_size": world_size,
+                    }
+                ],
+            )
+
+    def test_reduce_scatter_slot_pads(self):
+        bf16, fp32 = torch.bfloat16, torch.float32
+        world_size = 2
+        # A Shard(1) bf16 gradient, then fp32 gradients that need dim-0 padding
+        grads = [torch.randn(3, 4).to(bf16), torch.randn(3), torch.randn(5, 1)]
+        shard_dims = [1, 0, 0]
+        padded_sharded_numels = [6, 2, 3]
+        slot_numels = _get_reduce_scatter_slot_numels(
+            padded_sharded_numels, 16, fp32, world_size
+        )
+        expected = torch.empty(world_size * sum(padded_sharded_numels))
+        _default_reduce_scatter_input_fn(
+            [grad.clone() for grad in grads],
+            shard_dims=shard_dims,
+            world_size=world_size,
+        )(expected)
+        expected_chunks = expected.view(world_size, -1).split(padded_sharded_numels, 1)
+        for input_fn in (
+            _default_reduce_scatter_input_fn,
+            reduce_scatter_input_fn_with_native_copy,
+        ):
+            unsharded_grads = [grad.clone() for grad in grads]
+            copy_in = _with_reduce_scatter_slot_pads(
+                input_fn, padded_sharded_numels, slot_numels
+            )(unsharded_grads, shard_dims=shard_dims, world_size=world_size)
+            # Each pad follows its gradient in the caller's list with its dtype
+            self.assertEqual(
+                [grad.dtype for grad in unsharded_grads],
+                [bf16, bf16, fp32, fp32, fp32, fp32],
+            )
+            pad_refs = [weakref.ref(pad) for pad in unsharded_grads[1::2]]
+            output = torch.full((world_size * sum(slot_numels),), float("nan"))
+            copy_in(output)
+            chunks = output.view(world_size, -1).split(slot_numels, dim=1)
+            for chunk, expected_chunk, numel in zip(
+                chunks, expected_chunks, padded_sharded_numels
+            ):
+                self.assertEqual(chunk[:, :numel], expected_chunk, atol=0, rtol=0)
+                self.assertEqual(chunk[:, numel:], torch.zeros_like(chunk[:, numel:]))
+            # As in foreach_reduce, clearing the list and the copy-in frees the pads
+            unsharded_grads.clear()
+            del copy_in
+            self.assertTrue(all(ref() is None for ref in pad_refs))
+
+
+class TestAllGatherCopyInSlotPads(TestCase):
+    def test_all_gather_copy_in_zeroes_slot_pads(self, device):
+        # Inputs of 3, 8, and 5 elements; the middle slot has no pad, and the
+        # second call's larger pads outgrow the zeros cached by the first
+        sizes = [3, 8, 5]
+        for (dtype, fill), slot_sizes in itertools.product(
+            ((torch.float32, float("nan")), (torch.uint8, 0xFF)),
+            ([4, 8, 8], [16, 8, 16]),
+        ):
+            inputs = [
+                make_tensor(size, device=device, dtype=dtype, low=1, high=9)
+                for size in sizes
+            ]
+            numel = sum(slot_sizes)
+            output = torch.full((2 * numel,), fill, device=device, dtype=dtype)
+            all_gather_input, _ = torch.ops.fsdp.all_gather_copy_in(
+                inputs, output, sizes, numel, 1, slot_sizes
+            )
+            slots = all_gather_input.split(slot_sizes)
+            for slot, inp, size in zip(slots, inputs, sizes):
+                self.assertEqual(slot[:size], inp, atol=0, rtol=0)
+                pad = slot[size:]
+                self.assertEqual(pad, torch.zeros_like(pad), atol=0, rtol=0)
+
+    @onlyCUDA
+    def test_all_gather_copy_in_slot_pads_kernels(self, device):
+        sizes, slot_sizes = [3, 8, 5], [4, 8, 8]
+        inputs = [torch.randn(size, device=device) for size in sizes]
+
+        def copy_in_kernels(slot_sizes: list[int] | None) -> list[str]:
+            numel = sum(slot_sizes or sizes)
+            output = torch.empty(2 * numel, device=device)
+            with profile(activities=[ProfilerActivity.CUDA]) as prof:
+                torch.ops.fsdp.all_gather_copy_in(
+                    inputs, output, sizes, numel, 1, slot_sizes
+                )
+                torch.cuda.synchronize()
+            return [
+                event.name
+                for event in prof.events()
+                if event.device_type == DeviceType.CUDA
+            ]
+
+        # Warms the cached zeros
+        copy_in_kernels(slot_sizes)
+        # The pads are zeroed in the one fused copy, without a fill kernel
+        self.assertEqual(copy_in_kernels(slot_sizes), copy_in_kernels(None))
+
+
+instantiate_device_type_tests(
+    TestAllGatherCopyInSlotPads, globals(), only_for=("cpu", "cuda", "xpu")
+)
+
+
+class TestFullyShardCommBufferAlignment(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @parametrize("shard_dim", [0, 1])
+    @parametrize("native_copy", [False, True])
+    def test_copy_fns_parity(self, device, shard_dim, native_copy):
+        # Shards of 3, 30 (Shard(0) or Shard(1)), and 5 elements are misaligned
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(16, 6, device=device), nn.ReLU(), nn.Linear(6, 10, device=device)
+        )
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        ref_model = copy.deepcopy(model)
+        mesh = init_device_mesh(torch.device(device).type, (self.world_size,))
+        for m in (ref_model, model):
+            fully_shard(
+                m,
+                mesh=mesh,
+                shard_placement_fn=lambda param: Shard(shard_dim % param.ndim),
+            )
+        model.set_comm_buffer_alignment(16)
+        if native_copy:
+            group = fully_shard.state(model)._fsdp_param_group
+            group._all_gather_output_fn = all_gather_output_fn_with_native_copy
+            model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
+        num_native_copy_outs = 0
+        num_leading_dims: list[list[int] | None] = []
+
+        class RecordCopies(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                nonlocal num_native_copy_outs
+                kwargs = kwargs or {}
+                if func == torch.ops.fsdp._all_gather_copy_out_.default:
+                    num_native_copy_outs += 1
+                elif func == torch.ops.fsdp.chunk_cat_mixed_dtype.default:
+                    num_leading_dims.append(kwargs.get("num_leading_dims"))
+                return func(*args, **kwargs)
+
+        optim = torch.optim.SGD(model.parameters(), lr=0.1)
+        ref_optim = torch.optim.SGD(ref_model.parameters(), lr=0.1)
+        for iteration in range(2):
+            inp = torch.randn((2, 16), device=device) + self.rank + iteration
+            ref_loss = ref_model(inp).sum()
+            ref_loss.backward()
+            with RecordCopies():
+                loss = model(inp).sum()
+                loss.backward()
+            self.assertEqual(loss, ref_loss)
+            for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+                self.assertEqual(param.grad.full_tensor(), ref_param.grad.full_tensor())
+            optim.step()
+            ref_optim.step()
+            optim.zero_grad()
+            ref_optim.zero_grad()
+        # The native copies run on the padded entries rather than falling back
+        self.assertEqual(num_native_copy_outs > 0, native_copy)
+        # Only the first weight's slot is aligned, so the other inputs get pads
+        expected_dims = [shard_dim, 0, 0, shard_dim, 0, 0, 0] if native_copy else None
+        self.assertEqual(num_leading_dims, [expected_dims] * 2)
+
+
+instantiate_device_type_tests(
+    TestFullyShardCommBufferAlignment, globals(), only_for=("cpu", "cuda", "xpu")
 )
 
 
@@ -1382,6 +1771,121 @@ class TestFullyShardCommunication(FSDPTestContinuous):
             model.set_reduce_scatter_max_input_buffers(True)
         # A valid value is accepted
         model.set_reduce_scatter_max_input_buffers(2)
+
+    @skip_if_lt_x_gpu(2)
+    def test_set_comm_buffer_alignment(self):
+        """
+        Tests that ``set_comm_buffer_alignment`` only changes the communication
+        buffer layout: training with 16-byte aligned all-gather/reduce-scatter
+        slots matches the default packed layout for parameters with misaligned
+        shards, across FSDP/HSDP, fp32/bf16 mixed precision, and
+        Shard(0)/Shard(1).
+        """
+        model = nn.Sequential(nn.Linear(16, 7), nn.Linear(7, 13))
+        fully_shard(model[0])
+        fully_shard(model)
+        for invalid_num_bytes in (0, -16, 12, 16.0, True):
+            with self.assertRaisesRegex(ValueError, "positive power of two"):
+                model.set_comm_buffer_alignment(invalid_num_bytes)
+        model.set_comm_buffer_alignment(16, recurse=False)
+        self.assertEqual(
+            model._get_fsdp_state()._fsdp_param_group.comm_buffer_alignment, 16
+        )
+        self.assertEqual(
+            model[0]._get_fsdp_state()._fsdp_param_group.comm_buffer_alignment, 1
+        )
+        model.set_comm_buffer_alignment(32)
+        for module in (model, model[0]):
+            self.assertEqual(
+                module._get_fsdp_state()._fsdp_param_group.comm_buffer_alignment, 32
+            )
+
+        self.run_subtests(
+            {
+                "mesh_shape": [(self.world_size,), (self.world_size // 2, 2)],
+                "param_dtype": [None, torch.bfloat16],
+                "use_shard_placement_fn": [False, True],
+            },
+            self._test_set_comm_buffer_alignment,
+        )
+
+    def _test_set_comm_buffer_alignment(
+        self,
+        mesh_shape: tuple[int] | tuple[int, int],
+        param_dtype: torch.dtype | None,
+        use_shard_placement_fn: bool,
+    ):
+        class MisalignedModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Bias/weight shards of 2, 4, 28, 96, and 1 elements
+                self.lin1 = nn.Linear(16, 7)
+                self.lin2 = nn.Linear(7, 13)
+                self.lin3 = nn.Linear(13, 384)
+                self.lin4 = nn.Linear(384, 16)
+                self.scale = nn.Parameter(torch.ones(1))
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = F.relu(self.lin1(x))
+                x = F.relu(self.lin2(x))
+                x = F.relu(self.lin3(x))
+                return self.lin4(x) * self.scale
+
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
+            if param.ndim == 2 and param.size(1) % self.world_size == 0:
+                return Shard(1)
+            return None
+
+        torch.manual_seed(42)
+        ref_model = MisalignedModel().to(device)
+        model = copy.deepcopy(ref_model)
+        mesh_dim_names = ("outer",) if len(mesh_shape) == 1 else ("outer", "inner")
+        mesh = init_device_mesh(device.type, mesh_shape, mesh_dim_names=mesh_dim_names)
+        fsdp_kwargs = {
+            "mesh": mesh,
+            "mp_policy": MixedPrecisionPolicy(param_dtype=param_dtype),
+            "shard_placement_fn": (
+                shard_placement_fn if use_shard_placement_fn else None
+            ),
+        }
+        models = (ref_model, model)
+        for m in models:
+            fully_shard(m.lin1, **fsdp_kwargs)
+            fully_shard(m.lin2, **fsdp_kwargs)
+            fully_shard(m, **fsdp_kwargs)
+        model.set_comm_buffer_alignment(16)
+        optims = [torch.optim.AdamW(m.parameters(), lr=1e-2) for m in models]
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn((4, 16), device=device.type)
+        for step in range(3):
+            losses = []
+            for m in models:
+                loss = m(inp).sum()
+                loss.backward()
+                losses.append(loss)
+            # The all-gather copy-out is exact, so the first forward matches
+            # bitwise. Padding changes the reduce-scatter buffer size, which may
+            # change the collective's reduction order, so compare the rest with
+            # tolerance.
+            if step == 0:
+                self.assertTrue(torch.equal(losses[0], losses[1]))
+            else:
+                self.assertEqual(losses[0], losses[1])
+            for (name, ref_param), param in zip(
+                ref_model.named_parameters(), model.parameters()
+            ):
+                self.assertEqual(ref_param.placements, param.placements)
+                self.assertEqual(
+                    ref_param.grad.to_local(), param.grad.to_local(), msg=name
+                )
+            for optim in optims:
+                optim.step()
+                optim.zero_grad()
+            for (name, ref_param), param in zip(
+                ref_model.named_parameters(), model.parameters()
+            ):
+                self.assertEqual(ref_param.to_local(), param.to_local(), msg=name)
 
     @skip_if_lt_x_gpu(2)
     def test_set_reshard_after_forward(self):

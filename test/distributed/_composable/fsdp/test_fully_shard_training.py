@@ -2602,6 +2602,53 @@ class TestFullyShardGradientAccumulation(FSDPTestContinuous):
             model.finalize_backward()
         model.reset_iter_state()
 
+    @skip_if_lt_x_gpu(4, allow_cpu=True)
+    def test_hsdp_partial_reduce_comm_buffer_alignment(self):
+        """
+        Tests HSDP gradient accumulation that reduce-scatters every microbatch
+        but all-reduces only the last one with comm buffer alignment, whose
+        partial reduce output follows the padded reduce-scatter output layout.
+        """
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, 2),
+            mesh_dim_names=("dp_replicate", "dp_shard"),
+        )
+        torch.manual_seed(42)
+        # Shards of 3, 30, and 5 elements are misaligned
+        model = nn.Sequential(nn.Linear(16, 6), nn.ReLU(), nn.Linear(6, 10))
+        model = model.to(device_type)
+        ref_model = copy.deepcopy(model)
+        models = (ref_model, model)
+        for m in models:
+            fully_shard(m[0], mesh=mesh)
+            fully_shard(m, mesh=mesh)
+        model.set_comm_buffer_alignment(16)
+        ref_group = ref_model._get_fsdp_state()._fsdp_param_group
+        group = model._get_fsdp_state()._fsdp_param_group
+        optims = [torch.optim.AdamW(m.parameters(), lr=1e-2) for m in models]
+
+        torch.manual_seed(42 + self.rank)
+        for _ in range(2):
+            for microbatch_idx in range(3):
+                is_last_microbatch = microbatch_idx == 2
+                inp = torch.randn(4, 16, device=device_type)
+                losses = []
+                for m in models:
+                    m.set_requires_all_reduce(is_last_microbatch)
+                    losses.append(m(inp).sum())
+                    losses[-1].backward()
+                self.assertEqual(losses[0], losses[1])
+                if not is_last_microbatch:
+                    # The root's weight and bias shards pad from 30 and 5 to 32 and 8
+                    self.assertEqual(group._partial_reduce_output.numel(), 40)
+                    self.assertEqual(ref_group._partial_reduce_output.numel(), 35)
+            for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+                self.assertEqual(ref_param.grad.full_tensor(), param.grad.full_tensor())
+            for optim in optims:
+                optim.step()
+                optim.zero_grad()
+
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_gradient_accumulation(self):
         """
@@ -3444,6 +3491,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             all_gather_stream: torch.Stream,
             device: torch.device,
             all_gather_comm: AllGather,
+            comm_buffer_alignment: int = 1,
         ):
             nonlocal all_gather_streams
             all_gather_streams.add(all_gather_stream)
@@ -3455,6 +3503,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 all_gather_stream,
                 device,
                 all_gather_comm,
+                comm_buffer_alignment=comm_buffer_alignment,
             )
 
         orig_foreach_reduce = foreach_reduce
@@ -3477,6 +3526,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             force_sum_reduction_for_comms: bool = False,
             *,
             prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
+            comm_buffer_alignment: int = 1,
         ):
             nonlocal reduce_scatter_streams
             reduce_scatter_streams.add(reduce_scatter_stream)
@@ -3496,6 +3546,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 all_reduce_hook,
                 force_sum_reduction_for_comms,
                 prepare_reduce_scatter_inputs=prepare_reduce_scatter_inputs,
+                comm_buffer_alignment=comm_buffer_alignment,
             )
 
         with (

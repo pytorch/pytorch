@@ -919,7 +919,8 @@ class FSDPModule:
         run under ``torch.no_grad()`` on the current stream, also when
         ``world_size`` is 1. FSDP frees ``copy_in`` and the gradients afterward,
         so keep neither. See :mod:`torch.distributed.fsdp.experimental` for a
-        native implementation.
+        native implementation. With :meth:`set_comm_buffer_alignment`,
+        ``unsharded_grads`` may include extra 1D zero pads with shard dim 0.
 
         Args:
             fn (Optional[Callable]): Function returning the copy-in function, or
@@ -1057,6 +1058,49 @@ class FSDPModule:
                     fsdp_param_group._set_separate_reduce_scatter_group(
                         enable, new_groups
                     )
+
+    def set_comm_buffer_alignment(
+        self, num_bytes: int, *, recurse: bool = True
+    ) -> None:
+        """
+        Sets the byte alignment of each parameter's slot in the flat all-gather
+        and reduce-scatter communication buffers (experimental).
+
+        By default, FSDP packs each parameter's shard back-to-back in these
+        buffers, so a parameter whose shard is not a multiple of 16 bytes (e.g.
+        a small bias or a scalar) misaligns every later slot and the per-rank
+        row. The all-gather copy-out (``split_with_sizes_copy``) and the
+        reduce-scatter copy-in (``chunk_cat``) then fall back to narrower
+        memory accesses and run at a fraction of the achievable bandwidth.
+        Setting ``num_bytes`` (e.g. ``16``) rounds each slot up to a multiple of
+        ``num_bytes`` bytes so that every slot offset and the per-rank buffer
+        size are aligned, at the cost of communicating the (discarded) pad.
+        Only the communication buffer layout changes: parameter sharding, the
+        sharded parameters, and the unsharded parameters are unaffected.
+
+        Args:
+            num_bytes (int): Slot alignment in bytes; must be a power of two.
+                ``1`` (default) disables padding and matches FSDP's default
+                packed layout exactly.
+            recurse (bool): Whether to set for all FSDP submodules or just the
+                passed-in module.
+        """
+        if (
+            isinstance(num_bytes, bool)
+            or not isinstance(num_bytes, int)
+            or num_bytes < 1
+            or (num_bytes & (num_bytes - 1)) != 0
+        ):
+            raise ValueError(
+                f"num_bytes must be a positive power of two, got {num_bytes}"
+            )
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group.comm_buffer_alignment = num_bytes
 
     def set_unshard_in_backward(self, unshard_in_backward: bool) -> None:
         """
