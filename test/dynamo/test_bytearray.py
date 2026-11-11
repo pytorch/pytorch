@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     make_dynamo_test,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
 )
 
 
@@ -1295,6 +1296,7 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         with self.assertRaises(ValueError):
             del value[::0]
 
+    @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
     def test_store_to_new_bytearray(self):
         def f(output, x):
             value = bytearray(b"abc")
