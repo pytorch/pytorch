@@ -2505,7 +2505,7 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._bytearray_search(tx, "count", args, kwargs)
 
-    def _bytearray_split(
+    def _bytearray_constant_method(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
@@ -2530,7 +2530,7 @@ class ByteArrayVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        return self._bytearray_split(tx, args, kwargs, "split")
+        return self._bytearray_constant_method(tx, args, kwargs, "split")
 
     def bytearray_rsplit(
         self,
@@ -2538,7 +2538,31 @@ class ByteArrayVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        return self._bytearray_split(tx, args, kwargs, "rsplit")
+        return self._bytearray_constant_method(tx, args, kwargs, "rsplit")
+
+    def bytearray_splitlines(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "splitlines")
+
+    def bytearray_partition(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "partition")
+
+    def bytearray_rpartition(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "rpartition")
 
     def bytearray_find(
         self,
@@ -2762,7 +2786,7 @@ class ByteArrayVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        return self._bytearray_split(tx, args, kwargs, "replace")
+        return self._bytearray_constant_method(tx, args, kwargs, "replace")
 
     def bytearray_translate(
         self,
@@ -2770,7 +2794,7 @@ class ByteArrayVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        return self._bytearray_split(tx, args, kwargs, "translate")
+        return self._bytearray_constant_method(tx, args, kwargs, "translate")
 
     tp_methods = {
         "index": Method(bytearray_index),
@@ -2780,6 +2804,9 @@ class ByteArrayVariable(VariableTracker):
         "rsplit": Method(bytearray_rsplit),
         "find": Method(bytearray_find),
         "rfind": Method(bytearray_rfind),
+        "splitlines": Method(bytearray_splitlines),
+        "partition": Method(bytearray_partition),
+        "rpartition": Method(bytearray_rpartition),
         "hex": Method(bytearray_hex),
         "decode": Method(bytearray_decode),
         "append": Method(bytearray_append),

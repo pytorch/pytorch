@@ -10,6 +10,11 @@ class XPUAllocatorIPCTest : public ::testing::TestWithParam<bool> {
   void SetUp() override {
     if (GetParam()) {
 #if SYCL_COMPILER_VERSION >= 20260200
+      const auto& device = c10::xpu::get_raw_device(c10::xpu::current_device());
+      if (!device.has(sycl::aspect::ext_oneapi_ipc_physical_memory)) {
+        GTEST_SKIP()
+            << "Expandable segment IPC sharing requires ext_oneapi_ipc_physical_memory.";
+      }
       c10::CachingAllocator::setAllocatorSettings("expandable_segments:True");
 #else
       GTEST_SKIP()

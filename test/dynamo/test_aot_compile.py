@@ -1728,6 +1728,24 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             compiled_fn.save_compiled_function(self.path())
         self.assertIn("Cfg", str(cm.exception))
 
+    def test_load_guards_state_inside_fake_mode(self):
+        def fn(x):
+            return x + 1
+
+        opts = {"guard_filter_fn": torch.compiler.keep_tensor_guards_unsafe}
+        compiled = torch.compile(fn, fullgraph=True, backend="eager", options=opts)
+        compiled = compiled.aot_compile(((torch.randn(3),), {}))
+        # The TENSOR_MATCH guard on x is rebuilt with from_meta_and_device, which
+        # rejects fakes; unpickling the meta template under the active mode
+        # would make one
+        with FakeTensorMode() as mode:
+            guards_state = load_guards_state(compiled._artifacts.guards_state)
+            fake_key = torch._C._TorchDispatchModeKey.FAKE
+            self.assertIs(torch._C._get_dispatch_mode(fake_key), mode)
+        x = guards_state.output_graph.local_scope["x"]
+        self.assertTrue(torch._subclasses.fake_tensor.is_fake_tensor(x))
+        self.assertEqual(x.device, torch.device("cpu"))
+
     def test_aot_compile_reloads_a_helpers_annotations(self):
         # The shipping path: an annotated helper reached through
         # runtime_env.closure keeps the annotations that pickle and drops the
