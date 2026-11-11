@@ -9,27 +9,63 @@ from flydsl._mlir.dialects import llvm
 from flydsl.expr import const_expr
 from flydsl.expr.typing import Vector as Vec
 
+from .flex_attn_bwd_utils import (
+    forward_head_dims,
+    single_pass_value_shards,
+    WIDE_HEAD_DIMS,
+)
+from .flex_attn_plan import _is_wide_head, forward_plan
+from .flex_attn_target import resolve_target, WAVE_SIZE
 from .flex_attn_utils import (
+    capture_extent_count,
+    capture_table_layout,
+    ceil_div,
+    ELEMENT_TYPES,
     fast_exp2,
     is_sliding_window_mask_program,
+    make_capture_buffers,
     make_global_view,
-    make_mask_buffers,
     make_mask_evaluator,
     make_qk_shared_layout,
+    make_score_mod_readers,
+    make_tile_score_mod_readers,
     make_value_shared_layout,
+    mask_capture_sizes,
+    mask_element_value,
+    mask_instruction_operands,
+    optional_int,
+    resolve_capture_extents,
+    runtime_extent,
+    runtime_strides,
     schedule_fwd_pv_pipeline,
     schedule_fwd_qk_pipeline,
     schedule_fwd_softmax_pipeline,
+    tied_nop,
+    tile_axes,
+    tile_grid,
+    validate_score_mod_args,
 )
 
 
 _LOG2E = 1.4426950408889634
+# Element type and bits per load of four consecutive keys of a table build's
+# mask capture; int64 takes two loads.
+_VECTOR_MASK_LOADS = {
+    "bool": (fx.Uint8, 32),
+    "uint8": (fx.Uint8, 32),
+    "int8": (fx.Int8, 32),
+    "int16": (fx.Int16, 64),
+    "float16": (fx.Float16, 64),
+    "bfloat16": (fx.BFloat16, 64),
+    "float32": (fx.Float32, 128),
+    "int64": (fx.Int64, 128),
+}
 _LN2 = math.log(2.0)
 # Keep masked exponentials finite under fast math; empty rows store -inf explicitly.
 _NEG_BIG = -1.0e30
-# Four-wave CTAs reduce launch count once the 128-row prefill grid remains
-# large enough to keep gfx950 occupied.
-_FOUR_WAVE_PREFILL_MIN_CTAS = 512
+# Keys past Sk score far below _NEG_BIG, so exp2 flushes them to zero even in
+# rows with no other key, without keeping another mask live.
+_NEG_PAST_END = -3.0e38
 
 
 def _f32(value):
@@ -52,16 +88,25 @@ def _store_output_fragments(
     output_copy,
     output_chunks,
     mfma_tile_size,
+    element_type,
+    chunk_columns=None,
+    output_columns=None,
 ):
     for d_chunk in fx.range_constexpr(output_chunks):
         normalized = Vec(final_output[d_chunk]) * inverse_vec
-        for column_group in fx.range_constexpr(2):
+        # Each column group stores 16 columns; skip those past output_columns.
+        column_groups = 2
+        if output_columns is not None:
+            column_groups = min(
+                max((output_columns - d_chunk * mfma_tile_size) // 16, 0), 2
+            )
+        for column_group in fx.range_constexpr(column_groups):
             packed = (
                 Vec.from_elements(
                     [normalized[column_group * 8 + i] for i in fx.range_constexpr(8)],
                     fx.Float32,
                 )
-                .to(fx.BFloat16)
+                .to(element_type)
                 .bitcast(fx.Int32)
             )
             lower = []
@@ -82,11 +127,16 @@ def _store_output_fragments(
                 upper.append(
                     fx.Int32(llvm.extractvalue(fx.Int32.ir_type, swapped, [1]))
                 )
-            values = Vec.from_elements([*lower, *upper], fx.Int32).bitcast(fx.BFloat16)
-            column = fx.Int32(
-                d_chunk * mfma_tile_size + column_group * 16
-            ) + lane_half * fx.Int32(8)
-            fragment = fx.make_rmem_tensor(8, fx.BFloat16)
+            values = Vec.from_elements([*lower, *upper], fx.Int32).bitcast(element_type)
+            if chunk_columns is None:
+                column = fx.Int32(
+                    d_chunk * mfma_tile_size + column_group * 16
+                ) + lane_half * fx.Int32(8)
+            else:
+                column = chunk_columns[d_chunk] + (
+                    fx.Int32(column_group * 16) + lane_half * fx.Int32(8)
+                )
+            fragment = fx.make_rmem_tensor(8, element_type)
             fragment.store(values)
             fx.copy(
                 output_copy,
@@ -96,53 +146,47 @@ def _store_output_fragments(
             fx.rocdl.sched_barrier(0)
 
 
-def _select_owner_waves(
-    *,
-    batch_size: int,
-    num_q_heads: int,
-    num_kv_heads: int,
-    seq_q: int,
-    seq_kv: int,
-    qk_head_dim: int,
-) -> int:
-    """Choose how many independent 32-row query owners share one CTA."""
-    if 0 < seq_q < 128:
-        packed_query_rows = (num_q_heads // num_kv_heads) * seq_q
-        required_waves = max(1, (packed_query_rows + 31) // 32)
-        return min(8, 1 << (required_waves - 1).bit_length())
-
-    base_ctas = batch_size * num_q_heads * (seq_q // 128)
-    if (
-        qk_head_dim == 128
-        and base_ctas < _FOUR_WAVE_PREFILL_MIN_CTAS
-        and (seq_kv <= 1024 or base_ctas < 256)
-    ):
-        return 2
-    return 4
-
-
-def _select_waves_per_eu(
-    *,
-    owner_waves: int,
-    enough_prefill_parallelism: bool,
-    seq_kv: int,
-    qk_head_dim: int,
-) -> int:
-    """Select the occupancy hint independently from the owner geometry."""
-    if (
-        qk_head_dim == 128
-        and owner_waves in (4, 8)
-        and (seq_kv >= 2048 or enough_prefill_parallelism)
-    ):
-        return 2
-    return 1
+def _store_partial_output_fragments(
+    final_output,
+    inverse_vec,
+    output_source,
+    accumulator_coordinates,
+    output_chunks,
+    mfma_tile_size,
+):
+    # Each lane holds runs of four consecutive accumulator rows.
+    output_copy = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.Float32)
+    output_row = fx.logical_divide(output_source, fx.make_layout(4, 1))
+    for d_chunk in fx.range_constexpr(output_chunks):
+        normalized = Vec(final_output[d_chunk]) * inverse_vec
+        for group in fx.range_constexpr(4):
+            column = fx.Int32(d_chunk * mfma_tile_size) + fx.Int32(
+                fx.get_scalar(accumulator_coordinates[group * 4])
+            )
+            fragment = fx.make_rmem_tensor(4, fx.Float32)
+            fragment.store(
+                Vec.from_elements(
+                    [normalized[group * 4 + i] for i in fx.range_constexpr(4)],
+                    fx.Float32,
+                )
+            )
+            fx.copy(
+                output_copy,
+                fragment,
+                fx.slice(output_row, (None, column // fx.Int32(4))),
+            )
 
 
-def _make_forward_launch(kernel, *, grid, num_threads, mask_buffer_count, waves_per_eu):
+def _make_forward_launch(
+    kernel, *, grid, num_threads, mask_buffer_count, waves_per_eu, mod_key=None
+):
     def launch_kernel(inputs, mask_buffers, output, stream):
+        _ = mod_key  # Closure scalars key FlyDSL's JIT cache; mod bodies do not.
         buffers = (*mask_buffers, *([inputs[5]] * (4 - mask_buffer_count)))
         kernel(*inputs, *buffers, output).launch(
-            grid=grid, block=(num_threads, 1, 1), stream=stream
+            grid=grid(inputs[0]) if callable(grid) else grid,
+            block=(num_threads, 1, 1),
+            stream=stream,
         )
 
     # Each JIT entry point exposes only its live mask buffers. The internal
@@ -365,149 +409,255 @@ def build_flex_attn_fwd_module(
     o_stride=None,
     output_stats_in_log2: bool = False,
     write_max_scores: bool = True,
+    dtype: str = "bf16",
+    score_mod=None,
+    score_mod_aux=(),
+    score_mod_buffer_count: int = 0,
+    mod_key=None,
+    mask_buffer_dtypes=(),
+    score_mod_buffer_dtypes=(),
+    kv_head_dims=None,
+    qo_head_dims=None,
+    tie_streamed_probabilities: bool = False,
+    plan=None,
+    head_slow_order: bool = False,
+    kv_splits: int = 1,
+    single_pass: bool = False,
+    target_limits=None,
 ):
     """Build the gfx950 prefill or packed-GQA decode kernel.
 
-    Each wave is an independent owner of 32 query rows and its corresponding
-    32x128 output tile. The owner count is selected at compile time; K/V are
-    staged once per CTA and shared by all owners.
+    Each wave owns 32 query rows; K/V are staged once per CTA for all owners.
+    ``score_mod(score, b, h, q_idx, kv_idx, aux)`` sees ``q.k * scale``; its
+    captures follow the mask buffers, or above ``MAX_DIRECT_CAPTURES`` go
+    through an int64 table of base addresses. ``kv_head_dims`` are narrower
+    stored K/V widths (multiples of 8) whose missing columns read as zeros.
+    ``qo_head_dims`` are likewise narrower stored Q/O widths: missing Q columns
+    read as zeros and O columns past the stored width (a multiple of 16) are
+    not written.
+    ``tie_streamed_probabilities`` ties the wide-head wait states between
+    masked-tile probabilities and their PV MFMAs at every head dim.
+    ``head_slow_order`` launches the grid in ``tile_axes`` head-slow order.
+    ``kv_splits`` decode CTAs share each row's full and partial block lists;
+    split ``s`` writes its fp32 output, normalized by its own sum, to batch
+    ``s * B + b`` of a [kv_splits * B, Hq, Sq, V] output, and its statistics
+    to ``s * B + b`` of [kv_splits * B, Hq, Sq] ones.
+    ``single_pass`` builds a head-dim pair of ``WIDE_HEAD_DIMS`` as one
+    launch: K and V tiles pass through LDS in column stages of at most 256,
+    and ``single_pass_value_shards`` waves split each query row's output.
+    ``target_limits`` are the ``TargetLimits`` to plan for, by default the
+    current device's.
     """
 
+    target = resolve_target(target_limits)
     # Keep standalone entry-point validation even though Inductor checks these
     # constraints before registering the vendored kernel.
     if num_kv_heads <= 0 or num_q_heads % num_kv_heads:
         raise ValueError("FlyDSL forward requires Hq % Hkv == 0")
-
-    paired_ctas = batch_size * num_q_heads * (seq_q // 256)
-    min_kv_blocks = 64 if mask_buffer_shapes else 16
-    # Pair sparse rows only when enough CTAs and KV work amortize the merge.
-    paired = (
-        seq_q % 256 == 0
-        and sparse_q_block_size == 128
-        and sparse_kv_block_size == 128
-        and paired_ctas >= _FOUR_WAVE_PREFILL_MIN_CTAS
-        and seq_kv // sparse_kv_block_size >= min_kv_blocks
+    has_score_mod = score_mod is not None
+    score_mod_aux, score_mod_buffer_count = validate_score_mod_args(
+        score_mod, score_mod_aux, score_mod_buffer_count, mod_key
     )
 
-    decode = 0 < seq_q < 128
-    owner_waves = (
-        8
-        if paired
-        else _select_owner_waves(
+    key_columns, value_columns = (
+        (int(qk_head_dim), int(v_head_dim))
+        if kv_head_dims is None
+        else (int(kv_head_dims[0]), int(kv_head_dims[1]))
+    )
+    if not (
+        0 < key_columns <= qk_head_dim
+        and 0 < value_columns <= v_head_dim
+        and key_columns % 8 == value_columns % 8 == 0
+    ):
+        raise ValueError(
+            "FlyDSL forward kv_head_dims must be multiples of 8 up to the head dims"
+        )
+    query_columns, output_columns = (
+        (int(qk_head_dim), int(v_head_dim))
+        if qo_head_dims is None
+        else (int(qo_head_dims[0]), int(qo_head_dims[1]))
+    )
+    if not (
+        0 < query_columns <= qk_head_dim
+        and 0 < output_columns <= v_head_dim
+        and query_columns % 8 == output_columns % 16 == 0
+    ):
+        raise ValueError(
+            "FlyDSL forward qo_head_dims must be multiples of 8 (Q) and 16 (O) "
+            "up to the head dims"
+        )
+    padded_qo = (query_columns, output_columns) != (qk_head_dim, v_head_dim)
+    if padded_qo and (single_pass or (kv_splits > 1 and output_columns < v_head_dim)):
+        raise ValueError(
+            "FlyDSL forward qo_head_dims needs single_pass off, and kv_splits 1 "
+            "for a narrower O"
+        )
+    padded_kv = (key_columns, value_columns) != (qk_head_dim, v_head_dim)
+
+    if dtype not in ELEMENT_TYPES:
+        raise ValueError(f"FlyDSL forward supports bf16/fp16, got {dtype}")
+    element_type = ELEMENT_TYPES[dtype]
+    single_pass = bool(single_pass)
+    if single_pass:
+        if (qk_head_dim, v_head_dim) not in WIDE_HEAD_DIMS:
+            raise ValueError(
+                "FlyDSL single-pass forward requires (qk_head_dim, v_head_dim) "
+                f"in {WIDE_HEAD_DIMS}"
+            )
+    elif (qk_head_dim, v_head_dim) not in forward_head_dims(target):
+        raise ValueError(
+            "FlyDSL forward requires (qk_head_dim, v_head_dim) in "
+            f"{forward_head_dims(target)}"
+        )
+    if sparse_q_block_size != 128 or sparse_kv_block_size != 128:
+        raise ValueError("FlyDSL forward requires sparse block size 128")
+    # None sizes and strides are read from the launch's layout-dynamic tensors.
+    sizes = (batch_size, seq_q, seq_kv)
+    if any(size is not None and size <= 0 for size in sizes):
+        raise ValueError("FlyDSL forward requires positive B, Sq and Sk")
+    if None in sizes and plan is None:
+        raise ValueError("FlyDSL forward needs a forward_plan for runtime sizes")
+    if block_mask_batch not in (1, batch_size, None):
+        raise ValueError("BlockMask batch dimension must be 1 or B")
+    if block_mask_heads not in (1, num_kv_heads, num_q_heads):
+        raise ValueError("BlockMask head dimension must be 1, Hkv, or Hq")
+    if any(
+        blocks is not None and blocks <= 0
+        for blocks in (max_partial_blocks, max_full_blocks)
+    ):
+        raise ValueError("FlyDSL forward requires non-empty index storage")
+    if len(mask_buffer_shapes) != len(mask_buffer_strides):
+        raise ValueError("mask buffer shape/stride descriptors must match")
+
+    batch_size, seq_q, seq_kv = map(optional_int, sizes)
+    num_q_heads = int(num_q_heads)
+    num_kv_heads = int(num_kv_heads)
+    qk_head_dim = int(qk_head_dim)
+    v_head_dim = int(v_head_dim)
+    block_mask_batch = optional_int(block_mask_batch)
+    block_mask_heads = int(block_mask_heads)
+    num_q_blocks = optional_int(num_q_blocks)
+    max_partial_blocks = optional_int(max_partial_blocks)
+    max_full_blocks = optional_int(max_full_blocks)
+    if plan is None:
+        plan = forward_plan(
             batch_size=batch_size,
             num_q_heads=num_q_heads,
             num_kv_heads=num_kv_heads,
             seq_q=seq_q,
             seq_kv=seq_kv,
             qk_head_dim=qk_head_dim,
+            v_head_dim=v_head_dim,
+            has_score_mod=has_score_mod,
+            padded_kv=padded_kv or padded_qo,
+            has_mask_buffers=bool(mask_buffer_shapes),
+            **({"single_pass": True} if single_pass else {}),
+            target=target,
         )
-    )
-    query_tile_rows = owner_waves * 32
-    kv_tile_rows = 64
-    split_kv = (
-        (num_q_heads // num_kv_heads) * seq_q == 1
-        and batch_size * num_kv_heads < 256
-        and seq_kv >= 2048
-    )
-    num_waves = 2 if split_kv else owner_waves
-    num_threads = num_waves * 64
-    waves_per_eu = (
-        2
-        if paired
-        else _select_waves_per_eu(
-            owner_waves=owner_waves,
-            enough_prefill_parallelism=(
-                not decode
-                and batch_size * num_q_heads * (seq_q // 128)
-                >= _FOUR_WAVE_PREFILL_MIN_CTAS
+    paired = plan["paired"]
+    decode = plan["decode"]
+    owner_waves = plan["owner_waves"]
+    split_kv = plan["split_kv"]
+    waves_per_eu = plan["waves_per_eu"]
+    pipelined_kv = plan["pipelined_kv"]
+    q_ragged = plan["q_ragged"]
+    kv_ragged = plan["kv_ragged"]
+    heads_per_group = plan["heads_per_group"]
+    paired_kv_blocks = plan.get("paired_kv_blocks")
+    if paired and None in sizes and paired_kv_blocks is None:
+        raise ValueError("the paired FlyDSL forward needs a KV block bound")
+    kv_splits = int(kv_splits)
+    if kv_splits < 1 or (kv_splits > 1 and (paired or not decode)):
+        raise ValueError("FlyDSL forward splits the KV blocks of decode CTAs only")
+    wide_head = _is_wide_head(qk_head_dim, v_head_dim)
+    if single_pass and not (
+        pipelined_kv and owner_waves == 4 and not (paired or split_kv)
+    ):
+        raise ValueError("the FlyDSL single-pass forward needs a 4-wave pipeline")
+    value_shards = (
+        single_pass_value_shards(
+            qk_head_dim,
+            v_head_dim,
+            not (
+                has_score_mod
+                or mask_buffer_shapes
+                or decode
+                or q_ragged
+                or kv_ragged
+                or None in sizes
             ),
-            seq_kv=seq_kv,
-            qk_head_dim=qk_head_dim,
         )
+        if single_pass
+        else 1
     )
+    if kv_splits > 1 and value_shards > 1:
+        raise ValueError("FlyDSL split-KV decode cannot shard V across waves")
+    query_tile_rows = owner_waves * 32 // value_shards
+    kv_tile_rows = 64
+    num_waves = 2 if split_kv else owner_waves
+    num_threads = num_waves * WAVE_SIZE
     values_per_thread = 8
     mfma_tile_size = 32
-
-    if (qk_head_dim, v_head_dim) not in ((128, 128), (192, 128)):
-        raise ValueError(
-            "FlyDSL forward requires (qk_head_dim, v_head_dim) "
-            "to be (128, 128) or (192, 128)"
-        )
-    if sparse_q_block_size != 128 or sparse_kv_block_size != 128:
-        raise ValueError("FlyDSL forward requires sparse block size 128")
-    if seq_kv % sparse_kv_block_size:
-        raise ValueError("FlyDSL forward requires Sk divisible by 128")
-    if block_mask_batch not in (1, batch_size):
-        raise ValueError("BlockMask batch dimension must be 1 or B")
-    if block_mask_heads not in (1, num_kv_heads, num_q_heads):
-        raise ValueError("BlockMask head dimension must be 1, Hkv, or Hq")
-    if max_partial_blocks <= 0 or max_full_blocks <= 0:
-        raise ValueError("FlyDSL forward requires non-empty index storage")
-    if len(mask_buffer_shapes) != len(mask_buffer_strides):
-        raise ValueError("mask buffer shape/stride descriptors must match")
-    if len(mask_buffer_shapes) > 4:
-        raise ValueError("FlyDSL forward supports at most four mask buffers")
-
-    batch_size = int(batch_size)
-    num_q_heads = int(num_q_heads)
-    num_kv_heads = int(num_kv_heads)
-    seq_q = int(seq_q)
-    seq_kv = int(seq_kv)
-    qk_head_dim = int(qk_head_dim)
-    v_head_dim = int(v_head_dim)
-    block_mask_batch = int(block_mask_batch)
-    block_mask_heads = int(block_mask_heads)
-    num_q_blocks = int(num_q_blocks)
-    max_partial_blocks = int(max_partial_blocks)
-    max_full_blocks = int(max_full_blocks)
     query_heads_per_kv_head = num_q_heads // num_kv_heads
-    decode = bool(decode)
-    pipelined_kv = (not decode and seq_kv > sparse_kv_block_size) or (
-        qk_head_dim == 128
-        and decode
-        and owner_waves in (2, 4)
-        and batch_size * num_kv_heads <= 256
-        and seq_kv >= 2048
-    )
-    packed_query_rows = query_heads_per_kv_head * seq_q if decode else seq_q
-    num_query_chunks = (
-        (packed_query_rows + query_tile_rows - 1) // query_tile_rows
-        if decode
-        else seq_q // query_tile_rows
-    )
+
+    def packed_rows(seq_q):
+        return query_heads_per_kv_head * seq_q if decode else seq_q
 
     launch_heads = num_kv_heads if decode else num_q_heads
-    total_heads = batch_size * launch_heads
-    # Limit the heads interleaved across query blocks to preserve K/V reuse.
-    heads_per_group = max(1, min(total_heads, 64))
-    while total_heads % heads_per_group:
-        heads_per_group -= 1
+
+    def launch_grid(batch_size, seq_q):
+        num_query_chunks = ceil_div(packed_rows(seq_q), query_tile_rows)
+        if kv_splits > 1:
+            num_query_chunks = num_query_chunks * kv_splits
+        if paired:
+            return tile_grid(num_q_heads, num_query_chunks, batch_size, head_slow_order)
+        if isinstance(batch_size, int):
+            return tile_grid(
+                heads_per_group,
+                num_query_chunks,
+                batch_size * launch_heads // heads_per_group,
+                head_slow_order,
+            )
+        return tile_grid(
+            heads_per_group,
+            num_query_chunks,
+            batch_size * (launch_heads // heads_per_group),
+            head_slow_order,
+        )
+
+    packed_query_rows = None if seq_q is None else packed_rows(seq_q)
 
     if decode:
         if block_mask_heads not in (1, num_kv_heads):
             raise ValueError(
                 "FlyDSL forward decode requires a shared or per-KV-head BlockMask"
             )
-        if num_q_blocks != 1:
+        if num_q_blocks not in (1, None):
             raise ValueError("FlyDSL forward decode requires one sparse Q block")
-        if packed_query_rows <= 0 or packed_query_rows > 256:
+        if packed_query_rows is not None and not 0 < packed_query_rows <= 256:
             raise ValueError("FlyDSL forward decode requires 1 <= (Hq/Hkv)*Sq <= 256")
-    else:
-        if seq_q % query_tile_rows:
-            raise ValueError(
-                "FlyDSL forward prefill requires Sq divisible by its owner tile"
-            )
-        if num_q_blocks != seq_q // sparse_q_block_size:
-            raise ValueError("BlockMask Q rows must cover Sq with 128-row blocks")
+    elif None not in (num_q_blocks, seq_q) and num_q_blocks != ceil_div(
+        seq_q, sparse_q_block_size
+    ):
+        raise ValueError("BlockMask Q rows must cover Sq with 128-row blocks")
 
     kv_tiles_per_sparse_block = sparse_kv_block_size // kv_tile_rows
     qk_reduction_steps = qk_head_dim // 16
     first_softmax_count = min(24, 2 * qk_reduction_steps)
-    output_chunks = v_head_dim // mfma_tile_size
+    output_chunks = v_head_dim // mfma_tile_size // value_shards
+    # Single-pass stages: (count, columns) of K and V, two LDS buffers each.
+    key_stages = ceil_div(qk_head_dim, 256) if single_pass else 1
+    value_stages = ceil_div(v_head_dim, 256) if single_pass else 1
+    key_stage_columns = qk_head_dim // key_stages
+    value_stage_columns = v_head_dim // value_stages
+    key_stage_steps = key_stage_columns // 16
+    shard_stage_chunks = value_stage_columns // mfma_tile_size // value_shards
     qk_chunks_per_row = qk_head_dim // values_per_thread
     value_chunks_per_row = v_head_dim // values_per_thread
+    # Unpipelined K and V tiles take turns in one buffer.
+    shared_kv_tile = kv_tile_rows * max(qk_head_dim, v_head_dim)
     query_load_iterations = (query_tile_rows * qk_chunks_per_row) // num_threads
-    kv_load_threads = 64 if split_kv else num_threads
+    kv_load_threads = WAVE_SIZE if split_kv else num_threads
     key_load_iterations = (kv_tile_rows * qk_chunks_per_row) // kv_load_threads
     value_load_iterations = (kv_tile_rows * value_chunks_per_row) // kv_load_threads
     if (query_tile_rows * qk_chunks_per_row) % num_threads:
@@ -526,22 +676,46 @@ def build_flex_attn_fwd_module(
     o_stride = tuple(o_stride or contiguous_stride(num_q_heads, seq_q, v_head_dim))
     scale_log2 = float(scale) * _LOG2E
     output_stats_in_log2 = bool(output_stats_in_log2)
+    head_slow_order = bool(head_slow_order)
+    head_axis, block_axis = tile_axes(head_slow_order)
     mask_program = tuple(mask_program)
     mask_program_output = int(mask_program_output)
     mask_buffer_shapes = tuple(tuple(shape) for shape in mask_buffer_shapes)
     mask_buffer_strides = tuple(tuple(stride) for stride in mask_buffer_strides)
     mask_buffer_count = len(mask_buffer_shapes)
-    mask_buffer_sizes = tuple(
-        1 + sum((size - 1) * stride for size, stride in zip(shape, strides))
-        for shape, strides in zip(mask_buffer_shapes, mask_buffer_strides)
+    mask_buffer_sizes = mask_capture_sizes(mask_buffer_shapes, mask_buffer_strides)
+    capture_table = capture_table_layout(
+        mask_buffer_sizes,
+        tuple(mask_buffer_dtypes),
+        score_mod_aux,
+        score_mod_buffer_count,
+        tuple(score_mod_buffer_dtypes),
     )
+    capture_slots = capture_extent_count(mask_buffer_sizes, capture_table)
+    if single_pass and capture_table is not None:
+        raise ValueError("the FlyDSL single-pass forward reads no capture table")
+    if capture_table is not None and not paired:
+        # With two waves per SIMD, the capture reads of a table build spill
+        # inside the KV loops.
+        waves_per_eu = 1
     mask_load_width = 4
     vector_mask_loads = []
     for slot, instruction in enumerate(() if paired else mask_program, 4):
-        if instruction[0] != "load_i32":
+        if instruction[0] == "load_i32":
+            buffer_index, indices = instruction[1:]
+            load_dtype = "int32"
+        elif (
+            capture_table is not None
+            and instruction[0] == "load"
+            and instruction[3] in _VECTOR_MASK_LOADS
+        ):
+            # A table read holds its own descriptor until it issues.
+            buffer_index, indices, load_dtype = instruction[1:]
+        else:
             continue
-        buffer_index, indices = instruction[1:]
         if indices.count(3) != 1 or any(index not in (0, 1, 2, 3) for index in indices):
+            continue
+        if mask_buffer_sizes[buffer_index] is None:
             continue
         dimension = indices.index(3)
         strides = mask_buffer_strides[buffer_index]
@@ -554,25 +728,26 @@ def build_flex_attn_fwd_module(
                 if i != dimension
             )
         ):
-            vector_mask_loads.append((slot, buffer_index, indices))
+            vector_mask_loads.append((slot, buffer_index, indices, load_dtype))
+    # With no vector mask load, LLVM can schedule a streamed P pack's convert
+    # one wait state before the PV MFMA that reads it.
+    tie_scalar_mask_loads = not vector_mask_loads
 
     mask_interval_types = ["int"] * 4
     mask_key_dependent = [False, False, False, True]
     for instruction in mask_program:
         op = instruction[0]
         value_type = None
+        dependencies = mask_instruction_operands(instruction)
         if op in ("const_i32", "const_bool"):
-            dependencies = ()
             value_type = "int" if op == "const_i32" else "bool"
         elif op == "load_i32":
-            dependencies = instruction[2]
             if all(
                 mask_interval_types[index] == "int" and not mask_key_dependent[index]
                 for index in dependencies
             ):
                 value_type = "int"
         else:
-            dependencies = instruction[1:]
             if op in ("ge", "gt", "le", "lt", "eq", "ne"):
                 if all(mask_interval_types[index] == "int" for index in dependencies):
                     value_type = "bool"
@@ -594,28 +769,39 @@ def build_flex_attn_fwd_module(
         mask_buffer_strides,
     )
 
-    if pipelined_kv:
+    key_stage_loads = (
+        kv_tile_rows * key_stage_columns // values_per_thread // num_threads
+    )
+    value_stage_loads = (
+        kv_tile_rows * value_stage_columns // values_per_thread // num_threads
+    )
+    if single_pass:
+
+        @fx.struct
+        class ForwardSharedMemory:
+            k0: fx.Array[element_type, kv_tile_rows * key_stage_columns, 16]
+            k1: fx.Array[element_type, kv_tile_rows * key_stage_columns, 16]
+            v0: fx.Array[element_type, kv_tile_rows * value_stage_columns, 16]
+            v1: fx.Array[element_type, kv_tile_rows * value_stage_columns, 16]
+
+    elif pipelined_kv:
 
         @fx.struct
         class ForwardSharedMemory:
             # Keep Q in registers and double-buffer K/V
             # so the next tile's DMA can overlap the current tile's math.
-            k0: fx.Array[fx.BFloat16, kv_tile_rows * qk_head_dim, 16]
-            k1: fx.Array[fx.BFloat16, kv_tile_rows * qk_head_dim, 16]
-            v0: fx.Array[fx.BFloat16, kv_tile_rows * v_head_dim, 16]
-            v1: fx.Array[fx.BFloat16, kv_tile_rows * v_head_dim, 16]
+            k0: fx.Array[element_type, kv_tile_rows * qk_head_dim, 16]
+            k1: fx.Array[element_type, kv_tile_rows * qk_head_dim, 16]
+            v0: fx.Array[element_type, kv_tile_rows * v_head_dim, 16]
+            v1: fx.Array[element_type, kv_tile_rows * v_head_dim, 16]
 
     elif split_kv:
 
         @fx.struct
         class ForwardSharedMemory:
-            query: fx.Array[fx.BFloat16, query_tile_rows * qk_head_dim, 16]
+            query: fx.Array[element_type, query_tile_rows * qk_head_dim, 16]
             # One reusable K/V tile per worker wave keeps the CTA below 64 KiB.
-            kv: fx.Array[
-                fx.BFloat16,
-                num_waves * kv_tile_rows * qk_head_dim,
-                16,
-            ]
+            kv: fx.Array[element_type, num_waves * shared_kv_tile, 16]
             reduction_stats: fx.Array[fx.Float32, 2 * 2, 16]
             reduction_output: fx.Array[fx.Float32, 2 * output_chunks * 16, 16]
 
@@ -623,10 +809,50 @@ def build_flex_attn_fwd_module(
 
         @fx.struct
         class ForwardSharedMemory:
-            query: fx.Array[fx.BFloat16, query_tile_rows * qk_head_dim, 16]
-            # K needs the largest allocation. V reuses the same storage after
-            # every wave has consumed K into registers.
-            kv: fx.Array[fx.BFloat16, kv_tile_rows * qk_head_dim, 16]
+            query: fx.Array[element_type, query_tile_rows * qk_head_dim, 16]
+            # V reuses the K storage after every wave has consumed K into
+            # registers.
+            kv: fx.Array[element_type, shared_kv_tile, 16]
+
+    single_batch = batch_size == 1
+
+    def resolve_shape(query, key, value, output, metadata, mask_buffers):
+        kv_num_blocks, kv_indices, full_kv_indices = metadata
+        sizes = (
+            runtime_extent(batch_size, query, 0),
+            runtime_extent(seq_q, query, 2),
+            runtime_extent(seq_kv, key, 2),
+            runtime_extent(num_q_blocks, kv_num_blocks, 2),
+            runtime_extent(max_partial_blocks, kv_indices, 3),
+            runtime_extent(max_full_blocks, full_kv_indices, 3),
+        )
+        rows = packed_rows(sizes[1])
+        mask_rows = (
+            runtime_extent(block_mask_batch, kv_num_blocks, 0)
+            * block_mask_heads
+            * sizes[3]
+        )
+        return (
+            *sizes,
+            *(
+                runtime_strides(strides, tensor, sizes[length])
+                for strides, tensor, length in (
+                    (q_stride, query, 1),
+                    (k_stride, key, 2),
+                    (v_stride, value, 2),
+                    (o_stride, output, 1),
+                )
+            ),
+            rows,
+            ceil_div(rows, query_tile_rows),
+            mask_rows,
+            *resolve_mask_buffers(mask_buffers),
+        )
+
+    def resolve_mask_buffers(mask_buffers):
+        return resolve_capture_extents(
+            mask_buffer_strides, mask_buffer_sizes, mask_buffers, capture_table
+        )
 
     @flyc.kernel(known_block_size=[num_threads, 1, 1])
     def kernel(
@@ -645,9 +871,32 @@ def build_flex_attn_fwd_module(
         mask_buffer_3: fx.Tensor,
         output: fx.Tensor,
     ):
+        (
+            batch_size,
+            seq_q,
+            seq_kv,
+            num_q_blocks,
+            max_partial_blocks,
+            max_full_blocks,
+            q_stride,
+            k_stride,
+            v_stride,
+            o_stride,
+            packed_query_rows,
+            num_query_chunks,
+            mask_rows,
+            mask_buffer_strides,
+            mask_buffer_sizes,
+        ) = resolve_shape(
+            query,
+            key,
+            value,
+            output,
+            (kv_num_blocks, kv_indices, full_kv_indices),
+            (mask_buffer_0, mask_buffer_1, mask_buffer_2, mask_buffer_3),
+        )
         tid = fx.thread_idx.x
-        # This gfx950-only kernel uses wave64, including on older FlyDSL releases.
-        warp_size = 64
+        warp_size = WAVE_SIZE
         wave_index = tid // fx.Int32(warp_size)
         wave = fx.Int32(fx.rocdl.readfirstlane(fx.Int32.ir_type, wave_index.ir_value()))
         if const_expr(paired):
@@ -685,7 +934,7 @@ def build_flex_attn_fwd_module(
                     mfma_tile_size,
                     mfma_tile_size,
                     16,
-                    fx.BFloat16,
+                    element_type,
                 )
             )
             tiled_mma = fx.make_tiled_mma(
@@ -713,22 +962,27 @@ def build_flex_attn_fwd_module(
             if const_expr(paired):
                 batch = fx.block_idx.z
             else:
-                grouped_head = (
-                    fx.block_idx.z * fx.Int32(heads_per_group) + fx.block_idx.x
+                grouped_head = fx.block_idx.z * fx.Int32(heads_per_group) + getattr(
+                    fx.block_idx, head_axis
                 )
                 batch = (
                     fx.Int32(0)
-                    if const_expr(batch_size == 1)
+                    if const_expr(single_batch)
                     else grouped_head // fx.Int32(launch_heads)
                 )
-            if const_expr(decode or flat_work_mask):
-                q_chunk = fx.block_idx.y
+            if const_expr(kv_splits > 1):
+                kv_split = getattr(fx.block_idx, block_axis) % fx.Int32(kv_splits)
+                q_chunk = getattr(fx.block_idx, block_axis) // fx.Int32(kv_splits)
+            elif const_expr(decode or flat_work_mask):
+                q_chunk = getattr(fx.block_idx, block_axis)
             else:
                 # Dispatch longer causal query blocks first to avoid a ragged tail.
-                q_chunk = fx.Int32(num_query_chunks - 1) - fx.block_idx.y
+                q_chunk = fx.Int32(num_query_chunks - 1) - getattr(
+                    fx.block_idx, block_axis
+                )
             q_base = q_chunk * fx.Int32(query_tile_rows)
             if const_expr(paired):
-                head = fx.block_idx.x
+                head = getattr(fx.block_idx, head_axis)
                 if const_expr(query_heads_per_kv_head > 1):
                     head = (head % fx.Int32(num_kv_heads)) * fx.Int32(
                         query_heads_per_kv_head
@@ -757,14 +1011,22 @@ def build_flex_attn_fwd_module(
                 return valid, row_head, query_position
 
             query_row_in_wave = fx.Int32(fx.get_scalar(query_coordinates[0]))
+            owner_wave = wave
+            if const_expr(value_shards > 1):
+                owner_wave = wave // fx.Int32(value_shards)
+                value_shard = wave % fx.Int32(value_shards)
             query_row = (
                 query_row_in_wave
                 if const_expr(split_kv)
-                else wave * fx.Int32(mfma_tile_size) + query_row_in_wave
+                else owner_wave * fx.Int32(mfma_tile_size) + query_row_in_wave
             )
             query_valid, query_head, query_pos = row_coordinates(query_row)
 
-            if const_expr(pipelined_kv):
+            if const_expr(single_pass):
+                shared_query_pointer = None
+                shared_key_stages = [lds.k0.ptr, lds.k1.ptr]
+                shared_value_stages = [lds.v0.ptr, lds.v1.ptr]
+            elif const_expr(pipelined_kv):
                 # Q aliases K0/K1 until every wave has cached its fragments.
                 shared_query_pointer = lds.k0.ptr
                 shared_key_stages = [lds.k0.ptr, lds.k1.ptr]
@@ -778,8 +1040,7 @@ def build_flex_attn_fwd_module(
                             fx.make_view(
                                 shared_kv_pointer,
                                 fx.make_layout(
-                                    (num_waves, kv_tile_rows * qk_head_dim),
-                                    (kv_tile_rows * qk_head_dim, 1),
+                                    (num_waves, shared_kv_tile), (shared_kv_tile, 1)
                                 ),
                             ),
                             (wave, None),
@@ -793,15 +1054,21 @@ def build_flex_attn_fwd_module(
             key_view = make_global_view(
                 key,
                 (batch_i64, kv_head_i64, None, None),
-                (batch_size, num_kv_heads, seq_kv, qk_head_dim),
+                (batch_size, num_kv_heads, seq_kv, key_columns),
                 k_stride,
             )
             value_view = make_global_view(
                 value,
                 (batch_i64, kv_head_i64, None, None),
-                (batch_size, num_kv_heads, seq_kv, v_head_dim),
+                (batch_size, num_kv_heads, seq_kv, value_columns),
                 v_stride,
             )
+            output_batch, output_batches = batch, batch_size
+            output_batch_i64 = batch_i64
+            if const_expr(kv_splits > 1):
+                output_batch = kv_split * fx.Int32(batch_size) + batch
+                output_batch_i64 = fx.Int64(output_batch)
+                output_batches = batch_size * kv_splits
             if const_expr(decode):
                 query_view = make_global_view(
                     query,
@@ -811,7 +1078,7 @@ def build_flex_attn_fwd_module(
                         query_heads_per_kv_head,
                         num_kv_heads,
                         seq_q,
-                        qk_head_dim,
+                        query_columns,
                     ),
                     (
                         q_stride[0],
@@ -823,13 +1090,13 @@ def build_flex_attn_fwd_module(
                 )
                 output_view = make_global_view(
                     output,
-                    (batch_i64, None, kv_head_i64, None, None),
+                    (output_batch_i64, None, kv_head_i64, None, None),
                     (
-                        batch_size,
+                        output_batches,
                         query_heads_per_kv_head,
                         num_kv_heads,
                         seq_q,
-                        v_head_dim,
+                        output_columns,
                     ),
                     (
                         o_stride[0],
@@ -844,17 +1111,17 @@ def build_flex_attn_fwd_module(
                 query_view = make_global_view(
                     query,
                     (batch_i64, head_i64, None, None),
-                    (batch_size, num_q_heads, seq_q, qk_head_dim),
+                    (batch_size, num_q_heads, seq_q, query_columns),
                     q_stride,
                 )
                 output_view = make_global_view(
                     output,
                     (batch_i64, head_i64, None, None),
-                    (batch_size, num_q_heads, seq_q, v_head_dim),
+                    (batch_size, num_q_heads, seq_q, output_columns),
                     o_stride,
                 )
 
-            metadata_rows = block_mask_batch * block_mask_heads * num_q_blocks
+            metadata_rows = mask_rows
 
             def make_metadata_view(tensor, size):
                 if const_expr(paired):
@@ -874,26 +1141,28 @@ def build_flex_attn_fwd_module(
             logsumexp_view = make_global_view(
                 logsumexp,
                 None,
-                batch_size * num_q_heads * seq_q,
+                output_batches * num_q_heads * seq_q,
                 1,
             )
             max_scores_view = make_global_view(
                 max_scores,
                 None,
-                batch_size * num_q_heads * seq_q,
+                output_batches * num_q_heads * seq_q,
                 1,
             )
-            mask_buffers = make_mask_buffers(
+            mask_buffers, score_mod_buffers = make_capture_buffers(
                 make_global_view,
                 mask_buffer_count,
                 mask_buffer_sizes,
-                mask_buffer_0,
-                mask_buffer_1,
-                mask_buffer_2,
-                mask_buffer_3,
+                capture_table,
+                (mask_buffer_0, mask_buffer_1, mask_buffer_2, mask_buffer_3),
             )
+            if const_expr(has_score_mod):
+                score_mod_readers = make_score_mod_readers(
+                    make_global_view, score_mod_aux, score_mod_buffers
+                )
 
-            output_copy = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.BFloat16)
+            output_copy = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), element_type)
 
             def load_i32(view, index):
                 return fx.Int32(view[index])
@@ -915,38 +1184,64 @@ def build_flex_attn_fwd_module(
                 batch,
                 query_head,
             )
+            # Table reads are opaque to LLVM, which would otherwise hoist the
+            # reads that do not depend on the key out of the KV loops. The
+            # paired schedule has no registers to keep them in.
+            query_mask_values = {}
+            if const_expr(
+                capture_table is not None and bool(mask_program) and not paired
+            ):
+                query_mask_values = evaluate_mask(query_pos, None, independent_of=3)
 
             mask_vector_copy = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.Int32)
 
             def load_mask_group(first_key):
                 inputs = [fx.Int32(batch), query_head, query_pos, first_key]
                 groups = {}
-                for slot, buffer_index, indices in vector_mask_loads:
+                for slot, buffer_index, indices, load_dtype in vector_mask_loads:
                     offset = fx.Int32(0)
                     for dimension, index in enumerate(indices):
                         offset = offset + inputs[index] * fx.Int32(
                             mask_buffer_strides[buffer_index][dimension]
                         )
+                    element, copy = (fx.Int32, mask_vector_copy)
+                    if const_expr(load_dtype != "int32"):
+                        element, bits = _VECTOR_MASK_LOADS[load_dtype]
+                        copy = fx.make_copy_atom(
+                            getattr(fx.rocdl, f"BufferCopy{bits}b")(), element
+                        )
+                    width = min(mask_load_width, 128 // element.width)
                     source = fx.logical_divide(
-                        mask_buffers[buffer_index], fx.make_layout(mask_load_width, 1)
+                        mask_buffers[buffer_index], fx.make_layout(width, 1)
                     )
-                    fragment = fx.make_rmem_tensor(mask_load_width, fx.Int32)
-                    fx.copy(
-                        mask_vector_copy,
-                        fx.slice(source, (None, offset // fx.Int32(mask_load_width))),
-                        fragment,
-                    )
-                    groups[slot] = Vec(fragment.load())
+                    values = []
+                    for part in fx.range_constexpr(mask_load_width // width):
+                        index = offset // fx.Int32(width)
+                        if const_expr(part):
+                            index = index + fx.Int32(part)
+                        fragment = fx.make_rmem_tensor(width, element)
+                        fx.copy(copy, fx.slice(source, (None, index)), fragment)
+                        values.append(Vec(fragment.load()))
+                    groups[slot] = (values, width, load_dtype)
                 return groups
 
-            global_copy = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.BFloat16)
-            lds_copy = fx.make_copy_atom(fx.rocdl.BufferCopyLDS128b(), fx.BFloat16)
+            def mask_group_value(group, position):
+                values, width, load_dtype = group
+                value = values[position // width][position % width]
+                if const_expr(load_dtype == "int32"):
+                    return fx.Int32(value)
+                return mask_element_value(value, load_dtype)
+
+            global_copy = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), element_type)
+            lds_copy = fx.make_copy_atom(fx.rocdl.BufferCopyLDS128b(), element_type)
             transposed_lds_copy = fx.make_copy_atom(
                 fx.rocdl.cdna4.LDSReadTrans(16, 64),
-                fx.BFloat16,
+                element_type,
             )
-            key_shared_layout = make_qk_shared_layout(kv_tile_rows, qk_head_dim)
-            value_shared_layout = make_value_shared_layout(kv_tile_rows, v_head_dim)
+            key_shared_layout = make_qk_shared_layout(kv_tile_rows, key_stage_columns)
+            value_shared_layout = make_value_shared_layout(
+                kv_tile_rows, value_stage_columns
+            )
             shared_keys = [
                 fx.make_view(pointer, key_shared_layout)
                 for pointer in shared_key_stages
@@ -955,7 +1250,7 @@ def build_flex_attn_fwd_module(
                 fx.right_inverse(key_shared_layout.outer),
                 fx.make_composed_layout(
                     key_shared_layout.inner,
-                    fx.make_layout(kv_tile_rows * qk_head_dim, 1),
+                    fx.make_layout(kv_tile_rows * key_stage_columns, 1),
                 ),
             )
             value_copy_coordinates = fx.right_inverse(value_shared_layout)
@@ -963,7 +1258,7 @@ def build_flex_attn_fwd_module(
                 fx.logical_divide(
                     fx.make_view(
                         pointer,
-                        fx.make_layout(kv_tile_rows * qk_head_dim, 1),
+                        fx.make_layout(kv_tile_rows * key_stage_columns, 1),
                     ),
                     fx.make_layout(values_per_thread, 1),
                 )
@@ -973,7 +1268,7 @@ def build_flex_attn_fwd_module(
                 fx.logical_divide(
                     fx.make_view(
                         pointer,
-                        fx.make_layout(kv_tile_rows * v_head_dim, 1),
+                        fx.make_layout(kv_tile_rows * value_stage_columns, 1),
                     ),
                     fx.make_layout(values_per_thread, 1),
                 )
@@ -981,13 +1276,13 @@ def build_flex_attn_fwd_module(
             ]
             if const_expr(paired):
                 shared_query = query_view
-            elif const_expr(not pipelined_kv or not decode):
+            elif const_expr((not pipelined_kv or not decode) and not single_pass):
                 shared_query = fx.make_view(
                     shared_query_pointer,
                     make_qk_shared_layout(query_tile_rows, qk_head_dim),
                 )
             else:
-                # Decode inputs are contiguous; pack the group's query rows.
+                # Q stays in registers; this view is never read.
                 shared_query = fx.make_view(
                     fx.get_iter(query_view),
                     fx.make_layout(
@@ -1006,7 +1301,7 @@ def build_flex_attn_fwd_module(
             copy_v = fx.make_tiled_copy_A(transposed_lds_copy, tiled_mma).get_slice(
                 lane
             )
-            shared_copy = fx.make_copy_atom(fx.UniversalCopy128b(), fx.BFloat16)
+            shared_copy = fx.make_copy_atom(fx.UniversalCopy128b(), element_type)
             probability_coordinates = thr_mma.partition_B(
                 fx.make_view(
                     0,
@@ -1018,7 +1313,7 @@ def build_flex_attn_fwd_module(
             value_mma_layout = fx.composition(
                 fx.select(value_shared_layout, [1, 0]),
                 fx.make_tile(
-                    fx.make_layout(v_head_dim, 1),
+                    fx.make_layout(value_stage_columns, 1),
                     fx.make_layout(
                         (4, 2, 2, kv_tile_rows // 16),
                         (1, 8, 4, 16),
@@ -1032,6 +1327,21 @@ def build_flex_attn_fwd_module(
                 )
                 for pointer in shared_value_stages
             ]
+            shard_value_tiles = value_tiles
+            if const_expr(value_shards > 1):
+                # A shard's first chunk of each stage, 8 x 32 elements per chunk.
+                shard_value_tiles = [
+                    fx.flat_divide(
+                        fx.make_view(
+                            pointer
+                            + value_shard
+                            * fx.Int32(shard_stage_chunks * 8 * mfma_tile_size),
+                            value_mma_layout,
+                        ),
+                        (mfma_tile_size, 16),
+                    )
+                    for pointer in shared_value_stages
+                ]
 
             def mfma(a_fragment, b_fragment, c_v16):
                 c_fragment = fx.make_fragment_like(accumulator_coordinates, fx.Float32)
@@ -1067,9 +1377,8 @@ def build_flex_attn_fwd_module(
 
             def pair_word(view, row, count, capacity, word):
                 bits = fx.Uint32(0)
-                for group in fx.range_constexpr(
-                    (capacity + warp_size - 1) // warp_size
-                ):
+                slots = capacity if isinstance(capacity, int) else paired_kv_blocks
+                for group in fx.range_constexpr((slots + warp_size - 1) // warp_size):
                     slot = fx.Int32(group * warp_size) + lane
                     safe_slot = (slot < fx.Int32(capacity)).select(slot, fx.Int32(0))
                     block = load_i32(view, row * fx.Int32(capacity) + safe_slot)
@@ -1087,7 +1396,7 @@ def build_flex_attn_fwd_module(
             def pair_cache(words):
                 cache = []
                 for group in fx.range_constexpr(
-                    (seq_kv // sparse_kv_block_size + warp_size - 1) // warp_size
+                    (paired_kv_blocks + warp_size - 1) // warp_size
                 ):
                     index = fx.Int32(group * warp_size) + lane
                     prefix = fx.Int32(0)
@@ -1122,7 +1431,7 @@ def build_flex_attn_fwd_module(
                     )
                 )
                 for group in fx.range_constexpr(
-                    1, (seq_kv // sparse_kv_block_size + warp_size - 1) // warp_size
+                    1, (paired_kv_blocks + warp_size - 1) // warp_size
                 ):
                     value = fx.Int32(
                         fx.rocdl.readlane(
@@ -1149,9 +1458,7 @@ def build_flex_attn_fwd_module(
                 partial_words = []
                 paired_full_count = fx.Int32(0)
                 paired_partial_count = fx.Int32(0)
-                for word in fx.range_constexpr(
-                    (seq_kv // sparse_kv_block_size + 31) // 32
-                ):
+                for word in fx.range_constexpr((paired_kv_blocks + 31) // 32):
                     f0 = pair_word(
                         full_kv_indices_view,
                         mask_row,
@@ -1194,13 +1501,20 @@ def build_flex_attn_fwd_module(
                 partial_count = paired_partial_count
                 paired_full_cache = pair_cache(full_words)
 
-            # Cache scaled Q once so its LDS reads do not compete with K/V staging.
-            query_scale = Vec.from_elements(
-                [_f32(scale_log2)],
-                fx.Float32,
-            ).broadcast_to(values_per_thread)
+            def select_query_pack(keep, pack):
+                return Vec.from_elements(
+                    [
+                        keep.select(pack[element], element_type(0.0))
+                        for element in fx.range_constexpr(values_per_thread)
+                    ],
+                    element_type,
+                )
+
+            # Cache Q once so its LDS reads do not compete with K/V staging.
             query_register_packs = []
-            if const_expr(pipelined_kv and not decode and not paired):
+            if const_expr(
+                pipelined_kv and not decode and not paired and not single_pass
+            ):
                 query_shared_layout = make_qk_shared_layout(
                     query_tile_rows, qk_head_dim
                 )
@@ -1230,6 +1544,14 @@ def build_flex_attn_fwd_module(
                     )
                     row = logical % fx.Int32(query_tile_rows)
                     chunk = logical // fx.Int32(query_tile_rows * values_per_thread)
+                    if const_expr(query_columns < qk_head_dim):
+                        # Packs past the stored columns load from a row past
+                        # the buffer bound, which reads as zeros.
+                        row = (
+                            chunk < fx.Int32(query_columns // values_per_thread)
+                        ).select(
+                            row, fx.Int32(seq_q + qk_head_dim // values_per_thread)
+                        )
                     source = fx.logical_divide(
                         fx.slice(query_view, (q_base + row, None)),
                         fx.make_layout(values_per_thread, 1),
@@ -1247,15 +1569,11 @@ def build_flex_attn_fwd_module(
                     fx.copy(
                         shared_copy, copy_q.partition_S(tile), copy_q.retile(fragment)
                     )
-                    query_register_packs.append(
-                        (Vec(fragment.load()).to(fx.Float32) * query_scale).to(
-                            fx.BFloat16
-                        )
-                    )
+                    query_register_packs.append(Vec(fragment.load()))
                 fx.rocdl.s_waitcnt(vmcnt=0, lgkmcnt=0, expcnt=0)
                 fx.rocdl.s_barrier()
             elif const_expr(pipelined_kv):
-                if const_expr(paired):
+                if const_expr(paired or (single_pass and not decode)):
                     query_source = fx.slice(query_view, (query_pos, None))
                 else:
                     local_head = query_head - kv_head * fx.Int32(
@@ -1266,10 +1584,9 @@ def build_flex_attn_fwd_module(
                     query_source,
                     fx.make_layout(values_per_thread, 1),
                 )
-                raw_query_packs = []
                 for k_step in fx.range_constexpr(qk_reduction_steps):
                     column = fx.Int32(fx.get_scalar(query_k_coordinates[0, 0, k_step]))
-                    q_fragment = fx.make_rmem_tensor(values_per_thread, fx.BFloat16)
+                    q_fragment = fx.make_rmem_tensor(values_per_thread, element_type)
                     fx.copy(
                         global_copy,
                         fx.slice(
@@ -1278,14 +1595,13 @@ def build_flex_attn_fwd_module(
                         ),
                         q_fragment,
                     )
-                    raw_query_packs.append(Vec(q_fragment.load()))
-                fx.rocdl.s_waitcnt(vmcnt=0, lgkmcnt=0, expcnt=0)
-                for k_step in fx.range_constexpr(qk_reduction_steps):
-                    query_register_packs.append(
-                        (Vec(raw_query_packs[k_step].to(fx.Float32)) * query_scale).to(
-                            fx.BFloat16
+                    query_pack = Vec(q_fragment.load())
+                    if const_expr(query_columns < qk_head_dim):
+                        query_pack = select_query_pack(
+                            column < fx.Int32(query_columns), query_pack
                         )
-                    )
+                    query_register_packs.append(query_pack)
+                fx.rocdl.s_waitcnt(vmcnt=0, lgkmcnt=0, expcnt=0)
             else:
                 for load_step in fx.range_constexpr(query_load_iterations):
                     linear = fx.Int32(load_step * num_threads) + tid
@@ -1295,7 +1611,7 @@ def build_flex_attn_fwd_module(
                     row_valid, row_head, row_query_pos = row_coordinates(row)
                     query_fragment = fx.make_rmem_tensor(
                         values_per_thread,
-                        fx.BFloat16,
+                        element_type,
                     )
                     if const_expr(decode):
                         local_head = row_head - kv_head * fx.Int32(
@@ -1317,23 +1633,20 @@ def build_flex_attn_fwd_module(
                         query_fragment,
                     )
                     query_value = Vec(query_fragment.load())
-                    if const_expr(decode):
-                        query_value = Vec.from_elements(
-                            [
-                                row_valid.select(
-                                    query_value[element],
-                                    fx.BFloat16(0.0),
-                                )
-                                for element in fx.range_constexpr(values_per_thread)
-                            ],
-                            fx.BFloat16,
+                    if const_expr(query_columns < qk_head_dim):
+                        column_valid = column < fx.Int32(query_columns)
+                        row_valid = (
+                            row_valid & column_valid
+                            if const_expr(decode)
+                            else column_valid
                         )
-                    scaled_query = Vec(query_value.to(fx.Float32)) * query_scale
+                    if const_expr(decode or query_columns < qk_head_dim):
+                        query_value = select_query_pack(row_valid, query_value)
                     query_destination = fx.logical_divide(
                         fx.slice(shared_query, (row, None)),
                         fx.make_layout(values_per_thread, 1),
                     )
-                    query_fragment.store(Vec(scaled_query).to(fx.BFloat16))
+                    query_fragment.store(query_value)
                     fx.copy(
                         shared_copy,
                         query_fragment,
@@ -1374,6 +1687,14 @@ def build_flex_attn_fwd_module(
                 return _maximum(lhs, rhs) if maximum else lhs + rhs
 
             zero16 = Vec.filled(16, 0.0, fx.Float32)
+            score_scale = Vec.filled(16, scale_log2, fx.Float32)
+
+            def scale_scores(scores):
+                # The backward recomputes exp2(S * scale_log2 - lse) from f32 S
+                # without contraction; prescaling a rounded Q or fusing the
+                # subtract makes the two exponents disagree for large logits.
+                return Vec(scores) * score_scale
+
             output_accumulators = [zero16 for _ in fx.range_constexpr(output_chunks)]
             running_max = _f32(_NEG_BIG)
             running_sum = _f32(0.0)
@@ -1451,8 +1772,16 @@ def build_flex_attn_fwd_module(
                             )
                         fx.copy(copy, source, destination(load_step))
                 else:
+                    columns = key_columns if key_tile else value_columns
+                    width = qk_head_dim if key_tile else v_head_dim
                     for load_step in fx.range_constexpr(first, last):
                         linear, row, chunk = pack_coordinates(load_step)
+                        if const_expr(columns < width):
+                            # Packs past the stored columns load from a row past
+                            # the buffer bound, which reads as zeros.
+                            row = (
+                                chunk < fx.Int32(columns // values_per_thread)
+                            ).select(row, fx.Int32(seq_kv + width // values_per_thread))
                         source = fx.logical_divide(
                             fx.slice(view, (kv_base + row, None)),
                             fx.make_layout(values_per_thread, 1),
@@ -1476,6 +1805,119 @@ def build_flex_attn_fwd_module(
             def stage_value(kv_base, stage=0):
                 stage_kv(kv_base, stage, False, 0, value_load_iterations)
 
+            def stage_columns(kv_base, key_tile, column_stage):
+                view = key_view if key_tile else value_view
+                coordinates = (
+                    key_copy_coordinates if key_tile else value_copy_coordinates
+                )
+                buffer = column_stage % 2
+                destinations = (
+                    key_copy_destinations if key_tile else value_copy_destinations
+                )[buffer]
+                columns = key_columns if key_tile else value_columns
+                width = qk_head_dim if key_tile else v_head_dim
+                stage_chunks = (
+                    key_stage_columns if key_tile else value_stage_columns
+                ) // values_per_thread
+                for load_step in fx.range_constexpr(
+                    key_stage_loads if key_tile else value_stage_loads
+                ):
+                    linear = fx.Int32(load_step * num_threads) + tid
+                    logical = fx.Int32(
+                        fx.get_scalar(
+                            fx.crd2idx(
+                                linear * fx.Int32(values_per_thread), coordinates
+                            )
+                        )
+                    )
+                    row = logical % fx.Int32(kv_tile_rows)
+                    chunk = logical // fx.Int32(kv_tile_rows * values_per_thread)
+                    if const_expr(column_stage):
+                        chunk = chunk + fx.Int32(column_stage * stage_chunks)
+                    if const_expr(columns < width):
+                        row = (chunk < fx.Int32(columns // values_per_thread)).select(
+                            row, fx.Int32(seq_kv + width // values_per_thread)
+                        )
+                    source = fx.logical_divide(
+                        fx.slice(view, (kv_base + row, None)),
+                        fx.make_layout(values_per_thread, 1),
+                    )
+                    fx.copy(
+                        lds_copy,
+                        fx.slice(source, (None, chunk)),
+                        fx.slice(destinations, (None, linear)),
+                    )
+
+            def wait_stage(newer_loads):
+                # Loads retire in issue order: leaving the newer stage DMAs
+                # outstanding retires every older one, then the barrier
+                # publishes all waves' copies.
+                fx.rocdl.sched_barrier(0)
+                fx.rocdl.s_waitcnt(vmcnt=newer_loads, lgkmcnt=0, expcnt=0)
+                phase_fence()
+
+            def release_stage():
+                fx.rocdl.s_waitcnt(lgkmcnt=0)
+                phase_fence()
+
+            def single_pass_scores(kv_base):
+                scores_lo = zero16
+                scores_hi = zero16
+                for stage in fx.range_constexpr(key_stages):
+                    more = stage + 1 < key_stages
+                    if const_expr(stage == 0 and value_stages == 1):
+                        release_stage()
+                    if const_expr(more):
+                        stage_columns(kv_base, True, stage + 1)
+                    if const_expr(stage == 0):
+                        stage_columns(kv_base, False, 0)
+                    wait_stage((key_stage_loads if more else 0) + value_stage_loads)
+                    for step in fx.range_constexpr(key_stage_steps):
+                        query_pack = load_query_fragment(stage * key_stage_steps + step)
+                        key_lo = load_key_fragment(step, False, stage % 2)
+                        key_hi = load_key_fragment(step, True, stage % 2)
+                        scores_lo = mfma(key_lo, query_pack, scores_lo)
+                        scores_hi = mfma(key_hi, query_pack, scores_hi)
+                    schedule_fwd_qk_pipeline(
+                        reduction_steps=key_stage_steps, query_in_registers=True
+                    )
+                return scores_lo, scores_hi
+
+            def single_pass_output(
+                probability_packs, tile_output, kv_base, prefetch_base
+            ):
+                for stage in fx.range_constexpr(value_stages):
+                    more = stage + 1 < value_stages
+                    if const_expr(stage == 0 and key_stages == 1):
+                        release_stage()
+                    if const_expr(more):
+                        stage_columns(kv_base, False, stage + 1)
+                    if const_expr(stage == 0):
+                        stage_columns(prefetch_base, True, 0)
+                    wait_stage((value_stage_loads if more else 0) + key_stage_loads)
+                    for pack in fx.range_constexpr(4):
+                        probability_fragment = fx.make_fragment_like(
+                            probability_coordinates, element_type
+                        )
+                        probability_fragment.store(Vec(probability_packs[pack]))
+                        for chunk in fx.range_constexpr(shard_stage_chunks):
+                            tile = fx.slice(
+                                shard_value_tiles[stage % 2],
+                                (None, None, chunk, pack),
+                            )
+                            value_pack = thr_mma.make_fragment_A(tile)
+                            fx.copy(
+                                transposed_lds_copy,
+                                copy_v.partition_S(tile),
+                                copy_v.retile(value_pack),
+                            )
+                            index = stage * shard_stage_chunks + chunk
+                            tile_output[index] = mfma(
+                                value_pack, probability_fragment, tile_output[index]
+                            )
+                    schedule_fwd_pv_pipeline(output_chunks=shard_stage_chunks)
+                return tile_output
+
             def load_key_fragment(k_step, high_half, stage=0):
                 tile = fx.slice(key_tiles[stage], (None, None, int(high_half), k_step))
                 fragment = thr_mma.make_fragment_A(tile)
@@ -1496,7 +1938,7 @@ def build_flex_attn_fwd_module(
 
             def accumulate_probability(pack_values, pack_index, tile_output, stage):
                 probability_fragment = fx.make_fragment_like(
-                    probability_coordinates, fx.BFloat16
+                    probability_coordinates, element_type
                 )
                 probability_fragment.store(Vec(pack_values))
                 for d_chunk in fx.range_constexpr(output_chunks):
@@ -1505,6 +1947,48 @@ def build_flex_attn_fwd_module(
                         value_pack, probability_fragment, tile_output[d_chunk]
                     )
                 return tile_output
+
+            def apply_score_mod(raw, key_base):
+                # Move the modified score to log2 units.
+                if const_expr(capture_table is not None):
+                    keys = [
+                        key_base
+                        + fx.Int32(fx.get_scalar(accumulator_coordinates[element]))
+                        for element in fx.range_constexpr(16)
+                    ]
+                    readers = make_tile_score_mod_readers(
+                        score_mod_aux, score_mod_buffers, keys
+                    )
+                    batch_index = fx.Int32(batch)
+                    return [
+                        _f32(
+                            score_mod(
+                                _f32(raw[element]) * _f32(scale),
+                                batch_index,
+                                query_head,
+                                query_pos,
+                                keys[element],
+                                readers,
+                            )
+                        )
+                        * _f32(_LOG2E)
+                        for element in fx.range_constexpr(16)
+                    ]
+                return [
+                    _f32(
+                        score_mod(
+                            _f32(raw[element]) * _f32(scale),
+                            fx.Int32(batch),
+                            query_head,
+                            query_pos,
+                            key_base
+                            + fx.Int32(fx.get_scalar(accumulator_coordinates[element])),
+                            score_mod_readers,
+                        )
+                    )
+                    * _f32(_LOG2E)
+                    for element in fx.range_constexpr(16)
+                ]
 
             def process_tile_body(
                 kv_chunk,
@@ -1517,6 +2001,7 @@ def build_flex_attn_fwd_module(
                 tile_exact_max=None,
                 prepared_keep=None,
                 tile_full=None,
+                prefetch_chunk=None,
             ):
                 kv_base = kv_chunk * fx.Int32(kv_tile_rows)
                 if const_expr(not pipelined_kv):
@@ -1524,19 +2009,22 @@ def build_flex_attn_fwd_module(
                     fx.rocdl.s_waitcnt(vmcnt=0, lgkmcnt=0, expcnt=0)
                     fx.gpu.barrier()
 
-                scores_lo = zero16
-                scores_hi = zero16
-                for k_step in fx.range_constexpr(qk_reduction_steps):
-                    query_pack = load_query_fragment(k_step)
-                    key_lo = load_key_fragment(k_step, False, stage)
-                    key_hi = load_key_fragment(k_step, True, stage)
-                    scores_lo = mfma(key_lo, query_pack, scores_lo)
-                    scores_hi = mfma(key_hi, query_pack, scores_hi)
-                schedule_fwd_qk_pipeline(
-                    reduction_steps=qk_reduction_steps,
-                    vmem_count=(key_load_iterations if pipelined_kv else 0),
-                    query_in_registers=pipelined_kv,
-                )
+                if const_expr(single_pass):
+                    scores_lo, scores_hi = single_pass_scores(kv_base)
+                else:
+                    scores_lo = zero16
+                    scores_hi = zero16
+                    for k_step in fx.range_constexpr(qk_reduction_steps):
+                        query_pack = load_query_fragment(k_step)
+                        key_lo = load_key_fragment(k_step, False, stage)
+                        key_hi = load_key_fragment(k_step, True, stage)
+                        scores_lo = mfma(key_lo, query_pack, scores_lo)
+                        scores_hi = mfma(key_hi, query_pack, scores_hi)
+                    schedule_fwd_qk_pipeline(
+                        reduction_steps=qk_reduction_steps,
+                        vmem_count=(key_load_iterations if pipelined_kv else 0),
+                        query_in_registers=pipelined_kv,
+                    )
 
                 if const_expr(not pipelined_kv):
                     # Every wave must finish its K reads before the shared allocation
@@ -1544,12 +2032,18 @@ def build_flex_attn_fwd_module(
                     fx.gpu.barrier()
                     stage_value(kv_base)
 
-                raw_lo = Vec(scores_lo)
-                raw_hi = Vec(scores_hi)
+                if const_expr(has_score_mod):
+                    raw_lo = Vec(scores_lo)
+                    raw_hi = Vec(scores_hi)
+                else:
+                    raw_lo = scale_scores(scores_lo)
+                    raw_hi = scale_scores(scores_hi)
                 score_values = []
                 keep_values = []
                 for half in fx.range_constexpr(2):
                     raw = raw_lo if half == 0 else raw_hi
+                    if const_expr(has_score_mod):
+                        raw = apply_score_mod(raw, kv_base + fx.Int32(32 * half))
                     half_mask_groups = []
                     if const_expr(
                         prepared_keep is None and bool(vector_mask_loads) and masked
@@ -1579,17 +2073,19 @@ def build_flex_attn_fwd_module(
                                 keep = keep & tile_active
                             if const_expr(bool(mask_program)):
                                 if masked:
-                                    cached_mask = {}
+                                    cached_mask = dict(query_mask_values)
                                     if const_expr(bool(vector_mask_loads)):
                                         mask_group = half_mask_groups[
                                             element // mask_load_width
                                         ]
-                                        cached_mask = {
-                                            slot: fx.Int32(
-                                                values[element % mask_load_width]
-                                            )
-                                            for slot, values in mask_group.items()
-                                        }
+                                        cached_mask.update(
+                                            {
+                                                slot: mask_group_value(
+                                                    group, element % mask_load_width
+                                                )
+                                                for slot, group in mask_group.items()
+                                            }
+                                        )
                                     element_keep = evaluate_mask(
                                         query_pos, key_pos, cached_mask
                                     )
@@ -1598,9 +2094,12 @@ def build_flex_attn_fwd_module(
                                     keep = keep & element_keep
 
                         keep_values.append(keep)
-                        score_values.append(
-                            keep.select(_f32(raw[element]), _f32(_NEG_BIG))
-                        )
+                        score = keep.select(_f32(raw[element]), _f32(_NEG_BIG))
+                        if const_expr(kv_ragged):
+                            score = (key_pos < fx.Int32(seq_kv)).select(
+                                score, _f32(_NEG_PAST_END)
+                            )
+                        score_values.append(score)
 
                 max_levels = score_values
                 for level in fx.range_constexpr(5):
@@ -1663,7 +2162,11 @@ def build_flex_attn_fwd_module(
                         )
 
                 stream_probabilities = (
-                    not paired and pipelined_kv and mask_buffer_count > 0 and masked
+                    not paired
+                    and not single_pass
+                    and pipelined_kv
+                    and mask_buffer_count > 0
+                    and masked
                 )
                 shifted_scores = []
                 for pack in fx.range_constexpr(4):
@@ -1684,24 +2187,46 @@ def build_flex_attn_fwd_module(
                     shifted_scores.extend([shifted[i] for i in fx.range_constexpr(8)])
                 sum_probabilities = []
                 probability_packs = []
+                tie_stream = stream_probabilities and (
+                    wide_head or tie_streamed_probabilities or tie_scalar_mask_loads
+                )
                 for pack in fx.range_constexpr(4):
                     pack_probabilities = []
+                    if const_expr(tie_stream):
+                        exponents = tied_nop(
+                            Vec.from_elements(
+                                [
+                                    _exp2(shifted_scores[pack * 8 + i])
+                                    for i in fx.range_constexpr(8)
+                                ],
+                                fx.Float32,
+                            ),
+                            0,
+                        )
                     for pack_element in fx.range_constexpr(8):
                         element = pack * 8 + pack_element
                         probability = keep_values[element].select(
-                            _exp2(shifted_scores[element]),
+                            _f32(exponents[pack_element])
+                            if const_expr(tie_stream)
+                            else _exp2(shifted_scores[element]),
                             _f32(0.0),
                         )
                         pack_probabilities.append(probability)
                         sum_probabilities.append(probability)
                     pack_values = Vec.from_elements(pack_probabilities, fx.Float32).to(
-                        fx.BFloat16
+                        element_type
                     )
                     if const_expr(stream_probabilities):
+                        if const_expr(tie_stream):
+                            pack_values = tied_nop(pack_values, 1)
                         tile_output = accumulate_probability(
                             pack_values, pack, tile_output, stage
                         )
                     else:
+                        if const_expr(has_score_mod and capture_table is None):
+                            pack_values = tied_nop(
+                                pack_values, 1, has_side_effects=False
+                            )
                         probability_packs.append(pack_values)
                 sum_levels = sum_probabilities
                 for level in fx.range_constexpr(5):
@@ -1711,7 +2236,9 @@ def build_flex_attn_fwd_module(
                     ]
                 local_sum = sum_levels[0]
                 if const_expr(not stream_probabilities):
-                    schedule_fwd_softmax_pipeline(vmem_count=value_load_iterations)
+                    schedule_fwd_softmax_pipeline(
+                        vmem_count=0 if single_pass else value_load_iterations
+                    )
                 if const_expr(pipelined_kv):
                     tile_sum = reduce_lane_pair(local_sum, False)
                 else:
@@ -1727,7 +2254,14 @@ def build_flex_attn_fwd_module(
                     # Synchronize only when the LDS data is actually consumed.
                     fx.rocdl.s_waitcnt(vmcnt=0, lgkmcnt=0, expcnt=0)
                     fx.gpu.barrier()
-                if const_expr(not stream_probabilities):
+                if const_expr(single_pass):
+                    tile_output = single_pass_output(
+                        probability_packs,
+                        tile_output,
+                        kv_base,
+                        prefetch_chunk * fx.Int32(kv_tile_rows),
+                    )
+                elif const_expr(not stream_probabilities):
                     for probability_pack in fx.range_constexpr(4):
                         tile_output = accumulate_probability(
                             probability_packs[probability_pack],
@@ -1822,6 +2356,7 @@ def build_flex_attn_fwd_module(
                 tile_active=None,
                 tile_exact_max=None,
                 tile_full=None,
+                prefetch_chunk=None,
             ):
                 if const_expr(tile_exact_max is None):
                     tile_exact_max = tile_running_max
@@ -1885,10 +2420,15 @@ def build_flex_attn_fwd_module(
                                 )
                             )
                             cached_mask = {
-                                slot: fx.Int32(values[element % mask_load_width])
-                                for slot, values in mask_groups[
-                                    element // mask_load_width
-                                ].items()
+                                **query_mask_values,
+                                **{
+                                    slot: mask_group_value(
+                                        group, element % mask_load_width
+                                    )
+                                    for slot, group in mask_groups[
+                                        element // mask_load_width
+                                    ].items()
+                                },
                             }
                             keep = query_valid & evaluate_mask(
                                 query_pos, key_pos, cached_mask
@@ -1896,6 +2436,18 @@ def build_flex_attn_fwd_module(
                             if tile_active is not None:
                                 keep = keep & tile_active
                             prepared_keep.append(keep)
+                    if const_expr(single_pass):
+                        # Every wave takes the staging barriers of every tile.
+                        return process_tile_body(
+                            kv_chunk,
+                            masked,
+                            tile_output,
+                            tile_running_max,
+                            tile_running_sum,
+                            tile_exact_max=tile_exact_max,
+                            prepared_keep=prepared_keep,
+                            prefetch_chunk=prefetch_chunk,
+                        )
                     levels = prepared_keep
                     for level in fx.range_constexpr(5):
                         levels = [
@@ -1938,7 +2490,71 @@ def build_flex_attn_fwd_module(
                     tile_active=tile_active,
                     tile_exact_max=tile_exact_max,
                     tile_full=tile_full,
+                    prefetch_chunk=prefetch_chunk,
                 )
+
+            def process_single_pass_run(
+                block_count, block_indices, block_base, masked, run_state
+            ):
+                run_results = run_state
+                if block_count > fx.Int32(0):
+                    first_block = load_uniform_i32(block_indices, block_base)
+                    stage_columns(first_block * fx.Int32(sparse_kv_block_size), True, 0)
+                    results = [first_block, *run_state]
+                    for block_index, iter_args in range(
+                        fx.Int32(0),
+                        block_count,
+                        fx.Int32(1),
+                        init=results,
+                    ):
+                        current_block = fx.Int32(iter_args[0])
+                        state = [
+                            [
+                                iter_args[3 + d]
+                                for d in fx.range_constexpr(output_chunks)
+                            ],
+                            _f32(iter_args[1]),
+                            _f32(iter_args[2]),
+                            _f32(iter_args[3 + output_chunks]),
+                        ]
+                        # The last tile prefetches its own block again so that
+                        # every tile leaves the same DMAs outstanding.
+                        next_index = fx.Int32(block_index) + fx.Int32(1)
+                        next_block = load_uniform_i32(
+                            block_indices,
+                            block_base
+                            + (next_index < block_count).select(
+                                next_index, fx.Int32(block_index)
+                            ),
+                        )
+                        first_chunk = current_block * fx.Int32(
+                            kv_tiles_per_sparse_block
+                        )
+                        for sub_block in fx.range_constexpr(kv_tiles_per_sparse_block):
+                            prefetch_chunk = (
+                                next_block * fx.Int32(kv_tiles_per_sparse_block)
+                                if sub_block + 1 == kv_tiles_per_sparse_block
+                                else first_chunk + fx.Int32(sub_block + 1)
+                            )
+                            state = process_tile(
+                                first_chunk + fx.Int32(sub_block),
+                                masked,
+                                *state[:3],
+                                tile_exact_max=state[3],
+                                prefetch_chunk=prefetch_chunk,
+                            )
+                        results = yield [
+                            next_block,
+                            state[1],
+                            state[2],
+                            *state[0],
+                            state[3],
+                        ]
+                    # Retire the last prefetch before the LDS is reused.
+                    fx.rocdl.s_waitcnt(vmcnt=0, lgkmcnt=0, expcnt=0)
+                    phase_fence()
+                    run_results = results[1:]
+                return run_results
 
             def process_pipelined_run(
                 block_count,
@@ -2236,7 +2852,7 @@ def build_flex_attn_fwd_module(
                 scores = zero16
                 for step in fx.range_constexpr(qk_reduction_steps):
                     scores = mfma(packs[step], load_query_fragment(step), scores)
-                return Vec(scores)
+                return scale_scores(scores)
 
             def load_phase_value(half, stage):
                 return [
@@ -2248,7 +2864,7 @@ def build_flex_attn_fwd_module(
             def phase_pv(packs, probabilities, tile_output, half):
                 for d in fx.range_constexpr(2):
                     for pack in fx.range_constexpr(4):
-                        p = fx.make_fragment_like(probability_coordinates, fx.BFloat16)
+                        p = fx.make_fragment_like(probability_coordinates, element_type)
                         p.store(Vec(probabilities[pack]))
                         out_index = half * 2 + d
                         tile_output[out_index] = mfma(
@@ -2274,7 +2890,7 @@ def build_flex_attn_fwd_module(
                 packs = [
                     Vec.from_elements(
                         probabilities[pack * 8 : pack * 8 + 8], fx.Float32
-                    ).to(fx.BFloat16)
+                    ).to(element_type)
                     for pack in fx.range_constexpr(4)
                 ]
                 return packs, total
@@ -2366,6 +2982,8 @@ def build_flex_attn_fwd_module(
                         query_fragment = load_query_fragment(step)
                         score_lo = Vec(mfma(key_lo[step], query_fragment, score_lo))
                         score_hi = Vec(mfma(key_hi[step], query_fragment, score_hi))
+                    score_lo = scale_scores(score_lo)
+                    score_hi = scale_scores(score_hi)
                     previous = phase_exp(pending, 16, 32)
                     partial_sum = Vec.from_elements(
                         previous[:first_softmax_count], fx.Float32
@@ -2388,7 +3006,7 @@ def build_flex_attn_fwd_module(
                         pin_vector(
                             Vec.from_elements(
                                 previous[part * 8 : part * 8 + 8], fx.Float32
-                            ).to(fx.BFloat16)
+                            ).to(element_type)
                         )
                         for part in fx.range_constexpr(4)
                     ]
@@ -2422,7 +3040,7 @@ def build_flex_attn_fwd_module(
                     for part in fx.range_constexpr(first_softmax_count // 8):
                         values = Vec.from_elements(
                             previous_probabilities[part * 8 : part * 8 + 8], fx.Float32
-                        ).to(fx.BFloat16)
+                        ).to(element_type)
                         probabilities.append(pin_vector(values))
                     remaining = previous_probabilities[first_softmax_count:32]
                     for step in fx.range_constexpr(qk_reduction_steps):
@@ -2461,7 +3079,7 @@ def build_flex_attn_fwd_module(
                                 Vec.from_elements(
                                     final_probabilities[part * 8 : part * 8 + 8],
                                     fx.Float32,
-                                ).to(fx.BFloat16)
+                                ).to(element_type)
                             )
                         )
                     tile_sum = tile_sum + probability_sum
@@ -2488,7 +3106,7 @@ def build_flex_attn_fwd_module(
                     phase_fence()
 
                     probability_fragment = fx.make_fragment_like(
-                        probability_coordinates, fx.BFloat16
+                        probability_coordinates, element_type
                     )
                     probability_fragment.store(Vec(probabilities[0]))
                     for d in fx.range_constexpr(output_chunks):
@@ -2505,7 +3123,7 @@ def build_flex_attn_fwd_module(
 
                     for pack in fx.range_constexpr(1, 4):
                         probability_fragment = fx.make_fragment_like(
-                            probability_coordinates, fx.BFloat16
+                            probability_coordinates, element_type
                         )
                         probability_fragment.store(Vec(probabilities[pack]))
                         for d in fx.range_constexpr(output_chunks):
@@ -2596,7 +3214,8 @@ def build_flex_attn_fwd_module(
                     score_lo = phase_qk(key_packs)
                     phase_fence()
                     key_packs = load_phase_key(1, 0)
-                    fx.rocdl.s_waitcnt(vmcnt=63, lgkmcnt=0, expcnt=0)
+                    # Waves 4-7 run a barrier behind; waves 0-3 read K1 after the next one.
+                    fx.rocdl.s_waitcnt(vmcnt=value_load_iterations, lgkmcnt=0, expcnt=0)
                     phase_fence()
                     score_hi = phase_qk(key_packs)
                     tile_maximum = phase_max(score_lo, score_hi)
@@ -2688,6 +3307,8 @@ def build_flex_attn_fwd_module(
                         ]
                     fx.rocdl.s_waitcnt(vmcnt=key_load_iterations, lgkmcnt=0, expcnt=0)
                     phase_fence()
+                    # Waves 4-7 run a barrier behind: V1 is readable only after this one.
+                    phase_fence()
                     maximum = _f32(pipeline_results[2])
                     total = _f32(pipeline_results[3])
                     exact = _f32(pipeline_results[4])
@@ -2745,9 +3366,34 @@ def build_flex_attn_fwd_module(
                     fx.make_layout(8, 1),
                 )
                 store_valid = query_valid
+                if const_expr(q_ragged):
+                    store_valid = store_valid & (query_pos < fx.Int32(seq_q))
                 if const_expr(split_kv):
                     store_valid = store_valid & (wave == fx.Int32(0))
-                if store_valid:
+                chunk_columns = None
+                if const_expr(value_shards > 1):
+                    shard_column = value_shard * fx.Int32(
+                        shard_stage_chunks * mfma_tile_size
+                    )
+                    chunk_columns = [
+                        shard_column
+                        + fx.Int32(
+                            chunk // shard_stage_chunks * value_stage_columns
+                            + chunk % shard_stage_chunks * mfma_tile_size
+                        )
+                        for chunk in fx.range_constexpr(output_chunks)
+                    ]
+                if const_expr(kv_splits > 1):
+                    if store_valid:
+                        _store_partial_output_fragments(
+                            final_output,
+                            inverse_vec,
+                            output_source,
+                            accumulator_coordinates,
+                            output_chunks,
+                            mfma_tile_size,
+                        )
+                elif store_valid:
                     _store_output_fragments(
                         final_output,
                         inverse_vec,
@@ -2756,9 +3402,15 @@ def build_flex_attn_fwd_module(
                         output_copy,
                         output_chunks,
                         mfma_tile_size,
+                        element_type,
+                        chunk_columns,
+                        output_columns,
                     )
 
-                if store_valid & (lane_half == fx.Int32(0)):
+                stats_valid = store_valid & (lane_half == fx.Int32(0))
+                if const_expr(value_shards > 1):
+                    stats_valid = stats_valid & (value_shard == fx.Int32(0))
+                if stats_valid:
                     has_values = final_sum > _f32(0.0)
                     lse_value = final_max + fx.math.log2(final_sum)
                     max_value = (
@@ -2778,7 +3430,7 @@ def build_flex_attn_fwd_module(
                         _f32(float("-inf")),
                     )
                     stats_offset = (
-                        batch * fx.Int32(num_q_heads) + query_head
+                        output_batch * fx.Int32(num_q_heads) + query_head
                     ) * fx.Int32(seq_q) + query_pos
                     lse[stats_offset] = lse_value
                     if const_expr(write_max_scores):
@@ -2830,6 +3482,19 @@ def build_flex_attn_fwd_module(
                 partial_count = load_uniform_i32(kv_num_blocks_view, mask_row)
                 full_base = mask_row * fx.Int32(max_full_blocks)
                 partial_base = mask_row * fx.Int32(max_partial_blocks)
+                if const_expr(kv_splits > 1):
+
+                    def split_range(count, base):
+                        chunk = (count + fx.Int32(kv_splits - 1)) // fx.Int32(kv_splits)
+                        first = kv_split * chunk
+                        first = (first < count).select(first, count)
+                        rest = count - first
+                        return (chunk < rest).select(chunk, rest), base + first
+
+                    full_count, full_base = split_range(full_count, full_base)
+                    partial_count, partial_base = split_range(
+                        partial_count, partial_base
+                    )
                 initial_state = [running_max, running_sum] + output_accumulators
 
                 if const_expr(split_kv):
@@ -2848,6 +3513,21 @@ def build_flex_attn_fwd_module(
                         full_results,
                     )
                     final_results = reduce_split_results(split_results)
+                elif const_expr(single_pass):
+                    full_results = process_single_pass_run(
+                        full_count,
+                        full_kv_indices_view,
+                        full_base,
+                        False,
+                        [*initial_state, running_max],
+                    )
+                    final_results = process_single_pass_run(
+                        partial_count,
+                        kv_indices_view,
+                        partial_base,
+                        True,
+                        full_results,
+                    )
                 elif const_expr(pipelined_kv):
                     full_results = process_pipelined_run(
                         full_count,
@@ -2900,11 +3580,18 @@ def build_flex_attn_fwd_module(
     return _make_forward_launch(
         kernel,
         grid=(
-            (num_q_heads, num_query_chunks, batch_size)
-            if paired
-            else (heads_per_group, num_query_chunks, total_heads // heads_per_group)
+            launch_grid(batch_size, seq_q)
+            if None not in (batch_size, seq_q)
+            else lambda query: launch_grid(
+                runtime_extent(batch_size, query, 0), runtime_extent(seq_q, query, 2)
+            )
         ),
         num_threads=num_threads,
-        mask_buffer_count=mask_buffer_count,
+        mask_buffer_count=(
+            capture_slots
+            if capture_table
+            else mask_buffer_count + score_mod_buffer_count
+        ),
         waves_per_eu=waves_per_eu,
+        mod_key=mod_key,
     )

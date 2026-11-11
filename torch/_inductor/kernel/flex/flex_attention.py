@@ -164,6 +164,12 @@ flex_attention_template = TritonTemplate(
 )
 
 
+def _flydsl_option(kernel_options, direction, name, default):
+    """FlyDSL kernel option ``name``, preferring its ``direction``-prefixed form
+    (``fwd`` or ``bwd``) like the other kernel options."""
+    return kernel_options.get(f"{direction}_{name}", kernel_options.get(name, default))
+
+
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
 def flex_attention(
     query,
@@ -312,6 +318,19 @@ def flex_attention(
             subgraph_buffer=subgraph_buffer,
             mask_graph_buffer=mask_graph_buffer,
             write_max_scores=kernel_options.get("OUTPUT_MAX", True),
+            dualwave_causal=_flydsl_option(
+                kernel_options, "fwd", "FLYDSL_DUALWAVE_CAUSAL", False
+            ),
+            head_slow_order=_flydsl_option(
+                kernel_options, "fwd", "FLYDSL_HEAD_SLOW_ORDER", True
+            ),
+            split_kv=_flydsl_option(kernel_options, "fwd", "FLYDSL_SPLIT_KV", False),
+            dualwave_wide=_flydsl_option(
+                kernel_options, "fwd", "FLYDSL_DUALWAVE_WIDE", False
+            ),
+            single_pass=_flydsl_option(
+                kernel_options, "fwd", "FLYDSL_WIDE_SINGLE_PASS", True
+            ),
         )
 
     can_use_decode = _use_flex_decoding(
@@ -953,8 +972,8 @@ def flex_attention_backward(*args, **kwargs):
     else:
         kernel_options.setdefault("IS_DIVISIBLE", False)
 
-    if backend == "FLYDSL":
-        flydsl_result = create_flydsl_flex_attention_backward_kernel(
+    def _create_flydsl_backward(**mod_kwargs):
+        return create_flydsl_flex_attention_backward_kernel(
             query,
             key,
             value,
@@ -975,14 +994,28 @@ def flex_attention_backward(*args, **kwargs):
             full_kv_indices=full_kv_indices,
             dq_accum_fp32=cast(
                 bool,
-                kernel_options.get(
-                    "bwd_FLYDSL_DQ_ACCUM_FP32",
-                    kernel_options.get("FLYDSL_DQ_ACCUM_FP32", True),
-                ),
+                _flydsl_option(kernel_options, "bwd", "FLYDSL_DQ_ACCUM_FP32", True),
             ),
+            single_pass=cast(
+                bool,
+                _flydsl_option(kernel_options, "bwd", "FLYDSL_WIDE_SINGLE_PASS", False),
+            ),
+            split_backward=cast(
+                bool | None,
+                _flydsl_option(kernel_options, "bwd", "FLYDSL_SPLIT_BACKWARD", None),
+            ),
+            **mod_kwargs,
         )
-        if flydsl_result is not None:
-            return flydsl_result
+
+    flydsl_score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
+    if backend == "FLYDSL":
+        if flydsl_score_is_trivial:
+            flydsl_result = _create_flydsl_backward()
+            if flydsl_result is not None:
+                return flydsl_result
+        else:
+            # The FlyDSL template matches captures to subgraph loads by buffer name.
+            score_mod_other_buffers = maybe_realize(list(score_mod_other_buffers))
 
     fwd_placeholder_inps = [
         create_placeholder(name, dtype, device)
@@ -1020,6 +1053,13 @@ def flex_attention_backward(*args, **kwargs):
     joint_outputs = process_joint_outputs(
         all_joint_outputs, len(joint_placeholder_inps)
     )
+
+    if backend == "FLYDSL" and not flydsl_score_is_trivial:
+        flydsl_result = _create_flydsl_backward(
+            fw_subgraph_buffer=fw_subgraph_buffer, joint_outputs=joint_outputs
+        )
+        if flydsl_result is not None:
+            return flydsl_result
 
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())

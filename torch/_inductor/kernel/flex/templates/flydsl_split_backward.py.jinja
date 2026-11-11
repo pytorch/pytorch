@@ -1,0 +1,94 @@
+from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_split_bwd_dkdv import (
+    build_split_bwd_dkdv,
+)
+from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_split_bwd_dq import (
+    build_split_bwd_dq,
+)
+from torch._inductor.runtime.flydsl_cache import (
+    FlyDSLHostLauncher,
+    LazyFlyDSLLauncher,
+)
+
+
+{{gen_defines()}}
+
+_BUILD_ARGS = dict(
+    head_dim=HEAD_DIM,
+    lds_bytes=LDS_BYTES,
+    num_heads=NUM_HEADS,
+    num_kv_heads=NUM_KV_HEADS,
+    causal=CAUSAL,
+    window=CAUSAL,
+    dtype_str=DTYPE_STR,
+)
+_builders = (build_split_bwd_dq, build_split_bwd_dkdv)
+_dq_launcher, _dkdv_launcher = (
+    LazyFlyDSLLauncher(lambda build=build: FlyDSLHostLauncher(build(**_BUILD_ARGS)))
+    for build in _builders
+)
+
+
+def _row_args(query, key, logsumexp, delta, stream):
+    batch, _, seq_len_q, _ = query.shape
+    rows = (logsumexp.view(-1, seq_len_q), delta.view(-1, seq_len_q), batch, seq_len_q)
+    # A (Sq, 0) window is top-left causal: each query row sees keys up to its own.
+    left = seq_len_q if WINDOW_LEFT is None else WINDOW_LEFT
+    window = (left, 0) if CAUSAL else None
+    return rows, dict(
+        seqlen_k=key.shape[2], scale=SM_SCALE, window=window, stream=stream
+    )
+
+
+{% set kernel_args = [
+    "query", "key", "value", "grad_output", "logsumexp", "delta", "grad_key",
+    "grad_value",
+] %}
+{{def_kernel(*kernel_args)}}
+    grad_query = {{get_output()}}
+    rows, kwargs = _row_args(query, key, logsumexp, delta, stream)
+    device = query.device
+    _dq_launcher.get(device)(
+        query, key, value, grad_output, grad_query, *rows, device=device, **kwargs
+    )
+    _dkdv_launcher.get(device)(
+        query, key, value, grad_output, grad_key, grad_value, *rows, device=device, **kwargs
+    )
+    return grad_query
+
+
+def {{kernel_name}}_precompile(
+    precompile_shapes,
+    precompile_strides,
+    precompile_dtypes,
+    device_index=0,
+    device_capability=None,
+    flydsl_gpu_arch=None,
+):
+    """Warm FlyDSL's disk cache using metadata-only tensors."""
+    del device_index, device_capability
+    import torch
+
+    tensors = {
+        name: torch.empty_strided(
+            tuple(precompile_shapes[name]),
+            tuple(precompile_strides[name]),
+            dtype=getattr(torch, precompile_dtypes[name]),
+            device="meta",
+        )
+        for name in precompile_shapes
+    }
+    query, key, value, grad_output, logsumexp, delta, grad_key, grad_value = (
+        tensors[name] for name in {{ kernel_args }}
+    )
+    rows, kwargs = _row_args(query, key, logsumexp, delta, None)
+    dq_launcher, dkdv_launcher = (
+        FlyDSLHostLauncher(build(**_BUILD_ARGS)) for build in _builders
+    )
+    dq_launcher.precompile(
+        query, key, value, grad_output, tensors["output"], *rows,
+        flydsl_gpu_arch=flydsl_gpu_arch, **kwargs
+    )
+    dkdv_launcher.precompile(
+        query, key, value, grad_output, grad_key, grad_value, *rows,
+        flydsl_gpu_arch=flydsl_gpu_arch, **kwargs
+    )

@@ -1,5 +1,10 @@
 # mypy: allow-untyped-defs
 
+from torch.utils._ordered_set import OrderedSet
+
+from . import flex_attn_target
+
+
 MASK_TRAVERSAL_UNMASKED = "unmasked"
 MASK_TRAVERSAL_DIRECT_RANGE = "direct_range"
 MASK_TRAVERSAL_BLOCK_LIST = "block_list"
@@ -7,6 +12,144 @@ MASK_TRAVERSAL_BLOCK_LIST = "block_list"
 DIRECT_RANGE_CAUSAL = "causal"
 
 MAX_DQ_WORKSPACE_BYTES = 16 << 30
+MAX_BUFFER_VIEW_BYTES = 0xFFFFFFFF
+# The reverse block-list builder keeps one int32 flag per Q block in LDS.
+MAX_REVERSE_LIST_QUERY_BLOCKS = 16384
+# Kernels take this many capture tensors directly. Each keeps a 4-SGPR buffer
+# descriptor live across the attention loops, so more captures are read through
+# one table of base addresses instead.
+MAX_DIRECT_CAPTURES = 4
+# (QK, V) head dims for both directions. The backward needs QK % 32 == 0 and
+# V >= 64, and its dense LDS footprint must fit gfx950's LDS.
+SUPPORTED_HEAD_DIMS = (
+    (64, 64),
+    (64, 128),
+    (64, 256),
+    (96, 96),
+    (96, 128),
+    (128, 64),
+    (128, 128),
+    (128, 256),
+    (192, 128),
+    (192, 192),
+    (256, 128),
+    (256, 256),
+)
+# (QK, V) head dims above 256: two backward producer waves accumulate one
+# 32-column-aligned half of dK/dV each; the forward runs V in slices.
+WIDE_HEAD_DIMS = tuple(
+    (qk_head_dim, value_head_dim)
+    for qk_head_dim in (64, 128, 256, 384, 512)
+    for value_head_dim in (64, 128, 256, 384, 512)
+    if max(qk_head_dim, value_head_dim) > 256
+)
+# A producer wave holds (QK + V) / 2 f32 dK/dV accumulators per lane; above
+# this (or a wider V) two waves per SIMD spill, so the CTA runs one per SIMD.
+_MAX_SHARED_SIMD_ACCUMULATORS = 160
+# Rows the forward leaves empty store LSE = -inf, and a -inf score minus that
+# is NaN. Applied after any ln -> log2 conversion, which would overflow it.
+LSE_FLOOR = -3.0e38
+
+
+def dq_workspace_head_group(batch_heads):
+    return min(32, batch_heads & -batch_heads)
+
+
+def backward_column_slices(qk_head_dim, value_head_dim):
+    """Return how many producer waves share each 32-row key tile, one dK/dV
+    column slice each."""
+    return 2 if (qk_head_dim, value_head_dim) in WIDE_HEAD_DIMS else 1
+
+
+def backward_single_pass(qk_head_dim, value_head_dim, target=None):
+    """Whether a ``WIDE_HEAD_DIMS`` backward gives two producers 16 full-width rows."""
+    # 32 K/V rows and two 32-row Q/dO stages must fit in LDS with dS and P.
+    return (qk_head_dim, value_head_dim) in WIDE_HEAD_DIMS and (
+        192 * (qk_head_dim + value_head_dim)
+        + 2 * 32 * 40 * 2
+        + 32 * 16 * 2
+        + 2 * 64 * 4
+        <= flex_attn_target.resolve_target(target).lds_bytes
+    )
+
+
+def backward_producer_waves(block_list, qk_head_dim, value_head_dim, captures=0):
+    """Return the dK/dV producer waves of one backward compute CTA, whose
+    score_mod and mask_mod read ``captures`` tensors."""
+    if (
+        max((qk_head_dim + value_head_dim) // 2, value_head_dim)
+        > _MAX_SHARED_SIMD_ACCUMULATORS
+    ):
+        return 2
+    # Above QK 128, two waves per SIMD leave too few registers for the
+    # capture reads of a block list through a capture table, or of a dense or
+    # causal traversal's score_mod: they spill inside the query loop.
+    if qk_head_dim > 128 and (
+        captures > MAX_DIRECT_CAPTURES if block_list else captures > 0
+    ):
+        return 2
+    return 4 if block_list else 6
+
+
+def backward_key_rows(block_list, qk_head_dim, value_head_dim, captures=0):
+    """Return the KV rows one backward compute owner stages (16 per key group)."""
+    return (
+        backward_producer_waves(block_list, qk_head_dim, value_head_dim, captures)
+        * 32
+        // backward_column_slices(qk_head_dim, value_head_dim)
+    )
+
+
+def forward_value_slice(qk_head_dim, value_head_dim, target=None):
+    """Return the V columns of one forward kernel launch, at most 256 and
+    narrower where its double-buffered 64-row 2-byte K and V tiles would
+    overflow LDS."""
+    if max(qk_head_dim, value_head_dim) <= 256:
+        return value_head_dim
+    lds_bytes = flex_attn_target.resolve_target(target).lds_bytes
+    width = 256
+    while width > 128 and 2 * 64 * (qk_head_dim + width) * 2 > lds_bytes:
+        width //= 2
+    while value_head_dim % width:
+        width //= 2
+    return width
+
+
+def single_pass_value_shards(qk_head_dim, value_head_dim, lean=False):
+    """Waves that split one query row's output columns in the single-pass forward."""
+    # One wave holding them all spills, but for (384, 384) in a ``lean`` build:
+    # a static prefill with Sq and Sk multiples of 128 and no mods or captures.
+    if value_head_dim == 512 or (
+        value_head_dim == 384 and not (lean and qk_head_dim == 384)
+    ):
+        return 2
+    return 1
+
+
+def forward_single_pass(qk_head_dim, value_head_dim, target=None):
+    """Whether one launch computes S fewer times per row than the V slices do."""
+    return (qk_head_dim, value_head_dim) in WIDE_HEAD_DIMS and value_head_dim // (
+        forward_value_slice(qk_head_dim, value_head_dim, target)
+    ) > single_pass_value_shards(qk_head_dim, value_head_dim)
+
+
+def forward_head_dims(target=None):
+    """(QK, V) head dims of one forward kernel launch."""
+    return SUPPORTED_HEAD_DIMS + tuple(
+        sorted(
+            OrderedSet(
+                [(qk, forward_value_slice(qk, v, target)) for qk, v in WIDE_HEAD_DIMS]
+            )
+            - OrderedSet(SUPPORTED_HEAD_DIMS)
+        )
+    )
+
+
+def split_dq_tiles(qk_head_dim, consumer_waves):
+    """Split one dQ consumer wave's 16-column tiles into (phases, tiles per phase)."""
+    wave_tiles = qk_head_dim // (16 * consumer_waves)
+    phases = 2 if wave_tiles % 2 == 0 else 1
+    return phases, wave_tiles // phases
 
 
 def choose_dq_partitions(
@@ -16,28 +159,60 @@ def choose_dq_partitions(
     workspace_element_bytes=4,
     *,
     qk_head_dim=192,
+    key_sequence_length=None,
+    compute_batch_heads=None,
+    block_list=False,
+    target=None,
 ):
+    """Pick the number of private dQ slots, each holding dQ of every query head;
+    occupancy counts ``compute_batch_heads`` (one compute CTA per KV head)."""
+    if key_sequence_length is None:
+        key_sequence_length = sequence_length
+    if compute_batch_heads is None:
+        compute_batch_heads = batch_heads
     slot_bytes = batch_heads * sequence_length * qk_head_dim * workspace_element_bytes
     max_partitions = MAX_DQ_WORKSPACE_BYTES // slot_bytes
     if max_partitions == 0:
         raise ValueError("FlyDSL backward requires a dQ workspace larger than 16 GiB")
     max_partitions = 1 << (max_partitions.bit_length() - 1)
-    owners = (sequence_length + key_rows - 1) // key_rows
-    if key_rows == 128:
-        # Bound sparse slot traffic and each buffer view for both supported dimensions.
-        head_group = min(32, batch_heads & -batch_heads)
-        max_slots = min(
-            32,
-            0xFFFFFFFF
-            // (sequence_length * 192 * head_group * workspace_element_bytes),
+    # All slots of one workspace head group are addressed through one buffer view.
+    head_group = dq_workspace_head_group(batch_heads)
+    view_partitions = MAX_BUFFER_VIEW_BYTES // (
+        sequence_length * qk_head_dim * head_group * workspace_element_bytes
+    )
+    if view_partitions == 0:
+        raise ValueError(
+            "FlyDSL backward requires a dQ workspace view beyond the 32-bit buffer range"
         )
-        return min(owners, max_partitions, 1 << (max_slots.bit_length() - 1))
-    # Keep long owner loops distributed even when heads fill the device.
-    target = max(1 if owners <= 8 else 2, (256 + batch_heads - 1) // batch_heads)
-    return min(owners, max_partitions, 1 << (target - 1).bit_length())
+    max_partitions = min(max_partitions, 1 << (view_partitions.bit_length() - 1))
+    owners = (key_sequence_length + key_rows - 1) // key_rows
+    # Enough slots for one wave of compute CTAs: each slot costs a zeroing and
+    # a reduction pass over dQ. Long owner loops stay distributed even when
+    # heads fill the device.
+    num_cus = flex_attn_target.resolve_target(target).num_cus
+    partitions = max(1 if owners <= 8 else 2, -(-num_cus // compute_batch_heads))
+    partitions = 1 << (partitions - 1).bit_length()
+    if block_list:
+        # Bound sparse slot traffic as for a D192 slot; view_partitions bounds wider ones.
+        max_slots = max(
+            1,
+            min(
+                32,
+                MAX_BUFFER_VIEW_BYTES
+                // (sequence_length * 192 * head_group * workspace_element_bytes),
+            ),
+        )
+        # Up to two waves of owners, a slot per owner is faster than one wave
+        # of shared slots (by 15% at 16 heads x 32 causal owners).
+        if compute_batch_heads * owners <= 2 * num_cus:
+            partitions = owners
+        partitions = min(partitions, 1 << (max_slots.bit_length() - 1))
+    return min(owners, max_partitions, partitions)
 
 
-def _canonical_mask_expression(mask_program, mask_program_output, sequence_length=None):
+def _canonical_mask_expression(
+    mask_program, mask_program_output, sequence_length=None, key_sequence_length=None
+):
     """Build a small canonical expression tree for mask-shape recognition.
 
     Mask bytecode value ids are an implementation detail of lowering.  Keeping
@@ -51,6 +226,9 @@ def _canonical_mask_expression(mask_program, mask_program_output, sequence_lengt
         ("var", "query"),
         ("var", "key"),
     ]
+    if key_sequence_length is None:
+        key_sequence_length = sequence_length
+    lengths = {"query": sequence_length, "key": key_sequence_length}
 
     # Unknown loads or possible int32 overflow must retain BlockMask traversal.
     def interval(expression):
@@ -58,9 +236,10 @@ def _canonical_mask_expression(mask_program, mask_program_output, sequence_lengt
         if op == "int":
             value = expression[1]
             return (value, value) if -(1 << 31) <= value < (1 << 31) else None
-        if op == "var" and expression[1] in ("query", "key"):
-            if sequence_length is not None and 0 < sequence_length <= (1 << 31):
-                return (0, sequence_length - 1)
+        if op == "var" and expression[1] in lengths:
+            length = lengths[expression[1]]
+            if length is not None and 0 < length <= (1 << 31):
+                return (0, length - 1)
             return None
         if op not in ("add", "sub", "mul"):
             return None
@@ -158,6 +337,7 @@ def classify_mask_traversal(
     mask_buffer_shapes=(),
     *,
     sequence_length=None,
+    key_sequence_length=None,
     block_mask_is_dense=False,
 ):
     """Return ``(traversal, direct_range_kind)`` for a lowered mask.
@@ -178,7 +358,7 @@ def classify_mask_traversal(
         return MASK_TRAVERSAL_UNMASKED, None
 
     expression = _canonical_mask_expression(
-        mask_program, mask_program_output, sequence_length
+        mask_program, mask_program_output, sequence_length, key_sequence_length
     )
     if expression == ("bool", True):
         return MASK_TRAVERSAL_UNMASKED, None
