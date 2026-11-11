@@ -1845,6 +1845,10 @@ class GraphLowering(torch.fx.Interpreter):
 
     def finalize(self) -> None:
         for buf in self.buffers:
+            # Freeze to what a deferred template recorded, not a re-derived layout.
+            constraint = self.buffer_layout_constraints.get(buf.get_name())
+            if constraint is not None and isinstance(buf.layout, ir.FlexibleLayout):
+                buf.freeze_layout_with_exact_strides(constraint.stride)
             buf.decide_layout()
 
     @contextmanager

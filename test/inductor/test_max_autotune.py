@@ -3534,8 +3534,8 @@ class TestMaxAutotune(TestCase):
             # Not padded at lowering time
             catted_bf16 = catted_b_add.to(torch.bfloat16)
 
-            # bmm1 as output -> no padding occurs, however after fusion
-            # the buffer is padded, layout constraint violated
+            # bmm1 as output -> its own output is not padded, but the producer
+            # of catted_bf16 is padded when the buffer is frozen after fusion
             bmm1 = torch.bmm(a.to(torch.bfloat16), catted_bf16)
             fused = catted_bf16 - d
             if epilogue:
@@ -3563,11 +3563,14 @@ class TestMaxAutotune(TestCase):
             ),
         ):
             compiled = torch.compile(mm_with_cat, mode="max-autotune-no-cudagraphs")
-            _, code = run_and_get_code(compiled, a, b1, b2, d)
+            result, code = run_and_get_code(compiled, a, b1, b2, d)
 
-            # Despite Triton being 10x faster in benchmarks, the layout conflict
-            # should force fallback to extern_kernels.bmm
-            FileCheck().check_not("triton_tem").run(code[0])
+            # The template records the same padded layout the buffer is later
+            # frozen to, so Triton (10x faster here) is selected without conflict.
+            FileCheck().check("triton_tem").run(code[0])
+            torch.testing.assert_close(
+                result, mm_with_cat(a, b1, b2, d), rtol=5e-2, atol=5e-1
+            )
 
     @parametrize("always_freeze", [True, False])
     def test_mm_layout_freezing_behavior(self, always_freeze):
