@@ -4731,26 +4731,6 @@
       ]
     }
   ],
-  "GB0548": [
-    {
-      "Gb_type": "Module write racing a pending global delete",
-      "Context": "name",
-      "Explanation": "Dynamo cannot order this globals-dict write through the module object against the global mutation already pending in this trace.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB6598": [
-    {
-      "Gb_type": "DELETE_GLOBAL with a pending globals-dict write",
-      "Context": "name",
-      "Explanation": "Dynamo cannot order a global delete against a pending write to the same dict through the module __dict__.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB4927": [
     {
       "Gb_type": "autograd.grad consumed returned tensor's grad_fn",

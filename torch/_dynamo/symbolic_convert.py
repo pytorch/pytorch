@@ -2595,60 +2595,6 @@ class InstructionTranslatorBase(
             GlobalSource(name), self.symbolic_globals[name]
         )
 
-    def _check_global_write_race(self, obj: VariableTracker, name: str) -> None:
-        """Break on an alias write into this frame's globals dict.
-
-        The root DELETE_GLOBAL records the deletion on the per-name VT; a
-        later write through `me.g = ...` or `me.__dict__["g"] = ...` replays
-        in an order Dynamo cannot reason about, so it breaks the way eager
-        resume does.
-        """
-        side_effects = self.output.side_effects
-        if name not in self.symbolic_globals:
-            return
-        if not side_effects.has_pending_mutation_of_attr(
-            side_effects[self.symbolic_globals[name]], name
-        ):
-            return
-        obj = obj.realize()
-        module = None
-        value = getattr(obj, "value", None)
-        if isinstance(value, types.ModuleType):
-            module = value
-        elif self.f_globals in side_effects and obj is side_effects[self.f_globals]:
-            # A dict VT keyed by this frame's dict object; its source chain
-            # root names the variable holding the module, either a global
-            # alias or a derefed open-cell local.
-            global_name = (
-                get_global_source_name(obj.source) if obj.source is not None else None
-            )
-            source = obj.source
-            if (
-                isinstance(source, AttrSource)
-                and isinstance(source.base, LocalSource)
-                and source.base.is_derefed_cell_contents
-            ):
-                cell = self.symbolic_locals.get(source.base.local_name)
-                if cell is not None:
-                    contents = side_effects.load_cell(cell)
-                    if isinstance(contents, variables.PythonModuleVariable):
-                        module = contents.value
-            candidate = self.f_globals.get(global_name) if global_name else None
-            if isinstance(candidate, types.ModuleType):
-                module = candidate
-        if module is None or module.__dict__ is not self.f_globals:
-            return
-        unimplemented(
-            gb_type="Module write racing a pending global delete",
-            context=name,
-            explanation=(
-                "Dynamo cannot order this globals-dict write through the "
-                "module object against the global mutation already pending "
-                "in this trace."
-            ),
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
-
     def STORE_GLOBAL(self, inst: Instruction) -> None:
         value = self.pop()
         name = inst.argval
@@ -2702,18 +2648,6 @@ class InstructionTranslatorBase(
                     explanation=(
                         "Dynamo cannot order a global delete against a pending "
                         "write to the same dict through the module object."
-                    ),
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-        if self.f_globals in side_effects:
-            dict_gvar = side_effects[self.f_globals]
-            if dict_gvar is not target and side_effects.is_modified(dict_gvar):
-                unimplemented(
-                    gb_type="DELETE_GLOBAL with a pending globals-dict write",
-                    context=name,
-                    explanation=(
-                        "Dynamo cannot order a global delete against a pending "
-                        "write to the same dict through the module __dict__."
                     ),
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
@@ -4215,10 +4149,6 @@ class InstructionTranslatorBase(
     )
     def STORE_SUBSCR(self, inst: Instruction) -> None:
         val, obj, key = self.popn(3)
-        if isinstance(key, variables.ConstantVariable) and isinstance(
-            key.as_python_constant(), str
-        ):
-            self._check_global_write_race(obj, key.as_python_constant())
         generic_setitem(self, obj, key, val)
 
     def DELETE_SUBSCR(self, inst: Instruction) -> None:
