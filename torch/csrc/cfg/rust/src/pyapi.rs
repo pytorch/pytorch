@@ -1,13 +1,17 @@
-//! The Python face of the crate: compiled functions.
+//! The Python face of the crate: compiled functions, and the view of a region
+//! handed to passes written in Python.
 
 use crate::bytecode::OpcodeTable;
 use crate::capi::{self, TcfgApi, TCFG_API_VERSION};
 use crate::frontend;
-use crate::spec::{self, CfgPass, Pipeline};
+use crate::ir::*;
+use crate::pyffi::PyObj;
+use crate::spec::{self, CfgPass, PassCx, Pipeline, PyPass, Unit, ValueObs};
 use crate::vm::{Compiled, Options};
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyCapsule, PyDict, PyList, PyTuple};
+use std::cell::Cell;
 use std::ptr::null_mut;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -35,7 +39,7 @@ pub fn builtin_passes() -> Vec<&'static str> {
 pub fn compile(
     py: Python<'_>,
     func: &Bound<'_, PyAny>,
-    passes: Vec<String>,
+    passes: Vec<Bound<'_, PyAny>>,
     specialize: bool,
     skip_autograd: bool,
     max_versions: usize,
@@ -44,16 +48,29 @@ pub fn compile(
     let table = OpcodeTable::load(py)?;
     let function = frontend::build(py, &table, func)?;
     let mut pipeline: Vec<Box<dyn CfgPass>> = Vec::new();
-    for name in passes {
-        match spec::builtin_pass(&name) {
-            Some(p) => pipeline.push(p),
-            None => {
-                return Err(PyValueError::new_err(format!(
-                    "unknown pass '{}'; built-in passes are {:?}",
-                    name,
-                    spec::BUILTIN_PASSES
-                )))
+    for pass in passes {
+        if let Ok(name) = pass.extract::<String>() {
+            match spec::builtin_pass(&name) {
+                Some(p) => pipeline.push(p),
+                None => {
+                    return Err(PyValueError::new_err(format!(
+                        "unknown pass '{}'; built-in passes are {:?}",
+                        name,
+                        spec::BUILTIN_PASSES
+                    )))
+                }
             }
+        } else if pass.is_callable() {
+            let name = pass
+                .getattr("__name__")
+                .and_then(|n| n.extract::<String>())
+                .unwrap_or_else(|_| "<python pass>".to_string());
+            pipeline.push(Box::new(PyPass {
+                callable: unsafe { PyObj::from_borrowed(pass.as_ptr()) },
+                name,
+            }));
+        } else {
+            return Err(PyValueError::new_err("a pass is a built-in pass name or a callable"));
         }
     }
     let options = Options {
@@ -251,4 +268,151 @@ impl CfgFunction {
         }
         Ok(out.into_any().unbind())
     }
+}
+
+/// The region a pass is transforming. Only valid while the pass runs.
+#[pyclass(module = "torch._cfg_rs", name = "Region", unsendable)]
+pub struct Region {
+    unit: Cell<*mut Unit>,
+    cx: Cell<*const PassCx<'static>>,
+}
+
+impl Region {
+    fn parts(&self) -> PyResult<(&mut Unit, &PassCx<'static>)> {
+        if self.unit.get().is_null() {
+            return Err(PyRuntimeError::new_err("a Region is only valid while its pass runs"));
+        }
+        Ok(unsafe { (&mut *self.unit.get(), &*self.cx.get()) })
+    }
+}
+
+#[pymethods]
+impl Region {
+    /// Index of the basic block this region covers.
+    #[getter]
+    fn block(&self) -> PyResult<usize> {
+        Ok(self.parts()?.0.block)
+    }
+
+    /// Whether the pass may add guards based on what was observed.
+    #[getter]
+    fn speculate(&self) -> PyResult<bool> {
+        Ok(self.parts()?.0.speculate)
+    }
+
+    fn __str__(&self) -> PyResult<String> {
+        let (unit, cx) = self.parts()?;
+        Ok(unit.dump(cx.func()))
+    }
+
+    /// The instructions as dicts with keys index, op, dst, uses and text.
+    fn instructions(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let (unit, cx) = self.parts()?;
+        let func = cx.func();
+        let out = PyList::empty_bound(py);
+        for (i, u) in unit.insts.iter().enumerate() {
+            let d = PyDict::new_bound(py);
+            let text = func.op_repr(&u.inst.op);
+            d.set_item("index", i)?;
+            d.set_item("op", text.split_whitespace().next().unwrap_or(""))?;
+            d.set_item("dst", if u.inst.dst == NONE { None } else { Some(u.inst.dst) })?;
+            let mut uses = Vec::new();
+            u.inst.op.for_each_use(|v| uses.push(v));
+            d.set_item("uses", uses)?;
+            d.set_item("text", text)?;
+            out.append(d)?;
+        }
+        Ok(out.into_any().unbind())
+    }
+
+    /// What the profiling tier saw the SSA value be, or None.
+    fn observed(&self, py: Python<'_>, value: V) -> PyResult<PyObject> {
+        let (_, cx) = self.parts()?;
+        let Some(obs) = cx.obs.get(value as usize) else {
+            return Err(PyIndexError::new_err("no such value"));
+        };
+        let d = PyDict::new_bound(py);
+        match obs {
+            ValueObs::Unseen => return Ok(py.None()),
+            ValueObs::Tensor { min_rank, dims, last } => {
+                d.set_item("kind", "tensor")?;
+                d.set_item("rank", *min_rank)?;
+                d.set_item("dims", dims.clone())?;
+                d.set_item("last", last.clone())?;
+            }
+            ValueObs::Bool { seen_true, seen_false, last } => {
+                d.set_item("kind", "bool")?;
+                d.set_item("true", *seen_true)?;
+                d.set_item("false", *seen_false)?;
+                d.set_item("last", *last)?;
+            }
+            ValueObs::Int { lo, hi } => {
+                d.set_item("kind", "int")?;
+                d.set_item("lo", *lo)?;
+                d.set_item("hi", *hi)?;
+            }
+            ValueObs::Other => d.set_item("kind", "other")?,
+        }
+        Ok(d.into_any().unbind())
+    }
+
+    /// Makes this version of the region depend on lo <= value.size(dim) <= hi
+    /// (hi=None for no upper bound). The check goes to the region entry if
+    /// the value exists there, else right after its definition. Returns True
+    /// if the guard was added, False if the region already depended on it,
+    /// and None if it cannot be placed.
+    #[pyo3(signature = (value, dim, lo, hi=None))]
+    fn guard_dim(&self, value: V, dim: i64, lo: i64, hi: Option<i64>) -> PyResult<Option<bool>> {
+        let (unit, cx) = self.parts()?;
+        if value as usize >= cx.obs.len() {
+            return Err(PyIndexError::new_err("no such value"));
+        }
+        let cond = GuardCond::DimRange { v: value, dim, lo, hi: hi.unwrap_or(i64::MAX) };
+        let before = unit.def_pos(value).map_or(0, |p| p + 1);
+        Ok(unit.add_guard(cx, cond, before))
+    }
+
+    /// Replaces the instruction at `index` with the constant True, False or
+    /// None.
+    fn replace_with_const(&self, index: usize, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        let (unit, cx) = self.parts()?;
+        let func = cx.func();
+        let c = if value.is_none() {
+            func.const_none
+        } else if let Ok(b) = value.downcast::<pyo3::types::PyBool>() {
+            if b.is_true() {
+                func.const_true
+            } else {
+                func.const_false
+            }
+        } else {
+            return Err(PyValueError::new_err("only True, False and None can be folded to"));
+        };
+        let Some(u) = unit.insts.get_mut(index) else {
+            return Err(PyIndexError::new_err("no such instruction"));
+        };
+        if u.inst.dst == NONE {
+            return Err(PyValueError::new_err("the instruction does not produce a value"));
+        }
+        u.inst.op = Op::Const(c);
+        Ok(())
+    }
+}
+
+pub fn run_python_pass(callable: &PyObj, unit: &mut Unit, cx: &PassCx) -> PyResult<bool> {
+    Python::with_gil(|py| {
+        let region = Py::new(
+            py,
+            Region {
+                unit: Cell::new(unit as *mut Unit),
+                cx: Cell::new(cx as *const PassCx as *const PassCx<'static>),
+            },
+        )?;
+        let callable = unsafe { Bound::from_borrowed_ptr(py, callable.as_ptr()) };
+        let result = callable.call1((region.clone_ref(py),));
+        let r = region.borrow(py);
+        r.unit.set(null_mut());
+        r.cx.set(std::ptr::null());
+        result?.is_truthy()
+    })
 }

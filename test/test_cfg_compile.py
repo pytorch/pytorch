@@ -721,6 +721,64 @@ class TestCfgPasses(TestCase):
         self.assertIn("guard ", compiled.dump())
         self.assertGreaterEqual(block_stats(compiled, "guard_failures")[0], 1)
 
+    def test_python_pass(self):
+        pinned = []
+
+        def pin_first_dim(region):
+            changed = False
+            for inst in region.instructions():
+                if inst["op"] == "tensor_size" and region.speculate:
+                    value = inst["uses"][0]
+                    n = region.observed(value)["last"][0]
+                    if region.guard_dim(value, 0, n, n):
+                        pinned.append(n)
+                        changed = True
+            return changed
+
+        def f(x):
+            return x.sum() * x.shape[0]
+
+        pipeline = Pipeline.default().insert_after("tensor_accessors", pin_first_dim)
+        compiled = torch.cfg_compile(f, pipeline=pipeline, fallback=False)
+        for n in (3, 3, 5, 3, 5):
+            x = torch.ones(n, 2)
+            self.assertEqual(compiled(x), f(x))
+        self.assertEqual(pinned, [3, 5])
+        text = compiled.dump()
+        self.assertIn("3 <= size(%x.1, 0) <= 3", text)
+        self.assertIn("5 <= size(%x.1, 0) <= 5", text)
+        self.assertEqual(block_stats(compiled, "profile_runs"), [2])
+
+    def test_region_is_only_valid_during_the_pass(self):
+        kept = []
+
+        def keep(region):
+            kept.append(region)
+            return False
+
+        compiled = torch.cfg_compile(
+            lambda x: x + 1, pipeline=Pipeline([keep]), fallback=False
+        )
+        compiled(torch.ones(1))
+        with self.assertRaisesRegex(RuntimeError, "only valid while its pass runs"):
+            kept[0].instructions()
+
+    def test_failing_pass_leaves_the_block_generic(self):
+        def broken(region):
+            raise KeyError("oops")
+
+        def f(x):
+            return x * 3
+
+        compiled = torch.cfg_compile(
+            f, pipeline=Pipeline.default().append(broken), fallback=False
+        )
+        for _ in range(3):
+            self.assertEqual(compiled(torch.ones(2)), torch.full((2,), 3.0))
+        stats = compiled.stats()
+        self.assertEqual(block_stats(compiled, "versions"), [0])
+        self.assertIn("pass failed", stats["blocks"][0]["rejected"])
+
 
 if __name__ == "__main__":
     run_tests()
