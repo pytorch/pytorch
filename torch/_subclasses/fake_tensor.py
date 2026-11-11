@@ -1003,12 +1003,8 @@ def _from_tensor_shape_env(
 
 @typing.final
 class CppFakeTensorMode(torch._C._CppFakeTensorMode):
-    # The Python object of a C++ FakeTensorMode, which the Python parts of fake
-    # dispatch run against. Its fakes and the fake mode slot keep it alive, so
-    # it must not hold a fake: GC cannot see the reference back from the fake.
-    # Hence __slots__; a subclass could add a __dict__, so it is final, which
-    # getCppFakeTensorModeHandle enforces by accepting only this exact type. See
-    # Note [C++ FakeTensorMode handle] in torch/csrc/FakeTensorMode.cpp.
+    # State belongs to C++; a collected wrapper can be recreated around it.
+    # See Note [C++ FakeTensorMode Python object lifetime].
     __slots__ = ()
 
     def __init__(self, *, shape_env: ShapeEnv | None = None) -> None:
@@ -1016,6 +1012,13 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
         super().__init__(FakeTensorConverter(copy_data=copy_data), shape_env)
+        self._attach_python_object()
+
+    @classmethod
+    def _from_cpp_mode(cls, cpp_mode: object) -> Self:
+        self = cls.__new__(cls)
+        torch._C._CppFakeTensorMode.__init__(self, cpp_mode)
+        return self
 
     # Same as FakeTensorMode.avoid_device_init
     @property
