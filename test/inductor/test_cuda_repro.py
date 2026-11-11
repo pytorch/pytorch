@@ -1986,6 +1986,11 @@ class CudaReproTests(TestCase):
         not (TEST_CUDA or TEST_XPU),
         "requires CUDA or XPU: the cast runs on every non-CPU device",
     )
+    @skipIfXpu(
+        msg="triton-xpu folds the fp32 -> fp16 precision barrier and the "
+        "compiled-vs-eager check assumes cuDNN rounding; "
+        "intel/intel-xpu-backend-for-triton#7491, torch-xpu-ops: 4358"
+    )
     @config.patch(emulate_precision_casts_on_saved_tensors=True)
     def test_conv_bias_rounds_before_log_softmax(
         self, lowp_dtype, emulate_precision_casts, conv_offset
