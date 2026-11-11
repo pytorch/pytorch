@@ -73,7 +73,7 @@ class TestDispatchCapture(TestCase):
         self.assertEqual(result, torch.full((3,), 2.0))
         self.assertEqual(records[0][0], "aten::mul.Tensor")
 
-    def test_hook_is_removed(self):
+    def test_exception_propagates(self):
         x = torch.ones(3)
         self.assertEqual(self.trace(lambda: 1 + 1), [])
         with self.assertRaisesRegex(RuntimeError, "must match"):
