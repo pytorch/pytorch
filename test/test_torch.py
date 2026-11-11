@@ -59,7 +59,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
-    get_all_device_types, skipXLA, onlyAccelerator, skipCUDAIf)
+    get_all_device_types, skipXLA, onlyAccelerator, skipCUDAIf, skipXPUIf, onlyOn)
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
@@ -7249,6 +7249,79 @@ class TestTorchDeviceType(TestCase):
         if torch.version.cuda is not None:
             self._test_to_with_layout(torch.sparse_csr, device)
 
+    # Profiler kernel-name substring that identifies the expected code path, per backend.
+    FILL_KERNEL = {"cuda": "elementwise_kernel", "xpu": "FillFunctor"}
+    VECTORIZED_KERNEL = {"cuda": "vectorized_elementwise_kernel", "xpu": "VectorizedElementwiseKernel"}
+
+    def _kernel_names(self, fn):
+        with torch.profiler.profile() as prof:
+            fn()
+            torch.accelerator.synchronize()
+        return tuple(event.key for event in prof.key_averages())
+
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
+    @unittest.skipIf(TEST_WITH_ROCM, "which path dense zero_ takes is ROCm-version dependent; see zero_cuda_")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5371")
+    def test_zero_dense_emits_memset(self, device):
+        base = torch.ones(64, 96, device=device)
+        names = self._kernel_names(lambda: base[16:32].zero_())
+        self.assertTrue(any("Memset" in name for name in names), names)
+
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
+    def test_zero_strided_emits_fill_kernel(self, device):
+        base = torch.ones(64, 96, device=device)
+        names = self._kernel_names(lambda: base[:, ::2].zero_())
+        self.assertTrue(any(self.FILL_KERNEL[self.device_type] in name for name in names), names)
+
+    @onlyOn(["cuda", "xpu"])
+    @skipCUDAIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCm >= 5.3 required for graphs")
+    def test_zero_dense_inside_graph_capture(self, device):
+        # Whichever path zero_ takes has to survive being captured and replayed.
+        base = torch.ones(64, 96, device=device)
+        dev = torch.get_device_module(device)
+        graph = torch.accelerator.Graph()
+        stream = dev.Stream()
+        stream.wait_stream(dev.current_stream())
+        with dev.stream(stream):
+            base.zero_()
+            with dev.graph(graph):
+                base.zero_()
+        dev.current_stream().wait_stream(stream)
+
+        for _ in range(8):
+            base.fill_(1)
+            graph.replay()
+            torch.accelerator.synchronize()
+            self.assertEqual(base.count_nonzero().item(), 0)
+
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @dtypes(torch.bfloat16, torch.half)
+    def test_reduced_type_float_copy_emits_vectorized_kernel(self, device, dtype):
+        src = make_tensor((1024, 1024), dtype=dtype, device=device)
+        torch.accelerator.synchronize()
+        names = self._kernel_names(lambda: src.to(torch.float32))
+        self.assertTrue(any(self.VECTORIZED_KERNEL[self.device_type] in name for name in names), names)
+
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @parametrize("src_dtype,dst_dtype", [(torch.int32, torch.int64),
+                                         (torch.bool, torch.int64),
+                                         (torch.bool, torch.float64)])
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6150")
+    def test_converting_copy_emits_vectorized_kernel(self, device, src_dtype, dst_dtype):
+        if src_dtype == torch.bool:
+            src = torch.randint(0, 256, (1024, 1024), dtype=torch.uint8, device=device).view(torch.bool)
+        else:
+            src = make_tensor((1024, 1024), dtype=src_dtype, device=device)
+        torch.accelerator.synchronize()
+        out = []
+        names = self._kernel_names(lambda: out.append(src.to(dst_dtype)))
+        self.assertTrue(any(self.VECTORIZED_KERNEL[self.device_type] in name for name in names), names)
+        self.assertEqual(out[0].cpu(), src.cpu().to(dst_dtype))
+
 
 class TestTorchCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -7261,72 +7334,6 @@ class TestTorchCUDA(TestCase):
 
         with self.assertWarnsOnceRegex(UserWarning, msg):
             torch.cuda.DoubleTensor([0])
-
-    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
-    @unittest.skipIf(TEST_WITH_ROCM, "which path dense zero_ takes is ROCm-version dependent; see zero_cuda_")
-    def test_zero_dense_emits_memset(self, device):
-        base = torch.ones(64, 96, device=device)
-        with torch.profiler.profile() as prof:
-            base[16:32].zero_()
-            torch.cuda.synchronize()
-        names = tuple(event.key for event in prof.key_averages())
-        self.assertTrue(any("Memset" in name for name in names), names)
-
-    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
-    def test_zero_strided_emits_fill_kernel(self, device):
-        base = torch.ones(64, 96, device=device)
-        with torch.profiler.profile() as prof:
-            base[:, ::2].zero_()
-            torch.cuda.synchronize()
-        names = tuple(event.key for event in prof.key_averages())
-        self.assertTrue(any("elementwise_kernel" in name for name in names), names)
-
-    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCm >= 5.3 required for graphs")
-    def test_zero_dense_inside_graph_capture(self, device):
-        # Whichever path zero_ takes has to survive being captured and replayed.
-        base = torch.ones(64, 96, device=device)
-        graph = torch.cuda.CUDAGraph()
-        stream = torch.cuda.Stream()
-        stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(stream):
-            base.zero_()
-            with torch.cuda.graph(graph):
-                base.zero_()
-        torch.cuda.current_stream().wait_stream(stream)
-
-        for _ in range(8):
-            base.fill_(1)
-            graph.replay()
-            torch.cuda.synchronize()
-            self.assertEqual(base.count_nonzero().item(), 0)
-
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @dtypes(torch.bfloat16, torch.half)
-    def test_reduced_type_float_copy_emits_vectorized_kernel(self, device, dtype):
-        src = make_tensor((1024, 1024), dtype=dtype, device=device)
-        torch.cuda.synchronize()
-        with torch.profiler.profile() as prof:
-            src.to(torch.float32)
-            torch.cuda.synchronize()
-        names = tuple(event.key for event in prof.key_averages())
-        self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
-
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @parametrize("src_dtype,dst_dtype", [(torch.int32, torch.int64),
-                                         (torch.bool, torch.int64),
-                                         (torch.bool, torch.float64)])
-    def test_converting_copy_emits_vectorized_kernel(self, device, src_dtype, dst_dtype):
-        if src_dtype == torch.bool:
-            src = torch.randint(0, 256, (1024, 1024), dtype=torch.uint8, device=device).view(torch.bool)
-        else:
-            src = make_tensor((1024, 1024), dtype=src_dtype, device=device)
-        torch.cuda.synchronize()
-        with torch.profiler.profile() as prof:
-            dst = src.to(dst_dtype)
-            torch.cuda.synchronize()
-        names = tuple(event.key for event in prof.key_averages())
-        self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
-        self.assertEqual(dst.cpu(), src.cpu().to(dst_dtype))
 
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfRocm
