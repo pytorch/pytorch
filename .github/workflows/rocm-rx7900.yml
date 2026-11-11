@@ -51,8 +51,8 @@ jobs:
       sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.rx7900.no-dind" },
-          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.rx7900.no-dind" },
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.rx7900.1" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.rx7900.1" },
         ]}
     secrets: inherit
 
