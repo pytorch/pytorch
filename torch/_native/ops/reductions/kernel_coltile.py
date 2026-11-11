@@ -28,7 +28,6 @@ from .kernel_general import (
     _flat,
     _INT32_LIMIT,
     _launch,
-    _ORDERED_COL_DTYPES,
     ReduceBlock,
 )
 from .kernel_rowtile import trait_itree_plan
@@ -158,11 +157,11 @@ def select_ordered_col_config(
     if (
         cfg is None
         and cc in kg._ORDERED_COL_CCS
-        and dtype in _ORDERED_COL_DTYPES
+        and dtype in kg._ORDERED_COL_DTYPES
         and partials > 1
     ):
         cfg = OrderedColConfig(0, tile_columns=WARP, full_tiles=full_tiles)
-    if cfg is None or dtype not in _ORDERED_COL_DTYPES or batches != 1:
+    if cfg is None or dtype not in kg._ORDERED_COL_DTYPES or batches != 1:
         return None
     measured = cfg.out_dtypes
     if acc_bits != 32 or measured is not None and tuple(out_dtypes) != measured:
@@ -795,8 +794,6 @@ def reduce_ordered_col(
             if split:
                 return None
             config = OrderedColConfig(0)
-        else:
-            _check_ordered_mapping(config.worker_warps, config.tile_columns)
     op = _OrderedColReduce(
         trait,
         plan,
