@@ -345,6 +345,10 @@ class DeviceOpOverrides:
         """
         return False
 
+    def has_aten_c_shims(self) -> bool:
+        """If False on a PrivateUse1 device, aten fallbacks use the proxy executor."""
+        return True
+
     def import_get_raw_stream_as(self, name: str) -> str:
         raise NotImplementedError
 
