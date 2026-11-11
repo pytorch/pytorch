@@ -12,7 +12,7 @@ This module *curates* which of those fields Cuspy selects per kind (:data:`FIELD
 and derives the lookups Cuspy/observers need. The selection is the editorial part
 that can't be generated: it bounds record size and per-buffer decode cost.
 
-Cuspy does NOT compute record byte layouts: it requires libcupti >= 13.3, which
+Cuspy does NOT compute record byte layouts: it requires libcupti >= 13.5, which
 reports each kind's packed record layout (field offsets/sizes, record size) via
 ``pBufferCompleteInfo->ppRecordLayouts``. The native layer parses that and attaches it to
 each completed buffer; Cuspy decodes a buffer against that captured layout, using
