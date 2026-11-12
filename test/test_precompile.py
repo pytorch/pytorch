@@ -5061,7 +5061,7 @@ class TestPrecompileDynamoCapture(TestCase):
         with torch._inductor.config.patch(cudagraph_policy=object()):
             with self.assertRaisesRegex(PrecompileError, "Unset it while capturing"):
                 self._capture(single, options=on)
-            # A capture without CUDA graphs has no wrapping for it to decide.
+            # Without CUDA graphs a policy cannot change what the capture records.
             self._capture(single)
         # It is checked on every call, so one set after capture() began refuses too,
         # before compiling: a capture that recovers still saves.
@@ -6851,7 +6851,8 @@ class TestPrecompileCudagraphs(TestCase):
         # The capture takes the flag from the ambient config, so the artifact's
         # INDUCTOR_OPTIONS do not carry it.
         with torch._inductor.config.patch({"triton.cudagraphs": cudagraphs}):
-            self._capture_step(fn)
+            _, meta = self._capture_step(fn)
+        self.assertEqual(meta["INDUCTOR_OPTIONS"], {})
         # A shape no captured variant covers, so every graph serving it is
         # compiled in the loading process, whose own flag says the opposite.
         miss = torch.randn(6, 8, device="cuda")
