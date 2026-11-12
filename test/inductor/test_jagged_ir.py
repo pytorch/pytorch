@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 def graph():
@@ -41,8 +42,9 @@ def trace(data):
     return buffer.get_default_sizes_body()
 
 
+@requires_cuda_and_triton
 class TestJaggedReductionIR(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CUDA
 
     def test_bound_dependencies(self):
         j_range = JaggedRange("j")
