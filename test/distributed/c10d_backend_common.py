@@ -9,7 +9,7 @@ import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import Backend as C10dBackend
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import TEST_CUDA, TEST_XPU
+from torch.testing._internal.common_utils import ACCELERATOR_TYPE, TEST_MULTIACCELERATOR
 
 
 STANDARD_DTYPES = (
@@ -344,9 +344,8 @@ def instantiate_backend_tests(
             f"{backend.name} backend is not available",
         )(test_class)
         if backend.device_type != "cpu":
-            has_device = {"cuda": TEST_CUDA, "xpu": TEST_XPU}[backend.device_type]
             test_class = unittest.skipIf(
-                not has_device or torch.accelerator.device_count() < 2,
-                f"{backend.name} requires 2+ accelerators",
+                not TEST_MULTIACCELERATOR or ACCELERATOR_TYPE != backend.device_type,
+                f"{backend.name} requires 2+ {backend.device_type} devices",
             )(test_class)
         namespace[class_name] = test_class
