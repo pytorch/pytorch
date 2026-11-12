@@ -2168,6 +2168,7 @@ def get_selected_tests(options) -> list[str]:
             "test_modules",
             "test_linalg",
             "test_scaled_matmul_cuda",
+            "test_stream",
             "nn/test_convolution",
             "nn/test_dropout",
             "nn/test_pooling",
