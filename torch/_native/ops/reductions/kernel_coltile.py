@@ -129,9 +129,12 @@ class OrderedColConfig(NamedTuple):
 # kernel_general._reduce routes columns here only on its _ORDERED_COL_CCS, and
 # _reduce_col_tile hands off here only on _B200_CCS (b200_ragged_c4095_ordered) and
 # (10, 7); entries for other architectures serve direct reduce_ordered_col calls alone.
-# There are no (10, 0) entries: B200 split views take select_ordered_col_config's
-# fallback, OrderedColConfig(0, tile_columns=WARP, full_tiles=...), which its B200
-# full-tile rules narrow to 16-column tiles at some shapes.
+# There are no (10, 0) entries: B200 split views (from _reduce or direct
+# reduce_ordered_col calls) take select_ordered_col_config's fallback,
+# OrderedColConfig(0, tile_columns=WARP, full_tiles=...), which its B200 full-tile rules
+# narrow to 16-column tiles at some shapes. Looped B200 views (partials == 1), from
+# _reduce and from the b200_ragged_c4095_ordered hand-off, get None and run on
+# OrderedColConfig(0).
 _ORDERED_COL_CONFIGS: dict[tuple[int, int], dict[type, OrderedColConfig]] = {
     # WelfordOps covers var and std of any correction.
     (10, 7): {
