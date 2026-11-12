@@ -230,9 +230,11 @@ void fakeFallback(
   // (decompositions, say), so a Python Meta kernel calling active_fake_mode()
   // sees no fake mode; so here
   UnsetFakeTensorModeGuard unset_mode;
-  // Python dispatch disables autocast before running fake implementations.
-  c10::impl::ExcludeDispatchKeyGuard exclude_autocast(
-      c10::autocast_dispatch_keyset);
+  // Python dispatch disables autocast, autograd and view bookkeeping before
+  // running fake implementations.
+  c10::impl::ExcludeDispatchKeyGuard exclude_autocast_and_autograd(
+      c10::autocast_dispatch_keyset |
+      c10::autograd_dispatch_keyset_with_ADInplaceOrView);
 
   bool has_device_arguments = false;
   for (const auto idx : c10::irange(num_arguments)) {
@@ -373,7 +375,8 @@ void fakeFallback(
       (*stack)[arguments_begin + 1].isInt();
   const bool allocates_unbacked = schema.name() == "aten::_spdiags" ||
       schema.name() == "aten::_pack_padded_sequence" ||
-      schema.name() == "aten::_padded_dense_to_jagged_forward";
+      (schema.name() == "aten::_padded_dense_to_jagged_forward" &&
+       (*stack)[arguments_begin + 2].isNone());
   if (allocates_unbacked ||
       (!is_index_tensor && !is_static_repeat_interleave &&
        (op.hasTag(at::Tag::dynamic_output_shape) ||
