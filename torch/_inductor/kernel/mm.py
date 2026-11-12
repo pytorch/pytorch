@@ -145,6 +145,15 @@ persistent_mm_template = TritonTemplate(
     source=load_kernel_template("triton_persistent_mm"),
 )
 
+# The same template with an XCD-local program order, for ROCm archs whose
+# workgroups are dispatched round-robin over XCDs with separate L2s. Its
+# heuristic only offers configs on those archs.
+persistent_xcd_mm_template = TritonTemplate(
+    name="mm_persistent_xcd",
+    grid=persistent_mm_grid,
+    source=load_kernel_template("triton_persistent_xcd_mm"),
+)
+
 
 scaled_mm_device_tma_epilogue_scaling_template = TritonTemplate(
     name="scaled_mm_device_tma_epilogue_scaling",
@@ -705,6 +714,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
                         templates_to_use.append(persistent_tma_mm_template)
                     else:
                         templates_to_use.append(persistent_mm_template)
+                        templates_to_use.append(persistent_xcd_mm_template)
 
         templates_to_use.append(mm_contiguous_subgraph_template)
 
@@ -1060,6 +1070,7 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
                     templates_to_use.append(persistent_tma_mm_template)
                 else:
                     templates_to_use.append(persistent_mm_template)
+                    templates_to_use.append(persistent_xcd_mm_template)
 
         # Manually call get_template_configs as use 1-D bias if possible
         # contiguous_addmm calls addmm without alpha and beta.

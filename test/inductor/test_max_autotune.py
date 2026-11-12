@@ -4394,6 +4394,94 @@ class TestTemplateConfigPruning(TestCase):
                     lambda msg: f"{msg}\nEstimated maximum smem should exceed actual smem used for config {pinned}",
                 )
 
+    _ROCM_NUM_CUS = {"gfx942": 304, "gfx950": 256}
+    _ROCM_LDS_PER_CU = {"gfx942": 64 * 1024, "gfx950": 160 * 1024}
+
+    def _rocm_mm_choice_descs(self, arch, m, k, n, choice_regex=None):
+        """Compile an ``m x k @ k x n`` bf16 mm with max-autotune while the ROCm
+        heuristics see ``arch``, check the result, and return (choice name,
+        description) for every benchmarked choice plus the generated code. With
+        ``choice_regex``, only the choices it matches are offered."""
+        import torch._inductor.heuristics.template.triton as triton_heuristics
+
+        seen = []
+
+        def saver(timings, name, input_nodes, choices, *args):
+            seen.extend((c.name, c.description) for c in choices)
+
+        patches = {
+            "max_autotune_gemm": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.enable_persistent_tma_matmul": True,
+        }
+        if choice_regex is not None:
+            patches["test_configs.autotune_choice_name_regex"] = choice_regex
+        a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
+        torch._dynamo.reset()
+        clear_feedback_savers()
+        add_feedback_saver(saver)
+        try:
+            with (
+                mock.patch.object(
+                    triton_heuristics, "rocm_gfx_arch", return_value=arch
+                ),
+                # The grid sizing reads the CU count and LDS size of the device
+                # the test runs on; give it the simulated arch's.
+                mock.patch.object(
+                    triton_heuristics,
+                    "get_num_sms",
+                    return_value=self._ROCM_NUM_CUS[arch],
+                ),
+                mock.patch.object(
+                    triton_heuristics,
+                    "_rocm_lds_bytes_per_cu",
+                    return_value=self._ROCM_LDS_PER_CU[arch],
+                ),
+                config.patch(patches),
+                fresh_cache(),
+            ):
+                out, code = run_and_get_code(torch.compile(torch.mm), a, b)
+        finally:
+            clear_feedback_savers()
+        torch.testing.assert_close(out, torch.mm(a, b))
+        return seen, "\n".join(code)
+
+    @unittest.skipIf(not torch.version.hip, "ROCm persistent mm heuristic")
+    def test_rocm_persistent_mm_gated_to_gfx950(self):
+        for arch in ("gfx942", "gfx950"):
+            num_cus = self._ROCM_NUM_CUS[arch]
+            with self.subTest(arch=arch):
+                seen = self._rocm_mm_choice_descs(arch, 4096, 256, 4096)[0]
+                descs = [
+                    d for name, d in seen if re.search(r"mm_persistent_\d+$", name)
+                ]
+                xcd_descs = [
+                    d for name, d in seen if re.search(r"mm_persistent_xcd_\d+$", name)
+                ]
+                self.assertTrue(descs)
+                for d in descs:
+                    self.assertNotIn("NUM_XCDS", d)
+                if arch == "gfx942":
+                    # Original behavior: one program per CU, no XCD template.
+                    self.assertFalse(xcd_descs)
+                    for d in descs:
+                        self.assertIn(f"NUM_SMS={num_cus},", d)
+                else:
+                    # Two workgroups per CU for tiles that fit, and the remap.
+                    self.assertTrue(any(f"NUM_SMS={2 * num_cus}," in d for d in descs))
+                    self.assertTrue(xcd_descs)
+                    for d in xcd_descs:
+                        self.assertIn("NUM_XCDS=8,", d)
+
+    @unittest.skipIf(not torch.version.hip, "ROCm persistent mm heuristic")
+    def test_rocm_persistent_mm_xcd_remap_correct(self):
+        # Ragged tile grid; only the XCD program-id remap template is offered.
+        _, code = self._rocm_mm_choice_descs(
+            "gfx950", 4000, 1024, 4100, choice_regex="mm_persistent_xcd"
+        )
+        self.assertIn("NUM_XCDS : tl.constexpr = 8", code)
+
     def test_scaled_mm_block_k_pruning_excludes_rdna(self):
         import torch._inductor.heuristics.template.triton as triton_heuristics
         from torch._inductor.heuristics.template.triton import (
