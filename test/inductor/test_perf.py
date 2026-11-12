@@ -968,6 +968,14 @@ class NoopTests(TestCase):
         inp = T(10, 8, device="cpu")
         self.assertExpectedInline(count_numel(f, inp), """320""")
 
+    def test_noop_slice_scatter_same_slice(self):
+        def f(a):
+            b = aten.slice_scatter(a, aten.slice(a, 1, 3, 5), 1, 3, 5)
+            return unfusible(b)
+
+        inp = T(10, 8, device="cpu")
+        self.assertExpectedInline(count_numel(f, inp), """160""")
+
     def test_noop_dtype_conversion(self):
         def f(a):
             b = torch.ops.prims.convert_element_type(a, torch.float32)
