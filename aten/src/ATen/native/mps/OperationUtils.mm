@@ -780,7 +780,7 @@ MetalShaderLibrary::~MetalShaderLibrary() {
 
 id<MTLLibrary> MetalShaderLibrary::getLibrary() {
   std::lock_guard guard(cache_mutex);
-  if (C10_UNLIKELY(!library)) {
+  if (!library) [[unlikely]] {
     TORCH_INTERNAL_ASSERT(nparams == 0);
     library = compileLibrary(shaderSource);
   }
@@ -887,7 +887,7 @@ bool MetalShaderLibrary::hasFunction(const std::string& fname) {
   // kernel or fall back to the `_dense_cast_` cast variant.
   {
     std::lock_guard guard(cache_mutex);
-    if (C10_LIKELY(functionNamesPopulated)) {
+    if (functionNamesPopulated) [[likely]] {
       return functionNames.contains(fname);
     }
   }
@@ -956,7 +956,7 @@ class BundledShaderLibrary : public MetalShaderLibrary {
  protected:
   id<MTLLibrary> getLibrary() override {
     std::lock_guard guard(cache_mutex);
-    if (C10_UNLIKELY(!library)) {
+    if (!library) [[unlikely]] {
       // Listed newest first: a kernel defined by several sections resolves to the first one
       const std::vector<std::pair<std::string, bool (*)()>> variantSections = {
 #ifdef CAN_BUILD_METAL_41

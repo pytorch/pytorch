@@ -288,14 +288,13 @@ class NumBytesMetricTests(TestCase):
         "pre_grad_fusion_options",
         {
             "batch_linear": {},
-            "batch_linear_lhs": {},
             "batch_layernorm": {},
             "batch_tanh": {},
             "batch_relu": {},
             "batch_sigmoid": {},
         },
     )
-    @patch.object(config, "post_grad_fusion_options", {})
+    @patch.object(config, "post_grad_fusion_options", {"batch_linear_lhs": {}})
     def test_cat_pointwise_many_complex_inputs(self):
         def f(*inputs):
             input = [torch.nn.functional.gelu(val) for val in inputs]
@@ -310,14 +309,13 @@ class NumBytesMetricTests(TestCase):
         "pre_grad_fusion_options",
         {
             "batch_linear": {},
-            "batch_linear_lhs": {},
             "batch_layernorm": {},
             "batch_tanh": {},
             "batch_relu": {},
             "batch_sigmoid": {},
         },
     )
-    @patch.object(config, "post_grad_fusion_options", {})
+    @patch.object(config, "post_grad_fusion_options", {"batch_linear_lhs": {}})
     def test_cat_pointwise_many_simple_inputs(self):
         def f(*inputs):
             input = [torch.nn.functional.relu(val) for val in inputs]
