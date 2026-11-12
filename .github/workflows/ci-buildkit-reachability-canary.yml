@@ -1,0 +1,52 @@
+# Owner(s): ["module: ci"]
+# AI-assisted temporary diagnostic. No builds, cache operations, or registry writes.
+name: CI BuildKit reachability canary
+on:
+  pull_request:
+    paths: [.github/workflows/ci-buildkit-reachability-canary.yml]
+permissions: {}
+jobs:
+  probe:
+    if: github.repository == 'pytorch/pytorch'
+    runs-on: mt-l-x86iavx512-8-64
+    timeout-minutes: 5
+    container:
+      image: python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+    steps:
+      - name: Probe existing BuildKit read API
+        shell: sh
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import io
+          import os
+          from pathlib import Path
+          import subprocess
+          import tarfile
+          import tempfile
+          import urllib.request
+
+          url = "https://github.com/moby/buildkit/releases/download/v0.29.0/buildkit-v0.29.0.linux-amd64.tar.gz"
+          expected = "ab8d93c72253b450f34a43e1c480abc52380f4aec3a8a395aebf09489efef7a0"
+          with urllib.request.urlopen(url, timeout=30) as response:
+              archive = response.read(100 * 1024 * 1024 + 1)
+          if hashlib.sha256(archive).hexdigest() != expected:
+              raise SystemExit("BuildKit archive digest mismatch")
+          with tempfile.TemporaryDirectory(prefix="buildkit-canary-", dir=os.environ.get("RUNNER_TEMP")) as tmp:
+              binary = Path(tmp) / "buildctl"
+              with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
+                  member = tar.getmember("bin/buildctl")
+                  if not member.isfile():
+                      raise SystemExit("Unexpected BuildKit archive member")
+                  binary.write_bytes(tar.extractfile(member).read())
+              binary.chmod(0o700)
+              try:
+                  completed = subprocess.run(
+                      [str(binary), "--addr", "tcp://buildkitd-amd64.buildkit:1234", "debug", "info"],
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=False,
+                  )
+                  allowed = completed.returncode == 0
+              except (OSError, subprocess.TimeoutExpired):
+                  allowed = False
+              print("buildkit_read_api=" + str(allowed).lower())
+          PY

@@ -1,0 +1,47 @@
+# Owner(s): ["module: ci"]
+name: CI instance audit canary
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/ci-instance-audit.yml
+      - .github/scripts/ci_instance_audit.sh
+      - .github/scripts/ci_instance_audit.ps1
+permissions:
+  contents: read
+concurrency:
+  group: ci-instance-audit-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  linux-instance:
+    if: github.repository == 'pytorch/pytorch'
+    strategy:
+      fail-fast: false
+      matrix:
+        # Start with XPU. Add the other exact production labels only when needed:
+        # amd-dpx-linux.rocm.gpu.gfx950.1, linux.google.tpuv7x.1
+        runner: [linux.idc.xpu]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Inspect this job's instance boundary
+        shell: bash
+        run: bash .github/scripts/ci_instance_audit.sh
+  windows-instance:
+    if: github.repository == 'pytorch/pytorch'
+    runs-on: windows.4xlarge.nonephemeral
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Inspect this job's instance identity boundary
+        shell: powershell
+        run: .github/scripts/ci_instance_audit.ps1
