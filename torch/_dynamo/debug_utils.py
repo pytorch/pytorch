@@ -496,13 +496,15 @@ def _cuda_system_info_comment() -> str:
 
 
 def _probe_default_device() -> str:
-    """Default ``device`` for repros: the accelerator built into this torch.
+    """Default ``device`` for repros: the current accelerator.
 
-    ``current_accelerator`` without ``check_available`` returns the single
-    build-time accelerator (PrivateUse1, then MTIA, then the compiled-in one)
-    and does not fall back, so a CUDA build with no visible GPU still resolves
-    to ``cuda`` and fails loudly at input creation rather than silently
-    building CPU tensors.
+    The backend is whichever one ``torch.accelerator.current_accelerator()``
+    resolves (see that API for the resolution rules); it is called without
+    ``check_available``, so there is no runtime availability check: an
+    unavailable accelerator is still the one chosen. A CUDA build with no
+    visible GPU therefore resolves to ``cuda`` and fails loudly at input
+    creation rather than silently building CPU tensors. A build with no
+    accelerator at all resolves to ``cpu``.
     """
     acc = torch.accelerator.current_accelerator()
     return acc.type if acc is not None else "cpu"
@@ -1237,9 +1239,10 @@ def aot_graph_input_parser(
     kwargs = aot_graph_input_parser(forward)
     forward(**kwargs)
 
-    ``device`` defaults to the accelerator this build was compiled for
-    (PrivateUse1, MTIA or CUDA/XPU, with no runtime availability fallback),
-    so passing it explicitly is only needed to force a particular backend.
+    ``device`` defaults to the accelerator resolved by
+    ``torch.accelerator.current_accelerator()``, with no runtime availability
+    check, or ``cpu`` when torch has no accelerator; passing ``device``
+    explicitly is only needed to force a particular backend.
     """
     if device is None:
         device = _probe_default_device()

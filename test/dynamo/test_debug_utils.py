@@ -291,9 +291,13 @@ class TestDeviceSystemInfoComment(TestCase):
     def setUp(self):
         super().setUp()
         debug_utils._device_system_info_comment.cache_clear()
+        # warning_once is a process-wide functools.cache keyed on constant
+        # args; without this a second in-process run would see no warning.
+        debug_utils.warning_once.cache_clear()
 
     def tearDown(self):
         debug_utils._device_system_info_comment.cache_clear()
+        debug_utils.warning_once.cache_clear()
         super().tearDown()
 
     @staticmethod
@@ -538,14 +542,17 @@ class TestDebugUtilsDevice(TestCase):
 
         # On the CPU variant the tensor is filtered out and the mocked
         # accelerator channel decides; elsewhere the tensor device must win.
+        # mps is mocked because it is never a variant (except_for="mps" in
+        # the instantiation below), so the accelerator answer can never
+        # coincide with the tensor answer on any variant.
         device_type = torch.device(device).type
-        expected = "xpu" if device_type == "cpu" else device_type
+        expected = "mps" if device_type == "cpu" else device_type
         with (
             patch.object(debug_utils, "_device_system_info_comment", fake_comment),
             patch.object(
                 torch.accelerator,
                 "current_accelerator",
-                return_value=torch.device("xpu"),
+                return_value=torch.device("mps"),
             ),
         ):
             out = debug_utils.device_system_info_comment(
