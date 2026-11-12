@@ -907,6 +907,25 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
             r"hl\.load\(in1, \[\(-1\) \+ tile_x\.index\.reshape\(\[tile_x, 1\]\)\], extra_mask=tmp\d+\)",
         )
 
+    def test_kernel_args(self):
+        # Like a Triton kernel, a Helion kernel records the buffers it reads
+        # and writes, for generate_intermediate_hooks, warn_mix_layout and
+        # remove_kernel_local_buffers().
+        kernels = []
+        codegen = HelionScheduling.codegen_node_schedule
+
+        def record(scheduling, features):
+            kernels.append(codegen(scheduling, features))
+            return kernels[-1]
+
+        with patch.object(HelionScheduling, "codegen_node_schedule", record):
+            self.compile(
+                lambda x: (x * 2).sum(-1), torch.randn(64, 100, device="cuda"), tol=1e-4
+            )
+        (kernel,) = kernels
+        self.assertEqual(list(kernel.args.input_buffers), ["arg0_1"])
+        self.assertEqual(list(kernel.args.output_buffers), ["buf0"])
+
     @config.patch(nan_asserts=True)
     def test_nan_asserts(self):
         x, y = torch.randn(64, 100, device="cuda"), torch.randn(64, 100, device="cuda")
