@@ -36,6 +36,7 @@ from ..bytecode_transformation import (
 from ..exc import (
     handle_observed_exception,
     ObservedException,
+    ObservedTypeError,
     ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
@@ -2797,6 +2798,46 @@ class ByteArrayVariable(VariableTracker):
         self.data = new_data
         return ConstantVariable.create(result)
 
+    def bytearray_join(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # stringlib_bytes_join: https://github.com/python/cpython/blob/v3.13.0/Objects/stringlib/join.h
+        iterable = args[0].realize()
+        if istype(iterable, (ListVariable, TupleVariable)):
+            items = iterable.items
+        else:
+            try:
+                iterable = generic_getiter(tx, iterable)
+            except ObservedTypeError:
+                handle_observed_exception(tx)
+                raise_type_error(tx, "can only join an iterable")
+            items = unpack_iterable(tx, iterable)
+
+        parts = []
+        for item in items:
+            item = item.realize()
+            if isinstance(item, ByteArrayVariable):
+                parts.append(item.data)
+            elif istype(item, ConstantVariable):
+                # Not UserDefinedConstantVariable: a str or int subclass may
+                # define __buffer__, which must not run at trace time.
+                parts.append(item.as_python_constant())
+            else:
+                unimplemented(
+                    gb_type="bytearray.join() with unsupported item type",
+                    context=f"bytearray.join() item: {item}",
+                    explanation="Dynamo only supports joining bytes and bytearray "
+                    f"items, got {item.python_type_name()}.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+        try:
+            return VariableTracker.build(tx, self.data.join(parts))
+        except TypeError as e:
+            raise_observed_exception(TypeError, tx, args=list(e.args))
+
     def _bytearray_case_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -2867,6 +2908,7 @@ class ByteArrayVariable(VariableTracker):
         "extend": Method(bytearray_extend),
         "insert": Method(bytearray_insert),
         "pop": Method(bytearray_pop),
+        "join": Method(bytearray_join),
         "upper": Method(bytearray_upper),
         "lower": Method(bytearray_lower),
         "title": Method(bytearray_title),

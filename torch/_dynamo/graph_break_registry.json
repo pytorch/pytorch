@@ -1914,6 +1914,16 @@
       ]
     }
   ],
+  "GB9322": [
+    {
+      "Gb_type": "bytearray.join() with unsupported item type",
+      "Context": "bytearray.join() item: {item}",
+      "Explanation": "Dynamo only supports joining bytes and bytearray items, got {item.python_type_name()}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4778": [
     {
       "Gb_type": "nested function with non-constructible closure in output",
