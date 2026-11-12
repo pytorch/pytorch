@@ -1291,6 +1291,26 @@
       ]
     }
   ],
+  "GB2806": [
+    {
+      "Gb_type": "bytearray store to an existing bytearray",
+      "Context": "bytearray: {self.source.name}",
+      "Explanation": "Dynamo leaves writes to bytearrays with a source to eager to preserve shared buffers and resize errors.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6677": [
+    {
+      "Gb_type": "bytearray store with non-constant value",
+      "Context": "value: {value.python_type_name()}",
+      "Explanation": "Dynamo only traces bytearray item and slice stores whose value is known at compile time.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB6012": [
     {
       "Gb_type": "Cannot trace user-defined __len__",
