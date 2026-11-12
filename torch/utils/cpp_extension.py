@@ -1647,9 +1647,14 @@ def CUDAExtension(name, sources, *args, **kwargs):
     Note: Ninja is required to build a CUDA Extension with RDC linking.
 
     On ROCm there is no separate device-link step. With ``dlink=True`` (or ``dlink_libraries``)
-    HIP sources are compiled with ``-fgpu-rdc`` and :class:`BuildExtension` links the extension
-    with ``hipcc -fgpu-rdc --hip-link`` and the compile's arch flags; ``dlink_libraries`` are
-    linked as ordinary libraries. Not supported on Windows.
+    every HIP source is compiled with ``-fgpu-rdc`` and the extension is linked with
+    ``hipcc -fgpu-rdc --hip-link`` plus the compile's arch (``--offload-arch``, ...),
+    ``--[no-]offload-new-driver``, ``-O``, ``-g``, ``-Xarch_device`` and ``--offload-compress``
+    flags, since device code is generated at that link; ``dlink_libraries`` are linked as
+    ordinary libraries. nvcc's relocatable-code and device-link flags (``-rdc``, ``-dc``,
+    ``-dlink``, ``-dlto``, ...) and
+    ``nvcc_dlink`` arguments are dropped, and Ninja is not required. The extension must be built
+    with :class:`BuildExtension`, which does that link. Not supported on Windows.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -1746,14 +1751,24 @@ def CUDAExtension(name, sources, *args, **kwargs):
     dlink_libraries = kwargs.get('dlink_libraries', [])
     dlink = kwargs.get('dlink', False) or dlink_libraries
     if dlink and IS_HIP_EXTENSION:
-        # ROCm has no separate device-link step: compile with relocatable device code and let
-        # hipcc do the device link as part of the final link. Copy the caller's args so
-        # -fgpu-rdc does not leak into other extensions that share them.
-        extra_compile_args = dict(kwargs.get('extra_compile_args', {}))
-        extra_compile_args['nvcc'] = list(extra_compile_args.get('nvcc', [])) + ['-fgpu-rdc']
+        # ROCm has no separate device-link step: compile with relocatable device
+        # code and let hipcc do the device link as part of the final host link.
+        # Copy so -fgpu-rdc does not leak into other extensions that share the caller's args.
+        # A list applies to both compilers, same as BuildExtension treats it.
+        extra_compile_args = kwargs.get('extra_compile_args', {})
+        if isinstance(extra_compile_args, dict):
+            extra_compile_args = dict(extra_compile_args)
+        else:
+            extra_compile_args = {'cxx': list(extra_compile_args), 'nvcc': list(extra_compile_args)}
+        # nvcc's device-link flags have no hipcc equivalent; -fgpu-rdc replaces them.
+        nvcc_dlink = extra_compile_args.pop('nvcc_dlink', None)
+        if nvcc_dlink:
+            logger.warning("Ignoring nvcc_dlink flags %s for ROCm extension %s: hipcc does "
+                           "the device link in the final link.", nvcc_dlink, name)
+        extra_compile_args['nvcc'] = _strip_cuda_rdc_flags(extra_compile_args.get('nvcc', [])) + ['-fgpu-rdc']
         kwargs['extra_compile_args'] = extra_compile_args
         # _ROCM_DLINK_MARKER selects the hipcc link in _wrap_hip_dlink_link, which removes it again.
-        # Arch flags are added at build time by _add_rocm_dlink_link_flags.
+        # Arch, offload-driver and device codegen flags are added at build time by _add_rocm_dlink_link_flags.
         kwargs['extra_link_args'] = (
             list(kwargs.get('extra_link_args', [])) + ['-fgpu-rdc', '--hip-link', _ROCM_DLINK_MARKER]
         )
@@ -2994,20 +3009,65 @@ def _wrap_hip_dlink_link(compiler) -> None:
     compiler.link = link
 
 
-def _add_rocm_dlink_link_flags(extension) -> None:
-    """Give a HIP dlink extension's hipcc link (marked by _ROCM_DLINK_MARKER) the compile's archs.
+def _strip_cuda_rdc_flags(nvcc_flags: list[str]) -> list[str]:
+    """Drop nvcc's relocatable-device-code and device-link flags, which hipcc rejects or ignores."""
+    flags = []
+    skip_next = False
+    for flag in nvcc_flags:
+        if skip_next:
+            skip_next = False
+        elif flag in ('-rdc', '--relocatable-device-code'):
+            skip_next = True
+        elif flag in ('-dc', '--device-c', '-dw', '--device-w', '-dlink', '--device-link',
+                      '-dlto', '--dlink-time-opt') or flag.startswith(('-rdc=', '--relocatable-device-code=')):
+            pass
+        else:
+            flags.append(flag)
+    return flags
 
-    The legacy offload driver (default for -fgpu-rdc on ROCm 7.0) device-links only for the
-    archs on the link line. Done when the build starts, from the final nvcc flags, as the compile
-    does, so setup.py commands that only read metadata do not start the GPU runtime.
+
+def _get_rocm_dlink_link_flags(nvcc_flags: list[str]) -> list[str]:
+    """Compile flags the hipcc device link needs: arch, offload driver and device codegen.
+
+    With -fgpu-rdc the device code is generated at the link, so it needs the compile's
+    `-O`/`-g`, `-Xarch_device <opt>` and `--offload-compress` flags (hipcc defaults to -O3
+    otherwise). The legacy offload driver (default for -fgpu-rdc on ROCm 7.0) device-links only
+    for the archs on the link line, and objects built with one offload driver must be linked
+    with the same one. That is the user's own flags of these kinds, in order, plus the generated
+    arch defaults when the compile got them too (when it found no user arch flags). The value
+    of other two-token options such as `-Xarch_host -O0` or `-mllvm <opt>` is not forwarded.
+    """
+    flags = []
+    value = None  # what to do with the value of a two-token option: 'keep' or 'skip'
+    for f in nvcc_flags:
+        if value:
+            if value == 'keep':
+                flags.append(f)
+            value = None
+        elif f == '-Xarch_device':
+            flags.append(f)
+            value = 'keep'
+        elif f == '-mllvm' or (f.startswith('-X') and '=' not in f):
+            value = 'skip'
+        elif ((f.startswith(('-O', '-g')) and not f.startswith('-gen'))
+              or 'amdgpu-target' in f or 'offload-arch' in f or 'cuda-gpu-arch' in f
+              or 'offload-new-driver' in f or 'offload-compress' in f):
+            flags.append(f)
+    return flags + [f for f in _get_rocm_arch_flags(nvcc_flags) if f.startswith('--offload-arch')]
+
+
+def _add_rocm_dlink_link_flags(extension) -> None:
+    """Add the link flags of a HIP dlink extension (marked by _ROCM_DLINK_MARKER) at build time.
+
+    Done when the build starts, from the final nvcc flags, as the compile does, so compile and
+    link agree, and so setup.py commands that only read metadata do not start the GPU runtime.
     """
     link_args = list(extension.extra_link_args or [])
     if _ROCM_DLINK_MARKER not in link_args:
         return
-    nvcc_flags = extension.extra_compile_args.get('nvcc', [])
-    user_archs = [f for f in nvcc_flags if 'amdgpu-target' in f or 'offload-arch' in f]
-    default_archs = [f for f in _get_rocm_arch_flags(nvcc_flags) if f.startswith('--offload-arch')]
-    extension.extra_link_args = link_args + user_archs + default_archs
+    compile_args = extension.extra_compile_args
+    nvcc_flags = compile_args.get('nvcc', []) if isinstance(compile_args, dict) else list(compile_args)
+    extension.extra_link_args = link_args + _get_rocm_dlink_link_flags(nvcc_flags)
 
 def _get_build_directory(name: str, verbose: bool) -> str:
     """

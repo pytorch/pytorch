@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils.cpp_extension import (
     _get_cuda_arch_flags,
+    _get_rocm_dlink_link_flags,
     _TORCH_PATH,
     check_compiler_is_gcc,
     COMMON_MSVC_FLAGS,
@@ -1375,6 +1376,46 @@ except RuntimeError as e:
 class TestRocmDlinkArgs(common.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_dlink_link_flags(self):
+        device_opts = ["-O2", "-Xarch_device", "-O0", "--offload-compress"]
+        device_opts += ["--offload-arch=gfx942"]
+        cases = [
+            (
+                [
+                    "-O2",
+                    "--offload-arch=gfx942",
+                    "--no-offload-new-driver",
+                    "-fgpu-rdc",
+                ],
+                ["-O2", "--offload-arch=gfx942", "--no-offload-new-driver"],
+            ),
+            # Device code is generated at the rdc link, so it needs a debug build's -O0 -g.
+            (
+                ["-O0", "-g", "--offload-arch=gfx942", "-fgpu-rdc", "-DFOO"],
+                ["-O0", "-g", "--offload-arch=gfx942"],
+            ),
+            # Option values and look-alike options are not optimization or debug flags.
+            (
+                ["-O3", "-Xarch_host", "-O0", "-gen-cdb-fragment-path", "/tmp/cdb"]
+                + ["-mllvm", "-gpsize=0", "--offload-arch=gfx942"],
+                ["-O3", "--offload-arch=gfx942"],
+            ),
+            (["--amdgpu-target=gfx90a"], ["--amdgpu-target=gfx90a"]),
+            (["--no-offload-arch=gfx90a"], ["--no-offload-arch=gfx90a"]),
+            # Device-only options also shape the device code generated at the link.
+            (device_opts, device_opts),
+            # No user arch: all PYTORCH_ROCM_ARCH defaults; driver toggles keep their order.
+            (
+                ["-O2", "--offload-new-driver", "--no-offload-new-driver"],
+                ["-O2", "--offload-new-driver", "--no-offload-new-driver"]
+                + ["--offload-arch=gfx90a", "--offload-arch=gfx942"],
+            ),
+        ]
+        with mock.patch.dict(os.environ, {"PYTORCH_ROCM_ARCH": "gfx90a;gfx942"}):
+            for nvcc_flags, expected in cases:
+                with self.subTest(nvcc_flags=nvcc_flags):
+                    self.assertEqual(_get_rocm_dlink_link_flags(nvcc_flags), expected)
+
     def test_dlink_on_windows_rocm_raises(self):
         with (
             mock.patch.object(torch.utils.cpp_extension, "IS_HIP_EXTENSION", True),
@@ -1402,10 +1443,30 @@ class TestRocmDlinkArgs(common.TestCase):
             return torch.utils.cpp_extension.CUDAExtension("x", ["x.cpp"], **kwargs)
 
     def test_dlink_cuda_extension_args(self):
-        args = {"cxx": [], "nvcc": ["-O2"]}
-        ext = self._rocm_cuda_extension(dlink=True, extra_compile_args=args)
+        nvcc = [
+            "-O2",
+            "-rdc=true",
+            "-dc",
+            "-rdc",
+            "true",
+            "-dlto",
+            "-dlink",
+            "--device-link",
+        ]
+        args = {"cxx": [], "nvcc": list(nvcc), "nvcc_dlink": ["-dlto"]}
+        with self.assertLogs("torch.utils.cpp_extension", level="WARNING") as logs:
+            ext = self._rocm_cuda_extension(dlink=True, extra_compile_args=args)
+        # nvcc's rdc/dlink flags are dropped and nvcc_dlink is ignored with a warning,
+        # without changing the caller's args.
         self.assertEqual(ext.extra_compile_args["nvcc"], ["-O2", "-fgpu-rdc"])
-        self.assertEqual(args, {"cxx": [], "nvcc": ["-O2"]})  # caller's args unchanged
+        self.assertNotIn("nvcc_dlink", ext.extra_compile_args)
+        self.assertTrue(any("Ignoring nvcc_dlink flags" in o for o in logs.output))
+        self.assertEqual(args, {"cxx": [], "nvcc": nvcc, "nvcc_dlink": ["-dlto"]})
+        # A list of args applies to both compilers.
+        ext = self._rocm_cuda_extension(dlink=True, extra_compile_args=["-g"])
+        self.assertEqual(
+            ext.extra_compile_args, {"cxx": ["-g"], "nvcc": ["-g", "-fgpu-rdc"]}
+        )
         # dlink_libraries alone turns on dlink.
         ext = self._rocm_cuda_extension(dlink_libraries=["dlink_lib"])
         self.assertIn("dlink_lib", ext.libraries)
