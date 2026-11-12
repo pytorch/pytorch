@@ -709,9 +709,10 @@ class TestScheduler(TestCase):
     def test_reduction_over_template_input_is_not_an_epilogue(self):
         # x.sum(0) only reads the mm's input x, but its first split stage has the
         # output's (M, N) group (8 * 128, 128) and x has M * N elements, so it
-        # looked like an in-place row reduction of the output. A row sum of the
-        # output must still classify.
+        # looked like an in-place row reduction of the output. Row and column
+        # sums of the output must still classify.
         from torch._inductor.codegen.simd import template_reduction_axis
+        from torch._inductor.scheduler import MixOrderReduction
 
         axes = {}
         fusable = {}
@@ -724,6 +725,8 @@ class TestScheduler(TestCase):
                     if node.is_reduction() and not node.is_template():
                         if not produced & node.used_buffer_names():
                             expected = None
+                        elif MixOrderReduction.is_split_reduction(node):
+                            expected = 1  # y.sum(0)'s first stage
                         else:
                             expected = 0  # y.sum(1)
                         axes[node.get_name()] = (
@@ -739,13 +742,13 @@ class TestScheduler(TestCase):
 
         def f(x, w):
             y = x @ w.t()
-            return y, x.sum(0, keepdim=True), y.sum(1)
+            return y, x.sum(0, keepdim=True), y.sum(1), y.sum(0)
 
         torch._dynamo.reset()
         with patch.object(Scheduler, "fuse_nodes", record_axes):
             out = torch.compile(f)(x, w)
         self.assertEqual(out, f(x, w), atol=1e-1, rtol=1e-2)
-        self.assertEqual(sorted(e for _, e in axes.values() if e is not None), [0])
+        self.assertEqual(sorted(e for _, e in axes.values() if e is not None), [0, 1])
         for name, (axis, expected) in axes.items():
             self.assertEqual(axis, expected, name)
         # Nor can it fuse into the template some other way.
@@ -990,6 +993,98 @@ class TestScheduler(TestCase):
                     expected,
                     (tile, node.read_writes.reads),
                 )
+
+    def _mock_reduction_epilogue_snode(self, name, reads, group, reduction=False):
+        node = Mock(spec=SchedulerNode)
+        node.get_buffer_names.return_value = OrderedSet([name])
+        node.used_buffer_names.return_value = OrderedSet(dep.name for dep in reads)
+        node.get_nodes.return_value = [node]
+        node.is_reduction.return_value = reduction
+        node.unsplit_reduction.return_value = node
+        node.group = ("cuda", group)
+        node.read_writes = Mock(reads=OrderedSet(reads))
+        node.node = Mock(spec=ir.ComputedBuffer)
+        node.node.get_reduction_type.return_value = "sum"
+        node.node.get_dtype.return_value = torch.float32
+        return node
+
+    def test_tile_fits_reduction_epilogue_columns(self):
+        M, N = 128, 64
+        x, r = sympy.symbols("x r", integer=True, nonnegative=True)
+        template = Mock()
+        template.get_size.return_value = [sympy.Integer(M), sympy.Integer(N)]
+        template.get_name.return_value = "buf0"
+        column = self._mock_reduction_epilogue_snode(
+            "buf1", [MemoryDep("buf0", x + N * r, (x, r), (N, M))], (N, M), True
+        )
+
+        def pointwise(*reads):
+            return self._mock_reduction_epilogue_snode("buf2", reads, (M * N, 1))
+
+        row_major = MemoryDep("buf0", x, (x,), (M * N,))
+        cases = [
+            ([column], True),
+            ([pointwise(row_major), column], True),
+            # The column pass transposes the stored tile.
+            ([pointwise(MemoryDep("buf0", x + N * r, (x, r), (N, M))), column], False),
+            # The column result is only complete after the kernel.
+            (
+                [column, pointwise(row_major, MemoryDep("buf1", r, (x, r), (M, N)))],
+                False,
+            ),
+        ]
+        graph = Mock(sizevars=SizeVarAllocator(), cpp_wrapper=False)
+        with V.set_graph_handler(graph):
+            for nodes, expected in cases:
+                self.assertEqual(
+                    tile_fits_reduction_epilogue((M, N, 1), template, nodes),
+                    expected,
+                    [node.read_writes.reads for node in nodes],
+                )
+
+    @parametrize(
+        "case", ("split_column", "split_shifted", "split_partial", "unsplit_column")
+    )
+    def test_template_reduction_epilogue_matches_split_column(self, case):
+        """A split column reduction's stage-1 reads match the template write
+        only if the unsplit reduction reads all of it in place."""
+        # M = 5139 is split as 41 x 126 = 5166, so stage 1 masks a padded range.
+        M, N = 5139, 64
+        x, y, r = sympy.symbols("x y r", integer=True, nonnegative=True)
+        write = MemoryDep("buf0", N * x + r, (x, r), (M, N))
+        split_read = MemoryDep("buf0", x + N * (126 * y + r), (x, y, r), (N, 41, 126))
+        unsplit_read = {
+            "split_column": MemoryDep("buf0", x + N * r, (x, r), (N, M)),
+            "split_shifted": MemoryDep("buf0", x + N * r + 1, (x, r), (N, M)),
+            "split_partial": MemoryDep("buf0", x + N * r, (x, r), (N, M - 1)),
+            "unsplit_column": MemoryDep("buf0", x + N * r, (x, r), (N, M)),
+        }[case]
+        template = self._mock_base_snode("buf0")
+        template.read_writes.writes = OrderedSet([write])
+        if case == "unsplit_column":
+            reduction = self._mock_reduction_epilogue_snode(
+                "buf1", [unsplit_read], (N, M), True
+            )
+            expected = (MemoryDepMatch(write, unsplit_read),)
+        else:
+            reduction = self._mock_reduction_epilogue_snode(
+                "buf1", [split_read], (N * 41, 126), True
+            )
+            reduction.unsplit_reduction.return_value = (
+                self._mock_reduction_epilogue_snode(
+                    "buf1", [unsplit_read], (N, M), True
+                )
+            )
+            expected = (
+                (MemoryDepMatch(write, split_read),) if case == "split_column" else ()
+            )
+        scheduler = object.__new__(Scheduler)
+        scheduler.mutation_renames = {}
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            self.assertEqual(
+                scheduler._template_reduction_epilogue_matches(template, reduction),
+                expected,
+            )
 
     def test_nested_reduction_fuse_with_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
