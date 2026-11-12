@@ -19,8 +19,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# Positional order of block sizes in the config constructors.
-AXIS_ORDER = ("x", "y", "z", "r0_")
+# The axes a supplied config can name a block size for.
+BLOCK_AXES = ("x", "y", "z", "r0_")
 
 # The config constructors' argument for each block size.
 BLOCK_ARGS = {"XBLOCK": "x", "YBLOCK": "y", "ZBLOCK": "z", "R0_BLOCK": "r"}
@@ -150,8 +150,8 @@ def supplied_configs(
 
 
 def _block_names(category: str, size_hints: dict[str, int]) -> list[str]:
-    """Block sizes an entry must name, in constructor order."""
-    axes = [a for a in AXIS_ORDER if a in size_hints]
+    """Block sizes an entry must name."""
+    axes = [a for a in BLOCK_AXES if a in size_hints]
     if category == "persistent_reduction":
         axes = [a for a in axes if a != "r0_"]
     return [f"{a.upper()}BLOCK" for a in axes]
