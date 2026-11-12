@@ -1453,9 +1453,16 @@ class PointwiseStrictNumericsTest(TestCase):
     @_strict_ops(POINTWISE_OPS, POINTWISE_XFAIL)
     def test_pointwise_bitwise(self, device, dtype, op):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
-        self._assert_ledger(
-            mismatches, op, dtype, "forward", POINTWISE_XFAIL, "POINTWISE_XFAIL"
-        )
+        xfail = POINTWISE_XFAIL
+        if (
+            torch.version.hip is None
+            and _op_id(op) in ("sub", "rsub")
+            and dtype in (torch.float32, torch.float16, torch.bfloat16)
+        ):
+            # Explicit FMA for alpha subtraction makes sub and rsub match eager.
+            # Keep the global ledger entries so all three dtypes are collected.
+            xfail = xfail - {(_op_id(op), _dtype_label(dtype))}
+        self._assert_ledger(mismatches, op, dtype, "forward", xfail, "POINTWISE_XFAIL")
 
     @decorateIf(
         unittest.skip("uncompilable op under fullgraph"),

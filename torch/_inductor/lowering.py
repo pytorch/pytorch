@@ -779,7 +779,7 @@ def make_pointwise(
     override_device: torch.device | None = None,
     override_fn_when_input_bool: Callable[..., Any] | None = None,
     allow_alpha: bool = False,
-    use_fma_for_alpha: bool = False,
+    use_fma_for_alpha: Literal["add", "sub"] | None = None,
     triton_fallback: Callable[..., _T] | None = None,
     round_scalars_to_tensor_dtype: bool = False,
     force_output_cast: bool = False,
@@ -800,6 +800,9 @@ def make_pointwise(
                 raise AssertionError("expected: not allow_alpha")
             return triton_fallback(*inputs)
 
+        original_inputs = inputs
+        fma_alpha = None
+        opmath_scalar_indices: tuple[int, ...] = ()
         # pyrefly: ignore [bad-assignment]
         inputs = promote_constants(
             inputs,
@@ -808,8 +811,8 @@ def make_pointwise(
         )
         if allow_alpha:
             if alpha is not None and alpha != 1:
-                # Use FMA for add-with-alpha on Triton GPU floating-point.
-                # Eager CUDA/ROCm computes a + alpha * b as fma(b, alpha, a).
+                # Eager CUDA/ROCm fuses add/sub-with-alpha. Emit the FMA
+                # explicitly rather than relying on compiler contraction.
                 if use_fma_for_alpha and isinstance(inputs[0], IRNode):
                     inp_device = inputs[0].get_device()
                     if (
@@ -817,12 +820,21 @@ def make_pointwise(
                         and inp_device is not None
                         and inp_device.type == "cuda"
                     ):
-                        return _add_with_alpha_fma(inputs[0], inputs[1], alpha)
+                        if use_fma_for_alpha != "sub":
+                            return _add_with_alpha_fma(inputs[0], inputs[1], alpha)
+                        fma_alpha = -alpha
+                        # Eager CUDA keeps Python scalars at opmath precision.
+                        opmath_scalar_indices = tuple(
+                            i
+                            for i, x in enumerate(original_inputs)
+                            if isinstance(x, (int, float, sympy.Basic))
+                        )
 
-                # pyrefly: ignore [bad-assignment]
-                inputs = list(inputs)
-                # pyrefly: ignore [unsupported-operation]
-                inputs[-1] = mul(inputs[-1], alpha)
+                if fma_alpha is None:
+                    # pyrefly: ignore [bad-assignment]
+                    inputs = list(inputs)
+                    # pyrefly: ignore [unsupported-operation]
+                    inputs[-1] = mul(inputs[-1], alpha)
         else:
             if alpha is not None:
                 raise AssertionError("expected: alpha is None")
@@ -865,12 +877,23 @@ def make_pointwise(
                 for inp_index, load in enumerate(loaders):
                     out = load(index)
                     inp_dtype = inputs[inp_index].get_dtype()
-                    if emulate_precision_casts and inp_dtype in low_pr_fp:
+                    if (
+                        emulate_precision_casts
+                        and inp_dtype in low_pr_fp
+                        and inp_index not in opmath_scalar_indices
+                    ):
                         downcast = ops.to_dtype(out, inp_dtype, use_compute_types=False)
                         out = ops.to_dtype(downcast, inp_dtype)
                     inputs_loaded.append(out)
 
-                out = fn(*inputs_loaded)
+                if fma_alpha is None:
+                    out = fn(*inputs_loaded)
+                else:
+                    if isinstance(fma_alpha, sympy.Basic):
+                        alpha_expr = ops.index_expr(fma_alpha, dtype)
+                    else:
+                        alpha_expr = ops.constant(fma_alpha, dtype)
+                    out = ops.fma(inputs_loaded[1], alpha_expr, inputs_loaded[0])
                 if emulate_output_cast:
                     # fp16/bf16 kernels are computed in fp32. Casting down to fp16/bf16 here,
                     # then upcasting again, to emulate casts that eager would do.
@@ -1210,7 +1233,7 @@ def register_pointwise(
     override_return_dtype=None,
     override_fn_when_input_bool=None,
     allow_alpha=False,
-    use_fma_for_alpha=False,
+    use_fma_for_alpha=None,
     triton_fallback=None,
     round_scalars_to_tensor_dtype=False,
 ):
@@ -8476,7 +8499,7 @@ reduce_argmin_with_value = make_arg_with_value_reduction("argmin_with_value")
 add = register_pointwise(
     aten.add,
     allow_alpha=True,
-    use_fma_for_alpha=True,
+    use_fma_for_alpha="add",
     override_fn_when_input_bool="logical_or",
     round_scalars_to_tensor_dtype=True,
 )
@@ -8757,7 +8780,18 @@ relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise_numeric_ldf64(aten.sigmoid)
 sqrt = register_pointwise_numeric_ldf64(aten.sqrt)
 square = register_pointwise(aten.square)
-sub = register_pointwise(aten.sub, allow_alpha=True, round_scalars_to_tensor_dtype=True)
+# Foreach has different alpha conversion rules; retain its existing lowering.
+_foreach_sub = register_pointwise(
+    aten.sub, allow_alpha=True, round_scalars_to_tensor_dtype=True
+)
+sub = register_lowering([aten.sub, *aten.sub.op_overloads()], broadcast=True)(
+    make_pointwise(
+        ops_wrapper("sub"),
+        allow_alpha=True,
+        use_fma_for_alpha="sub",
+        round_scalars_to_tensor_dtype=True,
+    )
+)
 
 
 def _with_positional_alpha(lowering, self, other, alpha=1):
@@ -9136,8 +9170,8 @@ register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
 foreach_mul_list = register_foreach_pointwise(aten._foreach_mul.List, mul)
 register_foreach_pointwise(aten._foreach_mul.Tensor, mul)
 foreach_mul_scalar = register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
-register_foreach_pointwise(aten._foreach_sub.List, sub, allow_alpha=True)
-register_foreach_pointwise(aten._foreach_sub.Scalar, sub, allow_alpha=True)
+register_foreach_pointwise(aten._foreach_sub.List, _foreach_sub, allow_alpha=True)
+register_foreach_pointwise(aten._foreach_sub.Scalar, _foreach_sub, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
