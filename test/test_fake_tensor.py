@@ -2247,9 +2247,12 @@ def forward(self, x_1):
         from torch._guards import active_fake_mode, detect_fake_mode
 
         # Distinct creation sites must appear in the mismatch diagnostic.
+        # Keep these frames in the creation stacks under Dynamo.
+        @torch.compiler.disable
         def make_mode():
             return mode_cls()
 
+        @torch.compiler.disable
         def make_other():
             return mode_cls()
 
