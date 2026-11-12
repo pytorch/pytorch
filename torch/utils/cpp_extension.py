@@ -4,6 +4,7 @@ import glob
 import importlib
 import importlib.abc
 import importlib.util
+import inspect
 import os
 import re
 import shlex
@@ -911,6 +912,9 @@ class BuildExtension(_LazyBuildExt):
                         f"With dlink=True, ninja is required to build cuda extension {extension.name}."
                     )
 
+            if IS_HIP_EXTENSION:
+                _add_rocm_dlink_link_flags(extension)
+
         # Register .cu, .cuh, .hip, .mm and .sycl as valid source extensions.
         # NOTE: At the moment .sycl is not a standard extension for SYCL supported
         # by compiler. Here we introduce a torch level convention that SYCL sources
@@ -1351,6 +1355,9 @@ class BuildExtension(_LazyBuildExt):
             else:
                 self.compiler._compile = unix_wrap_single_compile
 
+        if IS_HIP_EXTENSION and any(_ROCM_DLINK_MARKER in (ext.extra_link_args or []) for ext in self.extensions):
+            _wrap_hip_dlink_link(self.compiler)
+
         super().build_extensions()
 
     def get_ext_filename(self, ext_name):
@@ -1639,6 +1646,11 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     Note: Ninja is required to build a CUDA Extension with RDC linking.
 
+    On ROCm there is no separate device-link step. With ``dlink=True`` (or ``dlink_libraries``)
+    HIP sources are compiled with ``-fgpu-rdc`` and :class:`BuildExtension` links the extension
+    with ``hipcc -fgpu-rdc --hip-link`` and the compile's arch flags; ``dlink_libraries`` are
+    linked as ordinary libraries. Not supported on Windows.
+
     Example:
         >>> # xdoctest: +SKIP
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
@@ -1650,6 +1662,11 @@ def CUDAExtension(name, sources, *args, **kwargs):
         ...        extra_compile_args={'cxx': ['-g'],
         ...                            'nvcc': ['-O2', '-rdc=true']})
     """
+    if IS_HIP_EXTENSION and IS_WINDOWS and (kwargs.get('dlink', False) or kwargs.get('dlink_libraries')):
+        raise RuntimeError(
+            "dlink=True and dlink_libraries are not supported for ROCm extensions on Windows: the MSVC "
+            "linker cannot do the HIP device link.")
+
     library_dirs = kwargs.get('library_dirs', [])
     library_dirs += library_paths(device_type="cuda")
     kwargs['library_dirs'] = library_dirs
@@ -1728,7 +1745,20 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     dlink_libraries = kwargs.get('dlink_libraries', [])
     dlink = kwargs.get('dlink', False) or dlink_libraries
-    if dlink:
+    if dlink and IS_HIP_EXTENSION:
+        # ROCm has no separate device-link step: compile with relocatable device code and let
+        # hipcc do the device link as part of the final link. Copy the caller's args so
+        # -fgpu-rdc does not leak into other extensions that share them.
+        extra_compile_args = dict(kwargs.get('extra_compile_args', {}))
+        extra_compile_args['nvcc'] = list(extra_compile_args.get('nvcc', [])) + ['-fgpu-rdc']
+        kwargs['extra_compile_args'] = extra_compile_args
+        # _ROCM_DLINK_MARKER selects the hipcc link in _wrap_hip_dlink_link, which removes it again.
+        # Arch flags are added at build time by _add_rocm_dlink_link_flags.
+        kwargs['extra_link_args'] = (
+            list(kwargs.get('extra_link_args', [])) + ['-fgpu-rdc', '--hip-link', _ROCM_DLINK_MARKER]
+        )
+        kwargs['libraries'] = list(kwargs.get('libraries', [])) + list(dlink_libraries)
+    elif dlink:
         extra_compile_args = kwargs.get('extra_compile_args', {})
 
         extra_compile_args_dlink = extra_compile_args.get('nvcc_dlink', [])
@@ -2935,6 +2965,49 @@ def _get_rocm_arch_flags(cflags: list[str] | None = None) -> list[str]:
     flags = [f'--offload-arch={arch}' for arch in archs]
     flags += [] if has_gpu_rdc_flag else ['-fno-gpu-rdc']
     return flags
+
+# Marks the link of a CUDAExtension(dlink=True) on ROCm. A private token instead of --hip-link,
+# so extensions that pass --hip-link themselves keep their own linker and link flags.
+_ROCM_DLINK_MARKER = '--torch-rocm-dlink'
+
+
+def _wrap_hip_dlink_link(compiler) -> None:
+    """Link HIP dlink extensions (marked by _ROCM_DLINK_MARKER) with hipcc, which does the device link.
+
+    Each such link runs on a copy of the compiler whose compiler_cxx is hipcc (setuptools builds
+    the C++ link from compiler_cxx plus the flags of linker_so_cxx), so concurrent builds
+    (build_ext -j) and other extensions keep the original linker and any earlier `link` override.
+    """
+    original_link = compiler.link
+    class_link = type(compiler).link
+
+    def link(*args, **kwargs):
+        bound = inspect.signature(class_link).bind(compiler, *args, **kwargs)
+        postargs = bound.arguments.get('extra_postargs') or []
+        if _ROCM_DLINK_MARKER not in postargs:
+            return original_link(*args, **kwargs)
+        bound.arguments['extra_postargs'] = [a for a in postargs if a != _ROCM_DLINK_MARKER]
+        linker = copy.copy(compiler)
+        linker.compiler_cxx = [_get_hipcc_path()]
+        return class_link(linker, *bound.args[1:], **bound.kwargs)
+
+    compiler.link = link
+
+
+def _add_rocm_dlink_link_flags(extension) -> None:
+    """Give a HIP dlink extension's hipcc link (marked by _ROCM_DLINK_MARKER) the compile's archs.
+
+    The legacy offload driver (default for -fgpu-rdc on ROCm 7.0) device-links only for the
+    archs on the link line. Done when the build starts, from the final nvcc flags, as the compile
+    does, so setup.py commands that only read metadata do not start the GPU runtime.
+    """
+    link_args = list(extension.extra_link_args or [])
+    if _ROCM_DLINK_MARKER not in link_args:
+        return
+    nvcc_flags = extension.extra_compile_args.get('nvcc', [])
+    user_archs = [f for f in nvcc_flags if 'amdgpu-target' in f or 'offload-arch' in f]
+    default_archs = [f for f in _get_rocm_arch_flags(nvcc_flags) if f.startswith('--offload-arch')]
+    extension.extra_link_args = link_args + user_archs + default_archs
 
 def _get_build_directory(name: str, verbose: bool) -> str:
     """

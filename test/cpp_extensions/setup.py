@@ -111,7 +111,7 @@ if (
     USE_NINJA
     and (not IS_WINDOWS)
     and torch.cuda.is_available()
-    and CUDA_HOME is not None
+    and (CUDA_HOME is not None or ROCM_HOME is not None)
 ):
     extension = CUDAExtension(
         name="torch_test_cpp_extension.cuda_dlink",
