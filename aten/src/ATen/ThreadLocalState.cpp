@@ -67,7 +67,9 @@ void ThreadLocalState::setThreadLocalState(
 
   c10::impl::PythonDispatcherTLS::set_state(state.python_dispatcher_state_);
 
-  c10::impl::FakeTensorModeTLS::create_state(state.fake_tensor_mode_state_);
+  // Released at the end, once the dispatch key set is restored
+  auto prev_fake_tensor_mode_state =
+      c10::impl::FakeTensorModeTLS::create_state(state.fake_tensor_mode_state_);
   c10::impl::FakeTensorModeTLS::set_in_kernel_invocation(state.in_kernel_invocation_state_);
 
   at::set_dtensor_allow_implicit_replication(state.dtensor_allow_implicit_replication_);

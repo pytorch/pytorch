@@ -28,6 +28,10 @@ namespace {
     class SqrtAndReciprocal : public ::testing::Test {};
     template <typename T>
     class SqrtAndReciprocalReal : public ::testing::Test {};
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
+    template <typename T>
+    class ReciprocalReducedFloat : public ::testing::Test {};
+#endif
     template <typename T>
     class FractionAndRemainderReal : public ::testing::Test {};
     template <typename T>
@@ -106,6 +110,9 @@ namespace {
     TYPED_TEST_SUITE(Rounding, RealFloatTestedTypes);
     TYPED_TEST_SUITE(SqrtAndReciprocal, FloatTestedTypes);
     TYPED_TEST_SUITE(SqrtAndReciprocalReal, RealFloatTestedTypes);
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
+    TYPED_TEST_SUITE(ReciprocalReducedFloat, ReducedFloatTestedTypes);
+#endif
     TYPED_TEST_SUITE(FractionAndRemainderReal, RealFloatTestedTypes);
     TYPED_TEST_SUITE(Trigonometric, RealFloatTestedTypes);
     TYPED_TEST_SUITE(ErrorFunctions, RealFloatTestedTypes);
@@ -360,6 +367,53 @@ namespace {
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_zero));
     }
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
+    // Checks every positive and negative normal input against the exact result.
+    // Results are computed in fp32 and rounded once, so they can exceed half a
+    // ULP only by the small double rounding margin allowed here.
+    template <typename vec, typename Exact, typename Op>
+    void test_reduced_float_accuracy(bool positive_only, Exact exact, Op op) {
+        using T = ValueType<vec>;
+        constexpr int digits = std::numeric_limits<T>::digits;
+        const double min_normal = static_cast<float>(std::numeric_limits<T>::min());
+        const double max_finite = static_cast<float>(std::numeric_limits<T>::max());
+        const auto n = static_cast<size_t>(vec::size());
+        std::vector<uint16_t> bits(n);
+        std::vector<T> out(n);
+        for (uint32_t i = 0; i < 65536; i++) {
+            std::fill(bits.begin(), bits.end(), static_cast<uint16_t>(i));
+            T in;
+            std::memcpy(&in, bits.data(), sizeof(T));
+            const double x = static_cast<float>(in);
+            if (!std::isfinite(x) || std::abs(x) < min_normal || (positive_only && x < 0)) {
+                continue;
+            }
+            const double expected = exact(x);
+            if (std::abs(expected) < min_normal || std::abs(expected) > max_finite) {
+                continue;
+            }
+            op(vec::loadu(bits.data())).store(out.data());
+            const double got = static_cast<float>(out[0]);
+            const double ulp = std::ldexp(1.0, std::ilogb(expected) - (digits - 1));
+            ASSERT_LE(std::abs(got - expected), (0.5 + 1e-3) * ulp)
+                << "input " << x << " got " << got << " expected " << expected;
+        }
+    }
+    TYPED_TEST(ReciprocalReducedFloat, Reciprocal) {
+        using vec = TypeParam;
+        test_reduced_float_accuracy<vec>(
+            false,
+            [](double x) { return 1.0 / x; },
+            [](vec v) { return v.reciprocal(); });
+    }
+    TYPED_TEST(ReciprocalReducedFloat, RSqrt) {
+        using vec = TypeParam;
+        test_reduced_float_accuracy<vec>(
+            true,
+            [](double x) { return 1.0 / std::sqrt(x); },
+            [](vec v) { return v.rsqrt(); });
+    }
+#endif
     TYPED_TEST(FractionAndRemainderReal, Frac) {
       using vec = TypeParam;
       test_unary<vec>(

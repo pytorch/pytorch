@@ -168,6 +168,30 @@ class AllGather(Comm):
     ) -> dist.Work | None: ...
 
 
+class AllReduce(Comm):
+    """Interface for an in-place all-reduce communication primitive.
+
+    FSDP calls this primitive synchronously on its internal all-reduce stream
+    with ``SUM`` or ``AVG``. ``AVG`` must divide by the process-group size.
+    Implementations using another stream must wait on the calling stream
+    before accessing the tensor and join it before returning, so that FSDP's
+    completion event covers the collective and protects the buffer lifetime.
+
+    The input buffer is allocated by the reduce-scatter primitive, so FSDP
+    does not call this primitive's ``allocate`` method. Implementations needing
+    registered memory may require a matching custom ``ReduceScatter``.
+    """
+
+    @abstractmethod
+    def __call__(
+        self,
+        tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        op: _ReduceOp,
+        async_op: bool = False,
+    ) -> dist.Work | None: ...
+
+
 class ReduceScatter(Comm):
     """
     Interface for reduce_scatter comm primitive

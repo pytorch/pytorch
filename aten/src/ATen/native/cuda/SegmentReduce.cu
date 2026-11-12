@@ -5,6 +5,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/cub.cuh>
@@ -25,8 +26,8 @@
 namespace at::native {
 
 namespace {
+template <typename OutputT>
 struct CustomMax {
-  template <typename OutputT>
   __host__ __device__ __forceinline__ OutputT
   operator()(const OutputT& a, const OutputT& b) const {
     if (at::_isnan(a)) {
@@ -34,28 +35,28 @@ struct CustomMax {
     } else if (at::_isnan(b)) {
       return b;
     }
-    return std::max<OutputT>(a, b);
+    return std::max(a, b);
   }
 };
 
+template <typename OutputT>
 struct CustomSum {
-  template <typename OutputT>
   __host__ __device__ __forceinline__ OutputT
   operator()(const OutputT& a, const OutputT& b) const {
     return a + b;
   }
 };
 
+template <typename OutputT>
 struct CustomProd {
-  template <typename OutputT>
   __host__ __device__ __forceinline__ OutputT
   operator()(const OutputT& a, const OutputT& b) const {
     return a * b;
   }
 };
 
+template <typename OutputT>
 struct CustomMin {
-  template <typename OutputT>
   __host__ __device__ __forceinline__ OutputT
   operator()(const OutputT& a, const OutputT& b) const {
     if (at::_isnan(a)) {
@@ -63,7 +64,7 @@ struct CustomMin {
     } else if (at::_isnan(b)) {
       return b;
     }
-    return std::min<OutputT>(a, b);
+    return std::min(a, b);
   }
 };
 
@@ -98,7 +99,7 @@ __global__ void segment_reduce_forward_kernel(
     const int64_t segment_count,
     const int64_t lengths_stride_axis,
     bool is_initial_set,
-    scalar_t initial_value,
+    at::opmath_type<scalar_t> initial_value,
     const int64_t outer_offset,
     const int64_t inner_offset,
     const int64_t data_stride_axis,
@@ -123,18 +124,18 @@ __global__ void segment_reduce_forward_kernel(
   for (index_t j = offset_start; j < offset_end; ++j) {
     int64_t data_index = outer_idx * data_stride_axis * data_size_axis
                          + j * data_stride_axis + lane_id;
-    const auto data = values_data[data_index];
+    const auto data = static_cast<at::opmath_type<scalar_t>>(values_data[data_index]);
     // TODO: There is no need to branch with every element
     if (reduction == ReductionType::MAX) {
       initial_value =
-          at::_isnan(data) ? data : std::max<scalar_t>(initial_value, data);
+          at::_isnan(data) ? data : std::max(initial_value, data);
     } else if (
         reduction == ReductionType::MEAN ||
         reduction == ReductionType::SUM) {
       initial_value = initial_value + data;
     } else if (reduction == ReductionType::MIN) {
       initial_value =
-          at::_isnan(data) ? data : std::min<scalar_t>(initial_value, data);
+          at::_isnan(data) ? data : std::min(initial_value, data);
     } else if (
       reduction == ReductionType::PROD) {
       initial_value = initial_value * data;
@@ -146,7 +147,7 @@ __global__ void segment_reduce_forward_kernel(
   CUDA_KERNEL_ASSERT(lengths_data[lengths_idx] >= 0);
   if (lengths_data[lengths_idx] == 0 && !is_initial_set &&
       reduction == ReductionType::MEAN) {
-    initial_value = static_cast<scalar_t>(NAN);
+    initial_value = NAN;
   } else if (
       reduction == ReductionType::MEAN && lengths_data[lengths_idx] > 0 &&
       !at::_isnan(initial_value)) {
@@ -154,7 +155,7 @@ __global__ void segment_reduce_forward_kernel(
   }
   int64_t output_index = outer_idx * output_stride_axis * output_size_axis
                          + dim_idx * output_stride_axis + lane_id;
-  output_data[output_index] = initial_value;
+  output_data[output_index] = static_cast<scalar_t>(initial_value);
 }
 
 
@@ -453,19 +454,20 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
             [&]() {
               auto* data_data_ptr = data.const_data_ptr<scalar_t>();
               auto* output_data_ptr = output.mutable_data_ptr<scalar_t>();
+              using opmath_t = at::opmath_type<scalar_t>;
 
               // initialize starting value
-              scalar_t initial_value = 0;
+              opmath_t initial_value = 0;
               if (initial.has_value()) {
-                initial_value = initial.value().to<scalar_t>();
+                initial_value = initial.value().to<opmath_t>();
               } else if (reduction == ReductionType::MAX) {
-                initial_value = -std::numeric_limits<scalar_t>::infinity();
+                initial_value = -std::numeric_limits<opmath_t>::infinity();
               } else if (
                   reduction == ReductionType::MEAN ||
                   reduction == ReductionType::SUM) {
                 initial_value = 0;
               } else if (reduction == ReductionType::MIN) {
-                initial_value = std::numeric_limits<scalar_t>::infinity();
+                initial_value = std::numeric_limits<opmath_t>::infinity();
               } else if (reduction == ReductionType::PROD) {
                 initial_value = 1;
               }
@@ -496,7 +498,7 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
                 C10_CUDA_KERNEL_LAUNCH_CHECK();
               } else {
                 if (reduction == ReductionType::MAX) {
-                  CustomMax max_op{};
+                  CustomMax<opmath_t> max_op{};
                   CUB_WRAPPER(
                       cub::DeviceSegmentedReduce::Reduce,
                       data_data_ptr,
@@ -508,7 +510,7 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
                       initial_value,
                       at::cuda::getCurrentCUDAStream());
                 } else if (reduction == ReductionType::MEAN) {
-                  CustomSum sum_op{};
+                  CustomSum<opmath_t> sum_op{};
                   CUB_WRAPPER(
                       cub::DeviceSegmentedReduce::Reduce,
                       data_data_ptr,
@@ -529,10 +531,10 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
                           lengths_data_ptr,
                           segment_count,
                           initial.has_value(),
-                          initial_value);
+                          static_cast<scalar_t>(initial_value));
                   C10_CUDA_KERNEL_LAUNCH_CHECK();
                 } else if (reduction == ReductionType::MIN) {
-                  CustomMin min_op{};
+                  CustomMin<opmath_t> min_op{};
                   CUB_WRAPPER(
                       cub::DeviceSegmentedReduce::Reduce,
                       data_data_ptr,
@@ -544,7 +546,7 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
                       initial_value,
                       at::cuda::getCurrentCUDAStream());
                 } else if (reduction == ReductionType::SUM) {
-                  CustomSum sum_op{};
+                  CustomSum<opmath_t> sum_op{};
                   CUB_WRAPPER(
                       cub::DeviceSegmentedReduce::Reduce,
                       data_data_ptr,
@@ -556,7 +558,7 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
                       initial_value,
                       at::cuda::getCurrentCUDAStream());
                 } else if (reduction == ReductionType::PROD) {
-                  CustomProd prod_op{};
+                  CustomProd<opmath_t> prod_op{};
                   CUB_WRAPPER(
                       cub::DeviceSegmentedReduce::Reduce,
                       data_data_ptr,

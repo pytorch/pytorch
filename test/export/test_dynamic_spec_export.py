@@ -29,6 +29,7 @@ from torch.fx.experimental.dynamic_spec import (
 )
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.testing._internal.common_utils import (
+    add_skip_condition,
     HardwareClassification,
     run_tests,
     TestCase,
@@ -999,6 +1000,23 @@ class TestExportDynamicSpecStrict(_TestExportDynamicSpecBase):
 class TestExportDynamicSpecNonStrict(_TestExportDynamicSpecBase):
     hw_classification = HardwareClassification.GENERIC
     strict = False
+
+
+for _name in (
+    "test_export_to_torch_ir_shapes_spec_direct",
+    "test_export_to_torch_ir_legacy_v1_shapes_spec_raises",
+    "test_strict_export_shapes_spec_direct",
+):
+    add_skip_condition(
+        getattr(TestExportDynamicSpecNonStrict, _name),
+        lambda cls: cls is TestExportDynamicSpecNonStrict and cls.strict is False,
+        "strict-only internal-API test",
+    )
+add_skip_condition(
+    TestExportDynamicSpecStrict.test_non_strict_export_shapes_spec_direct,
+    lambda cls: cls is TestExportDynamicSpecStrict and cls.strict is True,
+    "non-strict-only internal-API test",
+)
 
 
 del _TestExportDynamicSpecBase
