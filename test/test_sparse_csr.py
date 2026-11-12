@@ -2694,7 +2694,7 @@ class TestSparseCSRDevice(TestCase):
             torch.zeros(3, 3, dtype=dtype, device=device).to_sparse_bsr((1, 1)),
             torch.zeros(3, 3, dtype=dtype, device=device).to_sparse_bsc((1, 1)),
         ):
-            with self.assertRaisesRegex(RuntimeError, expected):
+            with self.assertRaisesRegex(ValueError, expected):
                 torch.add(a, a, out=out)
 
     @skipCPUIfNoMklSparse
