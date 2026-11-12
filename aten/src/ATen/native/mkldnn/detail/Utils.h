@@ -161,6 +161,15 @@ inline int tensor_zp_mask(dnnl::memory::dim zp_size) {
   return zp_size > 1 ? 1 : 0;
 }
 
+// Ported from ideep::utils::array_cmp.
+template <typename T>
+inline bool array_cmp(const T* a1, const T* a2, size_t size) {
+  for (size_t i = 0; i < size; ++i)
+    if (a1[i] != a2[i])
+      return false;
+  return true;
+}
+
 // Ported from ideep::utils::set_verbose.
 inline int set_verbose(int level) {
   dnnl::status ret = dnnl::set_verbose(level);

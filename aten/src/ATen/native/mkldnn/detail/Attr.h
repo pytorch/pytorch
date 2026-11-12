@@ -4,9 +4,7 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/detail/PrimitiveCache.h>
-// ideep headers use assert() without including <cassert>.
-#include <cassert>
-#include <ideep/tensor.hpp>
+#include <dnnl.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -86,6 +84,21 @@ struct Attr : public dnnl::primitive_attr {
   }
 
   /// @param arg Parameter argument index, e.g. DNNL_ARG_SRC
+  scale_mask_pair& get_scales(int arg) const {
+#ifndef NDEBUG
+    dnnl::error::wrap_c_api(
+        has_scales_for(arg) ? dnnl_success : dnnl_invalid_arguments,
+        "Scales for arg not found!");
+#endif
+    return (*scales_)[arg];
+  }
+
+  /// @param arg Parameter argument index, e.g. DNNL_ARG_SRC
+  bool has_scales_for(int arg) const {
+    return has_scales() && scales_->count(arg);
+  }
+
+  /// @param arg Parameter argument index, e.g. DNNL_ARG_SRC
   void set_zero_points(
       int arg,
       int mask,
@@ -103,6 +116,21 @@ struct Attr : public dnnl::primitive_attr {
 
   bool has_zero_points() const {
     return (zero_points_ && !(*zero_points_).empty());
+  }
+
+  /// @param arg Parameter argument index, e.g. DNNL_ARG_SRC
+  zp_mask_pair& get_zero_points(int arg) const {
+#ifndef NDEBUG
+    dnnl::error::wrap_c_api(
+        has_zero_points_for(arg) ? dnnl_success : dnnl_invalid_arguments,
+        "Zero point for arg not found!");
+#endif
+    return (*zero_points_)[arg];
+  }
+
+  /// @param arg Parameter argument index, e.g. DNNL_ARG_SRC
+  bool has_zero_points_for(int arg) const {
+    return has_zero_points() && zero_points_->count(arg);
   }
 
   // Helper factory
@@ -378,25 +406,6 @@ struct Attr : public dnnl::primitive_attr {
     // Note: depthwise/binary post op, zero points, scales, rnn params are
     // not encoded so far. PD cache is supposed to use in convolution only
     // as a temporary workaround for gemm-based conv pd overhead
-  }
-
-  // ideep::tensor's reorders still take ideep::attr_t until the tensor port.
-  operator ideep::attr_t() const {
-    if (!has_scales() && !has_zero_points()) {
-      return ideep::attr_t(static_cast<const dnnl::primitive_attr&>(*this));
-    }
-    dnnl_primitive_attr_t result;
-    dnnl::error::wrap_c_api(
-        dnnl_primitive_attr_clone(&result, get()),
-        "could not clone primitive attributes");
-    ideep::attr_t attr{dnnl::primitive_attr(result)};
-    for (const auto& s : get_all_scales()) {
-      attr.set_scales(s.first, s.second.second, s.second.first);
-    }
-    for (const auto& z : get_all_zero_points()) {
-      attr.set_zero_points(z.first, z.second.second, z.second.first);
-    }
-    return attr;
   }
 
  private:
