@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/FusedSGD.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -42,7 +43,7 @@ void _fused_sgd_kernel_cpu_(
   } else {
     TORCH_CHECK(momentum_buffer_list.size() == n_tensors);
   }
-  for (size_t i = 0; i < n_tensors; i++){
+  for (const auto i : c10::irange(n_tensors)){
     fused_sgd_stub(
       kCPU,
       params[i],
