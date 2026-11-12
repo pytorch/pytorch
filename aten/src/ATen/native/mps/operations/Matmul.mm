@@ -608,7 +608,9 @@ void metal_gemm(const Tensor& a,
   static const int64_t full_grid = kMatmulFullGridPerCore * MPSDevice::getInstance()->getCoreCount();
   constexpr uint32_t mpp_bn = kMatmulBlock * kMatmulBlockSimdgroups;
   const int64_t mpp_tiles = at::ceil_div(params.m, kMatmulBlock) * at::ceil_div(params.n, mpp_bn) * batch;
-  const uint32_t mpp_bm = mpp_tiles < full_grid ? kMatmulBlock / 2 : kMatmulBlock;
+  static const bool apple10 = is_apple_family_or_newer(AppleGPUFamily::APPLE_10_PLUS);
+  const bool tall = apple10 && out.scalar_type() != kFloat && mpp_tiles >= kMatmulTallTileFullGrids * full_grid;
+  const uint32_t mpp_bm = mpp_tiles < full_grid ? kMatmulBlock / 2 : tall ? 2 * kMatmulBlock : kMatmulBlock;
   const bool use_mpp = has_mpp() && params.out_stride_n == 1 && params.bias_stride_n == 1 &&
       (params.a_stride_m == 1 || params.a_stride_k == 1) && (params.b_stride_k == 1 || params.b_stride_n == 1) &&
       matmul_mpp_indices_fit(params, mpp_bm, mpp_bn);

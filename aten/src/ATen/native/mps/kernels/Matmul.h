@@ -26,6 +26,8 @@ C10_METAL_CONSTEXPR uint32_t kMatmulBlock = 32;
 C10_METAL_CONSTEXPR uint32_t kMatmulBlockSimdgroups = 4;
 C10_METAL_CONSTEXPR uint32_t kMatmulStepBytes = 128;
 C10_METAL_CONSTEXPR uint32_t kMatmulFullGridPerCore = 4;
+// On Apple10, half and bfloat tiles double their rows from this many grids.
+C10_METAL_CONSTEXPR uint32_t kMatmulTallTileFullGrids = 2;
 // fp32 K steps between barriers that keep a tile's simdgroups on the same
 // operand rows, which then stay in cache. half and bfloat do not drift.
 C10_METAL_CONSTEXPR uint32_t kMatmulPaceSteps = 4;
