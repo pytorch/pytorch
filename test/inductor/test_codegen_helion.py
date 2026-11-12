@@ -741,6 +741,31 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
 @unittest.skipUnless(
     HAS_CUDA_AND_TRITON and HAS_HELION, "requires CUDA, Triton and Helion"
 )
+class TestHelionDefaults(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_default_config(self):
+        # The other classes pin autotune_effort="none" to skip autotuning. With
+        # only TORCHINDUCTOR_HELION=1 set, a matmul is a Helion kernel that
+        # autotunes with effort "quick" at its first call. Only the generated
+        # code is checked, so the kernel is not run (or autotuned).
+        import helion
+
+        with (
+            config.patch({"helion.enabled": True}),
+            patch.object(helion.Kernel, "__call__", lambda self, *args: None),
+        ):
+            _, (code,) = run_and_get_code(
+                torch.compile(lambda a, b: a @ b), randn(32, 64), randn(64, 48)
+            )
+        (source,) = [s for s in SOURCE_RE.findall(code) if DOT_RE.search(s)]
+        self.assertIn('autotune_effort="quick"', source)
+        self.assertNotRegex(code, r"extern_kernels\.\w*mm\w*\(")
+
+
+@unittest.skipUnless(
+    HAS_CUDA_AND_TRITON and HAS_HELION, "requires CUDA, Triton and Helion"
+)
 @instantiate_parametrized_tests
 class TestHelionReduction(TestCase):
     hw_classification = HardwareClassification.CUDA
