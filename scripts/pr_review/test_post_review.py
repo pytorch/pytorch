@@ -709,6 +709,132 @@ class TestNothingIsPosted(unittest.TestCase):
         self.assertEqual(gh.writes(), [])
 
 
+TOO_LARGE = {"status": "skipped_too_large"}
+LIMITS = (100, 400_000)
+NOTICE = post_review.too_large_body("no automated review", LIMITS)
+
+
+def decline(gh, limits=LIMITS):
+    return run(gh, TOO_LARGE, 1, SHA, "no automated review", AUTHOR, limits)
+
+
+class TestATooLargePrGetsANotice(unittest.TestCase):
+    def test_one_comment_says_why_and_how_to_proceed(self):
+        gh = FakeGitHub(reviews=[old_review(5)])
+        self.assertEqual(decline(gh), 0)
+        [posted] = gh.posted()
+        self.assertEqual(posted["event"], "COMMENT")
+        self.assertEqual(posted["commit_id"], SHA)
+        body = posted["body"]
+        self.assertTrue(body.startswith(f"{MARKER}\n{post_review.TOO_LARGE_TAG}\n"))
+        self.assertIn("100 changed files or 400 KB of diff", body)
+        self.assertIn("split it into smaller PRs", body)
+        self.assertIn('`@pytorchbot label "no automated review"`', body)
+        # It replaces the earlier review like any other.
+        self.assertEqual(minimized(gh), ["N5"])
+
+    def test_without_limits_it_still_posts(self):
+        gh = FakeGitHub()
+        decline(gh, limits=None)
+        self.assertIn("over the automated review's size limit.", gh.posted()[0]["body"])
+
+    def test_the_notice_carries_no_command_pytorch_bot_would_run(self):
+        """pytorch-bot runs `^ *@pytorch(merge|)bot .+$` from review bodies."""
+        for label in ("no automated review", "x\n@pytorchbot merge -f y"):
+            body = post_review.too_large_body(label, LIMITS)
+            self.assertIsNone(re.search(r"(?m)^ *@pytorch(merge|)bot .+$", body))
+            self.assertEqual(len(re.findall(r"(?i)@pytorch", body)), 1, label)
+            self.assertIn('label "no automated review"', body)
+
+    def test_it_is_not_posted_again_while_it_is_the_newest(self):
+        gh = FakeGitHub(reviews=[old_review(5), old_review(6, body=NOTICE)])
+        decline(gh)
+        self.assertEqual(gh.posted(), [])
+        self.assertEqual((folds(gh), minimized(gh)), ([], []))
+
+    def test_nothing_is_posted_when_the_head_moved_or_the_pr_opted_out(self):
+        for gh in (
+            FakeGitHub(head="b" * 40, reviews=[old_review(5)]),
+            FakeGitHub(labels=("no automated review",), reviews=[old_review(5)]),
+        ):
+            decline(gh)
+            self.assertEqual(gh.writes(), [])
+
+    def test_a_standing_change_request_is_neither_dismissed_nor_hidden(self):
+        gh = FakeGitHub(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        decline(gh)
+        self.assertEqual(len(gh.posted()), 1)
+        self.assertEqual(dismissed(gh), [])
+        self.assertEqual(minimized(gh), [])
+
+    def test_a_failed_post_warns_and_does_not_fail_the_step(self):
+        gh = FakeGitHub(reviews=[old_review(5)])
+        real = gh.request
+
+        def refuse(method, path, body=None, idempotent=None):
+            if method == "POST" and path.endswith("/reviews"):
+                raise GitHubError(500, "boom")
+            return real(method, path, body, idempotent)
+
+        gh.request = refuse
+        with redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(decline(gh), 0)
+        self.assertIn("::warning::too-large notice not posted", out.getvalue())
+        self.assertEqual(minimized(gh), [])
+
+    def test_a_marked_notice_gets_its_body_back_instead_of_a_repost(self):
+        """On the diff-size path `announce` marks the notice before `review`
+        finds the PR too large again: no new notice, no defused command."""
+        gh = FakeGitHub(reviews=[old_review(5, body=NOTICE)])
+        post_review.mark_pending(gh, 1, SHA, AUTHOR, "77", "no automated review")
+        self.assertEqual(post_review.pending_run(gh.reviews[0]["body"]), "77")
+        decline(gh)
+        self.assertEqual(gh.posted(), [])
+        self.assertEqual(gh.reviews[0]["body"], NOTICE)
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(gh.reviews[0]["body"], NOTICE)
+
+    def test_a_marked_verdict_is_replaced_not_overwritten(self):
+        gh = FakeGitHub(reviews=[old_review(5)])
+        post_review.mark_pending(gh, 1, SHA, AUTHOR, "77", "no automated review")
+        decline(gh)
+        self.assertEqual([p["body"] for p in gh.posted()], [NOTICE])
+        self.assertEqual(minimized(gh), ["N5"])
+        writes = len(gh.writes())
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(len(gh.writes()), writes)
+
+    def test_a_notice_that_cannot_be_put_back_is_replaced(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=NOTICE)])
+        post_review.mark_pending(gh, 1, SHA, AUTHOR, "77", "no automated review")
+        real, refused = gh.request, []
+
+        def refuse_once(method, path, body=None, idempotent=None):
+            if method == "PUT" and path.endswith("/reviews/5") and not refused:
+                refused.append(path)
+                raise GitHubError(500, "boom")
+            return real(method, path, body, idempotent)
+
+        gh.request = refuse_once
+        with redirect_stdout(io.StringIO()):
+            decline(gh)
+        self.assertEqual([p["body"] for p in gh.posted()], [NOTICE])
+        writes = len(gh.writes())
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertEqual(len(gh.writes()), writes)
+
+    def test_a_notice_put_back_defused_is_replaced(self):
+        """A smaller commit's failed review puts the notice back defused; once
+        the PR is too large again, a working notice replaces it."""
+        gh = FakeGitHub(reviews=[old_review(5, body=NOTICE)])
+        post_review.mark_pending(gh, 1, SHA, AUTHOR, "77", "no automated review")
+        post_review.restore_pending(gh, 1, AUTHOR, "77")
+        self.assertIn("@ pytorchbot", gh.reviews[0]["body"])
+        decline(gh)
+        self.assertEqual([p["body"] for p in gh.posted()], [NOTICE])
+        self.assertEqual(minimized(gh), ["N5"])
+
+
 class TestContained(unittest.TestCase):
     def test_every_fence_run_is_escaped_in_any_container(self):
         for text in (
@@ -741,6 +867,77 @@ class TestAnUnfinishedRunLeavesTheLastVerdict(unittest.TestCase):
         )
         go(gh)
         self.assertEqual(gh.writes(), [])
+
+
+class TestAddingTheOptOutLabelWithdrawsChangeRequests(unittest.TestCase):
+    def withdraw(self, gh):
+        with redirect_stdout(io.StringIO()):
+            post_review.withdraw_opted_out(gh, 1, AUTHOR, "no automated review")
+
+    def test_every_standing_request_of_ours_is_dismissed(self):
+        gh = FakeGitHub(
+            labels=("No Automated Review",),
+            reviews=[
+                old_review(5, state="CHANGES_REQUESTED"),
+                old_review(6, state="CHANGES_REQUESTED", commit=SHA),
+                old_review(7, state="CHANGES_REQUESTED", author="someone"),
+                old_review(8, state="CHANGES_REQUESTED", body="no marker"),
+                old_review(9),
+            ],
+        )
+        self.withdraw(gh)
+        self.assertEqual(dismissed(gh), ["5", "6"])
+        for w in gh.writes("PUT"):
+            self.assertEqual(w[2]["message"], post_review.OPTED_OUT)
+
+    def test_nothing_is_dismissed_once_the_label_is_gone(self):
+        gh = FakeGitHub(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        self.withdraw(gh)
+        self.assertEqual(gh.writes(), [])
+
+    def test_a_refused_dismissal_does_not_stop_the_others(self):
+        class RefuseFive(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if path.endswith("/reviews/5/dismissals"):
+                    raise GitHubError(403, "forbidden")
+                return super().request(method, path, body)
+
+        gh = RefuseFive(
+            labels=("no automated review",),
+            reviews=[
+                old_review(5, state="CHANGES_REQUESTED"),
+                old_review(6, state="CHANGES_REQUESTED"),
+            ],
+        )
+        self.withdraw(gh)
+        self.assertEqual(
+            [r["state"] for r in gh.reviews], ["CHANGES_REQUESTED", "DISMISSED"]
+        )
+
+    def test_main_reads_its_inputs_and_an_api_error_only_warns(self):
+        env = {
+            "GH_TOKEN": "t",
+            "REPO": "o/r",
+            "PR_NUMBER": "1",
+            "OPT_OUT_LABEL": "skip me",
+        }
+        with (
+            mock.patch.dict(post_review.os.environ, env, clear=True),
+            mock.patch.object(sys, "argv", ["post_review.py", "--withdraw-opted-out"]),
+            mock.patch.object(post_review, "withdraw_opted_out") as withdraw_,
+        ):
+            self.assertEqual(post_review.main(), 0)
+        self.assertEqual(withdraw_.call_args.args[1:], (1, AUTHOR, "skip me"))
+        with (
+            mock.patch.dict(post_review.os.environ, env, clear=True),
+            mock.patch.object(sys, "argv", ["post_review.py", "--withdraw-opted-out"]),
+            mock.patch.object(
+                post_review, "withdraw_opted_out", side_effect=GitHubError(500, "x")
+            ),
+            redirect_stdout(io.StringIO()) as out,
+        ):
+            self.assertEqual(post_review.main(), 0)
+        self.assertIn("::warning::automated review not withdrawn", out.getvalue())
 
 
 class TestACleanVerdictLeavesNoChangeRequest(unittest.TestCase):
@@ -1890,7 +2087,56 @@ class TestPendingModesReadTheirInputs(unittest.TestCase):
                     self.assertIn("::warning::automated review not", out)
 
 
+class TestTooLargeModeReadsItsInputs(unittest.TestCase):
+    ENV = {
+        "GH_TOKEN": "t",
+        "REPO": "o/r",
+        "PR_NUMBER": "1",
+        "REVIEWED_SHA": SHA,
+        "OPT_OUT_LABEL": "skip me",
+        "MAX_CHANGED_FILES": "100",
+        "MAX_DIFF_BYTES": "400000",
+    }
+
+    def main(self, flag, env):
+        with (
+            mock.patch.dict(post_review.os.environ, env, clear=True),
+            mock.patch.object(sys, "argv", ["post_review.py", *flag]),
+            mock.patch.object(post_review, "decline", return_value=0) as decline_,
+            redirect_stdout(io.StringIO()),
+        ):
+            rc = post_review.main()
+        return rc, decline_
+
+    def test_it_passes_the_pr_the_label_and_the_limits(self):
+        rc, decline_ = self.main(["--too-large"], self.ENV)
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            decline_.call_args.args[1:], (1, SHA, AUTHOR, "skip me", (100, 400_000))
+        )
+
+    def test_the_row_path_passes_the_limits_too(self):
+        with mock.patch.object(Path, "read_text", return_value='{"status": "x"}'):
+            with mock.patch.object(post_review, "run", return_value=0) as run_:
+                self.main(["--row-file", "terminal.json"], self.ENV)
+        self.assertEqual(run_.call_args.args[-1], (100, 400_000))
+
+    def test_a_bad_limit_drops_the_numbers_not_the_notice(self):
+        _, decline_ = self.main(["--too-large"], {**self.ENV, "MAX_DIFF_BYTES": "4e5"})
+        self.assertIsNone(decline_.call_args.args[-1])
+
+
 class TestWorkflowWiring(unittest.TestCase):
+    def test_announce_runs_the_too_large_mode_with_a_write_token(self):
+        text = WORKFLOW.read_text()
+        announce = text.split("\n  announce:\n", 1)[1].split("\n  review:\n", 1)[0]
+        step = announce.split("- name: Say the PR is too large to review", 1)[1]
+        self.assertIn("python3 scripts/pr_review/post_review.py --too-large", step)
+        self.assertIn("pull-requests: write", announce.split("steps:", 1)[0])
+        header = text.split("\njobs:", 1)[0]
+        for var in ("MAX_CHANGED_FILES", "MAX_DIFF_BYTES"):
+            self.assertRegex(header, rf"(?m)^  {var}: \d+$")
+
     def test_publish_job_runs_the_script_on_the_row_with_a_write_token(self):
         text = WORKFLOW.read_text()
         publish = text.split("\n  publish:\n", 1)[1]
