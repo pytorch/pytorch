@@ -192,21 +192,25 @@ def select_ordered_col_config(
     default mapping and split plans decline.
 
     Entries are keyed by trait type; SM107's apply to its _SM107_DTYPES views only.
-    Split plans (partials > 1) without an entry take a fallback on _ORDERED_COL_CCS that
-    applies to any outputs, with full_tiles as its tile mode; looped plans take their
-    entry's own full_tiles unless an SM107 rule below applies, and ragged splits are
-    clamped regardless. Mappings apply to unbatched _ORDERED_COL_DTYPES views with
-    32-bit accumulators and, if the mapping has out_dtypes, only to those outputs;
-    SM107 mappings have _sm107_outputs. With rows, B200 single-field views whose mapping
-    has full tiles (cfg.full_tiles) take 16-column tiles at measured shapes and over a
-    band, R 32768-65536 at C 128-257. On SM107, with full_tiles, bf16 one-output Welford
-    views of 8192 rows and 1024 or 4096 columns take a fixed full-tile mapping. A column
-    anchor is a 1024- or 4096-column view of 256 MiB or 2 GiB. MeanOps and AMaxOps views
-    without an entry take OrderedColConfig(32) at 1024-column column anchors and, with
-    full_tiles, at mean anchors (_sm107_mean_columns), which get full tiles 16 columns
-    wide at 256 MiB and 32 otherwise. Other mapped views with full_tiles get 16-column
-    full tiles at 65536 x 1024 unless nfields == 2, full tiles at column anchors, and,
-    replacing the mapping, 16-column full tiles at 256 columns and 32768-131072 rows.
+    WelfordOps entries apply only to welford_outs == 1 traits (var and std), on every
+    cc. reduce_ordered_col passes full_tiles for split plans and for looped plans whose
+    tiles are exact, so for looped plans the rules below "with full_tiles" mean exact
+    tiles. Split plans (partials > 1) without an entry take a fallback on
+    _ORDERED_COL_CCS that applies to any outputs, with full_tiles as its tile mode;
+    looped plans take their entry's own full_tiles unless an SM107 rule below applies,
+    and ragged splits are clamped regardless. Mappings apply to unbatched
+    _ORDERED_COL_DTYPES views with 32-bit accumulators and, if the mapping has
+    out_dtypes, only to those outputs; SM107 mappings have _sm107_outputs. With rows,
+    B200 single-field views whose mapping has full tiles (cfg.full_tiles) take 16-column
+    tiles at measured shapes and over a band, R 32768-65536 at C 128-257. On SM107, with
+    full_tiles, bf16 one-output Welford views of 8192 rows and 1024 or 4096 columns take
+    a fixed full-tile mapping. A column anchor is a 1024- or 4096-column view of 256 MiB
+    or 2 GiB. MeanOps and AMaxOps views without an entry take OrderedColConfig(32) at
+    1024-column column anchors and, with full_tiles, at mean anchors
+    (_sm107_mean_columns), which get full tiles 16 columns wide at 256 MiB and 32
+    otherwise. Other mapped views with full_tiles get 16-column full tiles at
+    65536 x 1024 unless nfields == 2, full tiles at column anchors, and, replacing the
+    mapping, 16-column full tiles at 256 columns and 32768-131072 rows.
     Views filling fewer than the mapping's min_blocks useful 32-column blocks get None.
     """
     # In-tree routing reaches SM107 entries only through select_col_config's hand-offs.
