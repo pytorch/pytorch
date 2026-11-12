@@ -63,7 +63,7 @@ class UniqueVoidPtr {
 
   [[nodiscard]] bool /* success */ unsafe_reset_data_and_ctx(
       void* new_data_and_ctx) {
-    if (C10_UNLIKELY(ctx_.get_deleter() != &deleteNothing)) {
+    if (ctx_.get_deleter() != &deleteNothing) [[unlikely]] {
       return false;
     }
     // seems quicker than calling the no-op deleter when we reset

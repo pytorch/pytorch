@@ -3942,6 +3942,8 @@ make_fallback(aten.adaptive_max_pool3d, override_decomp=True)
 make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
 make_fallback(aten._scaled_addmm.default, warn=False)
 make_fallback(aten._scaled_addmm_.default, warn=False)
+make_fallback(aten._quantize_tensor.default, warn=False)
+make_fallback(aten._quantize_tensor_dual.default, warn=False)
 make_fallback(aten._to_dtype_rounded.default, warn=False)
 
 
@@ -7822,8 +7824,10 @@ def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
     return output[0] if not return_mean else output
 
 
+# prims.var's schema takes correction as a positional-or-keyword argument, so a
+# traced node may pass it positionally; keep it out of the keyword-only section.
 @register_lowering([aten.var, prims.var])
-def var_(x, axis=None, *, correction=None, keepdim=False):
+def var_(x, axis=None, correction=None, *, keepdim=False):
     return var_mean_helper_(
         x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
     )

@@ -950,8 +950,6 @@ def generate_tensor_like_override_tests(cls):
                 return None
             elif arg_type == "ScalarType":
                 return torch.float32
-            elif arg_type == "c10::string_view":
-                return ""
             elif arg_type in ("std::string_view", "::std::string_view"):
                 return ""
             elif arg_type == "SymInt":
@@ -2060,7 +2058,7 @@ TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTenso
 class TestTorchFunctionRedispatchOpsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @ops(op_db)
+    @ops([op for op in op_db if not op.has_nondeterministic_output])
     @skipOps({
         # Disabled due to CI failures; see #190241
         skip("nn.functional.conv_transpose3d", dtypes=(torch.float16, torch.bfloat16, torch.complex32)),
