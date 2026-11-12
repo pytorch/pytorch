@@ -31,6 +31,7 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyAccelerator,
     skipMPS,
+    skipXPUIf,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -1053,6 +1054,7 @@ class TestOptimRenewed(TestCase):
     @onlyAccelerator
     @skipMPS
     @largeTensorTest("72GB", "cuda")
+    @largeTensorTest("72GB", "xpu")
     @serialTest()
     @optims(
         [optim for optim in optim_db if "foreach" in optim.supported_impls],
@@ -1090,6 +1092,11 @@ class TestOptimRenewed(TestCase):
 
     @onlyAccelerator
     @skipMPS
+    @skipXPUIf(
+        True,
+        "XPU allocator granularity differs, peak memory bound off by one block; "
+        "https://github.com/intel/torch-xpu-ops/issues/5884",
+    )
     @optims(
         [optim for optim in optim_db if "foreach" in optim.supported_impls],
         dtypes=[torch.float32],
@@ -1119,10 +1126,10 @@ class TestOptimRenewed(TestCase):
                 import gc
 
                 gc.collect()
-                torch.cuda.reset_peak_memory_stats()
+                torch.accelerator.reset_peak_memory_stats()
                 optimizer.step()
                 gc.collect()
-                max_mems.append(torch.cuda.max_memory_allocated())
+                max_mems.append(torch.accelerator.max_memory_allocated())
 
             st_max_mem, mt_max_mem = max_mems
             intermediate_size = nparams * param.nelement() * param.element_size()
@@ -3081,8 +3088,10 @@ class TestOptimizerLoadStateDictContext(TestCase):
         self.assertEqual(asyncio.run(load_states()), [torch.float32, torch.bfloat16])
 
 
-instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
-instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
+instantiate_device_type_tests(
+    TestOptimRenewed, globals(), allow_mps=True, allow_xpu=True
+)
+instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True, allow_xpu=True)
 
 
 if __name__ == "__main__":
