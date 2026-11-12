@@ -804,6 +804,63 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* args, PyObject* kw
   END_HANDLE_TH_ERRORS
 }
 
+// Return an owned copy of the logical tensor data without a NumPy dependency.
+static PyObject * THPVariable_tobytes(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "tobytes(std::string? order='C')"
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(self, args, kwargs, parsed_args);
+  if (r.has_torch_function()) {
+    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+  }
+
+  auto order = r.string(0);
+  TORCH_CHECK_VALUE(
+      order.size() == 1 &&
+          (order[0] == 'C' || order[0] == 'c' || order[0] == 'F' ||
+           order[0] == 'f' || order[0] == 'A' || order[0] == 'a' ||
+           order[0] == 'K' || order[0] == 'k'),
+      "order must be one of 'C', 'F', 'A', or 'K'");
+  const auto& self_ = THPVariable_Unpack(self);
+  TORCH_CHECK(self_.device().is_cpu(), "tobytes() is only supported for CPU tensors");
+  TORCH_CHECK(
+      self_.layout() == at::kStrided && !self_.is_nested() && !self_.is_quantized(),
+      "tobytes() requires a strided, non-quantized, non-nested tensor");
+  TORCH_CHECK_VALUE(
+      static_cast<uint64_t>(self_.numel()) <=
+          static_cast<uint64_t>(PY_SSIZE_T_MAX) / self_.element_size(),
+      "tensor is too large to convert to bytes");
+
+  jit::tracer::warn("Converting a tensor to bytes", jit::tracer::WARN_PYTHON_DATAFLOW);
+  auto tensor = self_.detach();
+  if (order[0] == 'F' || order[0] == 'f' || order[0] == 'A' || order[0] == 'a') {
+    std::vector<int64_t> reversed_dims;
+    for (int64_t dim = tensor.dim(); dim > 0; --dim) {
+      reversed_dims.push_back(dim - 1);
+    }
+    auto reversed = tensor.permute(reversed_dims);
+    // Inspect the original strides before resolving view bits, which can copy.
+    if (order[0] == 'F' || order[0] == 'f' || reversed.is_contiguous()) {
+      tensor = std::move(reversed);
+    }
+  }
+  tensor = tensor.resolve_conj().resolve_neg().contiguous();
+  if (tensor._is_zerotensor()) {
+    tensor = tensor.clone();
+  }
+  const auto* data = static_cast<const char*>(tensor.const_data_ptr());
+  TORCH_CHECK(
+      data != nullptr || tensor.numel() == 0,
+      "tobytes() requires materialized tensor data");
+  return PyBytes_FromStringAndSize(
+      data,
+      static_cast<Py_ssize_t>(tensor.nbytes()));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -1312,6 +1369,7 @@ PyMethodDef variable_methods[] = {
   {"storage_offset", THPVariable_storage_offset, METH_NOARGS, nullptr},
   {"stride", castPyCFunctionWithKeywords(THPVariable_stride), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"to", castPyCFunctionWithKeywords(THPVariable_to), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"tobytes", castPyCFunctionWithKeywords(THPVariable_tobytes), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"tolist", THPVariable_tolist, METH_NOARGS, nullptr},
   {"type", castPyCFunctionWithKeywords(THPVariable_type), METH_VARARGS | METH_KEYWORDS, nullptr},
   ${py_method_defs}
