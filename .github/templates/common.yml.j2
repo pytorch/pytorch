@@ -12,6 +12,57 @@ concurrency:
   cancel-in-progress: true
 {%- endmacro -%}
 
+{#- Tail of a nightly binary workflow, mirroring the `validate` job of
+    docker-release.yml: once every wheel is uploaded, refresh the package index
+    (S3 only; no R2 secrets are passed) and validate the binaries through
+    test-infra. Runs on pushes to the nightly branch (whl/nightly, channel
+    nightly) and on RC tag pushes (whl/test, channel test), and only if no upload
+    failed. `validate_os` is the validate-binaries.yml `os` value, or "" when it
+    cannot validate this platform (s390x, windows-arm64). -#}
+{%- macro update_index_and_validate(upload_jobs, validate_os) -%}
+update-index:
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && github.repository_owner == 'pytorch' && (github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/tags/v')) }}
+    needs: [!{{ upload_jobs | join(', ') }}]
+    permissions:
+      id-token: write
+      contents: read
+    uses: pytorch/test-infra/.github/workflows/update-s3-html.yml@main
+    with:
+      prefixes: ${{ startsWith(github.ref, 'refs/tags/v') && '["whl/test"]' || '["whl/nightly"]' }}
+{%- if validate_os %}
+
+  get-validate-version:
+    if: ${{ github.repository_owner == 'pytorch' && (github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/tags/v')) }}
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Get release version from the RC tag
+        id: version
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          # v2.13.0-rc1 -> 2.13.0; nightly validates whatever is latest, so no version.
+          version=""
+          if [[ "${REF_TYPE}" == "tag" ]]; then
+            version="${REF_NAME#v}"
+            version="${version%-rc*}"
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+  validate:
+    needs: [update-index, get-validate-version]
+    if: ${{ !cancelled() && needs.update-index.result == 'success' && needs.get-validate-version.result == 'success' }}
+    uses: pytorch/test-infra/.github/workflows/validate-binaries.yml@main
+    with:
+      os: !{{ validate_os }}
+      channel: ${{ startsWith(github.ref, 'refs/tags/v') && 'test' || 'nightly' }}
+      version: ${{ needs.get-validate-version.outputs.version }}
+{%- endif %}
+{%- endmacro -%}
+
 {%- macro display_ec2_information() -%}
       - name: Display EC2 information
         shell: bash

@@ -219,3 +219,9 @@ jobs:
           path: "${{ runner.temp }}/libtorch_output/"
   !{{ upload.upload_extracted_libtorch(lt_config, use_s3=False) }}
 {%- endfor %}
+
+{#- Tail: refresh the package index and validate once every wheel is uploaded. -#}
+{%- if branches == "nightly" and build_configs and build_configs[0]['package_type'] == 'wheel' %}
+
+  !{{ common.update_index_and_validate(['wheel-test-upload'], "macos") }}
+{%- endif %}

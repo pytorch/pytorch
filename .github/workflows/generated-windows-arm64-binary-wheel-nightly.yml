@@ -329,3 +329,13 @@ jobs:
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
+
+  update-index:
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && github.repository_owner == 'pytorch' && (github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/tags/v')) }}
+    needs: [wheel-upload]
+    permissions:
+      id-token: write
+      contents: read
+    uses: pytorch/test-infra/.github/workflows/update-s3-html.yml@main
+    with:
+      prefixes: ${{ startsWith(github.ref, 'refs/tags/v') && '["whl/test"]' || '["whl/nightly"]' }}
