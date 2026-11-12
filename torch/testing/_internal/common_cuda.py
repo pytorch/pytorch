@@ -408,6 +408,21 @@ def evaluate_platform_supports_mx_gemm():
         return True
     return False
 
+def evaluate_platform_supports_mxfp8_cast():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            # TODO(future PR): add ROCm support for hardware natively supporting
+            # mxfp8 gemm. While technically the casts can be added on any
+            # hardware with emulation, we have no plans to do so.
+            return False
+        else:
+            # On NVIDIA, we have implementations for CUDA capability 10.0+
+            return SM100OrLater
+    # TODO(future PR): XPU, only on hardware which natively supports mxfp8
+    # gemm. While technically the casts can be added on any hardware
+    # with emulation, we have no plans to do so.
+    return False
+
 def evaluate_platform_supports_mxfp8_grouped_gemm():
     if torch.cuda.is_available() and not torch.version.hip:
         built_with_mslk = "USE_MSLK" in torch.__config__.show()
@@ -430,10 +445,19 @@ def evaluate_platform_supports_hipsparselt():
 def evaluate_platform_supports_cublaslt_grouped_gemm(min_cuda_version=(13, 3)):
     return (
         TEST_CUDA
+        and not TEST_WITH_ROCM
         and SM90OrLater
         and not SM120OrLater
-        and not TEST_WITH_ROCM
         and _get_torch_cuda_version() >= min_cuda_version
+    )
+
+def evaluate_platform_supports_cublaslt_mnk4():
+    return (
+        TEST_CUDA
+        and not TEST_WITH_ROCM
+        and torch.cuda.get_device_capability()[0] in (10, 11)
+        and _get_torch_cuda_version() >= (13, 4)
+        and int(dict(torch.cuda.tunable.get_validators())["CUBLASLT_VERSION"]) >= 130801
     )
 
 def evaluate_platform_supports_fp8_sparse():
@@ -449,12 +473,17 @@ def evaluate_platform_supports_fp8_sparse():
     return False
 
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
+PLATFORM_SUPPORTS_MXFP8_CAST: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_cast())
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 PLATFORM_SUPPORTS_FP8_SPARSE: bool = LazyVal(lambda: evaluate_platform_supports_fp8_sparse())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
 PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
 PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_grouped_gemm())
 PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_grouped_gemm((13, 4)))
+PLATFORM_SUPPORTS_CUBLASLT_FP32_BLOCK_GROUPED_GEMM: bool = LazyVal(
+    lambda: bool(PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM and IS_SM90)
+)
+PLATFORM_SUPPORTS_CUBLASLT_MNK4: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_mnk4())
 
 if TEST_NUMBA:
     try:
@@ -637,6 +666,7 @@ def with_tf32_off(f):
         with tf32_off():
             return f(*args, **kwargs)
 
+    wrapped._preserves_device_arguments = wrapped
     return wrapped
 
 def _get_magma_version():
