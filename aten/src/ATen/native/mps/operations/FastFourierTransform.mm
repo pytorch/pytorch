@@ -649,14 +649,16 @@ Tensor& _fft_c2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
   TORCH_CHECK(self.is_complex());
   TORCH_CHECK(out.device() == self.device(), "Expected out tensor on ", self.device(), " but got ", out.device());
   at::native::resize_output_symint(out, self.sym_sizes());
+  at::assert_no_internal_overlap(out);
   if (out.numel() == 0) {
     return out;
   }
 
+  const auto status = at::get_overlap_status(out, self);
+  const bool overlap = out.is_alias_of(self) && status != MemOverlapStatus::Full && status != MemOverlapStatus::No;
   if (dim.empty()) {
-    return out.copy_(self);
+    return out.copy_(overlap ? self.clone() : self);
   }
-  const bool overlap = at::get_overlap_status(out, self) == at::MemOverlapStatus::Partial;
   if (overlap || out.scalar_type() != self.scalar_type() || needs_fp32(self, out, dim, self.size(dim.back()))) {
     return out.copy_(_fft_c2c_mps(self.to(kComplexFloat), dim, normalization, forward));
   }
