@@ -10,9 +10,10 @@ import os
 import re
 import textwrap
 import threading
+import warnings
 import zlib
 from collections.abc import Callable
-from typing import cast, TypeVar
+from typing import Any, cast, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -41,6 +42,8 @@ def export_python(
     *,
     backend: str = "inductor",
     dynamic: bool | None = None,
+    mode: str | None = None,
+    options: dict[str, Any] | None = None,
     check: bool | None = None,
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Compile a function once into a Python file, and run that file from then on.
@@ -105,6 +108,17 @@ def export_python(
         backend: ``"inductor"`` (default) or ``"eager"``.
         dynamic: Forwarded to :class:`~torch.compiler.precompile.DynamoTracer`, as
             ``torch.compile(dynamic=)``.
+        mode: As ``torch.compile(mode=)``, for the inductor backend: the capture
+            compiles under that mode's inductor config, so ``"max-autotune"`` tunes
+            the graph's kernels, GEMM templates included, and the file holds the
+            kernels and configs it chose. A served file does not run under CUDA
+            graphs, so ``triton.cudagraphs``, which ``"max-autotune"`` turns on, is
+            left off for the capture with a warning; ``"reduce-overhead"``, which only
+            turns it on, raises.
+        options: As ``torch.compile(options=)``: inductor config for the capture,
+            with ``triton.cudagraphs`` left off as for ``mode``, and a
+            ``guard_filter_fn`` passed to the tracer, as ``torch.compile`` passes it
+            to Dynamo. Pass ``mode`` or ``options``, not both.
         check: Also run ``fn`` eagerly (a ``torch.compile``'d function it calls
             too, as during compiler-internal tracing) on every served call, on copies
             of the tensor arguments, and raise
@@ -132,7 +146,13 @@ def export_python(
     def decorator(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         enabled = os.environ.get("TORCH_EXPORT_PYTHON_CHECK") == "1"
         exported = _ExportedPython(
-            fn, path, backend, dynamic, enabled if check is None else check
+            fn,
+            path,
+            backend,
+            dynamic,
+            mode,
+            options,
+            enabled if check is None else check,
         )
 
         @functools.wraps(fn)
@@ -287,6 +307,8 @@ class _ExportedPython:
         path: str | os.PathLike[str],
         backend: str,
         dynamic: bool | None,
+        mode: str | None,
+        options: dict[str, Any] | None,
         check: bool,
     ) -> None:
         if getattr(fn, "__module__", None) == "__main__":
@@ -300,7 +322,52 @@ class _ExportedPython:
         self._path = os.fspath(path)
         self._cache_path = self._path + ".cache"
         self._backend = backend
-        self._tracer = DynamoTracer(dynamic=dynamic, fullgraph=True)
+        if mode is not None and options is not None:
+            raise RuntimeError(
+                "Either mode or options can be specified, but both can't be specified "
+                "at the same time."
+            )
+        options = dict(options or {})
+        # As torch.compile does, a guard filter goes to Dynamo rather than inductor.
+        guard_filter_fn = options.pop("guard_filter_fn", None)
+        if options.pop("use_aoti", False):
+            raise ValueError(
+                "export_python: use_aoti does not apply, since export_python writes the "
+                "graph's Python code rather than an AOTInductor package."
+            )
+        if backend != "inductor" and (mode is not None or options):
+            raise ValueError(
+                f"export_python: mode and options configure the inductor backend, "
+                f"not {backend!r}."
+            )
+        config: dict[str, object] = {}
+        if mode not in (None, "default"):
+            from torch._inductor import list_mode_options
+
+            config.update(list_mode_options(mode, dynamic))
+        config.update(options)
+        if config.pop("triton.cudagraphs", False):
+            if not config:
+                raise ValueError(
+                    f"export_python: {f'mode={mode!r}' if mode else 'options'} only "
+                    "turns on CUDA graphs (triton.cudagraphs), and a served file does "
+                    "not run under them."
+                )
+            if not os.path.exists(self._path):
+                warnings.warn(
+                    "export_python: a served file does not run under CUDA graphs, so "
+                    "the capture leaves off the triton.cudagraphs that mode or options "
+                    "set.",
+                    stacklevel=3,
+                )
+        # torch.compile's own validation of option names and types; triton.cudagraphs
+        # is already out, so none of its CUDA graph setup runs.
+        self._inductor_config = torch._TorchCompileInductorWrapper(
+            None, config, dynamic
+        ).config
+        self._tracer = DynamoTracer(
+            dynamic=dynamic, fullgraph=True, guard_filter_fn=guard_filter_fn
+        )
         self._check = check
         self._runnable: PrecompiledRunnable | None = None
         self._lock = threading.Lock()
@@ -383,10 +450,15 @@ class _ExportedPython:
             # An edit (or a missing cache) leaves nothing to accelerate: the edited
             # graph compiles the kernels its code defines.
             log.info("export_python: %s; serving it without the cache", stale)
-        return _runnable_from_pair(python_code, cache, _trusted=trusted)
+        from torch._inductor import config as inductor_config
+
+        # A served file never runs under CUDA graphs, whatever the process sets.
+        with inductor_config.patch({"triton.cudagraphs": False}):
+            return _runnable_from_pair(python_code, cache, _trusted=trusted)
 
     def _capture(self, *args: object, **kwargs: object) -> object:
         from torch._dynamo.exc import Unsupported
+        from torch._inductor import config as inductor_config
 
         os.makedirs(os.path.dirname(os.path.abspath(self._path)), exist_ok=True)
         # The precompile artifact the file is made from; its cache is the file's.
@@ -399,8 +471,11 @@ class _ExportedPython:
             tracer=self._tracer,
             backend=self._backend,
         )
+        # The mode's or options' inductor config, with CUDA graphs off whatever the
+        # process sets: no file runs under them.
+        config = {**self._inductor_config, "triton.cudagraphs": False}
         try:
-            with cap:
+            with inductor_config.patch(config), cap:
                 try:
                     result = cap(*args, **kwargs)
                 except Unsupported as e:

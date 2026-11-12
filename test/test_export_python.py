@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 import ast
+import functools
 import importlib
 import os
 import re
@@ -9,6 +10,7 @@ import tempfile
 import textwrap
 import unittest
 import uuid
+import warnings
 
 import torch
 from torch._precompile import _runnable_from_pair
@@ -83,6 +85,9 @@ def shifted(x):
 
 def reduce(x):
     return (x.sin() * 2).sum(dim=-1)
+
+def linear_relu(x, w):
+    return (x @ w).relu()
 
 from torch.nn.attention.flex_attention import flex_attention
 
@@ -532,6 +537,45 @@ class TestExportPython(_ExportPythonTestCase):
             """,
         )
 
+    def test_mode_and_options_are_checked_as_torch_compile_checks_them(self):
+        export = functools.partial(
+            torch.compiler.export_python, os.path.join(self.dir, "f.py")
+        )
+        scaled = self.module.scaled
+        with self.assertRaisesRegex(RuntimeError, "both can't be specified"):
+            export(mode="max-autotune", options={"max_autotune": True})(scaled)
+        with self.assertRaisesRegex(ValueError, "configure the inductor backend"):
+            export(backend="eager", mode="max-autotune")(scaled)
+        with self.assertRaisesRegex(RuntimeError, "Unexpected optimization option"):
+            export(options={"not_an_option": True})(scaled)
+        with self.assertRaisesRegex(ValueError, "only turns on CUDA graphs"):
+            export(mode="reduce-overhead")(scaled)
+        with self.assertRaisesRegex(ValueError, "use_aoti does not apply"):
+            export(options={"use_aoti": True})(scaled)
+
+    def test_options_reach_the_capture(self):
+        x = torch.randn(1024)
+        vectorized = "at::vec::Vectorized"
+        default, scalar = (os.path.join(self.dir, f"{n}.py") for n in ("v", "s"))
+        self._export("scaled", default)(x)
+        self.assertIn(vectorized, _graph_code(default))
+        self._export("scaled", scalar, options={"cpp.simdlen": 1})(x)
+        self.assertNotIn(vectorized, _graph_code(scalar))
+        with no_compilation():
+            self.assertEqual(self._export("scaled", scalar)(x), (x * 2.0).relu())
+        # A guard filter goes to the tracer, as torch.compile hands it to Dynamo.
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+
+        seen = []
+
+        def recording(entries):
+            seen.append(len(entries))
+            return default_guard_filter_fn(entries)
+
+        filtered = os.path.join(self.dir, "f.py")
+        self._export("scaled", filtered, options={"guard_filter_fn": recording})(x)
+        self.assertTrue(seen)
+
     def test_a_main_module_function_is_refused(self):
         def fn(x):
             return x + 1
@@ -574,6 +618,41 @@ class TestExportPythonCUDA(_ExportPythonTestCase):
             (launcher,) = getattr(module, {name!r}).launchers
             if launcher.config.num_warps != {warps}:
                 raise AssertionError(launcher.config)
+            """,
+        )
+
+    def test_max_autotune_composes(self):
+        # mode= is torch.compile's: the capture tunes under max-autotune and the file
+        # holds what it chose, served without compiling and without CUDA graphs.
+        path = os.path.join(self.dir, "linear_relu.py")
+        x, w = (torch.randn(256, 256, device="cuda") for _ in range(2))
+        # CUDA graphs stay off even where the process turns them on globally.
+        with (
+            torch._inductor.config.patch({"triton.cudagraphs": True}),
+            self.assertWarnsRegex(UserWarning, "CUDA graphs"),
+        ):
+            out = self._export("linear_relu", path, mode="max-autotune")(x, w)
+        self.assertEqual(out, (x @ w).relu(), atol=1e-3, rtol=1e-3)
+        code = _graph_code(path)
+        self.assertIn("'max_autotune': True", code)
+        # Serving the file it wrote is not a capture, so it does not warn.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            self._export("linear_relu", path, mode="max-autotune")
+        # No CUDA graph partitions for the served file to call.
+        self.assertIn("Runner(partitions=[])", code)
+        torch.save((x, w, out), os.path.join(self.dir, "io.pt"))
+        _in_a_fresh_process(
+            self,
+            f"""
+            from torch.compiler.precompile import no_compilation
+            x, w, out = torch.load({os.path.join(self.dir, "io.pt")!r})
+            run = torch.compiler.export_python(path={path!r})(m.linear_relu)
+            with no_compilation():
+                torch.testing.assert_close(run(x, w), out)
+            # A tuned GEMM sums in another order than cuBLAS; the check allows that.
+            checked = torch.compiler.export_python(path={path!r}, check=True)
+            torch.testing.assert_close(checked(m.linear_relu)(x, w), out)
             """,
         )
 
