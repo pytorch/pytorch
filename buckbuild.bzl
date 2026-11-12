@@ -44,7 +44,6 @@ load(
     "get_metal_source_dict",
     "get_template_registration_file_rules",
     "get_template_registration_files_outs",
-    "get_template_source_dict",
 )
 load(
     ":ufunc_defs.bzl",
@@ -550,26 +549,6 @@ def copy_template_registration_files(name, apple_sdks = None):
     cmd = []
     cmd_exe = []
 
-    template_source_dict = get_template_source_dict()
-
-    # Ideally, we would run one copy command for a single source directory along
-    # with all its child directories, but it's somewhat hard to know if a directory
-    # is a child of another just by looking at the metadata (directory relative
-    # path) that we currently have since 1 directory could look like a parent of
-    # another and yet come from a different filegroup() rule.
-    #
-    for (path_prefix, file_paths) in template_source_dict.items():
-        cmd.append("mkdir -p $OUT/{}".format(path_prefix))
-        cmd_exe.append("if not exist $OUT\\{0} md $OUT\\{0}".format(path_prefix.replace("/", "\\")))
-
-        # Adding *.cpp is a workaround to prevent cp from thrown an error when it
-        # encounters a directory (since -r was not specified). If files with an
-        # extension other than .cpp need to be copied, then the command below
-        # will not work and will need to be updated.
-        #
-        cmd.append("cp -f $(location {0}:templated_selective_build_srcs)/{1}/*.cpp $OUT/{1}/".format(ROOT, path_prefix))
-        cmd_exe.append("robocopy /E $(location {0}:templated_selective_build_srcs)/{1} $OUT\\{2}".format(ROOT, path_prefix, path_prefix.replace("/", "\\")))
-
     if NOT_OSS:
         for file_path in TEMPLATE_MASKRCNN_SOURCE_LIST:
             maskrcnn_file = "$(location //xplat/caffe2/fb/custom_ops/maskrcnn:templated_selective_build_srcs)/" + file_path
@@ -692,7 +671,7 @@ def pt_operator_query_codegen(
     srcs = get_aten_selective_cpp_rules(
         aten_genrule,
         static_dispatch_backend if static_dispatch_backend else USED_PT_BACKENDS,
-    ) + get_template_registration_file_rules(template_registration_genrule, IS_OSS) + ([
+    ) + [ROOT + ":" + src for src in TEMPLATE_SOURCE_LIST] + get_template_registration_file_rules(template_registration_genrule, IS_OSS) + ([
         ":{}[autograd/generated/VariableType_0.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/VariableType_1.cpp]".format(unboxing_and_autograd_genrule),
         ":{}[autograd/generated/VariableType_2.cpp]".format(unboxing_and_autograd_genrule),
@@ -927,15 +906,15 @@ def define_buck_targets(
         ],
     )
 
-    # @lint-ignore BUCKLINT
-    fb_native.filegroup(
-        name = "templated_selective_build_srcs",
-        # NB: no glob here, there are generated targets in this list!
-        srcs = glob(TEMPLATE_SOURCE_LIST) + aten_ufunc_generated_all_cpu_sources(":gen_aten[{}]"),
-        visibility = [
-            "PUBLIC",
-        ],
-    )
+    # Each app's selective build compiles these in place, so __FILE__ names the
+    # checked-in source.
+    for src in TEMPLATE_SOURCE_LIST:
+        fb_native.export_file(
+            name = src,
+            src = source_file(src),
+            mode = "reference",
+            visibility = ["PUBLIC"],
+        )
 
     fb_xplat_cxx_library(
         name = "aten_header",

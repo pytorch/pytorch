@@ -15,8 +15,12 @@ def _read_config(**kwargs):
 def _filegroup(**kwargs):
     filegroup(**kwargs)
 
+def _export_file(**kwargs):
+    export_file(**kwargs)
+
 fb_native = struct(
     genrule = _genrule,
     read_config = _read_config,
     filegroup = _filegroup,
+    export_file = _export_file,
 )
