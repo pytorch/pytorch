@@ -634,7 +634,6 @@ ownership:
     owners: []
     section: third_party_backend_deps
     paths:
-      - /third_party/NNPACK
       - /third_party/VulkanMemoryAllocator
       - /third_party/XNNPACK
       - /third_party/aiter
@@ -1560,6 +1559,7 @@ ownership:
       - /test/benchmark_utils/
       - /test/hw_classification_testdata/
       - /test/junit_xml_testdata/
+      - /test/prune_skips_testdata/
       - /test/scripts/
       - /test/spincli/
       - /test/strobelight/
