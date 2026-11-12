@@ -2766,6 +2766,7 @@ class TestSparseCSRDevice(TestCase):
 
     @skipMeta
     @skipCPUIfNoMklSparse
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6173")
     @dtypes(torch.float64)
     def test_mm_addmm_out_noncontiguous_values(self, device, dtype):
         # https://github.com/pytorch/pytorch/issues/201268
