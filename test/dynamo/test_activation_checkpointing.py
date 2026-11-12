@@ -3132,34 +3132,6 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
 
     @torch._functorch.config.patch(deterministic_recompute=True)
-    def test_deterministic_recompute_not_yet_shared(self, device):
-        # A graph writing in place is left as partitioned until a later commit
-        # shares it, and the log says why.
-        from torch._functorch._aot_autograd import deterministic_recompute
-
-        def fn(x, w, buf):
-            # (buf is read from the closure: eager checkpoint would refuse to
-            # recompute from a mutated input.)
-            gn = functools.partial(lambda x, w, buf: (x + buf).relu(), buf=buf)
-            y = torch.utils.checkpoint.checkpoint(gn, x, w, use_reentrant=False)
-            buf.add_(1)
-            return y
-
-        check = functools.partial(count_shared_recompute_calls, expected=0)
-        backend = aot_autograd(
-            fw_compiler=check,
-            bw_compiler=check,
-            partition_fn=min_cut_rematerialization_partition,
-            keep_inference_input_mutations=True,
-        )
-        x = torch.randn(4, 4, device=device, requires_grad=True)
-        w = torch.randn(4, 4, device=device, requires_grad=True)
-        buf = torch.randn(4, 4, device=device)
-        with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
-            self._validate(fn, backend, x, w, buf)
-        self.assertIn("writes in place", logs.output[0])
-
-    @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_nested(self, device):
         # A region nested in another is recomputed as part of the outer one.
         def inner(x, y):
@@ -3289,6 +3261,139 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
             self._validate(fn, backend, x, w)
         self.assertIn("is in a memory pool", logs.output[0])
+
+    @parametrize("view", [False, True])
+    @parametrize("backend", ["aot", "inductor"])
+    @requires_gpu_and_triton
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_input_mutation(self, device, view, backend):
+        # buf is mutated after the region by a copy_ that the graph keeps at its
+        # end. Nothing orders the shared call against it, so the call must not
+        # move past it, or the forward would read the mutated buf; also when the
+        # region reads a view of buf, whose base the copy_ writes.
+        from torch._higher_order_ops import invoke_subgraph
+
+        def fn(x, buf):
+            b = buf.t() if view else buf
+            y = torch.utils.checkpoint.checkpoint(
+                lambda x: (x + b).relu(), x, use_reentrant=False
+            )
+            buf.add_(1)
+            return y
+
+        def call_before_copy(gm, args):
+            # The call goes right before the copy_ (its outputs then follow it).
+            count_shared_recompute_calls(gm, args, 1)
+            nodes = [n for n in gm.graph.nodes if n.target is not operator.getitem]
+            copy = gm.graph.find_nodes(
+                op="call_function", target=torch.ops.aten.copy_.default
+            )[0]
+            if nodes[nodes.index(copy) - 1].target is not invoke_subgraph:
+                raise AssertionError(f"the call isn't right before the copy_ in {gm}")
+            return gm
+
+        if backend == "aot":
+            backend = aot_autograd(
+                fw_compiler=call_before_copy,
+                bw_compiler=functools.partial(count_shared_recompute_calls, expected=1),
+                partition_fn=min_cut_rematerialization_partition,
+                keep_inference_input_mutations=True,
+            )
+        x = torch.randn(8, 8, device=device, requires_grad=True)
+        buf = torch.randn(8, 8, device=device)
+        _, code = run_and_get_code(self._validate, fn, backend, x, buf)
+        if backend == "inductor":
+            fw_code, bw_code = code
+            self.assertEqual(len(shared_recompute_code(fw_code, "fw")), 1)
+            self.assertEqual(len(shared_recompute_code(bw_code, "bw")), 1)
+
+    @requires_distributed()
+    @parametrize(
+        "case",
+        [
+            "reads_after_write",
+            "read_before_and_after",
+            "write_between_reads",
+            "reads_around_write",
+        ],
+    )
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_inplace_write(self, device, case):
+        # fsdp.copy_ (an in-place write the graph keeps where it is) writes buf,
+        # so only buf's storage orders it against the region's reads of buf. A
+        # piece reading buf after the write goes after it, also when a saved mm
+        # reads the piece before the write (the mm moves below the call). With
+        # a policy saving the mm, a piece whose call has to wait for the mm
+        # would move the write, which reads the piece's sin, past the read of
+        # buf in between: that region is left as partitioned, and so is one
+        # whose piece reads buf on both sides of the write.
+        import torch.distributed.fsdp
+        from torch._functorch._aot_autograd import deterministic_recompute
+
+        def reads_after_write(x, w, buf):
+            y = (x @ w).sin()
+            torch.ops.fsdp.copy_(buf, x.detach() * 2)
+            return (y * buf).cos()
+
+        def read_before_and_after(x, w, buf):
+            a = x.sin()
+            b = a @ w
+            torch.ops.fsdp.copy_(buf, x.detach() * 2)
+            return (a * buf).cos() + b
+
+        def write_between_reads(x, w, buf):
+            s = x.sin()
+            torch.ops.fsdp.copy_(buf, s.detach())
+            t = buf * 3
+            return (s * (x @ w)).cos() + t
+
+        def reads_around_write(x, w, buf):
+            a = (x @ w) + buf
+            torch.ops.fsdp.copy_(buf, x.detach() * 2)
+            return (a * buf).sin()
+
+        gn, kwargs, shared = {
+            "reads_after_write": (reads_after_write, {}, 1),
+            "read_before_and_after": (
+                read_before_and_after,
+                {"context_fn": save_mm_context_fn},
+                1,
+            ),
+            "write_between_reads": (
+                write_between_reads,
+                {"context_fn": save_mm_context_fn},
+                0,
+            ),
+            "reads_around_write": (reads_around_write, {}, 0),
+        }[case]
+
+        def fn(x, w, buf):
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, w, buf, use_reentrant=False, **kwargs
+            )
+
+        x = torch.randn(8, 8, device=device, requires_grad=True)
+        w = torch.randn(8, 8, device=device, requires_grad=True)
+        buf = torch.zeros(8, 8, device=device)
+        xe, we = (t.detach().clone().requires_grad_() for t in (x, w))
+        # (Eager checkpoint would write buf again in its recompute.)
+        expected = gn(xe, we, buf.clone())
+        expected.sum().backward()
+        compiled = torch.compile(
+            fn, backend=self._shared_recompute_backend(shared), fullgraph=True
+        )
+        logs = self.assertNoLogs if shared else self.assertLogs
+        with logs(deterministic_recompute.log, level="INFO") as cm:
+            out = compiled(x, w, buf.clone())
+            out.sum().backward()
+        self.assertEqual(out, expected)
+        # (In reads_around_write the partitioner recomputes a from the written
+        # buf, flag or not, so its gradients are wrong either way.)
+        if case != "reads_around_write":
+            self.assertEqual(x.grad, xe.grad)
+            self.assertEqual(w.grad, we.grad)
+        if not shared:
+            self.assertIn("would reorder", cm.output[0])
 
     @parametrize("flag", ["enable_complex_wrapper", "compiled_autograd"])
     @torch._functorch.config.patch(deterministic_recompute=True)
@@ -3428,6 +3533,38 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
                     compiled(x, w).sum().backward()
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_resized_storage(self, device):
+        # resize_ frees buf's storage after the region reads it (as FSDP2 does
+        # after an unshard), which its schema doesn't show as a write: the call
+        # has to stay before it, also in a graph with another in-place write
+        # (the counter's).
+        def fn(x, buf, counter):
+            y = torch.utils.checkpoint.checkpoint(
+                lambda x: (x @ buf).sin(), x, use_reentrant=False
+            )
+            buf.untyped_storage().resize_(0)
+            counter.add_(1)
+            return y.cos()
+
+        x = torch.randn(8, 8, device=device, requires_grad=True)
+        buf0 = torch.randn(8, 8, device=device)
+        xe = x.detach().clone().requires_grad_()
+        expected = (xe @ buf0).sin().cos()
+        expected.sum().backward()
+        buf = buf0.clone()
+        nbytes = buf.untyped_storage().nbytes()
+        backend = self._shared_recompute_backend(1)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        out = compiled(x, buf, torch.zeros(1, device=device))
+        # Like FSDP2 before the backward, bring buf back.
+        buf.untyped_storage().resize_(nbytes)
+        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(buf):
+            buf.copy_(buf0)
+        out.sum().backward()
+        self.assertEqual(out, expected)
+        self.assertEqual(x.grad, xe.grad)
 
     @requires_gpu_and_triton
     @torch._inductor.config.patch(force_disable_caches=True)
@@ -5558,7 +5695,7 @@ class DeterministicRecomputeHelperTests(torch._dynamo.test_case.TestCase):
         inputs = list(dict.fromkeys(inputs))
         outputs = [n for n in nodes if any(u not in nodes for u in n.users)]
         last_input = max(inputs, key=index.__getitem__)
-        point, moved, reason = _place(set(nodes), inputs, last_input, index)
+        point, moved, reason = _place(nodes, set(nodes), inputs, last_input, index)
         if reason is not None:
             return reason
         _splice_slice_call(
@@ -5648,7 +5785,7 @@ class DeterministicRecomputeHelperTests(torch._dynamo.test_case.TestCase):
         inputs = [n["x_1"], n["mm"]]
         index = {node: i for i, node in enumerate(gm.graph.nodes)}
         replaced = {n["sin"], n["add"], n["mul"]}
-        point, moved, reason = _place(replaced, inputs, n["mm"], index)
+        point, moved, reason = _place(nodes, replaced, inputs, n["mm"], index)
         self.assertEqual((point, moved, reason), (n["mm"], [n["t"]], None))
         _splice_slice_call(
             gm,
