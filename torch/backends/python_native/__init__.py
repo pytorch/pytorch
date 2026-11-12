@@ -18,8 +18,8 @@ Example usage::
     pn.cutedsl.enabled = True  # Enable all cutedsl ops
 
     # Individual operation control
-    pn.disable_operations("scaled_mm")  # Disable specific op across all DSLs
-    pn.enable_operations("scaled_mm")  # Re-enable specific op
+    pn.disable_operations("sum.dim_IntList")  # Disable specific op across all DSLs
+    pn.enable_operations("sum.dim_IntList")  # Re-enable specific op
 
     # Context manager support
     with pn.triton.disabled():
@@ -27,7 +27,7 @@ Example usage::
 
     # Query capabilities
     print(pn.available_dsls)  # ['triton', 'cutedsl']
-    print(pn.get_dsl_operations("triton"))  # Operations for triton
+    print(pn.get_dsl_operations("cutedsl"))  # Operations for cutedsl
 """
 
 import functools
@@ -178,10 +178,9 @@ class DSLController:
     def disabled(self):
         """Context manager to temporarily disable DSL.
 
-        Also masks the native-AOT kernel stubs (kernels AOT-compiled
-        from this DSL and embedded in the aten kernels themselves) so
-        code inside the block sees stock aten behavior, e.g. for
-        reference computations in tests.
+        Also masks the native-AOT kernel stubs of every DSL (AOT-compiled kernels
+        embedded in the aten kernels themselves), process-wide, so code inside the
+        block sees stock aten behavior, e.g. for reference computations in tests.
 
         Two things stay active by design, because for them the override IS
         the implementation and masking would change results rather than
@@ -244,8 +243,8 @@ class PythonNativeModule(PropModule):
 
         Example::
 
-            ops = torch.backends.python_native.get_dsl_operations("triton")
-            print(ops)  # ['triton_to_mxfp8_dim0', ...]
+            ops = torch.backends.python_native.get_dsl_operations("cutedsl")
+            print(ops)  # [..., 'sum.dim_IntList', ...]
         """
         from torch._native.registry import get_dsl_operations
 
@@ -254,18 +253,21 @@ class PythonNativeModule(PropModule):
     def disable_operations(self, *op_symbols: str):
         """Disable specific operations across all DSLs.
 
+        Names match registered op symbols exactly: non-default overloads need their
+        suffix (``"sum.dim_IntList"``, not ``"sum"``), and default overloads use the
+        plain name (``"amax"``, not ``"amax.default"``). ``get_dsl_operations`` lists
+        the exact names a DSL registered, e.g. ``get_dsl_operations("cutedsl")``.
+
         Args:
             *op_symbols (str): Names of operations to disable.
 
         Example::
 
-            # Disable scaled matrix multiply across all DSLs
-            torch.backends.python_native.disable_operations("scaled_mm")
+            # Disable sum.dim_IntList overrides across all DSLs
+            torch.backends.python_native.disable_operations("sum.dim_IntList")
 
             # Disable multiple operations
-            torch.backends.python_native.disable_operations(
-                "scaled_mm", "flash_attention"
-            )
+            torch.backends.python_native.disable_operations("sum.dim_IntList", "amax")
         """
         deregister_op_overrides = _get_registry_functions()[0]
         deregister_op_overrides(disable_op_symbols=list(op_symbols))
@@ -279,9 +281,7 @@ class PythonNativeModule(PropModule):
         Example::
 
             # Re-enable previously disabled operations
-            torch.backends.python_native.enable_operations(
-                "scaled_mm", "flash_attention"
-            )
+            torch.backends.python_native.enable_operations("sum.dim_IntList", "amax")
         """
         reenable_op_overrides = _get_registry_functions()[1]
         reenable_op_overrides(enable_op_symbols=list(op_symbols))
@@ -323,10 +323,10 @@ class PythonNativeModule(PropModule):
 
         Example::
 
-            with torch.backends.python_native.operations_disabled("scaled_mm"):
-                # scaled_mm is disabled across all DSLs
+            with torch.backends.python_native.operations_disabled("amax"):
+                # amax is disabled across all DSLs
                 result = model(input)
-            # scaled_mm is automatically re-enabled here
+            # amax is automatically re-enabled here
         """
         filter_state = _get_filter_state()
         previously_disabled_ops = {

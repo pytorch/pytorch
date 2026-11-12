@@ -7,7 +7,9 @@ registered separately because structured delegation occurs below the dispatcher.
 Eligibility mirrors the former ``try_inner_tree_reduction``: TensorIterator must
 coalesce the input to one contiguous reduced dimension and at most one outer
 dimension. Unsupported geometry, dtype conversion, and integer or complex inputs
-fall through to ATen.
+fall through to the next registration: the CuTeDSL reduction overrides
+(``overrides.py``) for ``sum.dim_IntList`` and ``prod.dim_int``, then ATen if those
+decline too, and ATen directly for the ``out=`` overloads.
 
 Accepted calls canonicalize to ``(M, N)``. The ordered adapter uses the shared
 fixed-DAG kernel with dynamic input and output row strides.
@@ -22,6 +24,7 @@ from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._tensor_iterator import reduce_op, TensorIterator
 
 from ... import cutedsl_utils as cu
+from ...utils.device import cuda_device_guard
 
 
 # TODO: Move this rollout gate to a shared PyTorch config once eager native-op
@@ -229,7 +232,7 @@ def _make_impl(reduce_into):
         _run(self, d, out_kd, reduce_into)
         return out_kd if keepdim else out_kd.squeeze(d)
 
-    return _impl
+    return cuda_device_guard(_impl)
 
 
 def _make_out_impl(reduce_into):
@@ -243,7 +246,7 @@ def _make_out_impl(reduce_into):
         _run(self, d, out_kd, reduce_into)
         return out
 
-    return _out_impl
+    return cuda_device_guard(_out_impl)
 
 
 def register_to_dispatch() -> None:

@@ -10,6 +10,7 @@
 # CUDA inner-tree kernel produced -- the CuTeDSL kernel reproduces them
 # bit-for-bit, which is the contract for this op.
 
+import contextlib
 import hashlib
 import math
 import os
@@ -280,8 +281,81 @@ class TestSumCuteDSLOverride(TestCase):
         torch.sum(x, dim=1, out=out)
         self.assertEqual(out, ref)
 
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2 or torch.cuda.get_device_capability(1)[0] < 9,
+        "requires a second Hopper+ CUDA device",
+    )
+    @skipIfRocm
+    def test_non_current_device(self):
+        """Launch sum and prod, functional and out=, on the input tensor's device."""
+        # A single-kernel plan and a split plan, whose two stages both key the device.
+        single, split = ("rowitree",), ("rowitree1", "rowitree2")
+        tags = single + split
+        cases = (((17, 8192), single), ((3, 262144), split))
+        self.assertNotEqual(rt.itree_plan(8192, 17, 4).shape, "split")
+        self.assertEqual(rt.itree_plan(262144, 3, 4).shape, "split")
+
+        def keys(index):
+            return [k for k in rt._CACHE if k[0] in tags and k[7] == index]
+
+        rt._CACHE.clear()
+        with torch.cuda.device(0):
+            for (m, n), shape_tags in cases:
+                x0 = torch.ones(m, n, device="cuda:0")
+                x0[:, 0] = 2
+                x = x0.to("cuda:1")
+                for name, op in (("sum", torch.sum), ("prod", torch.prod)):
+                    # Warm cuda:0; device-keyed plans keep cuda:1 from reusing them.
+                    op(x0, dim=1)
+                    with torch.backends.python_native.cutedsl.disabled():
+                        expected = op(x, dim=1)
+                    want_cuda1 = {(tag, f"itree_{name}") for tag in shape_tags}
+                    for out in (None, torch.empty(m, device="cuda:1")):
+                        # Values match ATen exactly, so each call must rebuild
+                        # cuda:1's dropped plans to show it reached the override.
+                        for key in keys(1):
+                            del rt._CACHE[key]
+                        # Without the guard, the launchers' device check would raise.
+                        got = op(x, dim=1, out=out)
+                        self.assertEqual(got.device, torch.device("cuda:1"))
+                        self.assertEqual(got, expected)
+                        self.assertEqual({k[:2] for k in keys(1)}, want_cuda1)
+
+            self.assertEqual(torch.cuda.current_device(), 0)
+            want_cuda0 = {(t, f"itree_{op}") for t in tags for op in ("sum", "prod")}
+            self.assertEqual({k[:2] for k in keys(0)}, want_cuda0)
+
+    def test_overrides_enter_the_inputs_device(self):
+        # One GPU has no other device, so pretend another one is current and record the
+        # device context each impl's launch runs in.
+        active, seen = [], []
+
+        @contextlib.contextmanager
+        def device(index):
+            active.append(index)
+            yield
+            active.pop()
+
+        def run(*args):
+            seen.append(list(active))
+
+        x = torch.ones(4, 8, device="cuda")
+        index = x.get_device()
+        out = torch.empty(4, device="cuda")
+        with (
+            mock.patch.object(torch.cuda, "current_device", return_value=index + 1),
+            mock.patch.object(torch.cuda, "device", device),
+            mock.patch.object(cutedsl_impl, "_run", run),
+        ):
+            for into in (cutedsl_impl._sum_into, cutedsl_impl._prod_into):
+                cutedsl_impl._make_impl(into)(x, [1])
+                cutedsl_impl._make_out_impl(into)(x, [1], out=out)
+        self.assertEqual(seen, [[index]] * 4)
+
     @parametrize("op", ("sum", "prod"))
     def test_singleton_noncollapsible_rows_fall_through(self, op):
+        """Rows the inner-tree condition cannot collapse leave this family and still
+        match ATen; out= calls write only the output's elements."""
         values = torch.arange(36, device="cuda", dtype=torch.float32)
         base = values.reshape(18, 2, 1, 1)
         x = base[::3]
@@ -296,6 +370,22 @@ class TestSumCuteDSLOverride(TestCase):
         getattr(torch, op)(x, 3, out=out)
         self.assertEqual(out, x[..., 0])
         self.assertEqual(storage[12:], torch.full_like(storage[12:], -1.0))
+
+    def test_declined_calls_reach_the_reduction_overrides(self):
+        """sum.dim_IntList calls this family declines fall through to the CuTeDSL
+        reduction overrides, which record one replay entry, rather than to ATen."""
+        from torch._native.ops.reductions import kernel_general as kg, overrides as ov
+
+        if torch.cuda.get_device_capability()[0] not in ov._ARCH_MAJORS:
+            self.skipTest("the reduction overrides serve SM100-family only")
+        x = self._make_order_sensitive_input(128, 8192, torch.float32)
+        self.assertFalse(cutedsl_impl._cond(x, [0, 1]))
+        kg._REPLAYS.clear()
+        got = torch.sum(x, (0, 1))
+        self.assertEqual(len(kg._REPLAYS), 1)
+        with torch.backends.python_native.cutedsl.disabled():
+            ref = torch.sum(x, (0, 1))
+        self.assertEqual(got, ref, atol=1e-4, rtol=1e-4)
 
     @parametrize("op", ("sum", "prod"))
     @parametrize("keepdim", (False, True))
