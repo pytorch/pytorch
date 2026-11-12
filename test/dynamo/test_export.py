@@ -148,7 +148,7 @@ def forward(self, x, y):
 
     @common_utils.parametrize("value", [2, 2.5, "mode", True, None])
     def test_sourced_constant_outputs_smoke(self, value):
-        # Smoke coverage for export's deliberate source-independent reconstruction.
+        # Smoke coverage: export remains usable with its specialized Python input.
         def fn(x, value):
             return x + 1, value, ((value,),)
 
