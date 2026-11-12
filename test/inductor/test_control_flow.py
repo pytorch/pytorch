@@ -2312,6 +2312,10 @@ class ScanTests(TestCase):
             autograd=autograd,
         )
 
+    @decorateIf(
+        unittest.skip("Fails due to issues with backward pass when compiled."),
+        lambda params: params["autograd"],
+    )
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])

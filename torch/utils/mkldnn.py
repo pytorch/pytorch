@@ -24,17 +24,17 @@ def _get_mkldnn_classes():
                     'bias',
                     torch.zeros([dense_module.weight.size(0)], dtype=torch.float).to_mkldnn())
 
-        @torch.jit.script_method
+        @torch.jit._script.script_method
         def __getstate__(self):
             return (self.weight.to_dense(), self.bias.to_dense(), self.training)
 
-        @torch.jit.script_method
+        @torch.jit._script.script_method
         def __setstate__(self, state):
             self.weight = state[0].to_mkldnn()
             self.bias = state[1].to_mkldnn()
             self.training = state[2]
 
-        @torch.jit.script_method
+        @torch.jit._script.script_method
         def forward(self, x):
             x_mkldnn = x if x.is_mkldnn else x.to_mkldnn()
             y_mkldnn = torch._C._nn.mkldnn_linear(x_mkldnn, self.weight, self.bias)
@@ -64,11 +64,11 @@ def _get_mkldnn_classes():
                     'bias',
                     torch.zeros([dense_module.weight.size(0)], dtype=torch.float).to_mkldnn())
 
-        @torch.jit.script_method
+        @torch.jit._script.script_method
         def __getstate__(self):
             return (self.weight.to_dense(), self.bias.to_dense(), self.training)
 
-        @torch.jit.script_method
+        @torch.jit._script.script_method
         def forward(self, x):
             return torch.mkldnn_convolution(
                 x,
@@ -85,7 +85,7 @@ def _get_mkldnn_classes():
 
             self.register_buffer('weight', dense_module.weight.to_mkldnn(dtype))
 
-        @torch.jit.script_method
+        @torch.jit._script.script_method
         def __setstate__(self, state):
             self.weight = state[0].to_mkldnn()
             self.bias = state[1].to_mkldnn()
@@ -102,7 +102,7 @@ def _get_mkldnn_classes():
                 self.dilation,
                 self.groups))
 
-        @torch.jit.script_method
+        @torch.jit._script.script_method
         def __setstate__(self, state):
             self.weight = torch._C._nn.mkldnn_reorder_conv2d_weight(
                 state[0].to_mkldnn(),
@@ -124,7 +124,7 @@ def _get_mkldnn_classes():
                 self.dilation,
                 self.groups))
 
-        @torch.jit.script_method
+        @torch.jit._script.script_method
         def __setstate__(self, state):
             self.weight = torch._C._nn.mkldnn_reorder_conv3d_weight(
                 state[0].to_mkldnn(),
@@ -159,7 +159,7 @@ def _get_mkldnn_classes():
             self.register_buffer('running_mean', dense_module.running_mean.to_mkldnn())
             self.register_buffer('running_var', dense_module.running_var.to_mkldnn())
 
-        @torch.jit.script_method
+        @torch.jit._script.script_method
         def __getstate__(self):
             weight = self.weight.to_dense()
             bias = self.bias.to_dense()
@@ -167,7 +167,7 @@ def _get_mkldnn_classes():
             running_var = self.running_var.to_dense()
             return (weight, bias, running_mean, running_var, self.training)
 
-        @torch.jit.script_method
+        @torch.jit._script.script_method
         def __setstate__(self, state):
             self.weight = state[0].to_mkldnn()
             self.bias = state[1].to_mkldnn()
@@ -175,7 +175,7 @@ def _get_mkldnn_classes():
             self.running_var = state[3].to_mkldnn()
             self.training = state[4]
 
-        @torch.jit.script_method
+        @torch.jit._script.script_method
         def forward(self, x):
             return torch.batch_norm(
                 x,
@@ -194,16 +194,16 @@ def _get_mkldnn_classes():
             super().__init__()
             self.register_buffer('weight', dense_module.weight.to_mkldnn(dtype))
 
-        @torch.jit.script_method
+        @torch.jit._script.script_method
         def __getstate__(self):
             return (self.weight.to_dense(), self.training)
 
-        @torch.jit.script_method
+        @torch.jit._script.script_method
         def __setstate__(self, state):
             self.weight = state[0].to_mkldnn()
             self.training = state[1]
 
-        @torch.jit.script_method
+        @torch.jit._script.script_method
         def forward(self, x):
             x_mkldnn = x if x.is_mkldnn else x.to_mkldnn()
             y_mkldnn = torch.prelu(x_mkldnn, self.weight)
