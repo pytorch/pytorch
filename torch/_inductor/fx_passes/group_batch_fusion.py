@@ -573,6 +573,11 @@ class BatchLinearLHSFusion(BatchFusion):
         return False
 
     def match(self, node: torch.fx.Node):
+        devices = self.graph_search_options.get("devices")
+        if devices is not None:
+            value = node.meta.get("val")
+            if not (isinstance(value, torch.Tensor) and value.device.type in devices):
+                return None
         if CallFunctionVarArgs(aten.mm.default).match(node):
             input_m, weight_m = node.args
             bias_m = None
@@ -1820,7 +1825,7 @@ def generate_fusion_from_config(config_options: dict[str, Any], pre_grad=True):
                 f"fusion; set it in {other}."
             )
         _options = graph_search_options.copy()
-        _options.update({k: v for k, v in options.items() if k != "devices"})
+        _options.update(options)
         fusions.append(fusion_cls(graph_search_options=_options))  # type: ignore[operator]
     return fusions
 
