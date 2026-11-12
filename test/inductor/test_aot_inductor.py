@@ -422,6 +422,42 @@ _skip_cpu_triton_backend = skip_if_device(
 )
 
 
+def _run_capturing_stderr(fn):
+    """Calls fn and returns its result with what the call wrote to fd 2."""
+    original_stderr_fd = os.dup(2)
+    with tempfile.TemporaryFile(mode="w+") as captured_stderr:
+        try:
+            os.dup2(captured_stderr.fileno(), 2)
+            result = fn()
+        finally:
+            os.dup2(original_stderr_fd, 2)
+            os.close(original_stderr_fd)
+        captured_stderr.seek(0)
+        return result, captured_stderr.read()
+
+
+def _load_package_capturing_stderr(package_path):
+    return _run_capturing_stderr(
+        lambda: torch._inductor.aoti_load_package(package_path)
+    )
+
+
+def _compile_model_with_constants(device):
+    class Model(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.linear = torch.nn.Linear(1025, 1025)
+
+        def forward(self, x):
+            return self.linear(x)
+
+    example_inputs = (torch.randn(2, 1025, device=device),)
+    model = Model().to(device)
+    with config.patch({"always_keep_tensor_constants": True}):
+        package_path = AOTIRunnerUtil.compile(model, example_inputs)
+    return model, example_inputs, package_path
+
+
 class AOTInductorTestsTemplate:
     @common_utils.decorateIf(
         skip_if_device(
@@ -769,17 +805,10 @@ class AOTInductorTestsTemplate:
         ):
             package_path = AOTIRunnerUtil.compile(model, example_inputs)
 
-        original_stderr_fd = os.dup(2)
-        with tempfile.TemporaryFile(mode="w+") as captured_stderr:
-            try:
-                os.dup2(captured_stderr.fileno(), 2)
-                optimized = torch._inductor.aoti_load_package(package_path)
-            finally:
-                os.dup2(original_stderr_fd, 2)
-                os.close(original_stderr_fd)
-            captured_stderr.seek(0)
-            loading_log = captured_stderr.read()
+        optimized, loading_log = _load_package_capturing_stderr(package_path)
 
+        # Only ROCm copies on libtorch's stream; CUDA keeps one per model .so.
+        self.assertIn("created shared H2D stream", loading_log)
         self.assertIn("copy_tasks=1 cpu_copy_threads=2", loading_log)
         self.assertRegex(
             loading_log, r"completed \d+ bytes in 2 H2D submissions using 2"
@@ -795,6 +824,97 @@ class AOTInductorTestsTemplate:
         # threshold regardless of constant emission order.
         self.assertGreaterEqual(parallel_windows, 1)
         self.assertGreater(task_count, parallel_windows)
+        self.assertEqual(optimized(*example_inputs), model(*example_inputs))
+
+    @unittest.skipIf(
+        not TEST_WITH_ROCM, "Pinned async constant copy is default-on only on ROCm"
+    )
+    @patch.dict(os.environ, {"AOTI_LOG_LOADING": "1"})
+    def test_constants_pinned_async_copy_default_on_rocm(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires a ROCm GPU")
+        os.environ.pop("AOTI_COPY_USE_PINNED_ASYNC", None)
+        model, example_inputs, package_path = _compile_model_with_constants(self.device)
+
+        # Each load extracts the package to a new directory and dlopens its own
+        # copy of the .so, with its own statics.
+        optimized, load_log = _load_package_capturing_stderr(package_path)
+        self.assertEqual(optimized(*example_inputs), model(*example_inputs))
+        _, other_load_log = _load_package_capturing_stderr(package_path)
+        new_weights = {
+            fqn: torch.randn_like(tensor, device="cpu")
+            for fqn, tensor in model.state_dict().items()
+        }
+        _, update_log = _run_capturing_stderr(
+            lambda: optimized.load_constants(
+                new_weights, check_full_update=True, allow_h2d_copy=True
+            )
+        )
+        model.load_state_dict(new_weights)
+
+        self.assertIn("PinnedStagingPool: allocated", load_log)
+        self.assertIn("PinnedStagingPool: allocated", update_log)
+        self.assertEqual(optimized(*example_inputs), model(*example_inputs))
+        # Both loads and the constant update copy on libtorch's process-wide
+        # stream, not on a stream per .so.
+        streams = [
+            re.findall(r"using process-wide H2D stream (\S+) for device", log)
+            for log in (load_log, other_load_log, update_log)
+        ]
+        for found in streams:
+            self.assertEqual(len(found), 1)
+        self.assertEqual(len({found[0] for found in streams}), 1)
+        for log in (load_log, other_load_log, update_log):
+            self.assertNotIn("created shared H2D stream", log)
+
+    @unittest.skipIf(
+        not HAS_GPU or GPU_TYPE != "cuda",
+        "Pinned async constant copy is CUDA/ROCm-only",
+    )
+    @patch.dict(os.environ, {"AOTI_COPY_USE_PINNED_ASYNC": "1"})
+    def test_constants_pinned_async_update_waits_for_queued_run(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA or ROCm")
+        model, example_inputs, package_path = _compile_model_with_constants(self.device)
+        optimized = torch._inductor.aoti_load_package(package_path)
+        expected = model(*example_inputs)
+        new_weights = {
+            fqn: torch.randn_like(tensor, device="cpu")
+            for fqn, tensor in model.state_dict().items()
+        }
+        # The first run after loading waits on the host until its constant
+        # folding setup has run on the GPU, so it would not stay queued behind
+        # the sleep below. Run once first so that the run below only queues.
+        self.assertEqual(optimized(*example_inputs), expected)
+        torch.cuda.synchronize()
+
+        # Hold the default stream so that the run below is still queued when
+        # the in-place update starts copying; the copies must wait for it.
+        torch.cuda._sleep(1_000_000_000)
+        out = optimized(*example_inputs)
+        optimized.load_constants(
+            new_weights, check_full_update=True, allow_h2d_copy=True
+        )
+        self.assertEqual(out, expected)
+
+        model.load_state_dict(new_weights)
+        self.assertEqual(optimized(*example_inputs), model(*example_inputs))
+
+    @unittest.skipIf(
+        not TEST_WITH_ROCM, "Pinned async constant copy is default-on only on ROCm"
+    )
+    @patch.dict(
+        os.environ, {"AOTI_COPY_USE_PINNED_ASYNC": "0", "AOTI_LOG_LOADING": "1"}
+    )
+    def test_constants_pinned_async_copy_disabled_on_rocm(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires a ROCm GPU")
+        model, example_inputs, package_path = _compile_model_with_constants(self.device)
+
+        optimized, loading_log = _load_package_capturing_stderr(package_path)
+
+        self.assertIn("load_constants: starting H2D copy", loading_log)
+        self.assertNotIn("PinnedStagingPool: allocated", loading_log)
         self.assertEqual(optimized(*example_inputs), model(*example_inputs))
 
     def test_output_path_1(self):
