@@ -480,7 +480,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
-        # self.num_gpus = torch.cuda.device_count()
         self._spawn_processes()
 
     def tearDown(self):
@@ -4719,7 +4718,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
 @xfailIf(TEST_XPU)  # needs NCCL_ALGO/NCCL_DEBUG log scraping: #torch-xpu-ops/5385
 class NcclUserBufferRegistrationTest(MultiProcessTestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
         super().setUp()
@@ -4952,7 +4951,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
                 output = torch.zeros(60 * self.world_size, device=device)
                 torch.distributed.all_gather_single(output, t)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/115859")
     # On the gfx950 CI distributed runners (SR-IOV virtual functions) the
     # symmetric-memory rendezvous succeeds but the first device-side atomic on
     # the peer's signal pad in one_shot_all_reduce never completes and the test
@@ -6091,7 +6089,6 @@ class SparseCollective(MultiProcessTestCase):
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
-        # self.num_gpus = torch.cuda.device_count()
         self._spawn_processes()
 
     def tearDown(self):
@@ -6168,7 +6165,6 @@ class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
-        # self.num_gpus = torch.cuda.device_count()
         self._spawn_processes()
 
     def tearDown(self):
@@ -8171,7 +8167,7 @@ class CollectiveAnnotationTest(MultiProcContinuousTest):
 
 
 if __name__ == "__main__":
-    if device_module._initialized:
+    if device_type != "cpu" and device_module._initialized:
         raise AssertionError(
             "test_distributed must not have initialized CUDA/XPU context on main process"
         )
