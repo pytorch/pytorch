@@ -6,7 +6,7 @@
 #include <memory>
 
 namespace c10 {
-struct FakeTensorMode;
+struct FakeTensorModeHandle;
 struct TensorImpl;
 } // namespace c10
 
@@ -39,6 +39,6 @@ TORCH_API void set_and_normalize_fake_device(
 TORCH_API void init_cpp_fake(
     c10::TensorImpl* impl,
     c10::Device device,
-    const std::shared_ptr<c10::FakeTensorMode>& mode);
+    const std::shared_ptr<c10::FakeTensorModeHandle>& handle);
 
 } // namespace at

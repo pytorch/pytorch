@@ -256,6 +256,8 @@ def get_ignored_functions() -> set[Callable]:
         torch.nn.functional.has_torch_function_variadic,
         torch.nn.functional.handle_torch_function,
         torch.nn.functional.grouped_mm,
+        torch.nn.functional.quantize_tensor,
+        torch.nn.functional.quantize_tensor_dual,
         torch.nn.functional.scaled_addmm,
         torch.nn.functional.scaled_addmm_,
         torch.nn.functional.scaled_grouped_mm,
