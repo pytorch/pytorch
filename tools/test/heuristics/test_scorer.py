@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 
 START_UP = 10.0
 TODAY = date(2026, 11, 11)
+TD_JOB_NOW = datetime(2026, 11, 12, 1, tzinfo=UTC)
 
 
 def frozen_utc_now(now: datetime) -> mock.Mock:
@@ -562,7 +563,9 @@ class FakeResponse:
 
 
 class TestGetTdScorer(unittest.TestCase):
-    def fetch(self, outcomes: list[Any], max_bytes: int = 10) -> bytes | None:
+    def fetch(
+        self, outcomes: list[Any], max_bytes: int = 10, name: str | None = None
+    ) -> bytes | None:
         calls = iter(outcomes)
 
         def fake_urlopen(url: str, timeout: int) -> FakeResponse:
@@ -577,7 +580,17 @@ class TestGetTdScorer(unittest.TestCase):
             mock.patch.object(import_test_stats, "urlopen", fake_urlopen),
             mock.patch("builtins.print"),
         ):
-            return import_test_stats.get_td_scorer(max_bytes)
+            if name is None:
+                return import_test_stats.get_td_scorer(max_bytes)
+            return import_test_stats.get_td_scorer(max_bytes, name)
+
+    def test_budget_file_name(self) -> None:
+        self.assertEqual(
+            self.fetch([b"{}"], name=import_test_stats.TD_SCORER_BUDGET_FILE), b"{}"
+        )
+        self.assertTrue(
+            self.urls[0].endswith("/generated-stats/stats/td-scorer-budget.json")
+        )
 
     def test_404_gives_none_after_three_tries(self) -> None:
         not_found = HTTPError("u", 404, "Not Found", Message(), None)
@@ -594,8 +607,19 @@ class TestGetTdScorer(unittest.TestCase):
 
 
 class TestTDJob(unittest.TestCase):
-    def run_main(self, fetch: Any, changed: Any = None) -> dict[str, Any]:
+    def run_main(
+        self, fetch: Any, changed: Any = None, budget: Any = None
+    ) -> dict[str, Any]:
+        """td_job.main with `fetch` serving td-scorer.json and `budget` (None: a
+        404) serving td-scorer-budget.json; self.fetched lists the files asked."""
         self.changed_calls = 0
+        self.fetched: list[str] = []
+
+        def get_td_scorer(max_bytes: int, name: str = td_job.TD_SCORER_FILE) -> Any:
+            self.fetched.append(name)
+            if name == td_job.TD_SCORER_BUDGET_FILE:
+                return None if budget is None else budget(max_bytes)
+            return fetch(max_bytes)
 
         def query_changed_files() -> list[str]:
             self.changed_calls += 1
@@ -611,16 +635,12 @@ class TestTDJob(unittest.TestCase):
                     td_job, "get_test_prioritizations", lambda _: make_aggregated()
                 ),
                 mock.patch.object(td_job, "HEURISTICS", [HEURISTIC_A, HEURISTIC_B]),
-                mock.patch.object(td_job, "get_td_scorer", fetch),
+                mock.patch.object(td_job, "get_td_scorer", get_td_scorer),
                 mock.patch.object(td_job, "query_changed_files", query_changed_files),
                 mock.patch.dict("os.environ", {"CI": "false"}),
-                mock.patch("builtins.print"),
-                mock.patch.object(
-                    scorer,
-                    "datetime",
-                    frozen_utc_now(datetime(2026, 11, 12, 1, tzinfo=UTC)),
-                ),
+                mock.patch.object(scorer, "datetime", frozen_utc_now(TD_JOB_NOW)),
             ]
+            print_patch = mock.patch("builtins.print")
             for name in (
                 "get_test_times",
                 "get_test_class_times",
@@ -634,11 +654,14 @@ class TestTDJob(unittest.TestCase):
                 patches.append(mock.patch.object(td_job, name, lambda: None))
             for p in patches:
                 p.start()
+            printed = print_patch.start()
             try:
                 td_job.main()
             finally:
+                print_patch.stop()
                 for p in reversed(patches):
                     p.stop()
+            self.printed = [" ".join(map(str, c.args)) for c in printed.call_args_list]
             td_results: dict[str, Any] = json.loads(
                 (Path(tmp) / "td_results.json").read_text()
             )
@@ -686,6 +709,102 @@ class TestTDJob(unittest.TestCase):
                 self.assert_td_scores(td_results)
                 self.assertTrue(td_results["scorer"]["reason"].startswith(reason))
                 self.assertIsNone(td_results["scorer"]["model"])
+
+    def test_budget_file_used_when_both_files_are_usable(self) -> None:
+        plain = make_model()
+        with_budget = make_model(budget=make_budget())
+        td_results = self.run_main(
+            lambda _: encode(plain), budget=lambda _: encode(with_budget)
+        )
+        self.assertEqual(td_results["scorer"]["model"], with_budget)
+        self.assertEqual(
+            self.fetched, [td_job.TD_SCORER_FILE, td_job.TD_SCORER_BUDGET_FILE]
+        )
+        self.assertIn("TD scorer: model from td-scorer-budget.json", self.printed)
+
+    def test_unusable_budget_file_falls_back_to_the_plain_file(self) -> None:
+        def boom(_: int) -> bytes:
+            raise RuntimeError("boom")
+
+        bad = copy.deepcopy(make_model(budget=make_budget()))
+        bad["budget"]["share"] = 5.0
+        cases: list[tuple[str, Any]] = [
+            ("missing", None),
+            ("invalid", lambda _: encode(bad)),
+            ("disabled", lambda _: encode(make_model(enabled=False))),
+            ("stale", lambda _: encode(make_model(version="2026-10-01"))),
+            ("raising", boom),
+            ("another refit", lambda _: encode(make_model(version="2026-11-10"))),
+        ]
+        for why, budget in cases:
+            with self.subTest(why=why):
+                td_results = self.run_main(
+                    lambda _: encode(make_model()), budget=budget
+                )
+                self.assertEqual(td_results["scorer"]["reason"], "ok")
+                self.assertEqual(td_results["scorer"]["model"], make_model())
+                self.assertIn("TD scorer: model from td-scorer.json", self.printed)
+
+    def test_plain_file_is_the_master_switch(self) -> None:
+        def boom(_: int) -> bytes:
+            raise RuntimeError("boom")
+
+        bad = copy.deepcopy(make_model())
+        bad["schema"] = 1
+        with_budget = make_model(budget=make_budget())
+        cases: list[tuple[str, Any]] = [
+            ("raising", boom),
+            ("missing", lambda _: None),
+            ("invalid", lambda _: encode(bad)),
+            ("disabled", lambda _: encode(make_model(enabled=False))),
+            ("stale", lambda _: encode(make_model(version="2026-10-01"))),
+        ]
+        for why, plain in cases:
+            with self.subTest(why=why):
+                td_results = self.run_main(plain, budget=lambda _: encode(with_budget))
+                self.assertIsNone(td_results["scorer"]["model"])
+                self.assertEqual(self.fetched, [td_job.TD_SCORER_FILE])
+                self.assertFalse(any("model from" in line for line in self.printed))
+
+    def test_a_block_in_the_plain_file_never_applies(self) -> None:
+        with_budget = make_model(budget=make_budget())
+        for budget in (None, lambda _: encode(make_model(enabled=False))):
+            with self.subTest(budget=budget):
+                td_results = self.run_main(lambda _: encode(with_budget), budget=budget)
+                self.assertEqual(td_results["scorer"]["model"], make_model())
+
+    def test_choosing_the_file_never_raises(self) -> None:
+        real = td_job.build_scorer_block
+        plain = make_model()
+
+        def boom(*args: Any) -> Any:
+            raise RuntimeError("glue")
+
+        def second_call_boom(*args: Any) -> Any:
+            if len(self.calls) == 1:
+                raise RuntimeError("glue")
+            self.calls.append(1)
+            return real(*args)
+
+        for name, patched, has_model in (
+            ("first", boom, None),
+            ("second", second_call_boom, True),
+            ("none", lambda *args: None, None),
+        ):
+            self.calls: list[int] = []
+            with (
+                self.subTest(call=name),
+                mock.patch.object(td_job, "build_scorer_block", patched),
+            ):
+                td_results = self.run_main(
+                    lambda _: encode(plain),
+                    budget=lambda _: encode(make_model(budget=make_budget())),
+                )
+                self.assert_td_scores(td_results)
+                if has_model:
+                    self.assertEqual(td_results["scorer"]["model"], plain)
+                else:
+                    self.assertNotIn("scorer", td_results)
 
     def test_scorer_omitted_when_even_the_error_block_fails(self) -> None:
         class Unprintable(Exception):
@@ -1391,14 +1510,17 @@ class TestBudgetStaleness(unittest.TestCase):
 
     def test_td_job_writes_the_budget_fields(self) -> None:
         job = TestTDJob()
-        today = datetime.now(UTC).date()
+        today = TD_JOB_NOW.date()
         for version, kept in (
             ((today - timedelta(days=5)).isoformat(), False),
             (today.isoformat(), True),
         ):
             with self.subTest(version=version):
+                plain = make_model(version=version)
                 model = make_model(version=version, budget=make_budget())
-                td_results = job.run_main(lambda _: encode(model))
+                td_results = job.run_main(
+                    lambda _: encode(plain), budget=lambda _: encode(model)
+                )
                 block = td_results["scorer"]
                 self.assertEqual(block["reason"], "ok")
                 self.assertEqual("budget" in block["model"], kept)
