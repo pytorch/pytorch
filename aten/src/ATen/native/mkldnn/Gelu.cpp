@@ -39,8 +39,8 @@ Tensor mkldnn_gelu(const Tensor& input, std::string_view approximate) {
   }
   TORCH_CHECK(get_gelutype_enum(approximate) == GeluType::None,
                   "mkldnn_gelu: fast, approximate gelu is not supported");
-  const ideep::tensor& x = itensor_from_const_tensor(input);
-  ideep::tensor y;
+  const mkldnn::ITensor& x = itensor_from_const_tensor(input);
+  mkldnn::ITensor y;
   mkldnn::eltwise_forward(
       x, y, dnnl::algorithm::eltwise_gelu_erf, dnnl::prop_kind::forward_training, /*alpha*/ 0.0);
   return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
@@ -50,9 +50,9 @@ Tensor mkldnn_gelu(const Tensor& input, std::string_view approximate) {
 Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, std::string_view approximate) {
   TORCH_CHECK(get_gelutype_enum(approximate) == GeluType::None,
                   "mkldnn_gelu_backward: fast, approximate gelu is not supported");
-  const ideep::tensor& x = itensor_from_const_tensor(input);
-  ideep::tensor grady = itensor_from_const_tensor(grad_output);
-  ideep::tensor gradx;
+  const mkldnn::ITensor& x = itensor_from_const_tensor(input);
+  mkldnn::ITensor grady = itensor_from_const_tensor(grad_output);
+  mkldnn::ITensor gradx;
   mkldnn::eltwise_backward(x, grady, gradx,
       dnnl::algorithm::eltwise_gelu_erf, /*alpha*/ 0.0);
   return new_with_itensor_mkldnn(std::move(gradx),

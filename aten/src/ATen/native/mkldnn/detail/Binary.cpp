@@ -8,8 +8,8 @@ namespace at::native::mkldnn {
 
 void sum(
     const std::vector<float>& scales,
-    const std::vector<ideep::tensor>& srcs,
-    ideep::tensor& dst) {
+    const std::vector<ITensor>& srcs,
+    ITensor& dst) {
   const auto& engine = ideep::engine::cpu_engine();
   std::vector<dnnl::memory::desc> src_descs;
   src_descs.reserve(srcs.size());
@@ -24,7 +24,7 @@ void sum(
 
   // May replace dst's buffer and layout when they differ from pd.dst_desc().
   dst.reinit_if_possible(pd.dst_desc());
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  ITensor scratchpad(pd.scratchpad_desc());
   std::unordered_map<int, dnnl::memory> args{
       {DNNL_ARG_DST, dst}, {DNNL_ARG_SCRATCHPAD, scratchpad}};
   for (size_t i = 0; i < srcs.size(); ++i) {
@@ -35,9 +35,9 @@ void sum(
 }
 
 void binary(
-    const ideep::tensor& src0,
-    const ideep::tensor& src1,
-    ideep::tensor& dst,
+    const ITensor& src0,
+    const ITensor& src1,
+    ITensor& dst,
     dnnl::algorithm algorithm) {
   const auto& engine = ideep::engine::cpu_engine();
   auto src0_desc = src0.get_desc();
@@ -50,7 +50,7 @@ void binary(
   auto pd = dnnl::binary::primitive_desc(
       engine, algorithm, src0_desc, src1_desc, dst_desc, op_attr);
 
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  ITensor scratchpad(pd.scratchpad_desc());
 
   auto expected_src0 = src0.reorder_if_differ_in(pd.src0_desc());
   auto expected_src1 = src1.reorder_if_differ_in(pd.src1_desc());

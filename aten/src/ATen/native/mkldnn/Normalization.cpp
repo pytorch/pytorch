@@ -120,7 +120,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
   auto weight_it = at::native::itensor_from_mkldnn(weight);
   auto bias_it = at::native::itensor_from_mkldnn(bias);
 
-  auto out_it = inplace ? input_it : ideep::tensor(input_it.get_desc());
+  auto out_it = inplace ? input_it : mkldnn::ITensor(input_it.get_desc());
   mkldnn::layer_normalization_forward(input_it, weight_it, bias_it, out_it, mean_it, rstd_it, static_cast<float>(eps));
 
   auto dst = at::native::new_with_itensor_mkldnn(
@@ -151,25 +151,25 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
   TORCH_CHECK(weight.defined() && bias.defined(),
              "mkldnn_batch_norm: currently mkldnn only support affine model");
 
-  ideep::tensor& x = itensor_from_mkldnn(input);
-  ideep::tensor w = itensor_from_const_tensor(weight);
-  ideep::tensor b = itensor_from_const_tensor(bias);
+  mkldnn::ITensor& x = itensor_from_mkldnn(input);
+  mkldnn::ITensor w = itensor_from_const_tensor(weight);
+  mkldnn::ITensor b = itensor_from_const_tensor(bias);
   bool use_running_stat = (running_mean.defined() && running_var.defined());
 
-  ideep::tensor y;
+  mkldnn::ITensor y;
 
   if (train) {
     // TODO: enable 3d batchnorm.
     TORCH_CHECK(input.dim() == 4,
         "mkldnn_batch_norm: currently mkldnn training only support 2d batchnorm");
-    ideep::tensor saved_mean;
-    ideep::tensor saved_var;
+    mkldnn::ITensor saved_mean;
+    mkldnn::ITensor saved_var;
     mkldnn::batch_normalization_forward_training(
         x, w, b, y, saved_mean, saved_var, static_cast<float>(eps));
     if (use_running_stat) {
       auto len = x.get_nelems() / w.get_nelems(); // n*h*w
-      ideep::tensor m = itensor_from_tensor(running_mean);
-      ideep::tensor v = itensor_from_tensor(running_var);
+      mkldnn::ITensor m = itensor_from_tensor(running_mean);
+      mkldnn::ITensor v = itensor_from_tensor(running_var);
       const std::vector<float> scales_mean{static_cast<float>(1 - momentum),
                                            static_cast<float>(momentum)};
       const std::vector<float> scales_var{static_cast<float>(1 - momentum),
@@ -188,8 +188,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     TORCH_CHECK(input.dim() == 4 || input.dim() == 5,
         "mkldnn_batch_norm: currently mkldnn inference only support 2d and 3d batchnorm");
     if (use_running_stat) {
-      ideep::tensor m = itensor_from_const_tensor(running_mean);
-      ideep::tensor v = itensor_from_const_tensor(running_var);
+      mkldnn::ITensor m = itensor_from_const_tensor(running_mean);
+      mkldnn::ITensor v = itensor_from_const_tensor(running_var);
       mkldnn::batch_normalization_forward_inference(
           // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           x, m, v, w, b, y, eps);
@@ -200,9 +200,9 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     return std::make_tuple(
         new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
                                 input.options().device_opt()),
-        new_with_itensor_mkldnn(ideep::tensor{}, optTypeMetaToScalarType(weight.options().dtype_opt()),
+        new_with_itensor_mkldnn(mkldnn::ITensor{}, optTypeMetaToScalarType(weight.options().dtype_opt()),
                                 weight.options().device_opt()),
-        new_with_itensor_mkldnn(ideep::tensor{}, optTypeMetaToScalarType(weight.options().dtype_opt()),
+        new_with_itensor_mkldnn(mkldnn::ITensor{}, optTypeMetaToScalarType(weight.options().dtype_opt()),
                                 weight.options().device_opt()));
   }
 }
@@ -257,13 +257,13 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
   const Tensor& save_invstd = save_invstd_opt.value_or(Tensor());
 
   TORCH_CHECK(train, "mkldnn_batch_norm_backward: currently mkldnn only support train model");
-  ideep::tensor& grady = itensor_from_mkldnn(grad_output);
-  ideep::tensor& x = itensor_from_mkldnn(input);
-  ideep::tensor w = itensor_from_const_tensor(weight);
-  ideep::tensor& m = itensor_from_mkldnn(save_mean);
-  ideep::tensor& v = itensor_from_mkldnn(save_invstd);
+  mkldnn::ITensor& grady = itensor_from_mkldnn(grad_output);
+  mkldnn::ITensor& x = itensor_from_mkldnn(input);
+  mkldnn::ITensor w = itensor_from_const_tensor(weight);
+  mkldnn::ITensor& m = itensor_from_mkldnn(save_mean);
+  mkldnn::ITensor& v = itensor_from_mkldnn(save_invstd);
 
-  ideep::tensor gradx, gradw, gradb;
+  mkldnn::ITensor gradx, gradw, gradb;
   mkldnn::batch_normalization_backward(
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       x, m, v, grady, w, gradx, gradw, gradb, eps);

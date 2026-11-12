@@ -8,9 +8,9 @@
 namespace at::native::mkldnn {
 
 void pooling_forward(
-    const ideep::tensor& src,
+    const ITensor& src,
     const dnnl::memory::dims& output_sizes,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& kernel,
     const dnnl::memory::dims& padding_l,
@@ -24,7 +24,7 @@ void pooling_forward(
   // Workaround for oneDNN issue intel/mkl-dnn#588 (kept from ideep).
   auto src_desc = src._get_unblocked_desc_if_4c_blocked();
 
-  ideep::tensor::desc dst_desc(
+  ITensor::desc dst_desc(
       output_sizes, src.get_data_type(), dnnl::memory::format_tag::any);
 
   dnnl::primitive_attr op_attr;
@@ -51,7 +51,7 @@ void pooling_forward(
     dst.set_scale(src.get_scale());
   }
 
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  ITensor scratchpad(pd.scratchpad_desc());
 
   std::unordered_map<int, dnnl::memory> args{
       {DNNL_ARG_SRC, expected_src},
@@ -66,10 +66,10 @@ void pooling_forward(
 }
 
 void pooling_backward(
-    const ideep::tensor& diff_dst,
-    const ideep::tensor& dst,
-    const ideep::tensor& src,
-    ideep::tensor& diff_src,
+    const ITensor& diff_dst,
+    const ITensor& dst,
+    const ITensor& src,
+    ITensor& diff_src,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& kernel,
     const dnnl::memory::dims& padding_l,
@@ -121,7 +121,7 @@ void pooling_backward(
   auto expected_diff_dst = diff_dst.reorder_if_differ_in(pd.diff_dst_desc());
   diff_src.reinit_if_possible(pd.diff_src_desc());
 
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  ITensor scratchpad(pd.scratchpad_desc());
 
   std::unordered_map<int, dnnl::memory> args{
       {DNNL_ARG_DIFF_DST, expected_diff_dst},

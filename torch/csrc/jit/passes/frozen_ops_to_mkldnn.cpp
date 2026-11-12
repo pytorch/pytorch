@@ -260,7 +260,7 @@ Operation createUnaryOp(
     if (!inplace) {
       // `a_it.get_desc()` will allocate a tensor
       // of the right physical size.
-      auto it_empty = ideep::tensor(a_it.get_desc());
+      auto it_empty = at::native::mkldnn::ITensor(a_it.get_desc());
       TORCH_INTERNAL_ASSERT(it_empty.get_desc() == a_it.get_desc());
       out = at::native::new_with_itensor_mkldnn(
           std::move(it_empty),
@@ -497,8 +497,8 @@ Operation ConstantMKLDNNTensorOp(const Node* node) {
 }
 
 Tensor mkldnn_tensor_scalar_mul(Tensor& tensor, Tensor& out, float scalar) {
-  ideep::tensor& x = at::native::itensor_from_mkldnn(tensor);
-  ideep::tensor& z = at::native::itensor_from_mkldnn(out);
+  at::native::mkldnn::ITensor& x = at::native::itensor_from_mkldnn(tensor);
+  at::native::mkldnn::ITensor& z = at::native::itensor_from_mkldnn(out);
   at::native::mkldnn::eltwise_forward(
       x,
       z,

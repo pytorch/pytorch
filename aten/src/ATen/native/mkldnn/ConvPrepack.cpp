@@ -61,7 +61,7 @@ ContextConv create(
   // TODO: what if input is nhwc but w is nchw
   bool is_channels_last =
       weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
-  ideep::tensor::desc expected_weight_desc =
+  ITensor::desc expected_weight_desc =
       mkldnn::convolution_forward_expected_weights_desc(
           w.get_dims(),
           w.get_data_type(),
@@ -77,7 +77,7 @@ ContextConv create(
           attr,
           is_channels_last);
 
-  ideep::tensor packed_weight;
+  ITensor packed_weight;
   packed_weight.init(expected_weight_desc);
   packed_weight.feed_from(w);
 
@@ -92,10 +92,10 @@ ContextConv create(
 }
 
 static void _mkldnn_convolution_out(
-    const ideep::tensor& x,
-    ideep::tensor& y,
-    const ideep::tensor& w,
-    const std::optional<ideep::tensor>& b,
+    const ITensor& x,
+    ITensor& y,
+    const ITensor& w,
+    const std::optional<ITensor>& b,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
@@ -142,8 +142,8 @@ static void _mkldnn_convolution_out(
 
 static void mkldnn_convolution_out(
     const Tensor& input,
-    ideep::tensor& mkldnn_output,
-    const ideep::tensor& mkldnn_weight,
+    ITensor& mkldnn_output,
+    const ITensor& mkldnn_weight,
     const std::optional<Tensor>& bias_opt,
     IntArrayRef padding,
     IntArrayRef stride,
@@ -156,8 +156,8 @@ static void mkldnn_convolution_out(
   const Tensor& bias = *bias_maybe_owned;
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-  const ideep::tensor mkldnn_input = itensor_from_const_tensor(input);
-  std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
+  const ITensor mkldnn_input = itensor_from_const_tensor(input);
+  std::optional<ITensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
     mkldnn_bias = itensor_from_const_tensor(bias);
   }
@@ -178,7 +178,7 @@ static void mkldnn_convolution_out(
 static std::vector<int64_t> get_output_sizes(
     ContextConv& context,
     const Tensor& input) {
-  const ideep::tensor& mkldnn_weight = context.weight_packed_;
+  const ITensor& mkldnn_weight = context.weight_packed_;
   IntArrayRef padding = context.padding_;
   IntArrayRef stride = context.stride_;
   IntArrayRef dilation = context.dilation_;
@@ -197,10 +197,10 @@ Tensor run(ContextConv& context, const Tensor& input) {
 
   bool is_channels_last =
       input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
-  ideep::tensor y;
+  ITensor y;
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-  ideep::tensor mkldnn_output = itensor_from_tensor(output);
+  ITensor mkldnn_output = itensor_from_tensor(output);
 
   if (is_channels_last) {
     mkldnn_convolution_out(
@@ -236,12 +236,12 @@ void run(ContextConv& context, const Tensor& input, void* output) {
 
   bool is_channels_last =
       input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
-  ideep::tensor y;
+  ITensor y;
 
   dnnl::memory::format_tag o_tag = is_channels_last ? dnnl::memory::format_tag::nhwc : dnnl::memory::format_tag::nchw;
-  ideep::tensor::desc o_desc = {
+  ITensor::desc o_desc = {
       output_sizes, get_mkldnn_dtype(input.scalar_type()), o_tag};
-  ideep::tensor mkldnn_output = {o_desc, output};
+  ITensor mkldnn_output = {o_desc, output};
 
   if (is_channels_last) {
     mkldnn_convolution_out(

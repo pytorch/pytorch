@@ -37,8 +37,8 @@ Tensor& copy_mkldnn_(Tensor& self, const Tensor& src, bool non_blocking) {
       self.toString(),
       " and src type = ",
       src.toString());
-  ideep::tensor& x = itensor_from_mkldnn(src);
-  ideep::tensor& y = itensor_from_mkldnn(self);
+  mkldnn::ITensor& x = itensor_from_mkldnn(src);
+  mkldnn::ITensor& y = itensor_from_mkldnn(self);
   mkldnn::direct_copy(x, y);
   return self;
 }

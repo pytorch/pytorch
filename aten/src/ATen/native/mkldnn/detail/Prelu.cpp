@@ -6,9 +6,9 @@
 namespace at::native::mkldnn {
 
 void prelu_forward(
-    const ideep::tensor& src,
-    const ideep::tensor& weight,
-    ideep::tensor& dst,
+    const ITensor& src,
+    const ITensor& weight,
+    ITensor& dst,
     dnnl::prop_kind prop_kind) {
   const auto& engine = ideep::engine::cpu_engine();
   auto weight_in = weight;
@@ -30,7 +30,7 @@ void prelu_forward(
   // May replace dst's buffer and layout when they differ from pd.dst_desc().
   dst.reinit_if_possible(pd.dst_desc());
 
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::prelu_forward(pd).execute(
       ideep::stream::default_stream(),
@@ -41,11 +41,11 @@ void prelu_forward(
 }
 
 void prelu_backward(
-    const ideep::tensor& src,
-    const ideep::tensor& weight,
-    const ideep::tensor& diff_dst,
-    ideep::tensor& diff_src,
-    ideep::tensor& diff_weight) {
+    const ITensor& src,
+    const ITensor& weight,
+    const ITensor& diff_dst,
+    ITensor& diff_src,
+    ITensor& diff_weight) {
   if (is_avx2_vnni_2() &&
       one_of(
           diff_dst.get_data_type(),
@@ -68,7 +68,7 @@ void prelu_backward(
   auto weight_desc = weight_in.get_desc().to_format_any();
   auto diff_dst_desc = diff_dst.get_desc();
   auto diff_weights_desc =
-      ideep::tensor::desc(
+      ITensor::desc(
           weight_in.get_dims(),
           diff_dst.get_data_type(),
           dnnl::memory::format_tag::any)
@@ -95,7 +95,7 @@ void prelu_backward(
   diff_src.reinit_if_possible(pd.diff_src_desc());
   diff_weight.reinit_if_possible(pd.diff_weights_desc());
 
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::prelu_backward(pd).execute(
       ideep::stream::default_stream(),
