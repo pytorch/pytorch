@@ -39,6 +39,14 @@ C10_METAL_CONSTEXPR uint32_t kMatmulKGroupsFullGrids = 2;
 // up to a full grid over kMatmulSplitGridShare of threadgroups.
 C10_METAL_CONSTEXPR uint32_t kMatmulSplitMinK = 1024;
 C10_METAL_CONSTEXPR uint32_t kMatmulSplitGridShare = 2;
+// x @ W.t() for up to kMatmulStagedMaxRows rows of x reads W once, fastest
+// in whole cache lines. matmul_mpp_staged copies kMatmulStepBytes of each row
+// of a block of W to threadgroup memory, in loads of kMatmulStagedLoadBytes.
+C10_METAL_CONSTEXPR uint32_t kMatmulStagedBlock = 16;
+C10_METAL_CONSTEXPR uint32_t kMatmulStagedMaxRows = 16;
+C10_METAL_CONSTEXPR uint32_t kMatmulStagedLoadBytes = 16;
+// Apple10 is faster on the unstaged tiles under this many bytes of W.
+C10_METAL_CONSTEXPR uint32_t kMatmulStagedMinBytesApple10 = 1 << 24;
 // Complex products with M, K and N up to this are faster on the naive
 // kernels than as a real GEMM.
 C10_METAL_CONSTEXPR uint32_t kMatmulComplexNaiveMaxDim = 16;
@@ -337,17 +345,19 @@ inline void matmul_mpp_cooperative_gemm(
 
 // Dense matmul2d tile op: out = alpha * A * B + beta * bias, one matmul2d call
 // per simdgroup block and K step.
-template <typename T, int BM, bool TA, bool TB, int KG>
+template <typename T, int BM, bool TA, bool TB, int KG, int RN = kMatmulBlock>
 inline void matmul_mpp_block_gemm(
     thread const MatmulTile<T>& tile,
     constant MatmulParams<uint64_t>& p,
     uint simd_group,
-    threadgroup float* partials) {
+    threadgroup float* partials,
+    threadgroup T* stage = nullptr,
+    uint simd_lane = 0) {
   using namespace mpp::tensor_ops;
   using Ext = dextents<int32_t, 2>;
   using Str = array<int32_t, 2>;
   using Mat = tensor<device T, Ext, tensor_inline>;
-  constexpr int RN = kMatmulBlock, KC = kMatmulStepBytes / sizeof(T);
+  constexpr int KC = kMatmulStepBytes / sizeof(T);
   // KG > 1: the tile is one block and its KG simdgroups split K.
   const int group = KG > 1 ? simd_group : 0;
   const int col = (simd_group - group) * RN, pace = kMatmulPaceSteps * KC;
@@ -388,7 +398,27 @@ inline void matmul_mpp_block_gemm(
     if (paced && kk && kk % pace == 0) {
       threadgroup_barrier(mem_flags::mem_none);
     }
-    if (rows == BM && cols == RN && kk + KC <= k) {
+    if (RN != kMatmulBlock && kk + KC <= k) {
+      // Staged: VEC elements per lane, so RS rows of B per round of loads.
+      // The K tail is left to the loads of matmul2d below.
+      constexpr int VEC = kMatmulStagedLoadBytes / sizeof(T);
+      constexpr int RS = simdgroup_size * VEC / KC;
+      threadgroup T* st = stage + simd_group * RN * KC;
+      for (int r = 0; r < RN; r += RS) {
+        const int row = r + simd_lane % RS, off = simd_lane / RS * VEC;
+        *reinterpret_cast<threadgroup uint4*>(st + row * KC + off) =
+            *reinterpret_cast<device const uint4*>(
+                tile.b + min(row, cols - 1) * p.b_stride_n + kk + off);
+      }
+      simdgroup_barrier(mem_flags::mem_threadgroup);
+      const Mat sa(
+          const_cast<device T*>(tile.a) + kk,
+          Ext(KC, rows),
+          Str{1, int(p.a_stride_m)});
+      const tensor<threadgroup T, Ext, tensor_inline> sb(
+          st, Ext(KC, RN), Str{1, KC});
+      op.run(sa, sb, acc);
+    } else if (rows == BM && cols == RN && kk + KC <= k) {
       // Static slices skip the bounds checks.
       auto sa = a.template slice<TA ? BM : KC, TA ? KC : BM>(
           TA ? 0 : kk, TA ? kk : 0);

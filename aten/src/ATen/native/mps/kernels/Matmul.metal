@@ -138,6 +138,47 @@ INSTANTIATE_MATMUL_MPP_BM(bfloat, 64);
 INSTANTIATE_MATMUL_MPP_KG(float);
 INSTANTIATE_MATMUL_MPP_KG(half);
 INSTANTIATE_MATMUL_MPP_KG(bfloat);
+
+// matmul_mpp over K groups with staged blocks of b, which is x @ W.t().
+template <typename T, int BM>
+[[max_total_threads_per_threadgroup(kMatmulKGroups * simdgroup_size)]]
+kernel void matmul_mpp_staged(
+    device const T* a [[buffer(0)]],
+    device const T* b [[buffer(1)]],
+    device T* out [[buffer(2)]],
+    device const T* bias [[buffer(3)]],
+    constant MatmulParams<uint64_t>& params [[buffer(4)]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint simd_group [[simdgroup_index_in_threadgroup]],
+    uint simd_lane [[thread_index_in_simdgroup]]) {
+  constexpr int BN = kMatmulStagedBlock, KG = kMatmulKGroups;
+  threadgroup float partials[(KG - 1) * BM * BN];
+  threadgroup T stage[KG * BN * kMatmulStepBytes / sizeof(T)];
+  auto tile = matmul_tile<T, BM, BN>(a, b, out, bias, params, tgid);
+  matmul_mpp_block_gemm<T, BM, false, true, KG, BN>(
+      tile, params, simd_group, partials, stage, simd_lane);
+}
+
+#define INSTANTIATE_MATMUL_MPP_STAGED(T, BM)                            \
+  template [[host_name("matmul_mpp_staged_" #T "_bm" #BM)]] kernel void \
+  matmul_mpp_staged<T, BM>(                                             \
+      device const T*,                                                  \
+      device const T*,                                                  \
+      device T*,                                                        \
+      device const T*,                                                  \
+      constant MatmulParams<uint64_t>&,                                 \
+      uint3,                                                            \
+      uint,                                                             \
+      uint)
+
+// The tile rows metal_gemm picks for it: kMatmulStagedMaxRows and half of it.
+#define INSTANTIATE_MATMUL_MPP_STAGED_DTYPE(T) \
+  INSTANTIATE_MATMUL_MPP_STAGED(T, 8);         \
+  INSTANTIATE_MATMUL_MPP_STAGED(T, 16)
+
+INSTANTIATE_MATMUL_MPP_STAGED_DTYPE(float);
+INSTANTIATE_MATMUL_MPP_STAGED_DTYPE(half);
+INSTANTIATE_MATMUL_MPP_STAGED_DTYPE(bfloat);
 #endif
 
 // Grid (cols, rows, planes).
