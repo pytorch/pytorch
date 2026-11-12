@@ -15,7 +15,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     ops,
     skipOps,
-    skipXPUIf,
     xfail,
 )
 from torch.testing._internal.common_methods_invocations import op_db
@@ -194,7 +193,6 @@ class TestExportOnFakeDevice(TestCase):
     # We set device-specific env variable to simulate a CPU machine with gpu build
     # Running this on all ops in op_db is too slow, so we only run on a selected subset
     @onlyAccelerator
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5157")
     @unittest.skipIf(
         IS_WINDOWS,
         "Subprocess with simulated CPU machine imports op_db which triggers "
