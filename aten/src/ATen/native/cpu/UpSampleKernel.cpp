@@ -1652,7 +1652,6 @@ void upsample_separable_1d(
   // name for internal BC.
   AT_DISPATCH_FLOATING_TYPES_AND(
       at::ScalarType::Byte, iter.dtype(), "upsample_generic_Nd_aa", [&] {
-        const int ntensors = iter.ntensors();
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {
           if constexpr (is_horizontal) {
             // Strides are : X 0 | 8 8 8 0 8  (Channels first)
