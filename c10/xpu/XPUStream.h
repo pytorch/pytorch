@@ -140,7 +140,7 @@ class C10_XPU_API XPUStream {
     return XPUStream(Stream::unpack3(stream_id, device_index, device_type));
   }
 
-  /// Return the priority range **supported by PyTorch**.
+  /// Return the range of priority **supported by PyTorch**.
   static std::tuple<int, int> priority_range() {
     // See Note [XPU Stream priorities]
     return std::make_tuple(1, -max_compile_time_stream_priorities + 2);
