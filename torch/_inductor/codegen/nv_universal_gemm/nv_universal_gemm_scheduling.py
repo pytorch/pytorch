@@ -550,13 +550,9 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 continue
             if require_epilogue_fusion and not choice.supports_epilogue_fusion:
                 continue
-            if not NVUniversalGemmScheduling._supports_reduction_layout(
+            if not NVUniversalGemmScheduling._choice_fits_reduction(
                 choice, min_tile_shape
             ):
-                continue
-            required_tile = min_tile_shape[::-1] if choice.swap_ab else min_tile_shape
-            tile_shape = choice.kernel.metadata.design.tile_shape
-            if any(tile_shape[axis] < required_tile[axis] for axis in (0, 1)):
                 continue
             timing = choice_timings.get(choice, float("inf"))
             if best is None or timing < best_time:
@@ -584,21 +580,11 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             # Honor an explicit swap/finalize -- the fusion benchmark loop swaps
             # in each EFC choice one at a time and must not re-select from timings.
             selected = ir_node._render_caller
-            required_tile = (
-                min_tile_shape[::-1]
-                if isinstance(selected, NVUniversalGemmCaller) and selected.swap_ab
-                else min_tile_shape
-            )
             if (
                 isinstance(selected, NVUniversalGemmCaller)
                 and (not require_epilogue_fusion or selected.supports_epilogue_fusion)
-                and NVUniversalGemmScheduling._supports_reduction_layout(
+                and NVUniversalGemmScheduling._choice_fits_reduction(
                     selected, min_tile_shape
-                )
-                and all(
-                    selected.kernel.metadata.design.tile_shape[axis]
-                    >= required_tile[axis]
-                    for axis in (0, 1)
                 )
             ):
                 selected_choice = selected
