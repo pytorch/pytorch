@@ -26,7 +26,11 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_HELION
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CUDA_AND_TRITON,
+    HAS_HELION,
+)
 
 
 HAS_CUTE = importlib.util.find_spec("cutlass") is not None and (
@@ -38,7 +42,7 @@ BACKENDS = ["triton", "cute"]
 
 
 def randn(*shape, dtype=torch.bfloat16):
-    return torch.randn(shape, device="cuda", dtype=dtype)
+    return torch.randn(shape, device=GPU_TYPE, dtype=dtype)
 
 
 @contextlib.contextmanager
@@ -253,7 +257,7 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             lambda a, b, c: a @ b + fn(c),
             randn(40, 72),
             randn(72, 136),
-            torch.rand(136, device="cuda") + 0.5,
+            torch.rand(136, device=GPU_TYPE) + 0.5,
         )
         self.assertIn(f"torch.{op}(", source)
 
@@ -442,7 +446,7 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         elif case == "repeat":
             fn, args = lambda a, b: a.repeat(1, 9) @ b, [randn(40, 8), randn(72, 136)]
         elif case == "gather":
-            indices = torch.randint(0, 80, (40,), device="cuda")
+            indices = torch.randint(0, 80, (40,), device=GPU_TYPE)
             fn, args = (
                 lambda a, i, b: a[i] @ b,
                 [randn(80, 72), indices, randn(72, 136)],
@@ -567,10 +571,10 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             torch._dynamo.mark_dynamic(a, 0)
         elif case == "indirect_epilogue":
             fn = lambda a, b, c, i: a @ b + c[i]  # noqa: E731
-            args = [a, b, randn(80, 48), torch.randint(0, 80, (32,), device="cuda")]
+            args = [a, b, randn(80, 48), torch.randint(0, 80, (32,), device=GPU_TYPE)]
         else:
             fn = lambda a, b, c: a @ b + c  # noqa: E731
-            args = [a, b, torch.tensor(2.0)]
+            args = [a, b, torch.tensor(2.0, device="cpu")]
         # Unfused epilogues round the product first, as eager does.
         sources = self.compile(fn, *args, expected=fn(*args), tol=2e-2, helion=False)
         if case in ("indirect_epilogue", "cpu_scalar"):
@@ -759,8 +763,8 @@ class TestHelionReduction(TestCase):
     def test_reduction_source(self):
         (source,) = self.compile(
             lambda x, b: (x * 2).sum(-1) + b,
-            torch.randn(64, 100, device="cuda"),
-            torch.randn(64, device="cuda"),
+            torch.randn(64, 100, device=GPU_TYPE),
+            torch.randn(64, device=GPU_TYPE),
             tol=1e-4,
         )
         self.assertExpectedInline(
@@ -791,9 +795,9 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         if dtype == torch.int32:
             if op == "prod":
                 self.skipTest("an int32 product of 100 values overflows")
-            x = torch.randint(-50, 50, (64, 100), device="cuda", dtype=dtype)
+            x = torch.randint(-50, 50, (64, 100), device=GPU_TYPE, dtype=dtype)
         else:
-            x = torch.randn(64, 100, device="cuda", dtype=dtype)
+            x = torch.randn(64, 100, device=GPU_TYPE, dtype=dtype)
         if op == "prod":
             x = x / 8 + 1
         # R = 100 is not a power of two, so the last tile_r block is partial.
@@ -803,7 +807,7 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
     def test_second_loop(self):
         (source,) = self.compile(
             lambda x: x / x.abs().amax(-1, keepdim=True),
-            torch.randn(64, 100, device="cuda"),
+            torch.randn(64, 100, device=GPU_TYPE),
         )
         self.assertEqual(source.count("for tile_r in hl.tile(100):"), 2)
         # The second loop loads x again and views acc as (tile_x, 1).
@@ -819,20 +823,20 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
                 y = torch.sin(y) * 0.9 + 0.1 * i
             return y * y.sum(-1, keepdim=True)
 
-        (source,) = self.compile(fn, torch.randn(64, 100, device="cuda"), tol=1e-4)
+        (source,) = self.compile(fn, torch.randn(64, 100, device=GPU_TYPE), tol=1e-4)
         self.assertRegex(source, r"out0\[tile_x, tile_r\] = tmp\d+\n")
         self.assertIn(" = out0[tile_x, tile_r]", source)
 
     def test_reduction_axis_first_in_memory(self):
         (source,) = self.compile(
-            lambda x: x.sum(0), torch.randn(100, 64, device="cuda"), tol=1e-4
+            lambda x: x.sum(0), torch.randn(100, 64, device=GPU_TYPE), tol=1e-4
         )
         self.assertIn("reinterpret_tensor(arg0_1, (64, 100), (1, 64), 0)", self.code)
         self.assertIn(" = in0[tile_x, tile_r]", source)
 
     def test_full_reduction(self):
         (source,) = self.compile(
-            lambda x: x.mean(), torch.randn(64, 100, device="cuda"), tol=1e-4
+            lambda x: x.mean(), torch.randn(64, 100, device=GPU_TYPE), tol=1e-4
         )
         self.assertIn("for tile_x in hl.tile(1):", source)
         self.assertIn("out0[tile_x] = ", source)
@@ -844,8 +848,8 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         # The pad mask of column 3 is the constant 3 < 4, and s is 0-d.
         (source,) = self.compile(
             lambda x, s: torch.nn.functional.pad(x * s, (0, 1))[:, 3] + x[:, 1],
-            torch.randn(64, 4, device="cuda"),
-            torch.tensor(2.0, device="cuda"),
+            torch.randn(64, 4, device=GPU_TYPE),
+            torch.tensor(2.0, device=GPU_TYPE),
         )
         self.assertRegex(source, r"hl\.load\(in1, \[\], extra_mask=tmp\d+\)")
 
@@ -855,8 +859,8 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         # kernel, also with an operand that only the Helion lowering realizes.
         sources = self.compile(
             lambda a, b: a.permute(1, 0, 2).reshape(40, 64) @ b,
-            torch.randn(8, 40, 8, device="cuda"),
-            torch.randn(64, 136, device="cuda"),
+            torch.randn(8, 40, 8, device=GPU_TYPE),
+            torch.randn(64, 136, device=GPU_TYPE),
             tol=1e-2,
         )
         self.assertIn("tl.dot(", self.code)
@@ -864,13 +868,13 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
 
     def test_pointwise(self):
         (source,) = self.compile(
-            lambda x: torch.relu(x) * 2 + 1, torch.randn(64, 100, device="cuda")
+            lambda x: torch.relu(x) * 2 + 1, torch.randn(64, 100, device=GPU_TYPE)
         )
         self.assertIn("for tile_x in hl.tile(6400):", source)
 
     @parametrize("case", ["softmax", "layer_norm", "any", "argmax", "dynamic"])
     def test_triton_fallback(self, case):
-        x = torch.randn(64, 100, device="cuda")
+        x = torch.randn(64, 100, device=GPU_TYPE)
         fn = {
             "softmax": lambda x: torch.softmax(x, -1),
             "layer_norm": lambda x: torch.nn.functional.layer_norm(x, (100,)),
@@ -889,7 +893,7 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
     def test_reduction_of_broadcast_value(self):
         (source,) = self.compile(
             lambda x: x[:, :1].expand(64, 100).sum(-1),
-            torch.randn(64, 100, device="cuda"),
+            torch.randn(64, 100, device=GPU_TYPE),
             tol=1e-4,
         )
         self.assertIn(" + hl.zeros([tile_x, tile_r], dtype=torch.float32)", source)
@@ -898,8 +902,8 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         # The pad mask covers (tile_x, tile_r) and r is read over tile_x.
         (source,) = self.compile(
             lambda x, r: torch.nn.functional.pad(x * r, (1, 1, 1, 1)).sum(-1),
-            torch.randn(64, 100, device="cuda"),
-            torch.randn(64, 1, device="cuda"),
+            torch.randn(64, 100, device=GPU_TYPE),
+            torch.randn(64, 1, device=GPU_TYPE),
             tol=1e-4,
         )
         self.assertRegex(
@@ -920,7 +924,9 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
 
         with patch.object(HelionScheduling, "codegen_node_schedule", record):
             self.compile(
-                lambda x: (x * 2).sum(-1), torch.randn(64, 100, device="cuda"), tol=1e-4
+                lambda x: (x * 2).sum(-1),
+                torch.randn(64, 100, device=GPU_TYPE),
+                tol=1e-4,
             )
         (kernel,) = kernels
         self.assertEqual(list(kernel.args.input_buffers), ["arg0_1"])
@@ -928,7 +934,10 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
 
     @config.patch(nan_asserts=True)
     def test_nan_asserts(self):
-        x, y = torch.randn(64, 100, device="cuda"), torch.randn(64, 100, device="cuda")
+        x, y = (
+            torch.randn(64, 100, device=GPU_TYPE),
+            torch.randn(64, 100, device=GPU_TYPE),
+        )
         expected = x + y
         _, (code,) = run_and_get_code(torch.compile(lambda x, y: x.add_(y)), x, y)
         # The kernel runs once, and its arguments are checked after it.
