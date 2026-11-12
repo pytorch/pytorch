@@ -36,10 +36,6 @@ std::pair<const char*, const char*> InternedStrings::string(Symbol sym) {
 }
 
 Symbol InternedStrings::ns(Symbol sym) {
-#if defined C10_MOBILE
-  std::lock_guard<std::mutex> guard(mutex_);
-  return sym_to_info_.at(sym).ns;
-#else
   switch (sym) {
 #define DEFINE_CASE(ns, s) \
   case static_cast<unique_t>(ns::s): \
@@ -52,7 +48,6 @@ Symbol InternedStrings::ns(Symbol sym) {
       return sym_to_info_.at(sym).ns;
     }
   }
-#endif
 }
 
 Symbol InternedStrings::_symbol(const std::string& s) {

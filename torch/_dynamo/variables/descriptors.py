@@ -643,6 +643,18 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
     def python_type(self) -> type:
         return type(self.value) if self.value is not None else types.BuiltinMethodType
 
+    def get_id(self, tx: "InstructionTranslatorBase") -> int | None:
+        if self.value is not None and _method_identity_guards_filtered(tx):
+            unimplemented(
+                gb_type="Prebound builtin method identity requires wrapper guards",
+                context="builtin method wrapper identity",
+                explanation="Binding guards cannot preserve builtin method wrapper identity when identity guards are filtered.",
+                hints=[
+                    "Keep wrapper identity observations outside saved or guard-filtered functions."
+                ],
+            )
+        return super().get_id(tx)
+
     def has_fresh_container_receiver(self) -> bool:
         return (
             self.value is None

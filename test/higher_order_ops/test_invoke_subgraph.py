@@ -3899,7 +3899,54 @@ class TestInvokeSubgraphReuse(TestCase):
             self.assertEqual(compiled(x, holders), fn(x, holders))
         self.assertEqual(counter.frame_count, 1)
 
-    def test_reused_region_dynamic_capture_branch(self):
+    @parametrize("binding", ["unrelated", "range", "integer", "explicit"])
+    def test_reused_region_capture_binding(self, binding):
+        class Holder:
+            def __init__(self, scale):
+                self.scale = 2 if binding == "unrelated" else scale
+                if binding != "unrelated" or scale == 5:
+                    self.tensor = torch.ones(5)
+
+        @nested_compile_region
+        def region(x, holder):
+            if binding == "unrelated":
+                return x * holder.scale
+            if binding == "explicit":
+                return x.sum() + holder.tensor
+            if binding == "integer":
+                return x.expand(holder.scale).clone()
+            return x + 100 if holder.tensor.shape[0] >= 4 else x - 100
+
+        def fn(x, holders):
+            if binding in ("unrelated", "explicit"):
+                x = holders[0].tensor.clone()
+            return tuple(region(x, holder) for holder in holders)
+
+        holders = [Holder(5), Holder(3)]
+        if binding == "explicit":
+            for holder in holders:
+                torch._dynamo.mark_dynamic(holder.tensor, 0)
+        if binding == "range":
+            torch._dynamo.mark_dynamic(holders[0].tensor, 0, min=4)
+            torch._dynamo.mark_dynamic(holders[1].tensor, 0)
+        elif binding == "unrelated":
+            torch._dynamo.mark_dynamic(holders[0].tensor, 0)
+        x, counter = torch.ones(1), CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        with self._count_speculate_calls() as count:
+            self.assertEqual(compiled(x, holders), fn(x, holders))
+            if binding in ("range", "explicit"):
+                self.assertEqual(count(), 1)
+                holders[1].tensor = torch.ones(3)
+                torch._dynamo.mark_dynamic(holders[1].tensor, 0)
+            else:
+                holders[0].scale = 7
+            self.assertEqual(compiled(x, holders), fn(x, holders))
+        if binding == "range":
+            self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("reject_candidate", [False, True])
+    def test_reused_region_dynamic_capture_branch(self, reject_candidate):
         class Holder:
             def __init__(self, size):
                 self.tensor = torch.arange(size, dtype=torch.float)
@@ -3918,14 +3965,37 @@ class TestInvokeSubgraphReuse(TestCase):
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.ones(1)
         holders = [Holder(5) for _ in range(2)]
-        with self._count_speculate_calls() as count:
+
+        def reject(tx, match, *args):
+            self.assertTrue(match.pending_shape_guards)
+            installed = [guard.expr for guard in tx.output.shape_env.guards]
+            for predicate, _ in match.pending_shape_guards:
+                self.assertNotIn(predicate, installed)
+            tensors = {vt.as_proxy().node for vt in match.captured_variables.values()}
+            self.assertFalse(
+                any(
+                    node.op == "call_method"
+                    and node.target in ("size", "stride", "storage_offset")
+                    and node.args[0] in tensors
+                    for node in tx.output.graph.nodes
+                )
+            )
+            return False
+
+        policy = "torch._dynamo.variables.invoke_subgraph.capture_policy_matches"
+        check = (
+            mock.patch(policy, side_effect=reject)
+            if reject_candidate
+            else contextlib.nullcontext()
+        )
+        with check, self._count_speculate_calls() as count:
             self.assertEqual(compiled(x, holders), fn(x, holders))
             initial_traces = count()
             holders[-1].tensor.add_(3)
             self.assertEqual(compiled(x, holders), fn(x, holders))
             holders[-1] = Holder(7)
             self.assertEqual(compiled(x, holders), fn(x, holders))
-        self.assertEqual(initial_traces, 1)
+        self.assertEqual(initial_traces, 2 if reject_candidate else 1)
         self.assertEqual(counter.frame_count, 2)
 
     @parametrize("second_capture", ["static", "dynamic", "shared"])
@@ -4052,8 +4122,8 @@ class TestInvokeSubgraphReuse(TestCase):
         with self._count_speculate_calls() as count:
             x = torch.ones(1)
             self.assertEqual(compiled(x, holders), fn(x, holders))
-            for holder in holders:
-                holder.tensor = torch.ones(13)
+            for i, holder in enumerate(holders):
+                holder.tensor = torch.ones(13 + i)
                 torch._dynamo.mark_dynamic(holder.tensor, 0)
             self.assertEqual(compiled(x, holders), fn(x, holders))
         self.assertEqual(counter.frame_count, 1)

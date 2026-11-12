@@ -69,6 +69,7 @@ from torch._C._dynamo.guards import (
     install_no_tensor_aliasing_guard,
     install_object_alias_pattern_guard,
     install_object_aliasing_guard,
+    install_storage_overlap_partition_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
     LeafGuard,
@@ -115,6 +116,7 @@ from torch._guards import (
     GuardSource,
     Source,
     StorageOverlap,
+    StorageOverlapPartition,
     TracingContext,
 )
 from torch._library.custom_ops import CustomOpDef, OPDEFS
@@ -324,30 +326,54 @@ def _function_code_matches(value: object, expected: FunctionCodeMetadata) -> boo
 
 
 class NativeMethodMetadata(NamedTuple):
-    # Pickled by reference, so it is the loading process's class.
-    receiver: type
+    # Only class receivers are portable; instance tokens must not keep receivers alive.
+    receiver: type | tuple[type, int]
     name: str
 
 
-def _native_method_metadata(value: object) -> NativeMethodMetadata | None:
-    # A builtin bound to a class, like an autograd Function's ``apply``: every
-    # attribute read makes a new bound object, so only equality is portable.
+def _native_method_metadata(
+    value: object, *, portable: bool = True
+) -> NativeMethodMetadata | None:
     if type(value) is not types.BuiltinMethodType:
         return None
     receiver = value.__self__
-    if not isinstance(receiver, type) or not _resolves_by_reference(receiver):
+    is_cls = issubclass(type(receiver), type)
+    if portable and not is_cls:
         return None
-    if getattr(receiver, value.__name__, None) != value:
+    if not portable:
+        from .variables.object_protocol import type_is_immutable
+
+        owner = receiver if is_cls else type(receiver)
+        if type(owner) is not type or not type_is_immutable(owner):
+            return None
+        descr = inspect.getattr_static(owner, value.__name__, None)
+        kind = types.ClassMethodDescriptorType if is_cls else types.MethodDescriptorType
+        if type(descr) is not kind:
+            return None
+    if is_cls and not _resolves_by_reference(receiver):
         return None
-    return NativeMethodMetadata(receiver, value.__name__)
+    expected = NativeMethodMetadata(
+        cast(type, receiver) if is_cls else (type(receiver), id(receiver)),
+        value.__name__,
+    )
+    return expected if _native_method_matches(value, expected) else None
 
 
 def _native_method_matches(value: object, expected: NativeMethodMetadata) -> bool:
-    # The type check first: == would otherwise run the new value's __eq__.
-    return (
-        type(value) is types.BuiltinMethodType
-        and value.__self__ is expected.receiver
-        and value == getattr(expected.receiver, expected.name)
+    if type(value) is not types.BuiltinMethodType or value.__name__ != expected.name:
+        return False
+    receiver = value.__self__
+    if type(expected.receiver) is tuple:
+        owner, receiver_id = expected.receiver
+        if type(receiver) is not owner or id(receiver) != receiver_id:
+            return False
+        # Instance metadata only resolves descriptors on immutable builtin classes.
+        descr = getattr(owner, expected.name, None)
+        return type(descr) is types.MethodDescriptorType and value == descr.__get__(
+            receiver
+        )
+    return receiver is expected.receiver and value == getattr(
+        expected.receiver, expected.name
     )
 
 
@@ -365,29 +391,22 @@ def _method_identity_guards_filtered(tx: InstructionTranslatorBase) -> bool:
 def install_builtin_method_guard(
     tx: InstructionTranslatorBase, source: Source, value: object = None
 ) -> None:
-    if _method_identity_guards_filtered(tx):
-        if value is None:
-            value = tx.output.resolve_source_value(source)
-        expected = (
-            _native_method_metadata(value)
-            if type(value) is types.BuiltinMethodType
-            and issubclass(type(value.__self__), type)
-            else None
+    filtered = _method_identity_guards_filtered(tx)
+    if value is None:
+        value = tx.output.resolve_source_value(source)
+    expected = _native_method_metadata(value, portable=filtered)
+    if expected is not None:
+        create = functools.partial(GuardBuilder.NATIVE_METHOD_MATCH, expected=expected)
+        install_guard(source.make_guard(create))
+    elif filtered:
+        unimplemented(
+            gb_type="Prebound builtin method requires identity guards",
+            context=source.name,
+            explanation="Dynamo cannot track this prebound builtin method when its identity guard can be skipped or filtered.",
+            hints=["Bind the builtin method inside the compiled function."],
         )
-        if expected is None:
-            unimplemented(
-                gb_type="Prebound builtin method requires identity guards",
-                context=source.name,
-                explanation="Dynamo cannot track this prebound builtin method when its identity guard can be skipped or filtered.",
-                hints=["Bind the builtin method inside the compiled function."],
-            )
-        install_guard(
-            source.make_guard(
-                functools.partial(GuardBuilder.NATIVE_METHOD_MATCH, expected=expected)
-            )
-        )
-        return
-    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+    else:
+        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
 
 
 def _mapping_proxy_mapping(value: object) -> object:
@@ -3599,22 +3618,29 @@ class GuardBuilder(GuardBuilderBase):
         eval_fn=_native_method_matches,
     )
     def NATIVE_METHOD_MATCH(self, guard: Guard, expected: NativeMethodMetadata) -> None:
-        last_match: list[object] = []
+        if self.save_guards and type(expected.receiver) is tuple:
+            raise torch._dynamo.exc.PackageError(
+                "Instance methods need receiver identity; bind them in the saved function."
+            )
+        last_match: weakref.ReferenceType[object] | None = None
 
         def guard_fn(value: object) -> bool:
-            # The object ID_MATCH would have pinned; holding it keeps its id
-            # from being reused.
-            if last_match and value is last_match[0]:
-                return True
+            nonlocal last_match
+            if last_match is not None and value is last_match():
+                return value is not None
             if not _native_method_matches(value, expected):
                 return False
-            last_match[:] = [value]
+            last_match = weakref.ref(value)
             return True
 
-        code = (
-            f"___check_native_method({self.arg_ref(guard)}, "
-            f"{expected.receiver.__module__}.{expected.receiver.__qualname__}.{expected.name})"
+        owner = cast(
+            type,
+            expected.receiver[0]
+            if type(expected.receiver) is tuple
+            else expected.receiver,
         )
+        method = f"{owner.__module__}.{owner.__qualname__}.{expected.name}"
+        code = f"___check_native_method({self.arg_ref(guard)}, {method})"
         self._set_guard_export_info(guard, [code])
         self.get_guard_manager(guard).add_lambda_guard(
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
@@ -3643,8 +3669,10 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard)
         length = _sequence_length(value)
 
-        if not issubclass(type(value), dict):
-            # C++ DICT_LENGTH checks for type
+        if not issubclass(type(value), dict) and not istype(
+            guard.originating_source, TypeMROSource
+        ):
+            # DICT_LENGTH checks its type; TypeMROSource reads the always-tuple tp_mro.
             self.TYPE_MATCH(guard)
 
         code = []
@@ -6777,6 +6805,23 @@ class CheckFunctionManager:
                 install_storage_overlapping_guard(
                     overlapping_guard_managers,
                     non_overlapping_guard_managers,
+                    [code_part],
+                    None,
+                )
+                add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageOverlapPartition):
+                partition_guard_managers = [
+                    builder.get_guard_manager_from_source(s)
+                    for s in guard.input_sources
+                ]
+                code_part = (
+                    "___check_storage_overlap_partition("
+                    f"[{', '.join(source.name for source in guard.input_sources)}], "
+                    f"{guard.overlapping_indices})"
+                )
+                install_storage_overlap_partition_guard(
+                    partition_guard_managers,
+                    guard.overlapping_indices,
                     [code_part],
                     None,
                 )
