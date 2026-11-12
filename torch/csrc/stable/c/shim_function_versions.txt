@@ -163,4 +163,7 @@ aoti_torch_device_type_mtia: TORCH_VERSION_2_16_0
 aoti_torch_xpu_bmm_dtype_out: TORCH_VERSION_2_16_0
 aoti_torch_xpu_caching_allocator_raw_alloc: TORCH_VERSION_2_16_0
 aoti_torch_xpu_caching_allocator_raw_delete: TORCH_VERSION_2_16_0
+torch_is_conj: TORCH_VERSION_2_16_0
+torch_is_inference: TORCH_VERSION_2_16_0
+torch_is_neg: TORCH_VERSION_2_16_0
 torch_is_warn_always_enabled: TORCH_VERSION_2_16_0
