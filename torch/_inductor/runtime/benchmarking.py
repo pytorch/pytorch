@@ -617,6 +617,61 @@ class TritonBenchmarker(Benchmarker):
             raise
 
 
+# AMD Infinity Cache (MALL) size by gfx target; torch's device properties do not
+# report it. Unknown archs are assumed to have a 256 MB MALL.
+_ROCM_MALL_SIZE = {
+    "gfx908": 0,  # MI100
+    "gfx90a": 0,  # MI200
+    "gfx942": 256 * 1024 * 1024,  # MI300X
+    "gfx950": 256 * 1024 * 1024,  # MI350X
+}
+
+
+@functools.cache
+def _rocm_mall_size() -> int:
+    """MALL bytes of the current ROCm device."""
+    props = torch.cuda.get_device_properties(torch.cuda.current_device())
+    arch = getattr(props, "gcnArchName", "").split(":", 1)[0]
+    return _ROCM_MALL_SIZE.get(arch, 256 * 1024 * 1024)
+
+
+@functools.cache
+def _rocm_read_kernel() -> Any:
+    import triton
+    import triton.language as tl
+
+    @triton.jit
+    def _read(in_ptr, out_ptr, n, BLOCK: tl.constexpr):  # type: ignore[no-untyped-def]
+        pid = tl.program_id(0)
+        acc = tl.zeros([BLOCK], dtype=tl.float32)
+        for start in range(pid * BLOCK, n, tl.num_programs(0) * BLOCK):
+            offs = start + tl.arange(0, BLOCK)
+            acc += tl.load(in_ptr + offs, mask=offs < n, other=0.0)
+        tl.store(out_ptr + pid, tl.sum(acc))
+
+    return _read
+
+
+def _rocm_read_flush(buffer: torch.Tensor, passes: int) -> Callable[[], None]:
+    """Return a flush that reads all of `buffer` `passes` times with plain loads.
+
+    ATen's vectorized loads are nontemporal on gfx942 (MI300), so they do not
+    allocate in the Infinity Cache and a buffer.sum() flush evicts nothing there.
+    Triton's default loads do allocate.
+    """
+    kernel = _rocm_read_kernel()
+    props = torch.cuda.get_device_properties(buffer.device)
+    grid = (props.multi_processor_count * 8,)
+    partials = torch.empty(grid, dtype=torch.float32, device=buffer.device)
+    n = buffer.numel()
+
+    def flush() -> None:
+        for _ in range(passes):
+            kernel[grid](buffer, partials, n, BLOCK=2048, num_warps=8)
+
+    return flush
+
+
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     @cached_property
     def L2_cache_size(self: Self) -> int:
@@ -639,6 +694,21 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             if cache_size:
                 return cache_size
         return 256 * 1024 * 1024
+
+    def get_flush_size(
+        self: Self, device_type: str | torch.device | None = None
+    ) -> int:
+        """Bytes to flush between timed runs so each starts with cold caches.
+
+        On ROCm, L2_cache_size is the per-XCD L2 (4 MB on MI300X/MI350X) and the
+        Infinity Cache (MALL) behind it is not in torch's device properties, so add
+        it. Flushing only the L2 leaves operands warm in the MALL, which misranks
+        autotune choices.
+        """
+        cache_size = self.get_device_cache_size(device_type)
+        if not torch.version.hip:
+            return cache_size
+        return cache_size + _rocm_mall_size()
 
     def get_event_pairs(
         self: Self, iters: int, device_type: str | torch.device | None = None
@@ -691,7 +761,8 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         - estimation_iters: Optionally, the number of iterations to run `_callable`
         during runtime estimation.
         - memory_warmup_iters: Optionally, the number of iterations to flush the L2
-        cache before starting benchmarking.
+        cache before starting benchmarking. On ROCm each flush reads the buffer
+        twice, so half as many (rounded up) flushes run.
         - benchmark_iters: Optionally, the number of iterations to run `_callable`
         during the benchmarking.
         - max_benchmark_duration: Optionally, the maximum duration of the benchmarking,
@@ -753,16 +824,30 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         # host has launched `_callable`, leaking launch latency into the event
         # timing. A larger flush buffer keeps the device busy longer.
         # See https://github.com/pytorch/pytorch/issues/189144
-        buffer_size_bytes = self.get_device_cache_size(device_type)
+        buffer_size_bytes = self.get_flush_size(device_type)
         if device_type == "xpu":
             buffer_size_bytes = max(buffer_size_bytes, 64 * 1024 * 1024)
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
+        # (CUDA). On ROCm, flush by reading the buffer instead: zero_() leaves it
+        # dirty in the L2 / Infinity Cache and the timed call then pays the
+        # write-back. Read it with a Triton kernel, since ATen's loads skip the
+        # Infinity Cache on MI300 (see _rocm_read_flush). Read it twice: one pass
+        # does not evict operands the callable has just reused from the Infinity
+        # Cache.
         buffer = torch.empty(
             buffer_size_bytes // 4,
-            dtype=torch.int,
+            dtype=torch.float32 if torch.version.hip else torch.int,
             device=device_type,
         )
         buffer.zero_()
+        flush: Callable[[], Any]
+        if torch.version.hip:
+            passes = 2
+            flush = _rocm_read_flush(buffer, passes)
+            # keep the warmup's total reads
+            memory_warmup_iters = -(-memory_warmup_iters // passes)
+        else:
+            flush = buffer.zero_
 
         # estimate the runtime of `_callable`
         event_pairs = self.get_event_pairs(estimation_iters, device_type=device_type)
@@ -771,7 +856,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             if grad_to_none is not None:
                 for x in grad_to_none:
                     x.grad = None
-            buffer.zero_()
+            flush()
             start_event.record()
             _callable()
             end_event.record()
@@ -786,7 +871,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):
-            buffer.zero_()
+            flush()
 
         # benchmark `_callable`
         event_pairs = self.get_event_pairs(benchmark_iters, device_type=device_type)
@@ -795,7 +880,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             if grad_to_none is not None:
                 for x in grad_to_none:
                     x.grad = None
-            buffer.zero_()
+            flush()
             start_event.record()
             _callable()
             end_event.record()
@@ -803,7 +888,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
         # explicitly delete the buffer, sometimes helps memory
         # footprint metrics in OSS Inductor performance benchmarks
-        del buffer
+        del flush, buffer
 
         # Return based on the requested mode
         if return_mode == "all":
