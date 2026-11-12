@@ -260,6 +260,167 @@ _RANDOM_KEYS = (random.Random().random, random.Random().random)
 
 
 class FunctionTests(torch._dynamo.test_case.TestCase):
+    def test_prebound_slot_wrapper_metadata(self):
+        def fn(x, method):
+            return x + 1, method, method.__qualname__
+
+        receiver = collections.OrderedDict()
+        methods = [
+            owner.__get__(receiver)
+            for owner in (
+                dict.__setitem__,
+                collections.OrderedDict.__setitem__,
+                dict.__delitem__,
+            )
+        ]
+
+        class Spoof(types.SimpleNamespace):
+            @property
+            def __class__(self):
+                return types.MethodWrapperType
+
+        spoof = Spoof(
+            __self__=receiver,
+            __name__="__setitem__",
+            __objclass__=dict,
+            __qualname__="spoof",
+        )
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for method in (*methods, spoof, dict.__setitem__.__get__(receiver)):
+            actual = compiled(x, method)
+            self.assertEqual(actual[0], x + 1)
+            self.assertIs(actual[1], method)
+            self.assertEqual(actual[2], method.__qualname__)
+        self.assertEqual(counter.frame_count, 4)
+
+    def test_prebound_dict_write_ordered_fallback(self):
+        def fn(x, mapping, setter):
+            setter("b", 3)
+            return x + 1, list(dict.items(mapping)), list(mapping)
+
+        x = torch.ones(1)
+
+        def call(fn, cls):
+            mapping = cls(a=1)
+            return fn(x, mapping, dict.__setitem__.__get__(mapping))
+
+        compiled = torch.compile(fn, backend="eager")
+        items = [("a", 1), ("b", 3)]
+        self.assertEqual(call(compiled, dict), (x + 1, items, ["a", "b"]))
+        self.assertEqual(call(compiled, collections.OrderedDict), (x + 1, items, ["a"]))
+        with self.assertRaisesRegex(
+            Unsupported, "dict storage mutation on OrderedDict"
+        ):
+            call(
+                torch.compile(fn, backend="eager", fullgraph=True),
+                collections.OrderedDict,
+            )
+
+    def test_prebound_base_slot_override_fallback(self):
+        class Override(list):
+            def __add__(self, other):
+                return ["override"]
+
+        method = list.__add__.__get__(Override([1]))
+
+        def fn(x, method):
+            return x + 1, method([2])
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, method), (x + 1, [1, 2]))
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "Unsupported function call"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, method)
+
+    def test_prebound_wrapper_key_aliases(self):
+        def fn(x, methods):
+            return (
+                x + len({methods[0]: 1, methods[1]: 2}),
+                len({methods[0]}.intersection((methods[1],))),
+            )
+
+        first, second = {}, {}
+        bind = dict.__setitem__.__get__
+        cases = [
+            (bind(first), bind(first)),
+            (bind(first), bind(second)),
+            (bind(first), bind(first)),
+        ]
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for methods in cases:
+            self.assertEqual(compiled(x, methods), fn(x, methods))
+        self.assertEqual(counter.frame_count, 2)
+        with torch.compiler.set_stance(skip_guard_eval_unsafe=True):
+            for methods in cases:
+                self.assertEqual(compiled(x, methods), fn(x, methods))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_prebound_wrapper_mutable_hash_escape(self):
+        def fn(x, method):
+            return x + 1, hash(method)
+
+        self._check_key_fallback(fn, (dict.__setitem__.__get__({}),), "FakeIdVariable")
+
+    def test_prebound_wrapper_constant_receiver_hash(self):
+        def fn(x, method):
+            return x + 1, hash(method)
+
+        first = "".join(["a long ", "receiver"])
+        second = "".join(["a long ", "receiver"])
+        self.assertIsNot(first, second)
+        self._check_key_reuse(
+            fn, [s.__hash__ for s in (first, second, first)], frames=2
+        )
+
+    @parametrize("operation", ["hash", "compare"])
+    @parametrize("capture", ["aot", "cache"])
+    def test_prebound_wrapper_saved_identity_refusal(self, operation, capture):
+        def fn(x, methods):
+            if operation == "compare":
+                return x + (methods[0] == methods[1])
+            return x + len({methods[0]: 1, methods[1]: 2})
+
+        methods = tuple(dict.__setitem__.__get__({}) for _ in range(2))
+        with torch._dynamo.config.patch(
+            caching_precompile=capture == "cache", debug_force_nested_calls=False
+        ):
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(
+                Unsupported, "slot-wrapper identity requires receiver guards"
+            ):
+                if capture == "aot":
+                    compiled.aot_compile(((torch.ones(1), methods), {}))
+                else:
+                    compiled(torch.ones(1), methods)
+
+    @parametrize("capture", ["aot", "cache"])
+    def test_prebound_wrapper_saved_metadata(self, capture):
+        def fn(x, method):
+            return x + 1, method.__qualname__
+
+        receiver = collections.OrderedDict()
+        methods = [
+            owner.__get__(receiver)
+            for owner in (dict.__setitem__, collections.OrderedDict.__setitem__)
+        ]
+        x = torch.ones(1)
+        with torch._dynamo.config.patch(
+            caching_precompile=capture == "cache", debug_force_nested_calls=False
+        ):
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            if capture == "aot":
+                compiled = compiled.aot_compile(((x, methods[0]), {}))
+                self.assertEqual(compiled(x, methods[0]), fn(x, methods[0]))
+                with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+                    compiled(x, methods[1])
+            else:
+                for method in methods:
+                    self.assertEqual(compiled(x, method), fn(x, method))
+
     @parametrize("name", ["__getattr__", "__getattribute__"])
     @parametrize("inherited", [False, True])
     @torch._dynamo.config.patch(assume_dunder_attributes_remain_unchanged=False)
@@ -349,9 +510,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x, left, right), x + 8)
         self.assertEqual(counter.frame_count, 2)
 
-    def test_mro_guards_omit_builtin_object_tail(self):
-        class Input:
+    def test_mro_guards_pin_builtin_object_tail(self):
+        class Base:
             scale = 1
+
+        class Input(Base):
+            pass
 
         def fn(x, obj):
             return x + obj.scale
@@ -359,15 +523,63 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x, obj = torch.ones(1), Input()
         explanation = torch._dynamo.explain(fn)(x, obj)
         self.assertEqual(explanation.graph_count, 1)
-        self.assertFalse(
-            any(
-                guard.create_fn_name() == "ID_MATCH"
-                and guard.name == "type(L['obj']).__mro__[1]"
-                for guard in explanation.out_guards
-            )
-        )
+        guards = {
+            (guard.create_fn_name(), guard.name) for guard in explanation.out_guards
+        }
+        self.assertIn(("SEQUENCE_LENGTH", "type(L['obj']).__mro__"), guards)
+        self.assertIn(("ID_MATCH", "type(L['obj']).__mro__[1]"), guards)
+        self.assertIn(("ID_MATCH", "type(L['obj']).__mro__[2]"), guards)
 
-    def test_mro_guards_bypass_metaclass_lookup(self):
+    @parametrize("initial_builtin", [False, True])
+    def test_shared_mro_owner_non_object_tail(self, initial_builtin):
+        class Tail:
+            def f(self, x):
+                return x + 1
+
+        class OtherTail:
+            def f(self, x):
+                return x + 2
+
+            def __format__(self, spec):
+                return "changed"
+
+        tail = object if initial_builtin else Tail
+
+        class Meta(type):
+            def mro(cls):
+                return [cls, tail] if initial_builtin else [cls, object, tail]
+
+        class LeftBase(metaclass=Meta):
+            pass
+
+        class RightBase(metaclass=Meta):
+            pass
+
+        class Left:
+            pass
+
+        class Right:
+            pass
+
+        left, right = (Left, Right) if initial_builtin else (Left(), Right())
+        Left.__bases__ = (LeftBase,)
+        Right.__bases__ = (RightBase,)
+
+        def fn(x, left, right):
+            if initial_builtin:
+                return x + (left.__format__ is right.__format__)
+            return left.f(x) + right.f(x)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x, left, right), fn(x, left, right))
+        tail = OtherTail
+        RightBase.__bases__ = (object,)
+        self.assertEqual(compiled(x, left, right), fn(x, left, right))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_mro_guards_custom_metaclass_fallback(self):
         class Meta(type):
             def __getattribute__(cls, name):
                 if name == "__mro__":
@@ -383,9 +595,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + obj.scale
 
         obj, x = Input(), torch.ones(1)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, obj), x + 3
-        )
+        with self.assertRaisesRegex(Unsupported, "Custom metaclass metadata access"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, obj)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, obj), x + 3)
 
     @parametrize("suppressed", ["context", "source"])
     @parametrize("change", ["bases", "shadow"])
@@ -7413,6 +7625,127 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x, a, a), (True, x + 1))
 
+    @parametrize("receiver_type", [list, tuple, range])
+    def test_bound_builtin_method_comparison_alias_changes(self, receiver_type):
+        def fn(x, left, right):
+            descriptor = receiver_type.__dict__["count"]
+            return x + (
+                descriptor.__get__(left, receiver_type)
+                == descriptor.__get__(right, receiver_type)
+            )
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        left = receiver_type(2) if receiver_type is range else receiver_type([1, 2])
+        right = receiver_type(2) if receiver_type is range else receiver_type([1, 2])
+        for first, second in (
+            (left, right),
+            (left, left),
+            (right, right),
+            (right, left),
+        ):
+            self.assertEqual(compiled(x, first, second), x + (first is second))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("capture", ["aot", "cache"])
+    def test_saved_prebound_classmethod_binding(self, capture):
+        def fn(x, method):
+            return x + 1, method.__name__
+
+        x = torch.ones(1)
+        counter = torch._dynamo.testing.CompileCounter()
+        with torch._dynamo.config.patch(caching_precompile=capture == "cache"):
+            compiled = torch.compile(
+                fn, backend="eager" if capture == "aot" else counter, fullgraph=True
+            )
+            if capture == "aot":
+                compiled = compiled.aot_compile(((x, dict.fromkeys), {}))
+                self.assertEqual(compiled(x, dict.fromkeys), fn(x, dict.fromkeys))
+                self.assertFalse(compiled.guard_check(x, dict.__class_getitem__))
+            else:
+                for method in (dict.fromkeys, dict.__class_getitem__, dict.fromkeys):
+                    self.assertEqual(compiled(x, method), fn(x, method))
+                self.assertEqual(counter.frame_count, 2)
+
+    def test_bound_builtin_method_literal_tuple_comparison_fallback(self):
+        descriptor = tuple.__dict__["count"]
+
+        def fn(x, receiver):
+            return x + (
+                descriptor.__get__(receiver, tuple) == descriptor.__get__((1, 2), tuple)
+            )
+
+        literal = next(value for value in fn.__code__.co_consts if type(value) is tuple)
+        self._check_key_fallback(
+            fn, (literal, tuple(range(1, 3)), literal), "unstable receiver"
+        )
+
+    def test_bound_builtin_method_inlined_literal_fallback(self):
+        descriptor = tuple.__dict__["count"]
+
+        def helper(receiver):
+            return descriptor.__get__(receiver, tuple) == descriptor.__get__(
+                (1, 2), tuple
+            )
+
+        def fn(x, unused):
+            return x + helper((1, 2))
+
+        self.assertEqual(fn(torch.ones(1), None), torch.ones(1) + 1)
+        self._check_key_fallback(fn, (None,), "unstable receiver")
+
+    @parametrize("operation", ["hash", "metadata", "call", "key"])
+    @parametrize("capture", ["aot", "cache"])
+    def test_prebound_builtin_saved_identity_refusal(self, operation, capture):
+        def fn(x, method):
+            if operation == "hash":
+                return x + 1, hash(method)
+            if operation == "metadata":
+                return x + 1, method.__name__
+            if operation == "key":
+                return x + len({method})
+            return x + method(1)
+
+        with torch._dynamo.config.patch(caching_precompile=capture == "cache"):
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(
+                Unsupported, "Prebound builtin method requires identity guards"
+            ):
+                if capture == "aot":
+                    compiled.aot_compile(((torch.ones(1), [1].count), {}))
+                else:
+                    compiled(torch.ones(1), [1].count)
+
+    @parametrize("capture", ["aot", "cache"])
+    @parametrize("aggregate", [False, True])
+    def test_prebound_classmethod_saved_hash_refusal(self, capture, aggregate):
+        def fn(x, method):
+            return x + 1, hash(frozenset((method,)) if aggregate else method)
+
+        with torch._dynamo.config.patch(caching_precompile=capture == "cache"):
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            with self.assertRaisesRegex(Unsupported, "FakeIdVariable"):
+                if capture == "aot":
+                    compiled.aot_compile(((torch.ones(1), MethodKeyDict.fromkeys), {}))
+                else:
+                    compiled(torch.ones(1), MethodKeyDict.fromkeys)
+
+    def test_builtin_method_tuple_subclass_key(self):
+        class Keys(tuple):
+            __slots__ = ()
+
+            def __iter__(self):
+                raise AssertionError("key metadata must not iterate tuple subclass")
+
+        def fn(x, receiver, mapping):
+            key = (list.count.__get__(receiver, list),)
+            return x + mapping.get(key, 0)
+
+        first, second, third = [], [], []
+        mapping = {Keys([first.count]): 7}
+        self._check_key_reuse(fn, (second, third, first, second), mapping)
+
     @parametrize("direct", [False, True])
     def test_bound_builtin_method_hash(self, direct):
         receiver = [1, 1]
@@ -7592,6 +7925,22 @@ class GraphModule(torch.nn.Module):
             torch.compile(fn, backend="eager", fullgraph=True)(x, method), fn(x, method)
         )
 
+    @parametrize("participating", [False, True])
+    def test_saved_method_key_custom_collision(self, participating):
+        def fn(x, method, key):
+            table = {method: 1}
+            return x + (key in (table if participating else {1: 1}))
+
+        method = MethodKeyDict.fromkeys
+        args = (torch.ones(1), method, AlwaysEqualHashKey(hash(method)))
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        if participating:
+            with self.assertRaisesRegex(Unsupported, "requires identity guards"):
+                compiled.aot_compile((args, {}))
+        else:
+            compiled = compiled.aot_compile((args, {}))
+            self.assertEqual(compiled(*args), fn(*args))
+
     @parametrize("prebound", (False, True))
     def test_builtin_method_keys(self, prebound):
         def fn(x, pair):
@@ -7605,21 +7954,6 @@ class GraphModule(torch.nn.Module):
         method = a.get
         pairs = [(obj, method) for obj in (b, a, b)]
         self._check_key_reuse(fn, pairs, frames=2 if prebound else 1)
-
-    def test_builtin_method_tuple_subclass_key(self):
-        class Keys(tuple):
-            __slots__ = ()
-
-            def __iter__(self):
-                raise AssertionError("key metadata must not iterate tuple subclass")
-
-        def fn(x, receiver, mapping):
-            key = (list.count.__get__(receiver, list),)
-            return x + mapping.get(key, 0)
-
-        first, second, third = [], [], []
-        mapping = {Keys([first.count]): 7}
-        self._check_key_reuse(fn, (second, third, first, second), mapping)
 
     @parametrize("local", [False, True])
     @parametrize("key", [torch.float32, torch.device("cpu"), object()])
@@ -8032,8 +8366,7 @@ class GraphModule(torch.nn.Module):
     @parametrize("key_kind", ("metaclass", "plain_metaclass", "spoofed_method"))
     def test_builtin_method_input_key_custom_equality(self, depth, key_kind):
         class BaseMeta(type):
-            def __hash__(cls):
-                return cls.hash_value
+            __hash__ = AlwaysEqualHashKey.__hash__
 
         class Meta(BaseMeta):
             __hash__ = BaseMeta.__hash__
@@ -8044,7 +8377,7 @@ class GraphModule(torch.nn.Module):
         class ClassKey(metaclass=BaseMeta if key_kind == "plain_metaclass" else Meta):
             hash_value = 0
 
-        class Key:
+        class Key(AlwaysEqualHashKey):
             def __init__(self, method):
                 self.method = method
                 self.hash_value = hash(method)
@@ -8053,8 +8386,7 @@ class GraphModule(torch.nn.Module):
             def __class__(self):
                 return types.BuiltinMethodType
 
-            def __hash__(self):
-                return self.hash_value
+            __hash__ = AlwaysEqualHashKey.__hash__
 
             def __eq__(self, other):
                 return self.method == other
@@ -8619,7 +8951,7 @@ class GraphModule(torch.nn.Module):
             return x + 1, hash(method) == hash(method)
 
         self._check_key_fallback(
-            fn, (None,), "builtin method hash with unstable receiver"
+            fn, (None,), "builtin method identity with unstable receiver"
         )
 
     @parametrize("wrap", [None, tuple, frozenset, lambda _: frozenset([time.time])])
