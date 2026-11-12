@@ -1520,10 +1520,9 @@ def _same_slice_range(
 def _slice_scatter_noop_replacement(node):
     """Return ``self`` when ``src`` is exactly the slice being overwritten.
 
-    Functionalization can produce split/getitem/slice_scatter or
-    slice/slice_scatter chains that copy an unmodified view back to the same
-    range of its base.  Replacing such a
-    scatter with the base avoids materializing the whole tensor.  Fall back to
+    Functionalization can produce split/getitem/slice_scatter or slice/slice_scatter
+    chains that copy an unmodified view back to the same range of its base.  Replacing
+    such a scatter with the base avoids materializing the whole tensor.  Fall back to
     the historical full-replacement behavior (replace with ``src``).
     """
     self = get_arg_value(node, 0)
