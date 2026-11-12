@@ -2235,12 +2235,12 @@ class PrecompileSession(Generic[_P, _R]):
                 f"Precompilation dropped guard(s) that can affect dispatch on "
                 f"{[n for _, n in summary.risky_dropped_guards]}. Each of those names "
                 f"a slot whose value differed between captured variants, a "
-                f"configuration-dependent identity slot, or a guard discarded by a "
+                f"configuration-dependent identity slot, a mutable MRO base, or a guard discarded by a "
                 f"custom filter. Nothing checks it at load time, so a different value "
                 f"can silently select the wrong graph instead of recompiling. Make the "
                 f"value reachable through a serializable guard, pin both machines to "
                 f"the same value, or pass require_no_risky_drops=False to accept the "
-                f"risk explicitly."
+                f"risk explicitly. Keep mutable MRO bases importable through stable module/name references."
             )
         if require_complete:
             if summary.capture_errors:

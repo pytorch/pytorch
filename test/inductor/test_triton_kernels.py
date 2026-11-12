@@ -7,6 +7,7 @@ import dataclasses
 import functools
 import inspect
 import io
+import json
 import logging
 import os
 import subprocess
@@ -66,6 +67,7 @@ from torch._library import capture_triton
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
 from torch.testing._internal.inductor_utils import (
@@ -3513,6 +3515,46 @@ def forward(self, x_1, output_1):
             kernels[0].kwargs["in_ptr1"].get_name(),
         )
 
+    @unittest.skipIf(not has_triton_package(), "requires triton")
+    def test_config_to_dict_keeps_ctas_per_cga(self):
+        import triton
+
+        from torch._inductor.runtime.triton_heuristics import (
+            _pop_config_kwargs,
+            config_to_dict,
+        )
+
+        # triton.Config keeps a list as it is given; setting the attribute works
+        # with any Triton.
+        cfg = triton.Config({"BLOCK": 64})
+        cfg.ctas_per_cga = [2, 1, 1]
+        cfg_dict = config_to_dict(cfg)
+        self.assertIsInstance(cfg_dict["ctas_per_cga"], tuple)
+        # A JSON round trip turns the cluster shape into a list.
+        for d in (cfg_dict, json.loads(json.dumps(cfg_dict))):
+            ctas_per_cga = _pop_config_kwargs({**d})["ctas_per_cga"]
+            self.assertIsInstance(ctas_per_cga, tuple)
+            self.assertEqual(ctas_per_cga, (2, 1, 1))
+
+    @unittest.skipIf(not has_triton_package(), "requires triton")
+    def test_config_from_dict_restores_ctas_per_cga(self):
+        import triton
+
+        from torch._inductor.runtime.triton_compat import _triton_config_has
+        from torch._inductor.runtime.triton_heuristics import (
+            config_from_dict,
+            config_to_dict,
+        )
+
+        if not _triton_config_has("ctas_per_cga"):
+            raise unittest.SkipTest("triton.Config has no ctas_per_cga")
+        cfg_dict = config_to_dict(triton.Config({"BLOCK": 64}, ctas_per_cga=(2, 1, 1)))
+        for d in (cfg_dict, json.loads(json.dumps(cfg_dict))):
+            config = config_from_dict(d)
+            self.assertIsInstance(config.ctas_per_cga, tuple)
+            self.assertEqual(config.ctas_per_cga, (2, 1, 1))
+            self.assertEqual(config.kwargs, {"BLOCK": 64})
+
     @requires_gpu
     def test_triton_kernel_strided_input_nonzero_offset(self):
         def f(inp):
@@ -5551,7 +5593,60 @@ def forward(self, arg0_1, arg1_1):
         # to the same kernel there; config dedup does not know the device.
         self.assertCountEqual([o.get("maxnreg") for o in options], [None, 64])
 
+    @requires_cuda_and_triton
+    @unittest.skipIf(
+        not SM90OrLater or torch.version.hip, "thread block clusters need CUDA SM90+"
+    )
+    @common_utils.parametrize("autotune_at_compile_time", [True, False])
+    def test_triton_kernel_autotune_config_ctas_per_cga(self, autotune_at_compile_time):
+        # Like test_triton_kernel_autotune_config_maxnreg, for a cluster shape. It
+        # is given as a list, which triton.Config keeps, and the generated code
+        # rebuilds it as a tuple. The last config's BLOCK_SIZE matches no other
+        # config, so it finds a precomputed grid only if config_to_dict writes a
+        # tuple.
+        from torch._inductor.runtime.triton_compat import _triton_config_has
+
+        if not _triton_config_has("ctas_per_cga"):
+            raise unittest.SkipTest("triton.Config has no ctas_per_cga")
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 128}, num_warps=4),
+                triton.Config({"BLOCK_SIZE": 128}, num_warps=4, ctas_per_cga=[2, 1, 1]),
+                triton.Config({"BLOCK_SIZE": 64}, num_warps=4, ctas_per_cga=[2, 1, 1]),
+            ],
+            key=[],
+        )
+        @triton.jit
+        def add_kernel(in_ptr0, out_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x + 1, mask=mask)
+
+        def f(x):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](x, output, n_elements)
+            return output
+
+        x = torch.randn(1024, device=GPU_TYPE)
+        with inductor_config.patch(
+            {"triton.autotune_at_compile_time": autotune_at_compile_time}
+        ):
+            out, _, options = self._run_and_get_triton_compile_options(f, x)
+        self.assertEqual(out, x + 1)
+        clusters = [o.get("ctas_per_cga") for o in options]
+        self.assertCountEqual(clusters, [None, (2, 1, 1), (2, 1, 1)])
+
     @requires_gpu
+    @common_utils.decorateIf(
+        unittest.skip("compile-time autotuning only exists in inductor"),
+        lambda params: params["autotune_at_compile_time"]
+        and params["backend"] != "inductor",
+    )
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("autotune_at_compile_time", [True, False])
     def test_triton_kernel_restore_value(self, backend, autotune_at_compile_time):
@@ -8575,6 +8670,11 @@ else:
             add_compiled(x, y).mean()
 
     @requires_gpu
+    @common_utils.decorateIf(
+        unittest.skip("compile-time autotuning only exists in inductor"),
+        lambda params: params["autotune_at_compile_time"]
+        and params["backend"] != "inductor",
+    )
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("autotune_at_compile_time", [True, False])
     def test_triton_kernel_reset_to_zero(self, backend, autotune_at_compile_time):

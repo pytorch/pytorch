@@ -8,7 +8,11 @@ def define_tools_targets(
         python_test,
         third_party,
         torchgen_deps,
-        contacts = []):
+        contacts = [],
+        # Internal builds pass a version that also covers directories that are
+        # separate Buck packages there.
+        glob_impl = None):
+    glob_impl = glob_impl or glob
     python_library(
         name = "substitutelib",
         srcs = ["substitute.py"],
@@ -26,7 +30,7 @@ def define_tools_targets(
 
     python_library(
         name = "jit",
-        srcs = glob([
+        srcs = glob_impl([
             "jit/*.py",
             "jit/templates/*",
         ]),
