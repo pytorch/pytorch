@@ -14,18 +14,24 @@ from typing import Any, cast, NamedTuple, TYPE_CHECKING, TypeGuard
 
 import torch
 import torch._higher_order_ops
-from torch._dynamo import graph_break_hints
+from torch._dynamo import config, graph_break_hints
 from torch._dynamo.exc import unimplemented
 from torch._dynamo.guards import (
     extract_tensor_metadata,
     GUARD_VALUE_DISPATCH,
+    GuardBuilder,
     GuardCheckSpec,
     install_guard,
     SKIP_GUARD,
     UnsupportedGuardCheckSpec,
 )
-from torch._dynamo.source import SyntheticLocalSource
-from torch._dynamo.utils import _make_inlined, constants_identical, unpack_iterable
+from torch._dynamo.source import SyntheticLocalSource, TensorPropertySource
+from torch._dynamo.utils import (
+    _make_inlined,
+    constants_identical,
+    tensor_always_has_static_shape,
+    unpack_iterable,
+)
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
@@ -41,7 +47,6 @@ from torch._guards import (
     Source,
 )
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
-from torch.fx.experimental.dynamic_spec import TensorSpec
 from torch.fx.graph_module import GraphModule
 from torch.fx.proxy import Proxy
 from torch.utils import _pytree as pytree
@@ -405,16 +410,14 @@ class LiftedSyntheticObject:
 
 @dataclass
 class LiftedBoundSymbol:
-    """Lifted arg that is a SymInt already bound as a graph input.
+    """Symbolic graph input, optionally tied to a captured scalar/tensor property.
 
-    SymInt graph inputs are created during tensor wrapping (not through
-    VariableBuilder.wrap_symint), so they aren't registered in
-    unspec_variable_map or variable_tracker_cache. Using LiftedCapturedSource
-    for these would resolve the source to a concrete Python int via
-    source.get_value() instead of reusing the existing symbolic proxy.
+    Tensor properties need their tensor's symbolic policy rather than a fresh
+    scalar wrapper. Symbols without a source keep their existing graph proxy.
     """
 
     expr: Any  # sympy.Expr
+    source: Source | None = None
 
 
 LiftedArgOrigin = (
@@ -464,7 +467,7 @@ def is_reuse_eligible(
 
     It is possible that a subgraph is morally reusable but does not fall
     into the limited support that Dynamo has today. Current limitations:
-      - The subgraph must not have side effects or builtin-method key guards.
+      - Without a reuse hash, no side effects or builtin-method identity dependencies.
       - No sourceful variable accessed by the subgraph may have been
         mutated, because guards are snapshotted on source values at trace
         time — if the underlying object changed since then, the cached
@@ -481,10 +484,9 @@ def is_reuse_eligible(
     go stale from mutations.
     """
     if not has_reuse_hash_fn:
-        if tracing_info.has_builtin_method_keys:
-            # Stamp-out does not replay remapped receiver-alias guards. Trace
-            # each region to retain its runtime identity constraints.
-            hc_log.debug("subgraph_reuse: not eligible -- builtin-method key guards")
+        if tracing_info.has_builtin_method_identity:
+            # Stamp-out cannot replay remapped receiver-alias guards.
+            hc_log.debug("subgraph_reuse: not eligible -- builtin-method identity")
             return False
         if tracing_info.side_effect_stack is not None:
             stack_msg = "\n" + "".join(
@@ -701,6 +703,10 @@ class SubgraphReuseMatch:
     resolved_values: dict[Source, Any] = field(default_factory=dict)
     cloned_sources: dict[Source, Source] = field(default_factory=dict)
     runtime_guards: list[Guard] = field(default_factory=list)
+    captured_variables: dict[Source, VariableTracker] = field(default_factory=dict)
+    metadata_captures: set[Source] = field(default_factory=set)
+    symbolic_inputs: dict[Any, VariableTracker] = field(default_factory=dict)
+    symbol_replacements: dict[Any, Any] = field(default_factory=dict)
     _source_replacement: dict[Source, Source] | None = None
 
     @property
@@ -740,6 +746,51 @@ class SubgraphReuseMatch:
             self.resolve_globals, self.resolve_locals, self.resolved_values
         )
 
+    def build_capture(
+        self, tx: "InstructionTranslatorBase", source: Source
+    ) -> VariableTracker:
+        from .builder import VariableBuilder
+
+        if source not in self.captured_variables:
+            self.captured_variables[source] = VariableBuilder(tx, source)(
+                self.resolve(source)
+            )
+        return self.captured_variables[source]
+
+    def remap_bound_symbol(
+        self, tx: "InstructionTranslatorBase", lifted: LiftedBoundSymbol
+    ) -> VariableTracker | None:
+        if lifted.source is None:
+            return None
+        source = self.remap_source(lifted.source)
+        if source is lifted.source:
+            return None
+        if lifted.expr not in self.symbolic_inputs:
+            if isinstance(source, TensorPropertySource):
+                tensor = self.build_capture(tx, source.base)
+                args = (
+                    [] if source.idx is None else [ConstantVariable.create(source.idx)]
+                )
+                value = tensor.call_method(tx, source.prop.name.lower(), args, {})
+            else:
+                value = self.build_capture(tx, source)
+            self.symbolic_inputs[lifted.expr] = value
+            self.symbol_replacements[lifted.expr] = (
+                value.sym_num.node.expr
+                if isinstance(value, SymNodeVariable)
+                else value.as_python_constant()
+            )
+        return self.symbolic_inputs[lifted.expr]
+
+    def remap_symint(self, value: Any) -> Any:
+        if not self.symbolic_inputs or not isinstance(value, torch.SymInt):
+            return value
+        expr = value.node.expr.xreplace(self.symbol_replacements)
+        shape_env = value.node.shape_env
+        if shape_env is None:
+            raise AssertionError("Expected a shape environment for the captured symbol")
+        return shape_env.create_symintnode(expr, hint=None)
+
 
 def _treespecs_identical(a: pytree.TreeSpec, b: pytree.TreeSpec, /) -> bool:
     if a is b:
@@ -755,7 +806,7 @@ def _treespecs_identical(a: pytree.TreeSpec, b: pytree.TreeSpec, /) -> bool:
     )
 
 
-def static_capture_policy_matches(
+def capture_policy_matches(
     tx: "InstructionTranslatorBase",
     match: SubgraphReuseMatch,
     source: Source,
@@ -764,12 +815,12 @@ def static_capture_policy_matches(
     /,
 ) -> bool:
     """Captured dimensions must retain the expressions the cached body lifts."""
-    from .builder import (
-        lookup_spec_from_dynamo_source,
-        lookup_tracked_variable,
-        VariableBuilder,
-        wrap_to_fake_tensor_and_record,
+    from torch.fx.experimental.symbolic_shapes import (
+        DimDynamic,
+        StatelessSymbolicContext,
     )
+
+    from .builder import _automatic_dynamic, lookup_tracked_variable
 
     cached = tx.output.input_source_to_var.get(source)
     if not isinstance(cached, TensorVariable):
@@ -785,28 +836,36 @@ def static_capture_policy_matches(
     if example is None:
         hc_log.debug("subgraph_reuse: no cached tensor example for %s", source.name)
         return False
-    current = tx.output.input_source_to_var.get(new_source)
-    if not isinstance(current, TensorVariable) and (
-        type(value) is torch.Tensor or type(value) is torch.nn.Parameter
+    if (
+        type(value) is torch.nn.Parameter
+        and value.layout is torch.strided
+        and config.skip_no_tensor_aliasing_guards_on_parameters
+        and config._dynamic_shapes_spec is None
+        and value not in tx.output.tracing_context.tensor_to_context
+        and all(type(size) is int for size in example.shape)
+        and not any(
+            isinstance(lifted, LiftedCapturedSource) and lifted.source == source
+            for lifted in match.entry.subgraph_input_mapping
+        )
     ):
-        # Check the fake policy before constructing a tracker for the winning match.
-        spec = cast(
-            TensorSpec | None,
-            lookup_spec_from_dynamo_source(
-                new_source, torch._dynamo.config._dynamic_shapes_spec
-            ),
-        )
-        current_example = wrap_to_fake_tensor_and_record(
-            value, tx, source=new_source, is_tensor=True, tensor_spec=spec
-        )
-    else:
-        # Use the same source-specific policy and merged PGO state as stamp-out.
-        if not isinstance(current, TensorVariable):
-            current = VariableBuilder(tx, new_source)(value)
-        if not isinstance(current, TensorVariable):
-            hc_log.debug("subgraph_reuse: no current tensor for %s", new_source.name)
-            return False
-        current_example = current.proxy.node.meta.get("example_value")
+        static_shapes, _ = tensor_always_has_static_shape(value, True, new_source)
+        context = _automatic_dynamic(value, tx, new_source, static_shapes)
+        if isinstance(context, StatelessSymbolicContext) and all(
+            dim is DimDynamic.STATIC for dim in context.dynamic_sizes
+        ):
+            # Metadata-only static parameters need guards, but no unused graph attributes.
+            # Use the builder's policy, including source dynamism and PGO, before skipping it.
+            tx.output.input_source_to_sizes_strides[new_source] = {
+                "size": value.size(),
+                "stride": value.stride(),
+            }
+            match.metadata_captures.add(new_source)
+            return True
+    current = match.build_capture(tx, new_source)
+    if not isinstance(current, TensorVariable):
+        hc_log.debug("subgraph_reuse: no current tensor for %s", new_source.name)
+        return False
+    current_example = current.proxy.node.meta.get("example_value")
     if current_example is None:
         hc_log.debug(
             "subgraph_reuse: no current tensor example for %s", new_source.name
@@ -821,7 +880,7 @@ def static_capture_policy_matches(
             matches = (
                 isinstance(old_size, torch.SymInt)
                 and isinstance(new_size, torch.SymInt)
-                and sym_num_key(old_size) == sym_num_key(new_size)
+                and sym_num_key(match.remap_symint(old_size)) == sym_num_key(new_size)
             )
         if not matches:
             hc_log.debug(
@@ -1029,8 +1088,20 @@ def is_reusable(
         if guard.create_fn_name() == "TENSOR_MATCH":
             capture_checks.append((source, new_source, value))
 
+    for lifted in match.entry.subgraph_input_mapping:
+        if isinstance(lifted, LiftedBoundSymbol):
+            match.remap_bound_symbol(tx, lifted)
+
+    if match.symbol_replacements:
+        # Replaying a symbolic input must also replay branches/constraints on that input.
+        shape_env = tx.output.shape_env
+        for guard in tuple(shape_env.guards):
+            expr = guard.expr.xreplace(match.symbol_replacements)
+            if expr != guard.expr and not shape_env.evaluate_expr(expr):
+                return False
+
     for source, new_source, value in capture_checks:
-        if not static_capture_policy_matches(tx, match, source, new_source, value):
+        if not capture_policy_matches(tx, match, source, new_source, value):
             return False
 
     # Guard objects are copied only for the winning match.
@@ -1247,7 +1318,6 @@ def stamp_out_subgraph(
     graph placeholders. Replay runtime guards and order annotations from the winning
     match before returning; its dependencies then participate in outer-region reuse.
     """
-    from torch._dynamo.variables.builder import lookup_tracked_variable, VariableBuilder
     from torch._dynamo.variables.higher_order_ops import add_call_function, make_attr
 
     cached = match.entry
@@ -1255,14 +1325,11 @@ def stamp_out_subgraph(
     for guard in match.runtime_guards:
         if guard.create_fn_name() == "TENSOR_MATCH":
             source = guard.originating_source
-            value = match.resolve(source)
-            current = lookup_tracked_variable(tx, value)
-            if isinstance(current, TensorVariable) and current.source == source:
-                # This is VariableBuilder's tracked-tensor fast path; retain its footprint.
-                tx.output.current_tracer.traced_sources.add(source)
+            if source in match.metadata_captures:
+                # A copied partial can still hold the previous tensor's type and markings.
+                install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
             else:
-                # Other sources must still install tensor alias guards.
-                VariableBuilder(tx, source)(value)
+                match.build_capture(tx, source)
         elif not any(
             guard.is_equivalent_to(existing)
             for existing in tx.output.guards.get_guards_for_source(
@@ -1286,10 +1353,14 @@ def stamp_out_subgraph(
         elif isinstance(subgraph_input, LiftedBoundSymbol):
             from torch._dynamo.output_graph import LazyProxy
 
-            proxy = tx.output.current_tracer.bound_symbols[subgraph_input.expr]
-            if isinstance(proxy, LazyProxy):
-                proxy = proxy()
-                tx.output.current_tracer.bound_symbols[subgraph_input.expr] = proxy
+            current = match.remap_bound_symbol(tx, subgraph_input)
+            if current is not None:
+                proxy = current.as_proxy()
+            else:
+                proxy = tx.output.current_tracer.bound_symbols[subgraph_input.expr]
+                if isinstance(proxy, LazyProxy):
+                    proxy = proxy()
+                    tx.output.current_tracer.bound_symbols[subgraph_input.expr] = proxy
             new_lifted_args.append(proxy)
         elif isinstance(subgraph_input, LiftedSyntheticObject):
             ctor_args = subgraph_input.ctor_args
@@ -1314,8 +1385,7 @@ def stamp_out_subgraph(
             new_source = match.remap_source(subgraph_input.source)
             # VariableBuilder deduplicates via input_source_to_var,
             # so this reuses existing graph placeholders automatically.
-            value = match.resolve(new_source)
-            vt = VariableBuilder(tx, new_source)(value)
+            vt = match.build_capture(tx, new_source)
             new_lifted_args.append(vt.as_proxy())
 
     # Generate fake tensor outputs
@@ -1324,8 +1394,8 @@ def stamp_out_subgraph(
     with tx.fake_mode:
         example_value = tuple(
             torch.empty_strided(
-                shape,
-                stride,
+                tuple(match.remap_symint(dim) for dim in shape),
+                tuple(match.remap_symint(dim) for dim in stride),
                 dtype=dtype,
                 device=device,
                 requires_grad=req_grad,
@@ -1403,8 +1473,8 @@ def build_subgraph_input_mapping(
             # concrete int). They appear as either:
             # - placeholder nodes with grapharg.example being a SymInt
             # - call_function nodes (e.g. sym_size_int) with no grapharg
-            # In both cases, store the sympy expression and look it up in
-            # bound_symbols during stamp-out.
+            # Preserve its source when available so another capture can bind
+            # its own symbol; source-independent expressions keep the old proxy.
             example = (
                 grapharg.example
                 if grapharg is not None
@@ -1415,7 +1485,9 @@ def build_subgraph_input_mapping(
                 # replacements, so a symbol the region lifted before it was
                 # specialized comes back as a constant, which bound_symbols has
                 # no entry for.
-                subgraph_input_mapping.append(LiftedBoundSymbol(example.node._expr))
+                subgraph_input_mapping.append(
+                    LiftedBoundSymbol(example.node._expr, source)
+                )
                 continue
             if source is None and outer_proxy.node.op == "get_attr":
                 # Registered parameters/buffers have get_attr nodes, not graphargs.

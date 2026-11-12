@@ -1702,9 +1702,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                         return tx.output.side_effects.track_mutable(hooks_dict, result)
                     return result
 
-        # Hook IDs differ across equivalent module instances (RemovableHandle;
-        # https://github.com/pytorch/pytorch/issues/125836). Track them lazily so
-        # dispatch can reuse graphs while code observing IDs reads or guards them.
+        # Hook IDs vary across modules: https://github.com/pytorch/pytorch/issues/125836.
+        # Keep IDs lazy for dispatch reuse; observations read or guard the runtime value.
         if (
             self.source
             and name
