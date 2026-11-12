@@ -286,7 +286,7 @@ kernel void grouped_mm_mpp(
           mat_a, mat_b, offsets, output, params, tgid, tid, tile_info, tile)) {
     return;
   }
-  matmul_mpp_gemm<T, BM, BN, TA, TB>(tile, params.mm);
+  matmul_mpp_cooperative_gemm<T, BM, BN, TA, TB>(tile, params.mm);
 }
 
 #define INSTANTIATE_GROUPED_MM_MPP_MODE(DTYPE, BM, BN, TA, TB, LAYOUT, MODE) \
