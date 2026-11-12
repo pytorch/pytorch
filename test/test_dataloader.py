@@ -32,7 +32,6 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_LINUX,
     IS_MACOS,
-    IS_S390X,
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
@@ -1234,7 +1233,10 @@ def filter_len(row):
     "DataLoader tests hang in ASAN, see: https://github.com/pytorch/pytorch/issues/66223",
 )
 class TestDataLoader(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: several tests also pin memory when an accelerator is
+    # present, so the class can't be GENERIC until those are split out. Its tests
+    # take no device parameter and the class doesn't use
+    # instantiate_device_type_tests, so it isn't ACCELERATOR either.
 
     def setUp(self):
         super().setUp()
@@ -1427,7 +1429,6 @@ except RuntimeError as e:
             self.assertTrue(target.is_pinned())
 
     @skipIfXpu
-    @unittest.skipIf(IS_S390X, "Unexpectedly succeeds on s390x")
     # Test that DataLoader properly handles worker segfaults
     # Note: This test has inconsistent behavior across Linux distributions:
     # - Passes on RHEL 9.6 (segfault triggers correctly)
@@ -3054,6 +3055,60 @@ class TestDataLoaderDevice(TestCase):
         for batch in loader:
             self.assertTrue(batch[0].is_pinned())
 
+    @onlyAccelerator
+    @unittest.skipIf(
+        TEST_WITH_TSAN,
+        "Fails with TSAN with the following error: starting new threads after multi-threaded "
+        "fork is not supported. Dying (set die_after_fork=0 to override)",
+    )
+    def test_string_shuffle_pin_memory(self, device):
+        loader = DataLoader(
+            StringDataset(), batch_size=2, shuffle=True, num_workers=4, pin_memory=True
+        )
+        for s, n in loader:
+            self.assertIsInstance(s[0], str)
+            self.assertTrue(n.is_pinned())
+
+    @onlyAccelerator
+    @unittest.skipIf(
+        TEST_WITH_TSAN,
+        "Fails with TSAN with the following error: starting new threads after multi-threaded "
+        "fork is not supported. Dying (set die_after_fork=0 to override)",
+    )
+    def test_dataloader_with_namedtuple_pin_memory(self, device):
+        _check_namedtuple_loader(self, pin_memory=True)
+
+    @onlyAccelerator
+    @unittest.skipIf(
+        TEST_WITH_TSAN,
+        "Fails with TSAN with the following error: starting new threads after multi-threaded "
+        "fork is not supported. Dying (set die_after_fork=0 to override)",
+    )
+    @parametrize("num_workers", [0, 1])
+    def test_custom_batch_pin(self, device, num_workers):
+        inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+        tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+        dataset = TensorDataset(inps, tgts)
+        test_cases = [
+            (collate_wrapper, self_module.SimpleCustomBatch),
+            (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
+            (
+                collate_into_packed_sequence_batch_first,
+                torch.nn.utils.rnn.PackedSequence,
+            ),
+        ]
+        for collate_fn, elem_cls in test_cases:
+            loader = DataLoader(
+                dataset,
+                batch_size=2,
+                collate_fn=collate_fn,
+                pin_memory=True,
+                num_workers=num_workers,
+            )
+            for sample in loader:
+                self.assertIsInstance(sample, elem_cls)
+                self.assertTrue(sample.is_pinned())
+
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
     r"""
@@ -3125,28 +3180,6 @@ class StringDataset(Dataset):
 
     def __getitem__(self, ndx):
         return (self.s[ndx], ndx)
-
-
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)",
-)
-class TestStringDataLoader(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
-    def setUp(self):
-        super().setUp()
-        self.dataset = StringDataset()
-
-    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
-    def test_shuffle_pin_memory(self):
-        loader = DataLoader(
-            self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True
-        )
-        for s, n in loader:
-            self.assertIsInstance(s[0], str)
-            self.assertTrue(n.is_pinned())
 
 
 class DictDataset(Dataset):
@@ -3283,7 +3316,8 @@ class DummyDataset(torch.utils.data.Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestDataLoaderPersistentWorkers(TestDataLoader):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification, like TestDataLoader: besides the inherited tests, it
+    # has its own tests that pin memory when an accelerator is present.
 
     def setUp(self):
         super().setUp()
@@ -3671,6 +3705,25 @@ class NamedTupleDataset(Dataset):
         )
 
 
+def _check_namedtuple_loader(test_case, pin_memory):
+    dataset = NamedTupleDataset()
+    # auto-collation
+    loader = DataLoader(dataset, batch_size=2, pin_memory=pin_memory)
+    for batch in loader:
+        test_case.assertIsInstance(batch, NamedTupleDataset.Batch)
+        test_case.assertEqual(batch.random_tensor.is_pinned(), pin_memory)
+        test_case.assertIsInstance(batch.data, NamedTupleDataset.Data)
+        test_case.assertIsInstance(batch.data.positive, torch.Tensor)
+        test_case.assertEqual(batch.data.positive.is_pinned(), pin_memory)
+    # no auto-collation
+    loader = DataLoader(dataset, batch_size=None, pin_memory=pin_memory)
+    for batch in loader:
+        test_case.assertIsInstance(batch, NamedTupleDataset.Batch)
+        test_case.assertEqual(batch.random_tensor.is_pinned(), pin_memory)
+        test_case.assertIsInstance(batch.data, NamedTupleDataset.Data)
+        test_case.assertNotIsInstance(batch.data.positive, torch.Tensor)
+
+
 @unittest.skipIf(
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
@@ -3679,26 +3732,8 @@ class NamedTupleDataset(Dataset):
 class TestNamedTupleDataLoader(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def setUp(self):
-        super().setUp()
-        self.dataset = NamedTupleDataset()
-
     def test_dataloader_with_namedtuple(self):
-        # auto-collation
-        loader = DataLoader(self.dataset, batch_size=2, pin_memory=TEST_PIN_MEMORY)
-        for batch in loader:
-            self.assertIsInstance(batch, NamedTupleDataset.Batch)
-            self.assertEqual(batch.random_tensor.is_pinned(), TEST_PIN_MEMORY)
-            self.assertIsInstance(batch.data, NamedTupleDataset.Data)
-            self.assertIsInstance(batch.data.positive, torch.Tensor)
-            self.assertEqual(batch.data.positive.is_pinned(), TEST_PIN_MEMORY)
-        # no auto-collation
-        loader = DataLoader(self.dataset, batch_size=None, pin_memory=TEST_PIN_MEMORY)
-        for batch in loader:
-            self.assertIsInstance(batch, NamedTupleDataset.Batch)
-            self.assertEqual(batch.random_tensor.is_pinned(), TEST_PIN_MEMORY)
-            self.assertIsInstance(batch.data, NamedTupleDataset.Data)
-            self.assertNotIsInstance(batch.data.positive, torch.Tensor)
+        _check_namedtuple_loader(self, pin_memory=False)
 
 
 class SimpleCustomBatch:
@@ -3740,61 +3775,6 @@ def collate_into_packed_sequence_batch_first(batch):
     return torch.nn.utils.rnn.pack_padded_sequence(
         data, lengths, batch_first=True, enforce_sorted=False
     )
-
-
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)",
-)
-class TestCustomPinFn(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
-    def setUp(self):
-        super().setUp()
-        inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
-        tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
-        self.dataset = TensorDataset(inps, tgts)
-
-    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
-    def test_custom_batch_pin(self):
-        test_cases = [
-            (collate_wrapper, self_module.SimpleCustomBatch),
-            (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
-            (
-                collate_into_packed_sequence_batch_first,
-                torch.nn.utils.rnn.PackedSequence,
-            ),
-        ]
-        for collate_fn, elem_cls in test_cases:
-            loader = DataLoader(
-                self.dataset, batch_size=2, collate_fn=collate_fn, pin_memory=True
-            )
-            for sample in loader:
-                self.assertIsInstance(sample, elem_cls)
-                self.assertTrue(sample.is_pinned())
-
-    @unittest.skipIf(not TEST_PIN_MEMORY, "pin_memory requires accelerator")
-    def test_custom_batch_pin_worker(self):
-        test_cases = [
-            (collate_wrapper, self_module.SimpleCustomBatch),
-            (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
-            (
-                collate_into_packed_sequence_batch_first,
-                torch.nn.utils.rnn.PackedSequence,
-            ),
-        ]
-        for collate_fn, elem_cls in test_cases:
-            loader = DataLoader(
-                self.dataset,
-                batch_size=2,
-                collate_fn=collate_fn,
-                pin_memory=True,
-                num_workers=1,
-            )
-            for sample in loader:
-                self.assertIsInstance(sample, elem_cls)
-                self.assertTrue(sample.is_pinned())
 
 
 class TestWorkerQueueDataset(Dataset):
