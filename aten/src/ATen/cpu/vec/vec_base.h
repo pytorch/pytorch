@@ -1266,8 +1266,8 @@ inline Vectorized<T> fmadd(
     const Vectorized<T>& c) {
   if constexpr (is_reduced_floating_point_v<T>) {
     // Compute in float, where the product of two reduced floating-point
-    // values is exact (for BFloat16, unless it overflows or underflows):
-    // rounding it to T before adding would round twice.
+    // values is exact (for BFloat16, unless it overflows or underflows),
+    // rather than round the product to T before adding.
     __at_align__ T va[Vectorized<T>::size()];
     __at_align__ T vb[Vectorized<T>::size()];
     __at_align__ T vc[Vectorized<T>::size()];
