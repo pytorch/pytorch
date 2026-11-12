@@ -657,6 +657,23 @@ class TestReductionConfig(TestCase):
         cfg = ct.select_col_config(*args, **kw, **contract)
         self.assertEqual(cfg.rule, expected_rule)
 
+    def test_b200_ragged_welford_columns_need_combine_equal(self):
+        """Decline the grouped Welford column rule for a trait without combine_equal."""
+
+        class OwnCombine(T.WelfordOps):
+            def combine(self, a, b):
+                return super().combine(a, b)
+
+        args = ((10, 0), torch.float16, (16 << 20) // (257 * 2), 257, 1, 3)
+        kwargs = dict(itemsize=2, acc_bits=32, nouts=1, welford_outs=1, alignment=16)
+        kwargs |= dict(out_dtypes=(torch.float16,))
+        for trait_type, rule in (
+            (T.WelfordOps, "b200_ragged_welford_c257"),
+            (OwnCombine, "default"),
+        ):
+            cfg = ct.select_col_config(*args, trait_type=trait_type, **kwargs)
+            self.assertEqual(cfg.rule, rule)
+
     @parametrize(
         "dtype,trait,columns,size,expected",
         [

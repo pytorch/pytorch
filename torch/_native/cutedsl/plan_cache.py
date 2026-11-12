@@ -46,7 +46,7 @@ class LRUCache:
         self._d: OrderedDict[Any, Any] = OrderedDict()
         self._lock = threading.Lock()
 
-    def get(self, key: Any, default: Any = None) -> Any:
+    def get(self, key: Any, default: Any = None, /) -> Any:
         # Unlike flydsl_jit_cache's lock-free hits, a hit here mutates the OrderedDict
         # (move_to_end updates recency), so it takes the lock too.
         with self._lock:
@@ -57,7 +57,7 @@ class LRUCache:
             self._d.move_to_end(key)
             return value
 
-    def pop(self, key: Any, default: Any = _MISS) -> Any:
+    def pop(self, key: Any, default: Any = _MISS, /) -> Any:
         with self._lock:
             if default is _MISS:
                 return self._d.pop(key)

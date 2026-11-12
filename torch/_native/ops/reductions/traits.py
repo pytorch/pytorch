@@ -170,11 +170,22 @@ class WelfordOps:
     # has_combine_uniform enables uniform-count staged inner-tree combines
     # (tile.uniform_combine_ok), which rely on combine_uniform, uniform_weight, an FP32
     # accumulator and the count as the last field: they skip staging it and may stage
-    # the weight in its slot. A subclass that changes leaf, combine or the
-    # (mean, m2, nf) layout must set both flags to False.
+    # the weight in its slot. Both assume these leaf and combine methods, so a subclass
+    # that replaces either must opt back in; its subclasses inherit that choice.
     nfields = 3
     has_combine_equal = True
     has_combine_uniform = True
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        own = cls.__mro__[: cls.__mro__.index(WelfordOps)]
+        for flag in ("has_combine_equal", "has_combine_uniform"):
+            for c in own:
+                if flag in vars(c):
+                    break
+                if "leaf" in vars(c) or "combine" in vars(c):
+                    setattr(cls, flag, False)
+                    break
 
     def __init__(self, correction=1, take_sqrt=False, return_mean=False, acc=Float32):
         self.correction = float(correction)
