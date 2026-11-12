@@ -2212,7 +2212,6 @@ void scaled_gemm(
 }
 
 #ifdef USE_ROCM
-// hipBLASLt has no kernels for some archs (e.g. gfx906), so use rocBLAS there.
 static void int8_gemm_rocblas(
     bool transpose_mat1,
     bool transpose_mat2,
