@@ -1136,13 +1136,23 @@ def _raw_device_uuid_amdsmi() -> list[str] | None:
         except amdsmi.AmdSmiException:
             warnings.warn("Cannot get amd device handler", stacklevel=2)
             return None
+        # HIP and rocminfo identify a GPU by its KFD unique_id, which is not
+        # always the ASIC serial. Newer amdsmi reports it as hip_uuid.
         try:
-            uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
-                2:
-            ]  # Removes 0x prefix from serial
-        except amdsmi.AmdSmiException:
-            warnings.warn("Cannot get uuid for amd device", stacklevel=2)
-            return None
+            info = amdsmi.amdsmi_get_gpu_enumeration_info(handler)
+            hip_uuid = str(info.get("hip_uuid", ""))
+        except (AttributeError, amdsmi.AmdSmiException):
+            hip_uuid = ""
+        if hip_uuid.startswith("GPU-"):
+            uuid = hip_uuid.removeprefix("GPU-")
+        else:
+            try:
+                uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
+                    2:
+                ]  # Removes 0x prefix from serial
+            except amdsmi.AmdSmiException:
+                warnings.warn("Cannot get uuid for amd device", stacklevel=2)
+                return None
         uuids.append(
             str(uuid).lower()
         )  # Lower-case to match expected HIP_VISIBLE_DEVICES uuid input
@@ -1452,18 +1462,15 @@ def current_blas_handle():
     On CUDA, the handle uses the BLAS library's default workspace unless ATen
     workspace caching is explicitly enabled. When caching is disabled, internal
     ATen operations may temporarily bind their own workspace to this handle, but
-    restore the default workspace before releasing it. On ROCm they use
-    separate handles, and this function returns a different handle for each
-    stream, because a rocBLAS workspace must not be shared by two streams at
-    once. Each is bound when it is created to a buffer from a caching-allocator
-    pool reserved for these buffers, at least as large as the workspace rocBLAS would allocate, which
-    rocBLAS never grows. A workspace bound with
-    ``rocblas_set_workspace`` stays bound, even after the thread exits and the
-    handle passes to another thread, so unbind it before freeing the buffer.
-    While the current stream is capturing, ROCm returns a capture handle
-    instead, bound to a workspace from the capture's memory pool: call this
-    function inside the capture rather than reusing a handle obtained before
-    it, and do not use the capture handle after the capture ends.
+    restore the default workspace before releasing it.
+
+    On ROCm, this function returns a different handle for each thread and
+    stream, and another one while the current stream is capturing. Run work on
+    a handle only on the stream it was returned for, and inside a capture call
+    this function again rather than use a handle obtained before it. See
+    :ref:`hipblas-workspaces` for the workspace each handle has, how handles
+    pass between threads, how to move one to another stream, and what to call
+    before graph capture begins.
     """
     _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()

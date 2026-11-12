@@ -22,6 +22,18 @@ def my_add(self, other, alpha=1.0) -> torch.Tensor:
     return torch.ops.libtorch_agn_2_16.my_add.default(self, other, alpha)
 
 
+def my_is_conj(t: torch.Tensor) -> bool:
+    return torch.ops.libtorch_agn_2_16.my_is_conj.default(t)
+
+
+def my_is_neg(t: torch.Tensor) -> bool:
+    return torch.ops.libtorch_agn_2_16.my_is_neg.default(t)
+
+
+def my_is_inference(t: torch.Tensor) -> bool:
+    return torch.ops.libtorch_agn_2_16.my_is_inference.default(t)
+
+
 def my_is_warn_always_enabled() -> bool:
     """Stable ``torch_is_warn_always_enabled`` (2.16+)."""
     return torch.ops.libtorch_agn_2_16.my_is_warn_always_enabled.default()
