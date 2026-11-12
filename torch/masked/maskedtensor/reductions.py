@@ -81,7 +81,7 @@ def _torch_reduce_all(fn):
 
 
 def _torch_reduce_dim(fn):
-    def reduce_dim(self, dim, keepdim=False, dtype=None):
+    def reduce_dim(self, dim, keepdim=False, dtype=None, **reduction_kwargs):
         if self.is_sparse:
             msg = (
                 f"The sparse version of {fn} is not implemented in reductions.\n"
@@ -102,17 +102,34 @@ def _torch_reduce_dim(fn):
             result_data = masked_fn(data, dim=dim, keepdim=keepdim, mask=mask)
         else:
             result_data = masked_fn(
-                self, dim=dim, keepdim=keepdim, dtype=dtype, mask=self.get_mask()
+                self, dim=dim, keepdim=keepdim, dtype=dtype, mask=self.get_mask(),
+                **reduction_kwargs,
             )
         return as_masked_tensor(result_data, _multidim_any(mask, dim, keepdim))
 
     return reduce_dim
 
 
+def _torch_var_std(fn):
+    def var_std(input, dim=None, unbiased=None, keepdim=False, *, correction=None, dtype=None):
+        if isinstance(dim, bool):
+            unbiased, dim = dim, None
+        if isinstance(dim, (tuple, list)) and not dim:
+            dim = None
+        dim = torch.masked._canonical_dim(dim, input.ndim)
+        return _torch_reduce_dim(fn)(
+            input, dim, keepdim, dtype, unbiased=unbiased, correction=correction,
+        )
+
+    return var_std
+
+
 def _torch_reduce(fn):
     def reduce_fn(*args, **kwargs):
         if len(args) == 1 and len(kwargs) == 0:
             return _torch_reduce_all(fn)(args[0])
+        if fn in {"var", "std"}:
+            return _torch_var_std(fn)(*args, **kwargs)
         return _torch_reduce_dim(fn)(*args, **kwargs)
 
     return reduce_fn
@@ -126,6 +143,8 @@ def _torch_grad_reduce(fn):
     def grad_reduce(*args, **kwargs):
         if len(args) == 1 and len(kwargs) == 0:
             return _torch_reduce_all(fn)(args[0])
+        if fn in {"var", "std"}:
+            return _torch_var_std(fn)(*args, **kwargs)
         # TODO: autograd.Function doesn't support kwarg
         input, dim, keepdim, dtype = _reduce_dim_args(*args, **kwargs)
         return _torch_reduce_dim(fn)(input, dim, keepdim, dtype)
