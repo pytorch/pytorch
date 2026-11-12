@@ -192,7 +192,8 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             backend=backend,
         )
         load = {
-            "row": "in2[tile_y, 0]",
+            # A size-1 dim the index skips is dropped through a view.
+            "row": "in2[tile_y]",
             "column": "in2[tile_x]",
             "matrix": "in2[tile_y, tile_x]",
             "scalar": "in2[()]",
@@ -212,9 +213,9 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             randn(3, 40, 1),
             randn(3, 1, 136),
         )
-        self.assertIn("in2[tile_z, tile_y, 0].to(torch.float32)", source)
+        self.assertIn("in2[tile_z, tile_y].to(torch.float32)", source)
         self.assertIn(".reshape([tile_z, tile_y, 1])", source)
-        self.assertIn("in3[tile_z, 0, tile_x].to(torch.float32)", source)
+        self.assertIn("in3[tile_z, tile_x].to(torch.float32)", source)
         self.assertIn(".reshape([tile_z, 1, tile_x])", source)
 
     @parametrize(
@@ -309,10 +310,10 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             return torch.matmul(a, b) + index * 1e-3
 
         (source,) = self.compile(fn, randn(*batch, 40, 72), randn(*batch, 72, 136))
-        self.assertIn("136*tile_y.index[:, None]", source)
+        self.assertIn("136*tile_y.index.reshape([tile_y, 1])", source)
         self.assertIn("tile_x.index", source)
         if batched:
-            self.assertIn("5440*tile_z.index[:, None, None]", source)
+            self.assertIn("5440*tile_z.index.reshape([tile_z, 1, 1])", source)
 
     def test_index_expr_wider_than_int32(self):
         def fn(a, b):
@@ -396,7 +397,9 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             bias,
         )
         self.assertIn(f"reinterpret_tensor(arg2_1, ({numel}, ), (1, ), 0)", self.code)
-        self.assertRegex(source, r"in2\[.*tile_y\.index\[:, None\] // 8.*\]")
+        self.assertRegex(
+            source, r"in2\[.*tile_y\.index\.reshape\(\[tile_y, 1\]\) // 8.*\]"
+        )
 
     def test_flat_epilogue_input_skipping_an_axis(self):
         # The [B, 1, 1, N] bias of a [B * H, M, N] bmm is read at
@@ -408,7 +411,8 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
             randn(2, 1, 1, 136),
         )
         self.assertIn(
-            "in2[tile_x.index + 136*(tile_z.index[:, None, None] // 3)]", source
+            "in2[tile_x.index + 136*(tile_z.index.reshape([tile_z, 1, 1]) // 3)]",
+            source,
         )
 
     @parametrize("case", ["compute", "repeat", "gather", "permute_copy"])

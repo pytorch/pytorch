@@ -107,10 +107,11 @@ def literal(value: bool | float | int) -> str:
 class HelionPrinter(PythonPrinter):
     """Print index expressions over tile index tensors.
 
-    PythonPrinter prints ``Min(y, 5)`` as ``min(tile_y.index[:, None], 5)``,
+    PythonPrinter prints ``Min(y, 5)`` as
+    ``min(tile_y.index.reshape([tile_y, 1]), 5)``,
     which fails on a tensor: ``RuntimeError: Boolean value of Tensor with more
     than one value is ambiguous``. This prints
-    ``torch.minimum(tile_y.index[:, None], hl.full([], 5, dtype=torch.int64))``;
+    ``torch.minimum(tile_y.index.reshape([tile_y, 1]), hl.full([], 5, dtype=torch.int64))``;
     the constant is a 0-d tensor because torch.minimum takes no Python scalar.
     """
 
@@ -180,7 +181,7 @@ class HelionOverrides(OpOverrides):
         # SIMDScheduling turns an index_expr that computes a value into
         # value_expr, e.g. torch.arange(40 * 136).reshape(40, 136) in an
         # epilogue, which the OpsHandler default rejects with NotImplementedError:
-        #   tmp2 = (tile_x.index + 136*tile_y.index[:, None]).to(torch.float32)
+        #   tmp2 = (tile_x.index + 136*tile_y.index.reshape([tile_y, 1])).to(torch.float32)
         return cast(HelionKernel, V.kernel).index_expr(expr, dtype)
 
     @staticmethod
@@ -563,18 +564,31 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         """Tile index tensor of `axis`.
 
         By default it broadcasts against the tiles in scope, as index arithmetic
-        needs: tile_y.index[:, None] and tile_x.index for (y, x). With `axes`,
-        it has one dim per axis, as a tensor subscript needs: tile_y.index[:, None]
-        and tile_x.index[None, :] for axes (y, x).
+        needs: tile_y.index.reshape([tile_y, 1]) and tile_x.index for (y, x).
+        With `axes`, it has one dim per axis, as a tensor subscript needs:
+        tile_y.index.reshape([tile_y, 1]) and tile_x.index.reshape([1, tile_x])
+        for axes (y, x).
+
+        A reshape, not a tile_y.index[:, None] slice. A native matmul stores to
+        a view/permute destination on Helion's tcgen05 path only once Helion
+        proves the destination's layout by evaluating the store's subscript,
+        and that proof understands tile indices, reshape(), +, *, // and %, not
+        slicing. bmm(a, b).view(32, 16, 128, 64).permute(0, 2, 1, 3) of a
+        [512, 128, 64] bmm stores through a flat view of its [32, 128, 1024]
+        output:
+            out0[tile_x.index + 64*((tile_z.index.reshape([tile_z, 1, 1]) % 16)) + 1024*tile_y.index.reshape([tile_y, 1]) + 131072*(tile_z.index.reshape([tile_z, 1, 1]) // 16)]
+        With tile_z.index[:, None, None] and tile_y.index[:, None] there, the
+        proof fails, every tcgen05 config of the matmul is refused and only its
+        slower lowerings compile: about 30x slower than cuBLAS on a B200.
         """
         name = f"{TILE_NAMES[axis]}.index"
         if axes is None:
             scope = self.scope_axes
-            trailing = len(scope) - 1 - scope.index(axis)
-            return f"{name}[:{', None' * trailing}]" if trailing else name
+            axes = scope[scope.index(axis) :]
         if len(axes) == 1:
             return name
-        return f"{name}[{', '.join(':' if a == axis else 'None' for a in axes)}]"
+        shape = ", ".join(TILE_NAMES[a] if a == axis else "1" for a in axes)
+        return f"{name}.reshape([{shape}])"
 
     def align(self, value: CSEVariable, target: TileShape) -> str:
         """View `value` so that it broadcasts against a tensor of shape `target`.
@@ -668,7 +682,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         # 128*yindex + xindex - 8 where xindex >= 8, which as a view would be
         # reinterpret_tensor(arg2_1, (40, 136), (128, 1), -8), starting before
         # x's storage; the masked load reads the flat storage instead:
-        #   hl.load(in2, [(-8) + tile_x.index + 128*tile_y.index[:, None]], extra_mask=...)
+        #   hl.load(in2, [(-8) + tile_x.index + 128*tile_y.index.reshape([tile_y, 1])], extra_mask=...)
         end = offset + sum((size - 1) * stride for size, stride in zip(sizes, strides))
         if (
             offset < 0
@@ -704,7 +718,8 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         recovered from them, trying in turn:
         1. the buffer's own dims, e.g. [M, N] with strides (N, 1) at
            N*yindex + xindex is in0[tile_y, tile_x], a bias [N] at xindex is
-           in0[tile_x] and a 0-d tensor is in0[()];
+           in0[tile_x] and a 0-d tensor is in0[()]; size-1 dims the index
+           skips are dropped through a view;
         2. a view whose dims are tiles, if `index` is affine in them (see
            tiled_view()), e.g. x.sum(0) for x of shape [100, 64] reads
            reinterpret_tensor(arg0_1, (64, 100), (1, 64), 0) as in0[tile_x, tile_r];
@@ -736,10 +751,27 @@ class HelionKernel(SIMDKernel[CSEVariable]):
                 if dim is not None
             )
             if V.graph.sizevars.statically_known_equals(index, expected):
-                arg = self.tensor_arg(buffer, output=output)
-                coordinates = [TILE_NAMES[dim] if dim else "0" for dim in dims]
-                shape = tuple(TILE_NAMES[dim] for dim in dims if dim is not None)
-                return arg, coordinates or ["()"], shape
+                # A size-1 dim the index skips is dropped through a view: a
+                # [1, 1000, 4096] arg2_1 at 4096*yindex + xindex is passed as
+                # reinterpret_tensor(arg2_1, (1000, 4096), (4096, 1), 0) and
+                # read as in2[tile_y, tile_x]. Read as in2[0, tile_y, tile_x],
+                # the 0 keeps a native matmul's epilogue off Helion's tcgen05
+                # path.
+                kept = [i for i, dim in enumerate(dims) if dim is not None]
+                operand = buffer
+                if len(kept) < len(dims):
+                    squeezed = FixedLayout(
+                        layout.device,
+                        layout.dtype,
+                        [layout.size[i] for i in kept],
+                        [layout.stride[i] for i in kept],
+                        layout.offset,
+                        layout.is_pinned,
+                    )
+                    operand = ReinterpretView(data=buffer, layout=squeezed)
+                tiles = tuple(TILE_NAMES[dim] for dim in dims if dim is not None)
+                arg = self.tensor_arg(operand, output=output)
+                return arg, list(tiles) or ["()"], tiles
         if (view := self.tiled_view(buffer, index, axes)) is not None:
             tiles = tuple(TILE_NAMES[axis] for axis in axes)
             return self.tensor_arg(view, output=output), list(tiles) or ["()"], tiles
@@ -759,9 +791,10 @@ class HelionKernel(SIMDKernel[CSEVariable]):
 
         A [5, 8, 136] input with strides (1088, 1, 8), read by a [40, 136] tile, is
         passed as reinterpret_tensor(arg2_1, (5440, ), (1, ), 0) and read as
-        in2[8*tile_x.index + 1088*(tile_y.index[:, None] // 8) + ((tile_y.index[:, None] % 8))].
-        This handles any index, but as a gather: Helion cannot use tensor
-        descriptors for it.
+        in2[8*tile_x.index + 1088*(tile_y.index.reshape([tile_y, 1]) // 8) + ((tile_y.index.reshape([tile_y, 1]) % 8))].
+        This handles any index. A load reads it as a gather, without tensor
+        descriptors; a native matmul's store through it can still take Helion's
+        tcgen05 TMA store (see index_tensor()).
         """
         layout = buffer.get_layout()
         size = layout.storage_size()
@@ -1013,7 +1046,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         """Index arithmetic on tile index tensors.
 
         torch.arange(40 * 136).reshape(40, 136) in an epilogue reads
-        (tile_x.index + 136*tile_y.index[:, None]).to(torch.float32).
+        (tile_x.index + 136*tile_y.index.reshape([tile_y, 1])).to(torch.float32).
         """
         index = self.tile_index(expr)
         dtype = upcast_compute_type(dtype)
@@ -1032,7 +1065,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
     def index_tensor_expr(self, index: sympy.Expr, axes: Sequence[str]) -> str:
         """`index` computed on the tile index tensors of `axes`.
 
-        136*yindex + xindex -> 136*tile_y.index[:, None] + tile_x.index.
+        136*yindex + xindex -> 136*tile_y.index.reshape([tile_y, 1]) + tile_x.index.
         """
         if not OrderedSet(axes) <= OrderedSet(self.scope_axes) or (
             index.free_symbols - OrderedSet(self.symbols[axis] for axis in axes)
