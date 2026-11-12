@@ -81,8 +81,8 @@ def export_python(
     run a new process to pick up an edit, since loading an edited file where an
     earlier version of it is loaded raises.
 
-    With the inductor backend the capture tunes its Triton kernels at compile time (it
-    compiles as inductor does under ``triton.autotune_at_compile_time``), so the graph
+    With the inductor backend the capture tunes its Triton kernels at compile time, as
+    every :class:`~torch.compiler.precompile.DynamoTracer` capture does, so the graph
     code carries a ``KERNEL_CONFIGS`` table of the config each kernel inductor
     generated launches with: editing a row changes that kernel's launch config. A
     template (flex attention, say) or a user-defined kernel keeps its config in its
@@ -305,17 +305,7 @@ class _ExportedPython:
             backend=self._backend,
         )
         try:
-            with contextlib.ExitStack() as stack:
-                if self._backend == "inductor":
-                    from torch._inductor import config as inductor_config
-
-                    # Tuning at compile time writes the graph's KERNEL_CONFIGS table:
-                    # the config each inductor-generated kernel tuned to and launches
-                    # with.
-                    stack.enter_context(
-                        inductor_config.patch({"triton.autotune_at_compile_time": True})
-                    )
-                stack.enter_context(cap)
+            with cap:
                 try:
                     result = cap(*args, **kwargs)
                 except Unsupported as e:
