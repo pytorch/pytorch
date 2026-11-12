@@ -89,6 +89,11 @@ class WorkNCCL : public c10d::Work {
   std::exception_ptr exception() const override;
   bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
   void synchronize() override;
+  // Work::blockCurrentStream() releases the stream from a future callback, and
+  // getFuture() completes the future before the collective ends.
+  void blockCurrentStream() override {
+    synchronize();
+  }
   std::vector<at::Tensor> result() override;
   c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
   c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
