@@ -21,6 +21,7 @@ from ...utils import (
     _rocm_decompose_k_auto,
     ceildiv,
     get_k_splits,
+    get_num_sms,
     use_triton_blackwell_tma_template,
 )
 from ...virtualized import V
@@ -51,7 +52,9 @@ def decompose_k_split_bounds(device: torch.device) -> tuple[int, int]:
     if (device_properties.major or 0) >= 10:
         # SM100+: ensure splits fill at least one wave, assuming two CTAs per output
         # tile (decompose_k_min_output_tile_size).
-        return (device_properties.multi_processor_count + 1) // 2, 0
+        # get_num_sms() leaves out the SM carveout, which the partial kernel's grid
+        # doesn't get either.
+        return (get_num_sms() + 1) // 2, 0
     # SM90 and earlier: prune splits that use more than 8 MiB of FP32 workspace (no
     # split that beat ATen used more than ~5 MiB) or launch fewer than 8 output tiles.
     return 8, 8 * 1024 * 1024

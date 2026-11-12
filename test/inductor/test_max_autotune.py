@@ -112,6 +112,7 @@ from torch.utils._triton import (
 
 
 aten = torch.ops.aten
+from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import (
@@ -3050,14 +3051,16 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(filter_decompose_k_splits([], 16, 16, 64, 8, 0), [])
 
     def test_decompose_k_split_bounds(self):
-        def bounds_for(device_type, major, multi_processor_count, arch="", splits=-1):
+        def bounds_for(device_type, major, num_sms, arch="", splits=-1):
             props = mock.Mock(
-                type=device_type,
-                major=major,
-                multi_processor_count=multi_processor_count,
+                type=device_type, major=major, multi_processor_count=num_sms
             )
             with (
                 mock.patch.object(DeviceProperties, "create", return_value=props),
+                mock.patch(
+                    "torch._inductor.heuristics.template.decompose_k.get_num_sms",
+                    return_value=num_sms,
+                ),
                 mock.patch("torch._inductor.utils.rocm_gfx_arch", return_value=arch),
                 config.patch({"triton.num_decompose_k_splits": splits}),
             ):
@@ -3069,6 +3072,21 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(bounds_for("hip", 9, 256, "gfx950"), (32, 64 * 1024 * 1024))
         self.assertEqual(bounds_for("hip", 9, 256, "gfx950", splits=10), (0, 0))
         self.assertEqual(bounds_for("xpu", None, 64), (0, 0))
+
+    @unittest.skipIf(not is_datacenter_blackwell_arch(), "requires SM100")
+    def test_decompose_k_split_bounds_follow_sm_carveout(self):
+        # The wave bound counts the SMs the partial kernel gets, not the device's.
+        from torch._inductor.utils import get_max_num_sms
+
+        try:
+            bounds = []
+            for carveout in (None, 20):
+                torch._C._set_sm_carveout_experimental(carveout)
+                bounds.append(decompose_k_split_bounds(torch.device(GPU_TYPE)))
+        finally:
+            torch._C._set_sm_carveout_experimental(None)
+        self.assertEqual(bounds[0], ((get_max_num_sms() + 1) // 2, 0))
+        self.assertEqual(bounds[1], ((get_max_num_sms() - 20 + 1) // 2, 0))
 
     @unittest.skipIf(
         config.triton.native_matmul,
