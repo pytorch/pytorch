@@ -1,4 +1,3 @@
-#include <ATen/DeviceAccelerator.h>
 #include <ATen/MapAllocator.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <atomic>
@@ -151,7 +150,7 @@ CudaIPCSentData::CudaIPCSentData(
       offset_(offset),
       counter_ptr_(counter_ptr),
       device_(device) {
-  auto stream = at::accelerator::getCurrentStream(device_.index());
+  auto stream = c10::impl::VirtualGuardImpl(device_.type()).getStream(device_);
   // Backends may limit the number of live interprocess events, so fall back to
   // stream sync once TORCH_IPC_MAXIMUM_EVENTS_TO_USE is reached.
   if (cuda_ipc_global_entities.sync_events_used_.load() <
