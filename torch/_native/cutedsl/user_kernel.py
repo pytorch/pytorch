@@ -41,7 +41,7 @@ _compiled: dict[Callable[..., Any], dict[tuple[Any, ...], Any]] = {}
 
 # host function -> {(runtime argument names, constants' key) -> launcher}: the
 # launchers eager launches reuse. They hold their host functions, so this keeps them
-# alive, as the side table does for every host function wrap_cutedsl wraps. Like
+# alive (the side table holds them only until torch._dynamo.reset()). Like
 # _compiled, it evicts nothing.
 _eager_launchers: dict[
     Callable[..., Any], dict[tuple[Any, ...], "CuteDSLKernelLauncher"]
