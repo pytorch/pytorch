@@ -1995,6 +1995,82 @@ class TestBlackwellTMALoadFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
+    @parametrize("K", (128, 64))
+    def test_blackwell_mm_reduction_epilogue_tma_load_input(self, K: int):
+        """With TMA loads for template epilogues, a full-tile input of a row
+        reduction pass (the incoming gradient of an RMSNorm backward) is
+        TMA-loaded at the tile's origin, and a per-column input (the norm
+        weight) keeps tl.load. K=64 is a single K tile at BLOCK_K=64, which
+        needs facebookexperimental/triton#3938-#3940 under meta WS."""
+        M, N = 1000, 128
+        grad = torch.randint(-1, 2, (M, N), device=GPU_TYPE).bfloat16()
+        weight = torch.randint(1, 3, (N,), device=GPU_TYPE).bfloat16()
+
+        def fn(a, b):
+            c = (a @ b).float()
+            rstd = torch.rsqrt(c.pow(2).mean(-1, keepdim=True) + 1e-6)
+            xhat = c * rstd
+            g = grad.float() * weight.float()
+            return rstd * (g - xhat * (g * xhat).mean(-1, keepdim=True))
+
+        # Two stages leave shared memory to stage both the fp32 output and g.
+        kernels, code = self._run_reduction(
+            fn,
+            M,
+            K,
+            N,
+            BlackwellGPUGemmConfig(128, 128, 64, 2, 8),
+            tol=1e-5,
+            **{
+                "triton.template_reduction_epilogue": True,
+                "triton.enable_tma_load_for_template_epilogue": True,
+            },
+        )
+        self.assertEqual([k.split("_fused")[0] for k in kernels], ["triton_tem"])
+        FileCheck().check("tl.make_tensor_descriptor").check(".load([").run(code)
+        # The [N] weight is not a full tile.
+        self.assertEqual(len(re.findall(r"\.load\(\[", code)), 1, code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_reduction_epilogue_tma_load_input_keeps_tma_store(self):
+        """The incoming gradient of an RMSNorm backward, read by two epilogue
+        nodes, is charged one staging buffer, so at three stages the fp32
+        output still fits beside it and keeps its TMA store."""
+        M, N, K = 1000, 128, 128
+        grad = torch.randint(-1, 2, (M, N), device=GPU_TYPE).bfloat16()
+        weight = torch.randint(1, 3, (N,), device=GPU_TYPE).bfloat16()
+
+        def fn(a, b):
+            c = (a @ b).float()
+            rstd = torch.rsqrt(c.pow(2).mean(-1, keepdim=True) + 1e-6)
+            xhat = c * rstd
+            g = grad.float() * weight.float()
+            return rstd * (g - xhat * (g * xhat).mean(-1, keepdim=True))
+
+        kernels, code = self._run_reduction(
+            fn,
+            M,
+            K,
+            N,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            tol=1e-5,
+            **{
+                "triton.template_reduction_epilogue": True,
+                "triton.enable_tma_load_for_template_epilogue": True,
+                "triton.enable_template_tma_store": True,
+            },
+        )
+        self.assertEqual([k.split("_fused")[0] for k in kernels], ["triton_tem"])
+        self.assertEqual(len(re.findall(r"\.load\(\[", code)), 1, code)
+        self.assertEqual(len(re.findall(r"\.store\(\[", code)), 1, code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
     @parametrize(
         "case",
         ("stat_by_column", "stat_shifted_row", "wide_n", "wide_n_stats", "subtiled"),
@@ -2367,7 +2443,7 @@ class TestBlackwellTMALoadFusion(TestCase):
         limit = torch.cuda.get_device_properties(GPU_TYPE).shared_memory_per_block_optin
         charged, allocated = {}, {}
         greedy = select_algorithm.tma_store_outputs_within_budget
-        plan = select_algorithm.TritonTemplateKernel._tma_store_epilogue_outputs
+        plan = select_algorithm.TritonTemplateKernel._tma_epilogue_accesses
         make_launchers = CachingAutotuner._make_launchers
         disable_pipelining = CachingAutotuner.compile_by_disabling_pipelining
         calls, fell_back = [], []
@@ -2404,7 +2480,7 @@ class TestBlackwellTMALoadFusion(TestCase):
             ),
             mock.patch.object(
                 select_algorithm.TritonTemplateKernel,
-                "_tma_store_epilogue_outputs",
+                "_tma_epilogue_accesses",
                 record_plan,
             ),
             mock.patch.object(CachingAutotuner, "_make_launchers", record_launchers),
