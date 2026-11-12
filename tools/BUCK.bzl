@@ -161,27 +161,8 @@ def define_tools_targets(
     python_binary(
         name = "generate_code_bin",
         main_module = "tools.setup_helpers.generate_code",
-        # Windows does not support inplace:
-        # https://github.com/facebook/buck/issues/2161.
-        #
-        # Note that //arvr/mode/embedded/win/clang-aarch64-release sets
-        # its target platform to
-        # ovr_config//platform/embedded:clang-aarch64-linux-release, hence
-        # that is why we are selecting that OS to trigger this behavior.
-        package_style = select({
-            "DEFAULT": "inplace",
-            "ovr_config//os:linux-arm64": "standalone",
-        }),
+        package_style = "inplace",
         visibility = ["PUBLIC"],
-        # Because Windows does not support inplace packaging, we need to
-        # ensure it is unzipped before executing it, otherwise it will not
-        # be able to find any resources using path manipulation.
-        #
-        # See note above about why the OS is Linux here and not Windows.
-        zip_safe = select({
-            "DEFAULT": True,
-            "ovr_config//os:linux-arm64": False,
-        }),
         deps = [
             ":generate_code",
         ],

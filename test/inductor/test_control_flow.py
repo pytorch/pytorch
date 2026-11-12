@@ -404,6 +404,41 @@ class CondTests(TestCase):
         )
 
     @requires_gpu
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_cond_backward_does_not_reuse_donated_subgraph_input(self):
+        # bw_donated_idxs index the top-level backward's placeholders. A backward
+        # cond branch that inherited them would donate (and overwrite) its own
+        # unrelated inputs, corrupting gradients. See SubgraphLowering.__init__.
+        device = GPU_TYPE
+
+        def model(x, w):
+            h = torch.matmul(x, w)
+
+            def true_fn(a):
+                return a.sigmoid() * a
+
+            def false_fn(a):
+                return a.relu() * a
+
+            r = torch.cond(h.sum() > 0, true_fn, false_fn, (h,))
+            return ((h + r) * 3.0).sum()
+
+        def make():
+            return (
+                torch.randn(64, 64, device=device, requires_grad=True),
+                torch.randn(64, 64, device=device, requires_grad=True),
+            )
+
+        torch.manual_seed(0)
+        xe, we = make()
+        model(xe, we).backward()
+        torch.manual_seed(0)
+        xc, wc = make()
+        torch.compile(model, fullgraph=True, backend="inductor")(xc, wc).backward()
+        self.assertEqual(xc.grad, xe.grad)
+        self.assertEqual(wc.grad, we.grad)
+
+    @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_simple_with_int_closure(self, device):
         self._run_test(
@@ -2114,6 +2149,14 @@ class ScanModels:
                 torch.cat(grad_inputs, dim=0) / chunks,
             )
 
+    # One carry and no ys: the while_loop decomposition has a single flat output.
+    class ScanReduceOnly(torch.nn.Module):
+        def forward(self, scan_op, initial, xs):
+            def step(acc, x):
+                return acc + x.sin(), ()
+
+            return scan_op(step, initial, xs)
+
     class ScanWithClamp(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -2380,6 +2423,24 @@ class ScanTests(TestCase):
             device=device,
             dynamic=dynamic,
             autograd=autograd,
+        )
+
+    # Not @requires_gpu: the bug this guards is a CPU-reproducible lowering failure.
+    @parametrize("device", ["cpu"] + ([GPU_TYPE] if HAS_GPU else []))
+    @parametrize("dynamic", [True, False])
+    @parametrize("scan_length", [3, 0])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_scan_single_flat_output(self, device, dynamic, scan_length):
+        # Forward only: eager scan's backward does not support an empty ys.
+        self._run_test(
+            model=ScanModels.ScanReduceOnly(),
+            inputs=(
+                torch.randn(4, 5),
+                torch.randn(scan_length, 4, 5),
+            ),
+            device=device,
+            dynamic=dynamic,
+            autograd=False,
         )
 
 

@@ -79,6 +79,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.11-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -145,6 +146,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
+      lf_runners: ${{ needs.get-label-type.outputs.lf-runners }}
       build-environment: linux-jammy-aarch64-py3.11
       docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.11-gcc13
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -162,6 +164,20 @@ jobs:
         ]}
       python-version: "3.11"
       compiler: gcc13
+    secrets: inherit
+
+  linux-jammy-aarch64-py3_11-clang21-build:
+    name: linux-jammy-aarch64-py3.11-clang21
+    needs: get-label-type
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
+      runner: "l-arm64g4-16-62"
+      build-environment: linux-jammy-aarch64-py3.11-clang21
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.11-clang21
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      python-version: "3.11"
+      compiler: clang21
     secrets: inherit
 
   linux-jammy-aarch64-py3_11-gcc13-test:
@@ -191,6 +207,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.14t-clang21
       docker-image-name: ci-image:pytorch-linux-jammy-py3.14t-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -281,6 +298,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.11-clang21-asan
       docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -346,6 +364,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.11-clang21
       docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -411,6 +430,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.14-clang21
       docker-image-name: ci-image:pytorch-linux-jammy-py3.14-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -525,6 +545,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-rocm-py3.11
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
+      rocm-arch-list: gfx90a;gfx942;gfx950;gfx1100
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       # TODO (huydhn): Add this back once other workflow migrates
       # sync-tag: rocm-build
@@ -567,6 +588,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.13-clang21
       docker-image-name: ci-image:pytorch-linux-jammy-py3.13-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}

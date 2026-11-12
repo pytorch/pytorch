@@ -31,7 +31,18 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
+from torch.utils._triton import (
+    has_triton_cuda_tma_device,
+    has_triton_stable_tma_api,
+    has_triton_tma_device,
+)
+
+
+# has_triton_tma_device() is also true on a pre-SM90 CUDA GPU when Triton has a
+# CPU backend, so CUDA needs the stricter check.
+HAS_GPU_TMA = has_triton_tma_device() and (
+    GPU_TYPE != "cuda" or has_triton_cuda_tma_device()
+)
 
 
 class TestBase(TestCase):
@@ -75,12 +86,8 @@ class SkipPatternTest(TestBase):
     """
 
     @inductor_config.patch(split_reductions=False)
-    def test_dimension_too_close(self):
-        """
-        Skip if the two reduction size are too close.
-        We require one reduction dimension to be much larger so we can split
-        that dimension and make it efficient.
-        """
+    def test_workload_too_small(self):
+        """768x768 = 589824 elements, under `size_thres = 5 * 2**20` elements in `MixOrderReduction.can_fuse`."""
 
         def f(x):
             out1 = x.sum(dim=1)
@@ -155,9 +162,6 @@ class MixOrderReductionTest(TestBase):
 
     @parametrize("shape", ((4096, 8192), (4096, 16384), (8192, 16384)))
     def test_wide_reduction_fuses_in_strict_mode(self, shape):
-        """Wide reductions (large ncol, nrow < ncol*2) should use mix-order
-        fusion in the default (strict) mode, now that the `nrow >= ncol*2`
-        gate is removed."""
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -179,9 +183,6 @@ class MixOrderReductionTest(TestBase):
 
     @parametrize("shape", ((6144, 4000), (8192, 6144)))
     def test_flat_reduction_fuses_in_strict_mode(self, shape):
-        """A relatively flat reduction (nrow >= 4096, nrow < ncol*2) should use
-        mix-order fusion in the default (strict) mode, now that the
-        `nrow >= ncol*2` gate is removed."""
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -202,9 +203,6 @@ class MixOrderReductionTest(TestBase):
         )
 
     def test_wide_reduction_respects_row_floor(self):
-        """Strict mode still requires nrow >= 4096: with too few rows there is
-        not enough parallelism to split the other reduction across, so the
-        shape is left unfused (guards against over-fusing 2048x8192)."""
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -247,8 +245,8 @@ class MixOrderReductionTest(TestBase):
             "same-order reductions must not be classified as mix-order",
         )
 
-    @inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True})
-    def test_square_mix_order_reductions_non_strict(self):
+    def test_square_mix_order_reductions(self):
+        """8192x8192 clears both strict checks, so no non-strict override."""
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -582,9 +580,7 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
-    @unittest.skipUnless(
-        has_triton_tma_device(), "Test requires Triton TMA device support"
-    )
+    @unittest.skipUnless(HAS_GPU_TMA, "Test requires Triton TMA device support")
     @parametrize("allow_multi_stages", (False, True))
     @inductor_config.patch(
         {
@@ -659,9 +655,7 @@ class MixOrderReductionTest(TestBase):
                 .run(bwd_wrapper)
             )
 
-    @unittest.skipUnless(
-        has_triton_tma_device(), "Test requires Triton TMA device support"
-    )
+    @unittest.skipUnless(HAS_GPU_TMA, "Test requires Triton TMA device support")
     @parametrize("allow_multi_stages", (False, True))
     @parametrize("shape", ((32768, 256), (32768 + 1023, 768)))
     @inductor_config.patch(

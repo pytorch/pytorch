@@ -13,9 +13,9 @@ from ..exc import TYPE_CHECKING, unimplemented
 from ..graph_bytecode_inputs import (
     CURRENT_STREAM_INDEX,
     get_external_object_by_index,
+    mark_current_stream_used,
+    register_current_stream,
     register_graph_created_object,
-    register_user_object,
-    reset_user_object_tracking,
 )
 from ..source import CurrentStreamSource
 from .base import GetSet, Method, readonly_setter, VariableTracker
@@ -278,28 +278,21 @@ class SymbolicStreamState:
         if torch.accelerator.is_available():
             from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
 
-            # Reset the registry so the current stream is guaranteed index 0.
-            reset_user_object_tracking()
             stream = torch.accelerator.current_stream()
             device = stream.device
             if _coor_device_index_is_current(device):
                 # Reconstruct the stream relative to each rank's current device.
                 device = torch.device(device.type)
             source = CurrentStreamSource(device)
-            # Register the current stream so it gets index 0 (registry is
-            # fresh at tracing start).  The inductor wrapper updates this
+            # Register the current stream so it gets index 0 (each OutputGraph
+            # starts with an empty registry).  The inductor wrapper updates this
             # entry at runtime so cudagraph capture uses the capture stream
             # instead of this stale trace-time stream.
-            index = register_user_object(stream, source)
-            if index != CURRENT_STREAM_INDEX:
-                raise AssertionError(
-                    f"Current stream must be registered at index {CURRENT_STREAM_INDEX}, "
-                    f"got {index}"
-                )
+            register_current_stream(stream, source)
             stream_var = LazyVariableTracker.create(stream, source=source)
             # Set user_object_index as an instance attribute so accessing it
             # does NOT trigger LazyVariableTracker realization.
-            stream_var.user_object_index = index  # type: ignore[union-attr]
+            stream_var.user_object_index = CURRENT_STREAM_INDEX  # type: ignore[union-attr]
             cur_stack = [stream_var]  # type: ignore[list-item]
 
         self.cur_stream_stack: collections.deque[StreamVariable] = collections.deque(
@@ -313,12 +306,24 @@ class SymbolicStreamState:
         self.cur_stream_stack.pop()
 
     def cur_stream(self, device: torch.device | None = None) -> "StreamVariable":
+        mark_current_stream_used()
         if device is not None:
             for stream in reversed(self.cur_stream_stack):
                 if stream.device == device:
                     return stream
 
         return self.cur_stream_stack[-1]
+
+    def tracked_device_type(self) -> str | None:
+        """Device type of the tracked current stream, or None if no stream is
+        tracked.  Peeks the value so LazyVariableTrackers on the stack are not
+        realized (same pattern as cur_stream_id)."""
+        if not self.cur_stream_stack:
+            return None
+        stream = self.cur_stream_stack[-1]
+        if isinstance(stream, LazyVariableTracker) and not stream.is_realized():
+            return stream.peek_value().device.type
+        return stream.value.device.type
 
     def in_stream_context(self) -> bool:
         return len(self.cur_stream_stack) > 0
@@ -334,7 +339,11 @@ class SymbolicStreamState:
 class StreamContextVariable(FxTracebackAnnotateVariable):
     """This represents torch.cuda.StreamContext"""
 
+    # Re-entering only the stream annotation would not restore the stream.
+    _reenter_after_graph_break = False
+
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def create(
         tx: "InstructionTranslatorBase",
         stream_to_enter: "StreamVariable",
@@ -416,7 +425,9 @@ class StreamVariable(StreamContextVariable):
         ):
             from .tensor import CurrentDeviceVariable
 
-            current_device = CurrentDeviceVariable(torch.device(self.device.type))
+            current_device = CurrentDeviceVariable.create(
+                torch.device(self.device.type)
+            )
         self.current_device = current_device
 
         self.user_object_index = user_object_index

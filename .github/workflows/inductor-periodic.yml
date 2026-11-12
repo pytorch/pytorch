@@ -89,6 +89,7 @@ jobs:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       build-environment: linux-jammy-rocm-py3.11-mi350
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
+      rocm-arch-list: gfx950
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
@@ -169,11 +170,9 @@ jobs:
           { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
           { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
           { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
-          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
-          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
-          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
           { config: "dynamic_cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
           { config: "dynamic_cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "inductor_cpp_wrapper_cpu", shard: 1, num_shards: 1, runner: "mt-l-x86iavx512-16-128" },
           { config: "cpu_inductor_freezing_avx2_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iavx2-40-160" },
           { config: "cpu_inductor_freezing_avx2_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iavx2-40-160" },
           { config: "cpu_inductor_freezing_avx2_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iavx2-40-160" },

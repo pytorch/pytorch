@@ -247,7 +247,9 @@ class Vectorized16 {
     // returns an integer mask where all zero elements are translated to 1-bit
     // and others are translated to 0-bit
     __m256i cmp = _mm256_cmpeq_epi16(values, _mm256_set1_epi16(0));
-    return _mm256_movemask_epi8(cmp);
+    __m128i packed = _mm_packs_epi16(
+        _mm256_castsi256_si128(cmp), _mm256_extracti128_si256(cmp, 1));
+    return _mm_movemask_epi8(packed);
   }
   static Vectorized<T> loadu(const void* ptr, int16_t count = size()) {
     if (count == size())
@@ -414,8 +416,7 @@ class Vectorized16 {
       const auto nan_mask = _mm256_cmp_ps(not_nan_mask, zero_vec, _CMP_EQ_OQ);
       const auto pi = _mm256_set1_ps(c10::pi<float>);
 
-      const auto neg_mask = _mm256_cmp_ps(values_2, zero_vec, _CMP_LT_OQ);
-      auto angle = _mm256_blendv_ps(zero_vec, pi, neg_mask);
+      auto angle = _mm256_blendv_ps(zero_vec, pi, values_2);
       angle = _mm256_blendv_ps(angle, nan_vec, nan_mask);
       return angle;
     };

@@ -193,9 +193,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   if [[ -n "$CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
-      # Set ROCM_ARCH to gfx906 for CI builds, if user doesn't override.
-      echo "Limiting PYTORCH_ROCM_ARCH to gfx906 for CI builds"
-      export PYTORCH_ROCM_ARCH="gfx906"
+    echo "PYTORCH_ROCM_ARCH must be set for ROCm CI builds" >&2
+    exit 1
   fi
 
   # hipify sources
@@ -226,6 +225,11 @@ fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
 # gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
+# Limit this ARM64 CUDA build's parallelism to avoid compiler OOMs.
+if [[ "$BUILD_ENVIRONMENT" == "linux-jammy-aarch64-cuda13.2-py3.12-gcc13" ||
+      "$BUILD_ENVIRONMENT" == "linux-jammy-aarch64-cuda13.4-py3.12-gcc13" ]]; then
+  export MAX_JOBS=8
+fi
 if [ -z "$MAX_JOBS" ]; then
   if { [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; } && which sccache > /dev/null; then
     export MAX_JOBS=$(($(nproc) - 1))
@@ -307,13 +311,11 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # rocm builds fail when WERROR=1
-  # XLA test build fails when WERROR=1
   # s390x builds currently fail when WERROR=1
   # riscv64 builds currently fail when WERROR=1
   # Release xpu build stress with WERROR=1
   # set only when building other architectures
-  # or building non-XLA tests.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64*  && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *xpu* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *riscv64*  && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *xpu* ]]; then
     # TODO: Remove me and may be just focus on numpy-2.x testing
     if [[ "$PYTHON_VERSION" =~ ^3\.1[0-2]$ ]]; then
       # Install numpy-2.0.2 for builds which are backward compatible with 1.X
@@ -323,9 +325,6 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
     WERROR=1 python -m build --wheel --no-isolation
   else
-    if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
-      source .ci/pytorch/install_cache_xla.sh
-    fi
     python -m build --wheel --no-isolation
   fi
   pip_install_whl "$(echo dist/*.whl)"
@@ -342,6 +341,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     # ONE owner of the decision: stage 2 prints the verdict, we install only on RUN.
     if [[ "$(python tools/native_aot/build_stage2.py --print-verdict)" == "RUN" ]]; then
       install_cutlass_dsl
+      retry bash scripts/install_triton_wheel.sh
     fi
     # One wheel expected; a stale second would be glued into one argument. nullglob
     # so an empty dist/ counts as zero.
@@ -399,10 +399,6 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
   if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchao* ]]; then
     install_torchao
-  fi
-
-  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchcomms* ]]; then
-    install_torchcomms
   fi
 
   if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *spmd_types* ]]; then

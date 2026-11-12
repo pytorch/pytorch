@@ -1354,13 +1354,11 @@ class GemmSm120(GemmSm90):
                     # Splits not covering the last k-tile see a full tile.
                     k_valid = len_k - (k_tile_total - 1) * self.cta_tile_shape_mnk[2]
                     sf_valid_insts_last_tile = cute.ceil_div(k_valid, self.mma_inst_mnk[2])
-                    if (
-                        const_expr(self.split_k > 1)
-                        and k_tile_start_mma + k_tile_cnt != k_tile_total
-                    ):
-                        sf_valid_insts_last_tile = Int32(
-                            self.cta_tile_shape_mnk[2] // self.mma_inst_mnk[2]
-                        )
+                    if const_expr(self.split_k > 1):
+                        if k_tile_start_mma + k_tile_cnt != k_tile_total:
+                            sf_valid_insts_last_tile = Int32(
+                                self.cta_tile_shape_mnk[2] // self.mma_inst_mnk[2]
+                            )
                 if const_expr(self.pingpong):
                     self.pingpong_barrier_sync(warp_group_idx, stage="mma")
                 iket.range_push("mma")
@@ -1757,7 +1755,15 @@ class GemmSm120(GemmSm90):
                     # zero-filled value tail — its SF pad bytes may be
                     # arbitrary (0xFF is e8m0 NaN, and NaN * 0 would poison
                     # the accumulator)
-                    if const_expr(sf_valid_insts_last_tile is None) or k < sf_valid_insts_last_tile:
+                    if const_expr(sf_valid_insts_last_tile is None):
+                        cute.gemm(
+                            tiled_mma,
+                            acc,
+                            [tCrA[None, None, k], tCrSFA[None, None, k]],
+                            [tCrB[None, None, k], tCrSFB[None, None, k]],
+                            acc,
+                        )
+                    elif k < sf_valid_insts_last_tile:
                         cute.gemm(
                             tiled_mma,
                             acc,
