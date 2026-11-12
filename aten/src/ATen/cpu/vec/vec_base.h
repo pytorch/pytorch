@@ -379,6 +379,20 @@ struct Vectorized {
     }
     return ret;
   }
+  // A NaN (all bits set) where mask is true, this otherwise.
+  Vectorized<T> or_nan_if(const VecBool<T>& mask) const {
+    Vectorized<T> vector;
+    std::array<int_same_size_t<T>, size()> buffer{};
+    mask.store(buffer.data());
+    for (const auto i : c10::irange(size())) {
+      if (buffer[i] & 0x01) {
+        std::memset(&vector.values[i], 0xFF, sizeof(T));
+      } else {
+        vector[i] = values[i];
+      }
+    }
+    return vector;
+  }
   template <
       typename other_t_abs = T,
       typename std::enable_if_t<
