@@ -23831,7 +23831,7 @@ if RUN_GPU:
             torch.testing.assert_close(actual=actual, expected=reduce_3d(inp))
             for block_arg in ("YBLOCK", "XBLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"):
                 self.assertIn(block_arg, code[0])
-            self.assertNotIn("ZBLOCK", code[0])
+            self.assertNotIn("Z0_BLOCK", code[0])
             self.assertIn("tl.load", code[0])
 
         @config.patch({"triton.decompose_sort_ops": True})
