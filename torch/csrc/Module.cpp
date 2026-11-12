@@ -3069,17 +3069,16 @@ Call this whenever a new thread is created in order to propagate values from
       0);
 
   // The C++ counterpart of Python's FakeTensorConverter.from_meta_and_device.
-  // It takes no pytype or dispatch_keys: a C++ fake is always a plain Tensor
-  // (a Parameter carries the _is_param marker instead), and callers record
-  // anything else on the result. It does not memoize; callers such as the
-  // converter do. It rejects the inputs Python's does, raising TypeError,
-  // ValueError or, for a meta device the mode disallows, RuntimeError, where
-  // Python's raises AssertionError. Unlike Python's, it also rejects every
-  // tensor subclass with __torch_dispatch__ (Python's accepts one whose
-  // dispatched detach returns a plain tensor) and functional and functorch
-  // wrappers, and it takes device as a torch.device, not a string. It also
-  // does not initialize a CUDA or XPU context for such a device, as Python's
-  // FakeTensor.__new__ does (init_gpu_context).
+  // It takes no pytype or dispatch_keys: a C++ fake is always a plain Tensor,
+  // and callers record other metadata on the result. It does not memoize;
+  // callers such as the converter do. It rejects the inputs Python's does,
+  // raising TypeError, ValueError or, for a disallowed meta device,
+  // RuntimeError, where Python raises AssertionError. Unlike Python's, it also
+  // rejects every tensor subclass with __torch_dispatch__ (Python's accepts one
+  // whose dispatched detach returns a plain tensor) and functional and
+  // functorch wrappers, and it takes device as a torch.device, not a string. It
+  // also does not initialize a CUDA or XPU context for such a device, as
+  // Python's FakeTensor.__new__ does (init_gpu_context).
   py_module.def(
       "_from_meta_and_device",
       [](const at::Tensor& meta,
@@ -3140,8 +3139,8 @@ Call this whenever a new thread is created in order to propagate values from
   // any other tensor, including a Python FakeTensor (maybe_get_fake_mode
   // handles those) and a tensor with the Fake key but no mode (see
   // _set_fake_device). Unlike maybe_get_fake_mode, it does not look inside
-  // functional, functorch or traceable wrapper tensors. Raises for a fake of a
-  // mode made in C++, which has no Python object.
+  // functional, functorch or traceable wrapper tensors. A missing Python
+  // wrapper is created, including for modes made in C++.
   py_module.def("_maybe_get_fake_mode", [](const at::Tensor& t) -> py::object {
     if (!t.defined() || !t.is_fake()) {
       return py::none();
