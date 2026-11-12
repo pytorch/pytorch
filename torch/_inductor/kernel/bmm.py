@@ -37,7 +37,7 @@ from .mm_common import (
     is_batch_stride_largest_or_zero,
     mm_args,
     native_matmul_scaled_add,
-    use_helion_native_matmul,
+    use_helion_mm,
     use_native_matmul,
     zero_addmm_input,
 )
@@ -311,7 +311,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             mat2 = may_require_contiguous(mat2, meta_mat2)
 
     if use_native_matmul(mat1, mat2):
-        if use_helion_native_matmul(mat1):
+        if use_helion_mm(mat1, mat2):
             # The Helion kernel reads the operands from memory; see tuned_mm.
             mat1, mat2 = realize_inputs(mat1, mat2)
         mat1 = lowerings[aten.unsqueeze](mat1, -1)

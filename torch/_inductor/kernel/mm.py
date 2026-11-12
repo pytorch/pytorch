@@ -89,7 +89,7 @@ from .mm_common import (
     mm_grid,
     native_matmul_scaled_add,
     persistent_mm_grid,
-    use_helion_native_matmul,
+    use_helion_mm,
     use_native_matmul,
     zero_addmm_input,
 )
@@ -582,7 +582,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     # are semantically equivalent to the `ops.mul` + `ops.reduction("sum")`
     # combination, but are lowered to `tl.dot` during the code generation phase.
     if use_native_matmul(mat1, mat2):
-        if use_helion_native_matmul(mat1):
+        if use_helion_mm(mat1, mat2):
             # The Helion kernel reads in0[tile_y, tile_r] and in1[tile_r, tile_x]
             # from a buffer or a strided view of one. Without this,
             # a.permute(1, 0, 2).reshape(40, 64) @ b fails with
@@ -916,7 +916,7 @@ def _tuned_addmm_out_dtype(inp, mat1, mat2, out_dtype, *, alpha, beta, layout):
     # path too, so that addmm(c, a, b, out_dtype=torch.float32) is one Helion
     # kernel, tmp3 = acc + tmp2; out0[tile_y, tile_x] = tmp3, rather than
     # extern_kernels.addmm_dtype(arg0_1, arg1_1, arg2_1, out_dtype=torch.float32, ...).
-    if V.graph.cpp_wrapper or use_helion_native_matmul(mat1):
+    if V.graph.cpp_wrapper or use_helion_mm(mat1, mat2):
         result = lowerings[aten.mm](mat1, mat2, out_dtype, layout=layout)
         if alpha != 1:
             result = lowerings[aten.mul](alpha, result)

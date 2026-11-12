@@ -5,11 +5,14 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-import sympy
-
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
-from torch._inductor.utils import get_current_backend, is_bf16x9_matmul, sympy_product
+from torch._inductor.utils import (
+    get_current_backend,
+    is_bf16x9_matmul,
+    sympy_product,
+    use_helion_native_matmul,
+)
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
@@ -176,14 +179,11 @@ def scale_mm_epilogue():
     return epilogue
 
 
-def use_helion_native_matmul(mat1) -> bool:
-    """Whether config.helion.native_matmul applies to this CUDA matmul."""
-    return (
-        config.helion.enabled
-        and config.helion.native_matmul
-        and config.cuda_backend == "triton"
-        and mat1.get_device().type == "cuda"
-        and not (V.graph.cpp_wrapper or V.graph.fx_wrapper)
+def use_helion_mm(mat1, mat2) -> bool:
+    """Whether a Helion kernel emits mat1 @ mat2; see use_helion_native_matmul()."""
+    *size, k = mat1.get_size()
+    return use_helion_native_matmul(
+        mat1.get_device(), mat1.get_dtype(), [*size, mat2.get_size()[-1]], k
     )
 
 
@@ -218,25 +218,9 @@ def native_matmul_scaled_add(inp, alpha, beta, matmul):
 
 def use_native_matmul(mat1, mat2):
     """Whether to lower this matmul to native dot IR (ops.dot + reduction("dot"))."""
-    if use_helion_native_matmul(mat1):
-        # Static FP16/BF16/FP32 matmuls with M, N > 1 (K == 1 is decomposed to
-        # a multiply before lowering). The others use the regular lowering, as
-        # HelionKernel fails on them:
-        #   M or N == 1: no tile_y or tile_x, KeyError: 'y' in tiled_view()
-        #   K == 0: AssertionError: dot not supported for zero-dimension tensors!
-        #   FP64: ControlFlowTensorMismatch: dtype torch.float32 != torch.float64
-        #   dynamic: NotImplementedError: Cannot read a Helion dot operand at r0_index + 72*yindex
-        # BF16x9 has no Helion dot_precision and, as for Triton native matmul,
-        # uses the regular lowering too.
-        dtype = mat1.get_dtype()
-        sizes = [*mat1.get_size(), *mat2.get_size()]
-        return (
-            dtype in (torch.float16, torch.bfloat16, torch.float32)
-            and not is_bf16x9_matmul(mat1.get_device().type, dtype)
-            and all(isinstance(size, (int, sympy.Integer)) for size in sizes)
-            and 0 not in sizes
-            and 1 not in (mat1.get_size()[-2], mat2.get_size()[-1])
-        )
+    # A matmul that Helion declines can still be a Triton native matmul.
+    if use_helion_mm(mat1, mat2):
+        return True
 
     if (
         is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())

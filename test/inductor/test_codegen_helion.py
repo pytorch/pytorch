@@ -562,6 +562,23 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         else:
             self.assertEqual(sources, [])
 
+    @parametrize("op", ["mm", "addmm_out_dtype"])
+    def test_declined_matmul_keeps_its_lowering(self, op):
+        # A dynamic matmul, which Helion declines, is lowered as without Helion:
+        # a Triton native matmul with triton.native_matmul, and one
+        # extern_kernels.addmm_dtype for addmm(..., out_dtype=).
+        a, b = randn(40, 72), randn(72, 136)
+        torch._dynamo.mark_dynamic(a, 0)
+        if op == "mm":
+            with config.patch({"triton.native_matmul": True}):
+                self.compile(lambda a, b: a @ b, a, b, tol=1e-2, helion=False)
+            self.assertIn("tl.dot(", self.code)
+        else:
+            args = (randn(136, dtype=torch.float32), a, b)
+            fn = lambda c, a, b: torch.addmm(c, a, b, out_dtype=torch.float32)  # noqa: E731
+            self.compile(fn, *args, expected=fn(*args), tol=1e-2, helion=False)
+            self.assertIn("extern_kernels.addmm_dtype(", self.code)
+
     def test_addmm(self):
         (source,) = self.compile(
             lambda bias, a, b: torch.addmm(bias, a, b),
