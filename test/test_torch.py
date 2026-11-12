@@ -3254,7 +3254,7 @@ class TestTorchDeviceType(TestCase):
         # Partial sums of up to this many values in {-1, 0, 1} are exact in `dtype`.
         max_len = {torch.half: 2048, torch.bfloat16: 256}.get(dtype, 2**24)
         for (shape, dim), op in product(cases, (torch.cumsum, torch.cumprod)):
-            if shape[dim] > max_len:
+            if op is torch.cumsum and shape[dim] > max_len:
                 continue
             if dtype.is_floating_point or dtype.is_complex:
                 if op is torch.cumsum:
@@ -3339,17 +3339,16 @@ class TestTorchDeviceType(TestCase):
         # On CUDA these shapes give each line to a single thread (outer dim) or block (last dim),
         # which is too slow for a unit test.
         for shape, dim in (((2, 2**30 + 8, 2), 1), ((2, 2**31 + 16), 1)):
-            x = torch.ones(shape, dtype=torch.uint8, device=device)
-            res = x.cumsum(dim, dtype=torch.uint8).movedim(dim, 0)
-            del x
+            # Random values make every chunk and tile carry visible modulo 256.
+            x = torch.randint(0, 256, shape, dtype=torch.uint8, device=device)
+            res = x.cumsum(dim, dtype=torch.uint8)
             n = shape[dim]
             for start in (0, n // 2, n - 1024):
-                got = res[start:start + 1024]
-                expected = ((torch.arange(start, start + 1024, device=device) + 1) % 256).to(torch.uint8)
-                expected = expected.view(-1, *([1] * (got.dim() - 1))).expand_as(got)
-                self.assertEqual(got, expected, atol=0, rtol=0)
-            # got is a view of res; both must go before the next shape allocates.
-            del res, got, expected
+                prefix = x.narrow(dim, 0, start).sum(dim, keepdim=True, dtype=torch.int64).cpu()
+                window = x.narrow(dim, start, 1024).cpu().cumsum(dim, dtype=torch.int64)
+                expected = ((prefix + window) % 256).to(torch.uint8)
+                self.assertEqual(res.narrow(dim, start, 1024).cpu(), expected, atol=0, rtol=0)
+            del x, res
 
     @onlyCUDA
     @dtypes(torch.uint8, torch.int16, torch.half)
@@ -3367,6 +3366,22 @@ class TestTorchDeviceType(TestCase):
             x_off = torch.empty(x.numel() + 1, dtype=dtype, device=device)[1:].view(shape)
             x_off.copy_(x)
             self.assertEqual(op(x_off, -1, dtype=dtype), expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    def test_cumsum_alignment_independent(self, device, dtype):
+        # These rows run the chunked last-dim path. A misaligned input switches it to scalar loads,
+        # which must give the same bits as the vector loads, as must reruns. (CUDA scans 1-D inputs
+        # with CUB, whose look-back can group partial sums differently from run to run.)
+        for shape in ((2_000_000,), (3, 200_000), (1, 16_777_216)):
+            x = torch.randn(shape, dtype=dtype, device=device)
+            ref = x.cumsum(-1)
+            x_off = torch.empty(x.numel() + 1, dtype=dtype, device=device)[1:].view(shape)
+            x_off.copy_(x)
+            self.assertEqual(x_off.cumsum(-1), ref, atol=0, rtol=0)
+            for _ in range(3):
+                self.assertEqual(x.cumsum(-1), ref, atol=0, rtol=0)
 
     def _test_cumminmax_helper(self, x, fn, expected_val, expected_ind):
         val, ind = fn(x, -1)
