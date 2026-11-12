@@ -888,22 +888,54 @@ class TCPStoreTLSTest(TestCase):
             else {"tls_psk": ""}
         )
         with mock.patch.dict(os.environ, env):
-            with self.assertRaisesRegex(DistStoreError, "must not be empty"):
-                self._store(tls=empty)
+            server = self._store(tls=empty)
+            client = self._store(server.port, False, tls=empty)
+            self.assertEqual(client.clone().add("plain", 1), 1)
+            self.assertEqual(server.get("plain"), b"1")
             # Options are not merged with the env vars.
             with self.assertRaisesRegex(DistStoreError, "missing tls_key, tls_ca"):
                 self._store(tls={"tls_cert": self.server[0]})
 
-    @parametrize("option", ["cert", "key", "ca", "psk"])
+    @parametrize("option", ["cert", "key", "ca", "psk", "all"])
     @parametrize("from_env", [False, True])
     @parametrize("is_master", [False, True])
     def test_tls_empty_config(self, option, from_env, is_master):
-        name = f"TORCH_TCPSTORE_TLS_{option.upper()}" if from_env else f"tls_{option}"
-        env = {name: ""} if from_env else {}
-        tls = {} if from_env else {name: ""}
-        with mock.patch.dict(os.environ, env):
-            with self.assertRaisesRegex(DistStoreError, f"{name} must not be empty"):
-                self._store(is_master=is_master, tls=tls)
+        fields = ["cert", "key", "ca", "psk"] if option == "all" else [option]
+        values = {
+            (f"TORCH_TCPSTORE_TLS_{field.upper()}" if from_env else f"tls_{field}"): ""
+            for field in fields
+        }
+        server = self._store()
+        with mock.patch.dict(os.environ, values if from_env else {}):
+            store = self._store(
+                0 if is_master else server.port,
+                is_master,
+                tls={} if from_env else values,
+            )
+            self.assertEqual(store.add("plain", 1), 1)
+            self.assertEqual(store.clone().get("plain"), b"1")
+
+    @parametrize("option", ["cert", "key", "ca", "psk"])
+    @parametrize("from_env", [False, True])
+    @parametrize("is_master", [False, True])
+    def test_tls_partial_empty_config(self, option, from_env, is_master):
+        values = {
+            "tls_cert": self.server[0],
+            "tls_key": self.server[1],
+            "tls_ca": self.ca,
+        }
+        values[f"tls_{option}"] = ""
+        if from_env:
+            values = {
+                f"TORCH_TCPSTORE_{name.upper()}": value
+                for name, value in values.items()
+            }
+        with mock.patch.dict(os.environ, values if from_env else {}):
+            with self.assertRaisesRegex(
+                DistStoreError,
+                f"{option.upper() if from_env else option} must not be empty",
+            ):
+                self._store(is_master=is_master, tls={} if from_env else values)
 
     @parametrize("option", ["cert", "key", "ca", "psk"])
     def test_tls_nul_path(self, option):
@@ -917,14 +949,12 @@ class TCPStoreTLSTest(TestCase):
             self._store(tls=tls)
 
     def test_plaintext_clone_tls_env(self):
-        server = self._store(timeout=0.1)
+        server = self._store()
         self.assertEqual(server.clone().add("plain", 1), 1)
         with mock.patch.dict(os.environ, {"TORCH_TCPSTORE_TLS_CERT": ""}):
-            with self.assertRaisesRegex(DistStoreError, "must not be empty"):
-                server.clone()
+            self.assertEqual(server.clone().add("plain", 1), 2)
         with mock.patch.dict(os.environ, self._env(self.client)):
-            with self.assertRaisesRegex(DistStoreError, "TLS handshake failed"):
-                server.clone()
+            self.assertEqual(server.clone().add("plain", 1), 3)
 
     def test_tls_missing_ca(self):
         env = self._env(self.server)

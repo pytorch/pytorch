@@ -67,8 +67,8 @@ struct TCPStoreOptions {
   // a pre-shared key value of 32 to 256 random bytes, which cannot
   // be combined with the certificate options. If no tls* option is set, the
   // matching TORCH_TCPSTORE_TLS_{CERT,KEY,CA,PSK} environment variables are
-  // used instead. TLS is enabled if any option or environment variable is set.
-  // Empty values and NUL bytes are rejected. Never log the PSK value.
+  // used instead. All empty/unset settings disable TLS; otherwise empty values
+  // are rejected. NUL bytes are rejected. Never log the PSK value.
   std::optional<std::string> tlsCert = std::nullopt;
   std::optional<std::string> tlsKey = std::nullopt;
   std::optional<std::string> tlsCa = std::nullopt;
