@@ -3681,14 +3681,23 @@ def native_layer_norm(
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
     if input.device.type in ["cpu", "mtia"]:
-        mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
-        rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
+        stats_dtype = input.dtype
+        if input.device.type == "cpu" and input.dtype in (
+            torch.float16,
+            torch.bfloat16,
+        ):
+            if (weight is not None and weight.dtype == torch.float32) or (
+                bias is not None and bias.dtype == torch.float32
+            ):
+                stats_dtype = torch.float32
+        mean = _maybe_convert_to_dtype(mean, stats_dtype)  # type: ignore[assignment]
+        rstd = _maybe_convert_to_dtype(rstd, stats_dtype)  # type: ignore[assignment]
     return (out, mean, rstd)
 
 
 @torch._subclasses.fake_impls.register_op_impl(aten.native_layer_norm.default)
 def native_layer_norm_fake(fake_mode, func, *args, **kwargs):
-    return native_layer_norm(*args)
+    return native_layer_norm(*args, **kwargs)
 
 
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
