@@ -3801,9 +3801,9 @@ class TestBinaryUfuncsDevice(TestCase):
         out = torch.empty(0, device=device, dtype=torch.float32)
         torch.ldexp(mantissas, exponents, out=out)
         self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-        self.assertEqual(out, torch.ldexp(mantissas.float(), exponents), atol=0, rtol=0)
+        self.assertEqual(out, torch.ldexp(mantissas, exponents).float(), atol=0, rtol=0)
 
-    @skipCPUIf(True, "test requires distinct CPU and accelerator devices")
+    @onlyAccelerator
     def test_ldexp_out_dtype_differs_cpu_scalar(self, device):
         out = torch.empty(1, device=device, dtype=torch.float32)
         torch.ldexp(

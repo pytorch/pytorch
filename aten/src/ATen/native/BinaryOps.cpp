@@ -1599,11 +1599,13 @@ Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
     // turn the integer exponent into a float, and the CPU kernel can't cast
     // dynamically. So compute in self's dtype and copy, like cholesky_inverse_out.
     // The mul fallback below computes 2**other in self's dtype, which
-    // over/underflows even when the result is representable in out's dtype.
-    // Mixed-device inputs (e.g. CPU scalars) are left to mul_out, which handles them.
+    // over/underflows even when the result is representable in self's dtype.
+    // Mixed-device inputs (e.g. CPU scalars) are left to mul_out, which still
+    // computes 2**other in self's dtype.
     if (self.device() == other.device() && self.device() == result.device()) {
       Tensor tmp = at::ldexp(self, other);
-      // Restride on resize like codegen's resize_out, so out keeps self's layout.
+      // Restride on resize like codegen's resize_out, so out keeps the layout
+      // TensorIterator computes from the inputs.
       if (at::native::resize_output(result, tmp.sizes())) {
         result.as_strided_(tmp.sizes(), tmp.strides());
       }
