@@ -11,6 +11,9 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/FbcodeMaps.h>
+
+#include <mutex>
 
 AOTITorchError aoti_torch_create_cuda_guard(
     int32_t device_index,
@@ -58,6 +61,29 @@ AOTITorchError aoti_torch_get_current_cuda_stream(
     void** ret_stream) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     *(cudaStream_t*)(ret_stream) = at::cuda::getCurrentCUDAStream(device_index);
+  });
+}
+
+AOTITorchError aoti_torch_get_constants_copy_cuda_stream(
+    int32_t device_index,
+    void** ret_stream) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    if (device_index < 0) {
+      TORCH_CHECK(device_index == -1, "invalid device index ", device_index);
+      device_index = c10::cuda::current_device();
+    }
+    static std::mutex mutex;
+    static c10::FastMap<int32_t, cudaStream_t> streams;
+    std::lock_guard<std::mutex> lock(mutex);
+    cudaStream_t& stream = streams[device_index];
+    if (stream == nullptr) {
+      at::cuda::CUDAGuard device_guard(device_index);
+      cudaStream_t created = nullptr;
+      C10_CUDA_CHECK(
+          cudaStreamCreateWithFlags(&created, cudaStreamNonBlocking));
+      stream = created;
+    }
+    *(cudaStream_t*)(ret_stream) = stream;
   });
 }
 
