@@ -2948,6 +2948,10 @@ class CSEProxy(DefaultHandler):
         if name == "masked" and backend == "triton":
             output_dtype = value.dtype
             output_shape = value.shape
+        elif name == "masked" and backend == "mps":
+            # Like Triton, the result has the dtype of the masked body's value.
+            output_dtype = value.dtype
+            output_shape = shape_op(*args, **kwargs)
         elif name == "masked" and backend == "cpp":
             output_dtype = V.interpreter.current_node.meta.get(
                 OptimizationContext.key, None

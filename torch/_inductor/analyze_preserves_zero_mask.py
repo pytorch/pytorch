@@ -1,5 +1,6 @@
 import dataclasses
 import itertools
+from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 import sympy
@@ -77,7 +78,30 @@ class PreservesZeros(SymPyOps, DefaultHandler):
             return getattr(OpDecompositions, name)(*args, **kwargs).value
 
         dtype = getattr(self.dtype_prop, name)(*args, **kwargs)
+        if isinstance(dtype, tuple):  # ops with several outputs, e.g. frexp
+            return tuple(
+                TypedExpr(construct_symbol(next(self.count), d), d) for d in dtype
+            )
         return TypedExpr(construct_symbol(next(self.count), dtype), dtype)
+
+
+def _unknown_if_not_implemented(name: str) -> Callable[..., Any]:
+    sympy_op = getattr(SymPyOps, name)
+
+    def op(self: PreservesZeros, *args: Any, **kwargs: Any) -> Any:
+        result = sympy_op(*args, **kwargs)
+        if result is NotImplemented:
+            return self._default(name, args, kwargs)
+        return result
+
+    return op
+
+
+# SymPyOps returns NotImplemented for values it cannot represent (e.g. a float
+# remainder); give PreservesZeros an unknown value for those instead.
+for _name, _op in vars(SymPyOps).items():
+    if isinstance(_op, staticmethod) and _name not in vars(PreservesZeros):
+        setattr(PreservesZeros, _name, _unknown_if_not_implemented(_name))
 
 
 def prologue_preserves_zero_mask(prologue: "SchedulerNode") -> bool:
@@ -112,6 +136,8 @@ class RecordLowPrecisionOps(DefaultHandler):
             "to_dtype",
             "constant",
             "where",
+            # The ops inside the masked body are recorded separately.
+            "masked",
         )
 
     def load(self, name: str, index: sympy.Expr) -> DTypeContainer:
@@ -137,28 +163,28 @@ class RecordLowPrecisionOps(DefaultHandler):
         self, name: str, args: tuple[object, ...], kwargs: dict[str, object]
     ) -> Any:
         out_dtype = getattr(self.dtype_prop, name)(*args, **kwargs)
-        out = DTypeContainer(out_dtype, is_scalar=(name == "constant"))
         if name == "constant":
             return DTypeContainer(torch.float, is_scalar=True)
+        # Ops with several outputs, e.g. frexp, get a tuple of dtypes.
+        multi = isinstance(out_dtype, tuple)
+        outs = tuple(DTypeContainer(d) for d in (out_dtype if multi else (out_dtype,)))
 
         uses_low_prec = any(
             isinstance(dtype_cont, DTypeContainer)
             and dtype_cont.dtype is not None
             and low_prec_float(dtype_cont.dtype)
-            for dtype_cont in itertools.chain((out,), args, kwargs.values())
+            for dtype_cont in itertools.chain(outs, args, kwargs.values())
         )
 
         if uses_low_prec and name not in self.non_numeric_ops:
             self.low_precision_numeric_op = True
 
-        if (
-            self.disallow_fp32_ops
-            and out.dtype in (torch.float32, torch.float64)
-            and not out.is_scalar
+        if self.disallow_fp32_ops and any(
+            out.dtype in (torch.float32, torch.float64) for out in outs
         ):
             self.low_precision_numeric_op = True
 
-        return out
+        return outs if multi else outs[0]
 
 
 def low_prec_float(dtype: torch.dtype) -> bool:
