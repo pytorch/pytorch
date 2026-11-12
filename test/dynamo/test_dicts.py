@@ -70,6 +70,55 @@ class FakeMapping:
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
+    @parametrize("raises", [False, True])
+    def test_display_hash_and_equality_callback_order(self, raises):
+        class Key:
+            def __init__(self, name, events):
+                self.name, self.events = name, events
+
+            def __hash__(self):
+                self.events.append("hash:" + self.name)
+                return 1
+
+            def __eq__(self, other):
+                self.events.append("eq:" + self.name + other.name)
+                if raises:
+                    raise ValueError("collision")
+                return False
+
+        def fn(x, a, b, c):
+            try:
+                mapping = {a: 1, b: 2, c: 3}
+                return x + len(mapping)
+            except ValueError:
+                return x - 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x, expected_events, actual_events = torch.ones(1), [], []
+        expected = fn(x, *(Key(name, expected_events) for name in "abc"))
+        actual = compiled(x, *(Key(name, actual_events) for name in "abc"))
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_events, expected_events)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_aliased_ordered_view_rejects_dict_receiver(self):
+        class Mapping(dict):
+            keys = OrderedDict.keys
+
+        def fn(x, mapping):
+            try:
+                return x + len(mapping.keys())
+            except TypeError:
+                return x - 1
+
+        x, mapping = torch.ones(1), Mapping(a=1)
+        counter = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(
+            torch.compile(fn, backend=counter, fullgraph=True)(x, mapping), x - 1
+        )
+        self.assertEqual(counter.frame_count, 1)
+
     def test_keyword_expansion_preserves_mapping_protocol(self):
         class Mapping(dict):
             def __iter__(self):
@@ -3557,6 +3606,31 @@ class DictTests(torch._dynamo.test_case.TestCase):
         obj = Obj(3)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(Obj(3)), opt_fn(obj))
+
+    def test_getitem_keyerror_guard_recompiles(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/201369
+        # d[key] raising KeyError inside a try/except must still guard on
+        # whether `key` is present, just like d.get(key) and `key in d` do.
+        # Otherwise the compiled graph is reused once the key appears, and
+        # the function silently returns the stale except-branch result.
+        def fn(d, t):
+            try:
+                v = d["x"]
+            except KeyError:
+                return t - 1
+            return v.sum()
+
+        t = torch.tensor(0.0)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        d = {}
+        self.assertEqual(opt_fn(d, t), fn(d, t))
+        self.assertEqual(cnt.frame_count, 1)
+
+        d = {"x": torch.ones(3)}
+        self.assertEqual(opt_fn(d, t), fn(d, t))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_dunder_dict_getitem_guard_recompiles(self):
         class Obj:
