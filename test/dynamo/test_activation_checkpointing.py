@@ -1880,6 +1880,16 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         # Check that the sdpa op is recomputed in the backward graph
         self.assertTrue(count_ops(bwd_graph, [], freq=1, op=sdpa_op))
 
+    @skipIf(
+        not HAS_TRITON,
+        "requires_triton for CUDA and XPU",
+        device_type=("cuda", "xpu"),
+    )
+    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_compile_checkpoint_random_op_input_dim_matches_rng_state(self, device):
+        _check_random_op_input_dim_matches_rng_state(self, device)
+
 
 class ActivationCheckpointingViaTagsGenericTests(
     ActivationCheckpointingViaTagsTestBase
@@ -2002,12 +2012,6 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         result = opt_fn(a, b)
         self.assertEqual(result, expected)
 
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    @torch._inductor.config.patch(fallback_random=True)
-    def test_compile_checkpoint_random_op_input_dim_matches_rng_state(self, device):
-        _check_random_op_input_dim_matches_rng_state(self, device)
-
-    @requires_gpu_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
@@ -3853,6 +3857,8 @@ instantiate_device_type_tests(
 
 
 class ActivationCheckpointingCpuRngTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.CPU
+
     # The class above skips cpu, whose generator state has its own size.
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._inductor.config.patch(fallback_random=True)
