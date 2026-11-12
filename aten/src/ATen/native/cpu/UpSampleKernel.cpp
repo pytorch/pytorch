@@ -164,6 +164,13 @@ inline scalar_t interpolate_non_separable(char* src, char** data, const int64_t*
 //         -> interpolate_separable_1d
 //       -> basic_loop_separable_1d_vertical  (for other spatial dims, e.g. H, D)
 //         -> interpolate_separable_1d_zero_strides
+//
+// The vertical kernel assumes that the indices and weights are constant along
+// the innermost loop (i.e. the innermost loop runs over W, along which they
+// have zero strides). When that does not hold, e.g. output width is 1 so that
+// TensorIterator squashes W and the interpolated dim itself becomes the
+// innermost loop, the vertical pass falls back to the horizontal kernel which
+// reads the indices and weights per output element.
 
 template <typename scalar_t, typename index_t>
 inline scalar_t interpolate_separable_1d_zero_strides(
@@ -1652,6 +1659,7 @@ void upsample_separable_1d(
   // name for internal BC.
   AT_DISPATCH_FLOATING_TYPES_AND(
       at::ScalarType::Byte, iter.dtype(), "upsample_generic_Nd_aa", [&] {
+        const int ntensors = iter.ntensors();
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {
           if constexpr (is_horizontal) {
             // Strides are : X 0 | 8 8 8 0 8  (Channels first)
@@ -1660,7 +1668,26 @@ void upsample_separable_1d(
           } else {
             // Strides are : X Y | 0 0 0 0 0 (Channels first)
             // Strides are : X X | 0 0 0 0 0 (Channels last)
-            basic_loop_separable_1d_vertical<scalar_t>(data, strides, n, weights_precision);
+            //
+            // The vertical kernel only reads the first element of each
+            // indices/weights tensor, which is correct iff their strides along
+            // the innermost loop are all zero. That is not the case when the
+            // interpolated dim is the innermost loop, e.g. when the output
+            // width is 1 (TensorIterator squashes size-1 dims) or, in
+            // channels last, when C == 1 and W == 1. The horizontal kernel
+            // handles arbitrary strides, so use it in that case.
+            bool has_zero_strides = true;
+            for (const auto k : c10::irange(2, ntensors)) {
+              if (strides[k] != 0) {
+                has_zero_strides = false;
+                break;
+              }
+            }
+            if (has_zero_strides) {
+              basic_loop_separable_1d_vertical<scalar_t>(data, strides, n, weights_precision);
+            } else {
+              basic_loop_separable_1d_horizontal<scalar_t>(data, strides, n, weights_precision);
+            }
           }
         };
         iter.for_each(loop);
