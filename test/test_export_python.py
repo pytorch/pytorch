@@ -58,6 +58,20 @@ def factored(x):
 def matmul(x, y):
     return x @ y
 
+@torch.compile(backend="eager")
+def compiled_double(x):
+    return x * 2
+
+def calls_compiled(x):
+    return compiled_double(x) + 1
+
+def bump(x):
+    x.mul_(2)
+    return x + 1
+
+def grad_aware(x):
+    return x * 2 if x.requires_grad else x * 3
+
 _ARTIFACTS = os.path.join(os.path.dirname(__file__), "decorated")
 
 @torch.compiler.export_python(path=os.path.join(_ARTIFACTS, "scaled.py"))
@@ -428,6 +442,87 @@ class TestExportPython(_ExportPythonTestCase):
         os.mkdir(path + ".cache")
         with self.assertRaisesRegex(PrecompileError, "could not read the cache"):
             self._export("shifted", path)(x)
+
+    def test_check_catches_an_edit_that_changes_the_numerics(self):
+        path = os.path.join(self.dir, "shifted.py")
+        x = torch.randn(8)
+        self._export("shifted", path, check=True)(x)
+        self.assertEqual(self._export("shifted", path, check=True)(x), x * 7.25 + 1)
+        _edit_graph_code(path, "7.25", "7.5")
+        _in_a_fresh_process(
+            self,
+            f"""
+            checked = torch.compiler.export_python(path={path!r}, check=True)(m.shifted)
+            try:
+                checked(torch.ones(8))
+            except torch.compiler.PrecompileError as e:
+                if "does not match eager shifted" not in str(e):
+                    raise
+            else:
+                raise AssertionError("the check did not catch the edit")
+            """,
+        )
+
+    def test_check_runs_fn_eagerly_and_compares_in_place_writes(self):
+        x = torch.randn(4)
+        compiled = os.path.join(self.dir, "calls_compiled.py")
+        bump = os.path.join(self.dir, "bump.py")
+        self._export("calls_compiled", compiled)(x)
+        self._export("bump", bump)(x.clone())
+        _in_a_fresh_process(
+            self,
+            f"""
+            from torch.compiler.precompile import no_compilation
+            x = torch.randn(4)
+            # The eager run of a torch.compile'd callee compiles nothing.
+            run = torch.compiler.export_python(path={compiled!r}, check=True)
+            with no_compilation():
+                torch.testing.assert_close(run(m.calls_compiled)(x), x * 2 + 1)
+            # The copy is taken before the artifact doubles y, so eager doubles it too.
+            y = x.clone()
+            out = torch.compiler.export_python(path={bump!r}, check=True)(m.bump)(y)
+            torch.testing.assert_close((out, y), (x * 2 + 1, x * 2))
+            """,
+        )
+
+    def test_check_copies_keep_requires_grad(self):
+        path = os.path.join(self.dir, "grad_aware.py")
+        x = torch.randn(4, requires_grad=True)
+        with torch.no_grad():
+            self._export("grad_aware", path)(x)
+            self.assertEqual(self._export("grad_aware", path, check=True)(x), x * 2)
+
+    def test_check_allows_compiled_rounding_but_not_small_edits(self):
+        from torch.compiler._export_python import _assert_matches_eager
+
+        # A compiled GEMM's reordering noise on large values passes.
+        want = torch.randn(64, 64) * 20
+        _assert_matches_eager(want + 1e-4 * torch.randn(64, 64), want)
+        # Doubling a tensor of small values is still caught.
+        x = torch.randn(64)
+        with self.assertRaises(AssertionError):
+            _assert_matches_eager(x * 2e-4, x * 1e-4)
+
+    def test_check_defaults_to_the_environment_variable(self):
+        path = os.path.join(self.dir, "shifted.py")
+        x = torch.randn(8)
+        self._export("shifted", path)(x)
+        _edit_graph_code(path, "7.25", "7.5")
+        _in_a_fresh_process(
+            self,
+            f"""
+            import os
+            os.environ["TORCH_EXPORT_PYTHON_CHECK"] = "1"
+            run = torch.compiler.export_python(path={path!r})(m.shifted)
+            try:
+                run(torch.ones(8))
+            except torch.compiler.PrecompileError as e:
+                if "does not match eager" not in str(e):
+                    raise
+            else:
+                raise AssertionError("TORCH_EXPORT_PYTHON_CHECK=1 did not check")
+            """,
+        )
 
     def test_a_main_module_function_is_refused(self):
         def fn(x):
