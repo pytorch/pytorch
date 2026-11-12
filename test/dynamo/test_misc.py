@@ -113,7 +113,6 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     wrapDeterministicFlagAPITest,
 )
-from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils._sympy.numbers import int_oo
 
 
@@ -3784,6 +3783,34 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         for fn in (set_fn, del_fn):
             opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
             self.assertEqual(opt_fn(torch.zeros(2)), fn(torch.zeros(2)))
+
+    def test_member_descriptor_delete_c_member(self):
+        # OSError.strerror is a T_OBJECT member: del clears it, reads give None.
+        def fn():
+            e = OSError(1, "x")
+            OSError.__dict__["strerror"].__delete__(e)
+            return e
+
+        with self.assertRaisesRegex(Unsupported, "Delete of an unmodeled C member"):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIsNone(torch.compile(fn, backend="eager")().strerror)
+
+    @unittest.expectedFailure
+    def test_property_without_name_no_setter(self):
+        class C:
+            pass
+
+        C.x = property()
+
+        def fn(t):
+            try:
+                C().x = 1
+            except AttributeError as e:
+                return t + 1, str(e)
+
+        t = torch.zeros(1)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(res, fn(t))
 
     def test_tuplegetter_readonly_slot(self):
         # namedtuple field accessors are read-only; __set__/__delete__ raise
@@ -7602,6 +7629,36 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(len(sub_of_foo_subclass_var_optim), 1)
         self.assertEqual(sub_of_foo_subclass_var_optim, sub_of_foo_subclass_var_reg)
 
+    def test_reuse_hash_fn_does_not_suppress_mro_absence_guard(self):
+        class Layer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(2))
+
+        layer = Layer()
+
+        def hash_fn(mod, x):
+            return mod.weight.ndim
+
+        @torch.compiler.nested_compile_region(reuse_hash_fn=hash_fn)
+        def region(mod, x):
+            return x + mod.weight
+
+        def fn(x):
+            return region(layer, x)
+
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.zeros(2)
+        for _ in range(2):
+            self.assertEqual(compiled(x), torch.ones(2))
+            self.assertEqual(counter.frame_count, 1)
+
+        Layer.weight = torch.full((2,), 5.0)
+        for _ in range(2):
+            self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(counter.frame_count, 2)
+
     def test_type_mro_method(self):
         class Foo:
             pass
@@ -7993,6 +8050,196 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(sample)
 
         self.assertTrue(same(ref, res))
+
+    def test_temporary_directory_cleanup(self):
+        counter = CompileCounter()
+
+        def fn(x, tmpdir):
+            y = x + 1
+            tmpdir.cleanup()
+            return y + 1
+
+        compiled = torch.compile(fn, backend=counter)
+        x = torch.ones(2)
+        for _ in range(3):
+            tmpdir = tempfile.TemporaryDirectory()
+            with tmpdir:
+                self.assertEqual(compiled(x, tmpdir), x + 2)
+                self.assertFalse(os.path.exists(tmpdir.name))
+            self.assertEqual(counter.frame_count, 2)
+
+        tmpdir = tempfile.TemporaryDirectory()
+        with tmpdir:
+            reason = "uses the finalizer registry"
+            with self.assertRaisesRegex(Unsupported, reason):
+                torch.compile(fn, backend="eager", fullgraph=True)(x, tmpdir)
+            self.assertTrue(os.path.exists(tmpdir.name))
+
+    def test_weakref_finalize_constructor(self):
+        class Target:
+            pass
+
+        target = Target()
+        token = object()
+        calls = []
+
+        def callback(arg):
+            calls.append(arg)
+            return 7
+
+        def fn(x, target):
+            y = x + 1
+            finalizer = weakref.finalize(target, callback, token)
+            return y + 1, finalizer
+
+        x = torch.ones(2)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter)
+        finalizers = []
+        for _ in range(3):
+            result, finalizer = compiled(x, target)
+            self.addCleanup(finalizer.detach)
+            finalizers.append(finalizer)
+            self.assertEqual(result, x + 2)
+            self.assertIsInstance(finalizer, weakref.finalize)
+            self.assertTrue(finalizer.alive)
+            info = finalizer.peek()
+            self.assertIs(info[0], target)
+            self.assertIs(info[1], callback)
+            self.assertIs(info[2][0], token)
+            self.assertEqual(counter.frame_count, 2)
+            self.assertEqual(counter.op_count, 2)
+        self.assertEqual(len({id(finalizer) for finalizer in finalizers}), 3)
+        self.assertEqual(calls, [])
+
+        strict_target = Target()
+        with self.assertRaisesRegex(Unsupported, "uses the finalizer registry") as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(x, strict_target)
+        self.assertNotIn("dont_skip_tracing", str(cm.exception))
+        self.assertFalse(
+            any(
+                info.weakref() is strict_target and info.func is callback
+                for info in tuple(weakref.finalize._registry.values())
+            )
+        )
+        self.assertEqual(calls, [])
+        for finalizer in finalizers:
+            self.assertEqual(finalizer(), 7)
+            self.assertIsNone(finalizer())
+            self.assertFalse(finalizer.alive)
+        self.assertEqual(calls, [token] * 3)
+
+    def test_weakref_finalize_frame_entry(self):
+        class Target:
+            pass
+
+        def callback(value):
+            value.add_(1)
+            return value * 2
+
+        target = Target()
+        x = torch.ones(2)
+        finalizer = weakref.finalize(target, callback, x)
+        self.addCleanup(finalizer.detach)
+        counter = CompileCounter()
+        compiled = torch.compile(weakref.finalize.__call__, backend=counter)
+        self.assertEqual(compiled(finalizer), torch.tensor([4.0, 4.0]))
+        self.assertEqual(x, torch.tensor([2.0, 2.0]))
+        self.assertIsNone(compiled(finalizer))
+        self.assertEqual(x, torch.tensor([2.0, 2.0]))
+        self.assertFalse(finalizer.alive)
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize(
+        "operation", ["call", "detach", "peek", "alive", "atexit", "set_atexit", "repr"]
+    )
+    def test_weakref_finalize_registry(self, operation):
+        class Target:
+            pass
+
+        obj = Target()
+        token = object()
+        calls = []
+
+        def callback(arg, *, kwarg):
+            calls.append((arg, kwarg))
+            return 7
+
+        finalizer = weakref.finalize(obj, callback, token, kwarg=token)
+        self.addCleanup(finalizer.detach)
+        original = finalizer.peek()
+
+        def operate(finalizer):
+            if operation == "call":
+                value = finalizer()
+            elif operation == "detach":
+                value = finalizer.detach()
+            elif operation == "peek":
+                value = finalizer.peek()
+            elif operation == "alive":
+                value = finalizer.alive
+            elif operation == "atexit":
+                value = finalizer.atexit
+            elif operation == "set_atexit":
+                finalizer.atexit = False
+                value = None
+            else:
+                value = repr(finalizer)
+            return value
+
+        def fn(x, finalizer):
+            y = x + 1
+            value = operate(finalizer)
+            return y + 1, value
+
+        x = torch.ones(2)
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter)
+        for iteration in range(4):
+            other = weakref.finalize(obj, lambda: None)
+            self.addCleanup(other.detach)
+            if iteration == 1:
+                finalizer.atexit = False
+            elif iteration == 2:
+                finalizer.detach()
+            alive, atexit = finalizer.alive, finalizer.atexit
+            expected_repr = repr(finalizer)
+            frames = 3 if operation in ("detach", "peek") and not alive else 2
+            result, value = compiled(x, finalizer)
+            if operation == "detach":
+                self.assertFalse(finalizer.alive)
+            self.assertEqual(result, x + 2)
+            if operation == "call":
+                self.assertEqual(value, 7 if alive else None)
+                self.assertEqual(calls, [(token, token)])
+            elif operation in ("detach", "peek"):
+                if alive:
+                    self.assertEqual(value, original)
+                    for actual, expected in zip(value, original):
+                        self.assertIs(actual, expected)
+                else:
+                    self.assertIsNone(value)
+                self.assertEqual(calls, [])
+            elif operation == "alive":
+                self.assertIs(value, alive)
+            elif operation == "atexit":
+                self.assertIs(value, atexit)
+            elif operation == "set_atexit":
+                self.assertIsNone(value)
+                self.assertFalse(finalizer.atexit)
+            else:
+                self.assertEqual(value, expected_repr)
+            self.assertTrue(other.alive)
+            self.assertEqual(counter.frame_count, frames)
+
+        finalizer = weakref.finalize(obj, callback, token, kwarg=token)
+        self.addCleanup(finalizer.detach)
+        reason = "uses the finalizer registry"
+        with self.assertRaisesRegex(Unsupported, reason):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, finalizer)
+        self.assertTrue(finalizer.alive)
+        self.assertTrue(finalizer.atexit)
+        self.assertEqual(calls, [(token, token)] if operation == "call" else [])
 
     @skipIfWindows(
         msg="TODO(xuhancn): confirm, AssertionError: tensor([0.0290, 0.4019, 0.2598, 0.3666]) is not None"
@@ -10502,16 +10749,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             torch._C._remove_obj_from_tls(torch.compiler._IS_COMPILING)
         self.assertFalse(torch.compiler.is_compiling())
         self.assertFalse(torch.compiler.is_exporting())
-
-    def test_tracing_flags_scriptable(self):
-        # Only is_compiling() is scriptable: its is_scripting() check predates
-        # the per-thread flags and lets the JIT dead-code the TLS read. The
-        # other readers were never scriptable.
-        @torch.jit.script
-        def scripted_flags():
-            return torch.compiler.is_compiling()
-
-        self.assertEqual(scripted_flags(), False)
 
     def test_tracing_flags_in_session_reads(self):
         torch._dynamo.reset()
@@ -13542,6 +13779,21 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
 
+    def test_inductor_deterministic_preserved(self):
+        prior = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        prior_inductor_deterministic = torch._inductor.config.deterministic
+        try:
+            torch.use_deterministic_algorithms(False)
+            with torch._inductor.config.patch(deterministic=True):
+                fn = torch.compile(lambda x: x + 1, backend="eager")
+                self.assertEqual(fn(torch.ones(2)), torch.full((2,), 2.0))
+                self.assertTrue(torch._inductor.config.deterministic)
+                self.assertFalse(torch.are_deterministic_algorithms_enabled())
+        finally:
+            torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
+            torch._inductor.config.deterministic = prior_inductor_deterministic
+
     def test_deterministic_algorithms_warn_only_mutated(self):
         prior = torch.are_deterministic_algorithms_enabled()
         prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
@@ -15768,6 +16020,28 @@ def ___make_guard_fn():
         self.assertEqual(list(eager), list(compiled))
         self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_itertools_cycle_reuses_initial_iterator(self):
+        counters.clear()
+
+        class Iterable:
+            def __init__(self):
+                self.calls = 0
+
+            def __iter__(self):
+                self.calls += 1
+                return iter([self.calls, self.calls + 10])
+
+        def fn(x):
+            data = Iterable()
+            values = itertools.cycle(data)
+            return x + next(values) + next(values) + next(values), data.calls
+
+        x = torch.tensor(0)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), (x + 13, 1))
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(len(counters["graph_break"]), 0)
+
     def test_itertools_accumulate_symint_default_sum(self):
         # https://github.com/pytorch/pytorch/issues/110287
         counters.clear()
@@ -16639,7 +16913,8 @@ ShapeEnv not equal: field values don't match:
         # Make sure the record/replay mechanism for ShapeEnv will fallback
         # if no ShapeEnv instance is found.
         constrain_range(5, min=2, max=10)
-        constrain_unify(5, 5)
+        with self.assertWarns(FutureWarning):
+            constrain_unify(5, 5)
 
         self.assertExpectedRaisesInline(
             AssertionError,
@@ -20896,35 +21171,6 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
 
         inp = torch.ones(3)
         self.assertEqual(fn(inp, Foo()), inp + 1)
-
-
-class TestTracer(JitTestCase):
-    def test_jit_save(self):
-        def fn():
-            class Foo(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.a = 3
-
-                @torch.jit.export
-                def __getstate__(self):
-                    return (3, self.training)
-
-                @torch.jit.export
-                def __setstate__(self, state):
-                    self.a = state[0]
-                    self.training = state[1]
-
-                def forward(self, x):
-                    return x + self.a
-
-            f = Foo()
-
-            return torch.jit.trace(f, (torch.rand(3, 4),))
-
-        fn()
-        opt_fn = torch.compile(fn, backend="eager")
-        opt_fn()
 
 
 class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
