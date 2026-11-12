@@ -228,6 +228,14 @@ def fold_decoded(
 UNIFORM_TREE_MAX_LOADS = 64
 
 
+def _combine_equal_issue(trait) -> str | None:
+    flag = getattr(trait, "has_combine_equal", False)
+    if flag and hasattr(trait, "combine_equal"):
+        return None
+    hint = "WelfordOps subclasses must set has_combine_equal = True themselves"
+    return f"a trait with has_combine_equal, got {type(trait).__name__} ({hint})"
+
+
 def _uniform_tree_issue(
     trait,
     count,
@@ -251,8 +259,9 @@ def _uniform_tree_issue(
         return "a fold of inputs, not partials"
     if gidx_from != "r":
         return f"indices from r, got {gidx_from=}"
-    if not getattr(trait, "has_combine_equal", False):
-        return f"a trait with has_combine_equal, got {type(trait).__name__}"
+    issue = _combine_equal_issue(trait)
+    if issue is not None:
+        return issue
     if npairs_red != 1:
         return f"one reduced run, got {npairs_red}"
     if flat_tail or ragged_chunk:
@@ -728,9 +737,7 @@ def _col_group_issue(trait, axis, combine, vec) -> str | None:
         return "a fold of inputs, not partials"
     if vec != 1:
         return f"vec=1, got {vec=}"
-    if not getattr(trait, "has_combine_equal", False):
-        return f"a trait with has_combine_equal, got {type(trait).__name__}"
-    return None
+    return _combine_equal_issue(trait)
 
 
 @cute.jit
