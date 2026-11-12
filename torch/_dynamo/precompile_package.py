@@ -158,6 +158,33 @@ def _check_capture_options(options: Mapping[str, object]) -> None:
         )
 
 
+def _capture_cudagraph_config(
+    backend: str | torch._TorchCompileInductorWrapper,
+) -> dict[str, bool]:
+    """The CUDA graph config an Inductor capture's calls compile under.
+
+    A bundled AOTAutograd entry decides again, when it is post-compiled at load,
+    whether and how to wrap its graph in CUDA graphs, so the artifact records
+    this as CUDAGRAPH_CONFIG and post-compiles under it. graph_partition is part
+    of it because post-compile picks the wrapper by it, while the graph was
+    partitioned, or not, when it compiled.
+    """
+    import torch._inductor.config as inductor_config
+
+    config = {
+        "triton.cudagraphs": inductor_config.triton.cudagraphs,
+        "triton.cudagraph_trees": inductor_config.triton.cudagraph_trees,
+        "graph_partition": inductor_config.graph_partition,
+    }
+    if not isinstance(backend, str):
+        config.update((k, v) for k, v in backend.config.items() if k in config)
+    # Without CUDA graphs the other two decide nothing at load, so the calls
+    # compile them as configured.
+    if not config["triton.cudagraphs"]:
+        return {"triton.cudagraphs": False}
+    return config
+
+
 @contextlib.contextmanager
 def _capture_config(*, lowers_kernels: bool) -> Iterator[None]:
     """The compiler configuration a multi-graph capture's calls run under.
@@ -1944,6 +1971,10 @@ class PrecompileSession(Generic[_P, _R]):
         )
         if not isinstance(backend, str):
             _check_capture_options(backend.config)
+        # What the artifact records as CUDAGRAPH_CONFIG.
+        self._cudagraph_config: dict[str, bool] = {}
+        if self._backend_name == "inductor":
+            self._cudagraph_config = _capture_cudagraph_config(backend)
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
@@ -2065,6 +2096,7 @@ class PrecompileSession(Generic[_P, _R]):
             with (
                 _capture_config(lowers_kernels=self._backend_name == "inductor"),
                 torch._dynamo.config.patch(accumulated_recompile_limit=limit),
+                torch._inductor.config.patch(self._cudagraph_config),
             ):
                 return self._compiled(*args, **kwargs)
         except Exception as e:
@@ -2377,6 +2409,7 @@ class PrecompileSession(Generic[_P, _R]):
             summary,
             self._backend_name,
             self._fn,
+            cudagraph_config=self._cudagraph_config,
             inductor_options=options,
             **sections,
         )
