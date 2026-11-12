@@ -526,7 +526,8 @@ class InductorChoices:
         inlined. TORCHINDUCTOR_AVOID_MODULAR_INDEXING=0 restores inlining on
         every backend; with the heuristic, split reductions on Triton GPUs
         regroup partial sums and no longer match the previous release
-        bitwise.
+        bitwise, except under config.batch_invariant, which keeps the flat
+        split.
         """
         from .codegen.common import BackendFeature
         from .ir import get_device_type, is_triton
@@ -558,7 +559,11 @@ class InductorChoices:
             if hint is not None and hint < config.realize_modular_view_min_numel:
                 return True
             kind = kind()
-        if kind in ("reduction", "slice_scatter"):
+        if kind == "reduction":
+            # the dim-aligned split is not stable across batch sizes
+            # everywhere the flat split is
+            return config.batch_invariant
+        if kind == "slice_scatter":
             return False
         if kind == "view":
             hint = _numel_hint(numel)

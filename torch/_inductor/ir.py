@@ -1869,6 +1869,7 @@ class Reduction(Loops):
         input_node: IRNode | None = None,
         *,
         strict_reduction: bool = False,
+        allow_split: bool = True,
     ) -> TensorBox:
         """
         Create a reduction node. May split the reduction to multiple layers to expose
@@ -2055,6 +2056,8 @@ class Reduction(Loops):
 
         if strict_split is None:
             split = _maybe_increase_split(split)
+        if not allow_split:
+            split = 1
 
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
@@ -2435,6 +2438,8 @@ class Reduction(Loops):
         split: _IntLike,
         reduction_hint: ReductionHint,
         strict_reduction: bool = False,
+        *,
+        split_first_stage: bool = True,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
@@ -2458,6 +2463,7 @@ class Reduction(Loops):
             reduction_type,
             reduction_hint,
             strict_reduction=strict_reduction,
+            allow_split=split_first_stage,
         )
         intermediate.realize()
         intermediate_loader = intermediate.make_loader()
@@ -2533,6 +2539,11 @@ class Reduction(Loops):
                 aligned.split,
                 reduction_hint,
                 strict_reduction,
+                # The chunks of the boundary dim can leave the first stage
+                # above the size the split count was chosen for, and above
+                # the size that is split; splitting it again only adds a
+                # kernel.
+                split_first_stage=False,
             )
 
         # TODO(jansel): realize the reduction so we can do dynamic indexing
@@ -3028,6 +3039,8 @@ class WelfordReduction(MultiOutputReduction):
         reduction_ranges: list[Integer],
         reduction_type: ReductionType,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
+        *,
+        allow_split: bool = True,
     ) -> Sequence[TensorBox]:
         if reduction_type not in ("welford_reduce", "welford_combine"):
             raise AssertionError(
@@ -3113,7 +3126,7 @@ class WelfordReduction(MultiOutputReduction):
         # reuse the passed hint if available
         if reduction_hint == ReductionHint.DEFAULT:
             reduction_hint = hint
-        if split > 1:
+        if split > 1 and allow_split:
             # triton doesn't support reduce to single element well, so break it up
             return cls.create_multilayer(
                 device,
@@ -3231,6 +3244,8 @@ class WelfordReduction(MultiOutputReduction):
             new_reduction_ranges,
             reduction_type,
             reduction_hint,
+            # like Reduction.create_multilayer: an aligned first stage is final
+            allow_split=aligned is None,
         )
         for i in intermediates:
             i.realize()
@@ -4358,12 +4373,28 @@ class View(GenericView):
         # row-major merge of row-major loads simplifies back to affine, which
         # is what the kernel will see
         var_ranges = rw.var_ranges or {}
+        sizevars = V.graph.sizevars
+
+        def spans_modulus(e: Expr) -> bool:
+            # A merged dim whose size is its own symbol (x.view(y.shape))
+            # equals the product of the dims it merges only through the
+            # view's size guard, which the range simplification does not
+            # use: the modulus is left over, the load is still row-major.
+            return (
+                isinstance(e, ModularIndexing)
+                and e.args[1] == 1
+                and e.args[0] in var_ranges
+                and sizevars.statically_known_leq(var_ranges[e.args[0]], e.args[2])
+            )
+
         modular = [
             index
             for dep in rw.reads
             if isinstance(dep, dependencies.MemoryDep)
             and not is_affine_indexing(
-                index := V.graph.sizevars.simplify_with_ranges(dep.index, var_ranges)
+                index := sizevars.simplify_with_ranges(dep.index, var_ranges).replace(
+                    spans_modulus, lambda e: e.args[0]
+                )
             )
         ]
         if not modular:

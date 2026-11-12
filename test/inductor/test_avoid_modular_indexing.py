@@ -46,6 +46,7 @@ class AffineIndexingPredicateTest(TestCase):
                 name="floordiv_of_sizes",
             ),
             subtest((Identity(_p0 - 3) + 5, True), name="identity_wrapper"),
+            subtest((16 * Identity(Identity(_p0)) + _p1, True), name="nested_identity"),
             subtest((ModularIndexing(_p0, 1, 4), False), name="modular"),
             subtest((FloorDiv(_p0, 2) + _p1, False), name="floordiv"),
             subtest((Min(_p0, 3), False), name="min"),
@@ -112,6 +113,21 @@ class ModularIndexingDecisionTest(TestCase):
     @config.patch(avoid_modular_indexing=None)
     def test_triton_gpu_inlines(self, kind):
         self.assertTrue(V.choices.use_modular_indexing("cuda", numel=2**30, kind=kind))
+
+    @config.patch(avoid_modular_indexing=None, batch_invariant=True)
+    def test_triton_gpu_batch_invariant_keeps_flat_split(self):
+        # the dim-aligned split is not stable across batch sizes everywhere
+        # the flat one is; where affine indices are required it still applies
+        self.assertTrue(
+            V.choices.use_modular_indexing("cuda", numel=8, kind="reduction")
+        )
+        self.assertFalse(
+            V.choices.use_modular_indexing("mtia", numel=8, kind="reduction")
+        )
+        with config.patch(avoid_modular_indexing=True):
+            self.assertFalse(
+                V.choices.use_modular_indexing("cuda", numel=8, kind="reduction")
+            )
 
     @config.patch(avoid_modular_indexing=None, realize_modular_view_min_numel=1024)
     def test_triton_gpu_view_threshold(self):
@@ -308,6 +324,14 @@ class AvoidModularIndexingTest(TestCase):
             fn, x, cls_tok, w, b, kernel_count=2, modular_without_option=device != "cpu"
         )
 
+    def test_cat_of_inlined_cat(self, device):
+        # the pointwise cat wraps each input's index in Identity, so a cat of
+        # an inlined cat nests them; the index is affine all the same
+        def fn(a, b, c):
+            return torch.cat([torch.cat([a * 2, b * 2], 0), c], 0)
+
+        self.check(fn, *(torch.randn(n, 16, device=device) for n in (4, 5, 3)))
+
     def test_reshape_of_strided_buffer(self, device):
         # a realized channels-last buffer reshaped across non-contiguous dims
         def fn(x):
@@ -446,6 +470,22 @@ class AvoidModularIndexingTest(TestCase):
         x = torch.randn(100003, 4, 3, device=device)
         y = torch.randn(100003, 1, 1, device=device)
         self.check_split_reduction(fn, x, y)
+
+    @parametrize("var_mean,shape", [(False, (64, 4097)), (True, (2, 128, 8193))])
+    def test_split_reduction_first_stage_not_split_again(self, device, var_mean, shape):
+        # no chunking of 64 (128) rows gives the 33 (129) partials the split
+        # asks for, so the first stage reduces 8194 (8193) elements, above
+        # the size that devices with this threshold split: it must stay one
+        # kernel
+        def fn(x):
+            return torch.var_mean(x, (1, 2)) if var_mean else x.sum()
+
+        with mock.patch.object(
+            InductorChoices, "_inner_reduction_no_split_threshold", return_value=8192
+        ):
+            self.check_split_reduction(
+                fn, torch.randn(shape, device=device), modular_without_option=False
+            )
 
     def test_online_softmax_split_reduction(self, device):
         # a long softmax row is split; the chunks of the prime row length
@@ -823,6 +863,32 @@ class AvoidModularIndexingTest(TestCase):
             else:
                 self.check(fn, a, b)
 
+    def test_auto_mode_keeps_dynamic_flatten_inlined(self, device):
+        # the merged dim's size is its own symbol, equal to the product of the
+        # dims it merges only through the view's guard: still a row-major
+        # merge, which stays inlined above the size threshold
+        def fn(x, y):
+            return (x + 1).view(y.shape) + y
+
+        # five merged dims: the shape guard is not turned into a replacement
+        x = torch.randn(2, 3, 4, 5, 8, device=device)
+        y = torch.randn(960, device=device)
+        for i in range(x.dim()):
+            torch._dynamo.mark_dynamic(x, i)
+        torch._dynamo.mark_dynamic(y, 0)
+        with config.patch(
+            {
+                "avoid_modular_indexing": None,
+                "test_configs.raise_on_modular_indexing": False,
+                "realize_modular_view_min_numel": 1,
+            }
+        ):
+            if V.choices.use_modular_indexing(device, numel=960, kind="view_linear"):
+                self.check(fn, x, y, kernel_count=1)
+                self.assertEqual(metrics.ir_nodes_pre_fusion, 1)
+            else:
+                self.check(fn, x, y)
+
     def test_avg_pool2d_backward_with_padding(self, device):
         # the window bounds are FloorDiv/Min of the output index and reach the
         # grad load through indirect_indexing
@@ -913,6 +979,17 @@ class SplitReductionRangesTest(TestCase):
                     torch.device("cpu"), [], (1000, 4), 900
                 )
             )
+
+    @config.patch(avoid_modular_indexing=None)
+    def test_batch_invariant_keeps_flat_split(self):
+        def aligned():
+            return ir.Reduction._split_reduction_ranges(
+                torch.device("cuda"), [2], (64, 4097), 33
+            )
+
+        self.assertIsNotNone(aligned())
+        with config.patch(batch_invariant=True):
+            self.assertIsNone(aligned())
 
 
 instantiate_parametrized_tests(SplitReductionRangesTest)

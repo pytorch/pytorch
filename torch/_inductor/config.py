@@ -1005,11 +1005,12 @@ strict_output_strides = False
 # indices wherever a lowering has an affine form, False forces inlining;
 # TORCHINDUCTOR_AVOID_MODULAR_INDEXING=0 restores the previous inlining on
 # every backend. With the heuristic, split reductions on Triton GPUs regroup
-# partial sums and no longer match the previous release bitwise. Index
-# arithmetic on Pallas, which prefers affine indices but has no indirect
-# indexing, stays inlined in every mode; adaptive pooling with non-divisible
-# sizes, split reductions over symbolic ranges and a strided slice_scatter
-# whose dim is not provably a multiple of the step still use ModularIndexing.
+# partial sums and no longer match the previous release bitwise (batch_invariant
+# keeps the flat split). Index arithmetic on Pallas, which prefers affine
+# indices but has no indirect indexing, stays inlined in every mode; adaptive
+# pooling and upsample_nearest2d_backward with non-divisible sizes, split
+# reductions over symbolic ranges and a strided slice_scatter whose dim is not
+# provably a multiple of the step still use ModularIndexing.
 # [DO NOT LAND] forced on (strict affine indexing on every backend) so CI
 # exercises the avoid_modular_indexing paths in every test suite; =auto
 # selects the per-backend default.
