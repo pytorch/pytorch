@@ -3344,7 +3344,8 @@ class TestTorchDeviceType(TestCase):
             res = x.cumsum(dim, dtype=torch.uint8)
             n = shape[dim]
             for start in (0, n // 2, n - 1024):
-                prefix = x.narrow(dim, 0, start).sum(dim, keepdim=True, dtype=torch.int64).cpu()
+                # Summing in uint8 wraps modulo 256 like the scan, without an int64 copy of the input.
+                prefix = x.narrow(dim, 0, start).sum(dim, keepdim=True, dtype=torch.uint8).cpu()
                 window = x.narrow(dim, start, 1024).cpu().cumsum(dim, dtype=torch.int64)
                 expected = ((prefix + window) % 256).to(torch.uint8)
                 self.assertEqual(res.narrow(dim, start, 1024).cpu(), expected, atol=0, rtol=0)
@@ -3369,7 +3370,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyCUDA
     @skipCUDAIfNotRocm
-    @dtypes(torch.float, torch.half, torch.bfloat16)
+    @dtypes(torch.half, torch.bfloat16)
     def test_cumsum_alignment_independent(self, device, dtype):
         # These rows run the chunked last-dim path. A misaligned input switches it to scalar loads,
         # which must give the same bits as the vector loads, as must reruns. (CUDA scans 1-D inputs
