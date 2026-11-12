@@ -247,6 +247,13 @@ class _FSDPDeviceHandle:
             return cast(_FSDPDeviceHandle, torch.mtia)
         return cls(device)
 
+    def current_device(self) -> int:
+        if torch.accelerator.is_available():
+            return torch.accelerator.current_device_index()
+        if hasattr(self.__backend, "current_device"):
+            return self.__backend.current_device()
+        return 0
+
     def __getattr__(self, name: str, /) -> Any:
         try:
             return getattr(self.__backend, name)
