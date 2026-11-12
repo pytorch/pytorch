@@ -1,8 +1,8 @@
 # Owner(s): ["module: rocm"]
 name: linux-binary-test-rocm
 
-# Reusable ROCm manywheel binary test. Every image runs via docker run.
-# ECR images pull after ecr-login: ROCm runners have no instance profile.
+# Reusable ROCm manywheel binary test. setup-rocm prepares the runner
+# and logs into ECR. The test image is started with docker run.
 
 on:
   workflow_call:
@@ -37,8 +37,8 @@ on:
         type: string
         description: |
           Registry host prefix (with trailing slash) prepended to the
-          pytorch/<image> path. Empty means Docker Hub. A non-empty host
-          (ECR) logs in first.
+          pytorch/<image> path. Empty means Docker Hub. setup-rocm logs
+          into ECR before the pull.
       DESIRED_PYTHON:
         required: false
         type: string
@@ -88,22 +88,8 @@ jobs:
           submodules: recursive
           show-progress: false
 
-      # Same host logic as setup-rocm. Pods pass an isolated render list;
-      # daemon and bin cover the video gid's name inside each image OS.
-      - name: ROCm set GPU_FLAG
-        shell: bash
-        run: |
-          render_gid=$(cut -d: -f3 < <(grep render /etc/group))
-          if [ -f "/etc/podinfo/gha-render-devices" ]; then
-            DEVICE_FLAG=$(cat /etc/podinfo/gha-render-devices)
-          else
-            DEVICE_FLAG="--device /dev/dri"
-          fi
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd ${DEVICE_FLAG} --group-add video --group-add ${render_gid} --group-add daemon --group-add bin --cap-add=SYS_PTRACE --security-opt seccomp=unconfined" >> "${GITHUB_ENV}"
-
-      - name: Login to ECR
-        if: inputs.DOCKER_IMAGE_REGISTRY_HOST != ''
-        uses: ./.github/actions/ecr-login
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
 
       - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
