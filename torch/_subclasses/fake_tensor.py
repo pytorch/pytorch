@@ -1031,14 +1031,7 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
             shape_env,
             creation_traceback=CapturedTraceback.extract(),
         )
-        self._attach_python_object()
         self.allow_non_fake_inputs = allow_non_fake_inputs
-
-    @classmethod
-    def _from_cpp_mode(cls, cpp_mode: object) -> Self:
-        self = cls.__new__(cls)
-        torch._C._CppFakeTensorMode.__init__(self, cpp_mode)
-        return self
 
     # Symbolized on demand, without retaining the creation frame's locals.
     @property
