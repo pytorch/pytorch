@@ -412,8 +412,12 @@ void fakeFallback(
 
   // Run the (sparse) Meta kernel with the inputs reporting the meta device (see
   // Note [C++ in_kernel_invocation]), as Python's in_kernel_invocation_manager
-  // does, and with the ops it runs, on meta tensors, kept out of fake dispatch
-  c10::impl::ExcludeDispatchKeyGuard exclude_fake(c10::DispatchKey::Fake);
+  // does. Match _DisableTorchDispatch so nested ops bypass dispatch modes.
+  c10::impl::ExcludeDispatchKeyGuard exclude_dispatch(c10::DispatchKeySet(
+      {c10::DispatchKey::Fake,
+       c10::DispatchKey::Python,
+       c10::DispatchKey::PreDispatch,
+       c10::DispatchKey::PythonTLSSnapshot}));
   c10::impl::IncludeDispatchKeyGuard include_meta(c10::DispatchKey::Meta);
   c10::impl::InKernelInvocationGuard in_kernel;
   {
