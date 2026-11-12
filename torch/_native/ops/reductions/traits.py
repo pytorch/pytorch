@@ -164,20 +164,14 @@ def _welford_denom(acc_dtype, nf, correction):
 class WelfordOps:
     # acc = (mean, m2, nf). `reduce` is the ONLINE Welford update and `combine` the PARALLEL Chan
     # merge -- deliberately different formulas. project divides m2 by the clamped dof.
-    # has_combine_equal enables combine_equal's closed-form equal-count merges. They assume
-    # these leaf and combine methods, so a subclass that replaces either must opt back in;
-    # its subclasses inherit that choice.
+    # has_combine_equal enables combine_equal's closed-form equal-count merges. The flag is
+    # not inherited: a subclass that keeps leaf, combine and their helpers must set it.
     nfields = 3
     has_combine_equal = True
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        for c in cls.__mro__[: cls.__mro__.index(WelfordOps)]:
-            if "has_combine_equal" in vars(c):
-                break
-            if "leaf" in vars(c) or "combine" in vars(c):
-                cls.has_combine_equal = False
-                break
+        cls.has_combine_equal = vars(cls).get("has_combine_equal", False)
 
     def __init__(self, correction=1, take_sqrt=False, return_mean=False, acc=Float32):
         self.correction = float(correction)
@@ -193,7 +187,11 @@ class WelfordOps:
 
     @cute.jit
     def leaf(self, val, idx):
-        return (self.acc(val), self.acc(0.0), self.acc(1.0))
+        # The online update makes m2 NaN for +-inf (inf * (inf - inf)), and the leaf must
+        # agree: (v - v) ** 2 is +0.0 for finite v and NaN otherwise.
+        v = self.acc(val)
+        d = v - v
+        return (v, d * d, self.acc(1.0))
 
     @cute.jit
     def reduce(self, acc, val, idx, valid):
@@ -780,6 +778,7 @@ def block_reduce(
 class VarMeanOps(WelfordOps):
     # Reuse Welford and project variance/std plus mean; correction and take_sqrt are unchanged.
     nouts = 2
+    has_combine_equal = True
 
     def __init__(self, correction=1, take_sqrt=False, acc=Float32):
         super().__init__(correction=correction, take_sqrt=take_sqrt, acc=acc)
