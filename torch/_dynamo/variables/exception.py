@@ -49,7 +49,7 @@ class FrameSummaryVariable(VariableTracker):
         return traceback.FrameSummary
 
     # traceback.FrameSummary is pure-Python with __slots__ (Lib/traceback.py);
-    # each slot is exposed as a read-only member_descriptor.
+    # each slot is exposed as a member_descriptor.
     tp_members = {
         "lineno": Member(
             getset_build(lambda s: s.frame_summary.lineno), readonly_setter
@@ -66,13 +66,13 @@ if sys.version_info >= (3, 11):
     FrameSummaryVariable.tp_members.update(
         {
             "end_lineno": Member(
-                getset_build(lambda s: s.frame_summary.end_lineno), readonly_setter
+                getset_build(lambda s: s.frame_summary.end_lineno), unmodeled_setter
             ),
             "colno": Member(
-                getset_build(lambda s: s.frame_summary.colno), readonly_setter
+                getset_build(lambda s: s.frame_summary.colno), unmodeled_setter
             ),
             "end_colno": Member(
-                getset_build(lambda s: s.frame_summary.end_colno), readonly_setter
+                getset_build(lambda s: s.frame_summary.end_colno), unmodeled_setter
             ),
         }
     )
