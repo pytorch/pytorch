@@ -74,6 +74,7 @@ from trymerge import (
     can_skip_internal_checks,
     categorize_checks,
     check_greenlight_reviewed_head_sha,
+    check_native_stack_mergeability,
     check_stacked_pr_merge_rule,
     CLASSIFICATION_WAIT_SECONDS,
     ClassificationWaitWindow,
@@ -4300,12 +4301,44 @@ class TestNativeStackMain(NoNetworkTestCase):
             native_stack=NATIVE_STACK,
         )
 
-    def test_check_mergeability_does_not_read_the_stack(self) -> None:
+    def test_check_mergeability_checks_stack_on_default_branch(self) -> None:
         self.args.check_mergeability = True
+        check = self.patch("trymerge.check_native_stack_mergeability")
         trymerge_main()
-        self.get_stack.assert_not_called()
-        # No merge command was issued, so the refusal carries no tag
-        self.assertRefused(status=None)
+        self.get_stack.assert_called_once_with("pytorch", "pytorch", 1002)
+        check.assert_called_once_with(mock.ANY, mock.ANY, NATIVE_STACK)
+        self.assertEqual(check.call_args.args[1].pr_num, 1002)
+        self.post.assert_not_called()
+        self.merge.assert_not_called()
+
+    def test_check_mergeability_skips_pr_without_usable_stack_quietly(self) -> None:
+        self.args.check_mergeability = True
+        check = self.patch("trymerge.check_native_stack_mergeability")
+        local = self.patch("trymerge.GitHubPR.merge_changes_locally")
+        viable_strict = replace(NATIVE_STACK, base_ref="viable/strict")
+        fork = {**stacked_pr_info(), "isCrossRepository": True}
+        for name, stack, info in (
+            ("no stack", None, stacked_pr_info()),
+            ("other trunk", viable_strict, stacked_pr_info()),
+            ("fork", NATIVE_STACK, fork),
+        ):
+            with self.subTest(name):
+                self.get_stack.return_value = stack
+                self.info.return_value = info
+                trymerge_main()
+        self.assertEqual(self.get_stack.call_count, 2)
+        check.assert_not_called()
+        local.assert_not_called()
+        self.post.assert_not_called()
+        self.merge.assert_not_called()
+
+    def test_check_mergeability_fails_when_the_stack_cannot_be_read(self) -> None:
+        self.args.check_mergeability = True
+        self.get_stack.side_effect = NativeStackError("GraphQL errors: Timeout")
+        with self.assertRaisesRegex(NativeStackError, "Timeout"):
+            trymerge_main()
+        self.post.assert_not_called()
+        self.merge.assert_not_called()
 
     def test_fork_pr_does_not_read_the_stack(self) -> None:
         self.info.return_value = {**stacked_pr_info(), "isCrossRepository": True}
@@ -4741,6 +4774,23 @@ class TestNativeStackMergeEndToEnd(LandingTestCase):
         self.assertEqual(self.trunk_log(self.root, "%s"), subjects)
         self.assertEqual(self.bases, [self.root])
 
+    def test_mergeability_check_lands_nothing(self) -> None:
+        trunk = self.add_commits(TRUNK)
+        head = self.repo.rev_parse("HEAD")
+        check_native_stack_mergeability(self.repo, self.prs[103], self.stack)
+        self.assertEqual(self.bases, [trunk])
+        self.assertEqual(self.trunk_log(trunk), [])
+        self.assertEqual(self.repo.rev_parse("HEAD"), head)
+        self.assertEqual(self.git("status", "--porcelain", cwd=self.repo.repo_dir), "")
+
+    def test_mergeability_check_refuses_stack_that_conflicts_with_trunk(self) -> None:
+        # user/b, PR #102, adds file3.txt
+        self.add_commits(TRUNK, files={"file3.txt": "trunk\n"})
+        with self.assertRaisesRegex(
+            NativeStackError, "PR #102 has conflicts with the commits below it"
+        ):
+            check_native_stack_mergeability(self.repo, self.prs[103], self.stack)
+
     def merge_then_patch_revert(self) -> tuple[list[str], Any]:
         """Lands the stack, then patches what try_revert writes to GitHub, with no
         stack for the refresh of the reverted branches to read (see
@@ -5148,7 +5198,6 @@ class TestMainStatusTags(NoNetworkTestCase):
         self.args.comment_id = None
         local = self.patch("trymerge.GitHubPR.merge_changes_locally")
         cases = {
-            "PR targets user/1001 rather than main": stacked_pr_info(),
             "Can't merge closed PR": {**stacked_pr_info(base="main"), "closed": True},
         }
         for refusal, info in cases.items():
