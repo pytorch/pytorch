@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = [
 #   "numpy==1.26.4 ; python_version >= '3.10' and python_version <= '3.11'",
 #   "numpy==2.1.0 ; python_version >= '3.12' and python_version <= '3.13'",
@@ -10,7 +10,7 @@
 #   "spmd_types==0.2.1",
 #   "types-requests==2.27.25",
 #   "types-pyyaml==6.0.2",
-#   "types-tabulate==0.8.8",
+#   "types-tabulate==0.9.0",
 #   "types-protobuf==5.29.1.20250403",
 #   "types-setuptools==79.0.0.20250422",
 #   "types-jinja2==2.11.9",
