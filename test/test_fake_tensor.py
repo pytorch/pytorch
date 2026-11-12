@@ -5529,8 +5529,6 @@ class TestFakeTensorViewCopy(TestCase):
                     _ = yf.view(-1)
 
 
-# Dynamo would trace these tests with the C++ fakes they make as graph inputs,
-# which it cannot fakify yet
 _CPP_FAKE_DYNAMO_SKIP = "Dynamo does not support C++ fakes as inputs yet"
 
 
@@ -5785,7 +5783,6 @@ class TestCppFakeTensorModeBindings(TestCase):
             torch._C._unset_dispatch_mode(fake)
         self.assertEqual(self._installed(), (None, False))
 
-    # Dynamo keeps references that stop the mode being collected
     @skipIfTorchDynamo("Dynamo suspends the fake mode, rebuilding its Python object")
     def test_unset_rebuilds_mode(self):
         mode = CppFakeTensorMode()
@@ -5849,9 +5846,8 @@ class TestCppFakeTensorModeBindings(TestCase):
 
     def test_from_meta_and_device_sparse_mode_installed(self):
         # The placeholder meta indices and values that the sparse impls' copies
-        # allocate do not dispatch to the installed mode. With no Fake kernel
-        # registered yet, they would fail; once the fake fallback is, it would
-        # make meta fakes of them, which this mode's allow_meta rejects.
+        # allocate do not dispatch to the installed mode. Such dispatch would
+        # fail or make meta fakes, which this mode's allow_meta rejects.
         with torch._functorch.config.patch(fake_tensor_allow_meta=False):
             mode = CppFakeTensorMode()
         layouts = (torch.sparse_coo, torch.sparse_csr)
@@ -6088,7 +6084,7 @@ class TestCppFakeTensorModeBindings(TestCase):
             self.assertFalse(torch._C._is_fake_tensor(template))
             self.assertEqual(keys_raw, expected.raw_repr())
             pickler.dump({"t": fake})
-            # The C++ mode (a CppFakeTensorMode) is not pickled
+            # Neither the C++ mode nor its Python wrapper is pickled
             self.assertNotIn(b"FakeTensorMode", buf.getvalue())
             out = load_guards_state(buf.getvalue())["t"]
             self.assertEqual(maybe_get_fake_dispatch_keys(out), expected)
@@ -6133,7 +6129,7 @@ class TestCppFakeTensorModeBindings(TestCase):
         meta = torch.empty((), device="meta")
         fake = torch._C._from_meta_and_device(meta, torch.device("cpu"), mode)
 
-        # A collected mode is rebuilt around the same C++ mode and state
+        # A collected wrapper is rebuilt around the same C++ mode and state
         ref = weakref.ref(mode)
         del mode
         gc.collect()
