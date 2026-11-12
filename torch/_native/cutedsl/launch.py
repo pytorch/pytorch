@@ -206,7 +206,7 @@ class LaunchRecord:
     def finish(self, outs: Sequence[torch.Tensor]) -> "LaunchReplay | None":
         views = [self._view(out, written=False) for out in outs]
         slots = [-1 if view is None else view.slot for view in views]
-        if not self._ok or min(slots) < 0 or len(set(slots)) < len(slots):
+        if not self._ok or not slots or min(slots) < 0 or len(set(slots)) < len(slots):
             return None
         return LaunchReplay(self._allocs, self._launches, views)
 
@@ -223,6 +223,10 @@ def recording(x: torch.Tensor) -> Iterator[LaunchRecord]:
         yield record
     finally:
         _RECORD.reset(token)
+
+
+def recording_active() -> bool:
+    return _RECORD.get() is not None
 
 
 class LaunchReplay:

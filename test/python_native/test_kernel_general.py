@@ -495,6 +495,53 @@ class TestKernelGeneral(TestCase):
             len([k for k in kg._COMPILE_CACHE if k[1] == "uniform_share"]), 3
         )
 
+    @parametrize("where", ["last", "mid", "first_last"])
+    @parametrize(
+        "path,n",
+        [
+            ("uniform", 64),
+            ("uniform", 4095),
+            ("inner_tree", 127),
+            ("inner_tree", 4096),
+            ("ordered_col", 513),
+        ],
+    )
+    def test_welford_trees_agree_with_aten_on_infinities(self, path, n, where):
+        """Tree folds must give NaN where ATen does for one +-inf, not var = +inf."""
+        rows = 257 if path == "ordered_col" else 17
+        x = torch.randn(rows, n, device="cuda")
+        # Odd rows stay finite, so the finite comparison is not empty.
+        if where == "first_last":
+            x[::2, 0], x[::2, -1] = torch.inf, -torch.inf
+        else:
+            x[::2, -1 if where == "last" else n // 2] = torch.inf
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.double().var(dim=1).float()
+        trait = T.WelfordOps(correction=1, acc=cutlass.Float32)
+        key = f"welford_inf_{path}"
+        if path == "uniform":
+            got = torch.empty(rows, device="cuda")
+            op = kg.ReduceBlock(
+                trait,
+                count=n,
+                num_o=rows,
+                red_pairs=((n, 1),),
+                kept_pairs=((rows, n),),
+                block=64,
+                uniform_tree=True,
+            )
+            kg._launch(op, (key, "var") + op.cache_sig, [kg._flat(x)], [got])
+        elif path == "inner_tree":
+            got = kg.reduce_dim(trait, key, x, -1, torch.float32, order="inner_tree")
+        else:
+            xt = x.t().contiguous()
+            ordered = ct.reduce_ordered_col(trait, key, xt, [torch.float32], 1)
+            self.assertIsNotNone(ordered)
+            got = ordered[0]
+        self.assertEqual(got.isnan(), want.isnan())
+        finite = ~got.isnan()
+        self.assertEqual(got[finite], want[finite], atol=1e-5, rtol=1e-5)
+
     def test_uniform_welford_tree_changes_bits(self):
         """uniform_tree=True must take the tree: its bits differ from the online chain's,
         and both stay within tolerance of fp64."""
@@ -677,21 +724,25 @@ class TestKernelGeneral(TestCase):
             def combine(self, a, b):
                 return super().combine(a, b)
 
-        # A replacing class may opt back in; its plain subclasses keep that choice.
+        # The flag is per class, and only traits with combine_equal can use it.
         class OptedIn(OwnCombine):
             has_combine_equal = True
 
         class KeepsOptIn(OptedIn):
             pass
 
-        opted = tree | dict(trait=KeepsOptIn(acc=cutlass.Float32))
+        class FlaggedSum(T.SumOps):
+            has_combine_equal = True
+
+        opted = tree | dict(trait=OptedIn(acc=cutlass.Float32))
         self.assertEqual(kg.ReduceBlock(**opted).tile.uniform_tree_loads, 1024 // 128)
+        hint = "(WelfordOps subclasses must set has_combine_equal = True themselves)"
+        equal = "a trait with has_combine_equal, got {} " + hint
         for bad, reason in (
-            (dict(trait=trait), "a trait with has_combine_equal, got SumOps"),
-            (
-                dict(trait=OwnCombine(acc=cutlass.Float32)),
-                "a trait with has_combine_equal, got OwnCombine",
-            ),
+            (dict(trait=trait), equal.format("SumOps")),
+            (dict(trait=FlaggedSum(acc=cutlass.Float32)), equal.format("FlaggedSum")),
+            (dict(trait=OwnCombine(acc=cutlass.Float32)), equal.format("OwnCombine")),
+            (dict(trait=KeepsOptIn(acc=cutlass.Float32)), equal.format("KeepsOptIn")),
             (dict(count=0, red_pairs=((0, 1),)), f"{span} 0"),
             (dict(count=64, red_pairs=((64, 1),)), f"{span} 64"),
             (dict(count=cap + 1, red_pairs=((cap + 1, 1),)), f"{span} {cap + 1}"),
@@ -908,10 +959,11 @@ class TestKernelGeneral(TestCase):
         self.assertNotIn("replay_nested", [k[0] for k in kg._REPLAYS])
         replay = record.finish([out])
         self.assertIsNotNone(replay)
+        fresh = torch.randn(64, 256, device="cuda")
         with torch.backends.python_native.cutedsl.disabled():
-            want = x.sum(dim=1)
+            want, fresh_want = x.sum(dim=1), fresh.sum(dim=1)
         self.assertEqual(out, want)
-        self.assertEqual(replay(x)[0], want)
+        self.assertEqual(replay(fresh)[0], fresh_want)
 
     @unittest.skipIf(
         rt.inner_tree_order_enabled(), "requires unordered reduction order"

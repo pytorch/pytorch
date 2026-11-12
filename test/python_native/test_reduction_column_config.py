@@ -650,18 +650,18 @@ class TestColumnCombine(TestCase):
             expected = x.sum(0)
         self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
 
-    @parametrize("columns,served", [(256, True), (4095, True), (16, False)])
-    def test_inner_tree_order_hands_off(self, device, columns, served):
-        """inner_tree configs use the ordered kernel and fall back when it declines."""
-        x = torch.randn((257, columns), device=device)
+    def test_inner_tree_order_hands_off(self, device):
+        """inner_tree configs fall back to coltile when the ordered kernel declines."""
+        x = torch.randn((257, 16), device=device)
         cfg = ct.ColConfig("test_order", 64, 7, 4, "column", kernel_order="inner_tree")
         trait = T.SumOps(acc=cutlass.Float32)
-        key = f"order_{columns}"
+        key = "order_16"
         args = (trait, key, x, [torch.float32], 1, None, None, None)
+        # No policy picks inner_tree this narrow, so patch one in to reach the decline.
         with patch.object(ct, "select_col_config", return_value=cfg):
             got = ct._reduce_col_tile(*args)[0]
         tags = {k[0] for k in ct._CACHE if k[1] == key} & {"ordered_col", "coltile"}
-        self.assertEqual(tags, {"ordered_col" if served else "coltile"})
+        self.assertEqual(tags, {"coltile"})
         with (
             native._unconditional_masked(),
             torch.backends.python_native.cutedsl.disabled(),
