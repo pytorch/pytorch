@@ -4119,6 +4119,10 @@ def capture(
     capture is refused when a :func:`torch._dynamo.override_cudagraphs` decides
     a graph differently from its ``triton.cudagraphs``: ``fwd`` differing from
     it, or ``bwd=False`` for a CUDA-graphed forward that has a backward.
+    ``cudagraph_policy``, a Python object that wraps the graphs again at load,
+    is refused in ``options``, and a capture with CUDA graphs on refuses one
+    set in ``torch._inductor.config``: unset it while capturing and set it in
+    the loading process.
 
     Unlike under :func:`torch.compile`, whose options reach only Inductor, the
     capture's calls are traced under ``CUDAGRAPH_CONFIG`` too, so with CUDA
@@ -4164,6 +4168,16 @@ def capture(
             raise RuntimeError(
                 "Either mode or options can be specified, but both can't be "
                 "specified at the same time."
+            )
+        # Keys normalized as the wrapper does; it cannot take this one at all
+        # (its type check fails on the string annotation).
+        keys = {k.replace("-", "_") for k in options or ()}
+        if "cudagraph_policy" in keys:
+            raise PrecompileError(
+                "precompile cannot record options={'cudagraph_policy': ...}: the "
+                "policy wraps the graphs again at load, and an artifact holds no "
+                "Python objects. Set torch._inductor.config.cudagraph_policy in the "
+                "loading process instead."
             )
         if isinstance(tracer, MakeFxTracer):
             # Refused before the wrapper is built, which sets CUPTI environment
@@ -4301,7 +4315,8 @@ def load(
     CUDA graph at all (``triton.cudagraph_skip_dynamic_graphs``,
     ``triton.cudagraph_support_input_mutation``, ...) was decided when it
     compiled and ships with it. The settings read while the graphs are wrapped
-    and run (``triton.cudagraph_capture_sizes``, the rerecord limits,
+    and run (``cudagraph_policy``, which can decline to wrap a graph,
+    ``triton.cudagraph_capture_sizes``, the rerecord limits,
     ``triton.cudagraph_or_error``, the warmup and sync knobs, ...) are the
     loading process's, as for a :func:`torch.compile` cache hit. A loaded
     artifact does not apply :func:`torch.compile`'s CUPTI workaround for CUDA

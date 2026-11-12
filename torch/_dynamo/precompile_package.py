@@ -185,6 +185,22 @@ def _capture_cudagraph_config(
     return config
 
 
+def _check_cudagraph_policy(cudagraph_config: Mapping[str, bool]) -> None:
+    # A policy decides how the capture wraps each graph (and can turn off the box
+    # a forward shares with its backward), which CUDAGRAPH_CONFIG cannot record.
+    import torch._inductor.config as inductor_config
+
+    policy = inductor_config.cudagraph_policy
+    if cudagraph_config.get("triton.cudagraphs") and policy is not None:
+        raise PackageError(
+            "a DynamoTracer capture cannot record "
+            "torch._inductor.config.cudagraph_policy: it decides how the capture "
+            "wraps each graph, while a loaded artifact wraps them by "
+            "CUDAGRAPH_CONFIG. Unset it while capturing and set it in the loading "
+            "process."
+        )
+
+
 @contextlib.contextmanager
 def _capture_config(*, lowers_kernels: bool) -> Iterator[None]:
     """The compiler configuration a multi-graph capture's calls run under.
@@ -1981,6 +1997,7 @@ class PrecompileSession(Generic[_P, _R]):
         self._cudagraph_config: dict[str, bool] = {}
         if self._backend_name == "inductor":
             self._cudagraph_config = _capture_cudagraph_config(backend)
+        _check_cudagraph_policy(self._cudagraph_config)
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
@@ -2098,6 +2115,9 @@ class PrecompileSession(Generic[_P, _R]):
         limit = max(
             self._recompile_limit, torch._dynamo.config.accumulated_recompile_limit
         )
+        # Each compile reads the policy again, so one set since capture() is
+        # refused before this call compiles under it.
+        _check_cudagraph_policy(self._cudagraph_config)
         try:
             with (
                 _capture_config(lowers_kernels=self._backend_name == "inductor"),
