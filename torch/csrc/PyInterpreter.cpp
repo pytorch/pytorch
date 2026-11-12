@@ -1183,8 +1183,7 @@ bool run_fake_python_callback(
   return run_python_callback(op, stack, call, convert, label);
 }
 
-// The active FakeTensorMode and the CppFakeTensorMode Python object that
-// op-impl callbacks are invoked against.
+// The active C++ mode and a strong reference to its Python wrapper.
 struct ActiveFakeMode {
   std::shared_ptr<c10::FakeTensorMode> mode;
   py::object py_fake_mode;
