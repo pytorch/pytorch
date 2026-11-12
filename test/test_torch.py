@@ -56,11 +56,12 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXLA,
     instantiate_device_type_tests,
     onlyCUDA,
+    onlyOn,
     onlyCPU,
     preserves_device_selection,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
-    get_all_device_types, skipXLA, onlyAccelerator, skipCUDAIf)
+    get_all_device_types, skipXLA, onlyAccelerator, skipCUDAIf, skipXPUIf, onlyOn)
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
@@ -5908,8 +5909,8 @@ class TestTorchDeviceType(TestCase):
             self._test_memory_format_transformations(
                 device, get_generator(mf, shape, torch.float64), get_fn('float'), mf, default_is_preserve=True)
 
-    @onlyCUDA
-    def test_memory_format_cpu_and_cuda_ops(self, device):
+    @onlyOn(["cuda", "xpu"])
+    def test_memory_format_cpu_and_gpu_ops(self, device):
         def get_generator(memory_format, shape):
             def input_generator_fn(device):
                 return torch.randn(shape, device=device, dtype=torch.float32).contiguous(memory_format=memory_format)
@@ -5918,8 +5919,8 @@ class TestTorchDeviceType(TestCase):
         def transformation_cpu_fn(tensor, **kwargs):
             return tensor.cpu(**kwargs)
 
-        def transformation_cuda_fn(tensor, **kwargs):
-            return tensor.cuda(**kwargs)
+        def transformation_device_fn(tensor, **kwargs):
+            return tensor.to(device=device, **kwargs)
 
         formats_shapes = (
             (torch.channels_last, (4, 3, 8, 8)),
@@ -5927,9 +5928,24 @@ class TestTorchDeviceType(TestCase):
 
         for mf, shape in formats_shapes:
             self._test_memory_format_transformations(
-                'cuda', get_generator(mf, shape), transformation_cpu_fn, mf, default_is_preserve=True)
+                device, get_generator(mf, shape), transformation_cpu_fn, mf, default_is_preserve=True)
             self._test_memory_format_transformations(
-                'cpu', get_generator(mf, shape), transformation_cuda_fn, mf, default_is_preserve=True)
+                'cpu', get_generator(mf, shape), transformation_device_fn, mf, default_is_preserve=True)
+
+    @onlyOn(["cuda", "xpu"])
+    def test_addcmul_gpu_errors_with_cpu_scalars(self, device):
+        # Logic is dtype agnostic, so dtype isn't tested
+        alpha = 0.5
+
+        a = torch.rand((2, 2), device=device)
+        b = torch.rand((2, 2), device=device)
+        c = torch.rand((2, 2), device=device)
+        scalar = torch.rand([], device="cpu")
+
+        with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for tensor1 argument'):
+            torch.addcmul(a, scalar, c, value=alpha)
+        with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for self argument'):
+            torch.addcmul(scalar, b, c, value=alpha)
 
     # FIXME: move to test_serialization
     @onlyNativeDeviceTypes
@@ -6170,7 +6186,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(found_inf, 1.0)
 
     @onlyNativeDeviceTypes
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5375")
     def test_grad_scaling_state_dict(self, device):
         device = torch.device(device)
         GradScaler = partial(torch.GradScaler, device=device.type)
@@ -6184,10 +6199,10 @@ class TestTorchDeviceType(TestCase):
             if lazy_init_scale:
                 # Dummy scale() call to ensure the scale tensor is lazily initialized.
                 s1.scale(torch.full((1,), 4.0, dtype=torch.float32, device=device))
-                if "cuda" == device.type:
-                    self.assertTrue(isinstance(s1._scale, torch.cuda.FloatTensor))
-                else:
+                if device.type == "cpu":
                     self.assertTrue(isinstance(s1._scale, torch.FloatTensor))
+                else:
+                    self.assertEqual(s1._scale.device.type, device.type)
 
             s1.load_state_dict(s0.state_dict())
 
@@ -7374,6 +7389,79 @@ class TestTorchDeviceType(TestCase):
         if torch.version.cuda is not None:
             self._test_to_with_layout(torch.sparse_csr, device)
 
+    # Profiler kernel-name substring that identifies the expected code path, per backend.
+    FILL_KERNEL = {"cuda": "elementwise_kernel", "xpu": "FillFunctor"}
+    VECTORIZED_KERNEL = {"cuda": "vectorized_elementwise_kernel", "xpu": "VectorizedElementwiseKernel"}
+
+    def _kernel_names(self, fn):
+        with torch.profiler.profile() as prof:
+            fn()
+            torch.accelerator.synchronize()
+        return tuple(event.key for event in prof.key_averages())
+
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
+    @unittest.skipIf(TEST_WITH_ROCM, "which path dense zero_ takes is ROCm-version dependent; see zero_cuda_")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5371")
+    def test_zero_dense_emits_memset(self, device):
+        base = torch.ones(64, 96, device=device)
+        names = self._kernel_names(lambda: base[16:32].zero_())
+        self.assertTrue(any("Memset" in name for name in names), names)
+
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
+    def test_zero_strided_emits_fill_kernel(self, device):
+        base = torch.ones(64, 96, device=device)
+        names = self._kernel_names(lambda: base[:, ::2].zero_())
+        self.assertTrue(any(self.FILL_KERNEL[self.device_type] in name for name in names), names)
+
+    @onlyOn(["cuda", "xpu"])
+    @skipCUDAIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCm >= 5.3 required for graphs")
+    def test_zero_dense_inside_graph_capture(self, device):
+        # Whichever path zero_ takes has to survive being captured and replayed.
+        base = torch.ones(64, 96, device=device)
+        dev = torch.get_device_module(device)
+        graph = torch.accelerator.Graph()
+        stream = dev.Stream()
+        stream.wait_stream(dev.current_stream())
+        with dev.stream(stream):
+            base.zero_()
+            with dev.graph(graph):
+                base.zero_()
+        dev.current_stream().wait_stream(stream)
+
+        for _ in range(8):
+            base.fill_(1)
+            graph.replay()
+            torch.accelerator.synchronize()
+            self.assertEqual(base.count_nonzero().item(), 0)
+
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @dtypes(torch.bfloat16, torch.half)
+    def test_reduced_type_float_copy_emits_vectorized_kernel(self, device, dtype):
+        src = make_tensor((1024, 1024), dtype=dtype, device=device)
+        torch.accelerator.synchronize()
+        names = self._kernel_names(lambda: src.to(torch.float32))
+        self.assertTrue(any(self.VECTORIZED_KERNEL[self.device_type] in name for name in names), names)
+
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @parametrize("src_dtype,dst_dtype", [(torch.int32, torch.int64),
+                                         (torch.bool, torch.int64),
+                                         (torch.bool, torch.float64)])
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6150")
+    def test_converting_copy_emits_vectorized_kernel(self, device, src_dtype, dst_dtype):
+        if src_dtype == torch.bool:
+            src = torch.randint(0, 256, (1024, 1024), dtype=torch.uint8, device=device).view(torch.bool)
+        else:
+            src = make_tensor((1024, 1024), dtype=src_dtype, device=device)
+        torch.accelerator.synchronize()
+        out = []
+        names = self._kernel_names(lambda: out.append(src.to(dst_dtype)))
+        self.assertTrue(any(self.VECTORIZED_KERNEL[self.device_type] in name for name in names), names)
+        self.assertEqual(out[0].cpu(), src.cpu().to(dst_dtype))
+
 
 class TestTorchCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -7386,72 +7474,6 @@ class TestTorchCUDA(TestCase):
 
         with self.assertWarnsOnceRegex(UserWarning, msg):
             torch.cuda.DoubleTensor([0])
-
-    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
-    @unittest.skipIf(TEST_WITH_ROCM, "which path dense zero_ takes is ROCm-version dependent; see zero_cuda_")
-    def test_zero_dense_emits_memset(self, device):
-        base = torch.ones(64, 96, device=device)
-        with torch.profiler.profile() as prof:
-            base[16:32].zero_()
-            torch.cuda.synchronize()
-        names = tuple(event.key for event in prof.key_averages())
-        self.assertTrue(any("Memset" in name for name in names), names)
-
-    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
-    def test_zero_strided_emits_fill_kernel(self, device):
-        base = torch.ones(64, 96, device=device)
-        with torch.profiler.profile() as prof:
-            base[:, ::2].zero_()
-            torch.cuda.synchronize()
-        names = tuple(event.key for event in prof.key_averages())
-        self.assertTrue(any("elementwise_kernel" in name for name in names), names)
-
-    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCm >= 5.3 required for graphs")
-    def test_zero_dense_inside_graph_capture(self, device):
-        # Whichever path zero_ takes has to survive being captured and replayed.
-        base = torch.ones(64, 96, device=device)
-        graph = torch.cuda.CUDAGraph()
-        stream = torch.cuda.Stream()
-        stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(stream):
-            base.zero_()
-            with torch.cuda.graph(graph):
-                base.zero_()
-        torch.cuda.current_stream().wait_stream(stream)
-
-        for _ in range(8):
-            base.fill_(1)
-            graph.replay()
-            torch.cuda.synchronize()
-            self.assertEqual(base.count_nonzero().item(), 0)
-
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @dtypes(torch.bfloat16, torch.half)
-    def test_reduced_type_float_copy_emits_vectorized_kernel(self, device, dtype):
-        src = make_tensor((1024, 1024), dtype=dtype, device=device)
-        torch.cuda.synchronize()
-        with torch.profiler.profile() as prof:
-            src.to(torch.float32)
-            torch.cuda.synchronize()
-        names = tuple(event.key for event in prof.key_averages())
-        self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
-
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @parametrize("src_dtype,dst_dtype", [(torch.int32, torch.int64),
-                                         (torch.bool, torch.int64),
-                                         (torch.bool, torch.float64)])
-    def test_converting_copy_emits_vectorized_kernel(self, device, src_dtype, dst_dtype):
-        if src_dtype == torch.bool:
-            src = torch.randint(0, 256, (1024, 1024), dtype=torch.uint8, device=device).view(torch.bool)
-        else:
-            src = make_tensor((1024, 1024), dtype=src_dtype, device=device)
-        torch.cuda.synchronize()
-        with torch.profiler.profile() as prof:
-            dst = src.to(dst_dtype)
-            torch.cuda.synchronize()
-        names = tuple(event.key for event in prof.key_averages())
-        self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
-        self.assertEqual(dst.cpu(), src.cpu().to(dst_dtype))
 
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfRocm
@@ -7546,20 +7568,6 @@ class TestTorchCUDA(TestCase):
             _no_sync_helper(f, level)
         for f, level in product(expect_sync, (1, 2)):
             _sync_raises_helper(f, level)
-
-    def test_addcmul_cuda_errors_with_cpu_scalars(self, device):
-        # Logic is dtype agnostic, so dtype isn't tested
-        alpha = 0.5
-
-        a = torch.rand((2, 2), device=device)
-        b = torch.rand((2, 2), device=device)
-        c = torch.rand((2, 2), device=device)
-        scalar = torch.rand([], device="cpu")
-
-        with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for tensor1 argument'):
-            torch.addcmul(a, scalar, c, value=alpha)
-        with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for self argument'):
-            torch.addcmul(scalar, b, c, value=alpha)
 
     # FIXME: move to test_serialization
     @deviceCountAtLeast(1)  # Note: Tests works with one but prefers more devices
