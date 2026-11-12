@@ -14382,6 +14382,11 @@ class TestRNNMPS(TestCaseMPS):
         with torch.autocast(device_type="mps"):
             output, (hn, cn) = rnn(input, (hx, cx))
 
+        output_check, (hn_check, cn_check) = rnn(input.to(dtype), (hx, cx))
+        self.assertEqual(output.to(dtype), output_check, atol=1e-3, rtol=1e-3)
+        self.assertEqual(hn.to(dtype), hn_check, atol=1e-3, rtol=1e-3)
+        self.assertEqual(cn.to(dtype), cn_check, atol=1e-3, rtol=1e-3)
+
     # Regression test for https://github.com/pytorch/pytorch/issues/190057:
     # dropout=1.0 produced 0 * inf = NaN between layers.
     def test_lstm_dropout_one(self):
