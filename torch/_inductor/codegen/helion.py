@@ -49,6 +49,7 @@ import collections
 import contextlib
 import itertools
 import math
+import re
 from dataclasses import dataclass
 from typing import Any, cast, TYPE_CHECKING
 
@@ -78,9 +79,8 @@ from ..utils import (
     use_helion_native_matmul,
 )
 from ..virtualized import V
-from .common import CSEVariable, OpOverrides, PythonPrinter
+from .common import CSEVariable, DeferredLine, OpOverrides, PythonPrinter
 from .simd import SIMDKernel
-from .simd_kernel_features import DisableReduction, EnableReduction
 from .triton import TritonScheduling
 
 
@@ -444,7 +444,9 @@ def helion_supports(node: BaseSchedulerNode) -> bool:
 class HelionTensorArg:
     """A kernel parameter: a buffer, or a view of one that the wrapper passes."""
 
-    name: str
+    # Stands for the parameter in the kernel body, e.g. __arg2__[tile_x], until
+    # codegen_kernel() names the parameters that remain in0, ..., out0, ....
+    ref: str
     # Buffer or ReinterpretView of a buffer.
     operand: IRNode
     output: bool
@@ -497,25 +499,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         roots = {tree.prefix: tree for tree in self.range_trees}
         self.symbols = {axis: roots[axis].index_sym() for axis in self.axes}
         self.tile_ranges = {self.symbols[axis]: self.numels[axis] for axis in self.axes}
-        # Buffers stored to memory. A fused intermediate is read back through
-        # the CSE store cache instead; storing it too would add
-        # out0[tile_y, tile_x] = acc.to(torch.bfloat16) to relu(a @ b + c).
-        fused_names = OrderedSet(node.get_name() for node in nodes)
-        read_later = self.values_read_in_a_later_loop(nodes)
-        self.outputs = OrderedSet(
-            buf.get_name()
-            for node in nodes
-            for buf in node.get_outputs()
-            if not isinstance(buf.node.get_layout(), MutationLayoutSHOULDREMOVE)
-            and (
-                buf.get_name() in read_later
-                or not V.graph.scheduler.can_buffer_be_removed_through_fusion(
-                    buf.get_name(), fused_names
-                )
-            )
-        )
         self.arguments: dict[tuple[Any, ...], HelionTensorArg] = {}
-        self.argument_counts: collections.Counter[str] = collections.Counter()
         # Loads and compute share one buffer, so that a masked load follows the
         # computation of its mask. With loads first, as in Triton, cat((f, s))
         # would emit
@@ -529,44 +513,6 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         # Buffer -> value stored outside the current reduction loop; see
         # disable_reduction().
         self.outer_stores: dict[str, CSEVariable] = {}
-
-    def values_read_in_a_later_loop(
-        self, nodes: Sequence[BaseSchedulerNode]
-    ) -> OrderedSet[str]:
-        """Buffers that a reduction loop computes and a later loop reads.
-
-        A value of a reduction loop is out of scope in the next loop, so it
-        goes through memory even when no other kernel reads it. For y * s with
-        s = y.sum(-1, keepdim=True) and y a chain of 20 sin(y) * 0.9 + 0.1 * i,
-        Inductor keeps y as a buffer, and the kernel emits
-            for tile_r in hl.tile(100):
-                ...
-                out0[tile_x, tile_r] = tmp78
-                acc = acc + torch.sum(tmp78, -1)
-            for tile_r in hl.tile(100):
-                tmp79 = out0[tile_x, tile_r]
-        Without the store, the second loop reads a buffer nothing wrote and the
-        result is wrong. Reduction results are not such values; they live on in
-        their accumulators.
-        """
-        region, current = {}, 0
-        for item in self.features.node_schedule:
-            if item is DisableReduction or item is EnableReduction:
-                current += 1
-            elif isinstance(item, SchedulerNode):
-                region[item.get_name()] = current
-        writers = {buf.get_name(): node for node in nodes for buf in node.get_outputs()}
-        # The schedule starts in a reduction loop: regions 0, 2, ... are loops.
-        return OrderedSet(
-            dep.name
-            for node in nodes
-            for dep in node.read_writes.reads
-            if (writer := writers.get(dep.name)) is not None
-            and not writer.is_reduction()
-            and region[writer.get_name()] % 2 == 0
-            and region[node.get_name()] != region[writer.get_name()]
-            and self.features.is_reduction()
-        )
 
     @property
     def in_loop(self) -> bool:
@@ -705,10 +651,8 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             layout.offset,
         )
         if key not in self.arguments:
-            prefix = "out" if output else "in"
-            name = f"{prefix}{self.argument_counts[prefix]}"
-            self.argument_counts[prefix] += 1
-            self.arguments[key] = HelionTensorArg(name, operand, output)
+            ref = f"__arg{len(self.arguments)}__"
+            self.arguments[key] = HelionTensorArg(ref, operand, output)
             # Also record the buffer in self.args, which the kernel signature
             # does not use, but which generate_intermediate_hooks,
             # warn_mix_layout and remove_kernel_local_buffers() read.
@@ -939,7 +883,8 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
             settings += f', dot_precision="{"tf32" if tf32 else "ieee"}"'
         code.writeline(f"@helion.kernel({settings})")
-        signature = ", ".join(f"{arg.name}: torch.Tensor" for arg in self.kernel_args())
+        names = self.kernel_arg_names()
+        signature = ", ".join(f"{name}: torch.Tensor" for name in names.values())
         code.writeline(f"def kernel({signature}) -> None:")
         with code.indent():
             tiles = ", ".join(TILE_NAMES[axis] for axis in self.outer_axes)
@@ -951,10 +896,40 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             code.writeline(f"for {tiles} in hl.tile({sizes}):")
             with code.indent():
                 code.splice(self.body)
-        return code.getvalue()
+        # getvalue() drops the stores that remove_kernel_local_buffers()
+        # removed, and with them every reference to their parameters.
+        return re.sub(r"__arg\d+__", lambda ref: names[ref[0]], code.getvalue())
 
     def kernel_args(self) -> list[HelionTensorArg]:
-        return sorted(self.arguments.values(), key=lambda arg: arg.output)
+        """The parameters, inputs first, without outputs whose stores were removed.
+
+        For relu(a @ b + c), Inductor removes the buffer of a @ b, which no
+        other kernel reads, so its store
+            __arg2__[tile_y, tile_x] = acc.to(torch.bfloat16)
+        is dropped and kernel(in0, in1, in2, out0) writes only the result.
+        """
+        removed = (
+            self.removed_buffers
+            | self.inplaced_to_remove
+            | V.graph.removed_buffers
+            | V.graph.inplaced_to_remove
+        )
+        args = [
+            arg
+            for arg in self.arguments.values()
+            if not (arg.output and arg.operand.get_name() in removed)
+        ]
+        return sorted(args, key=lambda arg: arg.output)
+
+    def kernel_arg_names(self) -> dict[str, str]:
+        """Parameter name of each kernel_args() ref: in0, in1, ..., out0, ...."""
+        counts: collections.Counter[str] = collections.Counter()
+        names = {}
+        for arg in self.kernel_args():
+            prefix = "out" if arg.output else "in"
+            names[arg.ref] = f"{prefix}{counts[prefix]}"
+            counts[prefix] += 1
+        return names
 
     def call_args(self) -> list[str]:
         """The wrapper's argument of each kernel parameter, e.g. arg0_1 or a view."""
@@ -1026,7 +1001,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
                     f"Cannot read a Helion dot operand at {index}"
                 )
             arg, coordinates, shape = found
-            line = f"{arg.name}[{', '.join(coordinates)}]"
+            line = f"{arg.ref}[{', '.join(coordinates)}]"
             return self.cse.generate(
                 self.loads, line, dtype=buffer.get_dtype(), shape=shape
             )
@@ -1047,7 +1022,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         cast_suffix = "" if dtype == buffer.get_dtype() else f".to({dtype})"
         subscript = ", ".join(coordinates)
         if mask is None:
-            line = f"{arg.name}[{subscript}]{cast_suffix}"
+            line = f"{arg.ref}[{subscript}]{cast_suffix}"
         else:
             # The body of ops.masked() may only read where its mask holds.
             # F.pad(x, (8, 0)) for x of shape [40, 128] reads x at
@@ -1066,7 +1041,7 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             #   InvalidIndexingType: Expected tile/int/None/tensor/etc in tensor[...], got ().
             mask = self.align(mask, shape)
             index = "" if coordinates == ["()"] else subscript
-            line = f"hl.load({arg.name}, [{index}], extra_mask={mask}){cast_suffix}"
+            line = f"hl.load({arg.ref}, [{index}], extra_mask={mask}){cast_suffix}"
         value = self.cse.generate(self.loads, line, dtype=dtype, shape=shape)
         # A row vector continues as tmp3 = tmp2.reshape([tile_y, 1]). Left as
         # (tile_y,), a @ b + c for c of shape [40, 1] fails Inductor's shape
@@ -1098,8 +1073,6 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             # The mutation buffer itself is not an output, so without this x
             # would be left unchanged.
             buffer = layout.get_buffer()
-        elif name not in self.outputs:
-            return
         index = self.tile_index(index)
         # A size-1 tile that the index skips stays in the subscript, through a
         # stride-0 view. x.sum() has one tile_x of size 1, and its acc of shape
@@ -1124,11 +1097,13 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         # fail with CrossRootDeviceValue: Device value 'tmp4' cannot be carried
         # between top-level loops. Reduction results (SIMDKernel.store_reduction)
         # are stored after the loop.
+        # A DeferredLine, so that remove_kernel_local_buffers() can drop the
+        # store of a buffer that only this kernel reads. Read back through the
+        # CSE store cache, a fused intermediate needs no store; relu(a @ b + c)
+        # would otherwise also write a @ b to a buffer of its own.
         buffer_code = self.compute if self.in_loop else self.stores
-        buffer_code.writeline(
-            f"{arg.name}[{', '.join(coordinates)}] = "
-            f"{self.align(value, shape)}{cast_suffix}"
-        )
+        line = f"{arg.ref}[{', '.join(coordinates)}] = {self.align(value, shape)}"
+        buffer_code.writeline(DeferredLine(name, line + cast_suffix))
 
     def index_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> CSEVariable:
         """Index arithmetic on tile index tensors.
