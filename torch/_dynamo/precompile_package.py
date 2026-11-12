@@ -2220,7 +2220,9 @@ class PrecompileSession(Generic[_P, _R]):
             if not isinstance(artifact, BundledAOTAutogradCacheArtifact):
                 continue
             # As compile_fx applies an override: fwd decides the forward, and
-            # bwd=False keeps a CUDA graphed forward's backward out.
+            # bwd=False keeps a CUDA graphed forward's backward out. A forward
+            # Inductor then kept out for another reason (CPU inputs, ...) is not
+            # looked at, so its override is refused all the same.
             forward = flag if fwd is None else fwd
             backward = artifact.content.compiled_bw is not None
             if forward != flag or (forward and backward and bwd is False):
