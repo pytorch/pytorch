@@ -7,6 +7,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._inductor.heuristics.registry import register_template_heuristic
+from torch.utils._ordered_set import OrderedSet
 
 from ... import config
 from ...autows_utils import has_two_ctas, meta_ws_enabled
@@ -19,6 +20,7 @@ from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...utils import can_use_tma, get_num_sms, has_free_symbols
 from .base import TemplateConfigHeuristics
 from .triton import mm_allow_tf32
+from .triton_addmm import AddMMConfigMixin
 
 
 if TYPE_CHECKING:
@@ -54,8 +56,11 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         mat2_size = mat2.get_size()
         sizes = (*mat1_size, *mat2_size)
         # The current bounded configs require concrete dimensions, and CUDA
-        # tensor-map dimensions must be positive.
-        if has_free_symbols(sizes):
+        # tensor-map dimensions must be positive. Static sizes can still carry
+        # symbolic strides, e.g. a slice of a dynamic tensor.
+        if has_free_symbols(
+            (*sizes, *mat1.get_stride(), *mat2.get_stride())
+        ) or has_free_symbols((mat1.get_layout().offset, mat2.get_layout().offset)):
             return
 
         batch, m, k = map(int, mat1_size)
@@ -88,15 +93,24 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         a_broadcast = int(mat1.get_stride()[0]) == 0
         b_broadcast = int(mat2.get_stride()[0]) == 0
         # Host descriptors are built from the base buffer, so they cannot carry a
-        # storage offset, and one aliased kernel arg cannot hold two descriptors.
+        # storage offset, and one aliased kernel arg cannot hold a descriptor and
+        # anything else (the other operand, or a baddbmm bias).
+        host_tma_nodes = [
+            node
+            for node, broadcast in ((mat1, a_broadcast), (mat2, b_broadcast))
+            if not broadcast
+        ]
+        host_tma_names = [node.get_name() for node in host_tma_nodes]
+        other_names = OrderedSet(
+            node.get_name()
+            for node in kernel_inputs.nodes()
+            if node is not mat1 and node is not mat2
+        )
         host_side_tma = (
             config.triton.enable_host_side_tma
-            and all(
-                node.get_layout().offset == 0
-                for node, broadcast in ((mat1, a_broadcast), (mat2, b_broadcast))
-                if not broadcast
-            )
-            and (a_broadcast or b_broadcast or mat1.get_name() != mat2.get_name())
+            and all(node.get_layout().offset == 0 for node in host_tma_nodes)
+            and len(OrderedSet(host_tma_names)) == len(host_tma_names)
+            and not any(name in other_names for name in host_tma_names)
         )
 
         output_layout = kernel_inputs.output_layout()
@@ -181,3 +195,15 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
             raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
         m, n, k = kernel_inputs.mnk_symbolic()
         return {"ALLOW_TF32": mm_allow_tf32(m, n, k, kernel_inputs.device_type)}
+
+
+@register_template_heuristic(
+    blackwell_ws_persistent_tma_bmm_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+    op_name="baddbmm",
+)
+class CUDABlackwellBaddbmmTemplateConfigHeuristic(
+    AddMMConfigMixin, CUDABlackwellBMMTemplateConfigHeuristic
+):
+    """Blackwell BMM configs with the baddbmm bias applied in the epilogue."""
