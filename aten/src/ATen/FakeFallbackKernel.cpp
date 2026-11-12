@@ -256,7 +256,7 @@ void fakeFallback(
   // an output (by in-place and out= ops) from a new tensor
   std::unordered_set<const c10::TensorImpl*> input_impls;
   std::optional<c10::Device> device;
-  // The sparse inputs' Meta keys, or Meta for ops without sparse inputs
+  // The sparse inputs' Meta keys; Meta is added before redispatch.
   c10::DispatchKeySet meta_keyset;
   for_each_tensor(
       stack, arguments_begin, num_arguments, [&](const at::Tensor& t) {
@@ -317,6 +317,9 @@ void fakeFallback(
           meta_keyset = meta_keyset.add(c10::DispatchKey::SparseCsrMeta);
         }
       });
+  const bool has_sparse_inputs =
+      meta_keyset.has(c10::DispatchKey::SparseMeta) ||
+      meta_keyset.has(c10::DispatchKey::SparseCsrMeta);
   if (!device.has_value() && !is_tensor_constructor(schema)) {
     unsupported(op, "ops without fake tensor inputs");
   }
@@ -333,7 +336,7 @@ void fakeFallback(
     // Probe every native CIA op too: export writes py_kernels directly,
     // bypassing the registration hook that sets the PythonCIA bit.
     const bool try_decomp =
-        (has(FakeDispatchCategory::StaticShapeDecomp) && meta_keyset.empty()) ||
+        (has(FakeDispatchCategory::StaticShapeDecomp) && !has_sparse_inputs) ||
         has(FakeDispatchCategory::PythonCIA) || has_cia;
     if (try_decomp) {
       const auto& interpreter = *c10::impl::getGlobalPyInterpreter();
@@ -389,13 +392,13 @@ void fakeFallback(
   if (!device.has_value()) {
     unsupported(op, "ops without fake tensor inputs");
   }
-  if (meta_keyset.empty()) {
-    meta_keyset = c10::DispatchKeySet(c10::DispatchKey::Meta);
-  } else if (!op.hasComputedKernelForDispatchKey(
-                 meta_keyset.highestPriorityTypeId())) {
+  if (has_sparse_inputs &&
+      !op.hasComputedKernelForDispatchKey(
+          meta_keyset.highestPriorityTypeId())) {
     // Give a clearer error without constructing the dispatcher's kernel table.
     unsupported(op, "sparse inputs to ops without a sparse Meta kernel");
   }
+  meta_keyset = meta_keyset.add(c10::DispatchKey::Meta);
 
   // As in Python, the outputs of alias and detach of a fake keep its recorded
   // dispatch keys (see Note [C++ fake dispatch keys]), and other new outputs
@@ -420,7 +423,7 @@ void fakeFallback(
     // avoid reading that setting, which another thread can change. This also
     // suppresses the uninitialized-setting warning inside sparse Meta kernels.
     std::optional<at::impl::SparseTensorInvariantChecksGuard> checks_off;
-    if (!meta_keyset.has(c10::DispatchKey::Meta)) {
+    if (has_sparse_inputs) {
       checks_off.emplace(false);
     }
     try {
