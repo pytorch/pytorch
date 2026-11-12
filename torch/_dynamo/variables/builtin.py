@@ -2089,6 +2089,11 @@ class BuiltinVariable(BaseBuiltinVariable):
             # CPython (returns NotImplemented rather than falling back to the
             # reflected operation when the operands are incompatible).
             lval = args[0].as_python_constant()
+            if self.fn is object and name == "__eq__":
+                same = vt_identity_compare(args[0], args[1])
+                if same is not None:
+                    result = same.as_python_constant() or NotImplemented
+                    return ConstantVariable.create(result)
             if isinstance(lval, self.fn):
                 return ConstantVariable.create(
                     getattr(self.fn, name)(lval, args[1].as_python_constant())
@@ -2894,7 +2899,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 hints=[*graph_break_hints.DYNAMO_BUG],
             )
         if isinstance(arg, variables.NNModuleHooksDictVariable) and arg.source:
-            # Internal slot dispatch does not observe the hook registry's exact type.
+            # Explicit isinstance observes the registry type, unlike internal slot dispatch.
             install_guard(arg.source.make_guard(GuardBuilder.TYPE_MATCH))
         isinstance_type = isinstance_type_var.as_python_constant()
         # An AsyncCollectiveTensor (ACT) input's tensor-class guard is relaxed
