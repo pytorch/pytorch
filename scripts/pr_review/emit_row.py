@@ -34,7 +34,8 @@ Actions harness and the credential-less sandbox that replaces it write the SAME
 shape, distinguished by ``harness``, so the two eras stay comparable. ``extra``
 is the escape hatch for anything we learn we need later without re-cutting the
 table. Two keys today, both only on a succeeded review: ``findings``, the
-sanitized findings as a JSON array, which Dr.CI renders under the verdict; and
+sanitized findings as a JSON array, which Dr.CI renders under the verdict (a
+finding on a file the PR deletes carries that file's pre-deletion line number); and
 ``findings_dropped_at_publish``, present only when the publish-side re-check
 dropped some, so ``findings_count`` can exceed the array's length.
 """
