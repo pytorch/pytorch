@@ -705,6 +705,61 @@ class TestScheduler(TestCase):
         self.assertNotIn(node1, fused_nodes)
         self.assertNotIn(node2, fused_nodes)
 
+    @skipIf(not HAS_GPU, "requires GPU")
+    @inductor_config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        force_disable_caches=True,
+    )
+    def test_reduction_over_template_input_is_not_an_epilogue(self):
+        # x.sum(0) only reads the mm's input x, but its first split stage has the
+        # output's (M, N) group (8 * 128, 128) and x has M * N elements, so it
+        # looked like an in-place row reduction of the output. Row and column
+        # sums of the output must still classify.
+        from torch._inductor.codegen.simd import template_reduction_axis
+        from torch._inductor.scheduler import MixOrderReduction
+
+        axes = {}
+        fusable = {}
+        fuse_nodes = Scheduler.fuse_nodes
+
+        def record_axes(self, nodes):
+            for template in (n for n in nodes if n.is_template()):
+                produced = OrderedSet(template.get_buffer_names())
+                for node in nodes:
+                    if node.is_reduction() and not node.is_template():
+                        if not produced & node.used_buffer_names():
+                            expected = None
+                        elif MixOrderReduction.is_split_reduction(node):
+                            expected = 1  # y.sum(0)'s first stage
+                        else:
+                            expected = 0  # y.sum(1)
+                        axes[node.get_name()] = (
+                            template_reduction_axis(node, template.node, produced),
+                            expected,
+                        )
+                        if not template.get_operation_names() & node.ancestors:
+                            fusable[node.get_name()] = self.can_fuse(template, node)
+            return fuse_nodes(self, nodes)
+
+        x = torch.randn(1024, 128, device=GPU_TYPE, dtype=torch.bfloat16)
+        w = torch.randn(128, 128, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        def f(x, w):
+            y = x @ w.t()
+            return y, x.sum(0, keepdim=True), y.sum(1), y.sum(0)
+
+        torch._dynamo.reset()
+        with patch.object(Scheduler, "fuse_nodes", record_axes):
+            out = torch.compile(f)(x, w)
+        self.assertEqual(out, f(x, w), atol=1e-1, rtol=1e-2)
+        self.assertEqual(sorted(e for _, e in axes.values() if e is not None), [0, 1])
+        for name, (axis, expected) in axes.items():
+            self.assertEqual(axis, expected, name)
+        # Nor can it fuse into the template some other way.
+        self.assertTrue(fusable)
+        self.assertFalse(any(fusable.values()), fusable)
+
     def test_pending_fusion_does_not_repeat_legality_check(self):
         scheduler = object.__new__(Scheduler)
         pending_node1 = self._mock_base_snode("pending_node1")
