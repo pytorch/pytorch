@@ -21365,12 +21365,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @skip_if_device(lambda device: device != "cuda", "CUDA OOM regression test")
     def test_efficient_zero_tensor_avoids_oom(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("CUDA OOM regression test")
+        if self.device not in ("cuda", "xpu"):
+            raise unittest.SkipTest("accelerator OOM regression test")
 
         element_size = torch.empty((), dtype=torch.float32).element_size()
         numel = (
-            torch.cuda.get_device_properties(self.device).total_memory // element_size
+            torch.get_device_module(self.device)
+            .get_device_properties(self.device)
+            .total_memory
+            // element_size
         )
         numel += 1024
 
