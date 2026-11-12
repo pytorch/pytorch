@@ -827,6 +827,40 @@ static inline Vectorized<T> binary_op_as_fp32(
   return cvt_from_fp32<T>(o1, o2);
 }
 
+template <typename T, typename Op>
+static inline Vectorized<T> ternary_op_as_fp32(
+    const Vectorized<T>& a,
+    const Vectorized<T>& b,
+    const Vectorized<T>& c,
+    Op op) {
+  __m512 a_lo, a_hi;
+  __m512 b_lo, b_hi;
+  __m512 c_lo, c_hi;
+  cvt_to_fp32<T>(__m512i(a), a_lo, a_hi);
+  cvt_to_fp32<T>(__m512i(b), b_lo, b_hi);
+  cvt_to_fp32<T>(__m512i(c), c_lo, c_hi);
+  auto o1 = op(a_lo, b_lo, c_lo);
+  auto o2 = op(a_hi, b_hi, c_hi);
+  return cvt_from_fp32<T>(o1, o2);
+}
+
+#define FUSED_OP_AS_FP32(type, op)                                        \
+  template <>                                                             \
+  Vectorized<type> inline op(                                             \
+      const Vectorized<type>& a,                                          \
+      const Vectorized<type>& b,                                          \
+      const Vectorized<type>& c) {                                        \
+    return ternary_op_as_fp32(a, b, c, [](__m512 x, __m512 y, __m512 z) { \
+      return _mm512_##op##_ps(x, y, z);                                   \
+    });                                                                   \
+  }
+
+#define FUSED_OPS_AS_FP32(type)  \
+  FUSED_OP_AS_FP32(type, fmadd)  \
+  FUSED_OP_AS_FP32(type, fnmadd) \
+  FUSED_OP_AS_FP32(type, fmsub)  \
+  FUSED_OP_AS_FP32(type, fnmsub)
+
 template <>
 struct is_vec_specialized_for<BFloat16> : std::bool_constant<true> {};
 
@@ -1074,21 +1108,7 @@ inline void convert(const double* src, BFloat16* dst, int64_t n) {
   }
 }
 
-template <>
-Vectorized<BFloat16> inline fmadd(
-    const Vectorized<BFloat16>& a,
-    const Vectorized<BFloat16>& b,
-    const Vectorized<BFloat16>& c) {
-  __m512 a_lo, a_hi;
-  __m512 b_lo, b_hi;
-  __m512 c_lo, c_hi;
-  cvtbf16_fp32(__m512i(a), a_lo, a_hi);
-  cvtbf16_fp32(__m512i(b), b_lo, b_hi);
-  cvtbf16_fp32(__m512i(c), c_lo, c_hi);
-  auto o1 = _mm512_fmadd_ps(a_lo, b_lo, c_lo);
-  auto o2 = _mm512_fmadd_ps(a_hi, b_hi, c_hi);
-  return cvtfp32_bf16(o1, o2);
-}
+FUSED_OPS_AS_FP32(BFloat16)
 
 static inline void _transpose_mxn_half_16_16(__m256i t[], __m512i u[]) {
   __m512i r[8];
@@ -1834,21 +1854,28 @@ inline void convert(const double* src, Half* dst, int64_t n) {
   }
 }
 
-template <>
-Vectorized<Half> inline fmadd(
-    const Vectorized<Half>& a,
-    const Vectorized<Half>& b,
-    const Vectorized<Half>& c) {
-  __m512 a_lo, a_hi;
-  __m512 b_lo, b_hi;
-  __m512 c_lo, c_hi;
-  cvtfp16_fp32(__m512i(a), a_lo, a_hi);
-  cvtfp16_fp32(__m512i(b), b_lo, b_hi);
-  cvtfp16_fp32(__m512i(c), c_lo, c_hi);
-  auto o1 = _mm512_fmadd_ps(a_lo, b_lo, c_lo);
-  auto o2 = _mm512_fmadd_ps(a_hi, b_hi, c_hi);
-  return cvtfp32_fp16(o1, o2);
-}
+#if defined(__AVX512FP16__)
+// Native fp16 FMA rounds a * b + c once, rather than in fp32 and again when
+// narrowing to fp16.
+#define FUSED_OP_AS_FP16(op)                     \
+  template <>                                    \
+  Vectorized<Half> inline op(                    \
+      const Vectorized<Half>& a,                 \
+      const Vectorized<Half>& b,                 \
+      const Vectorized<Half>& c) {               \
+    return _mm512_castph_si512(_mm512_##op##_ph( \
+        _mm512_castsi512_ph(a),                  \
+        _mm512_castsi512_ph(b),                  \
+        _mm512_castsi512_ph(c)));                \
+  }
+FUSED_OP_AS_FP16(fmadd)
+FUSED_OP_AS_FP16(fnmadd)
+FUSED_OP_AS_FP16(fmsub)
+FUSED_OP_AS_FP16(fnmsub)
+#undef FUSED_OP_AS_FP16
+#else
+FUSED_OPS_AS_FP32(Half)
+#endif
 
 #define CONVERT_VECTORIZED_INIT(type, name)                     \
   inline std::tuple<Vectorized<float>, Vectorized<float>>       \

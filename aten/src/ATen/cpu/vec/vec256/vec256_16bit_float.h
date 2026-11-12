@@ -761,6 +761,40 @@ static inline Vectorized<T> binary_op_as_fp32(
   return cvt_from_fp32<T>(o1, o2);
 }
 
+template <typename T, typename Op>
+static inline Vectorized<T> ternary_op_as_fp32(
+    const Vectorized<T>& a,
+    const Vectorized<T>& b,
+    const Vectorized<T>& c,
+    Op op) {
+  __m256 a_lo, a_hi;
+  __m256 b_lo, b_hi;
+  __m256 c_lo, c_hi;
+  cvt_to_fp32<T>(__m256i(a), a_lo, a_hi);
+  cvt_to_fp32<T>(__m256i(b), b_lo, b_hi);
+  cvt_to_fp32<T>(__m256i(c), c_lo, c_hi);
+  auto o1 = op(a_lo, b_lo, c_lo);
+  auto o2 = op(a_hi, b_hi, c_hi);
+  return cvt_from_fp32<T>(o1, o2);
+}
+
+#define FUSED_OP_AS_FP32(type, op)                                        \
+  template <>                                                             \
+  Vectorized<type> inline op(                                             \
+      const Vectorized<type>& a,                                          \
+      const Vectorized<type>& b,                                          \
+      const Vectorized<type>& c) {                                        \
+    return ternary_op_as_fp32(a, b, c, [](__m256 x, __m256 y, __m256 z) { \
+      return _mm256_##op##_ps(x, y, z);                                   \
+    });                                                                   \
+  }
+
+#define FUSED_OPS_AS_FP32(type)  \
+  FUSED_OP_AS_FP32(type, fmadd)  \
+  FUSED_OP_AS_FP32(type, fnmadd) \
+  FUSED_OP_AS_FP32(type, fmsub)  \
+  FUSED_OP_AS_FP32(type, fnmsub)
+
 #define CONVERT_VECTORIZED_INIT(type, name)                     \
   inline std::tuple<Vectorized<float>, Vectorized<float>>       \
       convert_##name##_float(const Vectorized<type>& a) {       \
