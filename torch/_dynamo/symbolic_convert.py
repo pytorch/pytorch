@@ -386,18 +386,18 @@ class SpeculationLog:
                 SpeculationEntry(filename, lineno, instruction_pointer, inst)
             )
         entry = self.entries[self.index]
-        prev_entry_msg = ""
-        if self.index != 0:
-            prev_entry = self.entries[self.index - 1]
-            prev_entry_msg = (
-                f"Previous instruction: {prev_entry.filename}:{prev_entry.lineno}"
-                f"({prev_entry.inst.opname} @ {prev_entry.instruction_pointer})\n"
-            )
         if not (
             entry.instruction_pointer == instruction_pointer
             and entry.filename == filename
             and entry.lineno == lineno
         ):
+            prev_entry_msg = ""
+            if self.index != 0:
+                prev_entry = self.entries[self.index - 1]
+                prev_entry_msg = (
+                    f"Previous instruction: {prev_entry.filename}:{prev_entry.lineno}"
+                    f"({prev_entry.inst.opname} @ {prev_entry.instruction_pointer})\n"
+                )
             raise SpeculationLogDivergence(
                 f"""
 SpeculationLog diverged at index {self.index} (log had {len(self.entries)} entries):
@@ -1883,7 +1883,7 @@ class InstructionTranslatorBase(
         self.current_instruction = inst = self.instructions[ip]
         self.instruction_pointer = ip + 1
 
-        if inst.starts_line:
+        if inst.starts_line and inst.starts_line != self.lineno:
             self.starts_line(inst.starts_line)
 
         tc = TracingContext.try_get()
@@ -1917,7 +1917,8 @@ class InstructionTranslatorBase(
                 f"TRACE {inst.opname} {repr(inst.argval)} {stack_repr}"
             )
 
-        self.update_block_stack(inst)
+        if inst.exn_tab_entry is not None or self.block_stack:
+            self.update_block_stack(inst)
 
         try:
             self.dispatch_table[inst.opcode](self, inst)
@@ -2372,7 +2373,14 @@ class InstructionTranslatorBase(
         return self.stack.pop()
 
     def popn(self, n: int) -> list[VariableTracker]:
-        return [*reversed([self.pop() for _ in range(n)])]
+        if n == 0:
+            return []
+        stack = self.stack
+        if len(stack) < n:
+            raise IndexError("pop from empty list")
+        ret = stack[-n:]
+        del stack[-n:]
+        return ret
 
     def LOAD_FAST(self, inst: Instruction) -> None:
         name = inst.argval
