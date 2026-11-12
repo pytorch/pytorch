@@ -421,10 +421,10 @@ void SubgraphRewriter::rewriteMatch(
     if (dummy->users().empty()) {
       continue;
     }
+    replacedNodes_.insert(dummy->producer());
 
     for (auto& userNode : dummy->users()) {
       auto& userInputs = userNode->inputs();
-      replacedNodes_.insert(dummy->producer());
       for (auto it = userInputs.begin(); it != userInputs.end(); ++it) {
         if (it->value == dummy) {
           Attribute newAttr;
