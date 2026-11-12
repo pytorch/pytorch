@@ -2469,40 +2469,40 @@ test_cpp_extensions() {
 }
 
 test_vec256() {
-  # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
+  # Run the vec_test_all_types binary of each CPU capability that dispatch can
+  # pick on this CPU.
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing vec256 instructions"
-    TEST_REPORTS_DIR=$(pwd)/test/test-reports/vec256
-    mkdir -p "$TEST_REPORTS_DIR"
+    local reports_dir vec256_tests cpu_capability vec256_exec capability failed=""
+    local ran=0
+    reports_dir=$(pwd)/test/test-reports/vec256
+    mkdir -p "$reports_dir"
     pushd build/bin
     vec256_tests=$(find . -maxdepth 1 -executable -name 'vec_test_all_types_*')
-    cpu_capability=$(python -c "import torch; print(torch.backends.cpu.get_cpu_capability())")
-    ran=0
+    # The CPU's capability, not an ATEN_CPU_CAPABILITY override.
+    cpu_capability=$(env -u ATEN_CPU_CAPABILITY python -c "import torch; print(torch.backends.cpu.get_cpu_capability().replace(' ', ''))")
     for vec256_exec in $vec256_tests
     do
-      case "$vec256_exec" in
-        *AVX512*) flags="avx512f avx512bw avx512vl avx512dq" ;;
-        *AVX2*) flags="avx2 fma f16c" ;;
-        *) flags="" ;;
-      esac
-      skip=""
-      # SVE builds assume a vector length, so only run the one in use.
-      if [[ "$vec256_exec" == *SVE* && "$vec256_exec" != *"$cpu_capability" ]]; then
-        skip="PyTorch uses $cpu_capability"
-      fi
-      for flag in $flags; do
-        grep -qw "$flag" /proc/cpuinfo || skip="the CPU lacks $flag"
-      done
-      if [[ -n "$skip" ]]; then
-        echo "Skipping $vec256_exec: $skip"
+      capability=${vec256_exec#./vec_test_all_types_}
+      # SVE builds assume a vector length, so only the one in use runs.
+      if [[ "$capability" != DEFAULT && "$capability" != "$cpu_capability" &&
+            ! ( "$capability" == AVX2 && "$cpu_capability" == AVX512 ) ]]; then
+        echo "Skipping $vec256_exec: PyTorch uses $cpu_capability"
         continue
       fi
-      $vec256_exec --gtest_output=xml:"$TEST_REPORTS_DIR/${vec256_exec#./}.xml"
+      # Run every binary before failing, and stop hangs before the job timeout.
+      if ! timeout 20m "$vec256_exec" --gtest_output=xml:"$reports_dir/${vec256_exec#./}.xml"; then
+        failed="$failed ${vec256_exec#./}"
+      fi
       ran=$((ran + 1))
     done
     popd
     if [[ "$ran" == 0 ]]; then
       echo "No vec_test_all_types binary ran"
+      exit 1
+    fi
+    if [[ -n "$failed" ]]; then
+      echo "Failed vec_test_all_types binaries:$failed"
       exit 1
     fi
     assert_git_not_dirty
@@ -2912,9 +2912,10 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_lazy_tensor_meta_reference_disabled
   test_without_numpy
   install_torchvision
+  # Fast, and run first so that other failures don't hide its results.
+  test_vec256
   test_python_shard 1
   test_aten
-  test_vec256
   test_libtorch 1
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     test_xpu_bin
