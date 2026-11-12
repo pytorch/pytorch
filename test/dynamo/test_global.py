@@ -685,6 +685,57 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), x + 1)
             self.assertNotIn("create_delete_missing_value", mod.__dict__)
 
+    def test_delete_global_crossfile_pending_dict_write(self):
+        with crossfile_globals() as mod:
+
+            def fn(x):
+                mod.__dict__["delete_missing_value"] = 9
+                try:
+                    mod.delete_missing_value_fn()
+                except NameError:
+                    return x + 2
+                return x + 1
+
+            x = torch.ones(2, 2)
+            self.assertEqual(fn(x), x + 1)
+            self.assertNotIn("delete_missing_value", mod.__dict__)
+            mod.__dict__.pop("delete_missing_value", None)
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(
+                Unsupported, "DELETE_GLOBAL with a pending module-object write"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertNotIn("delete_missing_value", mod.__dict__)
+
+    def test_delete_global_crossfile_pending_getattr(self):
+        with crossfile_globals(delete_value=1) as mod:
+
+            def fn(x):
+                mod.__getattr__ = lambda name: 42
+                mod.delete_value_fn()
+                try:
+                    return x + mod.delete_value
+                except AttributeError:
+                    return x - 1
+
+            x = torch.ones(2, 2)
+            self.assertEqual(fn(x), x + 42)
+            self.assertNotIn("delete_value", mod.__dict__)
+            mod.__dict__.pop("__getattr__", None)
+            mod.__dict__["delete_value"] = 1
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(
+                Unsupported, "DELETE_GLOBAL in module with __getattr__"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+            self.assertEqual(opt_fn(x), x + 42)
+            self.assertNotIn("delete_value", mod.__dict__)
+
     # policy=error flags the zero-net store+delete as an unreplayed side
     # effect; the shape itself matches eager.
     @unittest.expectedFailure
@@ -841,6 +892,105 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
             self.assertEqual(opt_fn(x), x + 1)
             self.assertNotIn("_dg_a", globals())
+
+    def test_delete_global_pending_dict_write(self):
+        me = sys.modules[__name__]
+        with mock.patch.dict(globals()):
+
+            def fn(x):
+                global _dg_a
+                me.__dict__["_dg_a"] = 5
+                try:
+                    del _dg_a
+                except NameError:
+                    return x + 2
+                return x + 1
+
+            x = torch.ones(2, 2)
+            self.assertEqual(fn(x), x + 1)
+            self.assertNotIn("_dg_a", globals())
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(
+                Unsupported, "DELETE_GLOBAL with a pending module-object write"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertNotIn("_dg_a", globals())
+
+    def test_delete_global_stale_dict_replay(self):
+        me = sys.modules[__name__]
+        with mock.patch.dict(globals(), {"_dg_a": 1}):
+
+            def fn(x):
+                global _dg_a
+                me.__dict__["_dg_b"] = 2
+                del _dg_a
+                return x + 1
+
+            x = torch.ones(2, 2)
+            self.assertEqual(fn(x), x + 1)
+            self.assertNotIn("_dg_a", globals())
+            self.assertIn("_dg_b", globals())
+            globals().pop("_dg_b")
+            globals()["_dg_a"] = 1
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(
+                Unsupported, "DELETE_GLOBAL with a pending module-object write"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            torch._dynamo.reset()
+            globals().pop("_dg_b", None)
+            globals()["_dg_a"] = 1
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertNotIn("_dg_a", globals())
+            self.assertIn("_dg_b", globals())
+
+    def test_delete_global_created_then_store_read(self):
+        with mock.patch.dict(globals()):
+
+            def fn(x):
+                global _dg_a
+                _dg_a = 1
+                del _dg_a
+                _dg_a = 2
+                return x + _dg_a
+
+            x = torch.ones(2, 2)
+            self.assertEqual(fn(x), x + 2)
+            self.assertEqual(globals()["_dg_a"], 2)
+            globals().pop("_dg_a")
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), x + 2)
+            self.assertEqual(globals()["_dg_a"], 2)
+            torch._dynamo.reset()
+            globals().pop("_dg_a")
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+            self.assertEqual(opt_fn(x), x + 2)
+            self.assertEqual(globals()["_dg_a"], 2)
+
+    def test_delete_missing_global_read_after_caught_failed_del(self):
+        with mock.patch.dict(globals()):
+
+            def fn(x):
+                global _dg_a
+                try:
+                    del _dg_a
+                except NameError:
+                    pass
+                return x + _dg_a
+
+            x = torch.ones(2, 2)
+            with self.assertRaisesRegex(NameError, "name '_dg_a' is not defined"):
+                fn(x)
+            with self.assertRaisesRegex(Unsupported, "name '_dg_a' is not defined"):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(NameError, "name '_dg_a' is not defined"):
+                torch.compile(fn, backend="eager", fullgraph=False)(x)
 
     def test_delete_global_in_unregistered_importlib_module(self):
         module_name = "test_dynamo_unregistered_delete_global_181243"

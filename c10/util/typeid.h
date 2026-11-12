@@ -375,7 +375,7 @@ class C10_API TypeMeta final {
    * Returns the size of the item.
    */
   inline size_t itemsize() const noexcept {
-    if (C10_LIKELY(isScalarType())) {
+    if (isScalarType()) [[likely]] {
       return scalarTypeItemSizes[index_];
     }
     return data().itemsize_;
@@ -477,7 +477,7 @@ class C10_API TypeMeta final {
    * convert TypeMeta handles to ScalarType enum values
    */
   inline ScalarType toScalarType() const {
-    if (C10_LIKELY(isScalarType())) {
+    if (isScalarType()) [[likely]] {
       return static_cast<ScalarType>(index_);
     }
     error_unsupported_typemeta(*this);

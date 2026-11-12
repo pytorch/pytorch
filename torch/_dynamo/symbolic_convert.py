@@ -2559,11 +2559,17 @@ class InstructionTranslatorBase(
                     raise AssertionError("expected name in self.f_builtins to be true")
                 self.exec_recorder.builtins[name] = self.f_builtins[name]
 
-        if name not in self.f_globals:
+        if name not in self.f_globals and name not in self.symbolic_globals:
             return self.load_builtin(inst)
 
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
+            if not self.output.side_effects.has_pending_mutation_of_attr(
+                variable, name
+            ):
+                # A delete of an absent name raised without storing; eager
+                # raises on the read too.
+                return self.load_builtin(inst)
             if self._global_deleted_in_trace(variable, name):
                 return self.load_builtin(inst)
             self.push(self.output.side_effects.load_global(variable, name))
@@ -2626,8 +2632,10 @@ class InstructionTranslatorBase(
                 functools.partial(guard_builder, key=name)
             )
         )
-        # A pending write to the same dict through the module VT races the
-        # replayed delete; eager resume orders it instead.
+        # A pending write to the same dict through the module VT, or any
+        # mutation of the globals-dict VT (module __dict__ writes), races the
+        # replayed delete: the dict replay rebuilds from a snapshot after it,
+        # so eager resume has to order both instead.
         registered_module = _registered_module_for_globals(
             self.f_globals.get("__name__"), self.f_globals
         )
@@ -2641,13 +2649,17 @@ class InstructionTranslatorBase(
                         side_effects[module_value], name
                     )
                 )
+            ) or (
+                self.f_globals in side_effects
+                and side_effects.is_modified(side_effects[self.f_globals])
             ):
                 unimplemented(
                     gb_type="DELETE_GLOBAL with a pending module-object write",
                     context=name,
                     explanation=(
                         "Dynamo cannot order a global delete against a pending "
-                        "write to the same dict through the module object."
+                        "write to the module globals, whether through the "
+                        "module object or its __dict__."
                     ),
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
@@ -6585,14 +6597,17 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 ),
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        if (
-            getattr(getattr(fglobals_vt, "value", None), "__getattr__", None)
-            is not None
+        if getattr(
+            getattr(fglobals_vt, "value", None), "__getattr__", None
+        ) is not None or self.output.side_effects.has_pending_mutation_of_attr(
+            fglobals_vt, "__getattr__"
         ):
             # The replay of this delete is gated on hasattr(module, name), and
             # a module with __getattr__ answers it for names the module does
             # not hold, so the emitted DELETE_ATTR may fail where eager does
-            # not.
+            # not. The same gap opens when __getattr__ is stored in the
+            # trace: the later read consults the real module and misses the
+            # hook.
             unimplemented(
                 gb_type="DELETE_GLOBAL in module with __getattr__",
                 context=name,
