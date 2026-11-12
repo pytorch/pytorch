@@ -6362,6 +6362,36 @@ class TestSDPAAccelerator(NNTestCase):
                 _check_equal(golden, lp_ref, out, 4.0, f"out[{name}]")
 
     @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support Efficient Attention",
+    )
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CK_SDPA,
+        "Regression is specific to the ROCm CK SDPA backend",
+    )
+    @setSdpaBackendsToDefaultFinally
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_mem_eff_attention_ck_dropout_fwd_bwd_same_mask(self, device, dtype: torch.dtype):
+        # The backward must replay the dropout mask of the forward, using the
+        # seed/offset the forward returns. With seq_len == head_dim, v = I gives
+        # out = dropout(P) and grad_out = I gives grad_v = dropout(P)^T, so the
+        # zeros of both are the elements each pass dropped.
+        torch.backends.cuda.preferred_rocm_fa_library("ck")
+        if torch.backends.cuda.preferred_rocm_fa_library() != torch._C._ROCmFABackend.Ck:
+            self.skipTest("CK SDPA backend not available")
+        batch, heads, n = 2, 4, 64
+        q = torch.randn(batch, heads, n, n, device=device, dtype=dtype)
+        k = torch.randn(batch, heads, n, n, device=device, dtype=dtype)
+        eye = torch.eye(n, device=device, dtype=dtype).expand(batch, heads, n, n)
+        v = eye.clone().requires_grad_()
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            out = F.scaled_dot_product_attention(q, k, v, dropout_p=0.5)
+        (grad_v,) = torch.autograd.grad(out, v, eye)
+        kept = out != 0
+        self.assertTrue(0.4 < kept.float().mean().item() < 0.6)
+        self.assertEqual(kept, grad_v.transpose(-2, -1) != 0)
+
+    @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Does not support SDPA or pre-SM80 hardware",
     )
