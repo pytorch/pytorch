@@ -615,23 +615,25 @@ print(torch.xpu.is_initialized())
 
     def test_stream_priority(self):
         low, high = torch.xpu.Stream.priority_range()
-        s0 = torch.xpu.Stream(device=0, priority=low)
+        for priority in range(high, low + 1):
+            s = torch.xpu.Stream(device=0, priority=priority)
+            self.assertEqual(priority, s.priority)
+            self.assertEqual(torch.device("xpu:0"), s.device)
 
-        self.assertEqual(low, s0.priority)
-        self.assertEqual(torch.device("xpu:0"), s0.device)
+            e = torch.xpu.Event()
+            e.record()
+            s.wait_event(e)
+            s.synchronize()
+            self.assertTrue(s.query())
 
-        s1 = torch.xpu.Stream(device=0, priority=high)
-
-        self.assertEqual(high, s1.priority)
-        self.assertEqual(torch.device("xpu:0"), s1.device)
-
-        # Streams of every priority must be usable, including the lowest one.
-        event = torch.xpu.Event()
-        for stream in (s0, s1):
-            event.record()
-            stream.wait_event(event)
-            stream.synchronize()
-            self.assertTrue(stream.query())
+            x = torch.randn(2, 3, 8, 8)
+            w = torch.randn(4, 3, 3, 3)
+            expected = torch.nn.functional.conv2d(x, w)
+            with s:
+                # Run a oneDNN op on a stream of each priority.
+                out = torch.nn.functional.conv2d(x.to("xpu"), w.to("xpu"))
+            s.synchronize()
+            self.assertEqual(out.cpu(), expected)
 
     def test_event_repr(self):
         e = torch.xpu.Event()
