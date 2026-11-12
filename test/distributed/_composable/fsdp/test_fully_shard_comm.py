@@ -19,6 +19,9 @@ import torch.nn.functional as F
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
 from torch.distributed._composable import checkpoint, replicate
+from torch.distributed._composable.replicate_with_fsdp import (
+    replicate as replicate_with_fsdp,
+)
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
 )
@@ -36,6 +39,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
     DefaultAllGather,
+    DefaultAllReduce,
     DefaultReduceScatter,
     foreach_all_gather,
     foreach_all_gather_copy_out,
@@ -86,6 +90,8 @@ from torch.testing._internal.common_fsdp import (
     patch_unshard,
 )
 from torch.testing._internal.common_utils import (
+    device_sleep,
+    get_cycles_per_ms,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda_p2p_access,
@@ -166,6 +172,155 @@ class TestFSDPCommContext(TestCase):
         comm_ctx.all_gather_copy_in_stream.wait_event.assert_not_called()
         comm_ctx.all_gather_stream.wait_event.assert_not_called()
         self.assertIsNone(comm_ctx.all_gather_state)
+
+
+class TestFullyShardCustomAllReduceErrors(TestCase):
+    def test_invalid_parameter_groups(self):
+        cases = [
+            ([], None),
+            ([MagicMock(), MagicMock()], "multiple param groups"),
+            ([MagicMock(mesh_info=MagicMock(spec=FSDPMeshInfo))], "replication mesh"),
+        ]
+        for groups, message in cases:
+            with self.subTest(message=message):
+                model = MagicMock(spec=FSDPModule)
+                model._get_fsdp_state.return_value._fsdp_param_groups = groups
+                if message:
+                    with self.assertRaisesRegex(ValueError, message):
+                        FSDPModule.set_custom_all_reduce(model, DefaultAllReduce())
+                else:
+                    FSDPModule.set_custom_all_reduce(model, DefaultAllReduce())
+
+    def test_default_all_reduce(self):
+        tensor, group, work = MagicMock(), MagicMock(), MagicMock()
+        for async_op in (False, True):
+            with self.subTest(async_op=async_op):
+                with patch.object(dist, "all_reduce", return_value=work) as all_reduce:
+                    result = DefaultAllReduce()(
+                        tensor, group, dist.ReduceOp.SUM, async_op=async_op
+                    )
+                self.assertIs(result, work)
+                all_reduce.assert_called_once_with(
+                    tensor, group=group, op=dist.ReduceOp.SUM, async_op=async_op
+                )
+
+
+class TestFullyShardCustomAllReduce(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    def test_custom_all_reduce(self):
+        self.run_subtests(
+            {
+                "use_custom_all_reduce": [False, True],
+                "config": [
+                    (torch.float32, False, None),
+                    (torch.float32, True, None),
+                    (torch.float16, False, None),
+                    (torch.float32, True, 8.0),
+                ],
+            },
+            self._test_custom_all_reduce,
+        )
+
+    def test_custom_all_reduce_replicate(self):
+        self.run_subtests(
+            {
+                "use_custom_all_reduce": [False, True],
+                "config": [
+                    (torch.float32, False, None),
+                    (torch.float16, False, None),
+                ],
+                "use_replicate": [True],
+            },
+            self._test_custom_all_reduce,
+        )
+
+    def _test_custom_all_reduce(
+        self, use_custom_all_reduce: bool, config: tuple, use_replicate: bool = False
+    ):
+        reduce_dtype, force_sum_reduction, divide_factor = config
+        mesh = init_device_mesh(
+            "cpu",
+            (4,) if use_replicate else (2, 2),
+            mesh_dim_names=("replicate",) if use_replicate else ("replicate", "shard"),
+        )
+        model = nn.Linear(4, 4, bias=False, device="cpu")
+        parallelize = replicate_with_fsdp if use_replicate else fully_shard
+        parallelize(
+            model, mesh=mesh, mp_policy=MixedPrecisionPolicy(reduce_dtype=reduce_dtype)
+        )
+        model.set_force_sum_reduction_for_comms(force_sum_reduction)
+        if divide_factor is not None:
+            model.set_gradient_divide_factor(divide_factor)
+        custom_all_reduce = MagicMock(wraps=DefaultAllReduce())
+        if use_custom_all_reduce:
+            model.set_custom_all_reduce(custom_all_reduce)
+
+        def hook(_tensor):
+            self.assertEqual(custom_all_reduce.call_count, int(use_custom_all_reduce))
+
+        all_reduce_hook = MagicMock(side_effect=hook)
+        model.set_all_reduce_hook(all_reduce_hook)
+        inp = torch.full((2, 4), float(self.rank + 1), device="cpu")
+        model(inp).sum().backward()
+
+        all_reduce_hook.assert_called_once()
+        if use_custom_all_reduce:
+            custom_all_reduce.assert_called_once()
+            kwargs = custom_all_reduce.call_args.kwargs
+            tensor, group, op = kwargs["tensor"], kwargs["group"], kwargs["op"]
+            self.assertIs(group, mesh.get_group("replicate"))
+            self.assertEqual(tensor.dtype, reduce_dtype)
+            self.assertEqual(
+                op,
+                dist.ReduceOp.SUM
+                if force_sum_reduction or reduce_dtype == torch.float16
+                else dist.ReduceOp.AVG,
+            )
+            self.assertIs(all_reduce_hook.call_args.args[0], tensor)
+        else:
+            custom_all_reduce.assert_not_called()
+        self.assertEqual(
+            model.weight.grad.full_tensor(),
+            torch.full((4, 4), 20.0 / (divide_factor or self.world_size), device="cpu"),
+        )
+
+    def test_custom_all_reduce_accumulation(self):
+        mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("replicate", "shard"))
+        model = nn.Linear(4, 4, bias=False, device="cpu")
+        fully_shard(model, mesh=mesh)
+        custom_all_reduce = MagicMock(wraps=DefaultAllReduce())
+        model.set_custom_all_reduce(custom_all_reduce)
+        hook = MagicMock()
+        model.set_all_reduce_hook(hook)
+        inp = torch.full((2, 4), float(self.rank + 1), device="cpu")
+
+        model.set_requires_all_reduce(False)
+        model(inp).sum().backward()
+        custom_all_reduce.assert_not_called()
+        hook.assert_not_called()
+        model.set_requires_all_reduce(True)
+        model(inp).sum().backward()
+        custom_all_reduce.assert_called_once()
+        hook.assert_called_once()
+        self.assertEqual(model.weight.grad.full_tensor(), torch.full((4, 4), 10.0))
+
+    def test_restore_default_all_reduce(self):
+        mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("replicate", "shard"))
+        model = nn.Linear(4, 4, bias=False, device="cpu")
+        fully_shard(model, mesh=mesh)
+        custom_all_reduce = MagicMock(wraps=DefaultAllReduce())
+        model.set_custom_all_reduce(custom_all_reduce)
+        model.set_custom_all_reduce(None)
+        self.assertIsInstance(
+            model._get_fsdp_state()._fsdp_param_groups[0]._all_reduce_comm,
+            DefaultAllReduce,
+        )
+        model(torch.full((2, 4), float(self.rank + 1), device="cpu")).sum().backward()
+        custom_all_reduce.assert_not_called()
+        self.assertEqual(model.weight.grad.full_tensor(), torch.full((4, 4), 5.0))
 
 
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
@@ -2825,13 +2980,12 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
         return 1
 
     @parametrize("divide_factor", [None, 1.0, 2.0])
-    def test_singleton_copy_division(self, divide_factor):
-        divisions = []
+    def test_singleton_reduce_reuses_input(self, divide_factor):
+        ops = []
 
-        class RecordDivisions(TorchDispatchMode):
+        class RecordOps(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                if func == torch.ops.aten.div.Tensor:
-                    divisions.append(func)
+                ops.append(func)
                 return func(*args, **(kwargs or {}))
 
         model = nn.Linear(8, 4, bias=False, device=device)
@@ -2840,11 +2994,95 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
             model.set_gradient_divide_factor(divide_factor)
         inp = torch.ones(3, 8, device=device)
         loss = model(inp).sum()
-        with RecordDivisions():
+        allocate = DefaultReduceScatter.allocate
+        with (
+            patch.object(
+                DefaultReduceScatter, "allocate", autospec=True, side_effect=allocate
+            ) as mock_allocate,
+            RecordOps(),
+        ):
             loss.backward()
+        # The comm allocates nothing and the packed input is not copied to an output
+        self.assertEqual(mock_allocate.call_count, 0)
+        self.assertNotIn(torch.ops.aten.copy_.default, ops)
+        div_ops = (torch.ops.aten.div.Tensor, torch.ops.aten.div_.Tensor)
+        divisions = [op for op in ops if op in div_ops]
         self.assertEqual(len(divisions), int(divide_factor not in (None, 1)))
         expected = torch.full_like(inp[:1].expand(4, -1), 3 / (divide_factor or 1))
         self.assertEqual(model.weight.grad.to_local(), expected)
+
+    @unittest.skipIf(not hasattr(device_module, "_sleep"), "requires device sleep")
+    @parametrize("hsdp", [False, True])
+    def test_singleton_reduce_accumulation_with_delayed_post_reduce(self, hsdp):
+        # Delay reduce-scatter stream work so that reading a buffer released
+        # too early would race with the next module's backward reusing it. The
+        # sleep only widens that window; nothing relies on it for ordering.
+        # hsdp=True checks that partial accumulation keeps a separate output.
+        sleep_cycles = int(50 * get_cycles_per_ms(device.type))
+
+        def delayed_div_if_needed(tensor, div_factor):
+            device_sleep(device.type, sleep_cycles)
+            _div_if_needed(tensor, div_factor)
+
+        torch.manual_seed(42)
+        dim, num_layers, num_microbatches = 2048, 8, 3
+        layers = [nn.Linear(dim, dim, bias=False) for _ in range(num_layers)]
+        ref_model = nn.Sequential(*layers).to(device)
+        model = copy.deepcopy(ref_model)
+        shape = (1, 1) if hsdp else (1,)
+        names = ("replicate", "shard") if hsdp else None
+        mesh = init_device_mesh(device.type, shape, mesh_dim_names=names)
+        for layer in model:
+            fully_shard(layer, mesh=mesh)
+        fully_shard(model, mesh=mesh)
+        target = "torch.distributed.fsdp._fully_shard._fsdp_collectives._div_if_needed"
+        with patch(target, delayed_div_if_needed):
+            for microbatch_idx in range(num_microbatches):
+                is_last_microbatch = microbatch_idx == num_microbatches - 1
+                if hsdp:
+                    model.set_requires_all_reduce(is_last_microbatch)
+                inp = torch.randn(512, dim, device=device)
+                ref_model(inp).square().mean().backward()
+                model(inp).square().mean().backward()
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            self.assertEqual(param.grad.to_local(), ref_param.grad)
+
+    @parametrize("hsdp", [False, True])
+    def test_singleton_reduce_custom_comm_persistent_input(self, hsdp):
+        class PersistentInputReduceScatter(DefaultReduceScatter):
+            # Comm allows reusing a persistent buffer for the input
+            def __init__(self):
+                self.buffer = None
+                self.next_allocation_is_input = True
+
+            def allocate(self, size, *, dtype, device):
+                is_input = self.next_allocation_is_input
+                self.next_allocation_is_input = not is_input
+                if not is_input:
+                    return super().allocate(size, dtype=dtype, device=device)
+                if self.buffer is None:
+                    self.buffer = super().allocate(size, dtype=dtype, device=device)
+                return self.buffer
+
+        torch.manual_seed(42)
+        layers = [nn.Linear(16, 16, bias=False) for _ in range(4)]
+        ref_model = nn.Sequential(*layers).to(device)
+        model = copy.deepcopy(ref_model)
+        shape = (1, 1) if hsdp else (1,)
+        names = ("replicate", "shard") if hsdp else None
+        mesh = init_device_mesh(device.type, shape, mesh_dim_names=names)
+        comm = PersistentInputReduceScatter()
+        for layer in model:
+            fully_shard(layer, mesh=mesh)
+            layer.set_custom_reduce_scatter(comm)
+        fully_shard(model, mesh=mesh)
+        inp = torch.randn(8, 16, device=device)
+        ref_model(inp).square().mean().backward()
+        model(inp).square().mean().backward()
+        # No reduce-scatter runs, so the comm is never asked for a buffer
+        self.assertIsNone(comm.buffer)
+        for ref_param, param in zip(ref_model.parameters(), model.parameters()):
+            self.assertEqual(param.grad.to_local(), ref_param.grad)
 
     def test_size1_reduceop(self):
         from torch.distributed.distributed_c10d import ReduceOp

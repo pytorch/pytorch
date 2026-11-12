@@ -301,7 +301,7 @@ class Transport(ABC):
 
         # compare_set decides whether our bytes or the b"\x00" of a peer that
         # stopped waiting land; the prefix keeps them distinct. Waiters wait on
-        # a separate flag: legacy TCPStore's compare_set does not wake them.
+        # a separate flag: not every Store's compare_set wakes them.
         # pyrefly: ignore [bad-argument-type]
         if store.compare_set(str(rank), b"", url) != url:
             discard(rank)
