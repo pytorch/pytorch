@@ -60,7 +60,7 @@ from torch.testing._internal.common_device_type import (
     preserves_device_selection,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
-    get_all_device_types, skipXLA, onlyAccelerator, skipCUDAIf)
+    get_all_device_types, skipXLA, onlyAccelerator, skipCUDAIf, skipXPUIf)
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
@@ -353,7 +353,8 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(raises_on_data_ptr(s2))
 
     @onlyNativeDeviceTypes
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5377
+    @skipXPUIf(True, "TypedStorage is deprecated; XPU has no legacy typed storage classes. "
+                     "https://github.com/intel/torch-xpu-ops/issues/2508")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @slowTestIf(IS_WINDOWS)
     def test_tensor_storage_type(self, device, dtype):
