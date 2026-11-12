@@ -147,6 +147,76 @@ class TestOperatorReorderForPeakMemory(TestCase):
             self.assertTrue(same(outp, outp_corr))
 
     @mock.patch.object(config, "reorder_for_peak_memory", True)
+    def test_sink_nodes_that_free_nothing(self):
+        # lpmf schedules the calls of cos_sin first: they read only graph inputs
+        # and allocate less than the chain's (wider) matmuls, so the outputs of
+        # the second, read only at the end, then stay alive across the chain.
+        # Sinking moves each call to just before its first reader, keeps the
+        # MultiOutputs that unpack its tuple right after it (the first call's
+        # second output is read only at the end too), and keeps the order
+        # topological.
+        @torch.compiler.nested_compile_region
+        def cos_sin(y):
+            return y.cos(), y.sin()
+
+        def f(x, w, y1, y2):
+            a1, b1 = cos_sin(y1)
+            a2, b2 = cos_sin(y2)
+            h = (x @ w).relu() + a1.repeat(1, 4)
+            for _ in range(2):
+                h = (h @ w).relu()
+            return h[:, :256] + b1 * a2 * b2
+
+        orders = []
+
+        def reorder(
+            nodes,
+            name_to_buf,
+            name_to_fused_node,
+            graph_inputs,
+            graph_outputs,
+            methods=None,
+        ):
+            order = self.orig_reorder_method(
+                nodes, name_to_buf, name_to_fused_node, graph_inputs, graph_outputs
+            )
+            _, freeable = memory.prepare_planning_info(
+                nodes, name_to_buf, name_to_fused_node, graph_inputs, graph_outputs
+            )
+            lpmf = memory.topological_sort_lpmf(
+                nodes, freeable, name_to_buf, graph_outputs
+            )
+            orders.append(
+                (lpmf, memory.sink_nodes_that_free_nothing(lpmf, graph_outputs))
+            )
+            return order
+
+        shapes = [(256, 1024), (1024, 1024), (256, 256), (256, 256)]
+        args = [torch.randn(shape, device=GPU_TYPE) for shape in shapes]
+        with mock.patch.object(memory, "reorder_for_peak_memory", reorder):
+            torch.compile(f, fullgraph=True)(*args)
+        lpmf, sunk = next((a, b) for a, b in orders if len(a) > 1)
+
+        def kind(n):
+            return type(getattr(n, "node", None)).__name__
+
+        def calls_after_mms(order):
+            mms = [i for i, n in enumerate(order) if kind(n) == "ExternKernelOut"]
+            calls = [i for i, n in enumerate(order) if kind(n) == "InvokeSubgraph"]
+            return sum(i > max(mms) for i in calls)
+
+        self.assertEqual(calls_after_mms(lpmf), 0)
+        self.assertEqual(calls_after_mms(sunk), 1)
+        pos = {n: i for i, n in enumerate(sunk)}
+        for n in sunk:
+            self.assertTrue(all(pos[p] < pos[n] for p in n.mpi_node.pred_nodes))
+            if kind(n) == "MultiOutput":
+                # Right after its own call, or another output of it.
+                (call,) = n.mpi_node.pred_nodes
+                prev = sunk[pos[n] - 1]
+                self.assertTrue(prev is call or call in prev.mpi_node.pred_nodes)
+
+    @mock.patch.object(config, "reorder_for_peak_memory", True)
     def test_reorder_peak_memory_bfs(self):
         outp_corr = self.model(self.inputs)
 
