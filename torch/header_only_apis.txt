@@ -36,6 +36,9 @@ Float8_e5m2
 # torch/headeronly/util/Float8_e5m2fnuz.h
 Float8_e5m2fnuz
 
+# torch/headeronly/util/Float8_e5m3fnu.h
+Float8_e5m3fnu
+
 # torch/headeronly/util/Float8_e8m0fnu.h
 Float8_e8m0fnu
 
@@ -57,6 +60,28 @@ complex
 # torch/headeronly/util/complex_utils.h
 is_complex
 scalar_value_type
+
+# torch/headeronly/util/complex_math.h
+acos
+acosh
+asin
+asinh
+atan
+atanh
+cos
+cosh
+exp
+expm1
+log
+log10
+log1p
+log2
+pow
+sin
+sinh
+sqrt
+tan
+tanh
 
 # c10/util/generic_math.h
 div_floor_floating
@@ -204,6 +229,9 @@ kJagged
 # torch/headeronly/core/MemoryFormat.h
 MemoryFormat
 get_contiguous_memory_format
+
+# torch/headeronly/core/TransposeType.h
+TransposeType
 
 # torch/headeronly/core/Dispatch_v2.h
 THO_DISPATCH_V2_TMPL

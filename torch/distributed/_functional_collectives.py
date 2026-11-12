@@ -167,6 +167,70 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
     return _maybe_wrap_tensor(tensor)
 
 
+def reduce(
+    self: torch.Tensor,
+    dst: int,
+    reduceOp: str | dist.ReduceOp,
+    group: RANK_TYPES,
+    tag: str = "",
+):
+    """
+    Reduces the tensor data across all processes onto ``dst``.
+
+    Returns zeros on ranks other than ``dst``.
+
+    Backward is a collective: every rank must run backward through the output.
+
+    Args:
+        dst (int): Destination rank within the group
+        reduceOp (str or ReduceOp): The reduction operation
+        group (ProcessGroup or List[int]): The process group to work on.
+        tag (str, optional): A unique identifier for the collective. Default: empty string
+    """
+    group = _resolve_group(group, tag)
+    reduce_op = reduceOp.lower() if isinstance(reduceOp, str) else reduceOp
+    tensor = torch.ops._c10d_functional.reduce(
+        self, dst, reduce_op, _group_or_group_name(group)
+    )
+    return _maybe_wrap_tensor(tensor)
+
+
+def gather(self: torch.Tensor, dst: int, group: RANK_TYPES, tag: str = ""):
+    """
+    Gathers tensors from all processes onto ``dst``, concatenated along dim 0.
+
+    Every rank returns a tensor of the gathered shape; it is zeros on ranks other than ``dst``.
+
+    Backward is a collective: every rank must run backward through the output.
+
+    Args:
+        dst (int): Destination rank within the group
+        group (ProcessGroup or List[int]): The process group to work on.
+        tag (str, optional): A unique identifier for the collective. Default: empty string
+    """
+    group = _resolve_group(group, tag)
+    tensor = torch.ops._c10d_functional.gather(self, dst, _group_or_group_name(group))
+    return _maybe_wrap_tensor(tensor)
+
+
+def scatter(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
+    """
+    Splits the tensor on ``src`` along dim 0 and sends one chunk to each process.
+
+    Every rank must pass a tensor of the same shape; its data is ignored on ranks other than ``src``.
+
+    Backward is a collective: every rank must run backward through the output.
+
+    Args:
+        src (int): Source rank within the group
+        group (ProcessGroup or List[int]): The process group to work on.
+        tag (str, optional): A unique identifier for the collective. Default: empty string
+    """
+    group = _resolve_group(group, tag)
+    tensor = torch.ops._c10d_functional.scatter(self, src, _group_or_group_name(group))
+    return _maybe_wrap_tensor(tensor)
+
+
 def all_reduce(
     self: torch.Tensor,
     reduceOp: str | dist.ReduceOp,
@@ -731,17 +795,49 @@ def _is_min_max(op: str | ReduceOp):
     return op in (ReduceOp.MIN, ReduceOp.MAX)
 
 
+def _is_product(op: str | ReduceOp):
+    op = _reduce_op_type(op)
+    if isinstance(op, str):
+        return op == "product"
+    return op == ReduceOp.PRODUCT
+
+
 def _is_reduceop_supported(op: str | ReduceOp):
     op = _reduce_op_type(op)
     if isinstance(op, str):
-        return op in ("sum", "avg", "premul_sum", "max", "min")
+        return op in ("sum", "avg", "premul_sum", "max", "min", "product")
     return op in (
         ReduceOp.SUM,
         ReduceOp.AVG,
         ReduceOp.PREMUL_SUM,
         ReduceOp.MIN,
         ReduceOp.MAX,
+        ReduceOp.PRODUCT,
     )
+
+
+def _product_backward(grads, fwd_inputs, group_name, config):
+    """Scale summed grads by the product of the other ranks' inputs.
+
+    One product all_reduce gives the product of the nonzero inputs and
+    2**zero_count. With no zeros the other ranks' product is that product /
+    input, which like torch.prod backward can overflow or underflow. With a
+    zero it is the nonzero product on the only zero's rank, else 0.
+    """
+    is_zero = [fwd_input == 0 for fwd_input in fwd_inputs]
+    nonzero = [torch.where(z, 1, x) for z, x in zip(is_zero, fwd_inputs)]
+    zero_pow = [torch.where(z, 2, 1).to(x.dtype) for z, x in zip(is_zero, fwd_inputs)]
+    reduced = wait_tensors(
+        torch.ops._c10d_functional.all_reduce_coalesced(
+            nonzero + zero_pow, "product", group_name, config=config
+        )
+    )
+    n = len(fwd_inputs)
+    others = [
+        torch.where(z, torch.where(p == 2, prod, 0), torch.where(p == 1, prod / x, 0))
+        for z, prod, p, x in zip(is_zero, reduced[:n], reduced[n:], fwd_inputs)
+    ]
+    return [g * other for g, other in zip(grads, others)]
 
 
 def _min_max_extremum_mask(fwd_input: torch.Tensor, fwd_output: torch.Tensor):
@@ -768,9 +864,11 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
     reduce_op = ctx.reduce_op
     if not _is_reduceop_supported(reduce_op):
         raise RuntimeError(
-            f"all_reduce backward only supports `sum`, `premul_sum`, `avg`, `max`, `min` reductions, got '{reduce_op}'"
+            f"all_reduce backward only supports `sum`, `premul_sum`, `avg`, `max`, `min`, `product` reductions, got '{reduce_op}'"
         )
-    grad_reduce_op = "sum" if _is_min_max(reduce_op) else reduce_op
+    grad_reduce_op = (
+        "sum" if _is_min_max(reduce_op) or _is_product(reduce_op) else reduce_op
+    )
     output = torch.ops._c10d_functional.all_reduce(
         grad_output.contiguous(),
         grad_reduce_op,
@@ -799,6 +897,10 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
         )
         scaled = (output / tie_count).to(output.dtype)
         output = torch.ops.aten.where.ScalarOther(mask, scaled, 0)
+    if _is_product(reduce_op):
+        (output,) = _product_backward(
+            [output], [ctx.saved_tensors[0]], group_name, ctx.config
+        )
     return (output,) + (None,) * (ctx.num_inputs - 1)
 
 
@@ -817,6 +919,8 @@ def all_reduce_setup_context(ctx, inputs, output):
     ctx.reduce_op = reduce_op.lower() if isinstance(reduce_op, str) else reduce_op
     if _is_min_max(ctx.reduce_op):
         ctx.save_for_backward(input, output)
+    elif _is_product(ctx.reduce_op):
+        ctx.save_for_backward(input)
 
 
 torch.library.register_autograd(
@@ -898,19 +1002,23 @@ def reduce_scatter_tensor_backward(ctx, grad_output: torch.Tensor):
     reduce_op = ctx.reduce_op
 
     # Lazy validation: check reduce_op only when backward is called
-    if reduce_op != "sum":
+    if reduce_op not in ("sum", "avg"):
         raise RuntimeError(
-            f"reduce_scatter_tensor backward only supports 'sum' reduction, got '{reduce_op}'"
+            f"reduce_scatter_tensor backward only supports 'sum' and 'avg' reductions, got '{reduce_op}'"
         )
 
     # Backward is all_gather
-    output = torch.ops._c10d_functional.all_gather_into_tensor(
-        grad_output.contiguous(),
-        group_size,
-        group_name,
-        config=ctx.config,
+    output = wait_tensor(
+        torch.ops._c10d_functional.all_gather_into_tensor(
+            grad_output.contiguous(),
+            group_size,
+            group_name,
+            config=ctx.config,
+        )
     )
-    return (wait_tensor(output),) + (None,) * (ctx.num_inputs - 1)
+    if reduce_op == "avg":
+        output = output / group_size
+    return (output,) + (None,) * (ctx.num_inputs - 1)
 
 
 def reduce_scatter_tensor_setup_context(ctx, inputs, output):
@@ -989,6 +1097,87 @@ torch.library.register_autograd(
     setup_context=all_to_all_single_setup_context,
 )
 
+
+def broadcast_backward(ctx, grad_output: torch.Tensor):
+    output = torch.ops._c10d_functional.reduce(
+        grad_output.contiguous(), ctx.src, "sum", ctx.group_name
+    )
+    return wait_tensor(output), None, None
+
+
+def broadcast_setup_context(ctx, inputs, output):
+    _, ctx.src, ctx.group_name = inputs
+
+
+torch.library.register_autograd(
+    "_c10d_functional::broadcast",
+    broadcast_backward,
+    setup_context=broadcast_setup_context,
+)
+
+
+def reduce_backward(ctx, grad_output: torch.Tensor):
+    reduce_op = _reduce_op_type(ctx.reduce_op)
+    if reduce_op not in ("sum", "avg", ReduceOp.SUM, ReduceOp.AVG):
+        raise RuntimeError(
+            f"reduce backward only supports 'sum' and 'avg' reductions, got '{reduce_op}'"
+        )
+    output = wait_tensor(
+        torch.ops._c10d_functional.broadcast(
+            grad_output.contiguous(), ctx.dst, ctx.group_name
+        )
+    )
+    if reduce_op in ("avg", ReduceOp.AVG):
+        output = output / c10d._get_group_size_by_name(ctx.group_name)
+    return output, None, None, None
+
+
+def reduce_setup_context(ctx, inputs, output):
+    _, ctx.dst, ctx.reduce_op, ctx.group_name = inputs
+
+
+torch.library.register_autograd(
+    "_c10d_functional::reduce",
+    reduce_backward,
+    setup_context=reduce_setup_context,
+)
+
+
+def gather_backward(ctx, grad_output: torch.Tensor):
+    output = torch.ops._c10d_functional.scatter(
+        grad_output.contiguous(), ctx.dst, ctx.group_name
+    )
+    return wait_tensor(output), None, None
+
+
+def gather_setup_context(ctx, inputs, output):
+    _, ctx.dst, ctx.group_name = inputs
+
+
+torch.library.register_autograd(
+    "_c10d_functional::gather",
+    gather_backward,
+    setup_context=gather_setup_context,
+)
+
+
+def scatter_backward(ctx, grad_output: torch.Tensor):
+    output = torch.ops._c10d_functional.gather(
+        grad_output.contiguous(), ctx.src, ctx.group_name
+    )
+    return wait_tensor(output), None, None
+
+
+def scatter_setup_context(ctx, inputs, output):
+    _, ctx.src, ctx.group_name = inputs
+
+
+torch.library.register_autograd(
+    "_c10d_functional::scatter",
+    scatter_backward,
+    setup_context=scatter_setup_context,
+)
+
 # Backward compatibility: register autograd for _c10d_functional_autograd ops
 # These ops redirect to _c10d_functional but need their own autograd registration
 torch.library.register_autograd(
@@ -1028,9 +1217,11 @@ def all_reduce_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
     reduce_op = ctx.reduce_op
     if not _is_reduceop_supported(reduce_op):
         raise RuntimeError(
-            f"all_reduce_coalesced backward only supports `sum`, `premul_sum`, `avg`, `max`, `min` reductions, got '{reduce_op}'"
+            f"all_reduce_coalesced backward only supports `sum`, `premul_sum`, `avg`, `max`, `min`, `product` reductions, got '{reduce_op}'"
         )
-    grad_reduce_op = "sum" if _is_min_max(reduce_op) else reduce_op
+    grad_reduce_op = (
+        "sum" if _is_min_max(reduce_op) or _is_product(reduce_op) else reduce_op
+    )
     grad_inputs = torch.ops._c10d_functional.all_reduce_coalesced(
         [grad_output.contiguous() for grad_output in grad_outputs],
         grad_reduce_op,
@@ -1066,6 +1257,10 @@ def all_reduce_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
             torch.ops.aten.where.ScalarOther(mask, (g / count).to(g.dtype), 0)
             for g, mask, count in zip(grad_inputs, masks, tie_counts)
         ]
+    if _is_product(reduce_op):
+        grad_inputs = _product_backward(
+            grad_inputs, list(ctx.saved_tensors), group_name, ctx.config
+        )
     return (grad_inputs,) + (None,) * (ctx.num_inputs - 1)
 
 
@@ -1085,6 +1280,8 @@ def all_reduce_coalesced_setup_context(ctx, inputs, output):
     ctx.reduce_op = reduce_op.lower() if isinstance(reduce_op, str) else reduce_op
     if _is_min_max(ctx.reduce_op):
         ctx.save_for_backward(*tensor_list, *output)
+    elif _is_product(ctx.reduce_op):
+        ctx.save_for_backward(*tensor_list)
 
 
 torch.library.register_autograd(
@@ -1166,19 +1363,23 @@ def reduce_scatter_tensor_coalesced_backward(ctx, grad_outputs: list[torch.Tenso
     reduce_op = ctx.reduce_op
 
     # Lazy validation: check reduce_op only when backward is called
-    if reduce_op != "sum":
+    if reduce_op not in ("sum", "avg"):
         raise RuntimeError(
-            f"reduce_scatter_tensor_coalesced backward only supports 'sum' reduction, got '{reduce_op}'"
+            f"reduce_scatter_tensor_coalesced backward only supports 'sum' and 'avg' reductions, got '{reduce_op}'"
         )
 
     # Backward does all_gather on list of gradients
-    grad_inputs = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(
-        [grad_output.contiguous() for grad_output in grad_outputs],
-        group_size,
-        group_name,
-        config=ctx.config,
+    grad_inputs = wait_tensors(
+        torch.ops._c10d_functional.all_gather_into_tensor_coalesced(
+            [grad_output.contiguous() for grad_output in grad_outputs],
+            group_size,
+            group_name,
+            config=ctx.config,
+        )
     )
-    return (wait_tensors(grad_inputs),) + (None,) * (ctx.num_inputs - 1)
+    if reduce_op == "avg":
+        grad_inputs = [g / group_size for g in grad_inputs]
+    return (grad_inputs,) + (None,) * (ctx.num_inputs - 1)
 
 
 def reduce_scatter_tensor_coalesced_setup_context(ctx, inputs, output):
@@ -1658,6 +1859,21 @@ def _broadcast_meta(self, *args):
     return torch.empty_like(self)
 
 
+def _gather_meta(self, dst, group_name):
+    return _make_all_gather_out_tensor(self, c10d._get_group_size_by_name(group_name))
+
+
+def _scatter_meta(self, src, group_name):
+    group_size = c10d._get_group_size_by_name(group_name)
+    torch._check(
+        self.dim() > 0 and self.size(0) % group_size == 0,
+        lambda: "scatter: the first dimension of the input must be divisible by the group size",
+    )
+    out_size = list(self.size())
+    out_size[0] //= group_size
+    return self.new_empty(out_size)
+
+
 def _all_reduce_meta(self, *args):
     return torch.empty_like(self, memory_format=torch.contiguous_format)
 
@@ -1817,6 +2033,9 @@ lib_impl.impl(
 lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
 lib_impl.impl("broadcast", _broadcast_meta, "Meta")
 lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
+lib_impl.impl("reduce", _all_reduce_meta, "Meta")
+lib_impl.impl("gather", _gather_meta, "Meta")
+lib_impl.impl("scatter", _scatter_meta, "Meta")
 
 # Backward compatibility: register Meta impls for _c10d_functional_autograd ops
 # These ops redirect to _c10d_functional but need their own Meta registration so

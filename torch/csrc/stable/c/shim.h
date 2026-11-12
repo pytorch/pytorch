@@ -379,6 +379,28 @@ AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
 
+/**
+ * The beginning of all shims added in 2.16.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
+// Returns whether torch.set_warn_always(True) is in effect.
+AOTI_TORCH_EXPORT bool torch_is_warn_always_enabled();
+
+// Returns whether the tensor's conjugate bit is set.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_conj(AtenTensorHandle tensor, bool* ret_is_conj);
+
+// Returns whether the tensor's negative bit is set.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg);
+
+// Returns whether the tensor is an inference tensor.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

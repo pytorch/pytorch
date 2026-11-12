@@ -315,6 +315,17 @@ void pushPyOutToStack(
         stack, torch::jit::toIValue(out.ptr(), schema_returns[0].real_type()));
   } else {
     auto outs = py::cast<py::sequence>(out);
+    TORCH_CHECK(
+        outs.size() == num_returns,
+        "Expected ",
+        msg,
+        " for ",
+        op.operator_name(),
+        " to return ",
+        num_returns,
+        " values but it returned ",
+        outs.size(),
+        " instead.");
     for (const auto idx : c10::irange(outs.size())) {
       torch::jit::push(
           stack,
@@ -417,7 +428,7 @@ static PyObject* THPVariable_WrapWithType(
     PyTypeObject* type = reinterpret_cast<PyTypeObject*>(THPVariableClass);
     if (desired_type) {
       type = *desired_type;
-    } else if (C10_UNLIKELY(var.device().type() == c10::kXLA)) {
+    } else if (var.device().type() == c10::kXLA) [[unlikely]] {
       if (auto clazz = getPythonTensorClass(var.device())) {
         type = reinterpret_cast<PyTypeObject*>(clazz);
       }
@@ -2472,7 +2483,6 @@ create_native_op_schema(
       }
       default:
         TORCH_INTERNAL_ASSERT(false, "can't happen");
-        break;
     }
     idx++;
   }
@@ -2585,7 +2595,6 @@ create_native_op_schema(
         }
         default:
           TORCH_INTERNAL_ASSERT(false, "can't happen");
-          break;
       }
     }
   }
