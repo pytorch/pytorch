@@ -33,7 +33,7 @@ from torch import sub
 from torch._dynamo import decorators, trace_rules
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
-from torch._dynamo.source import SkipGuardSource
+from torch._dynamo.source import GetItemSource, SkipGuardSource, TypeMROSource
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
@@ -261,11 +261,21 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         explanation = torch._dynamo.explain(fn)(x, obj)
         self.assertEqual(explanation.graph_count, 1)
         guards = {
-            (guard.create_fn_name(), guard.name) for guard in explanation.out_guards
+            (guard.create_fn_name(), guard.originating_source)
+            for guard in explanation.out_guards
         }
-        self.assertIn(("SEQUENCE_LENGTH", "type(L['obj']).__mro__"), guards)
-        self.assertIn(("ID_MATCH", "type(L['obj']).__mro__[1]"), guards)
-        self.assertIn(("ID_MATCH", "type(L['obj']).__mro__[2]"), guards)
+        mro_sources = {
+            source
+            for kind, source in guards
+            if kind == "SEQUENCE_LENGTH" and isinstance(source, TypeMROSource)
+        }
+        self.assertEqual(len(mro_sources), 1)
+        for guard in explanation.out_guards:
+            if isinstance(guard.originating_source, TypeMROSource):
+                self.assertNotIn("TYPE_MATCH", guard.guard_types or ())
+        source = mro_sources.pop()
+        self.assertIn(("ID_MATCH", GetItemSource(source, 1)), guards)
+        self.assertIn(("ID_MATCH", GetItemSource(source, 2)), guards)
 
     @parametrize("initial_builtin", [False, True])
     def test_shared_mro_owner_non_object_tail(self, initial_builtin):
@@ -292,10 +302,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         class RightBase(metaclass=Meta):
             pass
 
-        class Left:
+        class InitialBase:
             pass
 
-        class Right:
+        class Left(InitialBase):
+            pass
+
+        class Right(InitialBase):
             pass
 
         left, right = (Left, Right) if initial_builtin else (Left(), Right())
