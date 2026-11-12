@@ -1298,7 +1298,7 @@ static ConvBackend _select_conv_backend(
     const at::OptionalArrayRef<T> bias_sizes_opt,
     const bool need_backward,
     const ConvParams<T>& params,
-    const bool is_backward = false) {
+    const bool is_backward) {
 
   // don't send empty inputs through backends
   if constexpr (std::is_same_v<T, c10::SymInt>) {
@@ -1451,7 +1451,7 @@ ConvBackend select_conv_backend(
   auto bias_sizes = bias.defined() ? std::optional<SymIntArrayRef>(bias.sym_sizes()) : bias_sizes_opt;
   bool need_backward = GradMode::is_enabled() &&
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
-  return _select_conv_backend(input, weight, bias, bias_sizes, need_backward, params);
+  return _select_conv_backend(input, weight, bias, bias_sizes, need_backward, params, /*is_backward=*/ false);
 }
 
 // For BC reasons, have a copy that does not require bias_opt
@@ -1461,7 +1461,7 @@ static ConvBackend select_conv_backend(
     const at::OptionalIntArrayRef bias_sizes_opt,
     const bool need_backward,
     const ConvParams<int64_t>& params,
-    const bool is_backward = false) {
+    const bool is_backward) {
   return _select_conv_backend(input, weight, {}, bias_sizes_opt, need_backward, params, is_backward);
 }
 
@@ -1619,7 +1619,7 @@ at::Tensor _convolution(
   auto bias_sizes_opt = bias.defined() ? std::optional<IntArrayRef>(bias.sizes()) : std::nullopt;
   bool need_backward = GradMode::is_enabled() &&
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
-  ConvBackend backend = _select_conv_backend(input, weight, bias, c10::OptionalIntArrayRef(bias_sizes_opt), need_backward, params);
+  ConvBackend backend = _select_conv_backend(input, weight, bias, c10::OptionalIntArrayRef(bias_sizes_opt), need_backward, params, /*is_backward=*/ false);
   at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight, backend);
 
   // Call the backend.

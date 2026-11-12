@@ -426,7 +426,8 @@ auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
   bool mkldnn_gelu = use_mkldnn(self) && (approximate_type == GeluType::None);
   // oneDNN supports bf16/fp16 eltwise forward but not backward on avx2_vnni_2.
-  if (mkldnn_gelu && self.scalar_type() != kFloat && ideep::check_isa_is_avx2_vnni_2()) {
+  if (mkldnn_gelu && (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) &&
+      ideep::check_isa_is_avx2_vnni_2()) {
     TORCH_WARN_ONCE("oneDNN does not support bf16/fp16 GELU backward on CPUs with avx2_vnni_2"
                     " as their best ISA; falling back to the native implementation.");
     mkldnn_gelu = false;
