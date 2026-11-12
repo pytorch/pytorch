@@ -224,7 +224,7 @@ def fold_decoded(
 
 # Caps the loads fold_uniform_tree unrolls per thread; each adds a load and its merges.
 # On B200 one kernel compiles in 0.24-0.31 s (64 loads: 0.31 s vs 0.25 s for the online
-# chain), and a configuration can compile up to 127 kernels (whole loads x tail).
+# chain), and a configuration can compile up to 127 kernels (64 tail-free plus 63 tail).
 UNIFORM_TREE_MAX_LOADS = 64
 
 
