@@ -74,7 +74,6 @@ jobs:
       BUILD_ENVIRONMENT: linux-binary-manywheel
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
-      GPU_FLAG: "--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon"
     permissions:
       id-token: write
       contents: read
@@ -88,6 +87,19 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           show-progress: false
+
+      # Same host logic as setup-rocm. Pods pass an isolated render list;
+      # daemon and bin cover the video gid's name inside each image OS.
+      - name: ROCm set GPU_FLAG
+        shell: bash
+        run: |
+          render_gid=$(cut -d: -f3 < <(grep render /etc/group))
+          if [ -f "/etc/podinfo/gha-render-devices" ]; then
+            DEVICE_FLAG=$(cat /etc/podinfo/gha-render-devices)
+          else
+            DEVICE_FLAG="--device /dev/dri"
+          fi
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd ${DEVICE_FLAG} --group-add video --group-add ${render_gid} --group-add daemon --group-add bin --cap-add=SYS_PTRACE --security-opt seccomp=unconfined" >> "${GITHUB_ENV}"
 
       - name: Login to ECR
         if: inputs.DOCKER_IMAGE_REGISTRY_HOST != ''
@@ -127,12 +139,9 @@ jobs:
         shell: bash
         run: |
           set -x
+          # shellcheck disable=SC2086
           container_name=$(docker run \
-            --device=/dev/mem \
-            --device=/dev/kfd \
-            --device=/dev/dri \
-            --group-add video \
-            --group-add daemon \
+            ${GPU_FLAG:-} \
             -e BINARY_ENV_FILE \
             -e BUILD_ENVIRONMENT \
             -e DESIRED_CUDA \
