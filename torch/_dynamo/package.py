@@ -899,11 +899,11 @@ class SystemInfo:
     toolkit_version: str | None
     triton_version: tuple[int, int] | None
     gpu_name: str | None
-    # What Inductor bakes into the kernels instead of the GPU name: the arch
-    # (CUDA compute capability as major * 10 + minor, or the ROCm gfx arch) and
-    # the SM count (a cooperative reduction's RSPLIT, the SMs a persistent
-    # kernel covers). None on XPU, and in packages written before they were
-    # recorded, where the GPU name is compared instead.
+    # What the kernels depend on instead of the GPU name: the arch they were
+    # compiled for (CUDA compute capability as major * 10 + minor, or the ROCm
+    # gfx arch) and the SM count, which a cooperative reduction sizes its grid
+    # from and needs every block resident for. None on XPU, and in packages
+    # written before they were recorded, where the GPU name is compared instead.
     gpu_arch: int | str | None = None
     gpu_sm_count: int | None = None
     CHECK_GPUS = ("cuda", "xpu")
@@ -951,10 +951,11 @@ class SystemInfo:
     ) -> None:
         """
         Check that a package recorded with this SystemInfo can load on a system
-        described by ``current``. What the package did not record is not
-        compared: a Triton version of (0, 0), a GPU name of None, and the GPU
-        arch and SM count when either side has no arch. Raises RuntimeError if
-        incompatible.
+        described by ``current``. A Triton version of (0, 0) or a GPU name of
+        None in the package is not compared; a toolkit version of None is, so a
+        package built without CUDA is refused on a CUDA host. The GPU arch and
+        SM count are compared when both sides record an arch, and the GPU name
+        otherwise. Raises RuntimeError if incompatible.
         """
         if _bytecode_version(self.python_version) != _bytecode_version(
             current.python_version
