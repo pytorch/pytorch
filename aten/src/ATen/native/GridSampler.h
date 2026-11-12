@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <utility>
 
+#include <ATen/OpMathType.h>
 #include <ATen/native/GridSamplerUtils.h>
 
 namespace at::native {
@@ -30,7 +31,11 @@ static inline scalar_t grid_sampler_unnormalize(scalar_t coord, int64_t size,
     return ((coord + 1) / 2) * (size - 1);
   } else {
     // unnormalize coord from [-1, 1] to [-0.5, size - 0.5]
-    return ((coord + 1) * size - 1) / 2;
+    using opmath_t = at::opmath_type<scalar_t>;
+    return static_cast<scalar_t>(std::fma(
+        static_cast<opmath_t>(coord) + 1,
+        static_cast<opmath_t>(size) / 2,
+        opmath_t(-0.5)));
   }
 }
 
@@ -48,7 +53,11 @@ static inline scalar_t grid_sampler_unnormalize_set_grad(scalar_t coord, int64_t
   } else {
     // unnormalize coord from [-1, 1] to [-0.5, size - 0.5]
     *grad_in = static_cast<scalar_t>(size) / 2;
-    return ((coord + 1) * size - 1) / 2;
+    using opmath_t = at::opmath_type<scalar_t>;
+    return static_cast<scalar_t>(std::fma(
+        static_cast<opmath_t>(coord) + 1,
+        static_cast<opmath_t>(size) / 2,
+        opmath_t(-0.5)));
   }
 }
 
