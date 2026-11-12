@@ -56,6 +56,8 @@ from .flex_flash_attention import (
     is_trivial_mask_graph,
     is_trivial_score_graph,
 )
+from .flex_flydsl_attention import create_flydsl_flex_attention_kernel
+from .flex_flydsl_backward import create_flydsl_flex_attention_backward_kernel
 
 
 if TYPE_CHECKING:
@@ -249,6 +251,9 @@ def flex_attention(
     if backend == "FLASH":
         score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
         mask_mod_other_buffers = realize_captures_for_cutedsl(mask_mod_other_buffers)
+    elif backend == "FLYDSL":
+        score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+        mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -287,6 +292,27 @@ def flex_attention(
     enable_gqa = V.graph.sizevars.evaluate_expr(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
+
+    if backend == "FLYDSL":
+        return create_flydsl_flex_attention_kernel(
+            query=query,
+            key=key,
+            value=value,
+            kv_num_blocks=kv_num_blocks,
+            kv_indices=kv_indices,
+            full_kv_num_blocks=full_kv_num_blocks,
+            full_kv_indices=full_kv_indices,
+            subgraph=subgraph,
+            mask_graph=mask_graph,
+            score_mod_other_buffers=score_mod_other_buffers,
+            mask_mod_other_buffers=mask_mod_other_buffers,
+            scale=scale,
+            sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
+            sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
+            subgraph_buffer=subgraph_buffer,
+            mask_graph_buffer=mask_graph_buffer,
+            write_max_scores=kernel_options.get("OUTPUT_MAX", True),
+        )
 
     can_use_decode = _use_flex_decoding(
         query, kv_indices, value, kernel_options, enable_gqa
@@ -444,7 +470,11 @@ def flex_attention(
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
     configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
-        head_dim, seq_len_q, dtype, query.get_device().type
+        head_dim,
+        seq_len_q,
+        dtype,
+        query.get_device().type,
+        V.graph.sizevars.guard_int(v_head_dim),
     )
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
@@ -923,6 +953,37 @@ def flex_attention_backward(*args, **kwargs):
     else:
         kernel_options.setdefault("IS_DIVISIBLE", False)
 
+    if backend == "FLYDSL":
+        flydsl_result = create_flydsl_flex_attention_backward_kernel(
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            grad_out,
+            grad_logsumexp,
+            scale,
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
+            fw_subgraph=fw_graph,
+            mask_graph=mask_graph,
+            score_mod_other_buffers=list(score_mod_other_buffers),
+            mask_mod_other_buffers=list(mask_mod_other_buffers),
+            kv_num_blocks=kv_num_blocks,
+            kv_indices=kv_indices,
+            full_kv_num_blocks=full_kv_num_blocks,
+            full_kv_indices=full_kv_indices,
+            dq_accum_fp32=cast(
+                bool,
+                kernel_options.get(
+                    "bwd_FLYDSL_DQ_ACCUM_FP32",
+                    kernel_options.get("FLYDSL_DQ_ACCUM_FP32", True),
+                ),
+            ),
+        )
+        if flydsl_result is not None:
+            return flydsl_result
+
     fwd_placeholder_inps = [
         create_placeholder(name, dtype, device)
         for name, dtype in [
@@ -1086,7 +1147,10 @@ def flex_attention_backward(*args, **kwargs):
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
     configs: list[FlexBwDConfig] = V.choices.get_flex_attention_bwd_configs(
-        head_dim, dtype, query.get_device().type
+        head_dim,
+        dtype,
+        query.get_device().type,
+        V.graph.sizevars.guard_int(v_head_dim),
     )
 
     # Default config for warp specialization

@@ -34,8 +34,21 @@ using result_ptr_t = std::shared_ptr<Result>;
 using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
 
+// A storage whose data was released with an error message set (e.g. a remat
+// placeholder or an overwritten cudagraph-tree output) throws on data pointer
+// access: use null.
+static const void* storageData(const at::Tensor& t) {
+  if (!t.has_storage()) {
+    return nullptr;
+  }
+  const auto& storage = t.storage();
+  return storage.unsafeGetStorageImpl()->throw_on_immutable_data_ptr()
+      ? nullptr
+      : storage.data();
+}
+
 RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
-    : data_{t.has_storage() ? t.storage().data() : nullptr},
+    : data_{storageData(t)},
       dtype_{t.scalar_type()},
       layout_{t.layout()},
       size_dim_{static_cast<uint32_t>(t.sizes().size())} {
@@ -194,13 +207,13 @@ bool InputOutputEncoder::isSupportedScalarList(
     return false;
   }
   auto list_ref = list_candidate.toListRef();
-  if (C10_UNLIKELY(list_ref.empty())) {
+  if (list_ref.empty()) [[unlikely]] {
     return true;
   }
-  if (C10_UNLIKELY(!list_ref[0].isScalar())) {
+  if (!list_ref[0].isScalar()) [[unlikely]] {
     return false;
   }
-  if (C10_UNLIKELY(list_ref.size() > SCALAR_LIST_LENGTH_LIMIT)) {
+  if (list_ref.size() > SCALAR_LIST_LENGTH_LIMIT) [[unlikely]] {
     return false;
   }
   return true;

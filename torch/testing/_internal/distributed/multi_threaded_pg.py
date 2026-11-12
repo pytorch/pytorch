@@ -17,6 +17,7 @@ from torch._C._distributed_c10d import (
     BroadcastOptions,
     FlightRecorderHook,
     ReduceOp,
+    ReduceOptions,
     ReduceScatterOptions,
     ScatterOptions,
     Store,
@@ -236,6 +237,17 @@ class AllReduce:
             for src_rank in range(len(data)):
                 # See Note [Hide collectives mutation from autograd]
                 data[src_rank][i].detach().copy_(res.to(data[src_rank][i].device))
+
+
+class Reduce(AllReduce):
+    def __init__(self, op, dst):
+        super().__init__(op)
+        self.dst = dst
+
+    def work(self, data):
+        super().work(
+            [d if r == self.dst else [t.clone() for t in d] for r, d in enumerate(data)]
+        )
 
 
 class AllGather:
@@ -503,6 +515,12 @@ class ProcessLocalGroup(dist.ProcessGroup):
 
     def allreduce_coalesced(self, tensor_list, opts=AllreduceOptions()):
         coll = ProcessLocalGroup._start_coll(AllReduce(opts.reduceOp), self)
+        res = coll.join(self._rank, tensor_list)
+        ProcessLocalGroup._end_coll(coll, self)
+        return res
+
+    def reduce(self, tensor_list, opts=ReduceOptions()):
+        coll = ProcessLocalGroup._start_coll(Reduce(opts.reduceOp, opts.rootRank), self)
         res = coll.join(self._rank, tensor_list)
         ProcessLocalGroup._end_coll(coll, self)
         return res

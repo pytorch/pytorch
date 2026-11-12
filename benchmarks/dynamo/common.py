@@ -205,6 +205,8 @@ BENCHMARK_USE_SGD = {
 # These CUDA Inductor TIMM models fail fp16 training accuracy with the default
 # eager Adam reference, but this has not been validated for non-accuracy runs,
 # non-Inductor, or ROCm periodic baselines.
+# PrivateUse1 devices temporarily reuse this CUDA list to keep NPU benchmark
+# behavior consistent with CUDA.
 CUDA_INDUCTOR_ACCURACY_USE_SGD = {
     "convnextv2_nano.fcmae_ft_in22k_in1k",
     "vit_base_patch14_dinov2.lvd142m",
@@ -489,7 +491,6 @@ def output_signpost(data, args, suite, error=None):
         "tag",
         "coverage",
         "overhead",
-        "speedup_dynamo_ts",
         "speedup_fx2trt",
         "speedup_fx2trt_fp16",
         "accuracy",
@@ -547,20 +548,7 @@ def patch_torch_manual_seed():
     """Make torch manual seed deterministic. Helps with accuracy testing."""
 
     def deterministic_torch_manual_seed(*args, **kwargs):
-        from torch._C import default_generator
-
-        seed = 1337
-        if HAS_CUDA:
-            import torch.cuda
-
-            if not torch.cuda._is_in_bad_fork():
-                torch.cuda.manual_seed_all(seed)
-        if HAS_XPU:
-            import torch.xpu
-
-            if not torch.xpu._is_in_bad_fork():
-                torch.xpu.manual_seed_all(seed)
-        return default_generator.manual_seed(seed)
+        return torch.random.manual_seed(1337)
 
     torch.manual_seed = deterministic_torch_manual_seed
 
@@ -570,10 +558,11 @@ def empty_gpu_cache(device):
     Explicitly empty gpu cache to avoid OOM in subsequent run.
     """
 
-    if device not in ["cuda", "xpu", "mps"]:
+    if device not in ["cuda", "xpu", "mps", torch._C._get_privateuse1_backend_name()]:
         log.warning(
-            "Trying to call the empty_gpu_cache for device: %s, which is not in list [cuda, xpu]",
+            "Trying to call the empty_gpu_cache for device: %s, which is not in list [cuda, xpu, mps, %s]",
             device,
+            torch._C._get_privateuse1_backend_name(),
         )
         return
 
@@ -1081,8 +1070,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         )
     elif args.export_nativert:
         frozen_model_iter_fn = export_nativert(model, example_inputs)
-    elif args.torchscript_jit_trace:
-        frozen_model_iter_fn = torchscript_jit_trace(model, example_inputs)
     elif args.aot_precompile:
         frozen_model_iter_fn = aot_precompile(model, example_inputs)
     else:
@@ -1356,13 +1343,6 @@ def xla(args, model_iter_fn, model, example_inputs):
     return format_speedup(speedup, pvalue)
 
 
-def try_script(model, example_inputs):
-    try:
-        return torch.jit.script(model)
-    except Exception:
-        return None
-
-
 def _produce_dynamic_shapes_for_export(path, x):
     # mark_dynamic() is ignored for export.
     # use this to produce dynamic_shapes spec instead.
@@ -1497,28 +1477,6 @@ class NativeRTCache:
         return cls.cache[key]
 
 
-class JitTracedCache:
-    cache: dict[weakref.ref, Any] = {}
-
-    @classmethod
-    def load(cls, model, example_inputs):
-        key = weakref.ref(model)
-        if key not in cls.cache:
-            example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-            if example_args:
-                jit_traced_module = torch.jit.trace(
-                    model, example_inputs=example_args, strict=False
-                )
-            else:
-                jit_traced_module = torch.jit.trace(
-                    model, example_kwarg_inputs=example_kwargs, strict=False
-                )
-
-            cls.cache[key] = jit_traced_module
-
-        return cls.cache[key]
-
-
 def export(model, example_inputs):
     from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
 
@@ -1594,16 +1552,6 @@ def export_aot_inductor(model, example_inputs, mode):
         return optimized(*example_args, **example_kwargs)
 
     return opt_aot_inductor
-
-
-def torchscript_jit_trace(model, example_inputs):
-    optimized = JitTracedCache.load(model, example_inputs)
-
-    def opt_jit_trace(_, example_inputs, collect_outputs=False):
-        example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        return optimized(*example_args, **example_kwargs)
-
-    return opt_jit_trace
 
 
 def download_retry_decorator(download_fn):
@@ -1866,7 +1814,18 @@ class BenchmarkRunner:
                 self.autocast_arg["dtype"] = amp_dtype
 
     def init_optimizer(self, name, device, params):
-        if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
+        device_type = torch.device(device).type
+
+        capturable_devices = {
+            "cuda",
+            torch._C._get_privateuse1_backend_name(),
+        }
+
+        if (
+            device_type in capturable_devices
+            and self.args.training
+            and name not in CI_SKIP_OPTIMIZER
+        ):
             use_sgd = (
                 (name in CI_USE_SGD and self.args.ci)
                 or name in BENCHMARK_USE_SGD
@@ -2095,7 +2054,7 @@ class BenchmarkRunner:
     def batch_size_finder(self, device, model_name, initial_batch_size=1024):
         batch_size = initial_batch_size
         while batch_size >= 1:
-            empty_gpu_cache(current_device)
+            empty_gpu_cache(device)
             try:
                 device, name, model, example_inputs, _ = self.load_model(
                     device,
@@ -2410,7 +2369,6 @@ class BenchmarkRunner:
                         self.args.export
                         or self.args.export_aot_inductor
                         or self.args.export_nativert
-                        or self.args.torchscript_jit_trace
                         or self.args.aot_precompile
                     ):
                         # apply export on module directly
@@ -3056,7 +3014,6 @@ class BenchmarkRunner:
             if (
                 self.args.export_aot_inductor
                 or self.args.export_nativert
-                or self.args.torchscript_jit_trace
                 or self.args.aot_precompile
             ):
                 optimized_model_iter_fn = optimize_ctx
@@ -3821,11 +3778,6 @@ def parse_args(args=None):
         "--overhead", action="store_true", help=help(overhead_experiment)
     )
     group.add_argument(
-        "--speedup-dynamo-ts",
-        action="store_true",
-        help="TorchDynamo frontend with torchscript backend",
-    )
-    group.add_argument(
         "--speedup-fx2trt", action="store_true", help=help(speedup_experiment_fx2trt)
     )
     group.add_argument(
@@ -3884,11 +3836,6 @@ def parse_args(args=None):
         "--export-nativert",
         action="store_true",
         help="Measure pass rate with Export+NativeRT",
-    )
-    group.add_argument(
-        "--torchscript-jit-trace",
-        action="store_true",
-        help="Measure pass rate with TorchScript jit.trace",
     )
     group.add_argument(
         "--xla", action="store_true", help="Compare TorchXLA to eager PyTorch"
@@ -4430,15 +4377,28 @@ def run(runner, args, original_dir=None):
         return sys.exit(-1)
 
     if not args.devices:
-        if torch.cuda.is_available():
-            args.devices = ["cuda"]
+        accelerator = torch.accelerator.current_accelerator(check_available=True)
+        if accelerator is not None and accelerator.type in {
+            "cuda",
+            torch._C._get_privateuse1_backend_name(),
+        }:
+            args.devices = [accelerator.type]
         else:
-            log.warning("torch.cuda.is_available() == False, using CPU")
+            log.warning("No supported accelerator is available, using CPU")
             args.devices = ["cpu"]
 
-    if args.devices != ["cpu"] and (HAS_CUDA or HAS_XPU):
+    if args.devices != ["cpu"]:
         global synchronize
-        synchronize = torch.cuda.synchronize if HAS_CUDA else torch.xpu.synchronize
+
+        device_type = torch.device(args.devices[0]).type
+        privateuse1_backend = torch._C._get_privateuse1_backend_name()
+
+        if device_type == "cuda" and HAS_CUDA:
+            synchronize = torch.cuda.synchronize
+        elif device_type == "xpu" and HAS_XPU:
+            synchronize = torch.xpu.synchronize
+        elif device_type == privateuse1_backend:
+            synchronize = torch.get_device_module(device_type).synchronize
 
     if args.nnc:
         torch._C._jit_override_can_fuse_on_cpu(True)
@@ -4538,20 +4498,12 @@ def run(runner, args, original_dir=None):
         optimize_ctx = export_nativert
         experiment = speedup_experiment
         output_filename = "export_nativert.csv"
-    elif args.torchscript_jit_trace:
-        optimize_ctx = torchscript_jit_trace
-        experiment = speedup_experiment
-        output_filename = "torchscript_jit_trace.csv"
     elif args.xla:
         (dev,) = args.devices
         os.environ["PJRT_DEVICE"] = {"cuda": "GPU", "cpu": "CPU"}[dev]
         torch._dynamo.mark_dynamic = MagicMock()
         experiment = xla
         output_filename = "xla.csv"
-    elif args.speedup_dynamo_ts:
-        optimize_ctx = torch._dynamo.optimize("ts", nopython=args.nopython)
-        experiment = speedup_experiment
-        output_filename = "speedup_dynamo_ts.csv"
     elif args.prims_nvfuser:
         optimize_ctx = torch._dynamo.optimize("prims_nvfuser", nopython=args.nopython)
         experiment = speedup_experiment

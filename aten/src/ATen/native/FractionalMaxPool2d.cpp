@@ -159,10 +159,10 @@ void fractional_max_pool2d_out_single_batch_frame(
       scalar_t* outputForPlane = output + plane * outputW * outputH;
       int64_t* indicesForPlane = indices + plane * outputW * outputH;
 
-      for (int h = 0; h < outputH; ++h) {
+      for (const auto h : c10::irange(outputH)) {
         int inputHStart = sequenceH[h];
 
-        for (int w = 0; w < outputW; ++w) {
+        for (const auto w : c10::irange(outputW)) {
           int inputWStart = sequenceW[w];
 
           int h2 = inputHStart, w2 = inputWStart;
@@ -237,8 +237,8 @@ void fractional_max_pool2d_backward_out_single_batch_frame(
       const scalar_t* gradOutputForPlane = gradOutput + plane * outputW * outputH;
       const int64_t* indicesForPlane = indices + plane * outputW * outputH;
 
-      for (int h = 0; h < outputH; ++h) {
-        for (int w = 0; w < outputW; ++w) {
+      for (const auto h : c10::irange(outputH)) {
+        for (const auto w : c10::irange(outputW)) {
           int outputIndex = h * outputW + w;
           int64_t index = indicesForPlane[outputIndex];
           AT_ASSERT(index >= 0 && index < static_cast<int64_t>(inputW) * inputH);
@@ -326,8 +326,8 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cpu) (
     input.scalar_type(),
     "fractional_max_pool2d_out_frame", [&] {
       auto input_data = input.const_data_ptr<scalar_t>();
-      auto output_data = output.data_ptr<scalar_t>();
-      auto indices_data = indices.data_ptr<int64_t>();
+      auto output_data = output.mutable_data_ptr<scalar_t>();
+      auto indices_data = indices.mutable_data_ptr<int64_t>();
       auto randomSamples_data = randomSamples.const_data_ptr<scalar_t>();
       fractional_max_pool2d_out_frame<scalar_t>(
         input_data,
@@ -381,7 +381,7 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cpu) (
     kBFloat16,
     kHalf,
     input.scalar_type(), "fractional_max_pool2d_backward_out_frame", [&] {
-      auto gradInput_data = gradInput.data_ptr<scalar_t>();
+      auto gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
       auto gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
       auto indices_data = indices.const_data_ptr<int64_t>();
       fractional_max_pool2d_backward_out_frame<scalar_t>(

@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import os
 import re
+import socket
 import time
 import traceback
 import urllib.parse
 from collections import defaultdict
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from functools import cache, partial
 from pathlib import Path
 from re import Pattern
-from typing import Any, cast, NamedTuple, TYPE_CHECKING
+from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
+from urllib.error import HTTPError, URLError
 from warnings import warn
 
 import yaml
@@ -55,11 +59,35 @@ from label_utils import (
     LABEL_ERR_MSG,
     NOT_USER_FACING_LABEL,
 )
+from mergebot_status import (
+    MERGE_FAILURE,
+    MERGE_SUCCESS,
+    REVERT_FAILURE,
+    REVERT_SUCCESS,
+    Status,
+    with_status,
+)
+from native_stack import (
+    branch_update_comments,
+    build_native_stack_commits,
+    build_native_stack_rebase,
+    find_stack_dependents,
+    get_native_stack,
+    get_native_stack_landing_prs,
+    NativeStackError,
+    PR_UPDATED_ERROR,
+    PULL_REQUEST_RESOLVED,
+    push_branches,
+    RE_GHSTACK_HEAD_REF,
+    stack_dependencies_line,
+)
 from trymerge_explainer import get_revert_message, TryMergeExplainer
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Iterator
+
+    from native_stack import NativeStack, StackEntry
 
 
 # labels
@@ -436,7 +464,6 @@ query ($owner: String!, $name: String!) {
 }
 """
 
-RE_GHSTACK_HEAD_REF = re.compile(r"^(gh/[^/]+/[0-9]+/)head$")
 RE_GHSTACK_DESC = re.compile(r"Stack.*:\r?\n(\* [^\r\n]+\r?\n)+", re.MULTILINE)
 RE_PULL_REQUEST_RESOLVED = re.compile(
     r"(Pull Request resolved|Pull-Request-resolved|Pull-Request): "
@@ -469,6 +496,36 @@ IMPORT_STATUS_CHECKRUN_NAME = "Import Status"
 # Also caps how many gates one merge may skip on an AI CI Advisor verdict -- see
 # categorize_checks.
 IGNORABLE_FAILED_CHECKS_THESHOLD = 10
+# How long merge() waits between checks of a PR's pending jobs.
+MERGE_RETRY_INTERVAL_SECONDS = 5 * 60
+# How long one merge treats a failed job as pending while its Dr.CI classification is
+# still on the way: Dr.CI has not listed the job yet (it reads jobs from a database that
+# lags GitHub), or the AI CI Advisor is still analyzing it (AI_PENDING). Either may move
+# the job into a non-blocking category minutes later, and a merge that fails first makes
+# the author retry by hand. Three 5-minute retries, fewer when Dr.CI answers slowly,
+# cover the advisor's 6-minute p95 from dispatch to verdict. A job still blocking after
+# that fails the merge as before.
+CLASSIFICATION_WAIT_SECONDS = 15 * 60
+# The details URL of a GitHub Actions job's check run, the only kind that can wait. App
+# check runs (EasyCLA, the Meta internal-changes check) link elsewhere, and CRCR relay
+# checks, which Dr.CI matches by name, link to a downstream run with no job part.
+RE_GHA_JOB_URL = re.compile(r"/actions/runs/\d+/job/\d+")
+# Classifications get_classifications gives a failed job whose classification is still
+# on the way, and the reason with_waiting_reasons gives for it in messages.
+AWAITING_CLASSIFICATIONS = {
+    "DRCI_PENDING": "failed, waiting for Dr.CI to classify it",
+    "AI_PENDING": "failed, waiting for the AI CI Advisor's verdict",
+}
+# Pauses before each retry of a failed Dr.CI call. Back-to-back retries land in the
+# same second and fail together, as on #199675 and #201134, whose merges were then
+# blocked by failures the AI CI Advisor had cleared.
+DRCI_RETRY_DELAYS_SECONDS = (5, 15, 30)
+# Longest a Dr.CI socket may sit silent. HUD caps the endpoint at 900 s
+# (maxDuration in drci.ts) and sends nothing until it finishes, so only a
+# connection that is truly stuck waits longer. A timed-out call is not retried.
+DRCI_TIMEOUT_SECONDS = 960
+# What to do after a failed Dr.CI call; see _drci_retry_kind.
+DrciRetry = Literal["pause", "now", "stop"]
 
 REVIEWS_PER_PAGE = 100
 REVIEW_PAGE_LIMIT = 10
@@ -484,6 +541,10 @@ REVIEW_PAGE_LIMIT = 10
 # #190927 / #186302 land race).
 DOCKER_CI_PATH = ".ci/docker"
 DOCKER_BUILDS_WORKFLOW_NAME = "docker-builds"
+# GitHub's GraphQL API can report a workflow by its file path instead of its
+# `name:` (for example after a run of the workflow file failed to start), which
+# prefixes its check names with the path.
+DOCKER_BUILDS_WORKFLOW_PATH = ".github/workflows/docker-builds.yml"
 
 
 def iter_issue_timeline_until_comment(
@@ -613,11 +674,14 @@ def is_docker_affecting_files(files: Iterable[str]) -> bool:
 
 def get_docker_build_checks(checks: JobNameToStateDict) -> JobNameToStateDict:
     """Return the subset of checks that belong to the docker-builds workflow."""
+    workflow_names = (DOCKER_BUILDS_WORKFLOW_NAME, DOCKER_BUILDS_WORKFLOW_PATH)
     return {
         name: check
         for name, check in checks.items()
-        if name == DOCKER_BUILDS_WORKFLOW_NAME
-        or name.startswith(f"{DOCKER_BUILDS_WORKFLOW_NAME} / ")
+        if any(
+            name == workflow_name or name.startswith(f"{workflow_name} / ")
+            for workflow_name in workflow_names
+        )
     }
 
 
@@ -813,6 +877,32 @@ def is_bot_initiated_codev_merge(pr: GitHubPR, comment_id: int | None) -> bool:
     )
 
 
+def post_pr_comment(
+    org: str,
+    project: str,
+    pr_num: int,
+    comment: str,
+    *,
+    status: Status | None,
+    comment_id: int | None = None,
+    dry_run: bool = False,
+) -> None:
+    """Post a mergebot comment on a PR. Every comment trymerge posts goes through here.
+
+    `status` is required: a reply that reports how a merge or revert command went
+    passes its outcome, which is appended as a hidden machine-readable tag (see
+    mergebot_status.py); any other comment (a notice, a waiting message) passes None.
+    A tagged reply also passes `comment_id`, the comment that issued the command.
+    """
+    gh_post_pr_comment(
+        org,
+        project,
+        pr_num,
+        with_status(comment, status, comment_id),
+        dry_run=dry_run,
+    )
+
+
 def ensure_mergeable_labels(
     pr: GitHubPR, comment_id: int | None, dry_run: bool
 ) -> None:
@@ -828,7 +918,7 @@ def ensure_mergeable_labels(
         # then failed, the merge would abort with the PR already satisfying
         # has_required_labels — so the retry would take the early return above
         # and the promised audit trail would never be written.
-        gh_post_pr_comment(
+        post_pr_comment(
             pr.org,
             pr.project,
             pr.pr_num,
@@ -836,7 +926,8 @@ def ensure_mergeable_labels(
             "PR is being merged after its internal diff landed, without a "
             "release-notes label. If this change is user facing, please replace "
             "the label with the appropriate `release notes: ...` one.",
-            dry_run,
+            status=None,
+            dry_run=dry_run,
         )
         gh_add_labels(pr.org, pr.project, pr.pr_num, [NOT_USER_FACING_LABEL], dry_run)
     else:
@@ -919,6 +1010,36 @@ def get_ghstack_prs(
                 + f"Please sync them and try again (ex. make the changes on {orig_ref} and run ghstack)."
             )
     return entire_stack
+
+
+def get_native_stack_prs(
+    repo: GitRepo, pr: GitHubPR, stack: NativeStack | None
+) -> list[tuple[GitHubPR, StackEntry, str]]:
+    """The open PRs of `pr`'s GitHub-native `stack` that merging `pr` lands, bottom
+    first, each with its stack entry and the commit its changes start from."""
+    if stack is None:
+        raise NativeStackError(f"PR #{pr.pr_num} is not in a stack")
+    rc: list[tuple[GitHubPR, StackEntry, str]] = []
+    for entry, lower in get_native_stack_landing_prs(
+        repo, pr.org, pr.project, stack, pr.pr_num, pr.default_branch()
+    ):
+        num = entry.number
+        stacked = pr if num == pr.pr_num else GitHubPR(pr.org, pr.project, num)
+        if stacked.last_commit_sha() != entry.head_oid:
+            raise NativeStackError(PR_UPDATED_ERROR.format(num))
+        rc.append((stacked, entry, lower))
+    return rc
+
+
+def get_prs_to_merge(
+    repo: GitRepo, pr: GitHubPR, native_stack: NativeStack | None = None
+) -> list[GitHubPR]:
+    """The open PRs that merging `pr` lands, bottom first."""
+    if pr.is_ghstack_pr():
+        return [p for p, _ in get_ghstack_prs(repo, pr)]  # raises error if out of sync
+    if native_stack is not None:
+        return [p for p, _, _ in get_native_stack_prs(repo, pr, native_stack)]
+    return [pr]
 
 
 class GitHubPR:
@@ -1185,7 +1306,8 @@ class GitHubPR:
         return cast(str, self.info["author"]["login"])
 
     def is_dependabot_pr(self) -> bool:
-        return self.get_pr_creator_login() == "dependabot[bot]"
+        # GraphQL reports the bot's login as `dependabot`, REST as `dependabot[bot]`
+        return normalize_login(self.get_pr_creator_login()) == "dependabot"
 
     def _fetch_authors(self) -> list[tuple[str, str]]:
         if self._authors is not None:
@@ -1440,28 +1562,50 @@ class GitHubPR:
                 filter_ghstack=True, ghstack_deps=pr_dependencies
             )
             if pr.pr_num != self.pr_num and not skip_all_rule_checks:
-                try:
-                    find_matching_merge_rule(
-                        pr,
-                        repo,
-                        skip_mandatory_checks=skip_mandatory_checks,
-                        skip_internal_checks=can_skip_internal_checks(self, comment_id),
-                        ignore_current_checks=ignore_current_checks,
-                    )
-                except MergeRuleFailedError as ex:
-                    raise type(ex)(
-                        f"Merge rule check failed for stacked PR #{pr.pr_num}:\n\n{ex}",
-                        ex.rule,
-                    ) from ex
+                check_stacked_pr_merge_rule(
+                    pr,
+                    repo,
+                    skip_mandatory_checks=skip_mandatory_checks,
+                    skip_internal_checks=can_skip_internal_checks(self, comment_id),
+                    ignore_current_checks=ignore_current_checks,
+                )
             repo.cherry_pick(rev)
             repo.amend_commit_message(commit_msg)
             pr_dependencies.append(pr)
         return [x for x, _ in ghstack_prs if not x.is_closed()]
 
+    def merge_native_stack_into(
+        self,
+        repo: GitRepo,
+        stack: NativeStack,
+        native_prs: list[tuple[GitHubPR, StackEntry, str]],
+        docker_pr: GitHubPR | None,
+        dry_run: bool,
+    ) -> list[GitHubPR]:
+        """Commit `native_prs`, as get_native_stack_prs returned them for `stack`, one
+        commit per PR, onto the default branch it fetched, push them and return their
+        PRs."""
+        default_branch = self.default_branch()
+        commits = []
+        for pr, entry, _ in native_prs:
+            deps = [e.number for e in stack.entries if e.position < entry.position]
+            message = pr.gen_commit_message(stack_deps=deps)
+            commits.append((pr.get_author(), message))
+        base = repo.rev_parse(f"refs/remotes/{repo.remote}/{default_branch}")
+        landing = [(entry, lower) for _, entry, lower in native_prs]
+        top = build_native_stack_commits(repo, base, landing, commits)
+        repo._run_git("checkout", "-B", default_branch, top)
+        # Log, but do not block on, a docker land race.
+        if docker_pr is not None:
+            warn_on_docker_merge_skew(repo, docker_pr)
+        repo.push(default_branch, dry_run)
+        return [pr for pr, _, _ in native_prs]
+
     def gen_commit_message(
         self,
         filter_ghstack: bool = False,
         ghstack_deps: list[GitHubPR] | None = None,
+        stack_deps: list[int] | None = None,
     ) -> str:
         """Fetches title and body from PR description
         adds reviewed by, pull request resolved and optionally
@@ -1477,10 +1621,12 @@ class GitHubPR:
         msg = self.get_title() + f" (#{self.pr_num})\n\n"
         msg += msg_body
 
-        msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
+        msg += f"\n{PULL_REQUEST_RESOLVED}{self.get_pr_url()}\n"
         msg += f"Approved by: {approved_by_urls}\n"
         if ghstack_deps:
             msg += f"ghstack dependencies: {', '.join([f'#{pr.pr_num}' for pr in ghstack_deps])}\n"
+        if stack_deps:
+            msg += f"{stack_dependencies_line(stack_deps)}\n"
 
         # Mention PR co-authors, which should be at the end of the message
         # And separated from the body by two newlines
@@ -1497,8 +1643,11 @@ class GitHubPR:
         labels = self.get_labels() if self.labels is not None else []
         full_label = label_base
         count = 0
+        numbered = re.compile(rf"{re.escape(label_base)}X\d+")
         for label in labels:
-            if label_base in label:
+            # Count only this label's own repeats: a substring match let an
+            # unrelated label such as "mergedog" turn "merged" into "mergedX1".
+            if label == label_base or numbered.fullmatch(label):
                 count += 1
                 full_label = f"{label_base}X{count}"
         self.add_label(full_label, dry_run)
@@ -1515,6 +1664,8 @@ class GitHubPR:
         comment_id: int,
         ignore_current_checks: set[tuple[int, str]] | None = None,
         greenlight_wait: GreenlightWaitWindow | None = None,
+        native_stack: NativeStack | None = None,
+        classification_wait: ClassificationWaitWindow | None = None,
     ) -> None:
         skip_internal_checks = can_skip_internal_checks(self, comment_id)
         # Raises exception if matching rule is not found
@@ -1529,12 +1680,31 @@ class GitHubPR:
             skip_mandatory_checks=skip_mandatory_checks,
             skip_internal_checks=skip_internal_checks,
             ignore_current_checks=ignore_current_checks,
+            classification_wait=classification_wait,
         )
         ghstack_prs: list[tuple[GitHubPR, str]] | None = None
+        stack: NativeStack | None = None
+        native_prs: list[tuple[GitHubPR, StackEntry, str]] = []
         prs_to_merge = [self]
         if self.is_ghstack_pr():
             ghstack_prs = get_ghstack_prs(repo, self, open_only=False)
             prs_to_merge = [pr for pr, _ in ghstack_prs if not pr.is_closed()]
+        elif native_stack is not None:
+            stack = get_native_stack(self.org, self.project, self.pr_num)
+            native_prs = get_native_stack_prs(repo, self, stack)
+            prs_to_merge = [pr for pr, _, _ in native_prs]
+        # Before the greenlight check: whether a lower PR's human approvals suffice can
+        # depend on its CI, so that question waits until the PR's own checks pass.
+        for pr in prs_to_merge:
+            if pr.pr_num != self.pr_num:
+                check_stacked_pr_merge_rule(
+                    pr,
+                    repo,
+                    skip_mandatory_checks=skip_mandatory_checks,
+                    skip_internal_checks=skip_internal_checks,
+                    ignore_current_checks=ignore_current_checks,
+                    classification_wait=classification_wait,
+                )
 
         check_greenlight_reviewed_head_sha(
             self,
@@ -1547,7 +1717,7 @@ class GitHubPR:
             ignore_current_checks=ignore_current_checks,
         )
 
-        # A ghstack merge lands all open PRs below this one. Use the topmost
+        # A stacked merge lands all open PRs below this one. Use the topmost
         # docker-affecting PR because its cumulative head has the final docker
         # tree for which images must have been built. Enforced even on force
         # merges.
@@ -1555,19 +1725,26 @@ class GitHubPR:
         if docker_pr is not None:
             check_docker_builds_ready(docker_pr)
 
+        merge_commit_sha: str | None = None
+        # GitHub's merge endpoint does not support stacked PRs.
+        if stack is not None:
+            additional_merged_prs = self.merge_native_stack_into(
+                repo, stack, native_prs, docker_pr, dry_run
+            )
         # Dependabot commits are authored/signed by the bot; merge them through
         # GitHub's squash+merge API so that signature is preserved and dependabot
         # can track the merge, instead of re-authoring a squash commit locally.
-        if self.is_dependabot_pr():
-            additional_merged_prs: list[GitHubPR] = []
+        elif self.is_dependabot_pr():
+            additional_merged_prs = []
             merge_commit_sha = self.merge_via_github_api(dry_run)
         else:
             additional_merged_prs = self.merge_changes_locally(
                 repo,
                 skip_mandatory_checks,
                 comment_id,
+                # Checked above, before the greenlight check.
+                skip_all_rule_checks=True,
                 ghstack_prs=ghstack_prs,
-                ignore_current_checks=ignore_current_checks,
             )
 
             # Log, but do not block on, a docker land race.
@@ -1575,50 +1752,57 @@ class GitHubPR:
                 warn_on_docker_merge_skew(repo, docker_pr)
 
             repo.push(self.default_branch(), dry_run)
-            # When the merge process reaches this part, we can assume that the
-            # commit has been successfully pushed to trunk
-            merge_commit_sha = repo.rev_parse(name=self.default_branch())
-        if not dry_run:
-            self.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
-            for pr in additional_merged_prs:
-                pr.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
+        # The merge landed: a failure after this point must not report it as failed
+        with after_landing(dry_run):
+            if merge_commit_sha is None:
+                # The commits just pushed to trunk
+                merge_commit_sha = repo.rev_parse(name=self.default_branch())
 
-        if comment_id and self.pr_num:
-            # Finally, upload the record to s3. The list of pending and failed
-            # checks are at the time of the merge
-            save_merge_record(
-                comment_id=comment_id,
-                pr_num=self.pr_num,
-                owner=self.org,
-                project=self.project,
-                author=self.get_author(),
-                pending_checks=pending_checks,
-                failed_checks=failed_checks,
-                ignore_current_checks=ignorable_checks.get("IGNORE_CURRENT_CHECK", []),
-                broken_trunk_checks=ignorable_checks.get("BROKEN_TRUNK", []),
-                flaky_checks=ignorable_checks.get("FLAKY", []),
-                unstable_checks=ignorable_checks.get("UNSTABLE", []),
-                ai_not_related_checks=ignorable_checks.get("AI_NOT_RELATED", []),
-                last_commit_sha=self.last_commit_sha(default=""),
-                merge_base_sha=self.get_merge_base(),
+            if comment_id and self.pr_num:
+                # Save the record for the s3 upload before any other follow-up
+                # step, so that step failing can't lose it. The list of pending and
+                # failed checks are at the time of the merge
+                save_merge_record(
+                    comment_id=comment_id,
+                    pr_num=self.pr_num,
+                    owner=self.org,
+                    project=self.project,
+                    author=self.get_author(),
+                    pending_checks=pending_checks,
+                    failed_checks=failed_checks,
+                    ignore_current_checks=ignorable_checks.get(
+                        "IGNORE_CURRENT_CHECK", []
+                    ),
+                    broken_trunk_checks=ignorable_checks.get("BROKEN_TRUNK", []),
+                    flaky_checks=ignorable_checks.get("FLAKY", []),
+                    unstable_checks=ignorable_checks.get("UNSTABLE", []),
+                    ai_not_related_checks=ignorable_checks.get("AI_NOT_RELATED", []),
+                    last_commit_sha=self.last_commit_sha(default=""),
+                    merge_base_sha=self.get_merge_base(),
+                    merge_commit_sha=merge_commit_sha,
+                    is_failed=False,
+                    skip_mandatory_checks=skip_mandatory_checks,
+                    ignore_current=bool(ignore_current_checks),
+                )
+            else:
+                print("Missing comment ID or PR number, couldn't upload to s3")
+
+            if not dry_run:
+                self.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
+                for pr in additional_merged_prs:
+                    pr.add_numbered_label(MERGE_COMPLETE_LABEL, dry_run)
+
+            # Usually Github will see that the commit has "resolves <pr_num>" in the
+            # commit message and close the PR, but sometimes it doesn't, leading to
+            # confusion.  When it doesn't, we close it manually.
+            time.sleep(60)  # Give Github some time to close the PR
+            manually_close_merged_pr(
+                pr=self,
+                additional_merged_prs=additional_merged_prs,
                 merge_commit_sha=merge_commit_sha,
-                is_failed=False,
-                skip_mandatory_checks=skip_mandatory_checks,
-                ignore_current=bool(ignore_current_checks),
+                comment_id=comment_id,
+                dry_run=dry_run,
             )
-        else:
-            print("Missing comment ID or PR number, couldn't upload to s3")
-
-        # Usually Github will see that the commit has "resolves <pr_num>" in the
-        # commit message and close the PR, but sometimes it doesn't, leading to
-        # confusion.  When it doesn't, we close it manually.
-        time.sleep(60)  # Give Github some time to close the PR
-        manually_close_merged_pr(
-            pr=self,
-            additional_merged_prs=additional_merged_prs,
-            merge_commit_sha=merge_commit_sha,
-            dry_run=dry_run,
-        )
 
     def merge_via_github_api(self, dry_run: bool = False) -> str:
         """Squash-and-merge this PR through GitHub's merge API, pinned to the
@@ -1647,11 +1831,27 @@ class GitHubPR:
         ignore_current_checks: set[tuple[int, str]] | None = None,
     ) -> list[GitHubPR]:
         """
-        :param skip_all_rule_checks: If true, skips all rule checks on ghstack PRs, useful for dry-running merge locally
+        Commits the PR, or the open PRs of its ghstack stack up to and including it,
+        onto `branch` (the default branch when None) in `repo`, without pushing them.
+
+        First fetches `branch` from the remote, which needs network access, and
+        force-resets the local `branch` to `<remote>/<branch>`, discarding any local
+        commits on it, so commits an earlier attempt left in `repo` never land.
+
+        :param skip_all_rule_checks: If true, skips the rule checks of a ghstack stack's
+            lower PRs. merge_into passes it, having checked them before the greenlight
+            check, and so does --check-mergeability, which only tests that the stack
+            applies.
         """
         branch_to_merge_into = self.default_branch() if branch is None else branch
-        if repo.current_branch() != branch_to_merge_into:
-            repo.checkout(branch_to_merge_into)
+        remote_tip = f"refs/remotes/{repo.remote}/{branch_to_merge_into}"
+        try:
+            repo.fetch(f"+refs/heads/{branch_to_merge_into}", remote_tip)
+        except RuntimeError as e:
+            raise RuntimeError(
+                f"Could not fetch {branch_to_merge_into} from {repo.remote}: {e}"
+            ) from e
+        repo._run_git("checkout", "-B", branch_to_merge_into, remote_tip)
 
         # It's okay to skip the commit SHA check for ghstack PRs since
         # authoring requires write access to the repo.
@@ -1720,6 +1920,23 @@ class MandatoryChecksMissingError(MergeRuleFailedError):
 
 class PostCommentError(Exception):
     pass
+
+
+class LandedError(Exception):
+    """A step after the merge or revert was pushed failed. The command's outcome
+    stands, so its reply carries no failure tag; the cause is `__cause__`."""
+
+
+@contextmanager
+def after_landing(dry_run: bool) -> Iterator[None]:
+    """Wrap the steps after a merge or revert was pushed: their failure raises
+    LandedError. A dry run pushed nothing, so it re-raises the original."""
+    try:
+        yield
+    except Exception as e:
+        if dry_run:
+            raise
+        raise LandedError(str(e)) from e
 
 
 @dataclass
@@ -1838,6 +2055,7 @@ def find_matching_merge_rule(
     skip_internal_checks: bool = False,
     ignore_current_checks: set[tuple[int, str]] | None = None,
     approved_by_override: set[str] | None = None,
+    classification_wait: ClassificationWaitWindow | None = None,
 ) -> tuple[
     MergeRule,
     list[tuple[str, str | None, int | None]],
@@ -1850,6 +2068,9 @@ def find_matching_merge_rule(
 
     approved_by_override replaces the PR's real approver set, so a caller can ask what
     would happen if a given approval were absent. None keeps the PR's real approvers.
+
+    classification_wait lets a failed job whose classification is still on the way
+    count as pending rather than failed; see get_classifications.
 
     NB: this function is used in Meta-internal workflows, see the comment at the top of
     this file for details.
@@ -1879,6 +2100,7 @@ def find_matching_merge_rule(
         pr.project,
         checks,
         ignore_current_checks=ignore_current_checks,
+        classification_wait=classification_wait,
     )
 
     # This keeps the list of all approvers that could stamp the change
@@ -1973,11 +2195,13 @@ def find_matching_merge_rule(
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
+                note = waited_note(failed_checks, classification_wait)
                 reject_reason = "\n".join(
                     (
                         f"{len(failed_checks)} mandatory check(s) failed.  The first few are:",
                         *checks_to_markdown_bullets(failed_checks),
                         "",
+                        *([note, ""] if note else []),
                         f"Dig deeper by [viewing the failures on hud]({hud_link})",
                     )
                 )
@@ -1988,7 +2212,9 @@ def find_matching_merge_rule(
                 reject_reason = "\n".join(
                     (
                         f"{len(pending_checks)} mandatory check(s) are pending/not yet run.  The first few are:",
-                        *checks_to_markdown_bullets(pending_checks),
+                        *checks_to_markdown_bullets(
+                            with_waiting_reasons(pending_checks, checks)
+                        ),
                         "",
                         f"Dig deeper by [viewing the pending checks on hud]({hud_link})",
                     )
@@ -2024,6 +2250,56 @@ def find_matching_merge_rule(
     raise MergeRuleFailedError(reject_reason, rule)
 
 
+def check_stacked_pr_merge_rule(
+    pr: GitHubPR,
+    repo: GitRepo,
+    *,
+    skip_mandatory_checks: bool,
+    skip_internal_checks: bool,
+    ignore_current_checks: set[tuple[int, str]] | None,
+    classification_wait: ClassificationWaitWindow | None = None,
+) -> None:
+    """find_matching_merge_rule for `pr`, which lands below the PR being merged, with
+    any refusal naming `pr`. Unless `skip_mandatory_checks`, `pr` is then held to the
+    checks merge() holds the merged PR to, not only the mandatory ones of its rule: a
+    startup failure, or a failure Dr.CI does not excuse, refuses and a pending check
+    waits."""
+    try:
+        _, pending, failing, _ = find_matching_merge_rule(
+            pr,
+            repo,
+            skip_mandatory_checks=skip_mandatory_checks,
+            skip_internal_checks=skip_internal_checks,
+            ignore_current_checks=ignore_current_checks,
+            classification_wait=classification_wait,
+        )
+    except MergeRuleFailedError as ex:
+        raise type(ex)(
+            f"Merge rule check failed for stacked PR #{pr.pr_num}:\n\n{ex}",
+            ex.rule,
+        ) from ex
+    if skip_mandatory_checks:
+        return
+    startup_failures = filter_checks_with_lambda(
+        pr.get_checkrun_conclusions(), lambda status: status == "STARTUP_FAILURE"
+    )
+    if startup_failures:
+        raise RuntimeError(
+            f"{len(startup_failures)} STARTUP failures reported on stacked PR #{pr.pr_num}, please check workflows syntax! "
+            + ", ".join(f"[{x.name}]({x.url})" for x in startup_failures[:5])
+        )
+    if failing:
+        raise RuntimeError(
+            f"{len(failing)} jobs have failed on stacked PR #{pr.pr_num}, first few of them are: "
+            + ", ".join(f"[{x[0]}]({x[1]})" for x in failing[:5])
+        )
+    if pending:
+        raise MandatoryChecksMissingError(
+            f"Still waiting for {len(pending)} jobs to finish on stacked PR #{pr.pr_num}, "
+            + f"first few of them are: {', '.join(x[0] for x in pending[:5])}"
+        )
+
+
 # One merge command runs as one process, and its retry loop re-asks this question every
 # five minutes with the same answer. The repeated call is not free: find_matching_merge_rule
 # posts to Dr.CI, which rewrites the PR's Dr.CI comment as a side effect.
@@ -2048,6 +2324,9 @@ def is_authorized_without_greenlight(
     `find_matching_merge_rule`. Relaxing any of them here would let a rule that the real
     gate rejects answer this question, and the real gate would then fall through to the
     Greenlight rule -- leaving greenlight the sole authority with the guard switched off.
+    The one argument not passed is `classification_wait`: without it a job still waiting
+    on its classification counts as failed here, which can only make this check stricter.
+    `merge_into` asks only after every PR it lands has passed its own rule check.
 
     An answer is cached per approver set and head commit. Both are re-read from GitHub on
     every retry, so an approval added mid-merge still takes effect; what the cache drops
@@ -2116,10 +2395,16 @@ def check_greenlight_reviewed_head_sha(
 
     The gate arguments are the ones `merge_into` gave the real `find_matching_merge_rule`,
     so that asking whether greenlight's approval is load-bearing asks it of the same gate.
+    `classification_wait` is the exception, left out on purpose: see
+    is_authorized_without_greenlight.
 
     The ghstack path lands a cherry-pick of each PR's head rather than the head itself,
     but get_ghstack_prs has already proven the two carry identical content, and the head
     is what greenlight records, so the head is what gets compared.
+
+    A PR of a GitHub-native stack lands the changes between the tip of its base branch
+    and its head. Only the head is compared, so a change to that base branch after
+    greenlight's review is not caught here.
     """
     # One rules file governs the whole stack, so every PR asks the same question of it.
     authorized_logins = partial(merge_authorized_logins, repo, pr.org, pr.project)
@@ -2150,7 +2435,14 @@ def check_greenlight_reviewed_head_sha(
     )
     if result.comment:
         try:
-            gh_post_pr_comment(pr.org, pr.project, pr.pr_num, result.comment, dry_run)
+            post_pr_comment(
+                pr.org,
+                pr.project,
+                pr.pr_num,
+                result.comment,
+                status=None,
+                dry_run=dry_run,
+            )
         except Exception as e:
             # The comment is a courtesy; failing to post it must not end a merge that
             # the guard itself is willing to keep waiting on.
@@ -2264,6 +2556,39 @@ def checks_to_str(checks: list[tuple[str, str | None]]) -> str:
     return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
 
 
+def with_waiting_reasons(
+    pending: list[tuple[str, str | None, int | None]], checks: JobNameToStateDict
+) -> list[tuple[str, str | None, int | None]]:
+    """`pending` for a message: a failed job waiting on its classification says so."""
+
+    def label(name: str) -> str:
+        check = checks.get(name)
+        reason = (
+            AWAITING_CLASSIFICATIONS.get(check.classification or "") if check else None
+        )
+        return f"{name} ({reason})" if reason else name
+
+    return [(label(name), url, job_id) for name, url, job_id in pending]
+
+
+def waited_note(
+    failed: list[tuple[str, str | None, int | None]],
+    classification_wait: ClassificationWaitWindow | None,
+) -> str:
+    """A sentence for a failure message when the merge waited on some of `failed`."""
+    if classification_wait is None:
+        return ""
+    waited = sum(
+        1 for _, _, job_id in failed if job_id in classification_wait.waited_on
+    )
+    if not waited:
+        return ""
+    return (
+        "Blocking jobs that the merge waited on for a Dr.CI or AI CI Advisor "
+        f"classification: {waited}."
+    )
+
+
 def checks_to_markdown_bullets(
     checks: list[tuple[str, str | None, int | None]],
 ) -> list[str]:
@@ -2273,57 +2598,80 @@ def checks_to_markdown_bullets(
 
 
 def post_starting_merge_comment(
-    repo: GitRepo,
     pr: GitHubPR,
+    stacked_prs: list[GitHubPR],
     explainer: TryMergeExplainer,
+    comment_id: int | None,
     dry_run: bool,
     ignore_current_checks_info: list[tuple[str, str | None, int | None]] | None = None,
 ) -> None:
     """Post the initial merge starting message on the PR. Also post a short
-    message on all PRs in the stack."""
-    gh_post_pr_comment(
+    message on the other PRs that merging it lands, `stacked_prs`."""
+    post_pr_comment(
         pr.org,
         pr.project,
         pr.pr_num,
         explainer.get_merge_message(ignore_current_checks_info),
+        status=MERGE_SUCCESS,
+        comment_id=comment_id,
         dry_run=dry_run,
     )
-    if pr.is_ghstack_pr():
-        for additional_prs, _ in get_ghstack_prs(repo, pr):
-            if additional_prs.pr_num != pr.pr_num:
-                gh_post_pr_comment(
-                    additional_prs.org,
-                    additional_prs.project,
-                    additional_prs.pr_num,
-                    f"Starting merge as part of PR stack under #{pr.pr_num}",
-                    dry_run=dry_run,
-                )
+    for additional_pr in stacked_prs:
+        if additional_pr.pr_num != pr.pr_num:
+            # Not a reply to a command on this PR: its merge outcome is reported
+            # on the PR that was asked to merge
+            post_pr_comment(
+                additional_pr.org,
+                additional_pr.project,
+                additional_pr.pr_num,
+                f"Starting merge as part of PR stack under #{pr.pr_num}",
+                status=None,
+                dry_run=dry_run,
+            )
 
 
 def manually_close_merged_pr(
     pr: GitHubPR,
     additional_merged_prs: list[GitHubPR],
     merge_commit_sha: str,
+    comment_id: int | None,
     dry_run: bool,
 ) -> None:
-    def _comment_and_close(pr: GitHubPR, comment: str) -> None:
+    def _still_open(pr: GitHubPR) -> GitHubPR | None:
         pr = GitHubPR(pr.org, pr.project, pr.pr_num)  # Refresh the PR
-        if not pr.is_closed():
-            gh_post_pr_comment(pr.org, pr.project, pr.pr_num, comment, dry_run)
-            gh_close_pr(pr.org, pr.project, pr.pr_num, dry_run)
+        return None if pr.is_closed() else pr
 
-    message = (
-        f"This PR (#{pr.pr_num}) was merged in {merge_commit_sha} but it is still open, likely due to a Github bug, "
-        "so mergebot is closing it manually.  If you think this is a mistake, please feel free to reopen and contact Dev Infra."
-    )
-    _comment_and_close(pr, message)
-    for additional_pr in additional_merged_prs:
-        message = (
-            f"This PR (#{additional_pr.pr_num}) was merged as part of PR #{pr.pr_num} in the stack under {merge_commit_sha} "
-            "but it is still open, likely due to a Github bug, so mergebot is closing it manually. "
-            "If you think this is a mistake, please feel free to reopen and contact Dev Infra."
+    if (open_pr := _still_open(pr)) is not None:
+        # The merge landed; this reply is its only report of that
+        post_pr_comment(
+            open_pr.org,
+            open_pr.project,
+            open_pr.pr_num,
+            f"This PR (#{pr.pr_num}) was merged in {merge_commit_sha} but it is still open, likely due to a Github bug, "
+            "so mergebot is closing it manually.  If you think this is a mistake, please feel free to reopen and contact Dev Infra.",
+            status=MERGE_SUCCESS,
+            comment_id=comment_id,
+            dry_run=dry_run,
         )
-        _comment_and_close(additional_pr, message)
+        gh_close_pr(open_pr.org, open_pr.project, open_pr.pr_num, dry_run)
+    for additional_pr in additional_merged_prs:
+        # A native stack's list includes the PR asked to merge, handled above
+        if additional_pr.pr_num == pr.pr_num:
+            continue
+        if (open_pr := _still_open(additional_pr)) is not None:
+            # Not a reply to a command on this PR: its merge outcome is reported
+            # on the PR that was asked to merge
+            post_pr_comment(
+                open_pr.org,
+                open_pr.project,
+                open_pr.pr_num,
+                f"This PR (#{additional_pr.pr_num}) was merged as part of PR #{pr.pr_num} in the stack under {merge_commit_sha} "
+                "but it is still open, likely due to a Github bug, so mergebot is closing it manually. "
+                "If you think this is a mistake, please feel free to reopen and contact Dev Infra.",
+                status=None,
+                dry_run=dry_run,
+            )
+            gh_close_pr(open_pr.org, open_pr.project, open_pr.pr_num, dry_run)
 
     print(f"PR {pr.pr_num} and all additional PRs in the stack have been closed.")
 
@@ -2392,26 +2740,104 @@ def save_merge_record(
         json.dump(data, f)
 
 
-@retries_decorator()
 def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
     """
-    Query HUD API to find similar failures to decide if they are flaky
+    Query HUD API to find similar failures to decide if they are flaky.
+
+    Returns None when every attempt has failed, or after a single attempt that
+    timed out, stalled on its error body or got HTTP 504. get_classifications
+    reads None as "Dr.CI unavailable" and answers from the Dr.CI check run
+    summary -- a fallback that drops AI_NOT_RELATED, so a failed call here
+    un-clears every failure the AI CI Advisor cleared.
     """
     # NB: This doesn't work internally atm because this requires making an
     # external API call to HUD
-    failures = gh_fetch_url(
-        f"https://hud.pytorch.org/api/drci/drci?prNumber={pr_num}",
-        data=f"repo={project}",
-        headers={
-            "Authorization": os.getenv("DRCI_BOT_KEY", ""),
-            "Accept": "application/vnd.github.v3+json",
-            "x-hud-internal-bot": os.getenv("HUD_API_TOKEN", ""),
-        },
-        method="POST",
-        reader=json.load,
-    )
+    delays = (0, *DRCI_RETRY_DELAYS_SECONDS)
+    retry: DrciRetry = "now"
+    for attempt, delay in enumerate(delays):
+        if retry == "stop":
+            break
+        if retry == "pause":
+            time.sleep(delay)
+        try:
+            failures = gh_fetch_url(
+                f"https://hud.pytorch.org/api/drci/drci?prNumber={pr_num}",
+                data=f"repo={project}",
+                headers={
+                    "Authorization": os.getenv("DRCI_BOT_KEY", ""),
+                    "Accept": "application/vnd.github.v3+json",
+                    "x-hud-internal-bot": os.getenv("HUD_API_TOKEN", ""),
+                },
+                method="POST",
+                reader=json.load,
+                timeout=DRCI_TIMEOUT_SECONDS,
+            )
+            return failures.get(str(pr_num), {}) if failures else {}
+        except HTTPError as err:
+            # gh_fetch_url has already printed the status. Dr.CI answers 400 for
+            # any exception it hits while recomputing and names it only in the
+            # body.
+            try:
+                body, retry = _http_error_body(err), _drci_retry_kind(err)
+            except TimeoutError as e:  # the body stalled after the headers
+                body, retry = f"<body timed out: {e}>", "stop"
+            print(
+                f"Attempt {attempt + 1} of {len(delays)} to call Dr.CI failed, "
+                f"response body: {body}"
+            )
+        except Exception as e:
+            print(
+                f"Attempt {attempt + 1} of {len(delays)} to call Dr.CI failed "
+                f'with "{e}"'
+            )
+            retry = _drci_retry_kind(e)
+    return None
 
-    return failures.get(str(pr_num), {}) if failures else {}
+
+def _drci_retry_kind(err: Exception) -> DrciRetry:
+    """How to follow a failed Dr.CI call, guessed from the exception type:
+    "pause" when waiting may clear it, "now" to retry at once, "stop" when
+    another attempt would only wait out the endpoint's time limit again."""
+    if isinstance(err, HTTPError):
+        if err.code == 504:  # HUD ran out its maxDuration
+            return "stop"
+        return "pause" if err.code in (400, 408, 429) or err.code >= 500 else "now"
+    if isinstance(err, TimeoutError):  # silent for DRCI_TIMEOUT_SECONDS
+        return "stop"
+    if isinstance(err, URLError):
+        reason = err.reason
+        if isinstance(reason, TimeoutError):
+            # No errno: DRCI_TIMEOUT_SECONDS ran out while sending. An errno
+            # (ETIMEDOUT): the kernel gave up while connecting or sending, which
+            # a later attempt may get past; Dr.CI's recompute is safe to repeat.
+            return "stop" if reason.errno is None else "pause"
+        # urlopen wraps errors raised while connecting and sending. Refused
+        # connections, no route (as on internal runners) and unknown hosts do
+        # not clear by waiting; a temporary DNS failure or a connection broken
+        # mid-send may.
+        if isinstance(reason, socket.gaierror):
+            return "pause" if reason.errno == socket.EAI_AGAIN else "now"
+        broken = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
+        return "pause" if isinstance(reason, broken) else "now"
+    # Raised while waiting for or reading the response, e.g. RemoteDisconnected,
+    # IncompleteRead, or JSONDecodeError on a cut-off body. Anything else is
+    # most likely a bug, which waiting will not fix.
+    transient = (
+        http.client.HTTPException,
+        OSError,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+    )
+    return "pause" if isinstance(err, transient) else "now"
+
+
+def _http_error_body(err: HTTPError, limit: int = 500) -> str:
+    try:
+        return err.read(limit).decode("utf-8", errors="replace")
+    except TimeoutError:
+        raise
+    except Exception as e:
+        return f"<unreadable body: {e}>"
 
 
 REMOVE_JOB_NAME_SUFFIX_REGEX = re.compile(r", [0-9]+, [0-9]+, .+\)$")
@@ -2556,16 +2982,136 @@ def is_ai_not_related(check: JobCheckState, drci_classifications: Any) -> bool:
     )
 
 
+def is_ai_pending(check: JobCheckState, drci_classifications: Any) -> bool:
+    """Return True if Dr.CI says the AI CI Advisor still owes this failure a verdict.
+
+    Dr.CI lists such a job under ``AI_PENDING`` and keeps it in its blocking category
+    too: the list only says an answer that may clear the job is coming. Matched on the
+    job id only, for the reason given in is_ai_not_related.
+    """
+    if not check or not drci_classifications or not check.job_id:
+        return False
+
+    # A new category whose shape production has not confirmed yet: skip a malformed
+    # entry rather than fail the merge on it, as is_unlisted_by_drci does.
+    pending = drci_classifications.get("AI_PENDING")
+    if not isinstance(pending, list):
+        return False
+    return any(
+        isinstance(job, dict) and check.job_id == job.get("id") for job in pending
+    )
+
+
+def is_unlisted_by_drci(check: JobCheckState, drci_classifications: Any) -> bool:
+    """Return True if this GitHub Actions job is in none of Dr.CI's categories.
+
+    Dr.CI files every failed job it knows about under some category, but it reads jobs
+    from a database that lags GitHub, so a job that failed moments ago may not be in
+    its answer yet -- nor dispatched to the AI CI Advisor, which Dr.CI does while
+    answering. Only meaningful for a live answer: the check-run summary is a snapshot.
+    awaiting_classification checks first that the check is a GitHub Actions job's.
+    """
+    if not check or not drci_classifications or not check.job_id:
+        return False
+
+    # Unlike its siblings, which read known categories, this walks every key, so it
+    # skips anything that is not a job list rather than fail the merge on it.
+    return all(
+        check.job_id != job.get("id")
+        for jobs in drci_classifications.values()
+        if isinstance(jobs, list)
+        for job in jobs
+        if isinstance(job, dict)
+    )
+
+
+@dataclass
+class ClassificationWaitWindow:
+    """How long one merge command has waited on each failed job's classification.
+
+    Owned by merge() and carried across its retries, like GreenlightWaitWindow. Each
+    job gets its own budget, opened the first time this merge saw it waiting, so a
+    rerun -- a new job id -- opens a new one. Without a window, get_classifications
+    never waits, which keeps every other caller as it was.
+    """
+
+    opened_at: dict[int, float] = field(default_factory=dict)
+    # The AWAITING_CLASSIFICATIONS key each job last waited under.
+    reasons: dict[int, str] = field(default_factory=dict)
+    # Jobs the latest classification of their PR left waiting.
+    waiting: set[int] = field(default_factory=set)
+    # Jobs that were waiting when merge() went to sleep for a retry.
+    waited_on: set[int] = field(default_factory=set)
+
+    def within_budget(self, job_id: int, now: float) -> bool:
+        """Record that the job is waiting. True while its budget lasts."""
+        opened = self.opened_at.setdefault(job_id, now)
+        return now - opened < CLASSIFICATION_WAIT_SECONDS
+
+    def note_retry(self) -> None:
+        """Called by merge() before it sleeps: every job waiting now was waited on."""
+        self.waited_on.update(self.waiting)
+
+
+def awaiting_classification(
+    check: JobCheckState,
+    live_classifications: Any,
+    classification_wait: ClassificationWaitWindow,
+) -> str | None:
+    """The AWAITING_CLASSIFICATIONS key for a failed job whose classification is still
+    on the way, or None.
+
+    Only a plain FAILURE of a GitHub Actions job qualifies (see RE_GHA_JOB_URL): it is
+    the only conclusion the AI CI Advisor can clear, and the case where Dr.CI's lag has
+    been seen to fail a merge. A job Dr.CI has already put in a blocking category with
+    no verdict coming is not waited on. Without a live answer, a job whose wait is
+    already open keeps the reason it last waited under.
+    """
+    if check.status != "FAILURE" or not RE_GHA_JOB_URL.search(check.url or ""):
+        return None
+    if not live_classifications:
+        return classification_wait.reasons.get(check.job_id)
+    if is_unlisted_by_drci(check, live_classifications):
+        return "DRCI_PENDING"
+    if is_ai_pending(check, live_classifications):
+        return "AI_PENDING"
+    return None
+
+
 def get_classifications(
     pr_num: int,
     project: str,
     checks: dict[str, JobCheckState],
     ignore_current_checks: set[tuple[int, str]] | None,
+    classification_wait: ClassificationWaitWindow | None = None,
 ) -> dict[str, JobCheckState]:
+    """Classify each failed check from Dr.CI's answer.
+
+    With a ClassificationWaitWindow, a failed job whose classification is still on the
+    way (awaiting_classification) is classified with its AWAITING_CLASSIFICATIONS key
+    while the window allows, so categorize_checks counts it as pending and merge()
+    retries instead of failing. Only a live Dr.CI answer can start a wait; without
+    one (the call failed, or answered {}), a failed job whose wait is already open
+    keeps waiting under its last reason until its budget runs out.
+    """
     # Get the failure classification from Dr.CI, which is the source of truth
     # going forward. It's preferable to try calling Dr.CI API directly first
     # to get the latest results as well as update Dr.CI PR comment
     drci_classifications = get_drci_classifications(pr_num=pr_num, project=project)
+    # Taken before the fallback below can replace it with the check-run summary. An
+    # empty answer starts no wait: Dr.CI answers {} for a PR none of whose jobs it has
+    # ingested, which is rare by the time a merge sees a failure, but also for every PR
+    # of a repo it has no data for, where a wait would delay every failed merge.
+    live_classifications = drci_classifications or None
+    if classification_wait is not None:
+        # This answer replaces the last one for these jobs; other PRs of a stack
+        # share the window, so theirs stay. A live answer also retires their saved
+        # reasons, so a job it settled does not wait again on a later failed call.
+        job_ids = {c.job_id for c in checks.values() if c.job_id}
+        classification_wait.waiting -= job_ids
+        if live_classifications is not None:
+            for job_id in job_ids:
+                classification_wait.reasons.pop(job_id, None)
 
     def get_readable_drci_results(drci_classifications: Any) -> str:
         try:
@@ -2709,6 +3255,27 @@ def get_classifications(
                 check.title,
                 check.summary,
             )
+            continue
+
+        if classification_wait is None or not check.job_id:
+            continue
+        awaiting = awaiting_classification(
+            check, live_classifications, classification_wait
+        )
+        if awaiting is not None and classification_wait.within_budget(
+            check.job_id, time.time()
+        ):
+            classification_wait.reasons[check.job_id] = awaiting
+            classification_wait.waiting.add(check.job_id)
+            checks_with_classifications[name] = JobCheckState(
+                check.name,
+                check.url,
+                check.status,
+                awaiting,
+                check.job_id,
+                check.title,
+                check.summary,
+            )
 
     return checks_with_classifications
 
@@ -2809,17 +3376,15 @@ def get_ghstack_dependent_prs(
     return rc
 
 
-def do_revert_prs(
+def commit_reverts(
     repo: GitRepo,
-    original_pr: GitHubPR,
     shas_and_prs: list[tuple[str, GitHubPR]],
     *,
     author_login: str,
-    extra_msg: str = "",
-    skip_internal_checks: bool = False,
-    dry_run: bool = False,
-) -> None:
-    # Prepare and push revert commits
+    extra_msg: str,
+) -> str:
+    """Commit a revert of each commit of `shas_and_prs`, in order, on the default
+    branch, and return the line that ends the message of the last one."""
     for commit_sha, pr in shas_and_prs:
         revert_msg = f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
         revert_msg += extra_msg
@@ -2829,12 +3394,24 @@ def do_revert_prs(
         msg = re.sub(RE_PULL_REQUEST_RESOLVED, "", msg)
         msg += revert_msg
         repo.amend_commit_message(msg)
-    repo.push(shas_and_prs[0][1].default_branch(), dry_run)
+    return revert_msg
 
-    # Comment/reopen PRs
+
+def reopen_reverted_prs(
+    original_pr: GitHubPR,
+    shas_and_prs: list[tuple[str, GitHubPR]],
+    revert_msg: str,
+    *,
+    comment_id: int | None,
+    skip_internal_checks: bool,
+    dry_run: bool,
+) -> None:
+    """Comment on, label and reopen the PRs of `shas_and_prs`, in order, once the
+    reverts of their commits landed, and comment `revert_msg` on those commits."""
     for commit_sha, pr in shas_and_prs:
         revert_message = ""
-        if pr.pr_num == original_pr.pr_num:
+        asked = pr.pr_num == original_pr.pr_num
+        if asked:
             revert_message += (
                 f"@{pr.get_pr_creator_login()} your PR has been successfully reverted."
             )
@@ -2850,15 +3427,172 @@ def do_revert_prs(
         ):
             revert_message += "\n:warning: This PR might contain internal changes"
             revert_message += "\ncc: @pytorch/pytorch-dev-infra"
-        gh_post_pr_comment(
-            pr.org, pr.project, pr.pr_num, revert_message, dry_run=dry_run
-        )
+        if asked:
+            post_pr_comment(
+                pr.org,
+                pr.project,
+                pr.pr_num,
+                revert_message,
+                status=REVERT_SUCCESS,
+                comment_id=comment_id,
+                dry_run=dry_run,
+            )
+        else:
+            # Not a reply to a command on this PR: its revert is reported on the
+            # PR that was asked to revert
+            post_pr_comment(
+                pr.org,
+                pr.project,
+                pr.pr_num,
+                revert_message,
+                status=None,
+                dry_run=dry_run,
+            )
 
         pr.add_numbered_label("reverted", dry_run)
         pr.add_label("ci-no-td", dry_run)
         if not dry_run:
             gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
             gh_update_pr_state(pr.org, pr.project, pr.pr_num)
+
+
+def do_revert_prs(
+    repo: GitRepo,
+    original_pr: GitHubPR,
+    shas_and_prs: list[tuple[str, GitHubPR]],
+    *,
+    author_login: str,
+    extra_msg: str = "",
+    comment_id: int | None,
+    skip_internal_checks: bool = False,
+    dry_run: bool = False,
+) -> None:
+    revert_msg = commit_reverts(
+        repo, shas_and_prs, author_login=author_login, extra_msg=extra_msg
+    )
+    repo.push(shas_and_prs[0][1].default_branch(), dry_run)
+    # The revert landed: a failure after this point must not report it as failed
+    with after_landing(dry_run):
+        reopen_reverted_prs(
+            original_pr,
+            shas_and_prs,
+            revert_msg,
+            comment_id=comment_id,
+            skip_internal_checks=skip_internal_checks,
+            dry_run=dry_run,
+        )
+
+
+def revert_with_dependents(
+    repo: GitRepo,
+    pr: GitHubPR,
+    commit_sha: str,
+    *,
+    author_login: str,
+    extra_msg: str,
+    comment_id: int | None,
+    skip_internal_checks: bool,
+    dry_run: bool,
+) -> None:
+    """Revert `commit_sha`, which lands `pr`, or, if PRs stacked on `pr` landed on
+    top of it (see find_stack_dependents), revert them and `pr`'s landing, top of the
+    stack first, and reopen them bottom-up. Then refresh the branches of the reverted
+    PRs (see refresh_reverted_branches)."""
+    default_branch = pr.default_branch()
+    shas_and_prs = [(commit_sha, pr)]
+    try:
+        landing, dependents = find_stack_dependents(
+            repo, pr.org, pr.project, pr.pr_num, default_branch
+        )
+        if landing is not None and dependents:
+            # validate_revert's lookup is a substring search, which also matches
+            # quotes and longer PR numbers; revert the landing the dependents need
+            shas_and_prs = [
+                (sha, GitHubPR(pr.org, pr.project, num)) for sha, num in dependents
+            ] + [(landing, pr)]
+            prs_to_revert = " ".join(p.get_pr_url() for _, p in shas_and_prs)
+            print(f"About to revert native stack of PRs: {prs_to_revert}")
+    except Exception as e:
+        raise RuntimeError(
+            f"Could not look up the PRs stacked on #{pr.pr_num}, so nothing was reverted, please try again"
+        ) from e
+    revert_msg = commit_reverts(
+        repo, shas_and_prs, author_login=author_login, extra_msg=extra_msg
+    )
+    repo.push(default_branch, dry_run)
+    # The revert landed: a failure after this point must not report it as failed
+    with after_landing(dry_run):
+        reopen_reverted_prs(
+            pr,
+            shas_and_prs[::-1],
+            revert_msg,
+            comment_id=comment_id,
+            skip_internal_checks=skip_internal_checks,
+            dry_run=dry_run,
+        )
+        refresh_reverted_branches(
+            repo, pr, [p.pr_num for _, p in shas_and_prs], dry_run
+        )
+
+
+def refresh_reverted_branches(
+    repo: GitRepo, original_pr: GitHubPR, reverted: list[int], dry_run: bool
+) -> None:
+    """Once the PRs `reverted`, `original_pr` and those reverted with it, are
+    reverted and reopened, merge the default branch into the branches of their
+    stack up to the topmost one (see build_native_stack_rebase) if merging that PR
+    would be refused, as when a rebase merged the trunk into a branch after its PR
+    landed: each PR then shows only its own changes again, and its author is asked
+    to pull the branch. The reverts already landed, so failures only get a comment."""
+    if dry_run or original_pr.is_cross_repo():
+        return
+    org, project = original_pr.org, original_pr.project
+    default_branch = original_pr.default_branch()
+    stack = None
+    try:
+        stack = get_native_stack(org, project, original_pr.pr_num)
+        if stack is None:
+            return
+        positions = {entry.number: entry.position for entry in stack.entries}
+        stacked = [number for number in reverted if number in positions]
+        if not stacked:
+            return
+        top = max(stacked, key=lambda number: positions[number])
+        try:
+            get_native_stack_landing_prs(repo, org, project, stack, top, default_branch)
+            return
+        except NativeStackError as e:
+            print(f"Updating the branches of the reverted PRs: {e}")
+        updates = build_native_stack_rebase(
+            repo, org, project, stack, top, default_branch, default_branch
+        )
+        push_branches(repo, updates)
+        for number, msg in branch_update_comments(
+            stack, updates, default_branch, original_pr.pr_num, "reverted"
+        ):
+            post_pr_comment(org, project, number, msg, status=None)
+    except Exception as e:
+        print(f"Failed to update the branches of the reverted PRs: {e}")
+        traceback.print_exc()
+        # The revert of a PR that is not stacked must not get this comment, so a
+        # failed read only gets it if the revert found PRs stacked on this one
+        if stack is None and len(reverted) == 1:
+            return
+        try:
+            # Reports a cleanup after a revert that landed, not the revert's outcome
+            post_pr_comment(
+                org,
+                project,
+                original_pr.pr_num,
+                "The branches of the reverted PRs could not be updated, so they may "
+                "not show only their own changes. To update them, comment "
+                f"`@pytorchbot rebase -b {default_branch}` on the topmost reverted "
+                f"PR. Error: {e}",
+                status=None,
+            )
+        except Exception as comment_error:
+            print(f"Failed to comment on PR #{original_pr.pr_num}: {comment_error}")
+            traceback.print_exc()
 
 
 def try_revert(
@@ -2872,7 +3606,15 @@ def try_revert(
     try:
         author_login, commit_sha = validate_revert(repo, pr, comment_id=comment_id)
     except PostCommentError as e:
-        gh_post_pr_comment(pr.org, pr.project, pr.pr_num, str(e), dry_run=dry_run)
+        post_pr_comment(
+            pr.org,
+            pr.project,
+            pr.pr_num,
+            str(e),
+            status=REVERT_FAILURE,
+            comment_id=comment_id,
+            dry_run=dry_run,
+        )
         return
 
     extra_msg = f" due to {reason}" if reason is not None else ""
@@ -2881,16 +3623,25 @@ def try_revert(
         if comment_id is not None
         else "\n"
     )
+    if not pr.is_ghstack_pr():
+        revert_with_dependents(
+            repo,
+            pr,
+            commit_sha,
+            author_login=author_login,
+            extra_msg=extra_msg,
+            comment_id=comment_id,
+            skip_internal_checks=can_skip_internal_checks(pr, comment_id),
+            dry_run=dry_run,
+        )
+        return
     shas_and_prs = [(commit_sha, pr)]
-    if pr.is_ghstack_pr():
-        try:
-            shas_and_prs = get_ghstack_dependent_prs(repo, pr)
-            prs_to_revert = " ".join([t[1].get_pr_url() for t in shas_and_prs])
-            print(f"About to stack of PRs: {prs_to_revert}")
-        except Exception as e:
-            print(
-                f"Failed to fetch dependent PRs: {str(e)}, fall over to single revert"
-            )
+    try:
+        shas_and_prs = get_ghstack_dependent_prs(repo, pr)
+        prs_to_revert = " ".join([t[1].get_pr_url() for t in shas_and_prs])
+        print(f"About to stack of PRs: {prs_to_revert}")
+    except Exception as e:
+        print(f"Failed to fetch dependent PRs: {str(e)}, fall over to single revert")
 
     if not shas_and_prs:
         raise RuntimeError(
@@ -2905,6 +3656,7 @@ def try_revert(
         shas_and_prs,
         author_login=author_login,
         extra_msg=extra_msg,
+        comment_id=comment_id,
         dry_run=dry_run,
         skip_internal_checks=can_skip_internal_checks(pr, comment_id),
     )
@@ -3009,6 +3761,10 @@ def categorize_checks(
             # ignored anyway. This is useful to not need to wait for scarce resources
             # like ROCm, which is also frequently in unstable mode
             pending_checks.append((checkname, url, job_id))
+        elif classification in AWAITING_CLASSIFICATIONS:
+            # Failed, but its classification is still on the way and may clear it, so
+            # it is waited on like a running job. get_classifications bounds the wait.
+            pending_checks.append((checkname, url, job_id))
         elif classification == "INVALID_CANCEL":
             continue
         elif not is_passing_status(check_runs[checkname].status):
@@ -3082,6 +3838,7 @@ def merge(
     timeout_minutes: int = 400,
     stale_pr_days: int = 3,
     ignore_current: bool = False,
+    native_stack: NativeStack | None = None,
 ) -> None:
     initial_commit_sha = pr.last_commit_sha()
     pr_link = f"https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num}"
@@ -3102,16 +3859,12 @@ def merge(
     ignore_current_checks_info = []
     ignore_current_checks: set[tuple[int, str]] = set()
 
-    stacked_prs = (
-        [p for p, _ in get_ghstack_prs(repo, pr)]  # raises error if out of sync
-        if pr.is_ghstack_pr()
-        else [pr]
-    )
+    stacked_prs = get_prs_to_merge(repo, pr, native_stack)
 
     check_for_sev(pr.org, pr.project, skip_mandatory_checks)
 
     if skip_mandatory_checks:
-        post_starting_merge_comment(repo, pr, explainer, dry_run)
+        post_starting_merge_comment(pr, stacked_prs, explainer, comment_id, dry_run)
         # This return is outside the retry loop below, so there is no iteration for
         # the greenlight check to wait in: it has to decide now or refuse.
         return pr.merge_into(
@@ -3120,6 +3873,7 @@ def merge(
             skip_mandatory_checks=skip_mandatory_checks,
             comment_id=comment_id,
             greenlight_wait=None,
+            native_stack=native_stack,
         )
 
     # Check for approvals
@@ -3140,9 +3894,10 @@ def merge(
             ignore_current_checks_info += [(f"{n}{tag}", u, j) for n, u, j in failing]
 
     post_starting_merge_comment(
-        repo,
         pr,
+        stacked_prs,
         explainer,
+        comment_id,
         dry_run,
         ignore_current_checks_info=ignore_current_checks_info,
     )
@@ -3153,6 +3908,8 @@ def merge(
     # Owned out here so the greenlight wait budget spans every iteration below rather
     # than restarting each time merge_into is re-entered.
     greenlight_wait = GreenlightWaitWindow()
+    # Likewise for the per-job wait on a classification still on the way.
+    classification_wait = ClassificationWaitWindow()
     while elapsed_time < timeout_minutes * 60:
         check_for_sev(pr.org, pr.project, skip_mandatory_checks)
         current_time = time.time()
@@ -3171,7 +3928,10 @@ def merge(
             ignore_flaky_failures = True
             try:
                 find_matching_merge_rule(
-                    pr, repo, ignore_current_checks=ignore_current_checks
+                    pr,
+                    repo,
+                    ignore_current_checks=ignore_current_checks,
+                    classification_wait=classification_wait,
                 )
             except MandatoryChecksMissingError as ex:
                 if ex.rule is not None:
@@ -3186,6 +3946,7 @@ def merge(
                 pr.project,
                 checks,
                 ignore_current_checks=ignore_current_checks,
+                classification_wait=classification_wait,
             )
             pending, failing, _ = categorize_checks(
                 checks,
@@ -3206,17 +3967,22 @@ def merge(
             # END of HACK
 
             if len(failing) > 0:
-                raise RuntimeError(
+                message = (
                     f"{len(failing)} jobs have failed, first few of them are: "
                     + ", ".join(f"[{x[0]}]({x[1]})" for x in failing[:5])
                 )
+                note = waited_note(failing, classification_wait)
+                raise RuntimeError(f"{message}. {note}" if note else message)
             if len(pending) > 0:
                 if failed_rule_message is not None:
                     raise failed_rule_message
                 else:
                     raise MandatoryChecksMissingError(
                         f"Still waiting for {len(pending)} jobs to finish, "
-                        + f"first few of them are: {', '.join(x[0] for x in pending[:5])}"
+                        + "first few of them are: "
+                        + ", ".join(
+                            x[0] for x in with_waiting_reasons(pending[:5], checks)
+                        )
                     )
 
             return pr.merge_into(
@@ -3226,19 +3992,45 @@ def merge(
                 comment_id=comment_id,
                 ignore_current_checks=ignore_current_checks,
                 greenlight_wait=greenlight_wait,
+                native_stack=native_stack,
+                classification_wait=classification_wait,
             )
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(
-                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in 5 min",
+                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in {MERGE_RETRY_INTERVAL_SECONDS // 60} min",
                 flush=True,
             )
-            time.sleep(5 * 60)
+            classification_wait.note_retry()
+            time.sleep(MERGE_RETRY_INTERVAL_SECONDS)
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"
     gh_add_labels(pr.org, pr.project, pr.pr_num, ["land-failed"], dry_run)
     raise RuntimeError(msg)
+
+
+def format_failure_comment(e: Exception, title: str, run_url: str | None) -> str:
+    """Render an exception as the PR comment mergebot posts on failure.
+
+    Debugging detail (workflow link, failing rule, a failed GraphQL query) goes
+    in a collapsed section, since it is not helpful to most devs.
+    """
+    details: list[str] = []
+    if run_url is not None:
+        details.append(f'Raised by <a href="{run_url}">workflow job</a>')
+    if isinstance(e, MergeRuleFailedError) and e.rule:
+        details.append(f"Failing merge rule: {e.rule.name}")
+    if isinstance(e, GHGraphQLError):
+        details.append(e.details_markdown())
+
+    msg = f"## {title}\n**Reason**: {e}\n"
+    if details:
+        # Blank lines around each part so markdown renders inside <details>
+        msg += "\n<details><summary>Details for Dev Infra team</summary>\n\n"
+        msg += "\n\n".join(details)
+        msg += "\n</details>\n"
+    return msg
 
 
 def main() -> None:
@@ -3247,30 +4039,29 @@ def main() -> None:
     org, project = repo.gh_owner_and_name()
 
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
-        exception = f"**Reason**: {e}"
-
-        failing_rule = None
-        if isinstance(e, MergeRuleFailedError):
-            failing_rule = e.rule.name if e.rule else None
-
-        internal_debugging = ""
         run_url = os.getenv("GH_RUN_URL")
-        if run_url is not None:
-            # Hide this behind a collapsed bullet since it's not helpful to most devs
-            internal_debugging = "\n".join(
-                line
-                for line in (
-                    "<details><summary>Details for Dev Infra team</summary>",
-                    f'Raised by <a href="{run_url}">workflow job</a>\n',
-                    f"Failing merge rule: {failing_rule}" if failing_rule else "",
-                    "</details>",
-                )
-                if line
-            )  # ignore empty lines during the join
-
-        msg = "\n".join((f"## {title}", f"{exception}", "", f"{internal_debugging}"))
-
-        gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
+        if isinstance(e, LandedError) and e.__cause__ is not None:
+            command = "revert" if args.revert else "merge"
+            title = f"The {command} landed, but a step after it failed"
+            # Not the command's outcome: the merge or revert landed
+            post_pr_comment(
+                org,
+                project,
+                args.pr_num,
+                format_failure_comment(e.__cause__, title, run_url),
+                status=None,
+                dry_run=args.dry_run,
+            )
+        else:
+            post_pr_comment(
+                org,
+                project,
+                args.pr_num,
+                format_failure_comment(e, title, run_url),
+                status=REVERT_FAILURE if args.revert else MERGE_FAILURE,
+                comment_id=args.comment_id,
+                dry_run=args.dry_run,
+            )
         traceback.print_exc()
 
     try:
@@ -3282,12 +4073,14 @@ def main() -> None:
 
     if args.revert:
         try:
-            gh_post_pr_comment(
+            post_pr_comment(
                 org,
                 project,
                 args.pr_num,
                 get_revert_message(org, project, pr.pr_num),
-                args.dry_run,
+                status=REVERT_SUCCESS,
+                comment_id=args.comment_id,
+                dry_run=args.dry_run,
             )
             try_revert(
                 repo,
@@ -3300,34 +4093,58 @@ def main() -> None:
             handle_exception(e, f"Reverting PR {args.pr_num} failed")
         return
 
+    # A --check-mergeability run answers no command, so its refusals carry no tag
     if pr.is_closed():
-        gh_post_pr_comment(
+        post_pr_comment(
             org,
             project,
             args.pr_num,
             f"Can't merge closed PR #{args.pr_num}",
+            status=None if args.check_mergeability else MERGE_FAILURE,
+            comment_id=args.comment_id,
             dry_run=args.dry_run,
         )
         return
 
     if pr.is_cross_repo() and pr.is_ghstack_pr():
-        gh_post_pr_comment(
+        post_pr_comment(
             org,
             project,
             args.pr_num,
             "Cross-repo ghstack merges are not supported",
+            status=None if args.check_mergeability else MERGE_FAILURE,
+            comment_id=args.comment_id,
             dry_run=args.dry_run,
         )
         return
+    native_stack: NativeStack | None = None
     if not pr.is_ghstack_pr() and pr.base_ref() != pr.default_branch():
-        gh_post_pr_comment(
-            org,
-            project,
-            args.pr_num,
-            f"PR targets {pr.base_ref()} rather than {pr.default_branch()}, refusing merge request",
-            dry_run=args.dry_run,
-        )
-        return
+        refusal = f"PR targets {pr.base_ref()} rather than {pr.default_branch()}, refusing merge request"
+        # merge_changes_locally, which --check-mergeability runs, cannot land stacks;
+        # forks need it, since only it pins the head to the merge comment
+        if not args.check_mergeability and not pr.is_cross_repo():
+            try:
+                native_stack = get_native_stack(org, project, pr.pr_num)
+            except Exception as e:
+                print(f"Failed to read the stack of PR #{pr.pr_num}: {e}")
+                traceback.print_exc()
+                refusal = f"Could not read the stack of PR #{pr.pr_num}, refusing merge request: {e}"
+        if native_stack is None or native_stack.base_ref != pr.default_branch():
+            if native_stack is not None:
+                refusal = (
+                    f"PR #{pr.pr_num} is in a stack based on {native_stack.base_ref} "
+                    f"rather than {pr.default_branch()}, refusing merge request"
+                )
+            post_pr_comment(
+                org,
+                project,
+                args.pr_num,
+                refusal,
+                status=None if args.check_mergeability else MERGE_FAILURE,
+                comment_id=args.comment_id,
+                dry_run=args.dry_run,
+            )
+            return
 
     if args.check_mergeability:
         if pr.is_ghstack_pr():
@@ -3344,7 +4161,15 @@ def main() -> None:
             f"This PR updates submodules {', '.join(pr.get_changed_submodules())}\n"
         )
         message += '\nIf those updates are intentional, please add "submodule" keyword to PR title/description.'
-        gh_post_pr_comment(org, project, args.pr_num, message, dry_run=args.dry_run)
+        post_pr_comment(
+            org,
+            project,
+            args.pr_num,
+            message,
+            status=MERGE_FAILURE,
+            comment_id=args.comment_id,
+            dry_run=args.dry_run,
+        )
         return
     try:
         # Ensure comment id is set, else fail
@@ -3360,11 +4185,16 @@ def main() -> None:
             dry_run=args.dry_run,
             skip_mandatory_checks=args.force,
             ignore_current=args.ignore_current,
+            native_stack=native_stack,
         )
     except Exception as e:
         handle_exception(e)
 
-        if args.comment_id and args.pr_num:
+        if isinstance(e, LandedError):
+            # The merge landed: keep the record merge_into saved, if it got that
+            # far, rather than overwrite it with a failure
+            print("Merge landed, not recording it as failed")
+        elif args.comment_id and args.pr_num:
             # Finally, upload the record to s3, we don't have access to the
             # list of pending and failed checks here, but they are not really
             # needed at the moment

@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ResizeCommon.h>
@@ -252,7 +253,7 @@ static const Tensor& _resize_(
         memory_format);
     self_->empty_tensor_restride(memory_format);
   }
-  if (C10_UNLIKELY(maybe_old_storage_nbytes_to_fill_resize.has_value())) {
+  if (maybe_old_storage_nbytes_to_fill_resize.has_value()) [[unlikely]] {
     at::native::fill_resize_deterministic_(self, *maybe_old_storage_nbytes_to_fill_resize);
   }
   return self;
