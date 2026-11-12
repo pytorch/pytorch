@@ -1741,6 +1741,9 @@ class _CapturePackage(CompilePackage):
         self.graph_break_op_devices: set[tuple[tuple[str, str], str]] = set()
         self._compile_graph_break_op_devices: set[tuple[tuple[str, str], str]] = set()
         self._compile_graph_break_code: types.CodeType | None = None
+        # The (fwd, bwd) of the torch._dynamo.override_cudagraphs each backend graph
+        # compiled under, by backend id.
+        self.cudagraph_overrides: dict[str, tuple[bool | None, bool | None]] = {}
 
     def note_compute(self) -> None:
         if self._current_entry is not None:
@@ -1757,6 +1760,9 @@ class _CapturePackage(CompilePackage):
 
         self.op_names[backend_id] = _op_names(gm)
         self.device_types[backend_id] = _graph_device_types(gm.graph)
+        # The annotation compile_fx reads.
+        if (a := gm.meta.get("cudagraph_annotation")) is not None:
+            self.cudagraph_overrides[backend_id] = (a.fwd, a.bwd)
 
     def add_graph_break_op(
         self,
@@ -2126,6 +2132,42 @@ class PrecompileSession(Generic[_P, _R]):
                 if artifact is not None:
                     self._backend_artifacts[backend_id] = artifact
 
+    def _check_cudagraph_overrides(
+        self, backends: Mapping[str, BackendCacheArtifact[Any]]
+    ) -> None:
+        """Refuse a graph that a ``torch._dynamo.override_cudagraphs`` decided
+        differently from ``CUDAGRAPH_CONFIG``.
+
+        The artifact records one CUDA graph config for all its graphs, and load
+        post-compiles each under it: a graph compiled without CUDA graphs fails
+        there when the config has them on, and one compiled with them runs
+        without when it has them off.
+        """
+        from torch._functorch._aot_autograd.aot_autograd_result import (
+            BundledAOTAutogradCacheArtifact,
+        )
+
+        flag = self._cudagraph_config["triton.cudagraphs"]
+        for backend_id, (fwd, bwd) in self._package.cudagraph_overrides.items():
+            artifact = backends.get(backend_id)
+            # Only a graph Inductor compiled carries a CUDA graph decision.
+            if not isinstance(artifact, BundledAOTAutogradCacheArtifact):
+                continue
+            # As compile_fx applies an override: fwd decides the forward, and
+            # bwd=False keeps a CUDA graphed forward's backward out. A forward
+            # Inductor then kept out for another reason (CPU inputs, ...) is not
+            # looked at, so its override is refused all the same.
+            forward = flag if fwd is None else fwd
+            backward = artifact.content.compiled_bw is not None
+            if forward != flag or (forward and backward and bwd is False):
+                raise PackageError(
+                    f"a DynamoTracer capture cannot serve graph {backend_id}, compiled "
+                    f"under torch._dynamo.override_cudagraphs(fwd={fwd}, bwd={bwd}), "
+                    f"with triton.cudagraphs={flag}: the artifact records the capture's "
+                    "CUDA graph config (CUDAGRAPH_CONFIG), not each graph's. Set "
+                    "triton.cudagraphs to match, or remove the override."
+                )
+
     def _collect_backends(self) -> dict[str, BackendCacheArtifact[Any]]:
         """The compiled subgraphs this capture produced, keyed by backend id."""
         from torch._dynamo.output_graph import noop_graph_call
@@ -2355,6 +2397,8 @@ class PrecompileSession(Generic[_P, _R]):
             require_no_risky_drops=require_no_risky_drops,
         )
         backends = self._collect_backends()
+        if self._backend_name == "inductor":
+            self._check_cudagraph_overrides(backends)
         package = self._package
         # Each op's devices: a graph-break op runs eagerly on its inputs' devices, or
         # on those of any compiled frame, and a graph's ops on the graph's devices.
