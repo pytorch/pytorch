@@ -4338,7 +4338,12 @@ def load(
     refusal: a call no captured variant covers compiles with the artifact's
     backend and the capture's ``mode`` or ``options`` (recorded in the
     artifact's ``INDUCTOR_OPTIONS``), as ``torch.compile`` would, under the
-    process-wide stance like any other compile. An artifact whose options are
+    process-wide stance like any other compile. Inductor lowers it under the
+    artifact's ``CUDAGRAPH_CONFIG`` too, so it runs as a CUDA graph exactly
+    when the captured graphs do; Dynamo still traces it under the loading
+    process's own ``triton.cudagraphs``, which decides whether a Python float
+    that changed since capture is specialized, so set that as the capture did
+    to trace alike. An artifact whose options are
     not all Python literals (such as a custom pass) refuses the flag. The
     captured variants are still served first and do not count toward
     ``torch._dynamo.config.recompile_limit``, so each frame gets
