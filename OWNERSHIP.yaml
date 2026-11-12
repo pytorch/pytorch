@@ -634,7 +634,6 @@ ownership:
     owners: []
     section: third_party_backend_deps
     paths:
-      - /third_party/NNPACK
       - /third_party/VulkanMemoryAllocator
       - /third_party/XNNPACK
       - /third_party/aiter
