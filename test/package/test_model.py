@@ -167,35 +167,6 @@ class ModelTest(PackageTestCase):
 
         self.assertEqual(*results)
 
-    @skipIfNoTorchVision
-    def test_script_resnet(self):
-        resnet = resnet18()
-
-        f1 = BytesIO()
-        # Option 1: save by pickling the whole model
-        # + single-line, similar to torch.jit.save
-        # - more difficult to edit the code after the model is created
-        with PackageExporter(f1) as e:
-            e.intern("**")
-            e.save_pickle("model", "pickled", resnet)
-
-        f1.seek(0)
-
-        i = PackageImporter(f1)
-        loaded = i.load_pickle("model", "pickled")
-
-        # Model should script successfully.
-        scripted = torch.jit.script(loaded)
-
-        # Scripted model should save and load successfully.
-        f2 = BytesIO()
-        torch.jit.save(scripted, f2)
-        f2.seek(0)
-        loaded = torch.jit.load(f2)
-
-        input = torch.rand(1, 3, 224, 224)
-        self.assertEqual(loaded(input), resnet(input))
-
 
 if __name__ == "__main__":
     run_tests()

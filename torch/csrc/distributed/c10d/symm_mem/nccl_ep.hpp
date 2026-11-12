@@ -21,6 +21,7 @@ enum class NcclEpLayout : int64_t {
 struct NcclEpGroup : c10::intrusive_ptr_target {
   void* group{nullptr}; // ncclEpGroup_t, opaque to avoid including nccl_ep.h
   std::string group_name;
+  int64_t num_local_experts{0};
 
   NcclEpGroup() = default;
   ~NcclEpGroup();
@@ -33,22 +34,26 @@ struct NcclEpHandle : c10::intrusive_ptr_target {
   // The library stashes topk_idx's device pointer on the handle (per nccl_ep.h:
   // "User-owned (do not free). LL reads directly; HT uses cached
   // hybridep.topk_idx"). recv_total_counter is allocated by us and read back
-  // by nccl_ep_handle_get_num_recv_tokens. Keep both alive for the handle's
-  // lifetime so nccl_ep can't read freed memory.
+  // by nccl_ep_handle_get_num_recv_tokens. recv_expert_counter is written by
+  // HT FLAT metadata (and may be caller-owned); keep all three alive for the
+  // handle's lifetime so nccl_ep can't read freed memory.
   at::Tensor topk_idx;
   at::Tensor recv_total_counter;
+  at::Tensor recv_expert_counter;
 
   NcclEpHandle(
       void* handle,
       NcclEpLayout layout,
       std::string group_name,
       at::Tensor topk_idx,
-      at::Tensor recv_total_counter)
+      at::Tensor recv_total_counter,
+      at::Tensor recv_expert_counter)
       : handle(handle),
         layout(layout),
         group_name(std::move(group_name)),
         topk_idx(std::move(topk_idx)),
-        recv_total_counter(std::move(recv_total_counter)) {}
+        recv_total_counter(std::move(recv_total_counter)),
+        recv_expert_counter(std::move(recv_expert_counter)) {}
   ~NcclEpHandle();
 };
 
