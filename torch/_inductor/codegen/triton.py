@@ -89,6 +89,7 @@ from ..utils import (
     get_fused_kernel_name,
     get_kernel_metadata,
     is_welford_reduction,
+    JaggedRange,
     Placeholder,
     prefix_is_pointwise,
     prefix_is_reduction,
@@ -3637,6 +3638,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._named_constants: dict[str, str] = {}
         self._named_constant_defs: IndentedBuffer = IndentedBuffer()
         self.outside_loop_vars = OrderedSet[Any]()
+        self.jagged_bound_code: dict[sympy.Expr, IndentedBuffer] = {}
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
         self.block_ptr_to_buffer = dict[str, str]()
@@ -4174,6 +4176,39 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             else:
                 # For looped reductions, indexing is deferred to the innermost loop.
                 self.codegen_reduction_indices(self.body)
+
+    def register_jagged_range(self, bound, jagged_range):
+        # Nodes that share a JaggedRange register the same bound (the lowering
+        # guarantees it), so the first registration serves the whole kernel.
+        if jagged_range in self.jagged_bound_code:
+            return
+        tree = next(tree for tree in self.range_trees if tree.numel == jagged_range)
+        # The bound is computed before its reduction loop:
+        #
+        #     r0_bound = tl.load(lengths + x0, xmask)
+        #     for r0_offset in tl.range(0, tl.max(tl.where(xmask, r0_bound, 0)), ...):
+        #         r0_mask = r0_index < r0_bound
+        #
+        # Everything emitted so far moves before the loop with it, so inner_fn
+        # must register the bound before it uses the reduction index.
+        #
+        # Loop code that does not use r0_index is masked only by xmask, so it
+        # also runs for rows that have already ended. Lowerings therefore
+        # indirect-index with the reduction index included, as in
+        # indirect_indexing(offsets[b] + r). Indexing offsets[b] alone puts its
+        # bounds check in the loop as
+        #     tl.device_assert(((0 <= tmp6) & (tmp6 < 1030)) | ~(xmask), ...)
+        # which fails for an empty last row, whose start is the total length.
+        code = IndentedBuffer()
+        code.splice(self.indexing_code)
+        code.splice(self.loads)
+        code.splice(self.compute)
+        code.writeline(f"{tree.prefix}bound = {bound}")
+        self.indexing_code.clear()
+        self.loads.clear()
+        self.compute.clear()
+        self.jagged_bound_code[jagged_range] = code
+        self.outside_loop_vars.add(bound)
 
     def need_numel_args(self):
         """
@@ -7599,6 +7634,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     loop_end = (
                         "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
                     )
+                    if isinstance(tree.numel, JaggedRange):
+                        self.body.splice(self.jagged_bound_code[tree.numel])
+                        masks = " & ".join(
+                            t.mask_name()
+                            for t in self.range_trees
+                            if t.grid_dim is not None
+                        )
+                        loop_end = f"tl.max(tl.where({masks}, {prefix}bound, 0))"
                     # Conditionalize pipelining on HIP for Triton due to
                     # reports of numerical inaccuracies on older Triton
                     if torch.version.hip and get_triton_version() > (3, 2):
@@ -8491,6 +8534,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     "cannot override persistent reduction with unknown dynamic rnumel"
                 )
             kernel_kwargs["override_persistent_reduction"] = False
+        # A cooperative reduction splits r0_numel over RSPLIT blocks, but a
+        # jagged kernel gets r0_numel = -1 and loops to each row's own bound,
+        # so every block would reduce the whole row: with RSPLIT = 8 a row sum
+        # comes out 8x too large.
+        if kernel_features.reduction_numel.has(JaggedRange):
+            kernel_kwargs["override_cooperative_reduction"] = False
 
     def codegen_static_numels(self, code):
         """
@@ -8907,7 +8956,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             code.writeline(self.create_constant_mask(entry))
         elif not (x == "x" and self.mix_order_reduction):
             # mix order reduction should generate xmask inside the loop
-            code.writeline(f"{entry.mask_name()} = {entry.name} < {x}numel")
+            # when there is a jagged range, we need to mask over the max length (bound) of segments
+            bound = f"{x}bound" if isinstance(entry.numel, JaggedRange) else f"{x}numel"
+            code.writeline(f"{entry.mask_name()} = {entry.name} < {bound}")
 
 
 class FusedUserDefinedTritonKernel(TritonKernel):
