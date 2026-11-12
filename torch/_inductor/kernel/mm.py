@@ -950,20 +950,25 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
         return _tuned_addmm_out_dtype(
             inp, mat1, mat2, out_dtype, alpha=alpha, beta=beta, layout=layout
         )
+    if alpha == 0:
+        # See Note [addmm with alpha == 0] in decomposition.py.
+        m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+        inp = realize_inputs(inp)
+        counters["aten_mm_info"][f"aten.addmm_{m}_{n}_{k}"] += 1
+        kernel_inputs = MMKernelInputs(
+            [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+        )
+        choices = V.choices.get_template_configs(kernel_inputs, [aten_addmm], "addmm")
+        node, _ = autotune_select_algorithm(
+            "addmm", choices, kernel_inputs.nodes(), layout
+        )
+        return node
+
     use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
     template_inp = inp
     if not use_bf16x9 and beta == 0:
         # The addmm decomposition already checked inp's shape where eager does.
         template_inp = zero_addmm_input(inp, mat1, mat2)
-        # Matches cuBLAS, which doesn't read mat1 and mat2 when alpha == 0.
-        if alpha == 0 and mat1.get_device().type == "cuda":
-            _, _, _, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
-            return lowerings[aten.full](
-                layout.size,
-                0,
-                dtype=layout.dtype,
-                device=layout.device,
-            )
 
     if use_native_matmul(mat1, mat2):
         if beta == 0:
@@ -971,10 +976,7 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
         else:
             arg1 = lowerings[aten.mul](beta, inp)
 
-        if alpha == 0:
-            arg2 = 0
-        else:
-            arg2 = lowerings[aten.mul](alpha, lowerings[aten.mm](mat1, mat2))
+        arg2 = lowerings[aten.mul](alpha, lowerings[aten.mm](mat1, mat2))
 
         return lowerings[aten.add](arg1, arg2)
 
