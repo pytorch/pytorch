@@ -143,6 +143,59 @@ class AbstractProcessGroupTest(C10dBackendTestContinuous):
         self.assertFalse(torch.cuda.current_stream().query())
         torch.cuda.synchronize()
 
+    def test_work_get_future_does_not_block_current_stream(self):
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} does not use CUDA")
+        tensor = torch.full((4,), float(self.rank + 1), device=self.device)
+        dist.all_reduce(torch.ones(1, device=self.device))
+        torch.cuda.synchronize()
+        side = torch.cuda.Stream()
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(int(250 * get_cycles_per_ms()))
+            work = dist.all_reduce(tensor, async_op=True)
+
+        future = work.get_future()
+
+        self.assertTrue(torch.cuda.current_stream().query())
+        result = future.then(lambda fut: fut.value()[0].clone()).wait()
+        expected = torch.full_like(tensor, sum(range(1, self.world_size + 1)))
+        self.assertEqual(result, expected)
+
+    def test_work_block_current_stream_is_stream_ordered(self):
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} does not use CUDA")
+        tensor = torch.full((4,), float(self.rank + 1), device=self.device)
+        dist.all_reduce(torch.ones(1, device=self.device))
+        torch.cuda.synchronize()
+        side = torch.cuda.Stream()
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(int(250 * get_cycles_per_ms()))
+            work = dist.all_reduce(tensor, async_op=True)
+
+        work.block_current_stream()
+
+        result = tensor.clone()
+        expected = torch.full_like(tensor, sum(range(1, self.world_size + 1)))
+        self.assertEqual(result, expected)
+
+    def test_aliased_all_gather_future_is_stream_ordered(self):
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} does not use CUDA")
+        # Large enough that a read racing the copy-back sees stale rows.
+        tensor = torch.full((1 << 22,), float(self.rank + 1), device=self.device)
+        output = torch.full_like(tensor, -1.0)
+        dist.all_reduce(torch.ones(1, device=self.device))
+        torch.cuda.synchronize()
+        side = torch.cuda.Stream()
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(int(250 * get_cycles_per_ms()))
+            work = dist.all_gather([output] * self.world_size, tensor, async_op=True)
+
+        result = work.get_future().then(lambda fut: output.clone()).wait()
+
+        # Every rank's row is copied into the same output; the last rank's wins.
+        self.assertEqual(result, torch.full_like(tensor, float(self.world_size)))
+
     def test_work_result_future(self):
         if not self.supports_work_result:
             self.skipTest(f"{self.backend_name} does not report work results")
