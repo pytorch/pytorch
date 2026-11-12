@@ -981,7 +981,7 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                     del _dg_a
                 except NameError:
                     pass
-                return x + _dg_a
+                return x + _dg_a  # noqa: F821
 
             x = torch.ones(2, 2)
             with self.assertRaisesRegex(NameError, "name '_dg_a' is not defined"):
