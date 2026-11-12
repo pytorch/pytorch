@@ -13,7 +13,12 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import make_dynamo_test, run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    make_dynamo_test,
+    parametrize,
+    run_tests,
+)
 
 
 # CPython's test_translate builds this table with item assignment, so build
@@ -307,6 +312,26 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         b = self.type2test(b"mississippi")
         self.assertEqual(b.count(b"i"), 4)
         self.assertEqual(b.count(b"i", 6), 2)
+        with self.assertRaises(TypeError):
+            b.count("i")
+        with self.assertRaisesRegex(ValueError, "byte must be in range"):
+            b.count(256)
+        # CPython 3.13 reformatted arity TypeErrors ("expected ... got ...");
+        # 3.11 and 3.12 say "() takes ... (N given)". make_dynamo_test runs the
+        # body eagerly before compiling, so accept either form, matching the
+        # pattern used in test/cpython/v3_13/test_call.py.
+        with self.assertRaisesRegex(
+            TypeError,
+            r"count\(\) takes at least 1 argument \(0 given\)"
+            r"|count expected at least 1 argument, got 0",
+        ):
+            b.count()
+        with self.assertRaisesRegex(
+            TypeError,
+            r"count\(\) takes at most 3 arguments \(4 given\)"
+            r"|count expected at most 3 arguments, got 4",
+        ):
+            b.count(b"i", None, None, None)
 
     @make_dynamo_test
     def test_rindex(self):
@@ -503,6 +528,119 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             ),
         )
 
+    def test_find(self):
+        b = self.type2test(b"mississippi")
+        self.assertEqual(b.find(b"i"), 1)
+        self.assertEqual(b.find(b"i", 5), 7)
+        self.assertEqual(b.find(b"i", 5, 8), 7)
+        self.assertEqual(b.find(b"is"), 1)
+        self.assertEqual(b.find(b"pi"), 9)
+        self.assertEqual(b.find(b"z"), -1)
+        self.assertEqual(b.find(self.type2test(b"ss")), 2)
+        self.assertEqual(b.find(b"i", -3), 10)
+        with self.assertRaises(TypeError):
+            b.find("i")
+        with self.assertRaises(TypeError):
+            b.find(b"i", "1")
+        with self.assertRaisesRegex(ValueError, "byte must be in range"):
+            b.find(-1)
+        with self.assertRaisesRegex(ValueError, "byte must be in range"):
+            b.find(256)
+        with self.assertRaisesRegex(
+            TypeError,
+            r"find\(\) takes at least 1 argument \(0 given\)"
+            r"|find expected at least 1 argument, got 0",
+        ):
+            b.find()
+        with self.assertRaisesRegex(
+            TypeError,
+            r"find\(\) takes at most 3 arguments \(4 given\)"
+            r"|find expected at most 3 arguments, got 4",
+        ):
+            b.find(b"i", None, None, None)
+
+    def test_rfind(self):
+        b = self.type2test(b"mississippi")
+        self.assertEqual(b.rfind(b"i"), 10)
+        self.assertEqual(b.rfind(b"i", 0, 6), 4)
+        self.assertEqual(b.rfind(b"i", 0, 4), 1)
+        self.assertEqual(b.rfind(b"is"), 4)
+        self.assertEqual(b.rfind(b"z"), -1)
+        self.assertEqual(b.rfind(b"i", 0, 9), 7)
+        with self.assertRaises(TypeError):
+            b.rfind("i")
+        with self.assertRaisesRegex(ValueError, "byte must be in range"):
+            b.rfind(256)
+        with self.assertRaisesRegex(
+            TypeError,
+            r"rfind\(\) takes at least 1 argument \(0 given\)"
+            r"|rfind expected at least 1 argument, got 0",
+        ):
+            b.rfind()
+        with self.assertRaisesRegex(
+            TypeError,
+            r"rfind\(\) takes at most 3 arguments \(4 given\)"
+            r"|rfind expected at most 3 arguments, got 4",
+        ):
+            b.rfind(b"i", None, None, None)
+
+    @make_dynamo_test
+    def test_splitlines(self):
+        b = self.type2test(b"a\r\nb\nc\rd")
+        self.assertEqual(
+            b.splitlines(),
+            [
+                self.type2test(b"a"),
+                self.type2test(b"b"),
+                self.type2test(b"c"),
+                self.type2test(b"d"),
+            ],
+        )
+        lines = b.splitlines(keepends=True)
+        self.assertEqual(
+            lines,
+            [
+                self.type2test(b"a\r\n"),
+                self.type2test(b"b\n"),
+                self.type2test(b"c\r"),
+                self.type2test(b"d"),
+            ],
+        )
+        for line in lines:
+            self.assertIs(type(line), bytearray)
+
+    @make_dynamo_test
+    def test_partition_and_rpartition(self):
+        b = self.type2test(b"a-b-c")
+        self.assertEqual(
+            b.partition(b"-"),
+            (self.type2test(b"a"), self.type2test(b"-"), self.type2test(b"b-c")),
+        )
+        result = b.rpartition(b"-")
+        self.assertEqual(
+            result,
+            (self.type2test(b"a-b"), self.type2test(b"-"), self.type2test(b"c")),
+        )
+        for part in result:
+            self.assertIs(type(part), bytearray)
+        self.assertEqual(
+            self.type2test(b"abc").partition(b"-"),
+            (self.type2test(b"abc"), self.type2test(), self.type2test()),
+        )
+        self.assertEqual(
+            self.type2test(b"abc").rpartition(b"-"),
+            (self.type2test(), self.type2test(), self.type2test(b"abc")),
+        )
+
+    @make_dynamo_test
+    def test_partition_empty_separator_and_keyword(self):
+        b = self.type2test(b"abc")
+        for method in (b.partition, b.rpartition):
+            with self.assertRaisesRegex(ValueError, "empty separator"):
+                method(b"")
+            with self.assertRaisesRegex(TypeError, "takes no keyword arguments"):
+                method(sep=b"-")
+
     def test_input_bytearray_hex_decode(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(ba):
@@ -516,6 +654,158 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             fn(bytearray(b"\xff\x00")),
             ("ff00", "\xff\x00"),
         )
+
+    def test_input_bytearray_find_rfind(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.find(b"b"), ba.find(b"z"), ba.rfind(b"b")
+
+        self.assertEqual(fn(bytearray(b"abcabc")), (1, -1, 4))
+        self.assertEqual(fn(bytearray(b"xyz")), (-1, 2, -1))
+
+    def test_input_bytearray_find_rfind_dynamic_start(self):
+        # Non-constant start (SymInt) must take the non-const fallback: Dynamo
+        # declines tracing bytearray.find/rfind and graph-breaks cleanly instead
+        # of inlining the C method descriptor (internal AttributeError).
+        @torch.compile(backend="eager", dynamic=True)
+        def fn(ba, n):
+            return ba.find(b"i", n), ba.rfind(b"i", n)
+
+        self.assertEqual(fn(bytearray(b"mississippi"), 5), (7, 10))
+        self.assertEqual(fn(bytearray(b"mississippi"), -3), (10, 10))
+
+        # The values above would also hold if n were specialized to a constant,
+        # so pin the fallback down: under fullgraph the non-constant start must
+        # raise Unsupported instead of tracing. Check each method separately,
+        # since tracing stops at the first graph break.
+        for name in ("find", "rfind", "count"):
+
+            @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+            def fn_fullgraph(ba, n, name=name):
+                return getattr(ba, name)(b"i", n)
+
+            with self.assertRaises(torch._dynamo.exc.Unsupported):
+                fn_fullgraph(bytearray(b"mississippi"), 5)
+
+    def test_input_bytearray_splitlines_partition_rpartition(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.splitlines(keepends=True), ba.partition(b"-"), ba.rpartition(b"-")
+
+        result = fn(self.type2test(b"a-b\nc-d"))
+        self.assertEqual(
+            result,
+            (
+                [bytearray(b"a-b\n"), bytearray(b"c-d")],
+                (bytearray(b"a"), bytearray(b"-"), bytearray(b"b\nc-d")),
+                (bytearray(b"a-b\nc"), bytearray(b"-"), bytearray(b"d")),
+            ),
+        )
+        for parts in result:
+            for part in parts:
+                self.assertIs(type(part), bytearray)
+
+    @parametrize("method", ["splitlines", "partition", "rpartition"])
+    @parametrize("data", [b"abc", b""])
+    def test_input_bytearray_splitlines_partition_rpartition_no_separator(
+        self, method, data
+    ):
+        args = () if method == "splitlines" else (b"-",)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return getattr(ba, method)(*args)
+
+        ba = self.type2test(data)
+        result = fn(ba)
+        self.assertEqual(result, getattr(ba, method)(*args))
+        self.assertIs(type(result), list if method == "splitlines" else tuple)
+        for i, part in enumerate(result):
+            self.assertIs(type(part), bytearray)
+            self.assertIsNot(part, ba)
+            for other in result[:i]:
+                self.assertIsNot(part, other)
+
+    @parametrize("method", ["splitlines", "partition", "rpartition"])
+    def test_input_bytearray_splitlines_partition_rpartition_after_mutation(
+        self, method
+    ):
+        args = () if method == "splitlines" else (b"-",)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            ba += b"-c\nd"
+            return getattr(ba, method)(*args)
+
+        ba = self.type2test(b"a-b")
+        expected = self.type2test(b"a-b-c\nd")
+        self.assertEqual(fn(ba), getattr(expected, method)(*args))
+        self.assertEqual(ba, expected)
+
+    @parametrize("method", ["splitlines", "partition", "rpartition"])
+    def test_input_bytearray_splitlines_partition_rpartition_mutate_results(
+        self, method
+    ):
+        args = () if method == "splitlines" else (b"-",)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            result = getattr(ba, method)(*args)
+            part = result[0]
+            part.append(ord("z"))
+            part += b"y"
+            return ba, result
+
+        for _ in range(2):
+            ba = self.type2test(b"abc")
+            expected = getattr(ba, method)(*args)
+            expected[0].extend(b"zy")
+            returned, result = fn(ba)
+            self.assertIs(returned, ba)
+            self.assertEqual(ba, self.type2test(b"abc"))
+            self.assertEqual(result, expected)
+            for part in result:
+                self.assertIs(type(part), bytearray)
+
+    def test_input_bytearray_splitlines_partition_rpartition_nonconstant_args(self):
+        def splitlines(x, ba, keepends):
+            return x + 1, ba.splitlines(keepends=keepends)
+
+        def partition(x, ba, sep):
+            return x + 1, ba.partition(sep)
+
+        def rpartition(x, ba, sep):
+            return x + 1, ba.rpartition(sep)
+
+        x = torch.ones(1)
+        ba = self.type2test(b"a-b\nc-d")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Dynamo does not know how to trace method `splitlines` of class `bytearray`",
+        ):
+            torch.compile(splitlines, backend="eager", fullgraph=True)(
+                x, ba, torch.tensor(True)
+            )
+        self.assertEqual(
+            torch.compile(splitlines, backend="eager")(x, ba, torch.tensor(True)),
+            (torch.tensor([2.0]), [bytearray(b"a-b\n"), bytearray(b"c-d")]),
+        )
+
+        for method, expected in (
+            (partition, (bytearray(b"a"), bytearray(b"-"), bytearray(b"b\nc-d"))),
+            (rpartition, (bytearray(b"a-b\nc"), bytearray(b"-"), bytearray(b"d"))),
+        ):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                f"Dynamo does not know how to trace method `{method.__name__}` of class `bytearray`",
+            ):
+                torch.compile(method, backend="eager", fullgraph=True)(
+                    x, ba, memoryview(b"-")
+                )
+            self.assertEqual(
+                torch.compile(method, backend="eager")(x, ba, memoryview(b"-")),
+                (torch.tensor([2.0]), expected),
+            )
 
     def test_inplace_concat_arg_mutation(self):
         # Regression: missing sq_inplace_concat fell back to constant-folding
@@ -992,6 +1282,9 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             return x0, x1, x2
 
         self.assertEqual(fn(bytearray(b"abc")), (99, 98, 97))
+
+
+instantiate_parametrized_tests(ByteArrayTest)
 
 
 if __name__ == "__main__":

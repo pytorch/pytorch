@@ -369,6 +369,20 @@ def mark_warmup_incomplete() -> None:
         manager.mark_warmup_incomplete()
 
 
+def mark_running_backward(device_index: int) -> None:
+    """Tell the device's manager that a backward runs, if there is a manager.
+
+    See [Backward Generation Handling]: clearing the pending-backward flag lets
+    the next invocation start a new generation. Post-compile can run before any
+    manager exists (a backward lowered with its forward), so the lookup happens
+    when the backward runs; even then there may be none (a forward that never
+    recorded a graph, or trees reset in between).
+    """
+    manager = get_manager(device_index, create_if_none_exists=False)
+    if manager is not None:
+        manager.set_to_running_backward()
+
+
 def reset_cudagraph_trees() -> None:
     "Clear all cudagraph trees"
     # see shutdown below for why this is necessary
@@ -466,9 +480,7 @@ def cudagraphify_impl(
         # See [Backward Generation Handling]: the forward may have been
         # cudagraphed even though this backward runs eager.
         if kwargs.get("is_backward"):
-            manager = get_manager(kwargs["device_index"], create_if_none_exists=False)
-            if manager is not None:
-                manager.set_to_running_backward()
+            mark_running_backward(kwargs["device_index"])
         return model(inputs)
 
     def deferred_cudagraphify(inputs: list[InputType]) -> OutputType:
