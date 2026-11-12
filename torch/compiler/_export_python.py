@@ -82,8 +82,8 @@ def export_python(
     run a new process to pick up an edit, since loading an edited file where an
     earlier version of it is loaded raises.
 
-    With the inductor backend the capture tunes its Triton kernels at compile time (it
-    compiles as inductor does under ``triton.autotune_at_compile_time``), so the graph
+    With the inductor backend the capture tunes its Triton kernels at compile time, as
+    every :class:`~torch.compiler.precompile.DynamoTracer` capture does, so the graph
     code carries a ``KERNEL_CONFIGS`` table of the config each kernel inductor
     generated launches with: editing a row changes that kernel's launch config. A
     template (flex attention, say) or a user-defined kernel keeps its config in its
@@ -312,17 +312,27 @@ class _ExportedPython:
                     if not os.path.exists(self._path):
                         return self._capture(*args, **kwargs)
                     self._runnable = self._load()
-        if not self._check:
-            return self._runnable(*args, **kwargs)
+        if self._check:
+            return self._checked(self._runnable, args, kwargs)
+        return self._runnable(*args, **kwargs)
+
+    def _checked(
+        self,
+        runnable: PrecompiledRunnable,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+    ) -> object:
+        """Run the file, then ``fn`` eagerly on copies of the tensor arguments, and
+        raise unless the outputs and the tensor arguments of the two runs match."""
+        from torch._dynamo.eval_frame import _use_eager_on_nested_compile
+
         # Copied before the artifact runs, so an in-place write cannot reach eager.
         eager_args, eager_kwargs = pytree.tree_map_only(
             torch.Tensor,
             lambda t: t.detach().clone().requires_grad_(t.requires_grad),
             (args, kwargs),
         )
-        result = self._runnable(*args, **kwargs)
-        from torch._dynamo.eval_frame import _use_eager_on_nested_compile
-
+        result = runnable(*args, **kwargs)
         # A torch.compile'd function fn calls runs eagerly too, on this thread only
         # (set_stance would switch every thread's compiles to eager).
         with _use_eager_on_nested_compile():
@@ -390,17 +400,7 @@ class _ExportedPython:
             backend=self._backend,
         )
         try:
-            with contextlib.ExitStack() as stack:
-                if self._backend == "inductor":
-                    from torch._inductor import config as inductor_config
-
-                    # Tuning at compile time writes the graph's KERNEL_CONFIGS table:
-                    # the config each inductor-generated kernel tuned to and launches
-                    # with.
-                    stack.enter_context(
-                        inductor_config.patch({"triton.autotune_at_compile_time": True})
-                    )
-                stack.enter_context(cap)
+            with cap:
                 try:
                     result = cap(*args, **kwargs)
                 except Unsupported as e:
