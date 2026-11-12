@@ -23,6 +23,7 @@
 #include <pthread.h>
 #endif
 
+#include <limits>
 #include <memory> // for unique_ptr
 #include <utility>
 
@@ -442,6 +443,32 @@ static PyObject* THPEngine_new(
   return type->tp_alloc(type, 0);
 }
 
+// Implementation of torch._C._EngineBase._allow_implicit_grad_accumulation:
+// allows output `edge.output_nr` of `edge.node`, or all of its outputs.
+static PyObject* THPEngine_allow_implicit_grad_accumulation(
+    PyObject* self,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  PyObject* edge = nullptr;
+  int all_outputs = 0;
+  if (!PyArg_ParseTuple(args, "Op", &edge, &all_outputs)) {
+    return nullptr;
+  }
+  // Check before parseGradientEdge narrows the index to uint32_t.
+  auto output_nr = THPUtils_unpackLong(PyTuple_GetItem(edge, 1));
+  auto gradient_edge = parseGradientEdge(edge, 0);
+  TORCH_CHECK(
+      output_nr >= 0 && output_nr <= std::numeric_limits<uint32_t>::max(),
+      gradient_edge.function->name(),
+      " has no output ",
+      output_nr);
+  gradient_edge.function->allow_implicit_grad_accumulation(
+      all_outputs ? std::nullopt
+                  : std::optional<uint32_t>(gradient_edge.input_nr));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMethodDef THPEngine_methods[] = {
     {"run_backward",
@@ -449,6 +476,10 @@ static struct PyMethodDef THPEngine_methods[] = {
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"queue_callback", THPEngine_queue_callback, METH_O, nullptr},
+    {"_allow_implicit_grad_accumulation",
+     THPEngine_allow_implicit_grad_accumulation,
+     METH_VARARGS,
+     nullptr},
     {"is_checkpoint_valid",
      THPEngine_is_checkpoint_valid,
      METH_NOARGS,
