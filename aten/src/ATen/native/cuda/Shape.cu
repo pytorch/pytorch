@@ -16,7 +16,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/cat.h>
 #include <ATen/ops/cat_native.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/empty.h>
@@ -30,6 +29,10 @@ constexpr int CAT_ARRAY_BATCH_SIZE = 128;
 constexpr int CAT_ARRAY_MAX_INPUT_DIMS = 4;
 constexpr int ALIGNED_VEC_LOAD_BYTES_16 = 16;
 constexpr int ALIGNED_VEC_LOAD_BYTES_8 = 8;
+// Max elements of the largest input per dim-0 chunk when cat_out_cuda splits a large
+// non-contiguous cat on dim != 0. Empirical, tuned on transposed fp32/bf16/u8 cats;
+// measurements in #203778.
+constexpr int64_t CAT_SPLIT_ELEMS = int64_t{32} << 20;
 
 namespace {
 
@@ -653,69 +656,74 @@ TORCH_IMPL_FUNC(cat_out_cuda)
       all32BitIndexable &&
       all_same_dtype &&
       memory_format == c10::MemoryFormat::Contiguous) {
-      // The generic strided kernel reads non-contiguous inputs with a large stride, so each
-      // fetched line is reused only through L2. When one launch covers a large batch, the
-      // reuse no longer fits in L2 and the same lines are fetched many times (1.4 G-element cat:
-      // gfx1201 L2 hit 84% -> 10%, 9.7x slower; RTX 5090 1.8x slower). Split such a cat along
-      // dim 0 so each launch covers at most kCatSplitElems elements of its largest input.
-      constexpr int64_t kCatSplitElems = int64_t{32} << 20;
-      const int64_t nrows = result.size(0);
-      int64_t row_elems = 0;
-      for (const Tensor& t : materialized) {
-        if (!cat_should_skip_tensor(t) && t.size(0) > 0) {
-          row_elems = std::max(row_elems, t.numel() / t.size(0));
+      auto strided_cat = [&](const Tensor& out, const MaterializedITensorListRef& inputs) {
+        if (isBitsType(out.scalar_type())) {
+          AT_DISPATCH_BIT_TYPES(out.scalar_type(), "cat_cuda", [&]() {
+            using dtype = OpaqueType<sizeof(scalar_t)>;
+            parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE/2, CAT_ARRAY_BATCH_SIZE/2>(out, inputs, dim, nDims, memory_format);
+          });
+        } else {
+          AT_DISPATCH_V2(
+              out.scalar_type(),
+              "cat_cuda",
+              AT_WRAP([&]() {
+                using dtype = OpaqueType<sizeof(scalar_t)>;
+                parallel_cat<
+                    dtype,
+                    CAT_ARRAY_BATCH_SIZE / 2,
+                    CAT_ARRAY_BATCH_SIZE / 2>(
+                    out, inputs, dim, nDims, memory_format);
+              }),
+              AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+              kComplexHalf,
+              kBComplex32,
+              kHalf,
+              kBool,
+              kBFloat16,
+              kFloat8_e4m3fn,
+              kFloat8_e4m3fnuz,
+              kFloat8_e5m2,
+              kFloat8_e5m2fnuz,
+              AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+              // TODO(#146647): extend this to other shell dtypes
+              kFloat4_e2m1fn_x2);
         }
-      }
-      if (dim != 0 && nrows > 1 && row_elems > 0 && row_elems * nrows > kCatSplitElems &&
-          result.is_contiguous()) {
-        const int64_t rows = std::max<int64_t>(1, kCatSplitElems / row_elems);
-        std::vector<Tensor> parts;
-        parts.reserve(materialized.size());
-        for (int64_t start = 0; start < nrows; start += rows) {
-          const int64_t n = std::min(rows, nrows - start);
-          parts.clear();
-          for (const Tensor& t : materialized) {
-            if (!cat_should_skip_tensor(t)) {
-              parts.push_back(t.narrow(0, start, n));
-            }
+      };
+      // Non-contiguous inputs such as transposed views are read with a large stride, so a
+      // fetched line is reused only through L2. When one launch covers a large batch, that
+      // reuse no longer fits in L2 and the same lines are fetched many times (#203778).
+      // Split such a cat along dim 0 into chunks of at most CAT_SPLIT_ELEMS elements of the
+      // largest input, or a single row when one row is larger.
+      if (dim != 0 && result.size(0) > 1 && result.is_contiguous()) {
+        // dim != 0, so every non-skipped input has size(0) == nrows.
+        const int64_t nrows = result.size(0);
+        int64_t row_elems = 0;
+        bool any_noncontig = false;
+        for (const Tensor& t : materialized) {
+          if (!cat_should_skip_tensor(t)) {
+            row_elems = std::max(row_elems, t.numel() / nrows);
+            any_noncontig |= !t.is_contiguous();
           }
-          Tensor out_rows = result.narrow(0, start, n);
-          // Each chunk is under kCatSplitElems or has a single row, so this does not split again.
-          at::cat_out(out_rows, parts, dim);
         }
-        return;
+        if (any_noncontig && row_elems > 0 && row_elems * nrows > CAT_SPLIT_ELEMS) {
+          const int64_t rows = std::max<int64_t>(1, CAT_SPLIT_ELEMS / row_elems);
+          std::vector<Tensor> parts;
+          parts.reserve(materialized.size());
+          for (int64_t start = 0; start < nrows; start += rows) {
+            const int64_t n = std::min(rows, nrows - start);
+            parts.clear();
+            for (const Tensor& t : materialized) {
+              if (!cat_should_skip_tensor(t)) {
+                parts.push_back(t.narrow(0, start, n));
+              }
+            }
+            const MaterializedITensorListRef part_refs(parts.begin(), parts.end());
+            strided_cat(result.narrow(0, start, n), part_refs);
+          }
+          return;
+        }
       }
-      if (isBitsType(result.scalar_type())) {
-        AT_DISPATCH_BIT_TYPES(result.scalar_type(), "cat_cuda", [&]() {
-          using dtype = OpaqueType<sizeof(scalar_t)>;
-          parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE/2, CAT_ARRAY_BATCH_SIZE/2>(result, materialized, dim, nDims, memory_format);
-        });
-      } else {
-        AT_DISPATCH_V2(
-            result.scalar_type(),
-            "cat_cuda",
-            AT_WRAP([&]() {
-              using dtype = OpaqueType<sizeof(scalar_t)>;
-              parallel_cat<
-                  dtype,
-                  CAT_ARRAY_BATCH_SIZE / 2,
-                  CAT_ARRAY_BATCH_SIZE / 2>(
-                  result, materialized, dim, nDims, memory_format);
-            }),
-            AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
-            kComplexHalf,
-            kBComplex32,
-            kHalf,
-            kBool,
-            kBFloat16,
-            kFloat8_e4m3fn,
-            kFloat8_e4m3fnuz,
-            kFloat8_e5m2,
-            kFloat8_e5m2fnuz,
-            AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
-            // TODO(#146647): extend this to other shell dtypes
-            kFloat4_e2m1fn_x2);
-      }
+      strided_cat(result, materialized);
   } else {
     int64_t offset = 0;
     for (const Tensor& t : materialized) {
