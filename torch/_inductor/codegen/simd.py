@@ -502,10 +502,11 @@ def template_reduction_axis(
     m, n = template.get_size()
 
     def reads(node, is_valid):
-        return all(
-            isinstance(dep, MemoryDep) and is_valid(dep)
-            for dep in node.read_writes.reads
-            if dep.name in produced
+        # A reduction that reads none of them (e.g. one over a template input)
+        # isn't an epilogue, however its group happens to match.
+        deps = [dep for dep in node.read_writes.reads if dep.name in produced]
+        return bool(deps) and all(
+            isinstance(dep, MemoryDep) and is_valid(dep) for dep in deps
         )
 
     def col_major(dep):
