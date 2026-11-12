@@ -47,6 +47,10 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   fi
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  pip_install nccl-extensions==0.1.0
+fi
+
 # Remove onnxruntime if present to avoid interference with non-ONNX tests
 if [[ "$TEST_CONFIG" != "onnx" ]]; then
   pip uninstall -y onnxruntime 2>/dev/null || true
