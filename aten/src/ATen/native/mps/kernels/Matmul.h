@@ -19,6 +19,57 @@ inline constexpr uint32_t matmul_simdgroups(
                                           : 2;
 }
 
+// matmul_mpp_block_gemm: one kMatmulBlock-wide block per simdgroup,
+// kMatmulStepBytes of an operand row per K step. Tile rows halve under
+// kMatmulFullGridPerCore threadgroups per GPU core.
+C10_METAL_CONSTEXPR uint32_t kMatmulBlock = 32;
+C10_METAL_CONSTEXPR uint32_t kMatmulBlockSimdgroups = 4;
+C10_METAL_CONSTEXPR uint32_t kMatmulStepBytes = 128;
+C10_METAL_CONSTEXPR uint32_t kMatmulFullGridPerCore = 4;
+// fp32 K steps between barriers that keep a tile's simdgroups on the same
+// operand rows, which then stay in cache. half and bfloat do not drift.
+C10_METAL_CONSTEXPR uint32_t kMatmulPaceSteps = 4;
+// A grid of up to kMatmulKGroupsFullGrids full grids of single blocks leaves
+// GPU cores idle, so kMatmulKGroups simdgroups split the K of each block.
+C10_METAL_CONSTEXPR uint32_t kMatmulKGroups = 8;
+C10_METAL_CONSTEXPR uint32_t kMatmulKGroupsFullGrids = 2;
+// A grid that small also splits K into products of at least kMatmulSplitMinK,
+// up to a full grid over kMatmulSplitGridShare of threadgroups.
+C10_METAL_CONSTEXPR uint32_t kMatmulSplitMinK = 1024;
+C10_METAL_CONSTEXPR uint32_t kMatmulSplitGridShare = 2;
+// Complex products with M, K and N up to this are faster on the naive
+// kernels than as a real GEMM.
+C10_METAL_CONSTEXPR uint32_t kMatmulComplexNaiveMaxDim = 16;
+// Rows of an expanded complex operand are padded to this.
+C10_METAL_CONSTEXPR uint32_t kMatmulComplexRowAlignBytes = 64;
+// The embed and interleave kernels run a thread per element.
+C10_METAL_CONSTEXPR uint32_t kMatmulComplexRowsPerThreadgroup = 4;
+
+// A complex product runs as a real one of twice the size: one operand is
+// expanded by matmul_complex_embed, the other read through its real view.
+// blocks: element x of alpha X becomes [[re, im], [-im, re]] (second row
+// signed by sign_out); else re and im go to rows 2r and 2r + 1.
+struct MatmulComplexEmbedParams {
+  int64_t rows, cols; // of the complex operand
+  int64_t rs, cs, plane; // its strides, in complex elements
+  int64_t ld, out_plane; // of the expansion
+  float alpha_re, alpha_im;
+  float sign_in, sign_out; // of the imaginary part read and written
+  bool blocks;
+};
+
+// matmul_complex_interleave gathers the real product F (re and im on row
+// pairs, and their partial products on column pairs) into complex C.
+struct MatmulComplexInterleaveParams {
+  int64_t M, N;
+  int64_t ldf, ldc; // of F (real elements) and C (complex elements)
+  int64_t f_plane, c_plane, bias_plane;
+  int64_t bias_rs, bias_cs; // in complex elements
+  float beta_re, beta_im; // zero: the bias is not read
+  float sign; // of B's imaginary part when F holds column pairs
+  bool column_pairs;
+};
+
 template <typename idx_t>
 struct MatmulParams {
   uint32_t m;
@@ -30,6 +81,13 @@ struct MatmulParams {
   idx_t b_stride_n;
   idx_t out_stride_m;
   idx_t out_stride_n;
+  idx_t bias_stride_m;
+  idx_t bias_stride_n;
+  idx_t a_batch, b_batch, out_batch, bias_batch; // batch strides
+  float alpha, beta; // beta == 0: bias is not read
+  // Not 0: each k_split of K is a product of its own, whose fp32 result goes
+  // to its plane of the partials bound as out.
+  uint32_t k_split;
 };
 
 #ifdef __METAL__
@@ -54,10 +112,11 @@ struct MatmulTile {
   uint32_t rows;
   uint32_t cols;
   uint32_t k;
+  device const T* bias;
 };
 
-// simdgroup-matrix tile GEMM: accumulates out[:rows, :cols] = A[:rows, :k] *
-// B[:k, :cols] in fp32 and writes the tile back.
+// simdgroup-matrix tile GEMM: out[:rows, :cols] = alpha * A[:rows, :k] *
+// B[:k, :cols] + beta * bias[:rows, :cols], accumulated in fp32.
 template <typename T, int BM, typename idx_t>
 inline void matmul_tile_gemm(
     thread const MatmulTile<T>& tile,
@@ -183,10 +242,16 @@ inline void matmul_tile_gemm(
         const uint32_t tile_col =
             warp_n + j * kMatmulFragDim + frag_n + element;
         if (tile_col < tile_cols) {
+          float v = params.alpha * accum[i][j].thread_elements()[element];
+          if (params.beta != 0) {
+            v += params.beta *
+                float(tile.bias
+                          [tile_row * params.bias_stride_m +
+                           tile_col * params.bias_stride_n]);
+          }
           tile.out
               [tile_row * params.out_stride_m +
-               tile_col * params.out_stride_n] =
-              static_cast<T>(accum[i][j].thread_elements()[element]);
+               tile_col * params.out_stride_n] = static_cast<T>(v);
         }
       }
     }
@@ -195,13 +260,15 @@ inline void matmul_tile_gemm(
 
 #if C10_METAL_HAS_MPP
 
-// matmul2d tile op. TA/TB name the operand layouts ('t' = column-major); every
+// matmul2d tile op with one matmul2d call for the whole tile: its simdgroups
+// cooperate on it and matmul2d runs the K loop (grouped mm's kernel).
+// TA/TB name the operand layouts ('t' = column-major); every
 // tensor is presented to matmul2d with a unit innermost stride and the matching
 // transpose flag, which matmul2d requires (it ignores layouts that contradict
 // the descriptor). half/bfloat multiply at relaxed precision; accumulation
 // stays fp32 via the destination cooperative tensor.
 template <typename T, int BM, int BN, bool TA, bool TB>
-inline void matmul_mpp_gemm(
+inline void matmul_mpp_cooperative_gemm(
     thread const MatmulTile<T>& tile,
     constant MatmulParams<uint64_t>& params) {
   constexpr int NSG = matmul_simdgroups(BM, BN);
@@ -264,6 +331,118 @@ inline void matmul_mpp_gemm(
     }
     result.store(out);
   }
+}
+
+// Dense matmul2d tile op: out = alpha * A * B + beta * bias, one matmul2d call
+// per simdgroup block and K step.
+template <typename T, int BM, bool TA, bool TB, int KG>
+inline void matmul_mpp_block_gemm(
+    thread const MatmulTile<T>& tile,
+    constant MatmulParams<uint64_t>& p,
+    uint simd_group,
+    threadgroup float* partials) {
+  using namespace mpp::tensor_ops;
+  using Ext = dextents<int32_t, 2>;
+  using Str = array<int32_t, 2>;
+  using Mat = tensor<device T, Ext, tensor_inline>;
+  constexpr int RN = kMatmulBlock, KC = kMatmulStepBytes / sizeof(T);
+  // KG > 1: the tile is one block and its KG simdgroups split K.
+  const int group = KG > 1 ? simd_group : 0;
+  const int col = (simd_group - group) * RN, pace = kMatmulPaceSteps * KC;
+  constexpr bool paced = is_same_v<T, float> && KG == 1;
+  if (col >= int(tile.cols)) {
+    // A simdgroup without a block still meets the barriers of the others.
+    for (int kk = pace; paced && kk < int(tile.k); kk += pace) {
+      threadgroup_barrier(mem_flags::mem_none);
+    }
+    return;
+  }
+  const int rows = tile.rows, cols = min(RN, int(tile.cols) - col), k = tile.k;
+  const Mat a(
+      const_cast<device T*>(tile.a),
+      TA ? Ext(rows, k) : Ext(k, rows),
+      TA ? Str{int(p.a_stride_m), int(p.a_stride_k)}
+         : Str{int(p.a_stride_k), int(p.a_stride_m)});
+  const Mat b(
+      const_cast<device T*>(tile.b) + col * p.b_stride_n,
+      TB ? Ext(k, cols) : Ext(cols, k),
+      TB ? Str{int(p.b_stride_k), int(p.b_stride_n)}
+         : Str{int(p.b_stride_n), int(p.b_stride_k)});
+  constexpr auto desc = matmul2d_descriptor(
+      BM,
+      RN,
+      KC,
+      TA,
+      TB,
+      !is_same_v<T, float>,
+      matmul2d_descriptor::mode::multiply_accumulate);
+  matmul2d<desc, execution_simdgroup> op;
+  auto acc = op.template get_destination_cooperative_tensor<Mat, Mat, float>();
+  for (ushort i = 0; i < acc.get_capacity(); ++i) {
+    acc[i] = 0;
+  }
+  const int k_group = c10::metal::ceil_div(k, KC * KG) * KC;
+  for (int kk = group * k_group; kk < min(k, (group + 1) * k_group); kk += KC) {
+    if (paced && kk && kk % pace == 0) {
+      threadgroup_barrier(mem_flags::mem_none);
+    }
+    if (rows == BM && cols == RN && kk + KC <= k) {
+      // Static slices skip the bounds checks.
+      auto sa = a.template slice<TA ? BM : KC, TA ? KC : BM>(
+          TA ? 0 : kk, TA ? kk : 0);
+      auto sb = b.template slice<TB ? KC : RN, TB ? RN : KC>(
+          TB ? kk : 0, TB ? 0 : kk);
+      op.run(sa, sb, acc);
+    } else {
+      auto sa = a.slice(TA ? 0 : kk, TA ? kk : 0);
+      auto sb = b.slice(TB ? kk : 0, TB ? 0 : kk);
+      op.run(sa, sb, acc);
+    }
+  }
+  if (KG > 1) {
+    // Groups 1.. leave their block in threadgroup memory for group 0 to add.
+    using Part = tensor<threadgroup float, Ext, tensor_inline>;
+    if (group) {
+      acc.store(
+          Part(partials + (group - 1) * BM * RN, Ext(RN, BM), Str{1, RN}));
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (group) {
+      return;
+    }
+    auto part =
+        op.template get_destination_cooperative_tensor<Mat, Mat, float>();
+    for (int g = 1; g < KG; ++g) {
+      part.load(Part(partials + (g - 1) * BM * RN, Ext(RN, BM), Str{1, RN}));
+      for (ushort i = 0; i < acc.get_capacity(); ++i) {
+        acc[i] += part[i];
+      }
+    }
+  }
+  const Ext ext(cols, rows);
+  if (p.k_split) {
+    acc.store(tensor<device float, Ext, tensor_inline>(
+        reinterpret_cast<device float*>(tile.out) + col,
+        ext,
+        Str{1, int(p.out_stride_m / p.out_stride_n)}));
+    return;
+  }
+  auto res = op.template get_destination_cooperative_tensor<Mat, Mat, T>();
+  // The bias branch stays out of the element loops, which then vectorize.
+  if (p.beta != 0) {
+    res.load(
+        Mat(const_cast<device T*>(tile.bias) + col,
+            ext,
+            Str{1, int(p.bias_stride_m)}));
+    for (ushort i = 0; i < acc.get_capacity(); ++i) {
+      res[i] = T(p.alpha * acc[i] + p.beta * float(res[i]));
+    }
+  } else {
+    for (ushort i = 0; i < acc.get_capacity(); ++i) {
+      res[i] = T(p.alpha * acc[i]);
+    }
+  }
+  res.store(Mat(tile.out + col, ext, Str{1, int(p.out_stride_m)}));
 }
 
 #endif

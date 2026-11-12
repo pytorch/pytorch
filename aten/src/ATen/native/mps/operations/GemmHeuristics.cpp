@@ -107,4 +107,11 @@ GemvConfig GemvPolicy::pick_nt(c10::ScalarType dt, int64_t outlen, int64_t /*K*/
   return clamp_vec({outlen >= 8192 ? t.nt_nsimd_hi : t.nt_nsimd_lo, t.nt_vec}, align);
 }
 
+GemvConfig GemvPolicy::pick_nt_rows(c10::ScalarType dt, int64_t rows) {
+  const GemvTuning t = gemv_tuning(dt);
+  GemvConfig cfg{t.nt_nsimd_lo, t.nt_vec};
+  cfg.rows = static_cast<int>(std::bit_ceil(static_cast<uint64_t>(rows)));
+  return cfg;
+}
+
 } // namespace at::native::mps
