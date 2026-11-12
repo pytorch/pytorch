@@ -1665,7 +1665,7 @@ static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(!Py_IsNone(mode));
 
-  if (py::isinstance<c10::FakeTensorMode>(mode)) {
+  if (torch::fake_tensor::isCppFakeTensorMode(mode)) {
     // Raises for a bare _CppFakeTensorMode or a subclass of CppFakeTensorMode
     auto cpp_mode = torch::fake_tensor::getCppFakeTensorMode(mode);
     TORCH_CHECK(
