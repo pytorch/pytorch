@@ -262,8 +262,10 @@ class TestTuningList(TestCase):
         "label",
         [
             "pointwise",
+            "tiled_pointwise",
             "pointwise_3d",
             "reduction",
+            "tiled_reduction",
             "persistent_reduction",
             "tiled_persistent_reduction",
         ],
