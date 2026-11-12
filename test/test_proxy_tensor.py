@@ -40,11 +40,8 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 
-# Under CPP_FAKETENSOR=1 this whole suite exercises the C++ FakeTensor mode:
-# make_fx builds a CppFakeTensorMode for tracing_mode="fake"/"symbolic" natively.
-
-# Mirror test_fake_tensor.py: under the C++ fake path, make bare FakeTensorMode()
-# construction build a CppFakeTensorMode so the suite exercises it end to end.
+# Under the C++ fake configuration, explicit FakeTensorMode() calls in this
+# module construct a CppFakeTensorMode.
 if torch._dynamo.config.use_cpp_fake_tensor:
     from torch._subclasses.fake_tensor import CppFakeTensorMode
 

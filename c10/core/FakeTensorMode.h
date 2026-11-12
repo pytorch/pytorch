@@ -15,10 +15,7 @@ namespace c10 {
 
 struct TensorImpl;
 
-// same as Python's FakeTensorMode
-// storing shape env and converter from Python, we'll use these later
-// to implement sym ints, real tensor conversion, etc
-// this doesn't have caching because we're not implementing it
+// State shared by C++ fake tensors and Python mode wrappers.
 // no in_kernel_invocation flag; that state is thread-local in C++
 // (see Note [C++ in_kernel_invocation] in FakeTensorModeTLS.h)
 struct C10_API FakeTensorMode {
