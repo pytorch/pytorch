@@ -899,6 +899,10 @@ class SystemInfo:
     toolkit_version: str | None
     triton_version: tuple[int, int] | None
     gpu_name: str | None
+    # What the kernels were compiled for: the CUDA compute capability as
+    # major * 10 + minor, or the ROCm gfx arch. None for XPU, and in packages
+    # written before it was recorded, where the GPU name is compared instead.
+    gpu_arch: int | str | None = None
     CHECK_GPUS = ("cuda", "xpu")
 
     @classmethod
@@ -908,12 +912,16 @@ class SystemInfo:
         gpu_name = None
         from torch.utils._triton import get_triton_version
 
-        gpu_name, toolkit_version = None, None
+        gpu_name, toolkit_version, gpu_arch = None, None, None
         for device_type in cls.CHECK_GPUS:
             if getattr(torch, device_type).is_available():
                 try:
                     gpu_name = getattr(torch, device_type).get_device_name()
                     toolkit_version = getattr(torch.version, device_type)
+                    if device_type == "cuda":
+                        from .device_interface import CudaInterface
+
+                        gpu_arch = CudaInterface.get_compute_capability()
                     break
                 except Exception:
                     pass
@@ -924,6 +932,7 @@ class SystemInfo:
             toolkit_version=toolkit_version,
             triton_version=get_triton_version((0, 0)),
             gpu_name=gpu_name,
+            gpu_arch=gpu_arch,
         )
 
     def check_compatibility(
@@ -933,7 +942,8 @@ class SystemInfo:
         Check if this SystemInfo is compatible with another SystemInfo.
         Raises RuntimeError if incompatible.
         """
-        if self.python_version != other.python_version:
+        # Serialized code objects depend on the minor version, not the patch.
+        if self.python_version.split(".")[:2] != other.python_version.split(".")[:2]:
             raise RuntimeError(
                 f"Compile package was created with a different Python version: {self.python_version}"
             )
@@ -959,8 +969,15 @@ class SystemInfo:
                     f"Compile package was created with a different Triton version: {self.triton_version}"
                 )
 
-            # Check GPU name if CUDA/XPU was used
-            if other.gpu_name is not None and self.gpu_name != other.gpu_name:
+            # GPUs of one arch run the same kernels, whatever their names.
+            if self.gpu_arch is not None and other.gpu_arch is not None:
+                if self.gpu_arch != other.gpu_arch:
+                    raise RuntimeError(
+                        f"Compile package was created for a different GPU arch: "
+                        f"cached={self.gpu_name} ({self.gpu_arch}), "
+                        f"current={other.gpu_name} ({other.gpu_arch})"
+                    )
+            elif other.gpu_name is not None and self.gpu_name != other.gpu_name:
                 raise RuntimeError(
                     f"Compile package was created with different GPU: "
                     f"cached={self.gpu_name}, current={other.gpu_name}"

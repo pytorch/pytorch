@@ -11032,27 +11032,56 @@ from user code:
     def test_a_recorded_gpu_device_type_arms_the_load_check(self):
         # What the flip from "cpu" to an accelerator buys, and what it costs: a
         # recorded "cuda" is what makes check_compatibility compare the GPU
-        # name, so an artifact saved on one GPU is now refused on another, and
-        # the AOT load path calls this unguarded. Both names are fabricated --
-        # SystemInfo.current().gpu_name is None on a host without a GPU, which
-        # is a mismatch on one side of the check only -- and is_available is
-        # patched so the refusal under test is the GPU-name one there too.
-        here = dataclasses.replace(SystemInfo.current(), gpu_name="This GPU")
-        saved = dataclasses.replace(here, gpu_name="Some Other GPU")
+        # arch, so an artifact saved on one arch is now refused on another, and
+        # the AOT load path calls this unguarded. Both archs are fabricated, and
+        # is_available is patched so the refusal under test is the GPU one on a
+        # host without a GPU too.
+        here = dataclasses.replace(
+            SystemInfo.current(), gpu_name="This GPU", gpu_arch=90
+        )
+        saved = dataclasses.replace(here, gpu_name="Some Other GPU", gpu_arch=100)
         with patch.object(torch.cuda, "is_available", return_value=True):
             here.check_compatibility(saved, "cpu")
+            # The two load paths pass the saved info in opposite positions (AOT
+            # as other, caching precompile as self); both refuse.
+            with self.assertRaisesRegex(RuntimeError, "different GPU arch"):
+                here.check_compatibility(saved, "cuda")
+            with self.assertRaisesRegex(RuntimeError, "different GPU arch"):
+                saved.check_compatibility(here, "cuda")
+
+    def test_gpus_of_one_arch_share_an_artifact_across_gpu_names(self):
+        saved = dataclasses.replace(
+            SystemInfo.current(), gpu_name="NVIDIA GB300", gpu_arch=103
+        )
+        here = dataclasses.replace(saved, gpu_name="NVIDIA GB300 Max-Q")
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            saved.check_compatibility(here, "cuda")
+            here.check_compatibility(saved, "cuda")
+
+    def test_an_unrecorded_gpu_arch_falls_back_to_the_gpu_name(self):
+        # A package written before the arch was recorded, or on XPU, which
+        # records none. Only the side passed as other is required to have a
+        # name, so an unknown name splits the two load paths.
+        here = dataclasses.replace(
+            SystemInfo.current(), gpu_name="This GPU", gpu_arch=None
+        )
+        saved = dataclasses.replace(here, gpu_name="Some Other GPU", gpu_arch=90)
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            here.check_compatibility(dataclasses.replace(here, gpu_arch=90), "cuda")
             with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
                 here.check_compatibility(saved, "cuda")
-            # The two load paths pass the saved info in opposite positions (AOT
-            # as other, caching precompile as self). With both names known they
-            # agree; only the side passed as other is required to be known, so
-            # an unknown name splits them.
             with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
                 saved.check_compatibility(here, "cuda")
             unknown = dataclasses.replace(here, gpu_name=None)
             with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
                 unknown.check_compatibility(saved, "cuda")
             saved.check_compatibility(unknown, "cuda")
+
+    def test_a_python_patch_release_shares_an_artifact(self):
+        here = dataclasses.replace(SystemInfo.current(), python_version="3.12.4")
+        here.check_compatibility(dataclasses.replace(here, python_version="3.12.9"))
+        with self.assertRaisesRegex(RuntimeError, "different Python version"):
+            here.check_compatibility(dataclasses.replace(here, python_version="3.13.4"))
 
     def test_a_recorded_device_the_host_lacks_refuses_the_compile(self):
         # __post_init__ runs at the end of a compile as well as on load, so the
