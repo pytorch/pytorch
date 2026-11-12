@@ -419,6 +419,16 @@ class TestCppBuilder(TestCase):
         command = builder(True, False, "mock_own_options").get_command_line()
         self.assertIn("-Wl,--as-needed", command.split())
 
+    def test_run_compile_cmd_passes_environment_snapshot(self) -> None:
+        with (
+            mock.patch.dict(os.environ, {"PATH": "/mock/bin"}),
+            mock.patch.object(cpp_builder.subprocess, "run") as run,
+        ):
+            cpp_builder._run_compile_cmd("g++ -c x.cpp", "/tmp")
+        env = run.call_args.kwargs["env"]
+        self.assertIsInstance(env, dict)
+        self.assertEqual(env["PATH"], "/mock/bin")
+
 
 if __name__ == "__main__":
     run_tests()
