@@ -1,7 +1,7 @@
 # Owner(s): ["module: distributions"]
 
 import torch
-from torch.distributions import biject_to, constraints, transform_to
+from torch.distributions import biject_to, constraints, Normal, transform_to
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -108,6 +108,23 @@ class TestConstraintsDevice(TestCase):
             raise AssertionError(
                 f"Expected {result}, got {constraint_fn.check(t).all()}"
             )
+
+    def test_real_rejects_complex(self, device):
+        # `real` used to accept any non-NaN value, including complex
+        # tensors, so e.g. Normal(loc=complex) passed validation silently.
+        for dtype in (torch.complex64, torch.complex128):
+            value = torch.tensor([1 + 2j], dtype=dtype, device=device)
+            if constraints.real.check(value).any():
+                raise AssertionError(
+                    f"real.check should reject complex values, dtype={dtype}"
+                )
+        # Real values behave as before, including the NaN rejection.
+        value = torch.tensor([1.0, float("nan")], device=device)
+        result = constraints.real.check(value)
+        if result.tolist() != [True, False]:
+            raise AssertionError(f"Unexpected real.check result: {result}")
+        with self.assertRaises(ValueError):
+            Normal(loc=torch.tensor([1 + 2j], device=device), scale=1.0)
 
     @parametrize("constraint_fn, args", [(c[0], c[1:]) for c in CONSTRAINTS])
     def test_biject_to(self, device, constraint_fn, args):

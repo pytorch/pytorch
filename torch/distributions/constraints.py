@@ -422,7 +422,8 @@ class _Real(Constraint):
     """
 
     def check(self, value):
-        return value == value  # False for NANs.
+        # False for NANs and for non-real (e.g. complex) values.
+        return (value == value) & (not torch.is_complex(value))
 
 
 class _GreaterThan(Constraint):
