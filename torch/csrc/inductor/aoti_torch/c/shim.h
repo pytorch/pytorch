@@ -626,6 +626,17 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+// Returns a non-blocking stream on device_index (-1: the current device) for
+// copying model constants to the device. It is created on first use and never
+// destroyed, and every caller in the process gets the same one: callers must
+// not destroy it. It is not the current stream, so callers must order their
+// copies against other work themselves. On ROCm a stream keeps its hardware
+// queue until the process exits, even after it is destroyed, so a stream per
+// model would accumulate queues.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_constants_copy_cuda_stream(
+    int32_t device_index,
+    void** ret_stream);
+
 struct CUDATunableOpDynamicDimsGuardOpaque;
 using CUDATunableOpDynamicDimsGuardHandle =
     CUDATunableOpDynamicDimsGuardOpaque*;
