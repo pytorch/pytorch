@@ -903,19 +903,37 @@ class AOTInductorTestsTemplate:
     @unittest.skipIf(
         not TEST_WITH_ROCM, "Pinned async constant copy is default-on only on ROCm"
     )
-    @patch.dict(
-        os.environ, {"AOTI_COPY_USE_PINNED_ASYNC": "0", "AOTI_LOG_LOADING": "1"}
+    @unittest.skipIf(
+        IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
     )
     def test_constants_pinned_async_copy_disabled_on_rocm(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires a ROCm GPU")
         model, example_inputs, package_path = _compile_model_with_constants(self.device)
 
-        optimized, loading_log = _load_package_capturing_stderr(package_path)
+        # AOTI_COPY_USE_PINNED_ASYNC is latched in a function-local static of an
+        # inline function. Without -fvisibility=hidden, GCC emits it as a
+        # STB_GNU_UNIQUE symbol that every model .so in the process shares, so
+        # whichever test loaded a GPU model first already decided it. Load in a
+        # fresh process where the env var is set before any model is loaded.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inputs_path = os.path.join(tmpdir, "inputs.pt")
+            output_path = os.path.join(tmpdir, "output.pt")
+            torch.save(example_inputs, inputs_path)
+            script = f"""
+import torch
 
-        self.assertIn("load_constants: starting H2D copy", loading_log)
-        self.assertNotIn("PinnedStagingPool: allocated", loading_log)
-        self.assertEqual(optimized(*example_inputs), model(*example_inputs))
+optimized = torch._inductor.aoti_load_package({package_path!r})
+torch.save(optimized(*torch.load({inputs_path!r})), {output_path!r})
+"""
+            env = dict(os.environ, AOTI_COPY_USE_PINNED_ASYNC="0", AOTI_LOG_LOADING="1")
+            result = subprocess.run(
+                [sys.executable, "-c", script], capture_output=True, text=True, env=env
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertIn("load_constants: starting H2D copy", result.stderr)
+            self.assertNotIn("PinnedStagingPool: allocated", result.stderr)
+            self.assertEqual(torch.load(output_path), model(*example_inputs))
 
     def test_output_path_1(self):
         class Model(torch.nn.Module):
