@@ -12677,7 +12677,9 @@ op_db: list[OpInfo] = [
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-           dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.uint8, torch.int8, torch.bfloat16),
+           # matmul with 1D x 1D inputs dispatches to dot, which XPU does not implement
+           # for integer types, so int8/uint8 are excluded here (consistent with 'matmul').
+           dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -12731,7 +12733,9 @@ op_db: list[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
                                            torch.bfloat16),
-           dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.uint8, torch.int8, torch.bfloat16),
+           # A full contraction reduces to dot, which XPU does not implement for
+           # integer types, so int8/uint8 are excluded here.
+           dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            decorators=[
