@@ -14,6 +14,7 @@ import sympy
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.utils import counters
 from torch._inductor.heuristics.registry import register_template_heuristic
 from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.utils._ordered_set import OrderedSet
@@ -100,6 +101,26 @@ def _origami_package_supported(
         return Version(package_version) >= Version("0.0.3")
     except InvalidVersion:
         return False
+
+
+# AttributeError: the _origami_* wrappers below read private rocm-origami attributes.
+_ORIGAMI_ERRORS = (ValueError, TypeError, RuntimeError, AttributeError)
+
+
+def _log_origami_fallback(err: Exception) -> None:
+    """Warn once per error type; the error text is logged at debug."""
+    torch._logging.warning_once(
+        log,
+        "Origami could not select configs (%s); using the regular config "
+        "generator. Run with TORCH_LOGS=+inductor for details.",
+        type(err).__name__,
+    )
+    log.debug("Origami selection error: %s", err)
+
+
+def _origami_config_key(cfg: BaseConfig) -> tuple[int, int, int]:
+    """Tile dimensions; _filter_configs may change num_stages/num_warps but not these."""
+    return (cfg.block_m, cfg.block_n, cfg.block_k)
 
 
 def _tdm_descriptor_orientation(kwargs: dict[str, Any]) -> tuple[bool, bool]:
@@ -2451,6 +2472,25 @@ def mm_allow_tf32(m: Any, n: Any, k: Any, device_type: str | None) -> bool:
     return allow_tf32
 
 
+def blackwell_tma_mma_layout_supported(
+    dtype: torch.dtype,
+    allow_tf32: bool,
+    a_row_major: bool,
+    block_m: int,
+) -> bool:
+    """Whether the Blackwell TMA GEMM templates can lower this A operand layout.
+
+    tcgen05.mma does not support transposed FP32 operands in shared memory.
+    With the layouts emitted by the Blackwell persistent-TMA mm template and
+    the decompose-K partial-BMM template, the unsupported case is a transposed
+    (column-major) A operand with TF32 enabled and BLOCK_M > 32. BLOCK_M=32
+    and either orientation of B use supported MMA layouts.
+    """
+    return not (
+        dtype == torch.float32 and allow_tf32 and not a_row_major and block_m > 32
+    )
+
+
 class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     """
     Mixin class that converts config lists to template kwargs.
@@ -2485,16 +2525,19 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     # kernels are unaffected.
     ascending_k: bool = False
 
+    def _allow_tf32(self, kernel_inputs: KernelInputs) -> bool:
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
+        m, n, k = kernel_inputs.mnk_symbolic()
+        return mm_allow_tf32(m, n, k, kernel_inputs.device_type)
+
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
     ) -> dict[str, Any]:
-        if not isinstance(kernel_inputs, MMKernelInputs):
-            raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
-        m, n, k = kernel_inputs.mnk_symbolic()
         extra_kwargs = {
-            "ALLOW_TF32": mm_allow_tf32(m, n, k, kernel_inputs.device_type),
+            "ALLOW_TF32": self._allow_tf32(kernel_inputs),
         }
         # Scoped to XPU (self.ascending_k) and to the templates that reference
         # the key. The mm/addmm/... ops via mm_template are excluded because
@@ -2518,6 +2561,110 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             return self.get_exhaustive_mm_configs()
         else:
             return self.get_mm_configs()
+
+    def _origami_may_select(self) -> bool:
+        """Origami replaces the regular configs, so use it only for in-tree
+        heuristics and not when max_mm_configs is set. Customize configs by
+        subclassing; setting mm_configs on an in-tree instance has no effect while
+        Origami is on (patch rocm.origami to False instead)."""
+        return (
+            type(self).__module__ == __name__
+            and config.test_configs.max_mm_configs is None
+        )
+
+    def _origami_select_configs(
+        self,
+        origami_module: Any,
+        allcfgs: Any,
+        m: Any,
+        n: Any,
+        k: Any,
+        dtype: Any,
+        device: Any,
+        a_stride: Any,
+        b_stride: Any,
+    ) -> tuple[list[BaseConfig], dict[tuple[int, int, int], tuple[Any, Any]]]:
+        """Origami's picks for one problem, plus (occupancy, group_m) per tile key.
+
+        Raises whatever Origami raises; the caller falls back on _ORIGAMI_ERRORS.
+        """
+        selector = origami_module.OrigamiMatmulSelector(
+            allcfgs,
+            m,
+            n,
+            k,
+            dtype,
+            dtype,
+            dtype,
+            device,
+            a_stride,
+            b_stride,
+        )
+        # _origami_{problem,hardware,configs} wrap the private attrs;
+        # see TODO at top of file for the upstream-API migration plan.
+        problem = _origami_problem(selector)
+        hardware = _origami_hardware(selector)
+        topk_results = origami_module.select_topk_configs(
+            problem,
+            hardware,
+            _origami_configs(selector),
+            config.rocm.origami_topk,
+        )
+
+        seen: OrderedSet[tuple[int, int, int, int]] = OrderedSet()
+        origami_configs: list[BaseConfig] = []
+        # Tile key -> (occupancy, group_m) for converting the filtered configs.
+        origami_params: dict[tuple[int, int, int], tuple[Any, Any]] = {}
+        try:
+            warp_size = DeviceProperties.create(device).warp_size or 64
+        except (RuntimeError, AttributeError) as e:
+            # Fall back to the standard warp size if device properties are unavailable.
+            torch._logging.warning_once(
+                log, "Failed to get device warp size (%s); using 64.", type(e).__name__
+            )
+            warp_size = 64
+        for result in topk_results:
+            cfg = result.config
+            key = (cfg.mt.m, cfg.mt.n, cfg.mt.k, cfg.occupancy)
+            if key in seen:
+                continue
+            seen.add(key)
+            grid = origami_module.select_grid_size(
+                problem,
+                hardware,
+                cfg,
+                origami_module.grid_selection_t.data_parallel,
+                hardware.N_CU,
+            )
+            wgm_result = origami_module.select_workgroup_mapping(
+                problem, hardware, cfg, grid
+            )
+            # One MFMA per warp, capped at 2 * parallel_mi_cu.
+            tile_area = cfg.mt.m * cfg.mt.n
+            max_warps = 2 * hardware.parallel_mi_cu
+            # mfma_dim from origami hardware object; fall back to 16.
+            mfma_dim = getattr(hardware, "mfma_m", 16)
+            num_warps = min(
+                max_warps,
+                max(1, tile_area // (mfma_dim * warp_size)),
+            )
+            # ROCmConfigHeuristic._filter_configs normalizes num_stages to
+            # self.default_num_stages, so seed with that value to keep the
+            # in-flight GemmConfig consistent with the post-filter state.
+            base_config = GemmConfig(
+                block_m=cfg.mt.m,
+                block_n=cfg.mt.n,
+                block_k=cfg.mt.k,
+                num_stages=self.default_num_stages,
+                num_warps=num_warps,
+                group_m=wgm_result.wgm,
+            )
+            origami_configs.append(base_config)
+            origami_params[_origami_config_key(base_config)] = (
+                cfg.occupancy,
+                wgm_result.wgm,
+            )
+        return origami_configs, origami_params
 
     def _get_template_configs_impl(
         self,
@@ -2556,6 +2703,16 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             and config.max_autotune_gemm_search_space == "DEFAULT"
         ):
             log.debug("Origami skipped: symbolic m/n/k, using regular config generator")
+        if (
+            origami is not None
+            and _origami_enabled()
+            and config.max_autotune_gemm_search_space == "DEFAULT"
+            and not self._origami_may_select()
+        ):
+            log.debug(
+                "Origami skipped: %s is not an in-tree heuristic or max_mm_configs is set",
+                type(self).__name__,
+            )
         # `origami is not None` is the module-load gate (set at import time);
         # `_origami_enabled()` checks config.rocm.origami at call time so that
         # config.patch({"rocm.origami": False}) disables the origami path even
@@ -2563,6 +2720,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         if (
             origami is not None
             and _origami_enabled()
+            and self._origami_may_select()
             and config.max_autotune_gemm_search_space == "DEFAULT"
             and mnk_static
         ):
@@ -2606,99 +2764,18 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 op_name=op_name,
                 **kwargs,
             )
-            selector = origami.OrigamiMatmulSelector(
-                allcfgs,
-                m,
-                n,
-                k,
-                dtype,
-                dtype,
-                dtype,
-                device,
-                a_stride,
-                b_stride,
-            )
-            # _origami_{problem,hardware,configs} wrap the private attrs;
-            # see TODO at top of file for the upstream-API migration plan.
-            topk_results = origami.select_topk_configs(
-                _origami_problem(selector),
-                _origami_hardware(selector),
-                _origami_configs(selector),
-                config.rocm.origami_topk,
-            )
-            seen = OrderedSet()
-            # Collect origami-selected configs into a list before filtering
-            origami_configs: list[BaseConfig] = []
-            # Map config key (immutable tile dimensions) to origami parameters
-            origami_triton_configs: dict[tuple[int, int, int], tuple[Any, Any]] = {}
-
-            def _config_key(cfg: BaseConfig) -> tuple[int, int, int]:
-                """
-                Generate a stable key for origami configs based on immutable tile dimensions.
-                Uses only block_m, block_n, block_k since these uniquely identify an origami
-                config and remain invariant across _filter_configs modifications (which may
-                change num_stages, num_warps, and other attributes).
-                """
-                return (
-                    cfg.block_m,
-                    cfg.block_n,
-                    cfg.block_k,
+            try:
+                origami_configs, origami_triton_configs = self._origami_select_configs(
+                    origami, allcfgs, m, n, k, dtype, device, a_stride, b_stride
                 )
-
-            for result in topk_results:
-                cfg = result.config
-                key = (cfg.mt.m, cfg.mt.n, cfg.mt.k, cfg.occupancy)
-                if key in seen:
-                    continue
-                seen.add(key)
-                grid = origami.select_grid_size(
-                    _origami_problem(selector),
-                    _origami_hardware(selector),
-                    cfg,
-                    origami.grid_selection_t.data_parallel,
-                    _origami_hardware(selector).N_CU,
-                )
-                wgm_result = origami.select_workgroup_mapping(
-                    _origami_problem(selector),
-                    _origami_hardware(selector),
-                    cfg,
-                    grid,
-                )
-                # One MFMA per warp, capped at 2 * parallel_mi_cu.
-                tile_area = cfg.mt.m * cfg.mt.n
-                try:
-                    warp_size = DeviceProperties.create(device).warp_size or 64
-                except (RuntimeError, AttributeError) as e:
-                    # Fallback to standard warp size if device properties unavailable
-                    log.warning(
-                        "Failed to get device warp size: %s. Using default 64.", e
-                    )
-                    warp_size = 64
-                max_warps = 2 * _origami_hardware(selector).parallel_mi_cu
-                # mfma_dim from origami hardware object; fall back to 16.
-                mfma_dim = getattr(_origami_hardware(selector), "mfma_m", 16)
-                num_warps = min(
-                    max_warps,
-                    max(1, tile_area // (mfma_dim * warp_size)),
-                )
-                # ROCmConfigHeuristic._filter_configs normalizes num_stages to
-                # self.default_num_stages, so seed with that value to keep the
-                # in-flight GemmConfig consistent with the post-filter state.
-                base_config = GemmConfig(
-                    block_m=cfg.mt.m,
-                    block_n=cfg.mt.n,
-                    block_k=cfg.mt.k,
-                    num_stages=self.default_num_stages,
-                    num_warps=num_warps,
-                    group_m=wgm_result.wgm,
-                )
-                origami_configs.append(base_config)
-                # Store triton config and its parameters for later conversion using stable key
-                config_key = _config_key(base_config)
-                origami_triton_configs[config_key] = (
-                    cfg.occupancy,
-                    wgm_result.wgm,
-                )
+                origami_error = False
+            except _ORIGAMI_ERRORS as err:
+                # This also covers Inductor's own code in the helper (num_warps math,
+                # GemmConfig build): a ValueError/TypeError/RuntimeError/AttributeError
+                # bug there falls back and is counted instead of failing the compile.
+                _log_origami_fallback(err)
+                origami_error = True
+                origami_configs, origami_triton_configs = [], {}
 
             # Revalidate the reconstructed Origami tiles. The candidate pool was
             # filtered above, but selected results are rebuilt as GemmConfig objects.
@@ -2725,46 +2802,52 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             # self.exhaustive_configs before origami selection.
             filtered_configs = self._filter_configs(origami_configs)
 
-            # If origami returned configs, use them; otherwise fall back to regular generator
-            if filtered_configs:
-                # Convert filtered configs to template kwargs and yield
-                for filtered_config in filtered_configs:
-                    # Retrieve stored origami parameters using stable config key
-                    config_key = _config_key(filtered_config)
-                    origami_params = origami_triton_configs.get(config_key)
-                    if origami_params is None:
-                        # If not found, log a warning about the lookup failure
-                        log.warning(
-                            "Config lookup failed for %s. "
-                            "This may indicate a config rebuilding issue in _filter_configs.",
-                            config_key,
-                        )
-                        continue
-                    occupancy, group_m = origami_params
+            # Use Origami's picks. Defensive: in-tree filters never change block
+            # sizes, but if no pick survives filtering and lookup, fall back.
+            yielded = False
+            # Convert filtered configs to template kwargs and yield
+            for filtered_config in filtered_configs:
+                # Retrieve stored origami parameters using stable config key
+                config_key = _origami_config_key(filtered_config)
+                origami_params = origami_triton_configs.get(config_key)
+                if origami_params is None:
+                    # Debug only: if every lookup misses, the fallback below bumps the
+                    # origami_fallback counter (and warns once per process).
+                    log.debug(
+                        "Config lookup failed for %s. "
+                        "This may indicate a config rebuilding issue in _filter_configs.",
+                        config_key,
+                    )
+                    continue
+                occupancy, group_m = origami_params
 
-                    # Create TritonConfig from filtered config
-                    triton_config = self.triton_config(  # pyright: ignore[attr-defined]
-                        num_stages=filtered_config.num_stages,
-                        num_warps=filtered_config.num_warps,
-                        BLOCK_M=filtered_config.block_m,
-                        BLOCK_N=filtered_config.block_n,
-                        BLOCK_K=filtered_config.block_k,
-                        GROUP_M=group_m,
-                        waves_per_eu=occupancy,
-                    )
-                    template_kwargs = self._convert_config_to_template_kwargs(
-                        triton_config,
-                        m,
-                        n,
-                        k,
-                        kernel_inputs.out_dtype(),
-                    )
-                    yield template_kwargs
-            else:
-                # No valid Origami configs remain; fall back to the regular generator.
-                log.warning(
-                    "No valid Origami configs remain, falling back to regular config generator"
+                # Create TritonConfig from filtered config
+                triton_config = self.triton_config(  # pyright: ignore[attr-defined]
+                    num_stages=filtered_config.num_stages,
+                    num_warps=filtered_config.num_warps,
+                    BLOCK_M=filtered_config.block_m,
+                    BLOCK_N=filtered_config.block_n,
+                    BLOCK_K=filtered_config.block_k,
+                    GROUP_M=group_m,
+                    waves_per_eu=occupancy,
                 )
+                template_kwargs = self._convert_config_to_template_kwargs(
+                    triton_config,
+                    m,
+                    n,
+                    k,
+                    kernel_inputs.out_dtype(),
+                )
+                yielded = True
+                yield template_kwargs
+            if not yielded:
+                # No valid Origami configs remain; fall back to the regular generator.
+                counters["inductor"]["origami_fallback"] += 1
+                if not origami_error:
+                    torch._logging.warning_once(
+                        log,
+                        "No valid Origami configs remain, falling back to regular config generator",
+                    )
                 for c in configs(
                     m,
                     n,
@@ -3049,6 +3132,19 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
     combinations the lowering cannot support before they reach codegen.
     """
 
+    @staticmethod
+    def _supports_mma_layout(
+        dtype: torch.dtype,
+        allow_tf32: bool,
+        template_kwargs: dict[str, Any],
+    ) -> bool:
+        return blackwell_tma_mma_layout_supported(
+            dtype,
+            allow_tf32,
+            template_kwargs["A_ROW_MAJOR"],
+            template_kwargs["BLOCK_M"],
+        )
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -3062,6 +3158,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             raise AssertionError("Blackwell GEMM requires MMKernelInputs")
         _, mat2 = kernel_inputs.mat1mat2()
         element_size = mat2.get_dtype().itemsize
+        allow_tf32 = self._allow_tf32(kernel_inputs)
 
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
@@ -3069,6 +3166,10 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             op_name,
             **kwargs,
         ):
+            if not self._supports_mma_layout(
+                kernel_inputs.dtype(), allow_tf32, template_kwargs
+            ):
+                continue
             use_meta_ws = template_kwargs.get("USE_META_WS", False)
             # autoWS configs come from a full sweep; drop combos the lowering
             # does not support so no invalid config reaches codegen.
