@@ -65,8 +65,8 @@ struct TCPStoreOptions {
   // TLS with mutual certificate authentication: PEM certificate (chain),
   // private key and CA bundle. If none is set, TORCH_TCPSTORE_TLS_CERT,
   // TORCH_TCPSTORE_TLS_KEY and TORCH_TCPSTORE_TLS_CA are used instead. TLS is
-  // enabled if any option or environment variable is set; all three are
-  // required. Empty values and paths containing NUL bytes are rejected.
+  // disabled when all selected settings are empty or unset. Otherwise all
+  // three values are required and must be non-empty. NUL bytes are rejected.
   std::optional<std::string> tlsCert = std::nullopt;
   std::optional<std::string> tlsKey = std::nullopt;
   std::optional<std::string> tlsCa = std::nullopt;
