@@ -218,15 +218,20 @@ class InductorChoices:
         and serves the sorted lowering, then autotuning candidates.
         """
         heuristics = self.get_config_heuristics(device.type)
-        return heuristics.get_scatter_preagg_configs(
+        configs = heuristics.get_scatter_preagg_configs(
             num_tokens,
             num_inner,
             dtype,
-            target=heuristics.get_scatter_preagg_target(device),
+            target=self.get_scatter_preagg_target(device),
             inner_contiguous=inner_contiguous,
             num_keys=num_keys,
             max_autotune=max_autotune,
         )
+        if not configs:
+            raise AssertionError(
+                "get_scatter_preagg_configs must return the default config first"
+            )
+        return configs
 
     def should_use_scatter_preagg_template(self, device: torch.device | None) -> bool:
         """
@@ -234,7 +239,8 @@ class InductorChoices:
         pre-aggregation template (kernel/scatter_preagg.py), including those
         that would otherwise take the eager fallback for atomic_add dtype
         support or deterministic algorithms, or atomics Triton lacks (8/16-bit
-        ints).
+        ints). ``config.scatter_preagg_template`` is on by default on ROCm only;
+        enabling it on another GPU is unsupported.
         """
         return (
             config.scatter_preagg_template

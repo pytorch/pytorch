@@ -3130,6 +3130,40 @@ class _ConstantDecompTable(Generic[_P, _T]):
         return self.table
 
 
+_scatter_env_vars_warned = False
+
+
+def _warn_deprecated_scatter_env_vars() -> None:
+    """Warn about the deprecated partitioned scatter variables, once per process."""
+    global _scatter_env_vars_warned
+    if _scatter_env_vars_warned and not torch.is_warn_always_enabled():
+        return
+    _scatter_env_vars_warned = True
+    for suffix, instead in (
+        (
+            "ENABLED",
+            "sets scatter_preagg_template on ROCm unless "
+            "TORCHINDUCTOR_SCATTER_PREAGG_TEMPLATE is set; use that instead "
+            "(enabling the template on other GPUs is unsupported)",
+        ),
+        ("FP32_ACCUMULATION", "does nothing"),
+        (
+            "FORCE",
+            "does nothing: the template decides per block at run time (see "
+            "scatter_preagg_template_min_saved)",
+        ),
+    ):
+        name = f"TORCHINDUCTOR_PARTITIONED_SCATTER_{suffix}"
+        if name in os.environ:
+            warnings.warn(
+                f"The environment variable {name} is deprecated since 2.16 (removal "
+                f"planned for 2.18; see "
+                f"https://github.com/pytorch/pytorch/issues/204051) and {instead}.",
+                FutureWarning,
+                stacklevel=1,
+            )
+
+
 def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
@@ -3165,7 +3199,7 @@ def compile_fx(
     from torch.compiler._no_compile import check_compilation_allowed
 
     check_compilation_allowed("Inductor graph compilation")
-    config._warn_deprecated_scatter_env_vars()
+    _warn_deprecated_scatter_env_vars()
     warn_deprecated_artifacts()
 
     # Some arguments trigger a recursive call to compile_fx.  Handle these

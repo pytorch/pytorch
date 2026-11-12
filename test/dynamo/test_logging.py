@@ -1590,7 +1590,9 @@ TorchDynamo attempted to trace the following frames: [
 
 class ScatterPreaggLoggingTests(LoggingTestCase):
     @requires_gpu
-    @unittest.skipIf(torch.version.hip is None, "scatter template is ROCm only")
+    @unittest.skipIf(
+        torch.version.hip is None, "scatter template is only supported on ROCm"
+    )
     @torch._inductor.config.patch(scatter_preagg_template=True)
     @make_logging_test(scatter_preagg=True)
     def test_scatter_preagg(self, records):
@@ -1693,7 +1695,8 @@ exclusions = {
     "overlap_scheduling",
     # Only emits for torch._native DSL ops, not for a plain torch.compile.
     "native_dsl_compile",
-    # Only emits for accumulating scatters on ROCm (see ScatterPreaggLoggingTests).
+    # Only emits for accumulating scatters where the template is enabled (see
+    # ScatterPreaggLoggingTests).
     "scatter_preagg",
     # Deprecated, logs nothing.
     "partitioned_scatter",

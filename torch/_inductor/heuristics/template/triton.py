@@ -443,7 +443,8 @@ class ScatterPreaggTarget:
     # Per-block shared memory limit, which Triton enforces at compile time.
     shared_mem_bytes: int
     num_sms: int
-    # Elements per atomic on the sort path (0 leaves it to the compiler).
+    # Elements per atomic on the sort and matrix-product paths (0 leaves it to
+    # the compiler).
     atomic_vec: int = 0
     # Bytes per lane of plain atomics on outputs under 2GB (0: atomic_vec).
     plain_atomic_bytes: int = 0
@@ -1496,8 +1497,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
     # Scatter pre-aggregation helpers
     def should_use_scatter_preagg_template(self, device: torch.device) -> bool:
-        """Whether this backend supports the scatter pre-aggregation template."""
-        return False
+        """
+        Whether this backend can run the scatter pre-aggregation template. The
+        template is on by default on ROCm only; enabling it on another GPU is
+        unsupported.
+        """
+        return device.type in ("cuda", "xpu")
 
     def get_scatter_preagg_target(self, device: torch.device) -> ScatterPreaggTarget:
         """

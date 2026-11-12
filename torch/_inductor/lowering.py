@@ -5075,11 +5075,6 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
 def index_put_impl_(self, indices, values, accumulate, check, may_realize=False):
     """Accumulating scatters may lower to the scatter pre-aggregation template
     (see InductorChoices.should_use_scatter_preagg_template)."""
-    from .kernel.scatter_preagg import (
-        can_bypass_atomic_fallback,
-        maybe_preaggregated_scatter,
-    )
-
     if may_realize:
 
         def indice_slice_from_randperm(indice):
@@ -5116,6 +5111,11 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
         for _ in range(len(mask.get_size()), len(self.get_size())):
             mask = unsqueeze(mask, -1)
         return index_put_as_masked_fill(self, [mask], values, accumulate)
+
+    from .kernel.scatter_preagg import (
+        can_bypass_atomic_fallback,
+        maybe_preaggregated_scatter,
+    )
 
     preagg = accumulate and V.choices.should_use_scatter_preagg_template(
         self.get_device()
@@ -5360,12 +5360,6 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     """Sum reductions may lower to the scatter pre-aggregation template (see
     InductorChoices.should_use_scatter_preagg_template)."""
-    from .kernel.scatter_preagg import (
-        can_bypass_atomic_fallback,
-        declines_by_size,
-        maybe_preaggregated_scatter,
-    )
-
     if reduce not in (None, "sum", "prod", "mean", "amax", "amin"):
         raise AssertionError(
             'expected: reduce in (None, "sum", "prod", "mean", "amax", "amin")'
@@ -5377,6 +5371,11 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         raise AssertionError(
             "aten.scatter_reduce_.two is not the unique overload of aten.scatter_reduce_"
         )
+    from .kernel.scatter_preagg import (
+        can_bypass_atomic_fallback,
+        declines_by_size,
+        maybe_preaggregated_scatter,
+    )
 
     if isinstance(src, Number):
         src = full_like(self, src)
@@ -5394,10 +5393,23 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         and can_bypass_atomic_fallback(self.get_dtype())
     )
     # A decline below would leave the include_self=False zeroing wasted.
+    # 8/16-bit ints are not covered by scatter_fallback, and Triton has no
+    # atomics for them, so that decline emits the eager fallback directly.
     if preagg_bypass and declines_by_size(
         self.get_dtype(), self.get_size(), index.get_size()
     ):
         preagg = preagg_bypass = False
+        if self.get_dtype() in (torch.int8, torch.int16, torch.uint8):
+            ir.ScatterFallback(
+                aten.scatter_reduce_.two,
+                self,
+                dim,
+                index,
+                src,
+                reduce=reduce,
+                include_self=include_self,
+            )
+            return self
     if not preagg_bypass and (
         fallback_result := scatter_fallback(
             aten.scatter_reduce_.two,

@@ -21,8 +21,10 @@ from torch._inductor.heuristics.template.triton import (
     ROCmConfigHeuristic,
     ScatterPreaggConfig,
     ScatterPreaggTarget,
+    XPUConfigHeuristic,
 )
 from torch._inductor.kernel import scatter_preagg
+from torch._inductor.select_algorithm import NoValidChoicesError
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
@@ -32,6 +34,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
+    set_warn_always_context,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
@@ -70,6 +73,20 @@ def _cfg(block_t, block_d, d_iters, num_warps):
     )
 
 
+def _isolate_heuristics(case):
+    """Build config heuristics without querying a device or importing Triton."""
+    heuristics = "torch._inductor.heuristics.template.triton"
+    case.enterContext(
+        unittest.mock.patch.dict(BaseHeuristicSingleton._instances, clear=True)
+    )
+    case.enterContext(
+        unittest.mock.patch(f"{heuristics}.get_backend_num_stages", return_value=2)
+    )
+    case.enterContext(
+        unittest.mock.patch(f"{heuristics}.kpack_supported", return_value=False)
+    )
+
+
 def _with_configs(*cfgs):
     return unittest.mock.patch.object(
         InductorChoices, "get_scatter_preagg_configs", return_value=list(cfgs)
@@ -77,7 +94,8 @@ def _with_configs(*cfgs):
 
 
 @unittest.skipIf(
-    not (TEST_WITH_ROCM and HAS_CUDA_AND_TRITON), "scatter template is ROCm only"
+    not (TEST_WITH_ROCM and HAS_CUDA_AND_TRITON),
+    "scatter template is only supported on ROCm",
 )
 class TestScatterPreagg(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -173,6 +191,37 @@ class TestScatterPreagg(TestCase):
 
         self._check(fn, x, idx, src, atol=1e-2)
 
+    @parametrize("dtype", [torch.int8, torch.int16, torch.uint8], name_fn=_dtype_name)
+    def test_tiny_int_scatter_add(self, device, dtype):
+        # Too small for the template, and Triton has no atomics for these, so
+        # the eager fallback must compile and match.
+        x = torch.zeros(8, 4, device=device, dtype=dtype)
+        idx = torch.arange(8, device=device)
+        src = torch.arange(32, device=device, dtype=dtype).view(8, 4)
+
+        def fn(x, i, s):
+            return x.scatter_add(0, i[:, None].expand_as(s), s)
+
+        self._check(fn, x, idx, src, applied=False, atol=0, rtol=0)
+        self.assertEqual(counters["inductor"]["scatter_preagg_skipped_too_small"], 1)
+
+    def test_deterministic_bf16_large_output(self, device):
+        # Deterministic bf16 uses the sorted lowering, which does not stage in
+        # fp32, so the fp32-copy size decline does not apply.
+        x = torch.randn(100_000, 8, device=device, dtype=torch.bfloat16)
+        idx = torch.randint(0, 100_000, (8192,), device=device)
+        v = torch.randn(8192, 8, device=device, dtype=torch.bfloat16)
+
+        def fn(x, i, v):
+            return x.index_add(0, i, v)
+
+        self.enterContext(DeterministicGuard(True))
+        self._check(fn, x, idx, v, atol=2e-2, rtol=2e-2)
+        self.assertEqual(counters["inductor"]["scatter_preagg_sorted"], 1)
+        self.assertEqual(
+            counters["inductor"]["scatter_preagg_skipped_fp32_copy_too_large"], 0
+        )
+
     def test_tiny_uint8_index_add_negative_alpha(self, device):
         x = torch.zeros(5, 5, device=device, dtype=torch.uint8)
         idx = torch.arange(5, device=device, dtype=torch.int32)
@@ -181,8 +230,17 @@ class TestScatterPreagg(TestCase):
         def fn(x, i, s):
             return x.index_add(0, i, s, alpha=-1)
 
+        # Too small for the template by default, which emits the eager fallback.
         self._check(fn, x, idx, src, applied=False, atol=0, rtol=0)
         self.assertEqual(counters["inductor"]["scatter_preagg_skipped_too_small"], 1)
+
+        # Past the size gate, the negative alpha wraps around in the sorted
+        # template as it does in eager.
+        torch._dynamo.reset()
+        counters.clear()
+        with config.patch(scatter_preagg_template_min_numel=0):
+            self._check(fn, x, idx, src, atol=0, rtol=0)
+        self.assertEqual(counters["inductor"]["scatter_preagg_sorted"], 1)
 
     def test_inplace_graph_inputs(self, device):
         # Mutating graph inputs in place still reaches the template.
@@ -200,6 +258,91 @@ class TestScatterPreagg(TestCase):
         with config.patch(scatter_preagg_template_min_numel=0):
             self._check(fn, *outs, idx, scatter_idx, vals, atol=1e-2, rtol=1e-3)
         self.assertEqual(counters["inductor"]["scatter_preagg_applied"], 2)
+
+    @parametrize("deterministic", [False, True])
+    @parametrize(
+        "producer",
+        ["cumsum_values", "cumsum_indices", "layer_norm_embedding", "cumsum_embedding"],
+    )
+    def test_realized_unfrozen_inputs(self, device, producer, deterministic):
+        # Values and indices from realized buffers whose layouts are still
+        # flexible are traced while planning, which needs them fixed.
+        n, rows, d = 20_000, 64, 32
+        x = torch.zeros(rows, d, device=device)
+        idx = _hot_indices(n, rows, device)
+        v = torch.randn(n, d, device=device)
+
+        def fn(x, i, v):
+            if producer == "cumsum_values":
+                return x.index_add(0, i, v.cumsum(1))
+            if producer == "cumsum_indices":
+                return x.index_add(0, i.cumsum(0) % rows, v)
+            if producer == "layer_norm_embedding":
+                grad = torch.nn.functional.layer_norm(v, (d,))
+                return torch.ops.aten.embedding_dense_backward(grad, i, rows, -1, False)
+            return torch.ops.aten.embedding_dense_backward(
+                v, i.cumsum(0) % rows, rows, -1, False
+            )
+
+        self.enterContext(DeterministicGuard(deterministic))
+        self._check(fn, x, idx, v, atol=1e-1, rtol=1e-3)
+
+    def _no_valid_choices(self, fail_on):
+        """Make the ``fail_on``-th (1-based) template selection find no valid
+        choice, and record the selections made."""
+        selected = []
+        select = scatter_preagg.autotune_select_algorithm
+
+        def autotune_select_algorithm(name, *args, **kwargs):
+            selected.append(name)
+            if len(selected) == fail_on:
+                raise NoValidChoicesError
+            return select(name, *args, **kwargs)
+
+        self.enterContext(
+            unittest.mock.patch.object(
+                scatter_preagg,
+                "autotune_select_algorithm",
+                autotune_select_algorithm,
+            )
+        )
+        return selected
+
+    @parametrize("deterministic", [False, True])
+    def test_no_valid_choices_falls_back(self, device, deterministic):
+        # With no valid template choice nothing has been emitted, so the regular
+        # lowering takes the scatter.
+        selected = self._no_valid_choices(fail_on=1)
+        self.enterContext(DeterministicGuard(deterministic))
+        x = torch.randn(64, 32, device=device)
+        idx = _hot_indices(20_000, 64, device)
+        v = torch.randn(20_000, 32, device=device)
+
+        code = self._check(
+            lambda x, i, v: x.index_add(0, i, v), x, idx, v, applied=False
+        )
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(
+            counters["inductor"]["scatter_preagg_skipped_codegen_failed"], 1
+        )
+        self.assertEqual(
+            "aten.index_put_" in code or "aten.index_add_" in code, deterministic
+        )
+
+    def test_no_valid_choices_after_first_stage_raises(self, device):
+        # The sorted lowering's chunk stage has already mutated the output when
+        # the merge stage fails, so falling back would apply the scatter twice.
+        selected = self._no_valid_choices(fail_on=2)
+        self.enterContext(DeterministicGuard(True))
+        x = torch.randn(64, 32, device=device)
+        idx = _hot_indices(20_000, 64, device)
+        v = torch.randn(20_000, 32, device=device)
+
+        with self.assertRaisesRegex(Exception, "NoValidChoicesError"):
+            torch.compile(lambda x, i, v: x.index_add(0, i, v), fullgraph=True)(
+                x, idx, v
+            )
+        self.assertEqual(selected, ["scatter_sorted_chunk", "scatter_sorted_merge"])
 
     @config.patch(scatter_preagg_template_min_saved=-1.0)
     @parametrize("dups", [False, True])
@@ -268,7 +411,8 @@ class TestScatterPreagg(TestCase):
 
     def test_gathered_values_config(self, device):
         # A message-passing scatter of gathered rows, on a config whose plain
-        # path once miscompiled with buffer ops into a memory fault.
+        # path miscompiles with buffer ops and index bounds assertions into a
+        # memory fault when its chunks are a regular loop.
         x = torch.zeros(65_536, 64, device=device)
         h = torch.randn(65_536, 64, device=device)
         src = torch.randint(0, 65_536, (524_288,), device=device)
@@ -358,8 +502,9 @@ class TestScatterPreagg(TestCase):
     @parametrize("reason", ["too_small", "fp32_copy_too_large"])
     @parametrize("op", ["index_put", "scatter_reduce"])
     def test_bf16_declined_falls_back(self, device, reason, op):
-        # A scatter the template declines for its size must still be lowered:
-        # eager fallback where bf16 atomics are missing, atomics where they exist.
+        # A scatter the template declines for its size must still be lowered. bf16
+        # has no atomics to fall back to, so it takes the eager fallback the
+        # template lifted it off.
         fn = _SCATTER_FNS[op]
         rows, n = (1000, 400) if reason == "too_small" else (100_000, 8192)
         x = torch.randn(rows, 8, device=device).bfloat16()
@@ -436,8 +581,8 @@ class TestScatterPreagg(TestCase):
     @parametrize("deterministic", [False, True])
     @parametrize("op", ["scatter", "index_put"])
     def test_skip_overwriting_scatter(self, device, deterministic, op):
-        # Only accumulating scatters reach the template; deterministic mode
-        # also skips its size gate.
+        # Only accumulating scatters reach the template, in deterministic mode
+        # too.
         x = torch.randn(64, 32, device=device)
         idx = torch.randint(0, 64, (20_000, 32), device=device)
         # Equal values make the duplicate writes' order irrelevant.
@@ -1076,6 +1221,48 @@ class TestScatterPreagg(TestCase):
         self.assertIn("COPY_NUMEL : tl.constexpr = 1728", code)
         self.assertEqual(counters["inductor"]["scatter_preagg_copies"], 1)
 
+    @parametrize("deterministic", [False, True])
+    @parametrize("transposed", [False, True])
+    def test_replan_when_output_layout_changes(self, device, deterministic, transposed):
+        # The output is planned against its layout so far and frozen only after
+        # the plan's declines pass. A computed output that decide_layout() gives
+        # other strides than that is planned again.
+        x = torch.randint(-2, 3, (17, 100), device=device).float()
+        idx = torch.randint(0, 17, (30_000,), device=device)
+        v = torch.randint(-1, 2, (30_000, 100), device=device).float()
+
+        def fn(x, i, v):
+            if transposed:
+                return x.t().index_add(1, i, v.t()).t()
+            return x.index_add(0, i, v)
+
+        self.enterContext(DeterministicGuard(deterministic))
+        with unittest.mock.patch.object(
+            scatter_preagg, "_plan", wraps=scatter_preagg._plan
+        ) as plan:
+            self._check(fn, x, idx, v, atol=0, rtol=0)
+        self.assertEqual(plan.call_count, 2 if transposed else 1)
+        if transposed:
+            first, replanned = (call.args[0] for call in plan.call_args_list)
+            self.assertNotEqual(first.stride, replanned.stride)
+            self.assertEqual(first.size, replanned.size)
+
+    def test_replan_turns_on_fp32_copy(self, device):
+        # Planned contiguous, the fp16 inner dimension takes the matrix product
+        # in fp16; the final transposed strides make it stage into an fp32 copy.
+        x = torch.zeros(64, 16, device=device, dtype=torch.float16)
+        idx = torch.randint(0, 16, (30_000,), device=device)
+        v = torch.randn(30_000, 64, device=device, dtype=torch.float16)
+
+        def fn(x, i, v):
+            return x.t().index_add(0, i, v)
+
+        out = torch.compile(fn, fullgraph=True)(x, idx, v)
+        ref = fn(x.double(), idx, v.double())
+        self.assertEqual(counters["inductor"]["scatter_preagg_fp32_copy"], 1)
+        # Accumulating in fp16 is off by about 0.4 here.
+        self.assertEqual(out.double(), ref, atol=0.1, rtol=0)
+
     def _check_deterministic(self, fn, *args, tol):
         ref = fn(*[a.double() if a.is_floating_point() else a.clone() for a in args])
         ref = ref.double()
@@ -1221,6 +1408,24 @@ class TestScatterPreagg(TestCase):
             )
 
 
+class TestScatterPreaggSelect(TestCase):
+    """Selection of the template's choices, without a device."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_select_emitted_stage_raises(self):
+        # A fallback is only for a scatter whose earlier stages were not emitted.
+        def no_choices(*args, **kwargs):
+            raise NoValidChoicesError
+
+        with unittest.mock.patch.object(
+            scatter_preagg, "autotune_select_algorithm", no_choices
+        ):
+            self.assertFalse(scatter_preagg._select("scatter", [], [], None))
+            with self.assertRaises(NoValidChoicesError):
+                scatter_preagg._select("scatter", [], [], None, emitted=True)
+
+
 class TestScatterPreaggConfigs(TestCase):
     """Config heuristics for given device targets."""
 
@@ -1228,17 +1433,7 @@ class TestScatterPreaggConfigs(TestCase):
 
     def setUp(self):
         super().setUp()
-        # Isolate the singleton and avoid querying a device.
-        heuristics = "torch._inductor.heuristics.template.triton"
-        self.enterContext(
-            unittest.mock.patch.dict(BaseHeuristicSingleton._instances, clear=True)
-        )
-        self.enterContext(
-            unittest.mock.patch(f"{heuristics}.get_backend_num_stages", return_value=2)
-        )
-        self.enterContext(
-            unittest.mock.patch(f"{heuristics}.kpack_supported", return_value=False)
-        )
+        _isolate_heuristics(self)
 
     def _configs(self, target, *args, rocm=True, **kwargs):
         cls = ROCmConfigHeuristic if rocm else CUDAConfigHeuristic
@@ -1250,7 +1445,9 @@ class TestScatterPreaggConfigs(TestCase):
         self.assertGreaterEqual(cfg.block_t, 32)
         self.assertLessEqual(cfg.block_t, 1024)
         self.assertLessEqual(cfg.block_d, 1 << (num_inner - 1).bit_length())
-        self.assertEqual((cfg.num_warps * target.warp_size) % target.warp_size, 0)
+        # Configs keep the lanes per program across warp sizes: 128 or 256
+        # threads, or one warp for the matrix product.
+        self.assertIn(cfg.num_warps * target.warp_size, (target.warp_size, 128, 256))
         if num_inner % cfg.block_d:
             # Ragged sort/scan tiles use about 16 bytes of LDS per element.
             self.assertLessEqual(
@@ -1306,11 +1503,11 @@ class TestScatterPreaggConfigs(TestCase):
         # Narrow fp32 rows take 256 threads and a register cap; wide slices
         # 256 threads.
         (cfg,) = self._configs(target, 1 << 20, 4, torch.float32)
-        self.assertGreaterEqual(cfg.num_warps * target.warp_size, 128)
+        self.assertEqual(cfg.num_warps, target.warps(256))
         self.assertGreater(cfg.waves_per_eu, 0)
         (cfg,) = self._configs(target, 1 << 20, 1024, torch.float32)
         self.assertGreaterEqual(cfg.block_d * cfg.d_iters, 256)
-        self.assertGreaterEqual(cfg.num_warps * target.warp_size, 128)
+        self.assertEqual(cfg.num_warps, target.warps(256))
         # Neither applies to other dtypes or strided rows.
         for args, kwargs in [
             ((1 << 20, 4, torch.bfloat16), {}),
@@ -1320,10 +1517,29 @@ class TestScatterPreaggConfigs(TestCase):
             self.assertEqual(cfg.num_warps, target.warps(128))
             self.assertEqual(getattr(cfg, "waves_per_eu", 0), 0)
         # The matrix product takes one wavefront, and 64-wide slices past
-        # 128-wide rows of cold duplicates.
+        # 128-wide rows pay only with mostly distinct keys.
         (cfg,) = self._configs(target, 50_000, 256, torch.float16, num_keys=1 << 20)
         self.assertEqual(cfg.num_warps, 1)
-        self.assertGreaterEqual(cfg.block_d, target.matrix_min_block_d)
+        self.assertEqual(cfg.block_d, 64)
+        (cfg,) = self._configs(target, 50_000, 256, torch.float16, num_keys=64)
+        self.assertEqual(cfg.num_warps, 1)
+        self.assertEqual(cfg.block_d, 32)
+        (cfg,) = self._configs(target, 50_000, 128, torch.float16, num_keys=1 << 20)
+        self.assertEqual(cfg.block_d, 32)
+
+    def test_ragged_tile_scales_with_shared_memory(self):
+        # Ragged tiles take about 16 bytes of shared memory per element, so the
+        # tile shrinks to fit a smaller limit and does not grow past the default
+        # on a larger one.
+        tiles = {}
+        for shared_mem_kb in (16, 32, 64, 160):
+            target = ScatterPreaggTarget(64, shared_mem_kb << 10, 80)
+            (cfg,) = self._configs(target, 1 << 20, 37, torch.float32)
+            tiles[shared_mem_kb] = cfg.block_t * cfg.block_d
+            self.assertLessEqual(tiles[shared_mem_kb] * 16, shared_mem_kb << 10)
+        self.assertLess(tiles[16], tiles[32])
+        self.assertLess(tiles[32], tiles[64])
+        self.assertEqual(tiles[64], tiles[160])
 
     @parametrize(
         "warp_size,shared_mem_kb,num_sms",
@@ -1345,22 +1561,104 @@ class TestScatterPreaggConfigs(TestCase):
         self.assertGreaterEqual(programs, 2 * num_sms)
 
     def test_copy_tuning_on_target(self):
-        # Output copy and sort-threshold choices belong to the target, so a
-        # backend overrides them there.
-        layout = types.SimpleNamespace(storage_size=lambda: 64 * 32)
-        for target in (
-            ScatterPreaggTarget(64, 64 << 10, 80, max_copies=2),
-            ScatterPreaggTarget(64, 64 << 10, 80),
-            ScatterPreaggTarget(64, 64 << 10, 80, max_copies=1),
-        ):
-            copies = scatter_preagg._num_copies(
-                layout, torch.float32, 1 << 20, 32, target
+        # Output copy choices belong to the target, so a backend overrides them
+        # there. Each bound limits the copies when it is the tightest.
+        storage = 64 * 32
+        layout = types.SimpleNamespace(storage_size=lambda: storage)
+        tokens, inner = 1 << 20, 32
+        writes = tokens * inner // storage
+
+        def copies(num_tokens=tokens, num_inner=inner, **kwargs):
+            kwargs = {"writes_per_copy": 1, "min_copy_tokens": 0} | kwargs
+            kwargs.setdefault("min_copy_tokens_single_column", 0)
+            target = ScatterPreaggTarget(64, 64 << 10, 80, **kwargs)
+            return scatter_preagg._num_copies(
+                layout, torch.float32, num_tokens, num_inner, target
             )
-            self.assertEqual(copies & (copies - 1), 0)
-            self.assertLessEqual(copies, target.max_copies)
-            self.assertLessEqual(
-                copies * layout.storage_size() * torch.float32.itemsize,
-                target.max_copy_bytes,
+
+        # With the other bounds loose, copies follow max_copies, rounded down to
+        # a power of two.
+        for max_copies, expect in [(1, 1), (2, 2), (3, 2), (4, 4), (8, 8), (16, 16)]:
+            self.assertEqual(copies(max_copies=max_copies), expect)
+        # Each copy takes at least writes_per_copy writes per element.
+        for writes_per_copy, expect in [
+            (writes, 1),
+            (writes // 2, 2),
+            (writes // 4, 4),
+        ]:
+            self.assertEqual(
+                copies(max_copies=16, writes_per_copy=writes_per_copy), expect
+            )
+        self.assertEqual(copies(max_copies=16, writes_per_copy=writes // 3), 2)
+        # All the copies together stay within max_copy_bytes.
+        copy_bytes = storage * torch.float32.itemsize
+        for num_copies, expect in [(1, 1), (2, 2), (3, 2), (4, 4)]:
+            self.assertEqual(
+                copies(max_copies=16, max_copy_bytes=num_copies * copy_bytes), expect
+            )
+        # Too few tokens take no copies, and single columns have their own
+        # minimum.
+        floor, never = 1 << 12, 1 << 40
+        for num_tokens, num_inner, kwargs, expect in [
+            (floor - 1, inner, {"min_copy_tokens": floor}, False),
+            (floor, inner, {"min_copy_tokens": floor}, True),
+            (floor, inner, {"min_copy_tokens_single_column": floor}, True),
+            (floor - 1, 1, {"min_copy_tokens_single_column": floor}, False),
+            (floor, 1, {"min_copy_tokens_single_column": floor}, True),
+            (floor, 1, {"min_copy_tokens": floor}, True),
+            (floor, 1, {"min_copy_tokens": never}, True),
+            (floor, 1, {"min_copy_tokens_single_column": never}, False),
+            (floor, inner, {"min_copy_tokens": never}, False),
+        ]:
+            self.assertEqual(
+                copies(num_tokens, num_inner, max_copies=8, **kwargs) > 1,
+                expect,
+                msg=f"{num_tokens=} {num_inner=} {kwargs=}",
+            )
+
+    def test_configs_use_choices_target(self):
+        # A choices subclass that overrides the target sizes the configs by it,
+        # not by the heuristics' own.
+        custom = ScatterPreaggTarget(32, 64 << 10, 80)
+
+        class Choices(InductorChoices):
+            def get_scatter_preagg_target(self, device):
+                return custom
+
+        choices = Choices()
+        heuristics = ROCmConfigHeuristic()
+        with (
+            unittest.mock.patch.object(
+                choices, "get_config_heuristics", return_value=heuristics
+            ),
+            unittest.mock.patch.object(heuristics, "get_scatter_preagg_target") as base,
+        ):
+            cfgs = choices.get_scatter_preagg_configs(
+                1 << 20,
+                32,
+                torch.float32,
+                device=torch.device("cuda", 0),
+                max_autotune=True,
+            )
+        base.assert_not_called()
+        self.assertGreater(len(cfgs), 1)
+        for cfg in cfgs:
+            self.assertIn(cfg.num_warps * custom.warp_size, (128, 256))
+
+    def test_configs_must_not_be_empty(self):
+        heuristics = ROCmConfigHeuristic()
+        with (
+            unittest.mock.patch.object(
+                InductorChoices, "get_config_heuristics", return_value=heuristics
+            ),
+            unittest.mock.patch.object(
+                heuristics, "get_scatter_preagg_configs", return_value=[]
+            ),
+            unittest.mock.patch.object(heuristics, "get_scatter_preagg_target"),
+            self.assertRaisesRegex(AssertionError, "default config first"),
+        ):
+            InductorChoices().get_scatter_preagg_configs(
+                1 << 20, 32, torch.float32, device=torch.device("cuda", 0)
             )
 
     def test_shared_memory_per_block(self):
@@ -1395,27 +1693,28 @@ class TestScatterPreaggTarget(TestCase):
 class TestScatterPreaggGating(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def setUp(self):
+        super().setUp()
+        _isolate_heuristics(self)
+
     @config.patch(scatter_preagg_template=True)
-    def test_enabled_only_on_rocm_gpu(self):
+    def test_opt_in_on_gpu_off_on_cpu(self):
+        # On by default on ROCm only. An explicit enable offers the template on
+        # other GPUs too, where it is unsupported, and never on CPU.
         enabled = V.choices.should_use_scatter_preagg_template
-        gpu = torch.device("cuda", 0)
-        with unittest.mock.patch.object(
-            V.choices,
-            "get_config_heuristics",
-            return_value=ROCmConfigHeuristic(),
+        for heuristic, device in (
+            (ROCmConfigHeuristic(), torch.device("cuda", 0)),
+            (CUDAConfigHeuristic(), torch.device("cuda", 0)),
+            (XPUConfigHeuristic(), torch.device("xpu", 0)),
         ):
-            self.assertTrue(enabled(gpu))
-            self.assertFalse(enabled(torch.device("cpu")))
-            self.assertFalse(enabled(torch.device("xpu", 0)))
-            self.assertFalse(enabled(None))
-            with config.patch(scatter_preagg_template=False):
-                self.assertFalse(enabled(gpu))
-        with unittest.mock.patch.object(
-            V.choices,
-            "get_config_heuristics",
-            return_value=CUDAConfigHeuristic(),
-        ):
-            self.assertFalse(enabled(gpu))
+            with unittest.mock.patch.object(
+                V.choices, "get_config_heuristics", return_value=heuristic
+            ):
+                self.assertTrue(enabled(device))
+                self.assertFalse(enabled(torch.device("cpu")))
+                self.assertFalse(enabled(None))
+                with config.patch(scatter_preagg_template=False):
+                    self.assertFalse(enabled(device))
 
 
 _DEPRECATED_NO_OP_CONFIGS = [
@@ -1501,7 +1800,7 @@ class TestScatterPreaggDeprecations(TestCase):
             (None, None, torch.version.hip is not None),
             (None, "1", True),
             ("0", None, False),
-            ("1", None, True),
+            ("1", None, torch.version.hip is not None),
             ("true", None, False),
             ("0", "1", True),
             ("1", "0", False),
@@ -1509,7 +1808,8 @@ class TestScatterPreaggDeprecations(TestCase):
         name_fn=lambda legacy, new, expected: f"legacy_{legacy}_new_{new}",
     )
     def test_enable_env_vars(self, legacy, new, expected):
-        # Only "1" enables, and the new name takes precedence.
+        # Only "1" enables, the old name only on ROCm, and the new name takes
+        # precedence.
         env_vars = {
             name: value
             for name, value in [
@@ -1531,7 +1831,7 @@ class TestScatterPreaggDeprecations(TestCase):
     @parametrize(
         "suffix,effect",
         [
-            ("ENABLED", "sets scatter_preagg_template unless"),
+            ("ENABLED", "sets scatter_preagg_template on ROCm unless"),
             ("FP32_ACCUMULATION", "does nothing"),
             ("FORCE", "does nothing"),
         ],
@@ -1549,7 +1849,33 @@ class TestScatterPreaggDeprecations(TestCase):
         )
         self.assertIn(effect, out.stderr)
         self.assertIn("https://github.com/pytorch/pytorch/issues/204051", out.stderr)
-        self.assertIn(os.path.join("torch", "_inductor", "config.py"), out.stderr)
+        self.assertIn(os.path.join("torch", "_inductor", "compile_fx.py"), out.stderr)
+
+    def test_deprecated_env_var_repeats_under_warn_always(self):
+        import torch._inductor.compile_fx as compile_fx
+
+        name = "TORCHINDUCTOR_PARTITIONED_SCATTER_FORCE"
+        warned = compile_fx._scatter_env_vars_warned
+        try:
+            compile_fx._scatter_env_vars_warned = False
+            with unittest.mock.patch.dict(os.environ, {name: "1"}):
+
+                def warnings_from_one_call():
+                    with warnings.catch_warnings(record=True) as caught:
+                        warnings.simplefilter("always")
+                        compile_fx._warn_deprecated_scatter_env_vars()
+                    return [
+                        str(w.message) for w in caught if w.category is FutureWarning
+                    ]
+
+                self.assertEqual(len(warnings_from_one_call()), 1)
+                self.assertEqual(warnings_from_one_call(), [])
+                with set_warn_always_context(True):
+                    repeated = warnings_from_one_call()
+                self.assertEqual(len(repeated), 1)
+                self.assertIn(name, repeated[0])
+        finally:
+            compile_fx._scatter_env_vars_warned = warned
 
     def test_deprecated_env_var_does_not_warn_during_import(self):
         self._run(

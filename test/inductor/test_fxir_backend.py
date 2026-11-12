@@ -703,7 +703,7 @@ class FxirTestCase(InductorTestCase):
         num_fallback = self._count_ops(gm, torch.ops.aten.scatter_.value)
         self.assertEqual(num_fallback, 1)
 
-    @unittest.skipIf(not TEST_WITH_ROCM, "scatter template is ROCm only")
+    @unittest.skipIf(not TEST_WITH_ROCM, "scatter template is only supported on ROCm")
     @config.patch("scatter_preagg_template", True)
     def test_index_put_scatter_template(self):
         out = torch.zeros(64, 32, device=self.device)

@@ -1396,16 +1396,18 @@ _fuse_ddp_communication_passes: list[Callable[..., None] | str] = [
 _micro_pipeline_tp: bool = False
 
 
-# Adaptive scatter pre-aggregation on ROCm, including the sorted lowering for
-# deterministic mode and 8/16-bit integers. This setting is ignored off ROCm.
+# Adaptive scatter pre-aggregation, including the sorted lowering for
+# deterministic mode and 8/16-bit integers. On by default on ROCm only;
+# enabling it on another GPU is unsupported.
 scatter_preagg_template: bool = (
     os.environ.get(
         "TORCHINDUCTOR_SCATTER_PREAGG_TEMPLATE",
-        # Deprecated name.
-        os.environ.get(
-            "TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED",
-            "1" if torch.version.hip else "0",
-        ),
+        # The deprecated name enabled a pass that CUDA supported, so it never
+        # opts in to the template off ROCm.
+        "1"
+        if torch.version.hip
+        and os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", "1") == "1"
+        else "0",
     )
     == "1"
 )
@@ -1425,14 +1427,16 @@ scatter_preagg_template_min_saved: float = 0.125
 # Deprecated in 2.16, to be removed in 2.18: the partitioned scatter pass was
 # replaced by scatter_preagg_template.
 _partitioned_scatter_removal = (
-    "Removal planned for 2.18; see https://github.com/pytorch/pytorch/issues/204051"
+    "The removal target is 2.18 (see https://github.com/pytorch/pytorch/issues/204051)"
 )
+# Unlike the environment variable, setting this opts in off ROCm, like
+# scatter_preagg_template.
 partitioned_scatter_enabled: bool = Config(
     alias="torch._inductor.config.scatter_preagg_template",
     deprecated=True,
     deprecation_message="has aliased scatter_preagg_template since 2.16; use that "
-    "instead. The template is ROCm only, so this no longer affects CUDA or XPU. "
-    + _partitioned_scatter_removal,
+    "instead (on by default on ROCm only; enabling it on other GPUs is "
+    "unsupported). " + _partitioned_scatter_removal,
 )
 partitioned_scatter_min_partitions: int = Config(
     default=2,
@@ -1473,37 +1477,8 @@ partitioned_scatter_force: bool = Config(
     "block at run time (see scatter_preagg_template_min_saved). "
     + _partitioned_scatter_removal,
 )
-
-
-def _warn_deprecated_scatter_env_vars() -> None:
-    if getattr(_warn_deprecated_scatter_env_vars, "_warned", False):
-        return
-    _warn_deprecated_scatter_env_vars._warned = True  # type: ignore[attr-defined]
-    for suffix, instead in (
-        (
-            "ENABLED",
-            "sets scatter_preagg_template unless TORCHINDUCTOR_SCATTER_PREAGG_TEMPLATE "
-            "is set; use that instead. The template is ROCm only, so this no longer "
-            "affects CUDA or XPU",
-        ),
-        ("FP32_ACCUMULATION", "does nothing"),
-        (
-            "FORCE",
-            "does nothing: the template decides per block at run time (see "
-            "scatter_preagg_template_min_saved)",
-        ),
-    ):
-        name = f"TORCHINDUCTOR_PARTITIONED_SCATTER_{suffix}"
-        if name in os.environ:
-            import warnings
-
-            warnings.warn(
-                f"The environment variable {name} is deprecated since 2.16 (removal "
-                f"planned for 2.18; see "
-                f"https://github.com/pytorch/pytorch/issues/204051) and {instead}.",
-                FutureWarning,
-                stacklevel=1,
-            )
+# Not a config option.
+del _partitioned_scatter_removal
 
 
 class _collective:

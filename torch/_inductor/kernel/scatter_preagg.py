@@ -129,9 +129,13 @@ def _size_decline(
     numel = _hint(sympy_product(sizes))
     if numel < config.scatter_preagg_template_min_numel:
         return "too_small"
-    # bf16 always stages in fp32 (see _try_template), and gets output copies
-    # only at many writes per element.
-    if dtype == torch.bfloat16 and _hint(sympy_product(out_sizes)) > 2 * numel:
+    # Non-deterministic bf16 stages in fp32 (see _stage_in_fp32). The sorted
+    # lowering, which deterministic mode uses, accumulates bf16 directly.
+    if (
+        dtype == torch.bfloat16
+        and not _use_sorted(dtype)
+        and _hint(sympy_product(out_sizes)) > 2 * numel
+    ):
         return "fp32_copy_too_large"
     return None
 
@@ -838,10 +842,13 @@ def maybe_preaggregated_scatter(
     Lower ``out[output_indexer(i)] += value_fn(i)`` over ``iter_sizes`` with the
     pre-aggregating template. ``inputs`` are the IR nodes value_fn and
     output_indexer read. Returns False if the template declines, for the caller
-    to lower the scatter. Planning may compute key or value buffers that the
-    scheduler removes when unused. Layouts are frozen only after planning and
-    configuration declines have passed; later codegen declines can still leave
-    guards and frozen layouts behind.
+    to lower the scatter. Planning freezes the layouts of the buffers read, which
+    tracing their loaders requires, and may compute key or value buffers that the
+    scheduler removes when unused. A plain output is frozen only after the
+    declines for the plan against its current layout have passed; a plan
+    against different final strides, or a codegen failure, can still decline
+    after that. A view output is frozen earlier, while its storage is found, and
+    a codegen failure can still leave guards behind.
     """
     read_names: OrderedSet[str] = OrderedSet()
     for x in inputs:
@@ -926,6 +933,85 @@ def _stage_in_fp32(
     )
 
 
+@dataclasses.dataclass
+class _Lowering:
+    """How the template lowers a planned scatter."""
+
+    target: ScatterPreaggTarget
+    # Accumulate in an fp32 copy of a 16-bit output.
+    stage: bool
+    copy_dtype: torch.dtype
+    copies: int
+    inputs: list[ir.IRNode]
+    configs: list[ScatterPreaggConfig]
+
+
+def _configure(
+    plan: _ScatterPlan,
+    reads: OrderedSet[str],
+    out_layout: ir.Layout,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> _Lowering | str:
+    """
+    How to lower ``plan`` into an output of ``out_layout``, or the reason the
+    template declines it. Commits nothing.
+    """
+    use_sorted = _use_sorted(dtype)
+    num_tokens, num_inner, num_keys = (
+        _hint(plan.num_tokens),
+        _hint(plan.num_inner),
+        _hint(plan.num_keys),
+    )
+    target = V.choices.get_scatter_preagg_target(device)
+    matrix_preagg = target.matrix_preagg(dtype, num_inner, plan.inner_contiguous)
+    stage = (
+        _stage_in_fp32(dtype, plan.num_keys, matrix_preagg, target) and not use_sorted
+    )
+    copy_dtype = torch.float32 if stage else dtype
+    copies = (
+        1
+        if use_sorted
+        else _num_copies(out_layout, copy_dtype, num_tokens, num_inner, target)
+    )
+    inputs: list[ir.IRNode] = []
+    for name in reads:
+        buf = V.graph.try_get_buffer(name)
+        if buf is None:
+            return "unknown_input"
+        inputs.append(buf)
+
+    configs = V.choices.get_scatter_preagg_configs(
+        num_tokens,
+        num_inner,
+        copy_dtype,
+        device=device,
+        inner_contiguous=plan.inner_contiguous,
+        num_keys=num_keys,
+        # Deterministic results need the same config on every compile.
+        max_autotune=config.max_autotune
+        and not use_sorted
+        and not plan.unsafe_to_benchmark,
+    )
+    if not use_sorted:
+        # The atomic template packs (key, position) into one int64.
+        key_bits = (num_keys + 1).bit_length()
+        configs = [c for c in configs if key_bits + c.block_t.bit_length() - 1 <= 62]
+        if not configs:
+            return "key_space"
+
+    # The fp32 copy costs passes over (and twice the bytes of) the output, which
+    # outweigh the regular lowering on outputs over twice the scatter's
+    # elements (declines_by_size predicts this for bf16).
+    if (
+        stage
+        and copies == 1
+        and _hint(sympy_product(out_layout.size)) > 2 * num_tokens * num_inner
+    ):
+        return "fp32_copy_too_large"
+    return _Lowering(target, stage, copy_dtype, copies, inputs, configs)
+
+
 def _try_template(
     out: ir.TensorBox,
     value_fn: ValueFn,
@@ -953,8 +1039,13 @@ def _try_template(
     if not out.get_size() or 0 in [_hint(s) for s in (*out.get_size(), *sizes)]:
         _record_skip("empty")
         return False
-    # Plan against the layout that decide_layout() would choose, without
-    # committing it while the template can still decline.
+    # Tracing the loaders indexes any realized input directly, which needs a
+    # fixed layout, and every stride the plan sees must be the final one.
+    for buf in read_bufs:
+        buf.freeze_layout()
+    # Plan against the layout the output has so far (contiguous for a buffer
+    # that decide_layout() has not yet chosen for), without committing it while
+    # the template can still decline.
     storage = _output_storage(out, freeze=False)
     if storage is None:
         return _scatter_into_copy(
@@ -969,20 +1060,44 @@ def _try_template(
         _record_skip(planned)
         return False
     plan, reads = planned
+    lowering = _configure(plan, reads, out_layout, dtype, device)
+    if isinstance(lowering, str):
+        _record_skip(lowering)
+        return False
 
+    def into_fp32_copy() -> bool:
+        # One fp32 copy is scattered into on its own, which plans and freezes
+        # that copy.
+        return _scatter_into_copy(
+            "fp32_copy",
+            out,
+            torch.float32,
+            plan.value_fn,
+            sizes,
+            plan.output_indexer,
+            read_names,
+        )
+
+    # Taken before freezing, the original output stays unfrozen if the copy
+    # declines.
+    if lowering.stage and lowering.copies == 1:
+        return into_fp32_copy()
+
+    # Every decline for this plan has passed: commit the output's layout.
     frozen_storage = _output_storage(out)
     if frozen_storage is None:
         _record_skip("output_layout")
         return False
     out_storage, frozen_layout = frozen_storage
-    if (
-        frozen_layout.size,
-        frozen_layout.stride,
-        frozen_layout.offset,
-    ) != (out_layout.size, out_layout.stride, out_layout.offset):
-        # Freezing may normalize strides of size-one dimensions or views.
-        # Re-plan with the finalized indexer while reusing any materialized
-        # key/value functions produced by the speculative plan.
+    if (frozen_layout.size, frozen_layout.stride, frozen_layout.offset) != (
+        out_layout.size,
+        out_layout.stride,
+        out_layout.offset,
+    ):
+        # decide_layout() may choose other strides than the contiguous ones
+        # planned against (or normalize those of size-one dimensions): plan
+        # again for the final layout, reusing the key and value buffers the
+        # first plan computed.
         planned = _plan(
             frozen_layout,
             out_storage.data.get_name(),
@@ -996,73 +1111,18 @@ def _try_template(
             _record_skip(planned)
             return False
         plan, reads = planned
+        lowering = _configure(plan, reads, frozen_layout, dtype, device)
+        if isinstance(lowering, str):
+            _record_skip(lowering)
+            return False
+        # The final strides can turn staging on (an fp16 inner dimension that
+        # is no longer contiguous), or drop a second copy.
+        if lowering.stage and lowering.copies == 1:
+            return into_fp32_copy()
     out_layout = frozen_layout
     out_buf = out_storage.data
-
-    num_tokens, num_inner, num_keys = (
-        _hint(plan.num_tokens),
-        _hint(plan.num_inner),
-        _hint(plan.num_keys),
-    )
-    target = V.choices.get_scatter_preagg_target(device)
-    matrix_preagg = target.matrix_preagg(dtype, num_inner, plan.inner_contiguous)
-    stage = (
-        _stage_in_fp32(dtype, plan.num_keys, matrix_preagg, target) and not use_sorted
-    )
-    copy_dtype = torch.float32 if stage else dtype
-    copies = (
-        1
-        if use_sorted
-        else _num_copies(out_layout, copy_dtype, num_tokens, num_inner, target)
-    )
-    inputs: list[ir.IRNode] = []
-    for name in reads:
-        buf = V.graph.try_get_buffer(name)
-        if buf is None:
-            _record_skip("unknown_input")
-            return False
-        inputs.append(buf)
-
-    configs = V.choices.get_scatter_preagg_configs(
-        num_tokens,
-        num_inner,
-        copy_dtype,
-        device=device,
-        inner_contiguous=plan.inner_contiguous,
-        num_keys=num_keys,
-        # Deterministic results need the same config on every compile.
-        max_autotune=config.max_autotune
-        and not use_sorted
-        and not plan.unsafe_to_benchmark,
-    )
-    if not use_sorted:
-        # The atomic template packs (key, position) into one int64.
-        key_bits = (num_keys + 1).bit_length()
-        configs = [c for c in configs if key_bits + c.block_t.bit_length() - 1 <= 62]
-        if not configs:
-            _record_skip("key_space")
-            return False
-
-    if stage and copies == 1:
-        # The copy costs passes over (and twice the bytes of) the output, which
-        # outweigh the regular lowering on outputs over twice the scatter's
-        # elements (declines_by_size predicts this for bf16).
-        if _hint(sympy_product(out_layout.size)) > 2 * num_tokens * num_inner:
-            _record_skip("fp32_copy_too_large")
-            return False
-        return _scatter_into_copy(
-            "fp32_copy",
-            out,
-            torch.float32,
-            plan.value_fn,
-            sizes,
-            plan.output_indexer,
-            read_names,
-        )
-
-    # Template codegen indexes all realized inputs directly.
-    for buf in inputs:
-        buf.freeze_layout()
+    target, stage, copy_dtype = lowering.target, lowering.stage, lowering.copy_dtype
+    copies, inputs, configs = lowering.copies, lowering.inputs, lowering.configs
 
     # The kernel inlines value_fn and output_indexer through the plan; the
     # subgraph wraps the value function so index-width selection sees its reads.
@@ -1112,9 +1172,9 @@ def _try_template(
     log.debug(
         "applied to %s tokens=%d inner=%d keys=%d sorted=%s",
         out_buf.get_name(),
-        num_tokens,
-        num_inner,
-        num_keys,
+        _hint(plan.num_tokens),
+        _hint(plan.num_inner),
+        _hint(plan.num_keys),
         use_sorted,
     )
     return True
@@ -1125,8 +1185,16 @@ def _select(
     choices: list[Any],
     input_nodes: list[ir.IRNode],
     layout: ir.Layout,
+    *,
+    emitted: bool = False,
     **kwargs: Any,
 ) -> bool:
+    """
+    Emit the best of ``choices``. Returns False if none is valid, for the caller
+    to lower the scatter, unless an earlier stage of the same scatter was
+    ``emitted``: it already mutated the output, so a fallback would apply the
+    scatter twice and the failure is raised instead.
+    """
     # MultiTemplateBuffer (deferred selection) does not track mutated inputs, so
     # the in-place result would be dropped.
     try:
@@ -1134,7 +1202,9 @@ def _select(
             name, choices, input_nodes, layout, return_multi_template=False, **kwargs
         )
     except NoValidChoicesError:
-        log.warning("all %s autotuning choices failed; using scatter fallback", name)
+        if emitted:
+            raise
+        log.debug("all %s choices failed; declining", name)
         return False
     template_buf = node.data.data
     if not isinstance(template_buf, ir.TemplateBuffer):
@@ -1506,7 +1576,7 @@ def _lower_sorted(
         if not choices:
             return False
         selections.append((name, choices, input_nodes))
-    for name, choices, input_nodes in selections:
-        if not _select(name, choices, input_nodes, layout):
+    for i, (name, choices, input_nodes) in enumerate(selections):
+        if not _select(name, choices, input_nodes, layout, emitted=i > 0):
             return False
     return True
