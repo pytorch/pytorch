@@ -58,13 +58,11 @@ int chunk(size_t length) {
 } // namespace
 
 TLSConfig tlsConfig(const TCPStoreOptions& opts) {
-  auto value = [](const std::optional<std::string>& path, const char* name) {
-    TORCH_CHECK_WITH(
-        DistStoreError,
-        !path || !path->empty(),
-        "TCPStore TLS: ",
-        name,
-        " must not be empty");
+  const char* empty = nullptr;
+  auto value = [&](const std::optional<std::string>& path, const char* name) {
+    if (path && path->empty()) {
+      empty = name;
+    }
     TORCH_CHECK_WITH(
         DistStoreError,
         !path || path->find('\0') == std::string::npos,
@@ -92,6 +90,12 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
   if (!config.enabled()) {
     return config;
   }
+  TORCH_CHECK_WITH(
+      DistStoreError,
+      empty == nullptr,
+      "TCPStore TLS: ",
+      empty,
+      " must not be empty when TLS is enabled");
   std::vector<std::string> missing;
   auto require =
       [&](const std::string& value, const char* opt, const char* env) {

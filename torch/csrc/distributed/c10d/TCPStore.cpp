@@ -302,6 +302,11 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
         ::c10d::detail::is_libuv_tcpstore_backend_available(),
         "TCPStore server requires libuv but PyTorch was built without libuv support.");
   }
+  if (!tls.enabled()) {
+    // Preserve disabled TLS during server setup and cloning, even if env
+    // changes.
+    tlsCert_ = "";
+  }
   if (tls.enabled()) {
     tlsCert_ = tls.cert;
     tlsKey_ = tls.key;
