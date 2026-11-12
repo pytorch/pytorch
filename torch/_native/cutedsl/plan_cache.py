@@ -55,8 +55,10 @@ class LRUCache:
             self._d.move_to_end(key)
             return value
 
-    def pop(self, key: Any, default: Any = None) -> Any:
+    def pop(self, key: Any, default: Any = _MISS) -> Any:
         with self._lock:
+            if default is _MISS:
+                return self._d.pop(key)
             return self._d.pop(key, default)
 
     def __setitem__(self, key: Any, value: Any) -> None:

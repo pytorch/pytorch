@@ -422,14 +422,7 @@ def _sm107_outputs(
 
 # Routing dtypes and ccs, deliberately separate from the launch-policy _B200_DTYPES and
 # _B200_CCS: the route and the policies are measured and extended independently.
-# kernel_coltile._ORDERED_COL_CONFIGS has no (10, 0) entries: B200 split views (from
-# _reduce or direct reduce_ordered_col calls) take the selector's fallback,
-# OrderedColConfig(0, tile_columns=WARP, full_tiles=...), which its B200 full-tile rules
-# narrow to 16-column tiles at some shapes. The looped views of the
-# b200_ragged_c4095_ordered hand-off get None and run on OrderedColConfig(0).
-# _ORDERED_COL_CONFIGS's (10, 7) entries are reached through select_col_config
-# hand-offs; entries for architectures outside _ORDERED_COL_CCS, _B200_CCS and (10, 7)
-# serve direct reduce_ordered_col calls only.
+# See the comment on kernel_coltile._ORDERED_COL_CONFIGS for which views reach entries.
 _ORDERED_COL_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 _ORDERED_COL_CCS = ((10, 0),)
 _ORDERED_COL_MIN_R = 128

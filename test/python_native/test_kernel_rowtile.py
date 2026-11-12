@@ -548,6 +548,11 @@ class TestKernelRowTile(TestCase):
         )
         self.assertEqual(got, torch.full((8,), 384.0, device="cuda"))
 
+    def _assert_keyed_width(self, trait_key, width):
+        # Row-tile keys hold six fields before TileReduce.cache_sig, whose 13th keys N for
+        # ragged vectors and 0 for every other runtime fold, whole vector rows included.
+        self.assertEqual({k[18] for k in rt._CACHE if k[1] == trait_key}, {width})
+
     @parametrize(
         "dtype,columns",
         (
@@ -571,6 +576,7 @@ class TestKernelRowTile(TestCase):
         x = torch.randint(1, 9, (33, columns), device="cuda").to(dtype)
         out = torch.float64 if dtype == torch.float64 else torch.float32
         acc = cutlass.Float64 if dtype == torch.float64 else cutlass.Float32
+        rt._CACHE.clear()
         (got,) = rt.reduce_row_tile(
             T.SumOps(acc=acc),
             "ragged_vector",
@@ -580,6 +586,7 @@ class TestKernelRowTile(TestCase):
             ragged_vector=True,
         )
         self.assertEqual(got, x.double().sum(dim=1).to(out), atol=0, rtol=0)
+        self._assert_keyed_width("ragged_vector", 0 if columns == 4096 else columns)
 
     @parametrize(
         "dtype,columns,threads_per_row",
@@ -596,6 +603,7 @@ class TestKernelRowTile(TestCase):
         even = r % 2 == 0
         x[r, torch.where(even, head, tail)] = 10.0
         x[r, torch.where(even, tail, head)] = -10.0
+        rt._CACHE.clear()
         (idx,) = rt.reduce_row_tile(
             T.ArgMaxOps(acc=cutlass.Float32),
             "ragged_argmax",
@@ -617,6 +625,8 @@ class TestKernelRowTile(TestCase):
         want = x.min(dim=1)
         self.assertEqual(vals, want.values.float())
         self.assertEqual(idx, want.indices.to(torch.int32))
+        for key in ("ragged_argmax", "ragged_min_dim"):
+            self._assert_keyed_width(key, columns)
 
     def test_ragged_vector_welford_partials(self):
         # Raw Welford counts must equal N exactly; any edge element dropped or repeated
@@ -624,6 +634,7 @@ class TestKernelRowTile(TestCase):
         rows, columns = 33, 4095
         x = torch.randn(rows, columns, device="cuda", dtype=torch.bfloat16)
         trait = T.WelfordOps(acc=cutlass.Float32)
+        rt._CACHE.clear()
         mean, m2, count = rt.reduce_row_tile(
             trait,
             "ragged_welford",
@@ -634,6 +645,7 @@ class TestKernelRowTile(TestCase):
         )
         want = torch.full((rows,), float(columns), device="cuda")
         self.assertEqual(count, want, atol=0, rtol=0)
+        self._assert_keyed_width("ragged_welford", columns)
         xd = x.double()
         self.assertEqual(mean, xd.mean(dim=1).float(), atol=1e-4, rtol=1e-4)
         var = m2 / (columns - 1)
