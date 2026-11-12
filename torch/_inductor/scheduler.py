@@ -10848,6 +10848,14 @@ class Scheduler:
             ):
                 why("template epilogue not satisfied")
                 return False
+            if node2.is_reduction() and not (
+                node1.get_operation_names() & node2.ancestors
+            ):
+                # Reductions in a template's epilogue run over its output tiles; one
+                # that doesn't depend on the template (e.g. over a shared input)
+                # isn't an epilogue.
+                why("template reduction epilogue doesn't read the template")
+                return False
             template_buf = node1.get_template_node()
             if template_buf is None:
                 raise AssertionError("expected template_buf to be set")
