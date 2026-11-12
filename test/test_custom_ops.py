@@ -6331,10 +6331,11 @@ class TestLibrarySourceLocation(TestCase):
 
     def test_get_source_stacklevel(self):
         def caller():
-            line = sys._getframe().f_lineno + 1
-            source = torch._library.utils.get_source(1)
-            self.assertEqual(source, f"{__file__}:{line}")
             return torch._library.utils.get_source(2)
+
+        line = sys._getframe().f_lineno + 1
+        source = torch._library.utils.get_source(1)
+        self.assertEqual(source, f"{__file__}:{line}")
 
         line = sys._getframe().f_lineno + 1
         source = caller()
