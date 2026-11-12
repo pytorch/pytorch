@@ -62,8 +62,15 @@ class CUDACombinedScheduling(BaseScheduling):
         # the others as Triton. Like use_helion_native_matmul, it
         # needs the Python wrapper: with cpp_wrapper and triton.native_matmul,
         # the C++ wrapper would get helion_fused_add_mm_relu_0(arg0_1, arg1_1,
-        # arg2_1, buf1); and fail to load with SyntaxError.
-        if config.helion.enabled and not (V.graph.cpp_wrapper or V.graph.fx_wrapper):
+        # arg2_1, buf1); and fail to load with SyntaxError. There is no graph
+        # without a scheduler: get_backend_features() builds this with None,
+        # e.g. for has_backend_feature() while tracing, when V.graph.cpp_wrapper
+        # raises AttributeError: 'NullHandler' object has no attribute 'cpp_wrapper'.
+        if (
+            config.helion.enabled
+            and scheduler is not None
+            and not (V.graph.cpp_wrapper or V.graph.fx_wrapper)
+        ):
             from .helion import HelionScheduling
 
             self._triton_scheduling = HelionScheduling(scheduler)
