@@ -508,10 +508,15 @@ def get_device_capability(device: Device = None) -> dict[str, Any]:
     props = get_device_properties(device)
     # Only keep attributes that are safe for dictionary serialization.
     serializable_types = (int, float, bool, str, type(None), list, tuple, dict)
+    # Exclude the per-card PCI location fields: this dict feeds Inductor's
+    # DeviceProperties.cc (and from there the Triton metadata and AOTI device
+    # metadata), where per-card values would fragment compile caches across
+    # otherwise identical cards and ranks.
     return {
         key: value
         for key in dir(props)
         if not key.startswith("__")
+        and not key.startswith("pci_")
         and isinstance((value := getattr(props, key)), serializable_types)
     }
 

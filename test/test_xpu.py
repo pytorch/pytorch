@@ -217,6 +217,20 @@ class TestXpu(TestCase):
         if torch.xpu.is_bf16_supported(including_emulation=True):
             self.assertIn(torch.bfloat16, supported_dtypes)
 
+    def test_get_device_capability_excludes_pci_ids(self):
+        # The capability dict feeds Inductor's DeviceProperties.cc (and from
+        # there the Triton metadata and AOTI device metadata); the per-card
+        # PCI location must stay out so identical cards share cache entries.
+        capability = torch.xpu.get_device_capability()
+        self.assertNotIn("pci_domain_id", capability)
+        self.assertNotIn("pci_bus_id", capability)
+        self.assertNotIn("pci_device_id", capability)
+        # The fields remain on the properties object for torch/numa/binding.py.
+        props = torch.xpu.get_device_properties()
+        self.assertIsInstance(props.pci_domain_id, int)
+        self.assertIsInstance(props.pci_bus_id, int)
+        self.assertIsInstance(props.pci_device_id, int)
+
     @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
