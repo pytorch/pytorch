@@ -815,13 +815,16 @@ inline void convert(const float* src, float* dst, int64_t n) {
 template <>
 inline void convert(const float* src, at::Half* dst, int64_t n) {
   const int64_t fraction = n % Vectorized<float>::size();
+  // Access the values as their uint16_t member: GCC assumes that float16_t
+  // accesses cannot alias at::Half (strict aliasing).
+  auto dst_u16 = reinterpret_cast<uint16_t*>(dst);
   svbool_t pg_16 = svwhilelt_b16(0ull, Vectorized<float>::size());
   svbool_t pg_32 = svwhilelt_b32(0ull, Vectorized<float>::size());
 #pragma unroll
   for (int64_t i = 0; i < n - fraction; i += Vectorized<float>::size()) {
     svfloat16_t src_vec = svuzp1_f16(
         svcvt_f16_f32_x(ptrue, svldnt1_f32(pg_32, src + i)), ZERO_F16);
-    svst1_f16(pg_16, reinterpret_cast<float16_t*>(dst) + i, src_vec);
+    svst1_u16(pg_16, dst_u16 + i, svreinterpret_u16_f16(src_vec));
   }
 #pragma unroll
   for (int64_t i = n - fraction; i < n; i += Vectorized<float>::size()) {
@@ -829,20 +832,21 @@ inline void convert(const float* src, at::Half* dst, int64_t n) {
     pg_32 = svwhilelt_b32(i, n);
     svfloat16_t src_vec = svuzp1_f16(
         svcvt_f16_f32_x(ptrue, svldnt1_f32(pg_32, src + i)), ZERO_F16);
-    svst1_f16(pg_16, reinterpret_cast<float16_t*>(dst) + i, src_vec);
+    svst1_u16(pg_16, dst_u16 + i, svreinterpret_u16_f16(src_vec));
   }
 }
 
 template <>
 inline void convert(const at::Half* src, float* dst, int64_t n) {
   const int64_t fraction = n % Vectorized<float>::size();
+  // Access the values as their uint16_t member, as above.
+  auto src_u16 = reinterpret_cast<const uint16_t*>(src);
   svbool_t pg_16 = svwhilelt_b16(0ull, Vectorized<float>::size());
   svbool_t pg_32 = svwhilelt_b32(0ull, Vectorized<float>::size());
 #pragma unroll
   for (int64_t i = 0; i < n - fraction; i += Vectorized<float>::size()) {
     svfloat16_t src_vec = svzip1_f16(
-        svldnt1_f16(pg_16, reinterpret_cast<const float16_t*>(src) + i),
-        ZERO_F16);
+        svreinterpret_f16_u16(svldnt1_u16(pg_16, src_u16 + i)), ZERO_F16);
     svst1_f32(pg_32, dst + i, svcvt_f32_f16_x(ptrue, src_vec));
   }
 #pragma unroll
@@ -850,8 +854,7 @@ inline void convert(const at::Half* src, float* dst, int64_t n) {
     pg_16 = svwhilelt_b16(i, n);
     pg_32 = svwhilelt_b32(i, n);
     svfloat16_t src_vec = svzip1_f16(
-        svldnt1_f16(pg_16, reinterpret_cast<const float16_t*>(src) + i),
-        ZERO_F16);
+        svreinterpret_f16_u16(svldnt1_u16(pg_16, src_u16 + i)), ZERO_F16);
     svst1_f32(pg_32, dst + i, svcvt_f32_f16_x(ptrue, src_vec));
   }
 }
