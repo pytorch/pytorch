@@ -58,6 +58,8 @@ def tensor_N(shape, dtype=float):
     return x
 
 
+@unittest.skipIf(not TEST_TENSORBOARD, "Skip the test since TensorBoard is not installed")
+@unittest.skipIf(TEST_WITH_CROSSREF, "Don't run TensorBoard tests with crossref")
 class BaseTestCase(TestCase):
     """Base class used for all TensorBoard tests"""
 
