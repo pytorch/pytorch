@@ -9,6 +9,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
+    get_cycles_per_ms,
     HardwareClassification,
     NoTest,
     parametrize,
@@ -96,8 +97,6 @@ class TestStream(TestCase):
         m.current_stream().record_event(e)
         self.assertTrue(f"torch.{self.device_type}.Event" in str(e))
 
-    # torch.mps.Stream.query is not supported yet
-    @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     def test_stream_query(self, device):
         m = torch.get_device_module(device)
@@ -108,6 +107,13 @@ class TestStream(TestCase):
         current_stream.synchronize()
         self.assertTrue(current_stream.query())
         del tensor1
+
+        # Sleep for 200 ms, which should be enough time to query the stream
+        # before the sleep is finished.
+        m._sleep(int(200 * get_cycles_per_ms(device)))
+        self.assertFalse(current_stream.query())
+        current_stream.synchronize()
+        self.assertTrue(current_stream.query())
 
     # Check that the stream is reset correctly if an exception is raised within
     # another stream's context.

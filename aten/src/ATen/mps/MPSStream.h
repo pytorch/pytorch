@@ -106,6 +106,8 @@ class TORCH_API MPSStream {
                        SyncType syncType = SyncType::NONE);
   void addCompletedHandler(MTLCommandBufferHandler block);
 
+  bool query();
+
   /// Get the MPS device index that this stream is associated with.
   c10::DeviceIndex device_index() const {
     return _stream.device_index();
@@ -134,6 +136,11 @@ class TORCH_API MPSStream {
   MPSGraphExecutionDescriptor* _executionDescriptor = nil;
   MPSGraphCompilationDescriptor* _compilationDescriptor = nil;
   dispatch_queue_t _serialQueue = nullptr;
+
+  // Event and signal counter used for `query`ing the stream
+  MTLSharedEvent_t _queryEvent = nullptr;
+  uint64_t _querySignalCounter = 0;
+
   // CommitAndContinue is enabled by default
   bool _enableCommitAndContinue = true;
   uint32_t _kernelsSinceCommit = 0;

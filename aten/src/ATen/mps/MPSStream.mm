@@ -44,6 +44,7 @@ bool commandBufferFailed(id<MTLCommandBuffer> cb, bool& is_oom, int32_t& code, s
 //-----------------------------------------------------------------
 
 MPSStream::MPSStream(Stream stream) : _stream(stream) {
+  _queryEvent = [MPSDevice::getInstance()->device() newSharedEvent];
   _commandQueue = [MPSDevice::getInstance()->device() newCommandQueue];
   TORCH_CHECK(_stream.device_type() == DeviceType::MPS);
   _serialQueue = dispatch_queue_create("metal gpu stream", nullptr);
@@ -66,6 +67,8 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
 }
 
 MPSStream::~MPSStream() {
+  [_queryEvent release];
+  _queryEvent = nil;
   [_commandQueue release];
   _commandQueue = nil;
   [_executionDescriptor release];
@@ -237,6 +240,21 @@ void MPSStream::addCompletedHandler(MTLCommandBufferHandler block) {
       [commandBuffer() addCompletedHandler:block];
     }
   });
+}
+
+bool MPSStream::query() {
+  __block bool done;
+  dispatch_sync(_serialQueue, ^() {
+    @autoreleasepool {
+      if (_commandBuffer) {
+        endKernelCoalescing();
+        [_commandBuffer encodeSignalEvent:_queryEvent value:++_querySignalCounter];
+        synchronize(SyncType::COMMIT);
+      }
+      done = _queryEvent.signaledValue >= _querySignalCounter;
+    }
+  });
+  return done;
 }
 
 void MPSStream::copy(id<MTLBuffer> srcBuffer,
