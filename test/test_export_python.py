@@ -1,0 +1,186 @@
+# Owner(s): ["oncall: pt2"]
+import importlib
+import os
+import subprocess
+import sys
+import tempfile
+import uuid
+
+import torch
+from torch._precompile import _runnable_from_pair
+from torch.compiler import PrecompileError
+from torch.compiler._export_python import (
+    _captured_artifact,
+    _CODE_BEGIN,
+    _CODE_END,
+    _exported_file,
+)
+from torch.compiler.precompile import (
+    capture,
+    DynamoTracer,
+    MakeFxTracer,
+    no_compilation,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
+
+
+# Serving an artifact imports the module its function was captured from, so each
+# test writes its functions into a fresh importable module.
+_MODULE = """
+import torch
+
+def scaled(x, *, scale=2.0):
+    return (x * scale).relu()
+
+def breaks(x):
+    y = x.sin()
+    print("graph break")
+    return y.cos()
+
+FACTOR = 3
+
+def factored(x):
+    return x * FACTOR
+"""
+
+
+def _graph_code(path):
+    with open(path) as f:
+        return f.read().partition(_CODE_BEGIN)[2].rpartition(_CODE_END)[0]
+
+
+class _ExportPythonTestCase(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = tmp.name
+        self.module_name = f"export_python_fns_{uuid.uuid4().hex}"
+        with open(os.path.join(self.dir, self.module_name + ".py"), "w") as f:
+            f.write(_MODULE)
+        sys.path.insert(0, self.dir)
+        self.addCleanup(sys.path.remove, self.dir)
+        self.module = importlib.import_module(self.module_name)
+        self.addCleanup(sys.modules.pop, self.module_name, None)
+
+
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+class TestExportPythonFile(_ExportPythonTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def _artifact(self, name, *args, fullgraph=True, tracer=None, **kwargs):
+        # The precompile artifact a capture writes, which the file is made from.
+        artifact, cache = (os.path.join(self.dir, name + e) for e in (".a", ".cache"))
+        tracer = tracer or DynamoTracer(fullgraph=fullgraph)
+        fn = getattr(self.module, name)
+        with capture(
+            fn, artifact_path=artifact, cache_path=cache, tracer=tracer, **kwargs
+        ) as cap:
+            cap(*args)
+        with open(artifact) as f:
+            return f.read(), cache
+
+    def test_the_file_is_the_graph_code_and_one_captured_line(self):
+        path = os.path.join(self.dir, "scaled.py")
+        with open(path, "w") as f:
+            f.write(_exported_file(self._artifact("scaled", torch.randn(8))[0]))
+        with open(path) as f:
+            lines = f.read().splitlines()
+        self.assertTrue(
+            lines[0].startswith("# Exported by torch.compiler.export_python")
+        )
+        self.assertIn("def call(", _graph_code(path))
+        self.assertTrue(lines[-1].startswith("_CAPTURED = '"))
+        # Nothing between the graph code and that line but a comment, and none of the
+        # precompile driver anywhere.
+        tail = lines[lines.index(_CODE_END) + 1 : -1]
+        self.assertTrue(all(not line or line.startswith("#") for line in tail), tail)
+        self.assertNotIn("_build_multigraph_forward", "\n".join(lines))
+
+    def test_the_file_rebuilds_the_artifact_it_was_made_from(self):
+        artifact, cache = self._artifact("scaled", torch.randn(8))
+        rebuilt = _captured_artifact(_exported_file(artifact), "scaled.py")
+        self.assertEqual(rebuilt, artifact)
+        # So the capture's cache, whose code_hash covers the artifact, serves it.
+        with open(cache, "rb") as f:
+            run = _runnable_from_pair(rebuilt, f.read())
+        x = torch.randn(8)
+        with no_compilation():
+            self.assertEqual(run(x), (x * 2.0).relu())
+
+    def test_the_artifact_takes_the_graph_code_the_file_holds(self):
+        artifact, _ = self._artifact("scaled", torch.randn(8))
+        text = _exported_file(artifact).replace(_CODE_END, "# an edit\n" + _CODE_END)
+        rebuilt = _captured_artifact(text, "scaled.py")
+        self.assertNotEqual(rebuilt, artifact)
+        self.assertIn("# an edit", rebuilt)
+
+    def test_an_eager_capture_has_no_graph_code(self):
+        artifact, _ = self._artifact("scaled", torch.randn(8), backend="eager")
+        text = _exported_file(artifact)
+        self.assertNotIn(_CODE_BEGIN, text)
+        self.assertEqual(_captured_artifact(text, "scaled.py"), artifact)
+
+    def test_the_header_names_the_guards_the_file_is_served_without(self):
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+
+        def drop_factor(entries):
+            keep = default_guard_filter_fn(entries)
+            return [k and "FACTOR" not in e.name for k, e in zip(keep, entries)]
+
+        tracer = DynamoTracer(
+            fullgraph=True, guard_filter_fn=drop_factor, require_no_risky_drops=False
+        )
+        artifact, _ = self._artifact("factored", torch.randn(4), tracer=tracer)
+        header = _exported_file(artifact).partition(_CODE_BEGIN)[0]
+        header = " ".join(line.removeprefix("# ") for line in header.splitlines())
+        # Each dropped guard once, with its type, and the risky ones again on their own.
+        guards = "CONSTANT_MATCH G['FACTOR'], EQUALS_MATCH G['FACTOR']"
+        self.assertIn(f"Guards not checked when served: {guards}.", header)
+        risky = "Of those, these can change what runs if they differ when served"
+        self.assertIn(f"{risky}: {guards}.", header)
+
+    def test_a_capture_that_is_not_one_graph_is_refused(self):
+        x = torch.randn(4)
+        for backend in ("inductor", "eager"):
+            artifact, _ = self._artifact("breaks", x, fullgraph=False, backend=backend)
+            with self.assertRaisesRegex(PrecompileError, "is not one graph"):
+                _exported_file(artifact)
+
+    def test_a_make_fx_capture_is_refused(self):
+        artifact, _ = self._artifact("scaled", torch.randn(8), tracer=MakeFxTracer())
+        with self.assertRaisesRegex(PrecompileError, "is not one graph"):
+            _exported_file(artifact)
+
+    def test_a_damaged_file_is_refused(self):
+        text = _exported_file(self._artifact("scaled", torch.randn(8))[0])
+        with self.assertRaisesRegex(PrecompileError, "no _CAPTURED line"):
+            _captured_artifact(text.rpartition("_CAPTURED")[0], "f.py")
+        with self.assertRaisesRegex(PrecompileError, "lost the lines"):
+            _captured_artifact(text.replace(_CODE_BEGIN, "#"), "f.py")
+        corrupt = text.replace("_CAPTURED = 'eN", "_CAPTURED = 'xN")
+        with self.assertRaisesRegex(
+            PrecompileError, "_CAPTURED line of f.py is corrupt"
+        ):
+            _captured_artifact(corrupt, "f.py")
+
+    def test_running_the_file_benchmarks_it(self):
+        path = os.path.join(self.dir, "scaled.py")
+        text = _exported_file(self._artifact("scaled", torch.randn(8))[0])
+        self.assertRegex(text, r"Running this file\s+(#\s+)?benchmarks it")
+        with open(path, "w") as f:
+            f.write(text)
+        out = subprocess.run(
+            [sys.executable, path], capture_output=True, text=True, timeout=900
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+
+if __name__ == "__main__":
+    run_tests()
