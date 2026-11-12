@@ -3927,7 +3927,33 @@ class TestBinaryUfuncsDevice(TestCase):
         exponents = torch.tensor([20, -25], device=device)
         out = torch.empty(2, device=device, dtype=torch.float32)
         torch.ldexp(mantissas, exponents, out=out)
-        self.assertEqual(out, torch.tensor([2.0**10, -(2.0**-24)], device=device))
+        self.assertEqual(
+            out, torch.tensor([2.0**10, -(2.0**-24)], device=device), atol=0, rtol=0
+        )
+
+    def test_ldexp_out_dtype_differs_keeps_layout(self, device):
+        mantissas = torch.randn(2, 3, 4, 5, device=device, dtype=torch.half).to(
+            memory_format=torch.channels_last
+        )
+        exponents = torch.randint(-3, 3, (2, 3, 4, 5), device=device)
+        out = torch.empty(0, device=device, dtype=torch.float32)
+        torch.ldexp(mantissas, exponents, out=out)
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(out, torch.ldexp(mantissas.float(), exponents), atol=0, rtol=0)
+
+    @skipCPUIf(True, "test requires distinct CPU and accelerator devices")
+    def test_ldexp_out_dtype_differs_cpu_scalar(self, device):
+        out = torch.empty(1, device=device, dtype=torch.float32)
+        torch.ldexp(
+            torch.tensor(1.0, dtype=torch.half),
+            torch.tensor([3], device=device),
+            out=out,
+        )
+        self.assertEqual(out, torch.tensor([8.0], device=device))
+        torch.ldexp(
+            torch.ones(1, device=device, dtype=torch.half), torch.tensor(3), out=out
+        )
+        self.assertEqual(out, torch.tensor([8.0], device=device))
 
     def test_ldexp_broadcast_exponent_no_resize_warning(self, device):
         mantissas = torch.ones(1, device=device)

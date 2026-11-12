@@ -1594,18 +1594,20 @@ Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
     if (result.scalar_type() == self.scalar_type()) {
       return _ldexp_int_exponent(self, other, result);
     }
-    // The kernel can't cast its output, and TensorIterator only casts outputs when
-    // it also promotes inputs, which would turn the integer exponent into a float.
-    // So compute in self's dtype and copy, like cholesky_inverse_out. Falling back
-    // to mul(self, 2**other) would compute 2**other in self's dtype, which
-    // over/underflows even when the final result is representable.
-    // copy_ silently crosses devices, so check explicitly (the direct path above
-    // relies on TensorIterator's device check).
-    TORCH_CHECK(result.device() == self.device(),
-                "Expected out tensor to have device ", self.device(), ", but got ", result.device(), " instead");
-    Tensor tmp = at::ldexp(self, other);
-    at::native::resize_output(result, tmp.sizes());
-    return result.copy_(tmp);
+    // TensorIterator only casts outputs when it also promotes inputs, which would
+    // turn the integer exponent into a float, and the CPU kernel can't cast
+    // dynamically. So compute in self's dtype and copy, like cholesky_inverse_out.
+    // The mul fallback below computes 2**other in self's dtype, which
+    // over/underflows even when the result is representable in out's dtype.
+    // Mixed-device inputs (e.g. CPU scalars) are left to mul_out, which handles them.
+    if (self.device() == other.device() && self.device() == result.device()) {
+      Tensor tmp = at::ldexp(self, other);
+      // Restride on resize like codegen's resize_out, so out keeps self's layout.
+      if (at::native::resize_output(result, tmp.sizes())) {
+        result.as_strided_(tmp.sizes(), tmp.strides());
+      }
+      return result.copy_(tmp);
+    }
   }
 
   return at::mul_out(result, self, _pow2(self, other));
