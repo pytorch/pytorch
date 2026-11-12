@@ -1234,8 +1234,12 @@ endif()
 # extension (torch._nccl_ep, see torch/CMakeLists.txt), which links it, so
 # libtorch_cuda does not depend on libnccl_ep and torch imports without nccl-extensions.
 if(USE_NCCL_EP)
-  message(STATUS "USE_NCCL_EP is ON")
-  include(${CMAKE_CURRENT_LIST_DIR}/External/nccl_ep.cmake)
+  if(NOT (USE_NCCL AND USE_CUDA))
+    caffe2_update_option(USE_NCCL_EP OFF)
+  else()
+    message(STATUS "USE_NCCL_EP is ON")
+    include(${CMAKE_CURRENT_LIST_DIR}/External/nccl_ep.cmake)
+  endif()
 endif()
 
 # ---[ XCCL
