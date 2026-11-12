@@ -22,7 +22,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfHpu,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 class Seq(torch.nn.Module):
@@ -165,7 +165,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_aot_ts(self, device):
         self._check_backend_works("aot_ts", device)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_aot_cudagraphs(self, device):
         self._check_backend_works("cudagraphs", device)
 
@@ -912,7 +912,7 @@ class TestDefaultBackend(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(eager_and_record.graphs), 0)
 
 
-instantiate_device_type_tests(TestOptimizations, globals())
+instantiate_device_type_tests(TestOptimizations, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

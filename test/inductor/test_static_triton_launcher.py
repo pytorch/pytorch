@@ -1149,6 +1149,7 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
                 cubin_file, "simple_kernel", limit + 1, device
             )
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6064")
     def test_too_high_shared_mem(self):
         @triton.jit
         def simple_kernel(arg0, arg1):
