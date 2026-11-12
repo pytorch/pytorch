@@ -25,6 +25,7 @@ from .utils import (
     cache_on_self,
     decompose_index,
     flatten_index,
+    JaggedRange,
     reduction_num_outputs,
     sympy_index_symbol_with_prefix,
     sympy_subs,
@@ -91,6 +92,7 @@ class MemoryUsageType(Enum):
     INDEX_EXPR = auto()
     CHECK_BOUNDS = auto()
     BUCKETIZE = auto()
+    JAGGED_RANGE = auto()
 
 
 # Ops a JaggedRange bound may use.
@@ -185,7 +187,7 @@ class LoopBody:
         )
         del self.indexing_exprs_name  # not used after _init_with_tracing
         eliminate_redundant_lowp_round_trips(self)
-        self._check_jagged_bounds()
+        self._check_jagged_ranges()
 
     def _init_with_copy(self, other: LoopBody, args, allow_same_symbol_in_index):
         """
@@ -218,11 +220,37 @@ class LoopBody:
     def has_op(self, name: str):
         return self.op_counts.get(name, 0) > 0
 
-    def _check_jagged_bounds(self) -> None:
-        """Each register_jagged_range bound may only use _JAGGED_BOUND_OPS."""
-        graph = self.root_block.graph
-        for register in graph.find_nodes(
-            op="call_method", target="register_jagged_range"
+    def _check_jagged_ranges(self) -> None:
+        """Checks the register_jagged_range calls; see JaggedRange for the rules."""
+        target = "register_jagged_range"
+        reduction_sizes = self.sizes[1]
+        jagged_sizes = OrderedSet(
+            s
+            for size in reduction_sizes
+            for s in sympy.sympify(size).free_symbols
+            if isinstance(s, JaggedRange)
+        )
+        if not jagged_sizes and not self.has_op(target):
+            return
+        for block in self.subblocks.values():
+            if block.graph.find_nodes(op="call_method", target=target):
+                raise AssertionError(f"{target} inside subblocks is not supported")
+        registered = [
+            self.indexing_exprs[entry.index_name]
+            for entry in self.memory_usage[MemoryUsageType.JAGGED_RANGE]
+        ]
+        if (
+            len(registered) != len(jagged_sizes)
+            or OrderedSet(registered) != jagged_sizes
+            or any(r not in reduction_sizes for r in registered)
+        ):
+            raise AssertionError(
+                f"{target} must be called once for each JaggedRange reduction size: "
+                f"registered {registered}, reduction sizes {reduction_sizes}"
+            )
+        bad_index_vars = OrderedSet([*self.reduce_vars, *self.indirect_vars])
+        for register in self.root_block.graph.find_nodes(
+            op="call_method", target=target
         ):
             _, bound, _ = register.args
             pending = [bound]
@@ -234,20 +262,23 @@ class LoopBody:
                 visited.add(node)
                 pending.extend(node.all_input_nodes)
                 if node.op == "call_module" and node.target == "get_index":
-                    # indirect_indexing adds no FX edge: lengths[perm[b]] loads
-                    # get_index(indirect0), and only set_indirect0 links
-                    # indirect0 to the load of perm. Follow that link so an
-                    # indirect access cannot hide from this check.
-                    expr = self.indexing_exprs[cast(str, node.args[0])]
-                    for var in expr.free_symbols & self.indirect_var_ranges.keys():
-                        pending.extend(
-                            graph.find_nodes(op="call_module", target=f"set_{var}")
+                    # Rejects lengths[rindex], index_expr(j) and lengths[perm[b]].
+                    # The last loads at get_index(indirect0), which has no FX
+                    # edge to the load of perm, so only its index shows it.
+                    index = self.indexing_exprs[cast(str, node.args[0])]
+                    if any(
+                        s in bad_index_vars or isinstance(s, JaggedRange)
+                        for s in index.free_symbols
+                    ):
+                        raise AssertionError(
+                            f"{target} bound indexes with {index}; it may not use "
+                            "a reduction index, a JaggedRange or an indirect index"
                         )
                 elif node.op != "placeholder" and not (
                     node.op == "call_method" and node.target in _JAGGED_BOUND_OPS
                 ):
                     raise AssertionError(
-                        f"register_jagged_range bound uses {node.target}; "
+                        f"{target} bound uses {node.target}; "
                         f"only {', '.join(_JAGGED_BOUND_OPS)} are allowed"
                     )
 
@@ -939,7 +970,7 @@ class CaptureIndexing(WrapperHandler):
 
     def register_jagged_range(self, bound, jagged_range):
         # FX passes the JaggedRange symbol through the existing index registry.
-        index = self._add_index(jagged_range, MemoryUsageType.INDEX_EXPR)
+        index = self._add_index(jagged_range, MemoryUsageType.JAGGED_RANGE)
         self._inner.register_jagged_range(bound, index)
         return jagged_range
 

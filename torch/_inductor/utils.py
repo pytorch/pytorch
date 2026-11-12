@@ -115,21 +115,34 @@ T = TypeVar("T")
 class JaggedRange(sympy.Dummy):
     """A reduction range whose extent is computed by the Reduction's inner_fn.
 
-    For ranges=[M] and reduction_ranges=[J], inner_fn calls
-    ops.register_jagged_range(lengths[i], J):
+    For ranges=[M] and reduction_ranges=[j], inner_fn calls
+    ops.register_jagged_range(lengths[i], j):
 
         for i in range(M):
-            for j in range(lengths[i]):  # empty when lengths[i] <= 0
-                acc[i] = combine(acc[i], body(i, j))
+            for r in range(lengths[i]):  # empty when lengths[i] <= 0
+                acc[i] = combine(acc[i], body(i, r))
 
-    The bound may only use load, constant, index_expr, add, sub and mul
-    (loop_body._JAGGED_BOUND_OPS); LoopBody rejects any other op.
+    LoopBody checks that inner_fn registers each JaggedRange in its
+    reduction_ranges exactly once, outside any subblock (ops.masked), and that
+    the bound uses only load, constant, index_expr, add, sub and mul
+    (loop_body._JAGGED_BOUND_OPS), at indices that do not use a reduction
+    index, a JaggedRange or an indirect index. The check reads the FX graph
+    after IndexPropagation, which folds integer ops on indices into index_expr:
+    with config.constant_and_index_propagation, ops.minimum of index_expr(b)
+    and constant 2 is recorded as index_expr(Min(b, 2)) and passes.
 
     A JaggedRange is not a tensor shape. Its bound is defined per node, so two
     nodes sharing a JaggedRange are not assumed to have the same bound.
     """
 
     def __new__(cls, name, dummy_index=None, **assumptions):
+        # Inductor tells symbol kinds apart by name prefix (symbol_is_type), so
+        # free_unbacked_symbols would take JaggedRange("u0") for an unbacked int.
+        prefix = prefix_str[SymT.JAGGED_RANGE]
+        if not name.startswith(prefix):
+            raise AssertionError(
+                f"JaggedRange name must start with {prefix!r}, got {name!r}"
+            )
         return super().__new__(
             cls,
             name,
@@ -253,7 +266,7 @@ from torch.utils._sympy.functions import (
     Mod,
     ModularIndexing,
 )
-from torch.utils._sympy.symbol import make_symbol, SymT
+from torch.utils._sympy.symbol import make_symbol, prefix_str, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from . import config
