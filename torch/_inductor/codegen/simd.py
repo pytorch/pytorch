@@ -431,10 +431,13 @@ def template_reduction_axis(
         dep = dep.normalize()
         return dep.is_contiguous() and dep.get_numel() == m * n
 
-    if node.group[1] == (m, n) and all(
-        isinstance(dep, MemoryDep) and row_major(dep)
-        for dep in node.read_writes.reads
-        if dep.name in produced
+    # A reduction that reads none of them (e.g. one over a template input) isn't
+    # an epilogue, however its group happens to match.
+    deps = [dep for dep in node.read_writes.reads if dep.name in produced]
+    if (
+        node.group[1] == (m, n)
+        and deps
+        and all(isinstance(dep, MemoryDep) and row_major(dep) for dep in deps)
     ):
         return 0
     return None
