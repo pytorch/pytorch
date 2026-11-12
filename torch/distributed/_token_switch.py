@@ -247,9 +247,10 @@ class TokenSwitch(abc.ABC):
     ) -> Routing:
         """Create expert routing for the current phase (e.g. top-k indices).
 
-        ``per_expert_token_counts`` is optional 1D int32, length >= local experts:
-        output buffer for per-expert receive counts (NCCL EP ``RECV_EXPERT_COUNTER``),
-        i.e. the number of received (token, local expert) pairs per local expert.
+        ``per_expert_token_counts`` is optional 1D int32 with exactly
+        ``num_experts // world_size`` elements: output buffer for per-expert
+        receive counts (NCCL EP ``RECV_EXPERT_COUNTER``), i.e. the number of
+        received (token, local expert) pairs per local expert.
         ``layout`` selects the dispatch output memory layout.
         """
         raise NotImplementedError

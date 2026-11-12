@@ -186,6 +186,8 @@ from ..utils import (
     get_locals_to_steal,
     get_static_address_type,
     get_type_dict_no_user_code,
+    has_custom_metaclass_accessor,
+    InvalidOrderedDict,
     is_frozen_dataclass,
     is_function,
     is_function_or_wrapper,
@@ -199,7 +201,6 @@ from ..utils import (
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
-    iter_mro_static_attrs,
     list_reverseiterator,
     list_reverseiterator_backing_list,
     list_reverseiterator_len,
@@ -707,16 +708,7 @@ def normalize_descriptor_source(
     if isinstance(source.base, AttrSource) and source.base.member == "__dict__":
         cls = tx.output.resolve_source_value(source.base.base)
         if issubclass(type(cls), type):
-            metacls = type(cls)
-            custom_getattribute = (
-                next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
-                is not type.__dict__["__getattribute__"]
-            )
-            custom_dict = (
-                next(iter_mro_static_attrs(metacls, "__dict__"), None)
-                is not type.__dict__["__dict__"]
-            )
-            if custom_getattribute or custom_dict:
+            if has_custom_metaclass_accessor(cls, "__dict__"):
                 unimplemented(
                     gb_type="Unsupported descriptor source",
                     context="class __dict__ source",
@@ -942,6 +934,23 @@ def _is_dim_dynamic_from_source_dynamism(
     source_dynamism = dict(source.dynamism)
     dim_dynamism = source_dynamism.get(normalized_source_name)
     return dim_dynamism is not None and dim < len(dim_dynamism) and dim_dynamism[dim]
+
+
+def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
+    try:
+        return list(enumerate_items_with_dict_position(value))
+    except InvalidOrderedDict:
+        unimplemented(
+            gb_type="OrderedDict storage differs from linked keys",
+            context="OrderedDict input snapshot",
+            explanation="Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
+            hints=[
+                "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
+                *graph_break_hints.FUNDAMENTAL,
+            ],
+            skip_frame=True,
+            apply_to_code=False,
+        )
 
 
 class VariableBuilder:
@@ -1528,8 +1537,7 @@ class VariableBuilder:
                 return key, res_value
 
             result = dict(
-                build_key_value(i, k, v)
-                for i, k, v in enumerate_items_with_dict_position(value)
+                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(value)
             )
 
             if istype(value, collections.defaultdict):
@@ -2187,16 +2195,7 @@ class VariableBuilder:
             if isinstance(descriptor, types.ClassMethodDescriptorType) and issubclass(
                 type(method_self), type
             ):
-                metacls = type(method_self)
-                custom_getattribute = (
-                    next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
-                    is not type.__dict__["__getattribute__"]
-                )
-                custom_dict = (
-                    next(iter_mro_static_attrs(metacls, "__dict__"), None)
-                    is not type.__dict__["__dict__"]
-                )
-                if custom_getattribute or custom_dict:
+                if has_custom_metaclass_accessor(method_self, "__dict__"):
                     unimplemented(
                         gb_type="Bound builtin classmethod with custom metaclass",
                         context=f"{descriptor.__qualname__} bound to a class with a custom metaclass",
@@ -2564,8 +2563,7 @@ class VariableBuilder:
                 return key, res_value
 
             kv_items = dict(
-                build_key_value(i, k, v)
-                for i, k, v in enumerate_items_with_dict_position(value)
+                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(value)
             )
 
             if isinstance(value, collections.defaultdict):
