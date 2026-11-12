@@ -224,7 +224,7 @@ def fold_decoded(
 
 # Caps the loads fold_uniform_tree unrolls per thread; each adds a load and its merges.
 # On B200 one kernel compiles in 0.24-0.31 s (64 loads: 0.31 s vs 0.25 s for the online
-# chain), and a configuration can compile up to 127 kernels (whole loads x tail).
+# chain), and a configuration can compile up to 127 kernels (64 tail-free plus 63 tail).
 UNIFORM_TREE_MAX_LOADS = 64
 
 
@@ -896,20 +896,18 @@ class TileReduce:
                 raise ValueError(
                     "the inner-tree order needs a row or general axis and a plan"
                 )
-            if itree.combine_weights and not itree.combine_count:
+            if itree.combine_weights and not itree.uniform_count:
                 raise ValueError("precomputed weights require uniform combine counts")
             # _uniform_combine_issue checks the split's length before it is unpacked.
-            if itree.combine_count:
+            if itree.uniform_count:
                 issue = _uniform_combine_issue(trait, itree.split)
                 if issue is not None:
                     raise ValueError(f"uniform combine counts need {issue}")
-            if itree.combine_count and (
-                itree.shape != "combine"
-                or not itree.combine_tile
-                or itree.split[1] != itree.combine_count
+            if itree.uniform_count and (
+                itree.shape != "combine" or not itree.combine_tile
             ):
                 raise ValueError(
-                    f"uniform combine counts need a staged combine plan of {itree.combine_count}-value partials, got {itree.shape=} {itree.combine_tile=} {itree.split=}"
+                    f"uniform combine counts need a staged combine plan, got {itree.shape=} {itree.combine_tile=}"
                 )
             # The plan maps wpr chunks to wpr // kchunk warps and rows_per_block rows.
             threads_per_row = WARP * (itree.wpr // itree.kchunk) if itree.wpr else 1
@@ -1447,12 +1445,12 @@ class TileReduce:
 
     @cute.jit
     def _combine_itree_partial(self, a, b, index):
-        if const_expr(self.itree.combine_count):
+        if const_expr(self.itree.uniform_count):
             return self.trait.combine_uniform(
                 a,
                 b,
                 index,
-                const_expr(self.itree.combine_count),
+                const_expr(self.itree.split[1]),
                 b[-1] if const_expr(self.itree.combine_weights) else None,
             )
         return self.trait.combine(a, b)
@@ -1460,7 +1458,7 @@ class TileReduce:
     @cute.jit
     def _stage_combine_weights(self, sw, base, lane):
         """Write the weights of the tile of partials from index `base` into sw."""
-        count = const_expr(self.itree.combine_count)
+        count = const_expr(self.itree.split[1])
         for i in cutlass.range_constexpr(self.itree.combine_tile // WARP):
             # Consecutive lanes write consecutive words, avoiding bank conflicts.
             k = Int32(const_expr(i * WARP)) + lane
@@ -1476,7 +1474,7 @@ class TileReduce:
         rpb = const_expr(self.itree.rows_per_block)
         tile_n = const_expr(self.itree.combine_tile)  # partials per row per tile
         unroll = const_expr(self.itree.combine_unroll)
-        count = const_expr(self.itree.combine_count)
+        count = const_expr(self.itree.split[1] if self.itree.uniform_count else 0)
         # Derived counts are not staged; weights depend only on the partial index, so one row of
         # them serves the whole block in the count field's slot.
         weights = const_expr(self.itree.combine_weights)
