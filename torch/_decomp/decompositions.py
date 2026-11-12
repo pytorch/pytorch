@@ -5646,7 +5646,11 @@ def _reflection_or_replication_pad(
     #         preserving the input's format (e.g. channels_last).
     #   CUDA/XPU/MPS: kernel writes to a flat contiguous buffer with linear indexing,
     #         always producing contiguous output regardless of input format.
+    #   Registered privateuse1 backends (e.g. Ascend NPU) follow the same
+    #   contiguous-output semantics as CUDA/XPU/MPS.
     if a.device.type in ("cuda", "mps", "xpu"):
+        memory_format = torch.contiguous_format
+    elif a.device.type == torch._C._get_privateuse1_backend_name():
         memory_format = torch.contiguous_format
     else:
         memory_format = utils.suggest_memory_format(a)
