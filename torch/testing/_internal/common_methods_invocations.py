@@ -35,7 +35,7 @@ from torch.testing._internal.common_device_type import (
     skipCPUIfNoMklSparse, toleranceOverride, tol, skipXPU, e4m3_type, e5m2_type, E4M3_MAX_POS, E5M2_MAX_POS,
 )
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_CUBLASLT_MNK4, PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM53OrLater, SM80OrLater, SM90OrLater, PLATFORM_SUPPORTS_MXFP8_CAST, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version,
@@ -10014,6 +10014,27 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
             )
 
 
+        if PLATFORM_SUPPORTS_CUBLASLT_MNK4:
+            for recipe, block_size in ((ScalingType.BlockWise1x32, 32), (ScalingType.BlockWise1x128, 128)):
+                scale1 = torch.ones(16 * math.ceil(M / 4) * math.ceil(K / (4 * block_size)),
+                                    device=device, dtype=torch.float8_e8m0fnu)
+                scale2 = torch.ones(16 * math.ceil(N / 4) * math.ceil(K / (4 * block_size)),
+                                    device=device, dtype=torch.float8_e8m0fnu)
+                samples.append(
+                    SampleInput(
+                        mat1,
+                        mat2,
+                        [scale1],
+                        [recipe],
+                        [SwizzleType.SWIZZLE_MN_K4],
+                        [scale2],
+                        [recipe],
+                        [SwizzleType.SWIZZLE_MN_K4],
+                        None,  # bias
+                        torch.bfloat16,  # out_dtype
+                    )
+                )
+
     yield from samples
 
 def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_grad, **kwargs):
@@ -19377,8 +19398,7 @@ op_db: list[OpInfo] = [
                          DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-3)}), 'TestUnaryUfuncs'),
                          DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e1, rtol=1e-1),
                                                          torch.float32: tol(atol=1e-4, rtol=1e-2)}),
-                                      'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                      active_if=IS_WINDOWS),
+                                      'TestUnaryUfuncs', 'test_reference_numerics_normal'),
                      ),
                      skips=(
                          # Redundant tests
@@ -19389,7 +19409,7 @@ op_db: list[OpInfo] = [
                          DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
                          DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large'),
                      ),
-                     sample_kwargs=lambda device, dtype, input: ({'n': n_}, {'n': n_}),
+                     sample_kwargs=lambda device, dtype, input, n=n_: ({'n': n}, {'n': n}),
                      # polygamma functions have multiple singularities at x having non-positive integer value
                      reference_numerics_filter=NumericsFilter(condition=lambda x: (x < 0.1) & ((x - x.round()).abs() < 1e-4),
                                                               safe_val=1))
