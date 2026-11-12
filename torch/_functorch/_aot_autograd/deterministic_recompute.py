@@ -4,9 +4,9 @@ The partitioner recomputes a checkpointed region by copying its forward ops
 into the backward graph. The forward and backward are compiled separately, so
 the two copies can lower to different kernels and the recompute can drift
 numerically from the forward (gh-186572). With
-torch._functorch.config.deterministic_recompute, each checkpointed region's
-recompute is outlined into a subgraph that both graphs invoke, compiled with
-Inductor deterministic=True so both lowerings match.
+torch._functorch.config.deterministic_recompute, each convex piece of a
+checkpointed region's recompute is outlined into a subgraph that both graphs
+invoke, compiled with Inductor deterministic=True so both lowerings match.
 
 The pass runs after partitioning because that is the first point where the
 recomputed ops are known: a selective-checkpointing policy is evaluated per aten
@@ -21,11 +21,12 @@ autograd get no recompute).
 
 import copy
 import functools
+import heapq
 import itertools
 import logging
 import operator
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 import sympy
@@ -199,22 +200,7 @@ def deterministic_recompute(
     copied = (copies & constants) - direct
     copied |= set(fw_module.graph.find_nodes(op="get_attr"))
 
-    # A region's recompute is one piece, with the copied constants it reads. If
-    # a path leaves it and comes back (e.g. through a value a selective policy
-    # saves), no single call can replace it, and it is left as partitioned (see
-    # _readers_to_move). Each region's constants that the backward reads
-    # directly form a piece of their own.
     order = {n: i for i, n in enumerate(fw_module.graph.nodes)}
-
-    def _with_copied(nodes: list[torch.fx.Node]) -> list[torch.fx.Node]:
-        piece = set(nodes)
-        stack = [a for n in nodes for a in n.all_input_nodes if a in copied]
-        while stack:
-            a = stack.pop()
-            if a not in piece:
-                piece.add(a)
-                stack.extend(b for b in a.all_input_nodes if b in copied)
-        return sorted(piece, key=order.__getitem__)
 
     changed = False
     # The backward node holding each value a shared piece returns, so later
@@ -230,6 +216,11 @@ def deterministic_recompute(
         nonlocal changed
         skipped = []
         for piece in pieces:
+            # (An earlier piece may have recomputed some of its nodes, reached
+            # through a node in no piece, and erased them.)
+            piece = [n for n in piece if not n._erased]
+            if not piece:
+                continue
             identifier = f"{prefix}recompute_{next(index)}"
             outputs = _share_region(
                 fw_module, bw_module, piece, saved, copies, copied, bw_of, identifier
@@ -244,17 +235,16 @@ def deterministic_recompute(
     # Constant pieces go first, so the pieces that read them find their outputs
     # in bw_of; the constants of one left as partitioned are copied into those
     # pieces instead.
-    direct_by_region: dict[Any, list[torch.fx.Node]] = defaultdict(list)
-    for c in sorted(direct, key=order.__getitem__):
-        direct_by_region[c.meta.get("ac_graph_id")].append(c)
-    for piece in _share([_with_copied(nodes) for nodes in direct_by_region.values()]):
+    direct_pieces = _split_region(sorted(direct, key=order.__getitem__), copied, order)
+    for piece in _share(_dependency_order(direct_pieces, order)):
         copied |= direct & set(piece)
-    pieces = []
+    # (Sharing added nodes to the graph, and erased some.)
+    order = {n: i for i, n in enumerate(fw_module.graph.nodes)}
+    pieces: list[list[torch.fx.Node]] = []
     for nodes in regions.values():
-        rest = [n for n in nodes if n not in direct and n not in copied]
-        if rest:
-            pieces.append(_with_copied(rest))
-    _share(pieces)
+        rest = [n for n in nodes if n not in direct and n in order]
+        pieces += _split_region(rest, copied, order)
+    _share(_dependency_order(pieces, order))
     if changed:
         for gm in (fw_module, bw_module):
             gm.graph.eliminate_dead_code()
@@ -324,6 +314,176 @@ def _recomputed_copies(
         if (key := n.meta.get("ac_graph_id")) is not None:
             regions[key].append(n)
     return copies, regions
+
+
+def _split_region(
+    nodes: list[torch.fx.Node],
+    copied: set[torch.fx.Node],
+    order: dict[torch.fx.Node, int],
+) -> list[list[torch.fx.Node]]:
+    """Split a region's recomputed nodes (in topological order) into convex
+    pieces, e.g. two recomputed stretches separated by a saved matmul. A piece
+    must be convex: if a path left it and came back, no single call could replace
+    it. Each piece grows from the first unassigned node, taking a neighboring
+    node whenever every node on a path between the piece and it is an unassigned
+    node of the region, and then all of those nodes; a multi-output op joins
+    together with its readers. Each piece gets its own shared subgraph; a piece
+    may read another's outputs (see _dependency_order). Views of values outside
+    the region, scalars and ``copied`` constants are free to replay, so they
+    join every piece that reads them instead of joining pieces together. Each
+    piece's nodes are sorted by ``order``."""
+    in_region = set(nodes)
+
+    def _view(n: torch.fx.Node) -> bool:
+        # (A getitem is a view only of a multi-output view op, e.g. split.)
+        op = n.args[0] if n.target is operator.getitem else n
+        return _is_view(n.target) and _is_view(getattr(op, "target", None))
+
+    replayed = set(copied)
+    for n in nodes:
+        outside = all(a not in in_region or a in replayed for a in n.all_input_nodes)
+        if (_view(n) and outside) or isinstance(n.meta.get("val"), _SCALARS):
+            replayed.add(n)
+
+    free = {n for n in nodes if n not in replayed}
+
+    def _unit(v: torch.fx.Node) -> set[torch.fx.Node]:
+        # A multi-output op and its readers stay together: a call can't take a
+        # tuple operand.
+        op = v.all_input_nodes[0] if v.target is operator.getitem else v
+        if op in free and isinstance(op.meta.get("val"), (tuple, list)):
+            return {op, *(u for u in op.users if u in free)}
+        return {v}
+
+    groups = []
+    for seed in nodes:
+        if seed not in free:
+            continue
+        group = _unit(seed)
+        free -= group
+        lo = min(order[n] for n in group)
+        hi = max(order[n] for n in group)
+        frontier: list[tuple[int, torch.fx.Node]] = []
+
+        def _push(added: set[torch.fx.Node]) -> None:
+            for n in added:
+                for m in (*n.all_input_nodes, *n.users):
+                    if m in free:
+                        heapq.heappush(frontier, (order[m], m))
+
+        _push(group)
+        # A rejection means some path between the piece and the neighbor goes
+        # through a node that is neither free nor replayed; growing the piece
+        # keeps that path, so a rejected neighbor stays rejected.
+        rejected: set[torch.fx.Node] = set()
+        while frontier:
+            _, v = heapq.heappop(frontier)
+            if v not in free or v in rejected:
+                continue
+            unit = _unit(v)
+            unit_lo = min(lo, *(order[n] for n in unit))
+            unit_hi = max(hi, *(order[n] for n in unit))
+            added = _hull_additions(group, unit, order, unit_lo, unit_hi)
+            # Replayed nodes may sit on such a path; they are copied into the
+            # piece anyway.
+            if all(n in free or n in replayed for n in added):
+                added -= replayed
+                free -= added
+                group |= added
+                lo, hi = unit_lo, unit_hi
+                _push(added)
+            else:
+                rejected |= unit
+        groups.append(group)
+    pieces = []
+    for group in groups:
+        stack = [a for n in group for a in n.all_input_nodes if a in replayed]
+        while stack:
+            v = stack.pop()
+            if v not in group:
+                group.add(v)
+                stack.extend(a for a in v.all_input_nodes if a in replayed)
+        pieces.append(sorted(group, key=order.__getitem__))
+    return pieces
+
+
+def _dependency_order(
+    pieces: list[list[torch.fx.Node]], order: dict[torch.fx.Node, int]
+) -> list[list[torch.fx.Node]]:
+    """``pieces`` reordered so each comes after the pieces whose results it
+    reads, and so finds their outputs in bw_of instead of recomputing them, and
+    otherwise by its first node's ``order``; pieces reading each other both
+    ways go by that order (each then has a path back through the other, so
+    both are left as partitioned). (A node in several pieces is replayed into
+    each, and belongs to none.)"""
+    owner: dict[torch.fx.Node, int | None] = {}
+    for i, piece in enumerate(pieces):
+        for n in piece:
+            owner[n] = None if n in owner else i
+    deps = [
+        {owner[a] for n in piece for a in n.all_input_nodes if owner.get(a, i) != i}
+        - {None}
+        for i, piece in enumerate(pieces)
+    ]
+
+    def _first(i: int) -> int:
+        return min(order[n] for n in pieces[i] if owner[n] == i)
+
+    remaining = sorted(range(len(pieces)), key=_first)
+    done: set[int] = set()
+    result = []
+    while remaining:
+        ready = next((i for i in remaining if deps[i] <= done), remaining[0])
+        remaining.remove(ready)
+        done.add(ready)
+        result.append(pieces[ready])
+    return result
+
+
+def _hull_additions(
+    group: set[torch.fx.Node],
+    unit: set[torch.fx.Node],
+    order: dict[torch.fx.Node, int],
+    lo: int,
+    hi: int,
+) -> set[torch.fx.Node]:
+    """``unit`` plus every node outside the convex ``group`` that lies on a path
+    between ``group | unit`` and ``unit``. Such paths stay within [``lo``,
+    ``hi``] in ``order``, and the searches stop at members."""
+
+    def _member(n: torch.fx.Node) -> bool:
+        return n in group or n in unit
+
+    def _on_paths(
+        step: Callable[[torch.fx.Node], Iterable[torch.fx.Node]],
+        back: Callable[[torch.fx.Node], Iterable[torch.fx.Node]],
+        inside: Callable[[torch.fx.Node], bool],
+    ) -> set[torch.fx.Node]:
+        # Nodes reachable from the unit by ``step`` without passing a member...
+        seen: set[torch.fx.Node] = set()
+        stack = [m for u in unit for m in step(u) if not _member(m) and inside(m)]
+        while stack:
+            x = stack.pop()
+            if x not in seen:
+                seen.add(x)
+                stack.extend(m for m in step(x) if not _member(m) and inside(m))
+        # ...that reach a member.
+        reach = {x for x in seen if any(_member(m) for m in step(x))}
+        stack = list(reach)
+        while stack:
+            for p in back(stack.pop()):
+                if p in seen and p not in reach:
+                    reach.add(p)
+                    stack.append(p)
+        return reach
+
+    down = _on_paths(
+        lambda n: n.users, lambda n: n.all_input_nodes, lambda n: order[n] < hi
+    )
+    up = _on_paths(
+        lambda n: n.all_input_nodes, lambda n: n.users, lambda n: order[n] > lo
+    )
+    return unit | down | up
 
 
 def _keep_budget(dst: torch.fx.Node, *srcs: torch.fx.Node) -> None:
@@ -495,7 +655,8 @@ def _share_region(
         a = stack.pop()
         if a in s_set or (a not in copies and a.op != "get_attr"):
             continue
-        cheap = a.op == "get_attr" or a in copied or _is_view(a.target)
+        scalar = not isinstance(a.meta.get("val"), (torch.Tensor, tuple, list))
+        cheap = a.op == "get_attr" or a in copied or _is_view(a.target) or scalar
         if not cheap and not _cheap_ops().is_recomputable(a):
             return _skip(f"its input {a.name} is computed in each graph")
         s_set.add(a)
