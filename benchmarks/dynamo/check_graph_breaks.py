@@ -28,7 +28,7 @@ def get_field(csv: pd.DataFrame, model_name: str, field: str) -> Any | None:
 # compared. A regression is a move in the "bad" direction:
 #   "exact_lower" -- lower-is-better, EXACT match: any change flags (regression
 #     when actual > expected, improvement when actual < expected). For small,
-#     stable signals (graph breaks, eager fallbacks).
+#     stable signals (graph breaks, recompiles, eager fallbacks).
 #   "drop_threshold" -- higher-is-better coverage count (ops captured). Only a
 #     DROP beyond COVERAGE_DROP_TOL is a regression; equal, small drops, and any
 #     increase are PASS. calls_captured is a large, fine-grained count that
@@ -48,6 +48,7 @@ def get_field(csv: pd.DataFrame, model_name: str, field: str) -> Any | None:
 COVERAGE_DROP_TOL = 0.05  # a >5% drop in captured ops is a regression
 TRACKED_METRICS = {
     "graph_breaks": "exact_lower",
+    "recompiles": "exact_lower",
     "calls_captured": "drop_threshold",  # ops captured
     "fallbacks_to_eager": "exact_lower",
 }
@@ -172,7 +173,7 @@ def check_graph_breaks(
             msg += textwrap.dedent(
                 f"""
             Error: {len(failed)} models have regressed dynamo metrics (more graph
-            breaks / eager fallbacks, or fewer ops / graphs captured):
+            breaks / recompiles / eager fallbacks, or fewer ops / graphs captured):
                 {" ".join(failed)}
 
             """
