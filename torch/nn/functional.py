@@ -6200,9 +6200,9 @@ def normalize(
         input: input tensor of any shape
         p (float): the exponent value in the norm formulation. Default: 2
         dim (int or tuple of ints): the dimension to reduce. Default: 1
-        eps (float, optional): small value to avoid division by zero. Default: 1e-12,
-            except for half precision inputs, where 1e-12 rounds to zero and the
-            default is ``torch.finfo(torch.float16).eps``
+        eps (float, optional): small value to avoid division by zero. If not specified,
+            uses ``torch.finfo(torch.float16).eps`` when the norm is ``torch.float16``,
+            where 1e-12 rounds to zero, and 1e-12 otherwise. Default: ``None``
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
     """

@@ -169,8 +169,9 @@ reference_functions = dict(
     softmax=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.softmax, *args, **kwargs),
     log_softmax=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.log_softmax, *args, **kwargs),
     softmin=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.nn.functional.softmin, *args, **kwargs),
+    # torch.masked.normalize defaults to eps=1e-12
     normalize=lambda *args, **kwargs: apply_masked_normalization_along_dim(
-        torch.nn.functional.normalize, *args, **dict(kwargs, dim_position=1)),
+        torch.nn.functional.normalize, *args, **{'eps': 1e-12, **kwargs, 'dim_position': 1}),
 )
 
 masked_ops = [op for op in op_db if op.name.startswith('masked.')]

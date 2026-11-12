@@ -7872,7 +7872,7 @@ class TestNNDeviceType(NNTestCase):
         F.normalize(x.detach(), out=out)
         self.assertEqual(out, expected)
         (grad,) = torch.autograd.grad(y.sum(), x)
-        self.assertTrue(grad.isfinite().all())
+        self.assertEqual(grad[:2], torch.full_like(grad[:2], 1 / eps))
 
     @skipMPS  # backward mismatches CPU reference at this size on MPS
     @onlyAccelerator
