@@ -662,6 +662,11 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         }
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
+        # deterministic_recompute isn't applied under compiled autograd, whose
+        # config is Dynamo's.
+        self.deterministic_recompute_compiled_autograd = (
+            config.deterministic_recompute and torch._dynamo.config.compiled_autograd
+        )
         if has_triton_package():
             self.triton_kernel_source_codes = self.get_triton_source_codes_from_gm(gm)
 
