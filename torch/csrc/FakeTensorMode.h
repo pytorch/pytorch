@@ -11,9 +11,9 @@ namespace torch::fake_tensor {
 // get the python CppFakeTensorMode object for mode, minting a fresh wrapper
 // around the same C++ mode if the previous one has been collected; see
 // Note [C++ FakeTensorMode Python wrapper lifetime] in FakeTensorMode.cpp.
-// Returns None only when mode is null.
+// Returns None only when handle is null.
 // Caller must hold the GIL.
 TORCH_PYTHON_API py::object getCppFakeTensorModePyObj(
-    const std::shared_ptr<c10::FakeTensorMode>& mode);
+    const std::shared_ptr<c10::FakeTensorModeHandle>& handle);
 
 } // namespace torch::fake_tensor
