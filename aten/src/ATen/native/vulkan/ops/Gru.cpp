@@ -14,6 +14,7 @@
 #include <ATen/ops/tanh.h>
 #endif
 
+#include <c10/util/irange.h>
 #include <utility>
 
 namespace at {
@@ -81,7 +82,7 @@ std::tuple<Tensor, Tensor> gru_input(
   // reshape to 2D due to Vulkan at::mm op accepts only 2D
   auto x = input_vk.reshape({batch_size * seq_length, input_vk.size(2)});
 
-  for (int64_t i = 0; i < num_layers; ++i) {
+  for (const auto i : c10::irange(num_layers)) {
     // extract each hidden state and squeeze into 2D dim
     auto h = at::slice(hx_vk, 0, i, i + 1, 1);
     h = h.reshape({h.size(0) * h.size(1), h.size(2)});
@@ -151,7 +152,7 @@ pack_linear_op_contexts(
   std::vector<c10::intrusive_ptr<LinearPackedContext>> linear_op_contexts;
   linear_op_contexts.reserve(num_layers * 6);
 
-  for (int64_t i = 0; i < num_layers; ++i) {
+  for (const auto i : c10::irange(num_layers)) {
     const auto& w_ih = params_cpu.at(i * 4);
     const auto& w_hh = params_cpu.at(i * 4 + 1);
     const auto& b_ih = params_cpu.at(i * 4 + 2);

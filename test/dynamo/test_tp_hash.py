@@ -1,7 +1,8 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for hash_impl: unified hash() / __hash__ protocol in Dynamo."""
+"""Tests for tp_hash_impl: unified hash() / __hash__ protocol in Dynamo."""
 
 import sys
+import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -72,10 +73,11 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
 
         def fn(x):
             tup = (1, "hello", t)
-            return hash(tup), hash(tup)
+            return hash(tup) == hash(tup)
 
-        h1, h2 = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
-        self.assertEqual(h1, h2)
+        self.assertTrue(
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        )
 
     def test_hash_tuple_with_tensor_as_dict_key(self):
         """Tuple containing a tensor can be used as a dict key."""
@@ -118,10 +120,11 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
 
         def fn(x):
             fs = frozenset({1, 2, t})
-            return hash(fs), hash(fs)
+            return hash(fs) == hash(fs)
 
-        h1, h2 = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
-        self.assertEqual(h1, h2)
+        self.assertTrue(
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        )
 
     # --- Range (RangeVariable) ---
 
@@ -223,10 +226,11 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         t = torch.tensor([1.0, 2.0])
 
         def fn(x):
-            return hash(t), hash(t)
+            return hash(t) == hash(t)
 
-        h1, h2 = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
-        self.assertEqual(h1, h2)
+        self.assertTrue(
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        )
 
     def test_hash_tensor_return_graph_breaks(self):
         """Returning hash(tensor) graph-breaks — tensor hash is fake."""
@@ -590,7 +594,7 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         self._assert_hash_equals(len)
 
     def test_hash_list_type(self):
-        """hash(list) exercises the as_python_constant fallback in base hash_impl."""
+        """hash(list) exercises the as_python_constant fallback in base tp_hash_impl."""
         self._assert_hash_equals(list)
 
     # --- C tp_hash types ---
@@ -613,7 +617,7 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
     def test_hash_timezone(self):
         import datetime
 
-        self._assert_hash_equals(datetime.timezone.utc)
+        self._assert_hash_equals(datetime.UTC)
 
     def test_hash_decimal(self):
         import decimal
@@ -647,6 +651,9 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
 
     # --- DistributedVariable ---
 
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "torch.distributed not available"
+    )
     def test_hash_distributed_group_member(self):
         """DistributedVariable (WorldMetaClassVariable): hash of GroupMember."""
         if not torch.distributed.is_available():
