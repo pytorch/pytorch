@@ -7,6 +7,7 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/macros/Export.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/FunctionRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/python_stub.h>
 #include <memory>
@@ -16,6 +17,7 @@
 // Forward declarations
 
 namespace c10 {
+struct FakeTensorMode;
 struct IValue;
 class OperatorHandle;
 struct SafePyObject;
@@ -229,6 +231,14 @@ struct C10_API PyInterpreterVTable {
 
   virtual void reset_backward_hooks(const TensorImpl* self) const = 0;
 
+  // Runs step with mode entered through CppFakeTensorMode's __enter__/__exit__,
+  // including on exceptions. Keeps one Python thread state alive across both
+  // calls so threading.local entry records survive on native worker threads.
+  // Releases the GIL around step; entries inside step must be balanced.
+  virtual bool fake_run_with_mode_entered(
+      const std::shared_ptr<c10::FakeTensorMode>& mode,
+      c10::function_ref<bool()> step) const = 0;
+
   // Note [C++ FakeTensor dispatch]
   // A fake tensor models a tensor on a logical device without allocating its
   // data. Running an op on fake tensors must reproduce the outputs' sizes,
@@ -296,15 +306,17 @@ struct C10_API PyInterpreterVTable {
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
       PyObject* real) const = 0;
-  // Needs an active mode. Non-fake Meta outputs are converted to fakes on
-  // common_device; this is the only callback that converts its outputs. See
-  // Note [C++ fake op_impl outputs] in torch/csrc/PyInterpreter.cpp.
+  // Takes the fallback's mode, which is uninstalled while handlers run.
+  // Non-fake Meta outputs are converted to fakes on common_device.
+  // Constructors finalize their own output devices.
+  // See Note [C++ fake op_impl outputs] in torch/csrc/PyInterpreter.cpp.
   virtual bool fake_try_op_impl(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
+      const std::shared_ptr<c10::FakeTensorMode>& mode,
       c10::Device common_device) const = 0;
-  // Python callback for prims handling: runs the prims op's Python
-  // prim_meta_impl, if it defines one.
+  // Runs prim_meta_impl with the caller's mode entered. Returns false if
+  // absent; a selected implementation returning NotImplemented raises.
   virtual bool fake_try_prim_meta(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const = 0;
