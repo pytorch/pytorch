@@ -818,13 +818,13 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   auto input_dims = {M, K};
   auto input_data_type = is_input_qint8 ? dnnl::memory::data_type::s8 : dnnl::memory::data_type::u8;
   auto input_desc = ideep::tensor::desc(input_dims, input_data_type);
-  ideep::attr_t op_attr = ideep::attr_t();
+  at::native::mkldnn::Attr op_attr = at::native::mkldnn::Attr();
   if (post_op == Relu) {
-    op_attr = ideep::attr_t::fuse_relu();
+    op_attr = at::native::mkldnn::Attr::fuse_relu();
   } else if (post_op == LeakyRelu) {
-    op_attr = ideep::attr_t::fuse_relu(/*scale=*/1.0f, /*alpha=*/post_op_args.get(0).to<double>());
+    op_attr = at::native::mkldnn::Attr::fuse_relu(/*scale=*/1.0f, /*alpha=*/post_op_args.get(0).to<double>());
   } else if (post_op == Tanh) {
-    op_attr = ideep::attr_t::fuse_tanh();
+    op_attr = at::native::mkldnn::Attr::fuse_tanh();
   }
   ideep::tensor x(input_desc, input_contig->data_ptr());
   auto dst_dims = {M, N};

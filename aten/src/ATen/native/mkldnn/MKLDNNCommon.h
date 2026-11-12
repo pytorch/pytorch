@@ -6,6 +6,7 @@
 #if AT_MKLDNN_ENABLED()
 #include <ideep.hpp>
 #include <dnnl.hpp>
+#include <ATen/native/mkldnn/detail/Attr.h>
 
 #ifndef DNNL_PREREQ
 // oneDNN version check macro

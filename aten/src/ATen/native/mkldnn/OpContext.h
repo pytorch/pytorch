@@ -8,9 +8,9 @@
 
 namespace at::native::mkldnn {
 
-const static std::map<std::string, ideep::attr_t> fusion_attr_map = {
-    {"none", ideep::attr_t()},
-    {"relu", ideep::attr_t::fuse_relu()},
+const static std::map<std::string, Attr> fusion_attr_map = {
+    {"none", Attr()},
+    {"relu", Attr::fuse_relu()},
 };
 
 using SerializationTypeConvPrePack = std::tuple<
@@ -87,7 +87,7 @@ class MkldnnConvOpContext final : public ConvOpContext {
       std::vector<int64_t>&& dilation,
       int64_t groups,
       std::vector<int64_t>&& input_size,
-      const ideep::attr_t& attr);
+      const Attr& attr);
 };
 
 } // namespace at

@@ -13,6 +13,7 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <ideep/tensor.hpp>
+#include <ATen/native/mkldnn/detail/Attr.h>
 #endif // AT_MKLDNN_ENABLED()
 
 namespace at { namespace native {
@@ -73,7 +74,7 @@ inline Tensor may_convert_to_default_contiguous_strides(const Tensor& input) {
 
 #if AT_MKLDNN_ENABLED()
 
-using AttrFunction = std::function<ideep::attr_t(
+using AttrFunction = std::function<mkldnn::Attr(
     torch::List<std::optional<at::Scalar>>,
     std::optional<std::string_view>)>;
 

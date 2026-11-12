@@ -30,7 +30,7 @@ ContextConv create(
     const IntArrayRef dilation,
     const int64_t groups,
     const IntArrayRef input_size,
-    const ideep::attr_t& attr);
+    const Attr& attr);
 
 Tensor run(ContextConv& context, const Tensor& input);
 

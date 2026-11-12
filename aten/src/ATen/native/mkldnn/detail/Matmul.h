@@ -31,10 +31,10 @@ struct matmul_forward_dyn_quant_params {
 struct matmul_forward_params {
   dnnl::matmul::primitive_desc pd;
   dnnl::matmul primitive;
-  ideep::attr_t op_attr;
-  ideep::attr_t src_attr;
-  ideep::attr_t weights_attr;
-  ideep::attr_t bias_attr; // contains requantization scales for bias
+  Attr op_attr;
+  Attr src_attr;
+  Attr weights_attr;
+  Attr bias_attr; // contains requantization scales for bias
   std::shared_ptr<matmul_forward_dyn_quant_params> dq_param_ptr;
   // Keep {dnnl_arg, tensor} pairs of scales and zero points for primitive
   // execution
@@ -46,10 +46,10 @@ struct matmul_forward_params {
 
   matmul_forward_params(
       dnnl::matmul::primitive_desc&& pd,
-      ideep::attr_t&& op_attr,
-      ideep::attr_t&& src_attr,
-      ideep::attr_t&& weights_attr,
-      ideep::attr_t&& bias_attr)
+      Attr&& op_attr,
+      Attr&& src_attr,
+      Attr&& weights_attr,
+      Attr&& bias_attr)
       : pd(std::move(pd)),
         op_attr(std::move(op_attr)),
         src_attr(std::move(src_attr)),
@@ -77,7 +77,7 @@ void matmul_forward_compute(
     const std::vector<int32_t>& dst_zero_points,
     const float dst_coeff = 1.0f,
     const float sum_coeff = 1.0f,
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     const dnnl::memory::data_type dst_type = dnnl::memory::data_type::undef,
     const ideep::lowp_kind alowp_kind = ideep::u8s8);
 
@@ -98,7 +98,7 @@ void matmul_forward_prepare(
     const std::vector<int32_t>& dst_zero_points,
     const float dst_coeff = 1.0f,
     const float sum_coeff = 1.0f, // for post-op sum
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     const dnnl::memory::data_type dst_type = dnnl::memory::data_type::u8,
     const ideep::lowp_kind alowp_kind = ideep::u8s8);
 
@@ -141,7 +141,7 @@ void matmul_forward(
     ideep::tensor& dst,
     const float dst_coeff = 1.0f,
     const float sum_coeff = 1.0f,
-    const ideep::attr_t& attr = ideep::attr_t());
+    const Attr& attr = Attr());
 
 // Ported from ideep::matmul_forward::expected_weights_desc (with y_dtype).
 ideep::tensor::desc matmul_forward_expected_weights_desc(
@@ -150,7 +150,7 @@ ideep::tensor::desc matmul_forward_expected_weights_desc(
     dnnl::memory::data_type dtype,
     dnnl::memory::data_type x_dtype,
     dnnl::memory::data_type y_dtype,
-    const ideep::attr_t& attr = ideep::attr_t());
+    const Attr& attr = Attr());
 
 // Ported from ideep::matmul_forward::expected_weights_desc (deduced y_dtype).
 ideep::tensor::desc matmul_forward_expected_weights_desc(
@@ -158,7 +158,7 @@ ideep::tensor::desc matmul_forward_expected_weights_desc(
     const dnnl::memory::dims& src_dims = dnnl::memory::dims(),
     dnnl::memory::data_type dtype = dnnl::memory::data_type::f32,
     dnnl::memory::data_type x_dtype = dnnl::memory::data_type::f32,
-    const ideep::attr_t& attr = ideep::attr_t());
+    const Attr& attr = Attr());
 
 } // namespace at::native::mkldnn
 

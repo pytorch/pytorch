@@ -1273,12 +1273,12 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   const std::vector<int32_t> src_zero_points = std::vector<int32_t>(1, input_zp);
   const std::vector<int32_t> dst_zero_points = std::vector<int32_t>(1, output_zero_point);
 
-  ideep::attr_t op_attr;
+  at::native::mkldnn::Attr op_attr;
   float sum_scale = has_accum ? accum.value().q_scale() : 1.0;
   int32_t sum_zero_point = has_accum ? accum.value().q_zero_point() : 0;
   if (has_accum) {
     // Just tells we have these post op, the actual value such as scale and zero point will be set later.
-    op_attr = kReluFused ? ideep::attr_t::residual_with_sum_zero_point() : ideep::attr_t::fuse_sum();
+    op_attr = kReluFused ? at::native::mkldnn::Attr::residual_with_sum_zero_point() : at::native::mkldnn::Attr::fuse_sum();
     const std::vector<float> accum_scale = std::vector<float>(1, 1.0/sum_scale);
     const std::vector<int32_t> accum_zero_points = std::vector<int32_t>(1, sum_zero_point);
     // Set the dst scale and zero point with the value of accum.
@@ -1286,7 +1286,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     dst.set_scale(accum_scale);
     dst.set_zero_point(accum_zero_points);
   } else if (kReluFused) {
-    op_attr = ideep::attr_t::fuse_relu();
+    op_attr = at::native::mkldnn::Attr::fuse_relu();
   }
 
   // Bias might be modified outside (e.g. by quantization bias correction).
@@ -1760,7 +1760,7 @@ static at::Tensor _quantized_convolution_onednn(
   }
   ideep::tensor dst = at::native::itensor_view_from_dense(output);
   static ideep::tensor::desc dummy_accum_desc;
-  ideep::attr_t op_attr = onednn_utils::create_attr_by_post_op(
+  at::native::mkldnn::Attr op_attr = onednn_utils::create_attr_by_post_op(
     binary_attr.has_value() ? binary_attr.value() : "none",
     binary_alpha.has_value() ? binary_alpha.value().to<double>() : 1.0,
     accum_scale,
