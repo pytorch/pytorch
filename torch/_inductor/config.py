@@ -2611,11 +2611,8 @@ class triton:
     disallow_failing_autotune_kernels_TESTING_ONLY = False
 
     # specify number of splits to autotune on for decompose_k. 0 disables decompose_k
-    # Disabled on ROCm by default pending performance validation.
     num_decompose_k_splits = int(
-        os.environ.get(
-            "TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "0" if torch.version.hip else "10"
-        )
+        os.environ.get("TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "10")
     )
 
     # Backends for the partial BMM nested inside a decompose-K subgraph. This
