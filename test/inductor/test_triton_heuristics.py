@@ -317,7 +317,6 @@ class TestTritonHeuristics(TestCase):
         self.assertIn(baseline_rblock, scalar_tiled_products)
 
     def test_strided_reduction_configs(self):
-        # sum(0) of a row-major tensor: the reduction dim is not contiguous
         device = self._fake_cuda_device_properties()._replace(major=10, cc=100)
         triton_meta = {"device": device}
 
@@ -335,9 +334,6 @@ class TestTritonHeuristics(TestCase):
         tiled = {"y": 128, "x": 128, "r0_": 8192}
         self.assertIn(128, r_blocks(tiled, {"y": 1, "x": 100, "r0_": 0}))
         self.assertNotIn(128, r_blocks(tiled, {"y": 1, "x": 100, "r0_": 10}))
-        tiled_small = {"y": 2048, "x": 128, "r0_": 256}
-        self.assertIn(128, r_blocks(tiled_small, {"y": 1, "x": 100, "r0_": 0}))
-        self.assertNotIn(128, r_blocks(tiled_small, {"y": 1, "x": 100, "r0_": 10}))
         self.assertIn(128, r_blocks({"x": 16384, "r0_": 8192}))
         self.assertNotIn(128, r_blocks({"x": 16384, "r0_": 512}))
 

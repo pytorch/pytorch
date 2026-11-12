@@ -556,14 +556,10 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     def _get_strided_reduction_configs(
         self, size_hints, inductor_meta, rnumel, register_intensive, warp_size
     ) -> list[Config]:
-        """
-        Extra candidate for reductions over a non-contiguous dim, e.g. sum(0)
-        of a row-major [R, N] tensor. These want a wide x tile for coalescing
-        and a deep R0_BLOCK, which no other candidate provides:
-        _adapt_config_for_tiling keeps a reduction dim with zero tiling score
-        at its minimum block of 4, and the 2D candidates pair a wide x tile
-        with at most R0_BLOCK=64.
-        """
+        # Strided reductions (e.g. sum(0) of row-major [R, N]) want a wide x tile
+        # and a deep R0_BLOCK. No other candidate has both: _adapt_config_for_tiling
+        # keeps a zero-score reduction dim at R0_BLOCK=4, and 2D wide-x candidates
+        # stop at R0_BLOCK=64.
         from torch._inductor.runtime.triton_heuristics import (
             triton_config_reduction,
             triton_config_tiled_reduction,
