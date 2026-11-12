@@ -267,7 +267,7 @@ def lower_blackwell_decompose_k_partial(
         raise AssertionError("decompose-K plan geometry does not match its config")
 
     layout = ir.FixedLayout(
-        mat1.get_device(),
+        mat1.get_device_or_error(),
         torch.float32,
         [int(k_split) * int(m_pad), n],
         [n, 1],

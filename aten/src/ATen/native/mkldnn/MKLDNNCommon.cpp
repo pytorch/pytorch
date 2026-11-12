@@ -119,7 +119,40 @@ int64_t nbytes_from_mkldnn(const Tensor& mkldnn_tensor) {
   return t.get_desc().get_size();
 }
 
-ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data_ptr) {
+namespace {
+
+enum class DenseViewAccess {
+  Mutable,
+  Const,
+};
+
+template <typename T>
+T* dense_view_data_ptr(const Tensor& tensor, DenseViewAccess access) {
+  return access == DenseViewAccess::Const
+      ? const_cast<T*>(tensor.template const_data_ptr<T>())
+      : tensor.template mutable_data_ptr<T>();
+}
+
+template <typename T>
+ideep::tensor typed_itensor_view_from_dense(
+    const Tensor& tensor,
+    ideep::tensor::data_type data_type,
+    DenseViewAccess access) {
+  return {{tensor.sizes().vec(), data_type, tensor.strides().vec()},
+          dense_view_data_ptr<T>(tensor, access)};
+}
+
+template <typename T>
+ideep::tensor typed_itensor_view_from_dense(
+    const Tensor& tensor,
+    const ideep::tensor::desc& desc,
+    DenseViewAccess access) {
+  return {desc, dense_view_data_ptr<T>(tensor, access)};
+}
+
+ideep::tensor itensor_view_from_dense_impl(
+    const Tensor& tensor,
+    DenseViewAccess access) {
   TORCH_CHECK(
       tensor.device().is_cpu(),
       "itensor_view_from_dense expects CPU tensor input");
@@ -127,69 +160,35 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data
       tensor.layout() == Layout::Strided,
       "itensor_view_from_dense expects dense tensor input");
   if (tensor.scalar_type() == ScalarType::Float) {
-    return {{tensor.sizes().vec(),
-            ideep::tensor::data_type::f32,
-            tensor.strides().vec()},
-            from_const_data_ptr ?
-              const_cast<float*>(tensor.template const_data_ptr<float>()) :
-              tensor.template data_ptr<float>()};
-  }
-  else if (tensor.scalar_type() == ScalarType::BFloat16) {
-    return {{tensor.sizes().vec(),
-            ideep::tensor::data_type::bf16,
-            tensor.strides().vec()},
-            from_const_data_ptr ?
-              const_cast<BFloat16*>(tensor.template const_data_ptr<BFloat16>()) :
-              tensor.template data_ptr<BFloat16>()};
-  }
-  else if (tensor.scalar_type() == ScalarType::Half) {
-    return {{tensor.sizes().vec(),
-            ideep::tensor::data_type::f16,
-            tensor.strides().vec()},
-            from_const_data_ptr ?
-              const_cast<Half*>(tensor.template const_data_ptr<Half>()) :
-              tensor.template data_ptr<Half>()};
-  }
-  else if (tensor.scalar_type() == ScalarType::Byte) {
-    return {{tensor.sizes().vec(),
-            ideep::tensor::data_type::u8,
-            tensor.strides().vec()},
-            from_const_data_ptr ?
-              const_cast<void*>(tensor.const_data_ptr()) :
-              tensor.data_ptr()};
-  }
-  else if (tensor.scalar_type() == ScalarType::Char) {
-    return {{tensor.sizes().vec(),
-            ideep::tensor::data_type::s8,
-            tensor.strides().vec()},
-            from_const_data_ptr ?
-              const_cast<void*>(tensor.const_data_ptr()) :
-              tensor.data_ptr()};
-  }
-  else if (tensor.scalar_type() == ScalarType::Float8_e4m3fn) {
-    return {{tensor.sizes().vec(),
-            ideep::tensor::data_type::f8_e4m3,
-            tensor.strides().vec()},
-            from_const_data_ptr ?
-              const_cast<void*>(tensor.const_data_ptr()) :
-              tensor.data_ptr()};
-  }
-  else if (tensor.scalar_type() == ScalarType::Float8_e5m2) {
-    return {{tensor.sizes().vec(),
-            ideep::tensor::data_type::f8_e5m2,
-            tensor.strides().vec()},
-            from_const_data_ptr ?
-              const_cast<void*>(tensor.const_data_ptr()) :
-              tensor.data_ptr()};
-  }
-  else {
+    return typed_itensor_view_from_dense<float>(
+        tensor, ideep::tensor::data_type::f32, access);
+  } else if (tensor.scalar_type() == ScalarType::BFloat16) {
+    return typed_itensor_view_from_dense<BFloat16>(
+        tensor, ideep::tensor::data_type::bf16, access);
+  } else if (tensor.scalar_type() == ScalarType::Half) {
+    return typed_itensor_view_from_dense<Half>(
+        tensor, ideep::tensor::data_type::f16, access);
+  } else if (tensor.scalar_type() == ScalarType::Byte) {
+    return {{tensor.sizes().vec(), ideep::tensor::data_type::u8, tensor.strides().vec()},
+            access == DenseViewAccess::Const ? const_cast<void*>(tensor.const_data_ptr()) : tensor.mutable_data_ptr()};
+  } else if (tensor.scalar_type() == ScalarType::Char) {
+    return {{tensor.sizes().vec(), ideep::tensor::data_type::s8, tensor.strides().vec()},
+            access == DenseViewAccess::Const ? const_cast<void*>(tensor.const_data_ptr()) : tensor.mutable_data_ptr()};
+  } else if (tensor.scalar_type() == ScalarType::Float8_e4m3fn) {
+    return {{tensor.sizes().vec(), ideep::tensor::data_type::f8_e4m3, tensor.strides().vec()},
+            access == DenseViewAccess::Const ? const_cast<void*>(tensor.const_data_ptr()) : tensor.mutable_data_ptr()};
+  } else if (tensor.scalar_type() == ScalarType::Float8_e5m2) {
+    return {{tensor.sizes().vec(), ideep::tensor::data_type::f8_e5m2, tensor.strides().vec()},
+            access == DenseViewAccess::Const ? const_cast<void*>(tensor.const_data_ptr()) : tensor.mutable_data_ptr()};
+  } else {
     TORCH_CHECK(false, "itensor_view_from_dense expects float/bfloat16/half/int8/fp8 tensor input", tensor.scalar_type());
   }
 }
 
-ideep::tensor itensor_view_from_dense(
+ideep::tensor itensor_view_from_dense_impl(
     const at::Tensor& tensor,
-    const ideep::tensor::desc& desc) {
+    const ideep::tensor::desc& desc,
+  DenseViewAccess access) {
   TORCH_CHECK(
       tensor.device().is_cpu(),
       "itensor_view_from_dense expects CPU tensor input");
@@ -201,7 +200,35 @@ ideep::tensor itensor_view_from_dense(
           tensor.scalar_type() == at::ScalarType::BFloat16 ||
           tensor.scalar_type() == at::ScalarType::Half,
       "itensor_view_from_dense expects float, bfloat16 or half tensor input");
-  return {desc, tensor.data_ptr()};
+  if (tensor.scalar_type() == at::ScalarType::Float) {
+    return typed_itensor_view_from_dense<float>(tensor, desc, access);
+  } else if (tensor.scalar_type() == at::ScalarType::BFloat16) {
+    return typed_itensor_view_from_dense<BFloat16>(tensor, desc, access);
+  } else {
+    return typed_itensor_view_from_dense<Half>(tensor, desc, access);
+  }
+}
+
+} // namespace
+
+ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
+  return itensor_view_from_dense_impl(tensor, DenseViewAccess::Mutable);
+}
+
+ideep::tensor itensor_view_from_const_dense(const Tensor& tensor) {
+  return itensor_view_from_dense_impl(tensor, DenseViewAccess::Const);
+}
+
+ideep::tensor itensor_view_from_dense(
+    const at::Tensor& tensor,
+    const ideep::tensor::desc& desc) {
+  return itensor_view_from_dense_impl(tensor, desc, DenseViewAccess::Mutable);
+}
+
+ideep::tensor itensor_view_from_const_dense(
+    const at::Tensor& tensor,
+    const ideep::tensor::desc& desc) {
+  return itensor_view_from_dense_impl(tensor, desc, DenseViewAccess::Const);
 }
 
 // Helper function for getting an ideep tensor out of an aten Tensor.
@@ -209,11 +236,19 @@ ideep::tensor itensor_view_from_dense(
 // tensor is just a view of the storage of the aten dense tensor, so
 // caller needs to make sure the aten dense tensor's lifetime is
 // longer than the ideep tensor.
-ideep::tensor itensor_from_tensor(const Tensor& tensor, bool from_const_data_ptr) {
+ideep::tensor itensor_from_tensor(const Tensor& tensor) {
   if (tensor.is_mkldnn()) {
     return itensor_from_mkldnn(tensor);
   } else {
-    return itensor_view_from_dense(tensor, from_const_data_ptr);
+    return itensor_view_from_dense(tensor);
+  }
+}
+
+ideep::tensor itensor_from_const_tensor(const Tensor& tensor) {
+  if (tensor.is_mkldnn()) {
+    return itensor_from_mkldnn(tensor);
+  } else {
+    return itensor_view_from_const_dense(tensor);
   }
 }
 

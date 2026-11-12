@@ -7,8 +7,8 @@ using namespace c10::metal;
 template <typename T, typename C, typename IdxT>
 kernel void compute_linear_combination(
     device void* out_ptr [[buffer(0)]],
-    constant void* in_ptr [[buffer(1)]],
-    constant void* coeff_ptr [[buffer(2)]],
+    device const char* in_ptr [[buffer(1)]],
+    device const char* coeff_ptr [[buffer(2)]],
     constant long* sizes [[buffer(3)]],
     constant long* out_strides [[buffer(4)]],
     constant long* in_strides [[buffer(5)]],
@@ -36,8 +36,8 @@ kernel void compute_linear_combination(
   template[[host_name("compute_linear_combination_" #T SUF)]] kernel void \
   compute_linear_combination<T, C, IDX>(                                  \
       device void* out_ptr [[buffer(0)]],                                 \
-      constant void* in_ptr [[buffer(1)]],                                \
-      constant void* coeff_ptr [[buffer(2)]],                             \
+      device const char* in_ptr [[buffer(1)]],                            \
+      device const char* coeff_ptr [[buffer(2)]],                         \
       constant long* sizes [[buffer(3)]],                                 \
       constant long* out_strides [[buffer(4)]],                           \
       constant long* in_strides [[buffer(5)]],                            \

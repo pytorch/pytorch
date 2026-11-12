@@ -160,7 +160,8 @@ def blackwell_bmm_grid(*args, cdiv, max, min):
 blackwell_ws_persistent_tma_bmm_template = TritonTemplate(
     name="blackwell_bmm",
     grid=blackwell_bmm_grid,
-    source=load_kernel_template("triton_blackwell_ws_persistent_tma_bmm"),
+    source=load_kernel_template("triton_blackwell_ws_persistent_tma_bmm")
+    + load_kernel_template("triton_gemm_helpers"),
     cache_codegen_enabled_for_template=True,
 )
 
@@ -209,7 +210,7 @@ BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS = (
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
     torch.bmm,
-    "at::_bmm_out_dtype_xpu" if torch.xpu._is_compiled() else "at::_bmm_out_dtype_cuda",
+    "at::bmm_dtype_out",
     name="bmm_dtype",
     op_overload=aten.bmm.dtype_out,
 )

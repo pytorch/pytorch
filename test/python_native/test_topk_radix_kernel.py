@@ -82,10 +82,15 @@ class TestRadixKernelBuilder(TestCase):
         )
         self.assertEqual(b["prefix"], "topk_radix_f32_k1024_det_vdyn_tarch")
         self.assertEqual(b["fn"].min_blocks_per_mp, 2)
-        with mock.patch.object(
-            cutlass_dsl.cuda_helpers,
-            "get_device_attribute",
-            side_effect=AssertionError("unexpected CUDA device query"),
+        dsl_env = cutlass_dsl.CuTeDSL._get_dsl().envar
+        # Restore the cache if lazy detection falls back under the mock.
+        with (
+            mock.patch.object(dsl_env, "_arch", dsl_env._arch),
+            mock.patch.object(
+                cutlass_dsl.cuda_helpers,
+                "get_device_attribute",
+                side_effect=AssertionError("unexpected CUDA device query"),
+            ),
         ):
             cute.compile(b["fn"], *b["fake_args"])
 

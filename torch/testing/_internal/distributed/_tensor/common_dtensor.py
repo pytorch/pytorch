@@ -61,6 +61,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
+    preserves_unittest_skip_marks,
     set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
@@ -724,13 +725,11 @@ class DTensorContinuousTestBase(DTensorTestMixin, MultiProcContinuousTest):
         super()._init_pg(rank, world_size, rdvz_file)
 
 
+@preserves_unittest_skip_marks()
 class LocalDTensorContinuousTestBase(DTensorContinuousTestBase):
     @property
     def is_local_tensor_enabled(self) -> bool:
         return True
-
-    def _handle_test_skip(self, msg: str) -> None:
-        self.skipTest(msg)
 
     def _get_local_tensor_mode(self):
         return LocalTensorMode(frozenset(range(self.world_size)))
@@ -1111,13 +1110,11 @@ class DTensorConverter:
             raise RuntimeError(f"Trying to convert to DTensor, but got {type(t)}")
 
 
+@preserves_unittest_skip_marks("join_or_run")
 class LocalDTensorOpTestBase(DTensorOpTestBase):
     @property
     def is_local_tensor_enabled(self) -> bool:
         return True
-
-    def _handle_test_skip(self, msg: str) -> None:
-        self.skipTest(msg)
 
     def _get_local_tensor_mode(self):
         return LocalTensorMode(frozenset(range(self.world_size)))
@@ -1173,13 +1170,11 @@ class LocalDTensorOpTestBase(DTensorOpTestBase):
         torch.manual_seed(0)
 
 
+@preserves_unittest_skip_marks("join_or_run")
 class LocalDTensorTestBase(DTensorTestBase):
     @property
     def is_local_tensor_enabled(self) -> bool:
         return True
-
-    def _handle_test_skip(self, msg: str) -> None:
-        self.skipTest(msg)
 
     def _get_local_tensor_mode(self):
         return LocalTensorMode(frozenset(range(self.world_size)))
@@ -1263,7 +1258,9 @@ def create_local_tensor_test_class(
         if not callable(fn):
             continue
         elif name in skipped_tests:
-            dct[name] = lambda self: self.skipTest("Skipped test")
+            dct[name] = unittest.skip("Skipped test")(
+                lambda self: self.skipTest("Skipped test")
+            )
         elif name.startswith("test_"):
             ctxs = [
                 lambda test: test._get_local_tensor_mode(),

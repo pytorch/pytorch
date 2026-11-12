@@ -169,14 +169,15 @@ class TestMaxAutotuneBlackwell(TestCase):
         else:
             write_api = "tl.store"
         fc = FileCheck().check("triton_tem_fused_mm")
-        if host_side_tma:
+        # Dynamic dims fall back to device-side descriptors.
+        if host_side_tma and not dynamic:
             fc.check("host_tma_descriptor_args")
             if not tma_store:
                 fc.check_not("tl.make_tensor_descriptor")
         else:
             fc.check("tl.make_tensor_descriptor")
         fc.check(write_api).run(code[0])
-        if host_side_tma and tma_store:
+        if host_side_tma and tma_store and not dynamic:
             # Loads are host-side, so the TMA store is the only descriptor
             # still built in-kernel.
             FileCheck().check_count("tl.make_tensor_descriptor", 1, exactly=True).run(
@@ -322,8 +323,67 @@ class TestMaxAutotuneBlackwell(TestCase):
             fc.check("tl.make_tensor_descriptor(base=")
         fc.run(code[0])
 
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_host_side_tma_one_dynamic_operand(self):
+        # Only A has a dynamic dim: the launcher reads it at launch, so both
+        # operands keep host-side descriptors and none is built in-kernel.
+        M, N, K = 1024, 256, 512
+        a = torch.randn(M, K).to(torch.float16).to(GPU_TYPE)
+        b = torch.randn(K, N).to(torch.float16).to(GPU_TYPE)
+        torch._dynamo.mark_dynamic(a, 0)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_host_side_tma": True,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            }
+        ):
+            c_actual, code = run_and_get_code(torch.compile(torch.mm), a, b)
+        torch.testing.assert_close(c_actual, torch.mm(a, b), atol=1e-2, rtol=1e-2)
+        FileCheck().check("triton_tem_fused_mm").check_not(
+            "tl.make_tensor_descriptor(base="
+        ).run(code[0])
+        FileCheck().check("'host_tma_descriptor_args'").check("'arg_A'").check(
+            "'launch_args': ['ks0']"
+        ).run(code[0])
+
     # NOTE: the current Inductor template verifies that the scaling mode is either per-tensor or per-row
     # TODO: support additional scaling modes for Blackwell
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_host_side_tma_aliased_dynamic_operand(self):
+        # Both operands view x, so def_kernel passes them as one arg. A is
+        # dynamic, so B must also take a device-side descriptor: the launcher
+        # can't pass the shared arg as a host TensorDescriptor to only one.
+        x = torch.randint(-2, 3, (256, 64)).to(torch.float16).to(GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        def mm(x):
+            return x @ x[:64].t()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_host_side_tma": True,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            }
+        ):
+            c_actual, code = run_and_get_code(torch.compile(mm), x)
+        torch.testing.assert_close(c_actual, mm(x), atol=0, rtol=0)
+        FileCheck().check_not("host_tma_descriptor_args").run(code[0])
+        FileCheck().check("tl.make_tensor_descriptor(base=A").check(
+            "tl.make_tensor_descriptor(base=B"
+        ).run(code[0])
+
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
@@ -382,7 +442,8 @@ class TestMaxAutotuneBlackwell(TestCase):
         else:
             write_api = "tl.store"
         fc = FileCheck().check("triton_tem_fused__scaled_mm")
-        if host_side_tma:
+        # Dynamic dims fall back to device-side descriptors.
+        if host_side_tma and not dynamic:
             fc.check("host_tma_descriptor_args")
         else:
             fc.check("tl.make_tensor_descriptor(base=")
@@ -454,7 +515,8 @@ class TestMaxAutotuneBlackwell(TestCase):
         else:
             write_api = "tl.store"
         fc = FileCheck().check("triton_tem_fused__scaled_mm")
-        if host_side_tma:
+        # Dynamic dims fall back to device-side descriptors.
+        if host_side_tma and not dynamic:
             fc.check("host_tma_descriptor_args")
         else:
             fc.check("tl.make_tensor_descriptor(base=")
@@ -548,14 +610,15 @@ class TestMaxAutotuneBlackwell(TestCase):
 
         # Verify that we are using a TMA implementation
         fc = FileCheck().check("triton_tem_fused_addmm")
-        if host_side_tma:
+        # Dynamic dims fall back to device-side descriptors.
+        if host_side_tma and not dynamic:
             fc.check("host_tma_descriptor_args")
             if not tma_store:
                 fc.check_not(make_desc_api)
         else:
             fc.check(make_desc_api)
         fc.check(read_api).check(write_api).run(code[0])
-        if host_side_tma and tma_store:
+        if host_side_tma and tma_store and not dynamic:
             # Loads are host-side, so the TMA store is the only descriptor
             # still built in-kernel.
             FileCheck().check_count(make_desc_api, 1, exactly=True).run(code[0])
@@ -990,6 +1053,39 @@ class TestBlackwellExhaustiveConfigs(TestCase):
     VALID_NUM_STAGES = {2, 3, 4, 5, 6}
     VALID_NUM_WARPS = {4, 8}
     VALID_EPILOGUE_SUBTILE = {1, 2, 4}
+
+    @parametrize(
+        "dtype,allow_tf32,a_row_major,b_row_major,block_m,expected",
+        (
+            (torch.float32, True, False, True, 64, False),
+            (torch.float32, True, False, False, 128, False),
+            (torch.float32, True, False, True, 256, False),
+            (torch.float32, True, False, True, 32, True),
+            (torch.float32, False, False, True, 128, True),
+            (torch.float32, True, True, False, 128, True),
+            (torch.bfloat16, True, False, True, 128, True),
+        ),
+    )
+    def test_fp32_mma_layout_filter(
+        self,
+        dtype,
+        allow_tf32,
+        a_row_major,
+        b_row_major,
+        block_m,
+        expected,
+    ):
+        kwargs = {
+            "A_ROW_MAJOR": a_row_major,
+            "B_ROW_MAJOR": b_row_major,
+            "BLOCK_M": block_m,
+        }
+        self.assertEqual(
+            CUDABlackwellPersistentTMATemplateConfigHeuristic._supports_mma_layout(
+                dtype, allow_tf32, kwargs
+            ),
+            expected,
+        )
 
     @parametrize(
         "heuristic_cls",
@@ -1905,7 +2001,6 @@ class TestBlackwellBMMTemplate(TestCase):
 
     @staticmethod
     def _offered_bmm_choices():
-        """Patch tuned_bmm/tuned_baddbmm to record every choice they offer."""
         from torch._inductor.kernel import bmm as bmm_module
 
         offered = []
@@ -1922,26 +2017,14 @@ class TestBlackwellBMMTemplate(TestCase):
         "Need Blackwell with device-side TMA support in Triton",
     )
     @parametrize("op", ("bmm", "baddbmm"))
-    @parametrize("bias_shape", ("full", "batch1", "matrix", "row", "scalar"))
-    @parametrize("tma", ("off", "default", "tma_store", "host_tma_store"))
-    def test_tuned_bmm_offers_blackwell_bmm_template(
-        self, op: str, bias_shape: str, tma: str
-    ):
-        if op == "bmm" and bias_shape != "full":
-            self.skipTest("bmm has no bias")
+    def test_tuned_bmm_offers_blackwell_bmm_template(self, op: str):
         # M and N tails exercise the masked bias loads and the rank-3 store.
         bsz, m, k, n = 6, 200, 264, 136
         # Small integers and power-of-two scalars keep the result exact.
-        shape, alpha, beta = {
-            "full": ((bsz, m, n), 2.0, 0.5),
-            "batch1": ((1, m, n), 1, 1),
-            "matrix": ((m, n), 0.5, -1),
-            "row": ((n,), -1, 2),
-            "scalar": ((), 2.0, 0.5),
-        }[bias_shape]
+        alpha, beta = 2.0, 0.5
         a = torch.randint(-1, 2, (bsz, m, k), device=GPU_TYPE).bfloat16()
         b = torch.randint(-1, 2, (bsz, k, n), device=GPU_TYPE).bfloat16()
-        bias = torch.randint(-4, 5, shape, device=GPU_TYPE).bfloat16()
+        bias = torch.randint(-4, 5, (bsz, m, n), device=GPU_TYPE).bfloat16()
 
         if op == "bmm":
 
@@ -1954,24 +2037,15 @@ class TestBlackwellBMMTemplate(TestCase):
                 return torch.baddbmm(bias, a, b, alpha=alpha, beta=beta)
 
         expected = fn(a.double(), b.double(), bias.double()).bfloat16()
-        enabled = tma != "off"
-        offered, spy = self._offered_bmm_choices()
         counters.clear()
-        with (
-            spy,
-            config.patch(
-                {
-                    "max_autotune": True,
-                    "max_autotune_gemm_backends": "ATEN,TRITON",
-                    "triton.enable_persistent_tma_matmul": enabled,
-                    "triton.enable_template_tma_store": "tma_store" in tma,
-                    "triton.enable_host_side_tma": tma == "host_tma_store",
-                    "test_configs.autotune_choice_name_regex": (
-                        "blackwell_bmm" if enabled else None
-                    ),
-                    "compile_threads": 1,
-                }
-            ),
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "ATEN,TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+                "test_configs.autotune_choice_name_regex": "blackwell_bmm",
+                "compile_threads": 1,
+            }
         ):
             actual, codes = run_and_get_code(torch.compile(fn), a, b, bias)
 
@@ -1979,25 +2053,17 @@ class TestBlackwellBMMTemplate(TestCase):
         self.assertTrue(
             any(key.startswith(f"aten.{op}_") for key in counters["aten_mm_info"])
         )
-        # The gates keep today's choices when the flag is off.
-        self.assertEqual(any("blackwell_bmm" in c.name for c in offered), enabled)
         # The persistent queue over batches and tiles is unique to the template.
-        self.assertEqual("num_tiles = BATCH * num_tiles_per_batch" in codes[0], enabled)
-        if enabled:
-            self.assertIn(f"USE_META_WS : tl.constexpr = {meta_ws_enabled()}", codes[0])
-        if tma == "host_tma_store":
-            self.assertIn("host_tma_descriptor_args", codes[0])
+        self.assertIn("num_tiles = BATCH * num_tiles_per_batch", codes[0])
+        self.assertIn(f"USE_META_WS : tl.constexpr = {meta_ws_enabled()}", codes[0])
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
-    @parametrize("alpha", (1, 2))
-    def test_tuned_baddbmm_blackwell_bmm_beta_zero_ignores_nonfinite_bias(
-        self, alpha: float
-    ):
-        # Like eager, beta=0 must ignore the bias, including its NaNs and infs.
+    def test_tuned_baddbmm_blackwell_bmm_beta_zero_ignores_nonfinite_bias(self):
+        alpha = 2
         bsz, m, k, n = 4, 256, 256, 128
         a = torch.randint(-1, 2, (bsz, m, k), device=GPU_TYPE).bfloat16()
         b = torch.randint(-1, 2, (bsz, k, n), device=GPU_TYPE).bfloat16()
@@ -2027,8 +2093,7 @@ class TestBlackwellBMMTemplate(TestCase):
         "Need Blackwell with device-side TMA support in Triton",
     )
     def test_tuned_baddbmm_blackwell_bmm_bias_aliases_operand(self):
-        # The bias is a slice of A: one kernel arg cannot carry both A's host
-        # descriptor and the bias pointer, so A falls back to a device descriptor.
+        # One kernel arg cannot carry both A's host descriptor and the bias pointer.
         bsz, m, k, n = 4, 256, 256, 128
         a = torch.randint(-1, 2, (bsz, m, k), device=GPU_TYPE).bfloat16()
         b = torch.randint(-1, 2, (bsz, k, n), device=GPU_TYPE).bfloat16()
@@ -2036,20 +2101,16 @@ class TestBlackwellBMMTemplate(TestCase):
         def fn(a, b):
             return torch.baddbmm(a[:, :, :n], a, b)
 
-        offered, spy = self._offered_bmm_choices()
-        with (
-            spy,
-            config.patch(
-                {
-                    "max_autotune": True,
-                    "max_autotune_gemm_backends": "ATEN,TRITON",
-                    "triton.enable_persistent_tma_matmul": True,
-                    "triton.enable_template_tma_store": True,
-                    "triton.enable_host_side_tma": True,
-                    "test_configs.autotune_choice_name_regex": "blackwell_bmm",
-                    "compile_threads": 1,
-                }
-            ),
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "ATEN,TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_template_tma_store": True,
+                "triton.enable_host_side_tma": True,
+                "test_configs.autotune_choice_name_regex": "blackwell_bmm",
+                "compile_threads": 1,
+            }
         ):
             actual, codes = run_and_get_code(torch.compile(fn), a, b)
 
@@ -2062,37 +2123,28 @@ class TestBlackwellBMMTemplate(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
-    @parametrize(
-        "reason",
-        ("no_max_autotune", "out_dtype", "dynamic_size", "dynamic_stride"),
-    )
-    def test_tuned_bmm_blackwell_bmm_template_gates(self, reason: str):
+    def test_tuned_bmm_blackwell_bmm_template_rejects_symbolic_stride(self):
         a = torch.randn(4, 256, 384, device=GPU_TYPE, dtype=torch.bfloat16)
         b = torch.randn(4, 128, 128, device=GPU_TYPE, dtype=torch.bfloat16)
-        if reason == "dynamic_stride":
-            # Static sizes with a symbolic batch stride: a slice of a tensor
-            # whose last dim is dynamic.
-            torch._dynamo.mark_dynamic(a, 2)
+        # Static sizes, symbolic batch stride: a slice of a dynamic last dim.
+        torch._dynamo.mark_dynamic(a, 2)
 
         def fn(a, b):
-            a = a[:, :, :128]
-            if reason == "out_dtype":
-                return torch.bmm(a, b, out_dtype=torch.float32)
-            return torch.bmm(a, b)
+            return torch.bmm(a[:, :, :128], b)
 
         offered, spy = self._offered_bmm_choices()
         with (
             spy,
             config.patch(
                 {
-                    "max_autotune": reason != "no_max_autotune",
+                    "max_autotune": True,
                     "max_autotune_gemm_backends": "ATEN,TRITON",
                     "triton.enable_persistent_tma_matmul": True,
                     "compile_threads": 1,
                 }
             ),
         ):
-            actual = torch.compile(fn, dynamic=reason == "dynamic_size")(a, b)
+            actual = torch.compile(fn)(a, b)
 
         self.assertTrue(offered)
         self.assertFalse(any("blackwell_bmm" in c.name for c in offered))

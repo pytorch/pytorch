@@ -120,7 +120,7 @@ mm_template = TritonTemplate(
     # See more details in https://github.com/pytorch/pytorch/pull/146293
     else load_kernel_template("triton_mm_rocm"),
     cache_codegen_enabled_for_template=True,
-    prologue_loads_all_inputs=True,
+    prologue_loads_all_named_inputs=True,
 )
 
 persistent_tma_mm_template = TritonTemplate(
@@ -167,7 +167,8 @@ flydsl_mm_template = FlyDSLTemplate(
 blackwell_ws_persistent_tma_mm_template = TritonTemplate(
     name="blackwell_ws_persistent_tma",
     grid=blackwell_persistent_mm_grid,
-    source=load_kernel_template("triton_blackwell_ws_persistent_tma_mm"),
+    source=load_kernel_template("triton_blackwell_ws_persistent_tma_mm")
+    + load_kernel_template("triton_gemm_helpers"),
 )
 
 
@@ -674,13 +675,15 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     ):
         if use_decompose_k_choice(m, n, k):
             templates_to_use.append(decompose_k_subgraph_template)
-        # Triton Templates typically perform very poorly for large K.
-        # Its highly unlikely that if we want to use decompose_k, then
-        # Triton will ever win.
-        #
-        # To be conservative we increase this threshold for N/M by 2.
-        is_exhaustive = inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE"
-        if is_exhaustive or not use_decompose_k_choice(m, n, k, threshold_multiple=2):
+        # CUDA drops Triton mm from the default search once decompose_k applies
+        # at twice the usual threshold. The exhaustive search still includes it.
+        # HIP keeps Triton mm.
+        keep_triton_mm = (
+            torch.version.hip is not None
+            or inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE"
+            or not use_decompose_k_choice(m, n, k, threshold_multiple=2)
+        )
+        if keep_triton_mm:
             templates_to_use.append(mm_template)
 
             if use_triton_blackwell_tma_template(
@@ -1523,6 +1526,7 @@ def scaled_mm_v2_constraint(
             if (
                 device == "cuda"
                 and not torch.version.hip
+                and scale.get_dtype() == torch.float32
                 and recipe in (ScalingType.BlockWise1x128, ScalingType.BlockWise128x128)
             ):
                 matrix = operands["self" if side == "a" else "mat2"]
