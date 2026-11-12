@@ -138,7 +138,7 @@ def _object_state(value: object, rules: ConstantRules) -> dict[str, object] | No
     mutation of it leaves its key as it was, and a new object with the same contents
     gets a key of its own. Such an object also stays in memory, with anything it holds,
     a tensor included (constant_key does not look inside it): a side-table entry holds
-    it for the life of the process (see KernelSideTable)."""
+    it until the table is reset (see KernelSideTable)."""
     cls = type(value)
     if rules.is_dsl_value(value) or _has_hidden_state(value):
         return None
@@ -331,12 +331,12 @@ class KernelSideTable(Generic[KernelT]):
         self.constant_args: dict[int, dict[str, object]] = {}
         self.lock = threading.Lock()
         # With constant_rules, equal constant args (see constant_key) share one index,
-        # so a table that is never reset grows only with distinct constant args, and
-        # each entry is a snapshot of the args it was added with. A constant keyed by
-        # identity (see _object_state) still adds an entry per object, which such a
-        # table keeps, with the object, for the life of the process: each capture adds
-        # its constants, and captured graphs hold their indexes, so entries cannot be
-        # evicted.
+        # so the table grows only with distinct constant args, not with every eager
+        # launch, until it is reset (most processes never reset it), and each entry is
+        # a snapshot of the args it was added with. A constant keyed by identity (see
+        # _object_state) still adds an entry per object, which the table keeps, with
+        # the object, until it is reset: captured graphs hold their indexes, so
+        # entries cannot be evicted sooner.
         self.constant_rules = constant_rules
         self._constant_args_index: dict[object, int] = {}
         # index -> {name: constant_key of the arg}.
