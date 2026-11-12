@@ -389,9 +389,9 @@ _B200_STRIDED_C256 = (SumOps, MeanOps, AMaxOps, AMinOps, *_B200_INDEX)
 _SM107_DTYPES = (torch.float32, torch.bfloat16)
 _SM107_CCS = ((10, 7),)
 _SM107_MIN_SIZE, _SM107_MID_SIZE = 16 << 20, 64 << 20
-_SM107_LARGE_SIZE, _SM107_MAX_SIZE = 256 << 20, 2 << 30
-_SM107_SIZES = (_SM107_MIN_SIZE, _SM107_MID_SIZE, _SM107_LARGE_SIZE, _SM107_MAX_SIZE)
-_SM107_LARGE_SIZES = _SM107_SIZES[2:]
+_SM107_256MIB, _SM107_MAX_SIZE = 256 << 20, 2 << 30
+_SM107_SIZES = (_SM107_MIN_SIZE, _SM107_MID_SIZE, _SM107_256MIB, _SM107_MAX_SIZE)
+_SM107_FULL_SIZES = _SM107_SIZES[2:]
 _SM107_ONE_FIELD_NAMES = {SumOps: "sum", MeanOps: "mean", AMaxOps: "amax"}
 _SM107_ONE_FIELD = tuple(_SM107_ONE_FIELD_NAMES)
 
@@ -581,7 +581,7 @@ def select_general_config(
     size = num_o * count * dtype.itemsize
     if size not in _SM107_SIZES:
         return _GeneralConfig()
-    if size in _SM107_LARGE_SIZES and trait_type is SumOps:
+    if size in _SM107_FULL_SIZES and trait_type is SumOps:
         return _GeneralConfig(block=64, rule="rubin_strided_sum")
     if welford_outs == nouts:
         return _GeneralConfig(kernel_order="inner_tree", rule="rubin_strided_welford")
@@ -631,7 +631,7 @@ _RAGGED_ROW_MAX_N = 16383
 
 def _ragged_row_min_n(trait: Any) -> int:
     """The narrowest row a trait takes ragged vectors at."""
-    if trait.nfields == 3:
+    if welford_outputs(trait):
         return _RAGGED_ROW_WELFORD_MIN_N
     late = isinstance(trait, (AbsMaxOps, AbsMinOps)) or _general_norm(trait)
     return _RAGGED_ROW_LATE_MIN_N if late else _RAGGED_ROW_MIN_N
@@ -1211,7 +1211,8 @@ def replay_reduce(
     earlier call with the same metadata. x's device must be current. The trait is not
     keyed: trait_key, with x.dtype and out_dtype, must determine every parameter of the
     trait make_trait builds. Every route must also follow _L.LaunchRecord's replay
-    contract."""
+    contract. Inside an active _L.recording it skips _REPLAYS and runs the full path, so
+    the outer recording captures the launches."""
     if not x.is_cuda:
         raise AssertionError(f"need a CUDA input, got {x.device}")
     check_current(x.get_device())
@@ -1223,8 +1224,7 @@ def replay_reduce(
             return reduce_all(trait, trait_key, x, out_dtype)
         return reduce_dim(trait, trait_key, x, dims, out_dtype)
 
-    if _L._RECORD.get() is not None:
-        # An outer recording captures these launches itself.
+    if _L.recording_active():
         return run()
     dims_key = None if dims is None else tuple(sorted({d % x.dim() for d in dims}))
     # Unset, "" and "0" all leave the inner-tree order off; strict mode keys apart.

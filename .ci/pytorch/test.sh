@@ -558,7 +558,8 @@ PY
 # test_ref_ runs only the dtypes they serve and has no bfloat16 variants, so bfloat16
 # coverage comes from test_ops and test_reductions_cutedsl.py; test_ops keeps its dtype-less
 # tests (test_dtypes_, test_errors_, ...).
-PYTHON_NATIVE_REDUCTIONS_FILTER='test_ref_ and cuda and not large_input and (_sum_ or _mean_ or _amax_ or _amin_ or _prod_) and (float16 or float32)'
+# test_noncontiguous_ and test_nan_policy_ add strided and NaN inputs; float16 also selects bfloat16.
+PYTHON_NATIVE_REDUCTIONS_FILTER='(test_ref_ or test_noncontiguous_ or test_nan_policy_) and cuda and not large_input and (_sum_ or _mean_ or _amax_ or _amin_ or _prod_) and (float16 or float32)'
 PYTHON_NATIVE_REDUCTION_OPS_FILTER='(_sum_cuda or _mean_cuda or _amax_cuda or _amin_cuda or _prod_cuda) and not scatter_reduce and not index_reduce and not cartesian and not var_mean and not std_mean and not number_mean'
 
 # PYTHON_TEST_EXTRA_OPTION intentionally expands into multiple arguments.
