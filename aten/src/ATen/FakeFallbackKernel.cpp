@@ -242,9 +242,11 @@ void fakeFallback(
   // (decompositions, say), so a Python Meta kernel calling active_fake_mode()
   // sees no fake mode; so here
   UnsetFakeTensorModeGuard unset_mode;
-  // Python dispatch disables autocast before running fake implementations.
-  c10::impl::ExcludeDispatchKeyGuard exclude_autocast(
-      c10::autocast_dispatch_keyset);
+  // Python dispatch disables autocast, autograd and view bookkeeping before
+  // running fake implementations.
+  c10::impl::ExcludeDispatchKeyGuard exclude_autocast_and_autograd(
+      c10::autocast_dispatch_keyset |
+      c10::autograd_dispatch_keyset_with_ADInplaceOrView);
 
   for (const auto idx : c10::irange(num_arguments)) {
     const auto& ivalue = (*stack)[arguments_begin + idx];
