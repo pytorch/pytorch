@@ -27,9 +27,10 @@ from collections.abc import Callable, Iterator
 from typing import Any, cast, TYPE_CHECKING, Union
 from typing_extensions import TypeIs
 
+from torch._guards import TracingContext
 from torch.utils._pytree import MappingKey
 
-from .. import graph_break_hints, polyfills, variables
+from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
     create_call_function,
     create_call_method,
@@ -201,29 +202,39 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 "and all values must be VariableTracker"
             )
 
+        keys: dict[int, HashableTracker] = {}
+
         def make_hashable(
             key: Union[VariableTracker, "HashableTracker"],
         ) -> "HashableTracker":
-            return key if isinstance(key, Hashable) else Hashable(key)
+            result = key if isinstance(key, Hashable) else Hashable(key)
+            keys[id(key)] = result
+            return result
 
-        keys = {id(key): make_hashable(key) for key in items}
-        if keys and self.source is None:
-            guard_key_collisions(keys.values())
         items_cls = cast(type, self._cpython_type)
         storage_cls = dict if items_cls is collections.defaultdict else items_cls
         self.items: dict[HashableTracker, VariableTracker]
-        if storage_cls is collections.OrderedDict and isinstance(
-            items, collections.OrderedDict
-        ):
-            # Normalizing tracker keys must preserve both orders without hashing twice.
-            storage = cast(dict[object, VariableTracker], items)
-            self.items = collections.OrderedDict(
-                (keys[id(key)], value) for key, value in dict.items(storage)
-            )
-            for key in items:
-                self.items.move_to_end(keys[id(key)])
-        else:
-            self.items = storage_cls({keys[id(x)]: v for x, v in items.items()})
+        try:
+            if storage_cls is collections.OrderedDict and isinstance(
+                items, collections.OrderedDict
+            ):
+                # Preserve storage and linked order without hashing twice.
+                storage = cast(
+                    dict[VariableTracker | HashableTracker, VariableTracker], items
+                )
+                self.items = collections.OrderedDict(
+                    (make_hashable(key), value) for key, value in dict.items(storage)
+                )
+                for key in items:
+                    self.items.move_to_end(keys[id(key)])
+            else:
+                self.items = storage_cls(
+                    {make_hashable(x): v for x, v in items.items()}
+                )
+        finally:
+            # A caught equality exception still depends on the participating method keys.
+            if keys and self.source is None:
+                guard_key_collisions(keys.values())
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = (
@@ -494,6 +505,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         value = self.items.get(key)
         # The deletion marker is explicit; `isinstance` would realize lazy values.
         if value is None or type(value) is variables.DeletedVariable:
+            self.install_dict_contains_guard(tx, key, key_present=False)
             raise_observed_exception(KeyError, tx, args=[arg])
         return value
 
@@ -543,6 +555,22 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if self.source and not is_constant_source(self.source):
             self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
+
+    def check_base_dict_mutation(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> None:
+        if (
+            name in ("__init__", "__ior__", "__setitem__", "__delitem__")
+            or name in ("clear", "pop", "popitem", "setdefault", "update")
+        ) and issubclass(self.python_type(), collections.OrderedDict):
+            unimplemented(
+                gb_type="dict storage mutation on OrderedDict",
+                context=f"dict.{name}",
+                explanation="Base dict writes bypass OrderedDict's linked storage.",
+                hints=["Use OrderedDict methods to preserve its linked storage."],
+                skip_frame=True,
+                apply_to_code=False,
+            )
 
     def install_dict_contains_guard(
         self,
@@ -1030,6 +1058,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> ConstantVariable:
         # dict not allow setting arbitrary attributes.  OrderedDict and
         # defaultdict allow arbitrary setattr, but not deletion of default attrs
+        # Hook dictionaries defer type guards until their type is observable.
+        if self.source and not is_constant_source(self.source):
+            install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
         cls = self.python_type()
         if any(
             cls is t for t in (dict, collections.OrderedDict, collections.defaultdict)
@@ -1401,6 +1432,17 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         if self.source:
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
 
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name in ("pop", "popitem", "move_to_end"):
+            self._guard_type()
+        return super().call_method(tx, name, args, kwargs)
+
     def is_python_constant(self) -> bool:
         return not self.items
 
@@ -1458,8 +1500,6 @@ class NNModuleHooksOrderedDictVariable(NNModuleHooksDictVariable, OrderedDictVar
 
 
 class _NNModuleHookFlagsDictVariable(ConstDictVariable):
-    """Cache membership bookkeeping for a sourced hook-flags dictionary."""
-
     GLOBAL_FLAGS = False
 
     _nonvar_fields = {
@@ -1505,10 +1545,10 @@ class _NNModuleHookFlagsDictVariable(ConstDictVariable):
                     hooks = tx.output.resolve_source_value(source.base)
                     if not all(type(k) is int for k in dict.keys(hooks)):
                         return super().sq_contains_impl(tx, item)
-                    # These reads install TYPE_MATCH without pinning deferred IDs.
-                    item.python_type()
-                    for stored_key in self.items:
-                        stored_key.vt.python_type()
+                    if not config.skip_nnmodule_hook_guards:
+                        item.python_type()
+                        for stored_key in self.items:
+                            stored_key.vt.python_type()
                     if self.GLOBAL_FLAGS:
                         self.install_dict_keys_match_guard()
                     install_guard(
@@ -1520,7 +1560,8 @@ class _NNModuleHookFlagsDictVariable(ConstDictVariable):
                             )
                         )
                     )
-                    self._hook_membership_sources.add(source.base)
+                    if not TracingContext.get().guards_context.skip_install:
+                        self._hook_membership_sources.add(source.base)
                 return ConstantVariable.create(key in self._hook_flag_keys)
         if not self.items and isinstance(item, variables.LazyConstantVariable):
             item.python_type()  # install TYPE_MATCH without specializing the value
@@ -1541,13 +1582,18 @@ class NNModuleHookFlagsOrderedDictVariable(
     pass
 
 
-class NNModuleGlobalHookFlagsDictVariable(_NNModuleHookFlagsDictVariable):
+class NNModuleGlobalHooksDictVariable(
+    _NNModuleHookFlagsDictVariable, NNModuleHooksDictVariable
+):
     # Global IDs may be pinned while local IDs vary across equivalent modules.
     GLOBAL_FLAGS = True
 
+    def install_dict_keys_match_guard(self) -> None:
+        ConstDictVariable.install_dict_keys_match_guard(self)
 
-class NNModuleGlobalOrderedHookFlagsDictVariable(
-    OrderedDictVariable, NNModuleGlobalHookFlagsDictVariable
+
+class NNModuleGlobalHooksOrderedDictVariable(
+    NNModuleGlobalHooksDictVariable, OrderedDictVariable
 ):
     pass
 

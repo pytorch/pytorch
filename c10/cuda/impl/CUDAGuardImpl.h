@@ -119,7 +119,7 @@ struct C10_CUDA_API CUDAGuardImpl final
 
     C10_CUDA_CHECK(cudaEventCreateWithFlags(cuda_event, cuda_flag));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_event_creation(
           c10::kCUDA, reinterpret_cast<uintptr_t>(cuda_event));
     }
@@ -140,7 +140,7 @@ struct C10_CUDA_API CUDAGuardImpl final
       C10_CUDA_CHECK_WARN(c10::cuda::GetDevice(&orig_device));
       C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(device_index));
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-      if (C10_UNLIKELY(interp)) {
+      if (interp) [[unlikely]] {
         (*interp)->trace_gpu_event_deletion(
             c10::kCUDA, reinterpret_cast<uintptr_t>(cuda_event));
       }
@@ -181,7 +181,7 @@ struct C10_CUDA_API CUDAGuardImpl final
     // Makes the void* point to the (possibly just allocated) CUDA event
     *event = cuda_event;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_event_record(
           c10::kCUDA,
           reinterpret_cast<uintptr_t>(cuda_event),
@@ -200,7 +200,7 @@ struct C10_CUDA_API CUDAGuardImpl final
         cuda_event,
         /*flags (must be zero)=*/0));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_event_wait(
           c10::kCUDA,
           reinterpret_cast<uintptr_t>(cuda_event),
@@ -251,7 +251,7 @@ struct C10_CUDA_API CUDAGuardImpl final
       return;
     cudaEvent_t cuda_event = static_cast<cudaEvent_t>(event);
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_event_synchronization(
           c10::kCUDA, reinterpret_cast<uintptr_t>(cuda_event));
     }
@@ -263,7 +263,7 @@ struct C10_CUDA_API CUDAGuardImpl final
   void synchronizeDevice(const c10::DeviceIndex device_index) const override {
     c10::impl::InlineDeviceGuard<CUDAGuardImpl> guard(device_index);
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_device_synchronization(c10::kCUDA);
     }
     C10_CUDA_CHECK(cudaDeviceSynchronize());
