@@ -4321,7 +4321,9 @@ def load(
     loading process's, as for a :func:`torch.compile` cache hit. A loaded
     artifact does not apply :func:`torch.compile`'s CUPTI workaround for CUDA
     graphs: when profiling repeatedly on CUDA older than 12.6, set
-    ``DISABLE_CUPTI_LAZY_REINIT=1`` and ``TEARDOWN_CUPTI=0`` yourself.
+    ``DISABLE_CUPTI_LAZY_REINIT=1`` and ``TEARDOWN_CUPTI=0`` yourself. The
+    exception is ``allow_serve_time_compiles`` (below): its Inductor wrapper
+    applies the workaround at load when the artifact's CUDA graphs are on.
 
     Frozen C++ kernels are keyed by their build command with the PyTorch install
     taken out, so they serve a host that installed the same PyTorch build
@@ -4338,7 +4340,12 @@ def load(
     refusal: a call no captured variant covers compiles with the artifact's
     backend and the capture's ``mode`` or ``options`` (recorded in the
     artifact's ``INDUCTOR_OPTIONS``), as ``torch.compile`` would, under the
-    process-wide stance like any other compile. An artifact whose options are
+    process-wide stance like any other compile. Inductor lowers it under the
+    artifact's ``CUDAGRAPH_CONFIG`` too, so it runs as a CUDA graph exactly
+    when the captured graphs do; Dynamo still traces it under the loading
+    process's own ``triton.cudagraphs``, which decides whether a Python float
+    that changed since capture is specialized, so set that as the capture did
+    to trace alike. An artifact whose options are
     not all Python literals (such as a custom pass) refuses the flag. The
     captured variants are still served first and do not count toward
     ``torch._dynamo.config.recompile_limit``, so each frame gets
