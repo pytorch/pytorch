@@ -265,7 +265,7 @@ test_int_dtypes = [
     torch.int64,
 ]
 
-if SM80OrLater or torch.backends.mps.is_built() or GPU_TYPE == "xpu":
+if SM80OrLater or torch.backends.mps.is_built() or GPU_TYPE in ("xpu", "mtia"):
     test_dtypes.append(torch.bfloat16)
 
 
@@ -8223,6 +8223,14 @@ for dtype in (torch.int32, torch.int64):
         self.common(fn, (torch.randn([2, 8]),))
         # Unrolled reduction
         self.common(fn, (torch.randn([2, 4]),))
+
+    def test_var_correction_positional(self):
+        # prims.var takes correction positionally, so the traced node can pass it
+        # positionally; the lowering has to accept that form.
+        def fn(x):
+            return torch.ops.prims.var.default(x, [1], 1)
+
+        self.common(fn, (torch.randn([2, 8]),))
 
     @config.patch(pick_loop_orders=True)
     def test_transposed_propagates(self):

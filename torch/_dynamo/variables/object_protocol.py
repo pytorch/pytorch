@@ -2307,7 +2307,7 @@ def mro_attr_source(
     Guards absence in every skipped class, including a complete MRO miss.
     Returns None on a complete miss; callers decide whether that is an error.
     """
-    entries = tuple(iter_mro_static_dicts(klass))
+    mro = get_type_mro_no_user_code(klass)
     memoize = (
         not TracingContext.get().guards_context.skip_install
         and not is_from_skip_guard_source(klass_source)
@@ -2323,12 +2323,12 @@ def mro_attr_source(
         # The builtin metaclass always puts the already guarded class first.
         first = 1 if type(klass) is type else 0
         # A custom ancestor MRO can replace even an object tail at constant length.
-        for index in range(first, len(entries)):
+        for index in range(first, len(mro)):
             install_guard(
                 GetItemSource(mro_source, index).make_guard(GuardBuilder.ID_MATCH)
             )
         tx.output.guarded_mro_type_ids.add(id(klass))
-    for idx, (base, namespace) in enumerate(entries):
+    for idx, (base, namespace) in enumerate(iter_mro_static_dicts(klass)):
         if not is_constant_source(klass_source):
             direct = not idx and base is klass
             attr = None
