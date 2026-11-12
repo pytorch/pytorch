@@ -75,12 +75,66 @@ def deterministic_recompute(
             return
     fw_outs = fw_module.graph.find_nodes(op="output")[0].args[0]
     saved = {n for n in fw_outs[num_fwd_outputs:] if isinstance(n, torch.fx.Node)}
-    _, regions = _recomputed_copies(fw_module, bw_module, saved)
+    copies, regions = _recomputed_copies(fw_module, bw_module, saved)
 
-    # A region's recompute is one piece. If a path leaves it and comes back
-    # (e.g. through a value a selective policy saves), no single call can replace
-    # it, and it is left as partitioned (see _readers_to_move).
-    pieces = list(regions.values())
+    # A constant is a value computed from no tensor graph input: an arange, an
+    # attribute such as a tensor constant, math on those, or SymInt
+    # arithmetic. An impure op isn't one, since copying it would run it again.
+    # A piece copies the recomputed constants and the attributes it reads, so
+    # they fuse into its kernels instead of being operands; a submodule (e.g.
+    # flex_attention's score_mod) couldn't be an operand anyway.
+    constants: set[torch.fx.Node] = set()
+    for n in fw_module.graph.nodes:
+        if n.op == "get_attr" or (
+            n.op == "call_function"
+            and not _is_rng(n)
+            and not n.is_impure()
+            and all(
+                a in constants
+                for a in n.all_input_nodes
+                if not isinstance(a.meta.get("val"), _SCALARS)
+            )
+        ):
+            constants.add(n)
+    copied = copies & constants
+    copied |= set(fw_module.graph.find_nodes(op="get_attr"))
+    # A tensor constant the backward also reads directly (e.g. the gradient of
+    # h * table reads table) is read from its own copy there, which could differ
+    # from the one the forward's piece computes; say so.
+    copy_names = {n.name for n in copies}
+    bw_body = {n.name: n for n in bw_module.graph.nodes}
+    for c in fw_module.graph.nodes:
+        if c not in copies or c not in constants:
+            continue
+        direct = any(u.name not in copy_names for u in bw_body[c.name].users)
+        if direct and isinstance(c.meta.get("val"), torch.Tensor):
+            log.info(
+                "deterministic_recompute: %s left as partitioned: the backward "
+                "reads it directly",
+                c.name,
+            )
+
+    # A region's recompute is one piece, with the copied constants it reads. If
+    # a path leaves it and comes back (e.g. through a value a selective policy
+    # saves), no single call can replace it, and it is left as partitioned (see
+    # _readers_to_move).
+    order = {n: i for i, n in enumerate(fw_module.graph.nodes)}
+
+    def _with_copied(nodes: list[torch.fx.Node]) -> list[torch.fx.Node]:
+        piece = set(nodes)
+        stack = [a for n in nodes for a in n.all_input_nodes if a in copied]
+        while stack:
+            a = stack.pop()
+            if a not in piece:
+                piece.add(a)
+                stack.extend(b for b in a.all_input_nodes if b in copied)
+        return sorted(piece, key=order.__getitem__)
+
+    pieces = []
+    for nodes in regions.values():
+        rest = [n for n in nodes if n not in copied]
+        if rest:
+            pieces.append(_with_copied(rest))
 
     changed = False
     # The backward node holding each value a shared piece returns, so later
@@ -91,7 +145,9 @@ def deterministic_recompute(
     # and miss the FX graph cache.
     for i, piece in enumerate(pieces):
         identifier = f"recompute_{i}"
-        outputs = _share_region(fw_module, bw_module, piece, saved, bw_of, identifier)
+        outputs = _share_region(
+            fw_module, bw_module, piece, saved, copied, bw_of, identifier
+        )
         if outputs is not None:
             bw_of.update(outputs)
             changed = True
@@ -100,6 +156,9 @@ def deterministic_recompute(
             gm.graph.eliminate_dead_code()
             gm.graph.lint()
             gm.recompile()
+
+
+_SCALARS = (int, float, bool, torch.SymInt, torch.SymFloat, torch.SymBool)
 
 
 def _recomputed_copies(
@@ -272,6 +331,7 @@ def _share_region(
     bw_module: torch.fx.GraphModule,
     s_nodes: list[torch.fx.Node],
     saved: set[torch.fx.Node],
+    copied: set[torch.fx.Node],
     bw_of: dict[torch.fx.Node, torch.fx.Node],
     identifier: str,
 ) -> dict[torch.fx.Node, torch.fx.Node] | None:
@@ -313,15 +373,11 @@ def _share_region(
     def _is_tuple_val(n: torch.fx.Node) -> bool:
         return isinstance(n.meta.get("val"), (tuple, list))
 
-    # Left as partitioned for now: a scalar (e.g. a SymInt size) or a graph
-    # attribute (e.g. a tensor constant), which can't be an operand; and an
-    # unbacked symbol (e.g. from .item() or nonzero), which Inductor can't bind
-    # coming out of a subgraph, nor in general passed in.
+    # Inductor can't bind an unbacked symbol (e.g. from .item() or nonzero)
+    # coming out of a subgraph, nor in general one passed in; such a piece is
+    # left as partitioned for now.
     for n in (*s_inputs, *s_nodes):
-        val = n.meta.get("val")
-        if n.op == "get_attr" or not isinstance(val, (torch.Tensor, tuple, list)):
-            return _skip(f"{n.name} is a scalar or a graph attribute")
-        if free_unbacked_symbols(val):
+        if free_unbacked_symbols(n.meta.get("val")):
             return _skip(f"{n.name} carries an unbacked symbol")
 
     # Inductor treats invoke_subgraph outputs as fresh buffers and may reuse one
@@ -352,6 +408,18 @@ def _share_region(
             inline.add(n)
         elif any(u in inline for u in n.users):
             return _skip(f"{n.name} aliases a value but isn't a view op")
+    # Copied constants are computed inside the slice and never returned, and
+    # neither are scalars (e.g. a SymInt size), which Inductor can't return from
+    # a subgraph: each graph keeps its own for other readers.
+    # (Another value, e.g. a user Triton kernel's dict of results, would be
+    # computed in each graph.)
+    inline |= s_set & copied
+    for n in s_nodes:
+        val = n.meta.get("val")
+        if isinstance(val, _SCALARS):
+            inline.add(n)
+        elif n not in inline and not isinstance(val, (torch.Tensor, tuple, list)):
+            return _skip(f"{n.name} isn't a tensor or a scalar")
     if len(inline) == len(s_nodes):
         # Only views are recomputed: no kernels, nothing to drift.
         return _skip("it recomputes only views, so there is nothing to share")
@@ -378,9 +446,20 @@ def _share_region(
     s_nodes = [n for n in s_nodes if n not in inline or n in needed]
     s_set = set(s_nodes)
     s_inputs = _inputs(s_nodes)
+    # A symbol no input binds (see _unbound_symbols) is bound by a SymInt graph
+    # input that is the symbol, which the piece then also takes; if there is
+    # none (Dynamo lifts each backed symbol as one, so only defensively), the
+    # piece is left as partitioned.
     if unbound := _unbound_symbols(s_inputs, s_nodes):
-        names = ", ".join(sorted(map(str, unbound)))
-        return _skip(f"no input binds the symbols its sizes use ({names})")
+        defining = {
+            val.node.expr: p
+            for p in fw_graph.find_nodes(op="placeholder")
+            if isinstance(val := p.meta.get("val"), torch.SymInt)
+        }
+        if missing := unbound - defining.keys():
+            names = ", ".join(sorted(map(str, missing)))
+            return _skip(f"no input binds the symbols its sizes use ({names})")
+        s_inputs += [defining[sym] for sym in sorted(unbound, key=str)]
 
     # The backward must supply every input: primals and saved values (its
     # placeholders), or outputs of pieces shared earlier.
@@ -409,9 +488,10 @@ def _share_region(
     for n in s_nodes:
         if not _is_tuple_val(n) or n.name not in contracted_names:
             continue
-        outside = [(fw_extra, u) for u in n.users if u not in s_set]
+        outside = [(fw_extra, u) for u in n.users if u not in s_set or u.name in live]
+        bw_users = bw_by_name[n.name].users
         outside += [
-            (bw_extra, u) for u in bw_by_name[n.name].users if u.name not in s_names
+            (bw_extra, u) for u in bw_users if u.name not in s_names or u.name in live
         ]
         for extra, u in outside:
             idx = u.args[1] if u.target is operator.getitem else None
@@ -441,10 +521,8 @@ def _share_region(
 
     # Each call goes right before the first node that reads the piece (see
     # _place). The forward otherwise falls back to right after the last slice
-    # input; a piece that reads none (e.g. a factory op and what is computed
-    # from it) is left as partitioned for now.
-    if not s_inputs:
-        return _skip("it reads no tensor input")
+    # input. (Every piece has one: a node computed from no tensor input is a
+    # constant.)
     last_input = max(s_inputs, key=node_index.__getitem__)
     fw_replaced = {n for n in s_nodes if n not in inline} | set(fw_extra.values())
     insert_after, fw_moved, reason = _place(
