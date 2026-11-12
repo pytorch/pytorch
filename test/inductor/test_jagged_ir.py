@@ -1,7 +1,9 @@
 # Owner(s): ["module: inductor"]
 
 import torch
-from torch._inductor import ir
+from torch._inductor import config, ir
+from torch._inductor.codecache import PyCodeCache
+from torch._inductor.debug import DebugContext
 from torch._inductor.dependencies import extract_read_writes
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import JaggedRange
@@ -18,6 +20,28 @@ from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 def graph():
     return GraphLowering(torch.fx.symbolic_trace(lambda x: x))
+
+
+def compile_and_run(node, inputs):
+    graph = GraphLowering(torch.fx.symbolic_trace(lambda: 0))
+    with (
+        V.set_graph_handler(graph),
+        DebugContext(),
+        config.patch(benchmark_fusion=False),
+    ):
+        for name, tensor in inputs.items():
+            layout = ir.FixedLayout(tensor.device, tensor.dtype, list(tensor.shape))
+            buffer = ir.InputBuffer(name=name, layout=layout)
+            graph.graph_inputs[name] = ir.TensorBox.create(buffer)
+            graph.graph_inputs_original[name] = buffer
+            graph.graph_input_names.append(name)
+        result = ir.TensorBox.create(node)
+        result.realize()
+        graph.graph_outputs = [result]
+        wrapper, _ = graph.codegen()
+    module = PyCodeCache.load(wrapper.value)
+    (actual,) = module.call([inputs[name] for name in graph.graph_input_names])
+    return actual, wrapper.value
 
 
 def row_sum(inner_fn, j_range):
@@ -172,6 +196,71 @@ class TestJaggedReductionIR(TestCase):
     def test_rejects_name_prefix(self):
         with self.assertRaisesRegex(AssertionError, "must start with 'j'"):
             JaggedRange("u0")
+
+    @parametrize("cooperative", [False, True])
+    def test_triton_row_sum_bj_to_b(self, cooperative):
+        # Row 2 is longer than any R0_BLOCK autotuning picks (at most 4096), so
+        # its loop runs more than once; rows 1 and 4 are empty. Integer values
+        # keep the sums exact. A forced cooperative reduction must still be
+        # turned off.
+        offsets = torch.tensor([0, 2, 2, 4099, 4100, 4100], device="cuda")
+        values = torch.randint(-8, 8, (4100,), device="cuda").float()
+        j_range = JaggedRange("j")
+
+        def inner_fn(index, rindex):
+            b = index[0]
+            length = ops.load("offsets", b + 1) - ops.load("offsets", b)
+            ops.register_jagged_range(length, j_range)
+            row = ops.load("offsets", b) + ops.index_expr(rindex[0], torch.int64)
+            return ops.load("values", ops.indirect_indexing(row, values.numel()))
+
+        reduction = ir.Reduction(
+            device=values.device,
+            dtype=values.dtype,
+            inner_fn=inner_fn,
+            ranges=[5],
+            reduction_ranges=[j_range],
+            reduction_type="sum",
+            src_dtype=values.dtype,
+            reduction_hint=ir.ReductionHint.DEFAULT,
+        )
+        inputs = {"offsets": offsets, "values": values}
+        with config.patch({"triton.force_cooperative_reductions": cooperative}):
+            actual, _ = compile_and_run(reduction, inputs)
+        self.assertEqual(actual, torch.segment_reduce(values, "sum", offsets=offsets))
+
+    def test_triton_row_sum_bjd_to_bd(self):
+        # Enough rows that a (y, x) tiling would otherwise be picked.
+        lengths = torch.randint(0, 8, (256,), device="cuda")
+        lengths[1], lengths[2] = 0, 4097
+        offsets = torch.nn.functional.pad(lengths.cumsum(0), (1, 0))
+        values = torch.randint(-8, 8, (int(offsets[-1]), 3), device="cuda").float()
+        j_range = JaggedRange("j")
+
+        def inner_fn(index, rindex):
+            b, d = index
+            length = ops.load("offsets", b + 1) - ops.load("offsets", b)
+            ops.register_jagged_range(length, j_range)
+            row = ops.load("offsets", b) + ops.index_expr(rindex[0], torch.int64)
+            address = row * 3 + ops.index_expr(d, torch.int64)
+            address = ops.indirect_indexing(address, values.numel())
+            return ops.load("values", address)
+
+        reduction = ir.Reduction(
+            device=values.device,
+            dtype=values.dtype,
+            inner_fn=inner_fn,
+            ranges=[256, 3],
+            reduction_ranges=[j_range],
+            reduction_type="sum",
+            src_dtype=values.dtype,
+            reduction_hint=ir.ReductionHint.DEFAULT,
+        )
+        actual, code = compile_and_run(
+            reduction, {"offsets": offsets, "values": values}
+        )
+        self.assertNotIn("ynumel", code)
+        self.assertEqual(actual, torch.segment_reduce(values, "sum", offsets=offsets))
 
 
 instantiate_parametrized_tests(TestJaggedReductionIR)
