@@ -1317,9 +1317,16 @@ for warning in w:
     @skipIfTorchVersionLessThan(2, 16)
     @onlyCPU
     @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
-    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize(
+        "dtype,brgemm_op",
+        [
+            (torch.float32, "my_cpublas_brgemm_f32"),
+            (torch.float16, "my_cpublas_brgemm_f16"),
+            (torch.bfloat16, "my_cpublas_brgemm_bf16"),
+        ],
+    )
     @parametrize("add_c", [False, True])
-    def test_cpublas_brgemm(self, device, dtype, add_c):
+    def test_cpublas_brgemm(self, device, dtype, brgemm_op, add_c):
         import libtorch_agn_2_16 as libtorch_agnostic
 
         a = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=dtype)
@@ -1332,7 +1339,7 @@ for warning in w:
         if add_c:
             expected += c
 
-        result = libtorch_agnostic.ops.my_cpublas_brgemm(a, b, c, add_c=add_c)
+        result = getattr(libtorch_agnostic.ops, brgemm_op)(a, b, c, add_c=add_c)
         self.assertEqual(result, expected)
         self.assertEqual(c, expected)
         self.assertEqual(result.data_ptr(), c.data_ptr())
@@ -1343,23 +1350,53 @@ for warning in w:
     @parametrize(
         "case",
         [
-            (torch.uint8, torch.uint8, torch.int32, "U8 Brgemm"),
-            (torch.uint8, torch.int8, torch.int32, "I8 Brgemm"),
-            (torch.int8, torch.int8, torch.int32, "I8 Brgemm"),
-            (torch.float8_e4m3fn, torch.float8_e4m3fn, torch.float32, "F8 Brgemm"),
-            (torch.float8_e5m2, torch.float8_e5m2, torch.float32, "F8 Brgemm"),
+            (
+                torch.uint8,
+                torch.uint8,
+                torch.int32,
+                "my_cpublas_brgemm_u8_u8",
+                "U8 Brgemm",
+            ),
+            (
+                torch.uint8,
+                torch.int8,
+                torch.int32,
+                "my_cpublas_brgemm_u8_i8",
+                "I8 Brgemm",
+            ),
+            (
+                torch.int8,
+                torch.int8,
+                torch.int32,
+                "my_cpublas_brgemm_i8_i8",
+                "I8 Brgemm",
+            ),
+            (
+                torch.float8_e4m3fn,
+                torch.float8_e4m3fn,
+                torch.float32,
+                "my_cpublas_brgemm_f8e4m3",
+                "F8 Brgemm",
+            ),
+            (
+                torch.float8_e5m2,
+                torch.float8_e5m2,
+                torch.float32,
+                "my_cpublas_brgemm_f8e5m2",
+                "F8 Brgemm",
+            ),
         ],
     )
     def test_cpublas_brgemm_requires_vnni(self, device, case):
         import libtorch_agn_2_16 as libtorch_agnostic
 
-        dtype_a, dtype_b, dtype_c, message = case
+        dtype_a, dtype_b, dtype_c, brgemm_op, message = case
         a = torch.ones(2, 3).to(dtype_a)
         b = torch.ones(3, 4).to(dtype_b)
         c = torch.zeros(2, 4, dtype=dtype_c)
 
         with self.assertRaisesRegex(RuntimeError, message):
-            libtorch_agnostic.ops.my_cpublas_brgemm(a, b, c)
+            getattr(libtorch_agnostic.ops, brgemm_op)(a, b, c)
 
     @skipIfTorchVersionLessThan(2, 16)
     @onlyCPU
