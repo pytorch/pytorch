@@ -667,10 +667,9 @@ def _wrap(kernel, mutates_args):
     """wrap_cutedsl(kernel, mutates_args=mutates_args) for the wrappers that most tests
     share as module globals: Dynamo must handle a global TraceableCuteDSLKernelWrapper,
     and the wrappers are reused across tests, between which torch._dynamo.reset() runs
-    (it resets the Triton kernel side table; the CuTeDSL records these wrappers hold
-    must keep resolving). They are built at import, so if wrap_cutedsl raises, the
-    result raises its error when called instead: only the tests that use a wrapper
-    fail, not every test of this file."""
+    (it clears the side tables; a wrapper adds its record again when called). They are
+    built at import, so if wrap_cutedsl raises, the result raises its error when called
+    instead: only the tests that use a wrapper fail, not every test of this file."""
     try:
         return wrap_cutedsl(kernel, mutates_args=mutates_args)
     except Exception as e:
@@ -2276,9 +2275,10 @@ def forward(self, x_1, y_1):
             cutedsl_kernel_side_table.add_kernel(CuteDSLKernel(add_kernel, "unknown")),
             idx,
         )
-        # torch._dynamo.reset() resets Triton's table, not this one.
+        # torch._dynamo.reset() clears this table, as it does Triton's.
         torch._dynamo.reset()
-        self.assertEqual(cutedsl_kernel_side_table.get_kernel(idx), record)
+        with self.assertRaisesRegex(AssertionError, "not found"):
+            cutedsl_kernel_side_table.get_kernel(idx)
 
 
 def _is_tensor_node(v):
@@ -2301,6 +2301,26 @@ class CuteDSLWrapTests(TestCase):
     """wrap_cutedsl: eager launches, make_fx / non-strict export capture, errors."""
 
     hw_classification = HardwareClassification.CUDA
+
+    def test_wrapper_registers_its_kernel_after_dynamo_reset(self):
+        # torch._dynamo.reset() clears the side table; a wrapper made before it adds
+        # its record again when called, eagerly and under make_fx.
+        w = wrap_cutedsl(add_kernel, mutates_args=["mOut"])
+        x, y = _rand(1000), _rand(1000)
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            w(x, y, out, x.numel())
+            return out
+
+        torch._dynamo.reset()
+        self.assertEqual(f(x, y), x + y)
+        self.assertEqual(
+            cutedsl_kernel_side_table.get_kernel(w.kernel_idx),
+            CuteDSLKernel(add_kernel, ("mOut",)),
+        )
+        torch._dynamo.reset()
+        self.assertEqual(make_fx(f)(x, y)(x, y), x + y)
 
     def test_wrap_cutedsl_mutates_args_iterator(self):
         # A one-shot iterable is read once, not consumed by its validation: the
@@ -4359,7 +4379,7 @@ class CuteDSLDynamoTests(TestCase):
     def test_object_constant_holding_a_tensor_graph_breaks(self):
         # As in a tuple or a list, a tensor or a DSL object inside an object
         # constant (a dict key included) would be baked into the side table, which
-        # is never reset and so also keeps it alive: the call graph-breaks, with the
+        # keeps it alive until torch._dynamo.reset(): the call graph-breaks, with the
         # error of the side table's walk, as a user error for a wrapper and as an
         # unsupported feature for a raw call, which eager CuTeDSL runs (as does
         # torch.compile without fullgraph, checked for the tensor). A tensor or a DSL
@@ -6467,30 +6487,22 @@ def forward(self, x, y):
             self.assertEqual((x_in, y_in), (x, y))
 
     @parametrize("strict", [False, True])
-    def test_later_strict_export_keeps_earlier_programs_valid(self, strict):
-        # Strict export runs Dynamo, which resets per-process tables (the Triton
-        # kernel side table is reset by torch._dynamo.reset()). A program exported
-        # earlier must keep launching its own kernel, not whatever now sits at its
-        # kernel_idx.
+    def test_strict_export_after_reset(self, strict):
+        # torch._dynamo.reset(), which strict export also runs, clears the side
+        # tables: a program exported after it, through a wrapper made before it,
+        # launches its own kernel. One exported before it does not (see the TODO in
+        # torch._dynamo.reset()).
         class Add(torch.nn.Module):
             def forward(self, x, y):
                 out = torch.empty_like(x)
                 add_w(x, y, out, x.numel())
                 return out
 
-        class Scale(torch.nn.Module):
-            def forward(self, x):
-                y = x.clone()
-                scale_inplace_w(y, y.numel())
-                return y
-
         x, y = _rand(1000), _rand(1000)
-        ep1 = torch.export.export(Add(), (x, y), strict=strict)
         torch._dynamo.reset()
-        ep2 = torch.export.export(Scale(), (x,), strict=True)
-        self.assertEqual(ep1.module()(x, y), x + y)
-        self.assertEqual(ep1.run_decompositions().module()(x, y), x + y)
-        self.assertEqual(ep2.module()(x), 2 * x)
+        ep = torch.export.export(Add(), (x, y), strict=strict)
+        self.assertEqual(ep.module()(x, y), x + y)
+        self.assertEqual(ep.run_decompositions().module()(x, y), x + y)
 
     def test_kernel_output_in_autograd_graph(self):
         # The launch has no derivative: its output enters the autograd graph as a
@@ -8211,15 +8223,17 @@ class CuteDSLAOTITests(TestCase):
 
     hw_classification = HardwareClassification.CUDA
 
-    def _package(self, model, args, dynamic_shapes=None, strict=False):
+    def _package(
+        self, model, args, dynamic_shapes=None, strict=False, package_path=None
+    ):
         ep = torch.export.export(
             model, args, dynamic_shapes=dynamic_shapes, strict=strict
         )
-        return torch._inductor.aoti_compile_and_package(ep)
+        return torch._inductor.aoti_compile_and_package(ep, package_path=package_path)
 
     def _package_and_code(self, model, args, **kwargs):
-        # run_and_get_cpp_code starts with torch._dynamo.reset(), so the export has
-        # to happen inside it (see test_aoti_program_exported_before_reset).
+        # run_and_get_cpp_code starts with torch._dynamo.reset(), which clears the
+        # side tables, so the export has to happen inside it.
         return run_and_get_cpp_code(self._package, model, args, **kwargs)
 
     def test_aoti_kernels_differing_in_closure_values(self):
@@ -8484,8 +8498,16 @@ class CuteDSLAOTITests(TestCase):
 
         x = torch.arange(1000, device=DEVICE, dtype=torch.float32)
         packages, prefixes = [], set()
-        for c in ([2.0, 0.0], [5.0, 1.0]):
-            pkg, code = self._package_and_code(module(c), (x,))
+        # A package path of its own for each: torch._dynamo.reset() (at the start of
+        # run_and_get_cpp_code) restarts the side tables' indices, so both graphs
+        # have the same code, which names AOTInductor's default output directory
+        # (see the TODO in torch._dynamo.reset()).
+        out_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, out_dir, ignore_errors=True)
+        for i, c in enumerate(([2.0, 0.0], [5.0, 1.0])):
+            pkg, code = self._package_and_code(
+                module(c), (x,), package_path=os.path.join(out_dir, f"{i}.pt2")
+            )
             packages.append(pkg)
             prefixes.update(re.findall(r"\bcall_(cutedsl_affine_kernel\w*)\(", code))
         (prefix,) = prefixes
@@ -8977,19 +8999,6 @@ class CuteDSLAOTITests(TestCase):
         FileCheck().check("argument mOut is not 16-byte aligned").run(code)
         runner = torch._inductor.aoti_load_package(pkg)
         self.assertEqual(runner(base), base[:, 1:] + 1)
-
-    @parametrize("strict", [False, True])
-    def test_aoti_program_exported_before_reset(self, strict):
-        # A program exported before torch._dynamo.reset() and another strict export
-        # must still compile its own kernel (the Triton side table is reset there).
-        x, y = _rand(1000), _rand(1000)
-        ep = torch.export.export(_AddModule(), (x, y), strict=strict)
-        torch._dynamo.reset()
-        torch.export.export(_ScaleModule(), (x,), strict=True)
-        runner = torch._inductor.aoti_load_package(
-            torch._inductor.aoti_compile_and_package(ep)
-        )
-        self.assertEqual(runner(x, y), x + y)
 
     def test_cutedsl_kernel_jit_cpp_wrapper(self):
         # torch.compile with the C++ wrapper links the exported objects into the JIT
