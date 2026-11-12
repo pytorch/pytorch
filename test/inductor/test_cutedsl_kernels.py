@@ -1956,9 +1956,10 @@ def forward(self, x_1, y_1):
             cutedsl_kernel_side_table.add_kernel(CuteDSLKernel(add_kernel, "unknown")),
             idx,
         )
-        # torch._dynamo.reset() resets Triton's table, not this one.
+        # torch._dynamo.reset() clears this table, as it does Triton's.
         torch._dynamo.reset()
-        self.assertEqual(cutedsl_kernel_side_table.get_kernel(idx), record)
+        with self.assertRaisesRegex(AssertionError, "not found"):
+            cutedsl_kernel_side_table.get_kernel(idx)
 
 
 def _is_tensor_node(v):
@@ -1981,6 +1982,26 @@ class CuteDSLWrapTests(TestCase):
     """wrap_cutedsl: eager launches, make_fx / non-strict export capture, errors."""
 
     hw_classification = HardwareClassification.CUDA
+
+    def test_wrapper_registers_its_kernel_after_dynamo_reset(self):
+        # torch._dynamo.reset() clears the side table; a wrapper made before it adds
+        # its record again when called, eagerly and under make_fx.
+        w = wrap_cutedsl(add_kernel, mutates_args=["mOut"])
+        x, y = _rand(1000), _rand(1000)
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            w(x, y, out, x.numel())
+            return out
+
+        torch._dynamo.reset()
+        self.assertEqual(f(x, y), x + y)
+        self.assertEqual(
+            cutedsl_kernel_side_table.get_kernel(w.kernel_idx),
+            CuteDSLKernel(add_kernel, ("mOut",)),
+        )
+        torch._dynamo.reset()
+        self.assertEqual(make_fx(f)(x, y)(x, y), x + y)
 
     def test_wrap_cutedsl_mutates_args_iterator(self):
         # A one-shot iterable is read once, not consumed by its validation: the
