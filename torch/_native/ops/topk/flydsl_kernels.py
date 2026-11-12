@@ -177,12 +177,15 @@ def topk_spec(dtype: torch.dtype, largest: bool) -> TopKSpec:
     # NaN sentinel, positive-infinity bits.
     # None for the NaN fields means the dtype has no NaN.
     def int_to_narrow_ord(bits, spec):
+        # Identity is its own inverse: applying it twice returns `bits`.
         return bits
 
     def float_to_narrow_ord(bits, spec):
         # S sign, E exponent, F fraction.
         # [S | E | F] -> [0 |  E |  F]  when S = 0
         #             -> [1 | ~E | ~F]  when S = 1
+        # S is unchanged, so applying the transform twice uses the same mask
+        # and returns the original bits.
         # Constants use the field's integer type, so a 16-bit value stays 16-bit.
         # `(1 << (width - 1)) - 1` is the bits under the sign at any width.
         width = spec["width"]
