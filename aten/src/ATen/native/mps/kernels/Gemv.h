@@ -257,7 +257,15 @@ kernel void gemv_t2d(device const DT* B [[buffer(0)]],
 
 // y = A @ x, A is (M, K) row-major. Each simdgroup owns one row; lanes stride
 // K and reduce with simd_sum. XC: x is unit-stride and VEC-aligned.
-template <typename DT, int NSIMD, int VEC, GemmEpilogue EPI, bool XC, bool STRIDED = false, typename IDX = int>
+// x and y hold gP.rows <= RN rows, and a load of A feeds all of them.
+template <typename DT,
+          int NSIMD,
+          int VEC,
+          GemmEpilogue EPI,
+          bool XC,
+          bool STRIDED = false,
+          typename IDX = int,
+          int RN = 1>
 kernel void gemv_nt(device const DT* A [[buffer(0)]],
                     device const DT* x [[buffer(1)]],
                     device DT* y [[buffer(2)]],
@@ -278,43 +286,58 @@ kernel void gemv_nt(device const DT* A [[buffer(0)]],
     return;
   }
   const device DT* Arow = &A[row * gLda];
-  ACC_T acc = (ACC_T)0;
+  // Rows past gP.rows read the last row and are not stored.
+  const device DT* xrow[RN];
+  ACC_T acc[RN];
+#pragma unroll
+  for (int t = 0; t < RN; ++t) {
+    xrow[t] = x + IDX(min(t, int(gP.rows) - 1)) * IDX(gP.xr);
+    acc[t] = (ACC_T)0;
+  }
   IDX k = IDX(lane) * VEC;
   for (; k + 3 * K_STRIDE + VEC <= gK; k += 4 * K_STRIDE) {
-    Vec x0 = load_x<DT, VEC, XC>(x, k + 0 * K_STRIDE, gXs);
-    Vec x1 = load_x<DT, VEC, XC>(x, k + 1 * K_STRIDE, gXs);
-    Vec x2 = load_x<DT, VEC, XC>(x, k + 2 * K_STRIDE, gXs);
-    Vec x3 = load_x<DT, VEC, XC>(x, k + 3 * K_STRIDE, gXs);
     Vec a0 = load_matrix<DT, VEC, STRIDED>(Arow, k + 0 * K_STRIDE, gMs);
     Vec a1 = load_matrix<DT, VEC, STRIDED>(Arow, k + 1 * K_STRIDE, gMs);
     Vec a2 = load_matrix<DT, VEC, STRIDED>(Arow, k + 2 * K_STRIDE, gMs);
     Vec a3 = load_matrix<DT, VEC, STRIDED>(Arow, k + 3 * K_STRIDE, gMs);
 #pragma unroll
-    for (int i = 0; i < VEC; ++i) {
-      acc += (ACC_T)a0.v[i] * (ACC_T)x0.v[i];
-      acc += (ACC_T)a1.v[i] * (ACC_T)x1.v[i];
-      acc += (ACC_T)a2.v[i] * (ACC_T)x2.v[i];
-      acc += (ACC_T)a3.v[i] * (ACC_T)x3.v[i];
+    for (int t = 0; t < RN; ++t) {
+      Vec x0 = load_x<DT, VEC, XC>(xrow[t], k + 0 * K_STRIDE, gXs);
+      Vec x1 = load_x<DT, VEC, XC>(xrow[t], k + 1 * K_STRIDE, gXs);
+      Vec x2 = load_x<DT, VEC, XC>(xrow[t], k + 2 * K_STRIDE, gXs);
+      Vec x3 = load_x<DT, VEC, XC>(xrow[t], k + 3 * K_STRIDE, gXs);
+#pragma unroll
+      for (int i = 0; i < VEC; ++i) {
+        acc[t] += (ACC_T)a0.v[i] * (ACC_T)x0.v[i];
+        acc[t] += (ACC_T)a1.v[i] * (ACC_T)x1.v[i];
+        acc[t] += (ACC_T)a2.v[i] * (ACC_T)x2.v[i];
+        acc[t] += (ACC_T)a3.v[i] * (ACC_T)x3.v[i];
+      }
     }
   }
   for (; k + VEC <= gK; k += K_STRIDE) {
-    Vec xv = load_x<DT, VEC, XC>(x, k, gXs);
     Vec av = load_matrix<DT, VEC, STRIDED>(Arow, k, gMs);
 #pragma unroll
-    for (int i = 0; i < VEC; ++i) {
-      acc += (ACC_T)av.v[i] * (ACC_T)xv.v[i];
+    for (int t = 0; t < RN; ++t) {
+      Vec xv = load_x<DT, VEC, XC>(xrow[t], k, gXs);
+#pragma unroll
+      for (int i = 0; i < VEC; ++i) {
+        acc[t] += (ACC_T)av.v[i] * (ACC_T)xv.v[i];
+      }
     }
   }
-  if (lane == 0) {
-    for (IDX kk = (gK / VEC) * VEC; kk < gK; ++kk) {
-      acc += (ACC_T)load_matrix_element<DT, STRIDED>(Arow, kk, gMs) * (ACC_T)x[kk * gXs];
+#pragma unroll
+  for (int t = 0; t < RN; ++t) {
+    if (lane == 0) {
+      for (IDX kk = (gK / VEC) * VEC; kk < gK; ++kk) {
+        acc[t] += (ACC_T)load_matrix_element<DT, STRIDED>(Arow, kk, gMs) * (ACC_T)xrow[t][kk * gXs];
+      }
     }
-  }
-
-  const ACC_T s = simd_sum(acc);
-  if (lane == 0) {
-    y[row] = apply_epilogue<EPI, DT, ACC_T>(
-        s, row, IDX(0), bias, IDX(gP.bias_r), IDX(gP.bias_c), alpha_beta[0], alpha_beta[1]);
+    const ACC_T s = simd_sum(acc[t]);
+    if (lane == 0 && t < int(gP.rows)) {
+      y[IDX(t) * IDX(gP.yr) + row] = apply_epilogue<EPI, DT, ACC_T>(
+          s, row, IDX(t), bias, IDX(gP.bias_r), IDX(gP.bias_c), alpha_beta[0], alpha_beta[1]);
+    }
   }
 }
 
@@ -420,6 +443,18 @@ kernel void gemv_nt(device const DT* A [[buffer(0)]],
 MB_GEMV_FLOAT(float)
 MB_GEMV_LP(half)
 MB_GEMV_LP(bfloat)
+
+// gemv_nt over 2 and 4 rows of x, at the config of GemvPolicy::pick_nt_rows.
+#define MB_COMMA ,
+#define MB_GEMV_NT_ROWS(DT, VEC, RN)                                                     \
+  MB_GEMV_NT(DT, 4, VEC, none, None, xc, true, "_r" #RN, false MB_COMMA int MB_COMMA RN) \
+  MB_GEMV_NT(DT, 4, VEC, ab, Bias, xc, true, "_r" #RN, false MB_COMMA int MB_COMMA RN)
+MB_GEMV_NT_ROWS(float, 4, 2)
+MB_GEMV_NT_ROWS(float, 4, 4)
+MB_GEMV_NT_ROWS(half, 8, 2)
+MB_GEMV_NT_ROWS(half, 8, 4)
+MB_GEMV_NT_ROWS(bfloat, 8, 2)
+MB_GEMV_NT_ROWS(bfloat, 8, 4)
 
 // 64-bit-index variants for operands whose element offsets overflow int32
 // (matrix numel > 2^31, or huge view strides). Such matrices are DRAM-bound,
