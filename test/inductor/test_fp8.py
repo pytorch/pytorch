@@ -1969,13 +1969,14 @@ class TestFP8Lowering(TestCase):
             ).check(".trans(0, 3, 2, 1, 4)").check("accumulator = tl.dot_scaled(").run(
                 code
             )
-            self.assertNotIn("_e8m0_to_fp32(", code)
+            self.assertNotIn("_e8m0_to_fp32", code)
             # host-side descriptors arrive as tensordesc kernel args; device-side
             # ones are built in the kernel from the same shapes and strides
             self.assertEqual("tl.make_tensor_descriptor(" in code, not host_side_tma)
         else:
+            # Module-level kernels suffix template helpers with the kernel name.
             FileCheck().check("scale_block = (k_idx * BLOCK_K) // 128").check(
-                "_e8m0_to_fp32("
+                "_e8m0_to_fp32"
             ).check("partial = tl.dot(").run(code)
             self.assertNotIn("tl.dot_scaled(", code)
             self.assertNotIn("def triton_poi_fused", code)
