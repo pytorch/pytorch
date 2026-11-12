@@ -129,11 +129,10 @@ struct C10_CUDA_API CUDAGuardImpl final
       const noexcept override {
     if (!event)
       return;
-    // noexcept: SetDevice() can throw on a device carrying a sticky error (see
-    // uncheckedSetDevice), and SetDevice(orig_device) can also throw via
-    // TORCH_CHECK(device >= 0) if the GetDevice above failed and left
-    // orig_device == -1. Guard the whole body so we warn instead of
-    // terminating.
+    // noexcept: the device guard may throw if switching to device_index fails
+    // (e.g. the device has a sticky error). Catch it and warn instead of
+    // terminating. In that case cudaEventDestroy is skipped and the event
+    // leaks, which is fine since it would most likely fail too.
     try {
       c10::impl::InlineDeviceGuard<CUDAGuardImpl> guard(device_index);
       auto cuda_event = static_cast<cudaEvent_t>(event);
