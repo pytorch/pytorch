@@ -97,6 +97,11 @@ device_type = (
 )
 
 
+@torch._dynamo.allow_in_graph
+def _opaque_scale(x):
+    return x * 2.0
+
+
 class CustomPreGradPassRemoveIdentMuls(CustomGraphPass):
     """
     Pre-grad pass that removes redundant identity multiplications (1 * x).
@@ -4127,6 +4132,29 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             self.assertRaises(
                 BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
             )
+
+    @functorch_config.patch({"autograd_cache_allow_custom_autograd_functions": True})
+    def test_incompatible_function_in_autograd_function_body(self):
+        # The fwd body is hashed as code but the allow_in_graph call it makes is not.
+        class MyAutogradFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return _opaque_scale(x)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        def fn(x):
+            return MyAutogradFunction.apply(x)
+
+        config = self.default_config()
+        inputs = [torch.ones(3, requires_grad=True)]
+        self.assertRaisesRegex(
+            BypassAOTAutogradCache,
+            "Unsupported call_function target",
+            lambda: self.gen_cache_key(fn, config, inputs),
+        )
 
     def test_autocast_no_dtype_in_graph_keys_ambient_dtype(self):
         # torch.autocast(device) with no dtype traces _enter_autocast(device,

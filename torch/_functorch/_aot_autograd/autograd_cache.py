@@ -384,7 +384,6 @@ def check_cacheable(gm: torch.fx.GraphModule) -> None:
     """
     Checks that the graph module only uses supported operators
     """
-    nodes = gm.graph.nodes
     if torch._inductor.config.freezing:
         raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 
@@ -398,17 +397,11 @@ def check_cacheable(gm: torch.fx.GraphModule) -> None:
         raise BypassAOTAutogradCache(
             "Won't cache a graph with fakify_first_call enabled"
         )
-    for node in nodes:
-        check_node_safe(node)
-
-    # Saved tensors hooks are globally set subgraphs,
-    # that are not used explicitly in the main graph.
-    # They are inlined in aot_autograd graphs.
-    # Subgraphs are only used for caching logic.
-    if hasattr(gm, "saved_tensors_hooks_pack_0"):
-        check_cacheable(gm.saved_tensors_hooks_pack_0)  # type: ignore[arg-type]
-        # We have guarantee of unpack subgraph existence if pack subgraph exists
-        check_cacheable(gm.saved_tensors_hooks_unpack_0)  # type: ignore[arg-type]
+    # Nested GraphModules (HOP bodies, saved tensors hooks) are hashed as code, but
+    # what they call (e.g. an allow_in_graph function) is not, so check them too.
+    for module in _iter_graph_modules(gm):
+        for node in module.graph.nodes:
+            check_node_safe(node)
 
 
 def _get_context_fn_cache_hash(context_fn: Callable[..., Any]) -> str | None:
