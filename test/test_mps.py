@@ -14363,6 +14363,30 @@ class TestRNNMPS(TestCaseMPS):
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, backward=True, **test_options)
 
+    def test_lstm_autocast(self, device="mps"):
+        dtype = torch.float32
+        other_dtype = torch.float16
+
+        seq_len = 3
+        batch_size = 5
+        hidden_size = 7
+        input_size = 11
+        num_layers = 1
+
+        rnn = nn.LSTM(input_size=input_size, hidden_size=hidden_size, dtype=dtype, device=device)
+
+        input = torch.randn(seq_len, batch_size, input_size, dtype=other_dtype, device=device)
+        hx = torch.randn(num_layers, batch_size, hidden_size, dtype=dtype, device=device)
+        cx = torch.randn(num_layers, batch_size, hidden_size, dtype=dtype, device=device)
+
+        with torch.autocast(device_type="mps"):
+            output, (hn, cn) = rnn(input, (hx, cx))
+
+        output_check, (hn_check, cn_check) = rnn(input.to(dtype), (hx, cx))
+        self.assertEqual(output.to(dtype), output_check, atol=1e-3, rtol=1e-3)
+        self.assertEqual(hn.to(dtype), hn_check, atol=1e-3, rtol=1e-3)
+        self.assertEqual(cn.to(dtype), cn_check, atol=1e-3, rtol=1e-3)
+
     # Regression test for https://github.com/pytorch/pytorch/issues/190057:
     # dropout=1.0 produced 0 * inf = NaN between layers.
     def test_lstm_dropout_one(self):
