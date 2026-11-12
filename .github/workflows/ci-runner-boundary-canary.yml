@@ -1,0 +1,143 @@
+# Owner(s): ["module: ci"]
+# AI-assisted, temporary contributor-boundary validation. No persistent changes.
+name: CI runner boundary canary
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ci-runner-boundary-canary.yml
+
+permissions: {}
+
+jobs:
+  probe:
+    if: github.repository == 'pytorch/pytorch'
+    runs-on: mt-l-x86iavx512-8-64
+    timeout-minutes: 5
+    container:
+      image: python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+      volumes:
+        - /var/run/secrets/kubernetes.io/serviceaccount:/audit-source:ro
+    steps:
+      - name: Check boundary without disclosing credentials
+        env:
+          CANARY_CHECK_API: "true"
+        shell: sh
+        run: |
+          python3 - <<'PY'
+          """Bounded CI canary: report booleans, never print credentials or API objects."""
+
+          import base64
+          import json
+          import os
+          from pathlib import Path
+          import ssl
+          import urllib.error
+          import urllib.request
+
+
+          SOURCE = Path("/audit-source")
+          NATIVE_TOKEN = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
+          EXPECTED_SUBJECT = "system:serviceaccount:arc-runners:arc-runner"
+          API = "https://kubernetes.default.svc/apis/authorization.k8s.io/v1/selfsubjectaccessreviews"
+          MAX_RESPONSE = 65536
+
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+
+          def main():
+              result = {
+                  "copied_directory_exists": SOURCE.is_dir(),
+                  "native_job_token_absent": not NATIVE_TOKEN.exists(),
+                  "copied_token_readable": False,
+                  "copied_namespace_matches": False,
+                  "copied_identity_matches_runner": False,
+                  "copied_ca_readable": False,
+                  "api_checks_enabled": os.environ.get("CANARY_CHECK_API") == "true",
+                  "api_reachable": False,
+                  "secrets_get_decision_received": False,
+                  "secrets_get_allowed": False,
+                  "pods_exec_decision_received": False,
+                  "pods_exec_allowed": False,
+                  "pods_create_decision_received": False,
+                  "pods_create_allowed": False,
+                  "probe_error": False,
+              }
+              try:
+                  token_bytes = (SOURCE / "token").read_bytes().strip()
+                  if not 0 < len(token_bytes) <= 16384:
+                      raise ValueError("token size")
+                  token = token_bytes.decode("ascii")
+                  result["copied_token_readable"] = True
+                  result["copied_namespace_matches"] = (
+                      (SOURCE / "namespace").read_text().strip() == "arc-runners"
+                  )
+                  payload = token.split(".")[1]
+                  claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+                  result["copied_identity_matches_runner"] = claims.get("sub") == EXPECTED_SUBJECT
+                  context = ssl.create_default_context(cafile=str(SOURCE / "ca.crt"))
+                  result["copied_ca_readable"] = True
+
+                  if not (
+                      result["api_checks_enabled"]
+                      and result["copied_namespace_matches"]
+                      and result["copied_identity_matches_runner"]
+                  ):
+                      return result
+
+                  # SelfSubjectAccessReview performs authorization only. It does not read
+                  # the resources under test or create a persistent Kubernetes object.
+                  opener = urllib.request.build_opener(
+                      urllib.request.ProxyHandler({}),
+                      urllib.request.HTTPSHandler(context=context),
+                      NoRedirect(),
+                  )
+                  checks = {
+                      "secrets_get": {"verb": "get", "resource": "secrets"},
+                      "pods_exec": {"verb": "create", "resource": "pods", "subresource": "exec"},
+                      "pods_create": {"verb": "create", "resource": "pods"},
+                  }
+                  for name, attributes in checks.items():
+                      body = json.dumps({
+                          "apiVersion": "authorization.k8s.io/v1",
+                          "kind": "SelfSubjectAccessReview",
+                          "spec": {"resourceAttributes": {
+                              "namespace": "arc-runners", "group": "", **attributes
+                          }},
+                      }).encode()
+                      request = urllib.request.Request(
+                          API,
+                          data=body,
+                          method="POST",
+                          headers={
+                              "Authorization": "Bearer " + token,
+                              "Content-Type": "application/json",
+                          },
+                      )
+                      try:
+                          with opener.open(request, timeout=10) as response:
+                              result["api_reachable"] = True
+                              raw = response.read(MAX_RESPONSE + 1)
+                              if len(raw) > MAX_RESPONSE:
+                                  continue
+                              status = json.loads(raw).get("status", {})
+                              if isinstance(status.get("allowed"), bool):
+                                  result[name + "_decision_received"] = True
+                                  result[name + "_allowed"] = status["allowed"]
+                      except urllib.error.HTTPError:
+                          result["api_reachable"] = True
+                      except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+                          pass
+              except Exception:
+                  # Do not turn malformed data or an unexpected runtime error into a
+                  # traceback that could expose input or response content in public logs.
+                  result["probe_error"] = True
+              return result
+
+
+          if __name__ == "__main__":
+              print(json.dumps(main(), sort_keys=True))
+          PY
