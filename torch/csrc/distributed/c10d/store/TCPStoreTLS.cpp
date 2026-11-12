@@ -58,17 +58,35 @@ int chunk(size_t length) {
 } // namespace
 
 TLSConfig tlsConfig(const TCPStoreOptions& opts) {
+  auto value = [](const std::optional<std::string>& path, const char* name) {
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        !path || !path->empty(),
+        "TCPStore TLS: ",
+        name,
+        " must not be empty");
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        !path || path->find('\0') == std::string::npos,
+        "TCPStore TLS: ",
+        name,
+        " must not contain NUL bytes");
+    return path.value_or("");
+  };
   TLSConfig config;
   if (opts.tlsCert || opts.tlsKey || opts.tlsCa) {
     config = {
-        opts.tlsCert.value_or(""),
-        opts.tlsKey.value_or(""),
-        opts.tlsCa.value_or("")};
+        value(opts.tlsCert, "tls_cert"),
+        value(opts.tlsKey, "tls_key"),
+        value(opts.tlsCa, "tls_ca")};
   } else {
+    auto env = [&](const char* name) {
+      return value(c10::utils::get_env(name), name);
+    };
     config = {
-        getCvarString({"TORCH_TCPSTORE_TLS_CERT"}, ""),
-        getCvarString({"TORCH_TCPSTORE_TLS_KEY"}, ""),
-        getCvarString({"TORCH_TCPSTORE_TLS_CA"}, ""),
+        env("TORCH_TCPSTORE_TLS_CERT"),
+        env("TORCH_TCPSTORE_TLS_KEY"),
+        env("TORCH_TCPSTORE_TLS_CA"),
         /*fromEnv=*/true};
   }
   if (!config.enabled()) {

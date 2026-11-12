@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     CONNECT_TIMEOUT,
     HardwareClassification,
     load_tests,
+    parametrize,
     retry_on_connect_failures,
     run_tests,
     set_warn_always_context,
@@ -861,21 +862,42 @@ class TCPStoreTLSTest(TestCase):
         )
 
     def test_tls_options_override_env(self):
-        no_tls = {"tls_cert": "", "tls_key": "", "tls_ca": ""}
         with mock.patch.dict(os.environ, self._env(self.server)):
-            # Empty strings disable TLS on both ends.
-            server = self._store(tls=no_tls)
-            client = self._store(server.port, False, tls=no_tls)
-            client.set("plain", "1")
-            self.assertEqual(server.get("plain"), b"1")
-            # The env vars enable TLS when no option is set.
-            tls_server = self._store()
-            self._assert_fails_fast(
-                "Server requires TLS", port=tls_server.port, is_master=False, tls=no_tls
-            )
+            with self.assertRaisesRegex(DistStoreError, "must not be empty"):
+                self._store(tls={"tls_cert": "", "tls_key": "", "tls_ca": ""})
             # Options are not merged with the env vars.
             with self.assertRaisesRegex(DistStoreError, "missing tls_key, tls_ca"):
                 self._store(tls={"tls_cert": self.server[0]})
+
+    @parametrize("option", ["cert", "key", "ca"])
+    @parametrize("from_env", [False, True])
+    @parametrize("is_master", [False, True])
+    def test_tls_empty_config(self, option, from_env, is_master):
+        name = f"TORCH_TCPSTORE_TLS_{option.upper()}" if from_env else f"tls_{option}"
+        env = {name: ""} if from_env else {}
+        tls = {} if from_env else {name: ""}
+        with mock.patch.dict(os.environ, env):
+            with self.assertRaisesRegex(DistStoreError, f"{name} must not be empty"):
+                self._store(is_master=is_master, tls=tls)
+
+    @parametrize("option", ["cert", "key", "ca"])
+    def test_tls_nul_path(self, option):
+        tls = {"tls_cert": self.server[0], "tls_key": self.server[1], "tls_ca": self.ca}
+        tls[f"tls_{option}"] += "\0suffix"
+        with self.assertRaisesRegex(
+            DistStoreError, f"tls_{option} must not contain NUL"
+        ):
+            self._store(tls=tls)
+
+    def test_plaintext_clone_tls_env(self):
+        server = self._store(timeout=0.1)
+        self.assertEqual(server.clone().add("plain", 1), 1)
+        with mock.patch.dict(os.environ, {"TORCH_TCPSTORE_TLS_CERT": ""}):
+            with self.assertRaisesRegex(DistStoreError, "must not be empty"):
+                server.clone()
+        with mock.patch.dict(os.environ, self._env(self.client)):
+            with self.assertRaisesRegex(DistStoreError, "TLS handshake failed"):
+                server.clone()
 
     def test_tls_missing_ca(self):
         env = self._env(self.server)
@@ -1025,6 +1047,9 @@ class TCPStoreTLSTest(TestCase):
             "protocol version", port=server.port, is_master=False, cert=self.client
         )
         self.assertEqual(server.add("alive", 1), 1)
+
+
+instantiate_parametrized_tests(TCPStoreTLSTest)
 
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
