@@ -2,6 +2,7 @@
 
 import torch
 from torch._inductor import ir
+from torch._inductor.dependencies import extract_read_writes
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import JaggedRange
 from torch._inductor.virtualized import ops, V
@@ -31,6 +32,15 @@ def row_sum(inner_fn, j_range):
     )
 
 
+def trace(data):
+    buffer = ir.ComputedBuffer(
+        name="out",
+        layout=ir.FixedLayout(torch.device("cpu"), torch.float32, data.get_size()),
+        data=data,
+    )
+    return buffer.get_default_sizes_body()
+
+
 class TestJaggedReductionIR(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -56,14 +66,19 @@ class TestJaggedReductionIR(TestCase):
                 {dep.name for dep in buffer.get_read_writes().reads},
                 {"values", "lengths", "offsets"},
             )
-            _, body, _ = buffer.get_default_sizes_body()
+            sizes, body, _ = buffer.get_default_sizes_body()
             self.assertTrue(body.has_op("register_jagged_range"))
+            # The LoopBody fast path must not record the range as an index_expr.
+            self.assertEqual(
+                extract_read_writes(body, *sizes).index_exprs,
+                buffer.get_read_writes().index_exprs,
+            )
 
-    def test_rejects_pointwise_range(self):
+    @parametrize("size", ["j", "2*j"])
+    def test_rejects_pointwise_range(self, size):
         j_range = JaggedRange("j")
 
         def inner_fn(index):
-            ops.register_jagged_range(ops.load("lengths", index[0]), j_range)
             return ops.load("values", index[0])
 
         with V.set_graph_handler(graph()):
@@ -72,42 +87,89 @@ class TestJaggedReductionIR(TestCase):
                     device=torch.device("cpu"),
                     dtype=torch.float32,
                     inner_fn=inner_fn,
-                    ranges=[4, j_range],
+                    ranges=[4, j_range if size == "j" else 2 * j_range],
                 )
 
-    @parametrize("op", ["minimum", "to_dtype", "indirect", "masked"])
+    @parametrize("case", ["pointwise", "dense", "missing", "twice", "masked"])
+    def test_rejects_registration(self, case):
+        j_range = JaggedRange("j")
+
+        def register(b):
+            ops.register_jagged_range(ops.load("lengths", b), j_range)
+
+        def inner_fn(index, rindex=None):
+            b = index[0]
+            if case == "masked":
+
+                def body():
+                    register(b)
+                    return ops.load("values", b)
+
+                return ops.masked(ops.load("mask", b), body, 0.0)
+            if case != "missing":
+                register(b)
+            if case == "twice":
+                register(b)
+            return ops.load("values", b)
+
+        msg = (
+            "inside subblocks"
+            if case == "masked"
+            else "must be called once for each JaggedRange reduction size"
+        )
+        with V.set_graph_handler(graph()):
+            if case == "pointwise":
+                data = ir.Pointwise(
+                    device=torch.device("cpu"),
+                    dtype=torch.float32,
+                    inner_fn=inner_fn,
+                    ranges=[4],
+                )
+            else:
+                data = row_sum(inner_fn, 8 if case == "dense" else j_range)
+            with self.assertRaisesRegex(AssertionError, msg):
+                trace(data)
+
+    @parametrize(
+        "op", ["minimum", "to_dtype", "masked", "indirect", "rindex", "jagged_range"]
+    )
     def test_rejects_bound_op(self, op):
         j_range = JaggedRange("j")
 
-        def bound(b):
+        def bound(b, r):
             length = ops.load("lengths", b)
             if op == "minimum":
                 return ops.minimum(length, ops.constant(2, torch.int64))
             if op == "to_dtype":
                 return ops.to_dtype(length, torch.int32)
+            if op == "masked":
+                return ops.masked(
+                    ops.load("mask", b), lambda: ops.load("lengths", b), 0
+                )
             if op == "indirect":
                 p = ops.indirect_indexing(length, 4, wrap_neg=False)
                 return ops.load("lengths", p)
-            return ops.masked(ops.load("mask", b), lambda: length, 0)
+            if op == "rindex":
+                return ops.load("lengths", r)
+            return ops.index_expr(j_range, torch.int64)
 
         def inner_fn(index, rindex):
-            ops.register_jagged_range(bound(index[0]), j_range)
+            ops.register_jagged_range(bound(index[0], rindex[0]), j_range)
             return ops.load("values", index[0])
 
-        targets = {
-            "minimum": "minimum",
-            "to_dtype": "to_dtype",
-            "indirect": "set_indirect0",
-            "masked": "masked_subblock1",
+        msgs = {
+            "minimum": "bound uses minimum;",
+            "to_dtype": "bound uses to_dtype;",
+            "masked": "bound uses masked_subblock",
         }
+        msg = msgs.get(op, "bound indexes with .*; it may not use")
         with V.set_graph_handler(graph()):
-            buffer = ir.ComputedBuffer(
-                name="out",
-                layout=ir.FixedLayout(torch.device("cpu"), torch.float32, [4]),
-                data=row_sum(inner_fn, j_range),
-            )
-            with self.assertRaisesRegex(AssertionError, f"bound uses {targets[op]};"):
-                buffer.get_default_sizes_body()
+            with self.assertRaisesRegex(AssertionError, msg):
+                trace(row_sum(inner_fn, j_range))
+
+    def test_rejects_name_prefix(self):
+        with self.assertRaisesRegex(AssertionError, "must start with 'j'"):
+            JaggedRange("u0")
 
 
 instantiate_parametrized_tests(TestJaggedReductionIR)
