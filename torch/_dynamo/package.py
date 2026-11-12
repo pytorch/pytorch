@@ -291,14 +291,14 @@ class FunctionPicklerBase(pickle.Pickler):
 
     @staticmethod
     def _is_literal(value: object) -> bool:
-        # Serializer literals include scalar values and torch.device; this is broader
-        # than utils.is_identity_singleton, whose objects share process-wide identity.
-        # An always-picklable constant: the singletons and scalars dynamo treats
+        # An always-picklable constant: the singletons and builtin literals Dynamo treats
         # as constants, NOT every common_constant_type (torch.finfo/iinfo do not
         # pickle). The guard pickler carries these whether or not a guard reads
         # them: pruning buys nothing and, since _keep matches by id, would make
         # the rebuilt state depend on whether some unrelated guard happened to
         # register the interned value. The AOT pickler skips probing them.
+        # This includes str/bytes and torch.device, unlike utils.is_identity_singleton,
+        # which requires shared identity rather than just safe serialization.
         if value is None or value is Ellipsis or value is NotImplemented:
             return True
         return type(value) in (
@@ -901,24 +901,42 @@ class SystemInfo:
     toolkit_version: str | None
     triton_version: tuple[int, int] | None
     gpu_name: str | None
+    # What the kernels depend on instead of the GPU name: the arch they were
+    # compiled for (CUDA compute capability as major * 10 + minor, or the ROCm
+    # gfx arch) and the SM count, which a cooperative reduction sizes its grid
+    # from and needs every block resident for. None on XPU, and in packages
+    # written before they were recorded, where the GPU name is compared instead.
+    gpu_arch: int | str | None = None
+    gpu_sm_count: int | None = None
     CHECK_GPUS = ("cuda", "xpu")
 
     @classmethod
     def current(cls) -> "SystemInfo":
         """Create a SystemInfo instance with current system information."""
-        # Get GPU name if CUDA or XPU is available
-        gpu_name = None
         from torch.utils._triton import get_triton_version
 
+        from .device_interface import get_interface_for_device
+
         gpu_name, toolkit_version = None, None
+        gpu_arch, gpu_sm_count = None, None
         for device_type in cls.CHECK_GPUS:
             if getattr(torch, device_type).is_available():
                 try:
                     gpu_name = getattr(torch, device_type).get_device_name()
                     toolkit_version = getattr(torch.version, device_type)
+                    if device_type == "cuda":
+                        interface = get_interface_for_device(device_type)
+                        gpu_arch, gpu_sm_count = (
+                            interface.get_compute_capability(),
+                            interface.get_multi_processor_count(),
+                        )
                     break
                 except Exception:
-                    pass
+                    logger.debug(
+                        "Could not read the %s device's info for SystemInfo",
+                        device_type,
+                        exc_info=True,
+                    )
 
         return cls(
             python_version=platform.python_version(),
@@ -926,21 +944,30 @@ class SystemInfo:
             toolkit_version=toolkit_version,
             triton_version=get_triton_version((0, 0)),
             gpu_name=gpu_name,
+            gpu_arch=gpu_arch,
+            gpu_sm_count=gpu_sm_count,
         )
 
     def check_compatibility(
-        self, other: "SystemInfo", device_type: str = "cpu"
+        self, current: "SystemInfo", device_type: str = "cpu"
     ) -> None:
         """
-        Check if this SystemInfo is compatible with another SystemInfo.
-        Raises RuntimeError if incompatible.
+        Check that a package recorded with this SystemInfo can load on a system
+        described by ``current``. A Triton version of (0, 0) or a GPU name of
+        None in the package is not compared; a toolkit version of None is, so a
+        package built without CUDA is refused on a CUDA host. The GPU arch and
+        SM count are compared when both sides record an arch, and the GPU name
+        otherwise. Raises RuntimeError if incompatible.
         """
-        if self.python_version != other.python_version:
+        if _bytecode_version(self.python_version) != _bytecode_version(
+            current.python_version
+        ):
             raise RuntimeError(
-                f"Compile package was created with a different Python version: {self.python_version}"
+                f"Compile package was created with a different Python version: "
+                f"cached={self.python_version}, current={current.python_version}"
             )
 
-        if self.torch_version != other.torch_version:
+        if self.torch_version != current.torch_version:
             raise RuntimeError(
                 f"Compile package was created with a different PyTorch version: {self.torch_version}"
             )
@@ -948,25 +975,41 @@ class SystemInfo:
             if not getattr(torch, device_type).is_available():
                 raise RuntimeError(f"{device_type} is not available")
 
-            if self.toolkit_version != other.toolkit_version:
+            if self.toolkit_version != current.toolkit_version:
                 raise RuntimeError(
                     f"Compile package was created with a different toolkit version: {self.toolkit_version}"
                 )
 
             if (
-                other.triton_version != (0, 0)
-                and self.triton_version != other.triton_version
+                self.triton_version != (0, 0)
+                and self.triton_version != current.triton_version
             ):
                 raise RuntimeError(
                     f"Compile package was created with a different Triton version: {self.triton_version}"
                 )
 
-            # Check GPU name if CUDA/XPU was used
-            if other.gpu_name is not None and self.gpu_name != other.gpu_name:
+            if self.gpu_arch is not None and current.gpu_arch is not None:
+                saved = (self.gpu_arch, self.gpu_sm_count)
+                if saved != (current.gpu_arch, current.gpu_sm_count):
+                    raise RuntimeError(
+                        f"Compile package was created for a different GPU: "
+                        f"cached={self.gpu_name} (arch {self.gpu_arch}, "
+                        f"{self.gpu_sm_count} SMs), current={current.gpu_name} "
+                        f"(arch {current.gpu_arch}, {current.gpu_sm_count} SMs)"
+                    )
+            elif self.gpu_name is not None and self.gpu_name != current.gpu_name:
                 raise RuntimeError(
                     f"Compile package was created with different GPU: "
-                    f"cached={self.gpu_name}, current={other.gpu_name}"
+                    f"cached={self.gpu_name}, current={current.gpu_name}"
                 )
+
+
+def _bytecode_version(python_version: str) -> str:
+    """Code objects change between minor releases, and between pre-releases."""
+    parts = python_version.split(".")
+    if len(parts) == 3 and parts[2].isdigit():
+        return ".".join(parts[:2])
+    return python_version
 
 
 def _collapse_device_types(device_types: frozenset[str]) -> str:
