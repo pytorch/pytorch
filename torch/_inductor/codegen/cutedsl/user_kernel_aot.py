@@ -1,12 +1,13 @@
 """Export and link support for user-defined CuTeDSL kernels in the C++ wrapper
 (AOTInductor, and torch.compile with cpp_wrapper).
 
-A ``@cute.jit`` host function is compiled against fake tensors with the layouts
-its parameter specs give, and exported with ``export_to_c``, which writes a C
-header plus a PIC object, for the C++ wrapper to splice into wrapper.cpp and to
-link, with the DSL's static CUDA-runtime shim archive and a few linker flags,
-into the model .so or the JIT wrapper's module. This module owns those artifacts
-and the C++ that loads and launches them; it takes parameter specs, not IR nodes.
+A ``@cute.jit`` host function is compiled against fake tensors that mirror the
+layouts Inductor froze for it, and exported with ``export_to_c``, which writes a
+C header plus a PIC object. The header is spliced into wrapper.cpp; the object,
+the DSL's static CUDA-runtime shim archive and a few linker flags go into the
+link of the model .so, or of the JIT wrapper's module. This module owns those
+artifacts and the C++ that loads and launches them; it takes parameter specs, not
+IR nodes (see cpp_wrapper_gpu.cutedsl_param_specs).
 
 The DSL is imported lazily: importing this module never needs cutlass. Do not add
 ``from __future__ import annotations``: the DSL reads annotations at runtime and
@@ -23,9 +24,12 @@ import shlex
 import shutil
 import struct
 import tempfile
+import threading
 import types
+import uuid
+import weakref
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any, TypeGuard
@@ -46,6 +50,7 @@ __all__ = [
     "ScalarParamSpec",
     "StreamParamSpec",
     "TensorParamSpec",
+    "cutedsl_cache_dir",
     "cutedsl_kernel_prefix",
     "cutedsl_link_flags",
     "cutedsl_link_inputs",
@@ -53,6 +58,7 @@ __all__ = [
     "emit_cpp_declarations",
     "emit_cpp_launch",
     "export_cutedsl_kernel",
+    "export_for_link",
     "parse_exported_header",
     "scalar_ctype",
     "validate_exported_abi",
@@ -572,7 +578,8 @@ def cutedsl_kernel_prefix(
     plain constants they read, the parameter specs and the target architecture.
 
     It is not an identity: values it cannot see (a captured list, a helper's
-    globals) can differ under the same prefix."""
+    globals) can differ under the same prefix. export_for_link keys exports by host
+    function and specs and keeps prefixes unique within a library."""
     import cutlass
 
     from torch._higher_order_ops.cutedsl_kernel_wrap import cutedsl_kernel_name
@@ -730,6 +737,107 @@ def export_cutedsl_kernel(
     return CuteDSLExportedKernel(prefix, header_path, object_path, text, abi, specs)
 
 
+# host function -> {export key -> its exports, one per prefix it is linked under}
+_exports: weakref.WeakKeyDictionary[
+    Callable[..., Any], dict[tuple[Any, ...], list[CuteDSLExportedKernel]]
+] = weakref.WeakKeyDictionary()
+_exports_lock = threading.Lock()
+
+
+def _export_key(
+    host_fn: Callable[..., Any], specs: Sequence[ParamSpec], arch: str
+) -> tuple[Any, ...]:
+    """The key of an export of ``host_fn`` in _exports (see export_for_link)."""
+    from torch._higher_order_ops.cutedsl_kernel_wrap import CUTEDSL_CONSTANT_RULES
+    from torch._higher_order_ops.user_kernel_hop import constant_key
+
+    return (
+        arch,
+        *(
+            (s.name, constant_key(s.value, CUTEDSL_CONSTANT_RULES))
+            if isinstance(s, ConstantParamSpec)
+            else _spec_key(s)
+            for s in specs
+        ),
+    )
+
+
+def cutedsl_cache_dir() -> str:
+    """Where the exports and the linker version scripts are stored, named by
+    content."""
+    from torch._inductor.runtime.cache_dir_utils import cache_dir
+
+    return os.path.join(cache_dir(), "cutedsl_user_kernels")
+
+
+def export_for_link(
+    host_fn: Callable[..., Any],
+    specs: Sequence[ParamSpec],
+    arch: str,
+    *,
+    linked: Mapping[str, CuteDSLExportedKernel],
+    out_root: str,
+) -> CuteDSLExportedKernel:
+    """The export of ``host_fn`` for ``specs`` and ``arch``, to link into a library
+    that already links ``linked`` (prefix -> export), under a prefix no other kernel
+    of the library uses.
+
+    Exports are reused within this process only, keyed by the host function object
+    and the specs: the prefix does not cover every value a kernel reads, so a new
+    process exports again. The files go to ``out_root/<prefix>.<hash of their bytes>``,
+    so exporting the same kernel again under the same prefix (see _stable_repr)
+    yields the same paths (and with them the same JIT wrapper cache key) and no new
+    files.
+    """
+    specs = tuple(specs)
+    key = _export_key(host_fn, specs, arch)
+    with _exports_lock:
+        cached = _exports.setdefault(host_fn, {}).setdefault(key, [])
+        # An export whose cache directory was removed since cannot be linked.
+        cached[:] = [e for e in cached if os.path.exists(e.object_path)]
+        for exported in cached:
+            if linked.get(exported.prefix, exported) is exported:
+                return exported
+    prefix = base = cutedsl_kernel_prefix(host_fn, specs, arch)
+    n = 0
+    while prefix in linked:
+        n += 1
+        prefix = f"{base}_{n}"
+    os.makedirs(out_root, exist_ok=True)
+    # The umask's mode, not mkdtemp's 0700: it becomes the cache entry, which other
+    # users of a shared cache directory read.
+    tmp_dir = os.path.join(out_root, f".{prefix}.{uuid.uuid4().hex}")
+    os.mkdir(tmp_dir)
+    try:
+        exported = export_cutedsl_kernel(
+            host_fn, specs, out_dir=tmp_dir, prefix=prefix, arch=arch
+        )
+        digest = hashlib.sha256()
+        for path in (exported.header_path, exported.object_path):
+            digest.update(Path(path).read_bytes())
+        out_dir = os.path.join(out_root, f"{prefix}.{digest.hexdigest()[:16]}")
+        header_path, object_path = (
+            os.path.join(out_dir, f"{prefix}{ext}") for ext in (".h", ".o")
+        )
+        try:
+            os.rename(tmp_dir, out_dir)
+        except OSError:
+            # Stored before, by this or another process: the same bytes. A damaged
+            # entry (e.g. files deleted by a cache cleanup) is repaired in place:
+            # other processes may be using it, and os.replace leaves no moment
+            # where a path they were given is missing.
+            if not (os.path.exists(header_path) and os.path.exists(object_path)):
+                os.makedirs(out_dir, exist_ok=True)
+                os.replace(exported.object_path, object_path)
+                os.replace(exported.header_path, header_path)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    exported = replace(exported, header_path=header_path, object_path=object_path)
+    with _exports_lock:
+        cached.append(exported)
+    return exported
+
+
 # Standard headers the declarations and launches use.
 CPP_HEADERS = (
     "atomic",
@@ -782,8 +890,8 @@ def emit_cpp_declarations(exported: CuteDSLExportedKernel, *, aot: bool) -> list
     returns it for that device without locking, as a Triton launch takes no lock: the
     library stays loaded onto the device while the reference holds it.
 
-    With ``aot``, no ``<prefix>_module`` is emitted: a caller is to hold one
-    ``<prefix>_module_ref`` per model instance, so that the library is released with
+    With ``aot``, each model instance holds a ``<prefix>_module_ref`` (a member of
+    AOTInductorModelKernels named ``<prefix>_ref``), so the library is released with
     the last instance that launched the kernel, as their Triton modules are, even
     when dlclose leaves the model .so mapped. Otherwise (the JIT wrapper)
     ``<prefix>_module(device)`` holds one from its first launch until the process

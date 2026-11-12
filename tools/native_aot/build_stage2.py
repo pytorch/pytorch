@@ -323,7 +323,7 @@ def _cutedsl_export() -> types.ModuleType:
 def _dsl_runtime_archive() -> str | None:
     """The DSL dialect runtime archive the CuTeDSL kernel objects need, for this
     build's CUDA major, or None if the DSL or the archive is missing: the lookup
-    Inductor's CuTeDSL link inputs use (runtime_archive in
+    Inductor links user CuTeDSL kernels with (runtime_archive in
     torch/_native/cutedsl/export.py), which falls back to the archive for another
     major, reported here, when the wheel ships none for this one. A mismatch warns
     rather than failing: in 4.6.2 the archives were the same objects (`ar p | md5sum`
