@@ -1763,6 +1763,9 @@ class FxGraphHashDetails:
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
+        # Creating the choices handler installs TLX, which replaces
+        # config.inductor_choices_class; do it before snapshotting the config.
+        _ = V.choices
         self.inductor_config = config.save_config_portable(
             ignore_private_configs=False, readonly_values=True
         )
