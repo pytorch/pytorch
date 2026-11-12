@@ -387,6 +387,9 @@ class Vectorized16 {
   // this way For example `Sleef_exp2f8_u10` signature is `const __m256
   // (__m256)`
   C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wignored-qualifiers")
+  // When sleef.h defines `SLEEF_CONST` as `__attribute__((const))`, it lands
+  // on the function pointer parameter, which clang ignores.
+  C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wignored-attributes")
   Vectorized<T> map(SLEEF_CONST __m256 (*SLEEF_CONST_OLD vop)(__m256)) const {
     __m256 lo, hi;
     cvt_to_fp32<T>(values, lo, hi);
@@ -394,6 +397,7 @@ class Vectorized16 {
     const auto o2 = vop(hi);
     return cvt_from_fp32<T>(o1, o2);
   }
+  C10_DIAGNOSTIC_POP()
   C10_DIAGNOSTIC_POP()
   Vectorized<T> isnan() const {
     __m256 lo, hi;
