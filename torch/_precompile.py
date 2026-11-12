@@ -4125,6 +4125,13 @@ def capture(
     the loading process.
     Under ``cpp_wrapper`` with ``graph_partition`` a capture compiles without
     CUDA graphs, as :func:`torch.compile` does, and records them off.
+    ``triton.cudagraphs``, ``triton.cudagraph_trees``, ``graph_partition`` and
+    ``cpp_wrapper`` are read when ``capture()`` is called: a capture with CUDA
+    graphs on raises on a call made after one of them changed in
+    ``torch._inductor.config``, and one without raises on a call made with
+    ``triton.cudagraphs`` turned on there, which it would ignore, unless its
+    ``mode`` or ``options`` set ``triton.cudagraphs`` (they win, as under
+    :func:`torch.compile`).
 
     Unlike under :func:`torch.compile`, whose options reach only Inductor, the
     capture's calls are traced under ``CUDAGRAPH_CONFIG`` too, so with CUDA
