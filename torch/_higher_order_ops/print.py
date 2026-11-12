@@ -3,6 +3,7 @@ import builtins
 import torch
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.utils import register_fake
+from torch._library.opaque_object import OpaqueStr
 from torch._ops import HigherOrderOperator
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
@@ -43,7 +44,8 @@ class Print(HigherOrderOperator):
         super().__init__("print")
 
     def __call__(self, format_str: str, *args: object, **kwargs: object) -> None:
-        if not isinstance(format_str, str):
+        # OpaqueStr is a str, but the fake that stands in for it while tracing is not.
+        if not isinstance(format_str, (str, OpaqueStr)):
             raise AssertionError(f"format_str must be a string, got {type(format_str)}")
         # pyrefly: ignore [missing-attribute]
         return super().__call__(format_str, *args, **kwargs)
