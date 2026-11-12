@@ -242,16 +242,16 @@ class DtypePropagationOpsHandler:
     def masked(
         mask: DTypeArg, body: Callable[[], DTypeArg], other: DTypeArg
     ) -> torch.dtype:
-        # Backends fill the masked-out lanes with `other` cast to the dtype of
-        # the body's result, so the result has that dtype. `body` runs under
-        # the current ops handler, which must produce values with a dtype, e.g.
-        # an analysis handler built on this one. Codegen takes the dtype of the
-        # value it generated instead of calling this.
-        result = body()
-        dtype = result if isinstance(result, torch.dtype) else result.dtype  # type: ignore[union-attr]
-        if not isinstance(dtype, torch.dtype):
-            raise AssertionError(f"expected a dtype from the masked body, got {result}")
-        return dtype
+        from .loop_body import LoopBodyBlock
+
+        if not isinstance(body, LoopBodyBlock):
+            raise AssertionError("body must be a LoopBodyBlock")
+        # TODO - we avoid calling this in codegen, needs work for non codegen use cases
+        loads = body.graph.find_nodes(op="call_method", target="load")
+        if len(loads) <= 1:
+            return promote_types([other])
+
+        return upcast_compute_type(V.graph.get_dtype(loads[-1].args[1]))
 
     @staticmethod
     def where(a: DTypeArg, b: DTypeArg, c: DTypeArg) -> torch.dtype:
