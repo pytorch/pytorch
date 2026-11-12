@@ -7559,6 +7559,58 @@ class TestControlFlowTraced(TestCase):
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
 
+    @parametrize(
+        "hop",
+        ["cond", "while_loop", "switch", "scan", "associative_scan", "flex_attention"],
+    )
+    def test_graph_module_pickle_roundtrip(self, hop):
+        # Unpickling a GraphModule re-traces it symbolically, replaying each
+        # HOP call with Proxy operands. scan, associative_scan and
+        # flex_attention check only the tensors they lift (w, keep).
+        import pickle
+
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        def f_cond(x, pred):
+            return cond(pred, torch.sin, torch.cos, [x])
+
+        def f_while_loop(i, x):
+            return while_loop(lambda i, x: i < 3, lambda i, x: (i + 1, x.sin()), (i, x))
+
+        def f_switch(index, x):
+            return switch(index, (torch.sin, torch.cos), (x,))
+
+        def f_scan(xs, w):
+            return scan(lambda c, x: (c + x * w, c.clone()), torch.zeros(4), xs)
+
+        def f_associative_scan(xs, w):
+            # The raw HOP: the frontend's generic mode doesn't trace one.
+            return associative_scan_op(lambda a, b, w: [a + b * w], [xs], (w,))
+
+        def f_flex_attention(q, keep):
+            def mask_mod(b, h, q_idx, kv_idx):
+                return keep[kv_idx]
+
+            mask = create_block_mask(mask_mod, 1, 1, 16, 16, "cpu", BLOCK_SIZE=8)
+            return flex_attention(q, q, q, block_mask=mask)
+
+        x, w, xs = torch.randn(4), torch.randn(4), torch.randn(3, 4)
+        f, args = {
+            "cond": (f_cond, (x, torch.tensor(True))),
+            "while_loop": (f_while_loop, (torch.tensor(0), x)),
+            "switch": (f_switch, (torch.tensor(1), x)),
+            "scan": (f_scan, (xs, w)),
+            "associative_scan": (f_associative_scan, (xs, w)),
+            "flex_attention": (
+                f_flex_attention,
+                (torch.randn(1, 1, 16, 8), torch.arange(16) < 8),
+            ),
+        }[hop]
+        gm = pickle.loads(pickle.dumps(make_fx(f)(*args)))
+        target = getattr(torch.ops.higher_order, hop)
+        self.assertEqual(len(gm.graph.find_nodes(op="call_function", target=target)), 1)
+        self.assertEqual(gm(*args), f(*args))
+
     def test_switch_traced_mismatched_output_structure(self):
         from torch._higher_order_ops.switch import switch_op
 
