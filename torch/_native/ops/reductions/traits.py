@@ -1,12 +1,17 @@
 # Reusable CuteDSL reduction traits and cross-thread helpers. leaf creates a one-element
 # accumulator, combine merges accumulators, and reduce performs a serial update. Tree folds
-# use leaf/combine, so leaf must include every element transform. Other names mirror
-# SharedReduceOps.h. Accumulator dtypes provide their identities. Scalar conditionals lower
-# only inside cute.jit methods; cute.arch.fmax suppresses NaNs, so traits handle them.
+# use leaf/combine, so leaf must include every element transform. has_combine_equal opts a
+# trait into combine_equal, a closed-form merge of equal-count states, and
+# has_combine_uniform into combine_uniform, which folds equal-count partials deriving
+# counts from their index. Other names mirror SharedReduceOps.h. Accumulator dtypes
+# provide their identities. Scalar conditionals lower only inside cute.jit methods;
+# cute.arch.fmax suppresses NaNs, so traits handle them.
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import Boolean, const_expr, Float32, Int32, Int64
+from cutlass import Boolean, const_expr, Float32, Float64, Int32, Int64
+from cutlass._mlir.dialects import llvm
+from cutlass.cutlass_dsl import dsl_user_op, T as _T
 
 
 WARP = 32
@@ -72,6 +77,29 @@ class SumOps:
         return acc[0]
 
 
+@dsl_user_op
+def _square_rn(a, *, loc=None, ip=None):
+    """a * a rounded on its own: ptxas never contracts mul.rn into an add. Other
+    accumulator types square plainly."""
+    if type(a) not in (Float32, Float64):
+        return a * a
+    wide = type(a) is Float64
+    x = a.ir_value(loc=loc, ip=ip)
+    return type(a)(
+        llvm.inline_asm(
+            _T.f64() if wide else _T.f32(),
+            [x, x],
+            "mul.rn.f64 $0, $1, $2;" if wide else "mul.rn.f32 $0, $1, $2;",
+            "=d,d,d" if wide else "=f,f,f",
+            has_side_effects=False,
+            is_align_stack=False,
+            asm_dialect=llvm.AsmDialect.AD_ATT,
+            loc=loc,
+            ip=ip,
+        )
+    )
+
+
 class NormOps:
     # acc = (sum(|x|**p),); project raises it to 1/p.
     nfields = 1
@@ -82,12 +110,15 @@ class NormOps:
         self.fdtypes = (acc,)
 
     @cute.jit
-    def _absp(self, val):
+    def _absp(self, val, rounded: cutlass.Constexpr = False):
         a = self.acc(cute.math.absf(val))
         if const_expr(self.p == 1.0):
             return a
         elif const_expr(self.p == 2.0):
-            return a * a
+            # Tree folds would contract a leaf square into whichever add follows, which
+            # differs by kernel, so leaves round it on their own and stay bitwise equal
+            # across kernels. Serial updates keep the fused a * a.
+            return _square_rn(a) if const_expr(rounded) else a * a
         else:
             # |x|**p via exp(p*log|x|); log(0)=-inf so 0**p -> exp(-inf)=0 for p>0.
             return cute.math.exp(self.acc(self.p) * cute.math.log(a))
@@ -97,7 +128,7 @@ class NormOps:
 
     @cute.jit
     def leaf(self, val, idx):
-        return (self._absp(val),)
+        return (self._absp(val, rounded=True),)
 
     @cute.jit
     def reduce(self, acc, val, idx, valid):
@@ -135,7 +166,15 @@ def _welford_denom(acc_dtype, nf, correction):
 class WelfordOps:
     # acc = (mean, m2, nf). `reduce` is the ONLINE Welford update and `combine` the PARALLEL Chan
     # merge -- deliberately different formulas. project divides m2 by the clamped dof.
+    # has_combine_equal enables combine_equal's closed-form equal-count merges.
+    # has_combine_uniform enables uniform-count staged inner-tree combines
+    # (tile.uniform_combine_ok), which rely on combine_uniform, uniform_weight, an FP32
+    # accumulator and the count as the last field: they skip staging it and may stage
+    # the weight in its slot. A subclass that changes leaf, combine or the
+    # (mean, m2, nf) layout must set both flags to False.
     nfields = 3
+    has_combine_equal = True
+    has_combine_uniform = True
 
     def __init__(self, correction=1, take_sqrt=False, return_mean=False, acc=Float32):
         self.correction = float(correction)
@@ -143,6 +182,7 @@ class WelfordOps:
         self.return_mean = bool(return_mean)
         self.acc = acc
         self.fdtypes = (acc, acc, acc)
+        self.split_grid_mult = 8 if acc.width == 32 else 4
 
     def init(self):
         z = self.acc(0.0)
@@ -175,10 +215,54 @@ class WelfordOps:
         elif nb != zero:
             nn = na + nb
             nb_over_n = nb / nn
-            delta = mb - ma
-            mean = ma + delta * nb_over_n
-            m2 = m2a + m2b + delta * delta * na * nb_over_n
+            mean, m2 = self._chan_merge(ma, m2a, na, mb, m2b, nb_over_n)
         return (mean, m2, nn)
+
+    @cute.jit
+    def _chan_merge(self, ma, m2a, na, mb, m2b, w):
+        """Chan's merge of nonempty states, given the weight w = nb / (na + nb)."""
+        delta = mb - ma
+        mean = ma + delta * w
+        m2 = m2a + m2b + delta * delta * na * w
+        return mean, m2
+
+    @cute.jit
+    def combine_uniform(self, a, b, index, count: cutlass.Constexpr, weight=None):
+        """Fold partial `b` into `a` with `combine`'s arithmetic, deriving counts.
+
+        `index` is the number of partials already folded into `a` and must be at least 1:
+        unlike `combine`, nothing passes `b` through for an empty `a`. Every partial holds
+        exactly `count` values, so `index * count` must be exact in the accumulator (fp32).
+        `a[2]` and `b[2]` are ignored. `weight`, if given, replaces `count / ((index + 1) * count)`
+        and must be uniform_weight(index, count).
+        """
+        ma, m2a, _ = a
+        mb, m2b, _ = b
+        na, nb = self.acc(index) * self.acc(count), self.acc(count)
+        nn = na + nb
+        if const_expr(weight is None):
+            weight = self.uniform_weight(index, count)
+        mean, m2 = self._chan_merge(ma, m2a, na, mb, m2b, weight)
+        return (mean, m2, nn)
+
+    @cute.jit
+    def uniform_weight(self, index, count: cutlass.Constexpr):
+        """combine_uniform's nb / nn for partial `index`, with the same arithmetic."""
+        na, nb = self.acc(index) * self.acc(count), self.acc(count)
+        return nb / (na + nb)
+
+    @cute.jit
+    def combine_equal(self, a, b, count: cutlass.Constexpr):
+        """Combine two nonempty states that each hold `count` values.
+
+        a's and b's count fields are not read.
+        """
+        ma, m2a, _ = a
+        mb, m2b, _ = b
+        delta = mb - ma
+        mean = ma + delta * self.acc(0.5)
+        m2 = m2a + m2b + delta * delta * self.acc(count * 0.5)
+        return (mean, m2, self.acc(count * 2))
 
     @cute.jit
     def shfl_down(self, acc, offset):
@@ -356,7 +440,8 @@ class NanSumOps:
 
 
 class AllOps:
-    # acc is the product of 0/1 truth flags; NaN is truthy, matching torch.all.
+    # acc is the min of 0/1 truth flags; NaN is truthy, matching torch.all. Ordered
+    # columns ran a product fold at 0.22-0.59x of the indexed tree on B200.
     nfields = 1
 
     def __init__(self, acc=Float32):
@@ -374,11 +459,11 @@ class AllOps:
     def reduce(self, acc, val, idx, valid):
         flag = self.acc(1.0) if (val != self.acc(0.0)) else self.acc(0.0)
         keep = flag if valid else self.acc(1.0)
-        return (acc[0] * keep,)
+        return (min(keep, acc[0]),)
 
     @cute.jit
     def combine(self, a, b):
-        return (a[0] * b[0],)
+        return (min(b[0], a[0]),)
 
     @cute.jit
     def shfl_down(self, acc, offset):
@@ -733,6 +818,13 @@ class VarMeanOps(WelfordOps):
         var = m2 / _welford_denom(self.acc, nf, self.correction)
         result = cute.math.sqrt(var) if const_expr(self.take_sqrt) else var
         return (result, mean)
+
+
+def welford_outputs(trait) -> int:
+    """Outputs of a variance-returning Welford trait, or 0 for any other trait."""
+    if not isinstance(trait, WelfordOps) or trait.return_mean:
+        return 0
+    return getattr(trait, "nouts", 1)
 
 
 class MaxDimOps(ArgMaxOps):
