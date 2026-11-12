@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import re
+import unittest
 from dataclasses import FrozenInstanceError
 
 import torch
@@ -43,6 +44,7 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         graph.output(())
         return torch.fx.GraphModule({}, graph)
 
+    @unittest.skipIf(not IS_BIG_GPU, "requires a GPU with Triton GEMM template support")
     @requires_gpu_and_triton
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     @torch._inductor.config.patch(
