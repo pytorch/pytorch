@@ -15,6 +15,7 @@ from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
@@ -36,6 +37,12 @@ class DeterministicTest(TestCase):
         super().setUp()
         self._exit_stack = contextlib.ExitStack()
         self._exit_stack.enter_context(fresh_cache())
+        # Start each test with deterministic mode off and restore the state
+        # afterwards, so tests that turn it on do not leak into later ones.
+        # The guard's exit sets Inductor's flag to the deterministic-algorithms
+        # state; the config patch, exited after it, then restores the flag.
+        self._exit_stack.enter_context(inductor_config.patch(deterministic=False))
+        self._exit_stack.enter_context(DeterministicGuard(False))
 
     def tearDown(self) -> None:
         self._exit_stack.close()
@@ -62,6 +69,17 @@ class DeterministicTest(TestCase):
             _, (code,) = run_and_get_code(torch.compile(fn), x)
             self.assertIn("'deterministic': True", code)
         self.assertTrue(inductor_config.deterministic)
+
+    def test_compile_does_not_leak_deterministic_mode(self):
+        # Something may turn on deterministic algorithms while compiling a
+        # frame (e.g. numeric_utils); Dynamo undoes it, Inductor's flag too.
+        def backend(gm, example_inputs):
+            torch.use_deterministic_algorithms(True)
+            return gm.forward
+
+        torch.compile(lambda x: x + 1, backend=backend)(torch.randn(4))
+        self.assertFalse(torch.are_deterministic_algorithms_enabled())
+        self.assertFalse(inductor_config.deterministic)
 
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, deterministic):
@@ -172,6 +190,32 @@ class DeterministicTest(TestCase):
 
         x = torch.randn(8, 65536, device=GPU_TYPE)
         self.assertEqual(torch.compile(fn)(x), fn(x))
+
+    @inductor_config.patch(deterministic=True, force_pointwise_cat=True)
+    def test_explicit_fma_skips(self):
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x, y, w, a, b):
+            # p - p must stay exactly 0: the two products are separate nodes,
+            # for pad and cat each copy of the masked load is a subblock, and
+            # for a gather each copy of the index is its own indirect symbol.
+            p = x * y
+            q = torch.nn.functional.pad(x, (1, 1)) * w
+            r = torch.cat([x, y]) * w[:-2].repeat(2)
+            g = w[a.abs()] * x[:512]
+            zeros = (p - p.detach(), q - q.detach(), r - r.detach(), g - g.detach())
+            # A pointwise int64 cat fills with 0.0; it is still not a float.
+            c1, c2, c3 = (torch.cat([a + k, b + k]) for k in (1, 2, 3))
+            return *zeros, c1 * c2 + c3
+
+        x, y = (torch.randn(1024, device=GPU_TYPE) for _ in range(2))
+        w = torch.randn(1026, device=GPU_TYPE)
+        a, b = (torch.randint(-100, 100, (512,), device=GPU_TYPE) for _ in range(2))
+        out, (code,) = run_and_get_code(torch.compile(fn), x, y, w, a, b)
+        self.assertEqual(out, fn(x, y, w, a, b), atol=0, rtol=0)
+        for zero in out[:4]:
+            self.assertEqual(zero.count_nonzero().item(), 0)
+        self.assertNotIn("tl.fma(", code)
 
     @parametrize(
         "deterministic,fp_fusion",

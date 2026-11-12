@@ -250,6 +250,10 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis, DefaultHandler):
             # int to float or float to int
             return ValueRanges(cast(x.lower, dtype), cast(x.upper, dtype))
 
+    @classmethod
+    def fma(cls, x: Any, y: Any, z: Any) -> ValueRanges[Any]:
+        return cls.add(cls.mul(x, y), z)
+
     @staticmethod
     # pyrefly: ignore [bad-override]
     def square(x: Any) -> ValueRanges[Any]:

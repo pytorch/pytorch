@@ -121,6 +121,7 @@ from .utils import (
     developer_warning,
     do_bench_using_profiling,
     dtype_from_size,
+    get_current_backend,
     get_dtype_size,
     get_kernel_metadata,
     GPU_ALIGN_BYTES,
@@ -5871,6 +5872,7 @@ class ComputedBuffer(OperationBuffer):
         if (
             device is not None
             and is_gpu(device.type)
+            and get_current_backend(device.type) == "triton"
             and not triton_fp_fusion_enabled()
             and not config.emulate_precision_casts
         ):

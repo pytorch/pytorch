@@ -7,7 +7,8 @@ from typing import Any, TYPE_CHECKING
 import sympy
 
 import torch
-from torch.fx import Graph, Node
+from torch.fx import Graph, map_arg, Node
+from torch.utils._ordered_set import OrderedSet
 
 from .dtype_propagation import DtypePropagationOpsHandler
 from .ops_handler import DefaultHandler, OpsHandler
@@ -53,6 +54,71 @@ class _RecordNodeDtypes(DefaultHandler):
         return _Dtype(out)
 
 
+def _differences_of_equal_values(loop_body: LoopBody) -> OrderedSet[Node]:
+    """Find the ``sub(x, y)`` nodes of the root block where ``x`` and ``y``
+    compute the same value, as codegen's CSE would see them.
+
+    CSE gives such operands one variable, and ``TritonOverrides.sub`` then keeps
+    ``x - x`` exactly 0. As ``fma(a, b, -(a*b))`` it would instead be the
+    rounding error of ``a*b``. Tracing does not deduplicate: ``x`` and ``y`` are
+    often separate but identical nodes (e.g. ``p - p.detach()``), each copy of a
+    ``masked`` body is its own subblock, and each copy of an indirect index gets
+    its own symbol. So nodes are numbered by what they compute: the same op on
+    operands with the same numbers, with a subblock standing for its result and
+    an indirect symbol for the value it was computed from.
+    """
+    value_ids: dict[object, int] = {}
+    node_ids: dict[Node, tuple[str, int]] = {}
+    block_ids: dict[str, tuple[str, int]] = {}
+    indirect_values: dict[sympy.Symbol, sympy.Symbol] = {}
+
+    def number(graph: Graph) -> tuple[str, int]:
+        for node in graph.nodes:
+            target = node.target
+            args, kwargs = map_arg((node.args, node.kwargs), node_ids.__getitem__)
+            # set_indirect shims carry the indirect symbol they define.
+            shim = (
+                loop_body.submodules.get(target) if node.op == "call_module" else None
+            )
+            bound = getattr(getattr(shim, "clone", None), "keywords", {})
+            if target in loop_body.subblocks:
+                if target not in block_ids:
+                    block_ids[target] = number(loop_body.subblocks[target].graph)
+                target = block_ids[target]
+            elif "var" in bound:
+                target = (
+                    "set_indirect",
+                    bound["size"],
+                    bound["check"],
+                    bound["wrap_neg"],
+                )
+            elif target == "get_index":
+                expr = loop_body.indexing_exprs[node.args[0]]
+                args = (expr.xreplace(indirect_values),)
+            key: object = (node.op, target, args, kwargs)
+            if node.op == "placeholder":
+                key = (node.op, target)
+            try:
+                node_ids[node] = ("%", value_ids.setdefault(key, len(value_ids)))
+            except TypeError:  # unhashable argument
+                node_ids[node] = ("%", value_ids.setdefault(node, len(value_ids)))
+            if "var" in bound:
+                indirect_values[bound["var"]] = sympy.Symbol(
+                    f"value{node_ids[node][1]}"
+                )
+        return node_ids[graph.output_node()]
+
+    graph = loop_body.root_block.graph
+    number(graph)
+    differences = OrderedSet[Node]()
+    for node in graph.find_nodes(op="call_method", target="sub"):
+        _, lhs, rhs = node.args
+        if isinstance(lhs, Node) and isinstance(rhs, Node):
+            if node_ids[lhs] == node_ids[rhs]:
+                differences.add(node)
+    return differences
+
+
 def form_explicit_fmas(loop_body: LoopBody) -> bool:
     """Rewrite each float ``add``/``sub`` of a ``mul`` into an ``fma``.
 
@@ -69,7 +135,7 @@ def form_explicit_fmas(loop_body: LoopBody) -> bool:
     multiply-adds Triton contracts depends on the block size, while this choice
     depends only on the graph, so it is the same for every config. ``p`` stays
     if something else uses it. Multiply-adds split across fused nodes, or inside
-    ``masked`` subblocks, are not contracted.
+    ``masked`` subblocks, are not contracted, and neither is ``p - p``.
     """
     counts = loop_body.op_counts
     if not counts["mul"] or not (counts["add"] or counts["sub"]):
@@ -87,12 +153,17 @@ def form_explicit_fmas(loop_body: LoopBody) -> bool:
         return None
 
     graph = loop_body.root_block.graph
+    skip = OrderedSet[Node]()
+    if counts["sub"]:
+        skip = _differences_of_equal_values(loop_body)
     formed = 0
     candidates = [
         *graph.find_nodes(op="call_method", target="add"),
         *graph.find_nodes(op="call_method", target="sub"),
     ]
     for node in candidates:
+        if node in skip:
+            continue
         ops, lhs, rhs = node.args
         sub = node.target == "sub"
         for prod, addend, prod_is_lhs in ((lhs, rhs, True), (rhs, lhs, False)):
