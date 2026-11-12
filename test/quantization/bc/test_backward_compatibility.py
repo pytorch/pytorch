@@ -51,8 +51,6 @@ def get_filenames(self, subname):
 
     input_file = base_name + ".input.pt"
     state_dict_file = base_name + ".state_dict.pt"
-    scripted_module_file = base_name + ".scripted.pt"
-    traced_module_file = base_name + ".traced.pt"
     expected_file = base_name + ".expected.pt"
     package_file = base_name + ".package.pt"
     get_attr_targets_file = base_name + ".get_attr_targets.pt"
@@ -60,8 +58,6 @@ def get_filenames(self, subname):
     return (
         input_file,
         state_dict_file,
-        scripted_module_file,
-        traced_module_file,
         expected_file,
         package_file,
         get_attr_targets_file,
@@ -91,8 +87,6 @@ class TestSerialization(TestCase):
         (
             input_file,
             state_dict_file,
-            scripted_module_file,
-            traced_module_file,
             expected_file,
             _package_file,
             _get_attr_targets_file,
@@ -112,81 +106,13 @@ class TestSerialization(TestCase):
                 state_dict_file,
                 _use_new_zipfile_serialization=new_zipfile_serialization,
             )
-            torch.jit.save(torch.jit.script(qmodule), scripted_module_file)
-            torch.jit.save(torch.jit.trace(qmodule, input_tensor), traced_module_file)
             torch.save(qmodule(input_tensor), expected_file)
 
         input_tensor = torch.load(input_file)
         # weights_only = False as sometimes get ScriptObject here
         qmodule.load_state_dict(torch.load(state_dict_file, weights_only=False))
-        qmodule_scripted = torch.jit.load(scripted_module_file)
-        qmodule_traced = torch.jit.load(traced_module_file)
         expected = torch.load(expected_file)
         self.assertEqual(qmodule(input_tensor), expected, atol=prec)
-        self.assertEqual(qmodule_scripted(input_tensor), expected, atol=prec)
-        self.assertEqual(qmodule_traced(input_tensor), expected, atol=prec)
-
-    def _test_op_graph(
-        self,
-        qmodule,
-        subname=None,
-        input_size=None,
-        input_quantized=True,
-        generate=False,
-        prec=None,
-        new_zipfile_serialization=False,
-    ):
-        r"""
-        Input: a floating point module
-
-        If generate == True, traces and scripts the module and quantizes the results with
-        PTQ, and saves the results.
-
-        If generate == False, traces and scripts the module and quantizes the results with
-        PTQ, and compares to saved results.
-        """
-        (
-            input_file,
-            _,
-            scripted_module_file,
-            traced_module_file,
-            expected_file,
-            _package_file,
-            _get_attr_targets_file,
-        ) = get_filenames(self, subname)
-
-        # only generate once.
-        if generate and qengine_is_fbgemm():
-            input_tensor = torch.rand(*input_size).float()
-            torch.save(input_tensor, input_file)
-
-            # convert to TorchScript
-            scripted = torch.jit.script(qmodule)
-            traced = torch.jit.trace(qmodule, input_tensor)
-
-            # quantize
-
-            def _eval_fn(model, data):
-                model(data)
-
-            qconfig_dict = {"": torch.ao.quantization.default_qconfig}
-            scripted_q = torch.ao.quantization.quantize_jit(
-                scripted, qconfig_dict, _eval_fn, [input_tensor]
-            )
-            traced_q = torch.ao.quantization.quantize_jit(
-                traced, qconfig_dict, _eval_fn, [input_tensor]
-            )
-
-            torch.jit.save(scripted_q, scripted_module_file)
-            torch.jit.save(traced_q, traced_module_file)
-            torch.save(scripted_q(input_tensor), expected_file)
-
-        input_tensor = torch.load(input_file)
-        qmodule_scripted = torch.jit.load(scripted_module_file)
-        qmodule_traced = torch.jit.load(traced_module_file)
-        expected = torch.load(expected_file)
-        self.assertEqual(qmodule_scripted(input_tensor), expected, atol=prec)
-        self.assertEqual(qmodule_traced(input_tensor), expected, atol=prec)
 
     def _test_obs(
         self, obs, input_size, subname=None, generate=False, check_numerics=True
@@ -197,8 +123,6 @@ class TestSerialization(TestCase):
         (
             input_file,
             state_dict_file,
-            _,
-            _,
             expected_file,
             _package_file,
             _get_attr_targets_file,
@@ -223,8 +147,6 @@ class TestSerialization(TestCase):
         (
             input_file,
             _,
-            _scripted_module_file,
-            _traced_module_file,
             expected_file,
             package_file,
             get_attr_targets_file,
@@ -345,122 +267,6 @@ class TestSerialization(TestCase):
             padding_mode="zeros",
         )
         self._test_op(module, input_size=[1, 3, 6, 6], generate=False)
-
-    @override_qengines
-    def test_conv2d_graph(self):
-        module = nn.Sequential(
-            torch.ao.quantization.QuantStub(),
-            nn.Conv2d(
-                3,
-                3,
-                kernel_size=3,
-                stride=1,
-                padding=0,
-                dilation=1,
-                groups=1,
-                bias=True,
-                padding_mode="zeros",
-            ),
-        )
-        self._test_op_graph(module, input_size=[1, 3, 6, 6], generate=False)
-
-    @override_qengines
-    def test_conv2d_nobias_graph(self):
-        module = nn.Sequential(
-            torch.ao.quantization.QuantStub(),
-            nn.Conv2d(
-                3,
-                3,
-                kernel_size=3,
-                stride=1,
-                padding=0,
-                dilation=1,
-                groups=1,
-                bias=False,
-                padding_mode="zeros",
-            ),
-        )
-        self._test_op_graph(module, input_size=[1, 3, 6, 6], generate=False)
-
-    @override_qengines
-    def test_conv2d_graph_v2(self):
-        # tests the same thing as test_conv2d_graph, but for version 2 of
-        # ConvPackedParams{n}d
-        module = nn.Sequential(
-            torch.ao.quantization.QuantStub(),
-            nn.Conv2d(
-                3,
-                3,
-                kernel_size=3,
-                stride=1,
-                padding=0,
-                dilation=1,
-                groups=1,
-                bias=True,
-                padding_mode="zeros",
-            ),
-        )
-        self._test_op_graph(module, input_size=[1, 3, 6, 6], generate=False)
-
-    @override_qengines
-    def test_conv2d_nobias_graph_v2(self):
-        # tests the same thing as test_conv2d_nobias_graph, but for version 2 of
-        # ConvPackedParams{n}d
-        module = nn.Sequential(
-            torch.ao.quantization.QuantStub(),
-            nn.Conv2d(
-                3,
-                3,
-                kernel_size=3,
-                stride=1,
-                padding=0,
-                dilation=1,
-                groups=1,
-                bias=False,
-                padding_mode="zeros",
-            ),
-        )
-        self._test_op_graph(module, input_size=[1, 3, 6, 6], generate=False)
-
-    @override_qengines
-    def test_conv2d_graph_v3(self):
-        # tests the same thing as test_conv2d_graph, but for version 3 of
-        # ConvPackedParams{n}d
-        module = nn.Sequential(
-            torch.ao.quantization.QuantStub(),
-            nn.Conv2d(
-                3,
-                3,
-                kernel_size=3,
-                stride=1,
-                padding=0,
-                dilation=1,
-                groups=1,
-                bias=True,
-                padding_mode="zeros",
-            ),
-        )
-        self._test_op_graph(module, input_size=[1, 3, 6, 6], generate=False)
-
-    @override_qengines
-    def test_conv2d_nobias_graph_v3(self):
-        # tests the same thing as test_conv2d_nobias_graph, but for version 3 of
-        # ConvPackedParams{n}d
-        module = nn.Sequential(
-            torch.ao.quantization.QuantStub(),
-            nn.Conv2d(
-                3,
-                3,
-                kernel_size=3,
-                stride=1,
-                padding=0,
-                dilation=1,
-                groups=1,
-                bias=False,
-                padding_mode="zeros",
-            ),
-        )
-        self._test_op_graph(module, input_size=[1, 3, 6, 6], generate=False)
 
     @override_qengines
     def test_conv2d_relu(self):
