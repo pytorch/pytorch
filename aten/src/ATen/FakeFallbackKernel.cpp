@@ -190,22 +190,6 @@ bool has_op_impl_predicate(const c10::OperatorHandle& op) {
        op.hasComputedKernelForDispatchKey(c10::DispatchKey::Meta));
 }
 
-// See cppFakeNotImplemented; categories is the op's fakeDispatchTableCategories
-bool cpp_fake_not_implemented(const c10::OperatorHandle& op, uint32_t categories) {
-  using at::impl::FakeDispatchCategory;
-  for (const auto category :
-       {FakeDispatchCategory::OpImpl,
-        FakeDispatchCategory::CustomOpImpl,
-        FakeDispatchCategory::PrimMeta,
-        FakeDispatchCategory::PythonCIA}) {
-    if (at::impl::fakeDispatchCategoriesHave(categories, category)) {
-      return true;
-    }
-  }
-  return op.hasTag(at::Tag::dynamic_output_shape) ||
-      op.hasTag(at::Tag::data_dependent_output) || has_op_impl_predicate(op);
-}
-
 bool cpp_meta_supports_symint(
     const c10::OperatorHandle& op,
     uint32_t categories) {
@@ -213,18 +197,6 @@ bool cpp_meta_supports_symint(
       at::impl::fakeDispatchCategoriesHave(
           categories, at::impl::FakeDispatchCategory::CppMetaSupportsSymint);
 }
-
-} // namespace
-
-namespace at::impl {
-
-bool cppFakeNotImplemented(const c10::OperatorHandle& op) {
-  return cpp_fake_not_implemented(op, fakeDispatchTableCategories(op.operator_name()));
-}
-
-} // namespace at::impl
-
-namespace {
 
 void fakeFallback(
     const c10::OperatorHandle& op,
