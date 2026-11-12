@@ -15,7 +15,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.triton_kernel_wrap import (
-    kernel_side_table,
+    get_triton_kernel_name,
     triton_kernel_wrapper_functional,
 )
 from torch._inductor import config, inductor_prims
@@ -1030,24 +1030,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                         replacement = output_idx_to_replacement[idx]
                         replace_and_collect(user, replacement)
         elif node.target in inplaceable_triton_ops:
-            kernel_idx = node.kwargs["kernel_idx"]
-            kernel = kernel_side_table.get_kernel(kernel_idx)
-            from triton.runtime.autotuner import Autotuner
-            from triton.runtime.jit import JITFunction
-
-            if isinstance(kernel, JITFunction):
-                kernel_name = kernel.fn.__name__
-            elif isinstance(kernel, Autotuner):
-                if config.is_fbcode():
-                    # Autotuner has different implementations for AMD and NV
-                    if torch.version.hip is None:
-                        kernel_name = kernel.base_fn.__name__
-                    else:
-                        kernel_name = kernel.fn.__name__
-                else:
-                    kernel_name = kernel.base_fn.__name__
-            else:
-                raise AssertionError("Unknown triton kernel type")
+            kernel_name = get_triton_kernel_name(node.kwargs)
 
             # inplaceable_triton_ops take an additional argument called
             # tensors_to_clone which contain a list of tensors to clone
