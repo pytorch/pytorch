@@ -142,7 +142,7 @@ __global__ void build_trsm_ptr_kernel(
 ) {
   int b = blockIdx.x * blockDim.x + threadIdx.x;
   if (b >= batch_count) return;
-  auto* base = dA + b * matrix_stride;
+  auto* base = dA + static_cast<int64_t>(b) * matrix_stride;
   dL11_array[b] = base + diag_offset + static_cast<size_t>(diag_offset) * lda;
   dA12_array[b] = base + diag_offset + static_cast<size_t>(diag_offset + panel_width) * lda;
 }
@@ -281,11 +281,11 @@ setup_pivinfo_kernel(
   int batch = blockIdx.x;
   int tid = threadIdx.x;
 
-  int* piv = pivinfo + batch * pivinfo_stride;
-  const int* ip = ipiv + batch * ipiv_stride;
+  int* piv = pivinfo + static_cast<int64_t>(batch) * pivinfo_stride;
+  const int* ip = ipiv + static_cast<int64_t>(batch) * ipiv_stride;
 
   // Initialize identity (1-based absolute row indices, like MAGMA)
-  for (int dst = tid + row_offset; dst < row_offset + nrows; dst += BS) {
+  for (int64_t dst = static_cast<int64_t>(tid) + row_offset; dst < static_cast<int64_t>(row_offset) + nrows; dst += BS) {
     piv[dst] = dst + 1;
   }
   __syncthreads();
@@ -345,8 +345,8 @@ laswp_rowparallel_kernel(
   int batch = blockIdx.z;
   int tid = threadIdx.x;
 
-  auto* A = dA + batch * matrix_stride;
-  const int* piv = pivinfo + batch * pivinfo_stride + row_offset;
+  auto* A = dA + static_cast<int64_t>(batch) * matrix_stride;
+  const int* piv = pivinfo + static_cast<int64_t>(batch) * pivinfo_stride + row_offset;
 
   // This tile's column range
   int tile_col_start = blockIdx.x * swp_width;
@@ -440,7 +440,7 @@ batched_panel_register_resident_fused_kernel(
   const int tid = threadIdx.x;
   const int batch = blockIdx.x;
   const int nrows = m - col_start;
-  auto* A = dA + batch * matrix_stride;
+  auto* A = dA + static_cast<int64_t>(batch) * matrix_stride;
   int curr_row = tid; // tracks "virtual" row swaps
   int linfo = (col_start == 0) ? 0 : dinfo[batch];
 
@@ -528,7 +528,7 @@ batched_panel_register_resident_fused_kernel(
 
   // Write pivots (1-based, absolute)
   if (tid < nb) {
-    dipiv[batch * ipiv_stride + col_start + tid] = sipiv[tid] + col_start + 1;
+    dipiv[static_cast<int64_t>(batch) * ipiv_stride + col_start + tid] = sipiv[tid] + col_start + 1;
   }
 
   // Write back results using curr_row
@@ -551,7 +551,7 @@ batched_panel_register_resident_nopiv_fused_kernel(
   const int tid = threadIdx.x;
   const int batch = blockIdx.x;
   const int nrows = m - col_start;
-  auto* A = dA + batch * matrix_stride;
+  auto* A = dA + static_cast<int64_t>(batch) * matrix_stride;
   int linfo = (col_start == 0) ? 0 : dinfo[batch];
 
   extern __shared__ char smem_raw[];
@@ -655,7 +655,7 @@ batched_panel_colserial_fused_kernel(
   __shared__ scalar_t sdiag;
 
   int batch = blockIdx.z;
-  auto* A = dA + batch * matrix_stride;
+  auto* A = dA + static_cast<int64_t>(batch) * matrix_stride;
   int tid = threadIdx.x;
   int panel_end = col_start + nb;
 
@@ -674,8 +674,13 @@ batched_panel_colserial_fused_kernel(
       }
     }
     int pivot_row = block_argmax<real_t, BS>(my_max, my_idx, sdata, sidx, tid);
+    // An all-NaN column leaves the argmax sentinel unset. Fall back to
+    // the diagonal so that swaps and pivot indices remain in bounds.
+    if (pivot_row < 0) {
+      pivot_row = k;
+    }
     if (tid == 0) {
-      dipiv[batch * ipiv_stride + k] = pivot_row + 1; // 1-based!
+      dipiv[static_cast<int64_t>(batch) * ipiv_stride + k] = pivot_row + 1; // 1-based!
     }
 
     // 2. Row swaps
@@ -706,8 +711,8 @@ batched_panel_colserial_fused_kernel(
 
     // 4. Rank-1 update (linearized)
     if (rows_below > 0 && update_cols > 0) {
-      auto numel = rows_below * update_cols;
-      for (int idx = tid; idx < numel; idx += BS) {
+      const int64_t numel = static_cast<int64_t>(rows_below) * update_cols;
+      for (int64_t idx = tid; idx < numel; idx += BS) {
         auto local_row = idx % rows_below;
         auto local_col = idx / rows_below;
         auto i = k + 1 + local_row;
