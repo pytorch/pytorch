@@ -344,8 +344,8 @@ class TestMaxAutotuneBlackwell(TestCase):
         "Need Blackwell with device-side TMA support in Triton",
     )
     def test_blackwell_host_side_tma_one_dynamic_operand(self):
-        # Only A has a dynamic dim, so A falls back to a device-side descriptor
-        # while B keeps its host-side one in the same kernel.
+        # Only A has a dynamic dim: the launcher reads it at launch, so both
+        # operands keep host-side descriptors and none is built in-kernel.
         M, N, K = 1024, 256, 512
         a = torch.randn(M, K).to(torch.float16).to(GPU_TYPE)
         b = torch.randn(K, N).to(torch.float16).to(GPU_TYPE)
@@ -361,10 +361,12 @@ class TestMaxAutotuneBlackwell(TestCase):
         ):
             c_actual, code = run_and_get_code(torch.compile(torch.mm), a, b)
         torch.testing.assert_close(c_actual, torch.mm(a, b), atol=1e-2, rtol=1e-2)
-        FileCheck().check("triton_tem_fused_mm").check_count(
-            "tl.make_tensor_descriptor(base=A", 1, exactly=True
-        ).check_not("tl.make_tensor_descriptor(base=B").run(code[0])
-        FileCheck().check("'host_tma_descriptor_args': {'arg_B'").run(code[0])
+        FileCheck().check("triton_tem_fused_mm").check_not(
+            "tl.make_tensor_descriptor(base="
+        ).run(code[0])
+        FileCheck().check("'host_tma_descriptor_args'").check("'arg_A'").check(
+            "'launch_args': ['ks0']"
+        ).run(code[0])
 
     # NOTE: the current Inductor template verifies that the scaling mode is either per-tensor or per-row
     # TODO: support additional scaling modes for Blackwell
@@ -768,22 +770,26 @@ class TestMaxAutotuneBlackwell(TestCase):
 
         # Run the emitted pre-runner code rather than matching its text, so a
         # rename in either launcher can't silently drop the output check.
-        desc = {"block_shape": [4], "shape": [16], "strides": [1]}
+        desc = {"block_shape": [4], "shape": [16], "strides": [1], "launch_args": []}
         aligned = torch.empty(16)
         misaligned = torch.empty(17)[1:]
         for is_output in (False, True):
+            out_desc = {**desc, "is_output": True} if is_output else desc
             stub = SimpleNamespace(
                 inductor_meta={
-                    "host_tma_descriptor_args": {
-                        "in_ptr0": desc,
-                        "out_ptr0": {**desc, "is_output": True} if is_output else desc,
-                    }
+                    "host_tma_descriptor_args": {"in_ptr0": {}, "out_ptr0": {}}
                 },
                 config=SimpleNamespace(kwargs={}),
-                compile_meta={"constants": {}},
+                compile_meta={
+                    "constants": {},
+                    "host_tma_descriptors": {"in_ptr0": desc, "out_ptr0": out_desc},
+                },
                 kernel=SimpleNamespace(
                     tensordesc_meta=None, tensordesc_arg_names=["in_ptr0", "out_ptr0"]
                 ),
+            )
+            stub._host_tma_descriptors = lambda call_args, stub=stub: (
+                CompileResult._host_tma_descriptors(stub, call_args)
             )
             args = ["in_ptr0", "out_ptr0"]
             lines, _ = CompileResult._host_tma_pre_runner_lines(stub, list(args), args)
@@ -805,6 +811,51 @@ class TestMaxAutotuneBlackwell(TestCase):
                         exec("\n".join(code), scope)
                 else:
                     exec("\n".join(code), scope)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_host_side_tma_store_descriptor_marked_output_at_precompile(self):
+        from torch._inductor.runtime import triton_heuristics
+
+        a = torch.randn(1024, 1024, dtype=torch.float16, device=GPU_TYPE)
+        b = torch.randn(1024, 1024, dtype=torch.float16, device=GPU_TYPE)
+        captured: list[dict] = []
+        orig = triton_heuristics.CachingAutotuner._create_compile_meta
+
+        def _spy(self, cfg):
+            meta = orig(self, cfg)
+            captured.append(meta.get("host_tma_descriptors", {}))
+            return meta
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.enable_template_tma_store": True,
+                    "triton.enable_host_side_tma": True,
+                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+                }
+            ),
+            mock.patch.object(
+                triton_heuristics.CachingAutotuner, "_create_compile_meta", _spy
+            ),
+        ):
+            actual = torch.compile(torch.mm)(a, b)
+
+        torch.testing.assert_close(actual, a @ b, atol=1e-2, rtol=1e-2)
+        # The launchers only see the compile-time record, so the store's
+        # is_output must survive into it; the operands stay inputs.
+        outputs = {
+            n for descs in captured for n, d in descs.items() if d.get("is_output")
+        }
+        inputs = {
+            n for descs in captured for n, d in descs.items() if not d.get("is_output")
+        }
+        self.assertEqual(outputs, {"out_ptr0"}, captured)
+        self.assertEqual(inputs, {"arg_A", "arg_B"}, captured)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
