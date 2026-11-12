@@ -88,10 +88,11 @@ def _u32_to_i32(x: int) -> int:
 class TopKSpec:
     """Encode a value as a signed int32 ordinal and decode it.
 
-    The dtype selects an involutive, same-width bit transform. The spec
-    left-aligns its result in an int32, then complements it for
-    ``largest=False`` to reverse the order. NaNs collapse to a sentinel;
-    the caller detects that sentinel and reloads the original value.
+    The dtype selects an involutive, same-width bit transform and, for a
+    float, the ``+inf`` bit pattern used to detect NaN and a NaN sentinel.
+    The spec collapses NaNs, applies the transform, left-aligns its result
+    in an int32, then complements it for ``largest=False``. Decoding reverses
+    every step but the collapse; the caller detects the sentinel and reloads.
     """
 
     dtype: torch.dtype
