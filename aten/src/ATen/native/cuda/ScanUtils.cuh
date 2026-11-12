@@ -1576,6 +1576,8 @@ void scan_innermost_dim(const TensorBase& self, const TensorBase& result,
 #endif
 }
 
+// binary_op must be associative, and commutative too: the ROCm kernels combine pieces of a line
+// out of order (see inner_scan).
 template<typename scalar_t, typename BinaryFunction>
 void scan_dim(const TensorBase& self, const TensorBase& result,
      int64_t dim, scalar_t init, BinaryFunction binary_op) {
