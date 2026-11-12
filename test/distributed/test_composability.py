@@ -22,9 +22,9 @@ from torch.distributed.pipelining.schedules import (
 )
 from torch.distributed.tensor import DTensor
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
+    requires_accelerator_dist_backend,
     requires_nccl,
     skip_if_lt_x_gpu,
 )
@@ -32,12 +32,12 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skip_but_pass_in_sandcastle_if,
     skipIfRocm,
 )
 
 
-device_type = "cuda"
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+backend = torch.distributed.get_default_backend_for_device(device_type)
 
 
 # MLP Layer
@@ -100,7 +100,7 @@ class ComposabilityTest(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
         # Testing with NCCL backend
-        return "nccl"
+        return backend
 
     @property
     def device(self) -> torch.device:
@@ -214,9 +214,8 @@ class ComposabilityTest(MultiProcContinuousTest):
             )
         return pipeline_schedule, partial_models, offsets
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(4)
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @parametrize(
         "ScheduleClass",
         [
@@ -293,9 +292,8 @@ class ComposabilityTest(MultiProcContinuousTest):
                 ref_p = ref_parameters[name]
                 torch.testing.assert_close(p.grad, ref_p.grad)
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(4)
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @parametrize("dp_type", ["FSDP", "FSDP_MP"])
     @parametrize(
         "ScheduleClass,defer_reduce_grad_wait",
@@ -413,9 +411,8 @@ class ComposabilityTest(MultiProcContinuousTest):
                     p.grad.full_tensor(), ref_p.grad, atol=5e-5, rtol=2e-2
                 )
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(4)
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @skipIfRocm
     @parametrize("defer_reduce_grad_wait", [False, True])
     def test_pp_fsdp_outer_gradient_accumulation(self, defer_reduce_grad_wait):
@@ -537,7 +534,6 @@ class ComposabilityTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @parametrize("dp_type", ["FSDP", "FSDP_MP"])
     def test_pp_fsdp_unshard_reshard_runtime(self, dp_type):
         """Test FSDP UNSHARD/RESHARD functionality using _PipelineScheduleRuntime with custom schedules."""
