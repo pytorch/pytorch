@@ -588,6 +588,18 @@ class StorageOverlap(GuardEnvExpr):
     non_overlapping_sources: list[Source]
 
 
+@dataclasses.dataclass(frozen=True)
+class StorageOverlapPartition(GuardEnvExpr):
+    input_sources: list[Source]
+    overlapping_indices: tuple[tuple[int, ...], ...]
+
+    def __post_init__(self) -> None:
+        if len(set(self.input_sources)) != len(self.input_sources):
+            raise AssertionError(
+                f"input_sources must be unique, got {self.input_sources}"
+            )
+
+
 """
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
 
@@ -913,6 +925,8 @@ class InvokeSubgraphReuseEntry:
     # The graph may have additional outputs from side-effect intermediates;
     # stamp_out_subgraph uses this to return only the user-visible slice.
     num_user_outputs: int = 0
+
+    shape_guards: list[tuple[Any, bool]] = dataclasses.field(default_factory=list)
 
 
 @dataclass
