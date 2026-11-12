@@ -1311,6 +1311,26 @@
       ]
     }
   ],
+  "GB2806": [
+    {
+      "Gb_type": "bytearray store to an existing bytearray",
+      "Context": "bytearray: {self.source.name}",
+      "Explanation": "Dynamo leaves writes to bytearrays with a source to eager to preserve shared buffers and resize errors.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6677": [
+    {
+      "Gb_type": "bytearray store with non-constant value",
+      "Context": "value: {value.python_type_name()}",
+      "Explanation": "Dynamo only traces bytearray item and slice stores whose value is known at compile time.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB6012": [
     {
       "Gb_type": "Cannot trace user-defined __len__",
@@ -1469,6 +1489,16 @@
       "Explanation": "Dynamo requires the attribute name passed to `super().__delattr__(...)` to be a constant (string).",
       "Hints": [
         "Ensure the attribute name is a string literal or a constant variable."
+      ]
+    }
+  ],
+  "GB7937": [
+    {
+      "Gb_type": "Prebound builtin method identity requires wrapper guards",
+      "Context": "builtin method wrapper identity",
+      "Explanation": "Binding guards cannot preserve builtin method wrapper identity when identity guards are filtered.",
+      "Hints": [
+        "Keep wrapper identity observations outside saved or guard-filtered functions."
       ]
     }
   ],
@@ -1855,14 +1885,6 @@
       "Hints": [
         "Compare or hash slot wrappers outside the compiled region."
       ]
-    },
-    {
-      "Gb_type": "slot-wrapper identity requires receiver guards",
-      "Context": "{self}",
-      "Explanation": "Saved slot-wrapper hashes require receiver identity guards that may be filtered out.",
-      "Hints": [
-        "Compute the hash or build the container outside the compiled region."
-      ]
     }
   ],
   "GB7711": [
@@ -2036,16 +2058,6 @@
       "Hints": [
         "Avoid checking COW state on tensor subclasses inside ",
         "torch.compile regions."
-      ]
-    }
-  ],
-  "GB4061": [
-    {
-      "Gb_type": "Unsupported OrderedDict union result",
-      "Context": "new.python_type_name()",
-      "Explanation": "Dynamo cannot yet update a non-dictionary returned by an OrderedDict subclass constructor.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -2669,6 +2681,16 @@
       "Context": "",
       "Explanation": "msg",
       "Hints": []
+    }
+  ],
+  "GB1891": [
+    {
+      "Gb_type": "Unsafe value live across comprehension graph break",
+      "Context": "{value}, frame skipped: {format_frame_info(tx.f_code)}",
+      "Explanation": "A context manager or local generator cannot be reconstructed safely after a comprehension graph break, so the frame falls back to eager.",
+      "Hints": [
+        "Close the generator first, or move the comprehension into a helper."
+      ]
     }
   ],
   "GB0150": [
@@ -7338,16 +7360,6 @@
     },
     {
       "Gb_type": "OrderedDict storage differs from linked keys",
-      "Context": "OrderedDict input snapshot: {error}",
-      "Explanation": "Dynamo cannot safely match this OrderedDict's linked order to its dictionary storage.",
-      "Hints": [
-        "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
-        "On free-threaded builds, use Python 3.14.1 or newer.",
-        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
-      ]
-    },
-    {
-      "Gb_type": "OrderedDict storage differs from linked keys",
       "Context": "OrderedDict input snapshot",
       "Explanation": "Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
       "Hints": [
@@ -7356,31 +7368,13 @@
       ]
     }
   ],
-  "GB5295": [
+  "GB1160": [
     {
-      "Gb_type": "builtin method hash with unstable receiver",
-      "Context": "receiver: {obj}",
-      "Explanation": "Dynamo cannot compute the hash of a builtin method without a stable receiver identity.",
+      "Gb_type": "Unsupported dictionary view owner",
+      "Context": "dict_vt.python_type_name()",
+      "Explanation": "Dynamo cannot access this dictionary view's owner storage.",
       "Hints": [
-        "Bind the method on an input or another stable object.",
-        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
-      ]
-    },
-    {
-      "Gb_type": "builtin method hash with unstable receiver",
-      "Context": "{self}",
-      "Explanation": "Dynamo cannot compute the hash of a builtin method without a stable receiver identity.",
-      "Hints": [
-        "Bind the method on an input or another stable object.",
-        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
-      ]
-    },
-    {
-      "Gb_type": "builtin method hash with unstable receiver",
-      "Context": "{self}",
-      "Explanation": "Dynamo cannot compute the hash of a builtin method without a stable receiver identity.",
-      "Hints": [
-        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -7394,11 +7388,11 @@
       ]
     }
   ],
-  "GB1160": [
+  "GB4061": [
     {
-      "Gb_type": "Unsupported dictionary view owner",
-      "Context": "dict_vt.python_type_name()",
-      "Explanation": "Dynamo cannot access this dictionary view's owner storage.",
+      "Gb_type": "Unsupported OrderedDict union result",
+      "Context": "new.python_type_name()",
+      "Explanation": "Dynamo cannot yet update a non-dictionary returned by an OrderedDict subclass constructor.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
