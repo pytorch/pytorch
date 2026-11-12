@@ -382,8 +382,10 @@ class TestKernelGeneral(TestCase):
     def test_family_kernels_are_listed(self):
         # New kernels must be listed here deliberately: TileReduce is the shared body for every
         # axis, PartialColumns folds partition-major column partials, and _OrderedColReduce
-        # preserves the row inner-tree order down columns. Glob files and match
-        # qualified or annotated decorators so new drivers and spellings cannot evade the check.
+        # preserves the row inner-tree order down columns. aot_kernel.py holds native-AOT's
+        # inner-tree multirow, looped, split-partial and accumulate kernels. Glob files and
+        # match qualified or annotated decorators so new drivers and spellings cannot evade
+        # the check.
         # Runtime introspection cannot distinguish @cute.kernel from @cute.jit wrappers.
         root = pathlib.Path(reductions.__file__).parent
         deco = re.compile(r"@(?:\w+\.)*cute\.kernel\b")
@@ -393,7 +395,8 @@ class TestKernelGeneral(TestCase):
             for line in path.read_text().splitlines()
             if deco.match(line.strip())
         )
-        self.assertEqual(found, {"tile.py": 1, "kernel_coltile.py": 2})
+        allowed = {"tile.py": 1, "kernel_coltile.py": 2, "aot_kernel.py": 4}
+        self.assertEqual(found, allowed)
 
     # 4095 over 64 threads leaves leftover subtrees and a 63-value tail load with one masked
     # lane; count == block is a single load, and 200 over 128 one whole load and a tail.
