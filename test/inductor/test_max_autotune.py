@@ -1874,8 +1874,6 @@ class TestMaxAutotune(TestCase):
         }
     )
     def test_max_autotune_decompose_k_compile_failure(self):
-        # A subgraph choice whose benchmark module fails to compile is dropped
-        # instead of failing the whole compile.
         from torch._inductor.codegen.subgraph import SubgraphChoiceCaller
         from torch._inductor.compile_worker.subproc_pool import SubprocException
 

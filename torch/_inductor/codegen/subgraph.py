@@ -269,9 +269,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
     def _ensure_compiled(self) -> None:
         """Ensure the module is compiled. Used for lazy compilation in non-async path.
 
-        A compile failure (e.g. a kernel Triton cannot lower) makes this choice
-        unusable rather than failing the whole compile, matching how template
-        choices that fail to precompile are dropped.
+        A compile failure drops this choice, like a template that fails to precompile.
         """
         if self._compiled_module is not None:
             return
