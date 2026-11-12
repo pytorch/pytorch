@@ -91,7 +91,7 @@ TOLERANCES = {
 # Runs eagerly under --use-compile: offs.tolist() and the print can't be compiled.
 @torch.compiler.disable
 def check_correctness(x, w, offs):
-    """Output, dX and dW against per-group fp32 matmuls, with Primus-Turbo's tolerances."""
+    """Primus-Turbo's check: output, dX and dW against per-group matmuls."""
     x, w = (t.detach().requires_grad_() for t in (x, w))
     with torch.enable_grad():
         out = torch.nn.functional.grouped_mm(x, w.transpose(-2, -1), offs=offs)
@@ -101,17 +101,15 @@ def check_correctness(x, w, offs):
     groups = list(enumerate(zip([0] + ends[:-1], ends)))
     rtol, atol = TOLERANCES[x.dtype]
 
-    # The reference is computed in fp32: a 16-bit mm may reduce long sums (N = 32768 in dX)
-    # in reduced precision on CUDA, which alone can exceed these tolerances.
-    def close(out, a, b):
-        return torch.allclose(out.float(), a.float() @ b.float(), rtol=rtol, atol=atol)
+    def close(a, b):
+        return torch.allclose(a, b, rtol=rtol, atol=atol)
 
     # Compare one group at a time: full-size references OOM on the largest fp32 shapes.
     with torch.no_grad():
         ok = {
-            "fwd": all(close(out[s:e], x[s:e], w[i].t()) for i, (s, e) in groups),
-            "dX": all(close(dx[s:e], grad_out[s:e], w[i]) for i, (s, e) in groups),
-            "dW": all(close(dw[i], grad_out[s:e].t(), x[s:e]) for i, (s, e) in groups),
+            "fwd": all(close(out[s:e], x[s:e] @ w[i].t()) for i, (s, e) in groups),
+            "dX": all(close(dx[s:e], grad_out[s:e] @ w[i]) for i, (s, e) in groups),
+            "dW": all(close(dw[i], grad_out[s:e].t() @ x[s:e]) for i, (s, e) in groups),
         }
     details = ", ".join(f"{k}={v}" for k, v in ok.items())
     shapes = f"x {tuple(x.shape)} w {tuple(w.shape)} {x.dtype}"
