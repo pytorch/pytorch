@@ -138,7 +138,7 @@ SymInt operator-(const SymInt& s) {
     // Workaround by using ternary that avoids alterning the flags
 #if C10_HAS_BUILTIN_OVERFLOW()
     std::decay_t<decltype(val)> out = 0;
-    if (C10_UNLIKELY(__builtin_sub_overflow(out, val, &out))) {
+    if (__builtin_sub_overflow(out, val, &out)) [[unlikely]] {
       return SymInt(val);
     }
     return SymInt(out);

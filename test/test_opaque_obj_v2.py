@@ -57,6 +57,7 @@ from torch.fx.graph import _illegal_char_regex
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    preserves_device_selection,
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
@@ -1657,11 +1658,15 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         def foo(counter, x):
             if hasattr(counter, "missing"):
                 x = x + 1
-            return x, getattr(counter, "missing", None)
+            return x + 1, getattr(counter, "missing", None)
 
         x = torch.ones(2, 3)
-        opt_foo = torch.compile(foo, backend="eager", fullgraph=True)
-        self.assertEqual(opt_foo(counter, x), foo(counter, x))
+        backend = CompileCounter()
+        opt_foo = torch.compile(foo, backend=backend, fullgraph=True)
+        # The registered guard specializes on `start`, not `end`.
+        for value in (counter, Counter(0, 9)):
+            self.assertEqual(opt_foo(value, x), foo(value, x))
+        self.assertEqual(backend.frame_count, 1)
 
     def test_compile_fixed_stride_order(self):
         hs_name = get_opaque_type_name(HoistedString)
@@ -4408,6 +4413,8 @@ class TestOpaqueGenerator(TestCase):
 
 class TestOpaqueGeneratorDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+    setUp = preserves_device_selection(TestCase.setUp)
+    setUpClass = classmethod(preserves_device_selection(TestCase.setUpClass.__func__))
 
     @onlyAccelerator
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5200")
