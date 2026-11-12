@@ -4656,6 +4656,27 @@ Attributes:
             group that never communicates allocates no NCCL resources. Such a
             group can't be split from until its first operation. Default is
             False.
+    encryption_psk (str, optional): nccl2 only. Pre-shared key NCCL uses to
+            encrypt and authenticate its built-in TCP sockets (bootstrap,
+            proxy, RAS, socket transport and InfiniBand connection setup)
+            with TLS 1.3. GPU data paths, external net plugins and the c10d
+            Store are not encrypted. The key is process-global and applies to
+            every NCCL user in the process: set it on the first nccl2 group,
+            identically on every rank, before any other NCCL communicator
+            exists (only earlier nccl2 groups are checked). Later groups must
+            pass the same key or none. Ranks with mismatched keys may hang
+            rather than error. NCCL requires at least 32 bytes; use a
+            uniformly random secret (e.g. ``secrets.token_hex(32)``), not a
+            passphrase. Requires NCCL 2.32.3+ built with
+            ``TLS_BACKEND=OPENSSL3`` with ``libcrypto.so.3`` and
+            ``libssl.so.3`` available at runtime; otherwise group or
+            communicator creation fails; ROCm is unsupported. Groups must not
+            be constructed concurrently while a key is being set. If None and
+            no key has been applied yet, the ``TORCH_NCCL_ENCRYPTION_PSK``
+            environment variable is used when non-empty, so setting it after
+            a keyless first group makes later group creation fail. The key
+            persists for the life of the process, across
+            ``destroy_process_group``. Default is None.
 
 Example::
     >>> import torch.distributed as dist
@@ -4679,6 +4700,8 @@ Example::
       .def_readwrite(
           "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
       .def_readwrite("lazy_init", &::c10d::ProcessGroupNCCL::Options::lazy_init)
+      .def_readwrite(
+          "encryption_psk", &::c10d::ProcessGroupNCCL::Options::encryption_psk)
       .def_readwrite(
           "use_pg_for_symm_mem_rendezvous",
           &::c10d::ProcessGroupNCCL::Options::use_pg_for_symm_mem_rendezvous)
