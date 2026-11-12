@@ -2100,6 +2100,8 @@ def apply_graphsafe_rng_functionalization(
             args=(fw_node.target, *fw_node.args),  # type: ignore[arg-type]
             kwargs=fw_kwargs,
         )
+        # (It returns what the op does.)
+        functional_fw_node.meta["val"] = fw_node.meta.get("val")
     fw_node.replace_all_uses_with(functional_fw_node)
     fw_graph.erase_node(fw_node)
 
@@ -2113,6 +2115,7 @@ def apply_graphsafe_rng_functionalization(
             args=(bw_node.target, *bw_node.args),  # type: ignore[arg-type]
             kwargs=bwd_kwargs,
         )
+        rng_output.meta["val"] = bw_node.meta.get("val")
         bw_node.replace_all_uses_with(rng_output)
         bw_graph.erase_node(bw_node)
 
