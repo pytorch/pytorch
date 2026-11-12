@@ -102,8 +102,21 @@ class modules(_TestParametrizer):
                                'context; use it with instantiate_device_type_tests() instead of '
                                'instantiate_parametrized_tests()')
 
-        for module_info in self.module_info_list:
-            dtypes = set(module_info.supported_dtypes(device_cls.device_type))
+        if not self.module_info_list:
+            raise ValueError(
+                f"{test.__name__}: An empty module_info_list was passed to @modules. "
+                "Note that this may result from reuse of a generator."
+            )
+
+        # Order matters: module_allowlist filters first, then module_overrides adds
+        # decorators. This ensures module_overrides only applies to modules that
+        # passed the module_allowlist filter.
+        module_info_list = device_cls._apply_module_allowlist(self.module_info_list)
+        module_info_list = device_cls._apply_module_overrides(module_info_list)
+
+        device_type = device_cls._resolved_device_type()
+        for module_info in module_info_list:
+            dtypes = set(module_info.supported_dtypes(device_type))
             if self.allowed_dtypes is not None:
                 dtypes = dtypes.intersection(self.allowed_dtypes)
 
@@ -130,7 +143,7 @@ class modules(_TestParametrizer):
                         test_wrapper = skipIfTorchDynamo("Policy: we don't run ModuleInfo tests w/ Dynamo")(test_wrapper)
 
                     decorator_fn = partial(module_info.get_decorators, generic_cls.__name__,
-                                           test.__name__, device_cls.device_type, dtype)
+                                           test.__name__, device_type, dtype)
 
                     yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
@@ -4365,6 +4378,10 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
                    DecorateInfo(precisionOverride({torch.complex64: 1e-04}), 'TestModule', 'test_cpu_gpu_parity'),
                    DecorateInfo(precisionOverride({torch.chalf: 5e-03}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(
+                       toleranceOverride({torch.float32: tol(atol=2e-5, rtol=1e-5)}),
+                       "TestModule", "test_non_contiguous_tensors", device_type="xpu"
+                   ),
                )),
     ModuleInfo(torch.nn.CosineEmbeddingLoss,
                module_inputs_func=module_inputs_torch_nn_CosineEmbeddingLoss,
@@ -4455,6 +4472,10 @@ module_db: list[ModuleInfo] = [
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(
+                       toleranceOverride({torch.float32: tol(atol=2e-5, rtol=1e-5)}),
+                       "TestModule", "test_non_contiguous_tensors", device_type="xpu"
+                   ),
                )),
     ModuleInfo(torch.nn.LazyConvTranspose1d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=True, transposed=True),
@@ -4500,6 +4521,10 @@ module_db: list[ModuleInfo] = [
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(
+                       toleranceOverride({torch.float32: tol(atol=2e-5, rtol=1e-5)}),
+                       "TestModule", "test_non_contiguous_tensors", device_type="xpu"
+                   ),
                )),
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear,
