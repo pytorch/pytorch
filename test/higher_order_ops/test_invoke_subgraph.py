@@ -3693,6 +3693,30 @@ class TestInvokeSubgraphCompileCUDA(TestCase):
 class TestInvokeSubgraphReuse(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_method_receiver_alias_guards_retrace(self):
+        class Pair:
+            def __init__(self, left, right):
+                self.left, self.right = left, right
+
+        @nested_compile_region
+        def region(x, pair):
+            return x + (
+                list.count.__get__(pair.left, list)
+                == list.count.__get__(pair.right, list)
+            )
+
+        def fn(x, first, second):
+            return region(x, first) + region(x, second)
+
+        x, shared = torch.ones(1), []
+        first, second = Pair([], []), Pair(shared, shared)
+        with self._count_speculate_calls() as count:
+            result = torch.compile(fn, backend="eager", fullgraph=True)(
+                x, first, second
+            )
+        self.assertEqual(result, 2 * x + 1)
+        self.assertEqual(count(), 2)
+
     @contextlib.contextmanager
     def _count_speculate_calls(self):
         count = 0
@@ -3901,7 +3925,7 @@ class TestInvokeSubgraphReuse(TestCase):
             self.assertEqual(compiled(x, holders), fn(x, holders))
             holders[-1] = Holder(7)
             self.assertEqual(compiled(x, holders), fn(x, holders))
-        self.assertEqual(initial_traces, 2)
+        self.assertEqual(initial_traces, 1)
         self.assertEqual(counter.frame_count, 2)
 
     @parametrize("second_capture", ["static", "dynamic", "shared"])
@@ -3931,7 +3955,7 @@ class TestInvokeSubgraphReuse(TestCase):
                 if second_capture == "shared":
                     holders[1].tensor = holders[0].tensor
                 self.assertEqual(compiled(x, holders), fn(x, holders))
-        self.assertEqual(count(), 1 if second_capture == "shared" else 2)
+        self.assertEqual(count(), 2 if second_capture == "static" else 1)
         self.assertEqual(counter.frame_count, 1)
 
     def test_reused_region_captured_storage_offset(self):
@@ -3981,11 +4005,71 @@ class TestInvokeSubgraphReuse(TestCase):
         self.assertEqual(count(), 1)
         self.assertEqual(counter.frame_count, 1)
 
+    @parametrize("metadata", ["scalar", "offset"])
+    def test_reused_region_captured_symbol_source(self, metadata):
+        class Holder:
+            def __init__(self, value):
+                self.scale = value
+                self.tensor = torch.arange(12.0)[value : value + 2]
+
+        @nested_compile_region
+        def region(x, holder):
+            size = (
+                holder.scale if metadata == "scalar" else holder.tensor.storage_offset()
+            )
+            return x + size
+
+        def fn(x, holders):
+            return tuple(region(x, holder) for holder in holders)
+
+        holders = [Holder(value) for value in (5, 3, 7)]
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        with self._count_speculate_calls() as count:
+            x = torch.ones(2)
+            self.assertEqual(compiled(x, holders), fn(x, holders))
+            self.assertEqual(compiled(x, holders), fn(x, holders))
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(count(), 1)
+
+    def test_reused_region_independent_dynamic_capture_symbols(self):
+        class Holder:
+            def __init__(self, size):
+                self.tensor = torch.ones(size)
+                torch._dynamo.mark_dynamic(self.tensor, 0)
+
+        @nested_compile_region
+        def region(x, holder):
+            size = holder.tensor.shape[0]
+            return x + size, x.expand(size).clone()
+
+        def fn(x, holders):
+            return tuple(region(x, holder) for holder in holders)
+
+        holders = [Holder(5) for _ in range(9)]
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        with self._count_speculate_calls() as count:
+            x = torch.ones(1)
+            self.assertEqual(compiled(x, holders), fn(x, holders))
+            for holder in holders:
+                holder.tensor = torch.ones(13)
+                torch._dynamo.mark_dynamic(holder.tensor, 0)
+            self.assertEqual(compiled(x, holders), fn(x, holders))
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(count(), 1)
+
     @torch._dynamo.config.patch(install_free_tensors=True)
-    def test_reused_region_graph_attribute_metadata(self):
+    @parametrize("metadata", ["size", "stride"])
+    def test_reused_region_graph_attribute_metadata(self, metadata):
         @nested_compile_region
         def region(x, layer):
-            return x + layer.weight.shape[0]
+            value = (
+                layer.weight.shape[0]
+                if metadata == "size"
+                else layer.weight.stride()[0]
+            )
+            return x + value
 
         def fn(x, layers):
             return tuple(region(x, layer) for layer in layers)
@@ -3998,7 +4082,10 @@ class TestInvokeSubgraphReuse(TestCase):
             self.assertEqual(compiled(x, layers), fn(x, layers))
             self.assertEqual(count(), 1)
             self.assertEqual(counter.frame_count, 1)
-            layers[-1].weight = torch.nn.Parameter(torch.ones(5, 3))
+            replacement = (
+                torch.ones(5, 3) if metadata == "size" else torch.ones(3, 3).t()
+            )
+            layers[-1].weight = torch.nn.Parameter(replacement)
             self.assertEqual(compiled(x, layers), fn(x, layers))
         self.assertEqual(count(), 3)
         self.assertEqual(counter.frame_count, 2)
@@ -4026,10 +4113,41 @@ class TestInvokeSubgraphReuse(TestCase):
         self.assertEqual(count(), 1)
         self.assertEqual(counter.frame_count, 1)
 
-    def test_reused_region_dynamic_policy_with_static_first_capture(self):
+    @parametrize("plain_first", [False, True])
+    def test_reused_region_metadata_guard_values(self, plain_first):
+        class Holder:
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+        @nested_compile_region
+        def region(x, holder):
+            return x + holder.tensor.shape[0]
+
+        def fn(x, holders):
+            return tuple(region(x, holder) for holder in holders)
+
+        first = torch.ones(2)
+        if not plain_first:
+            first = torch.nn.Parameter(first, requires_grad=False)
+        second = torch.nn.Parameter(torch.ones(2), requires_grad=False)
+        torch._dynamo.mark_static(second, 0)
+        holders = [Holder(first), Holder(second)]
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=False)
+        x = torch.ones(1)
+        with self._count_speculate_calls() as count:
+            for _ in range(2):
+                self.assertEqual(compiled(x, holders), fn(x, holders))
+        self.assertEqual(count(), 1)
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(force_parameter_static_shapes=False)
+    @parametrize("parameter", [False, True])
+    def test_reused_region_dynamic_policy_with_static_first_capture(self, parameter):
         class Holder:
             def __init__(self):
-                self.tensor = torch.ones(2)
+                value = torch.ones(2)
+                self.tensor = torch.nn.Parameter(value) if parameter else value
 
         @nested_compile_region
         def region(x, holder):
@@ -4045,7 +4163,8 @@ class TestInvokeSubgraphReuse(TestCase):
         x = torch.ones(1)
         with self._count_speculate_calls() as count:
             self.assertEqual(compiled(x, holders), fn(x, holders))
-            holders[1].tensor = torch.ones(7)
+            value = torch.ones(7)
+            holders[1].tensor = torch.nn.Parameter(value) if parameter else value
             self.assertEqual(compiled(x, holders), fn(x, holders))
         self.assertEqual(count(), 2)
         self.assertEqual(counter.frame_count, 1)
