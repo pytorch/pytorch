@@ -235,7 +235,8 @@ struct TensorArgs {
       it = _args.emplace(impl, TensorArg(_next_id++)).first;
       inputs.emplace_back(tensor);
       if (active_node_call_idx.has_value()) {
-        input_origins.emplace_back(active_node_call_idx.value());
+        input_origins.emplace_back(
+            static_cast<uint32_t>(active_node_call_idx.value()));
       }
     }
     return it->second;
@@ -306,7 +307,8 @@ struct LiftedIValueArgs {
   void add(const at::IValue* iv) {
     args.emplace_back(iv);
     if (active_node_call_idx.has_value()) {
-      args_origins.emplace_back(active_node_call_idx.value());
+      args_origins.emplace_back(
+          static_cast<uint32_t>(active_node_call_idx.value()));
     }
   }
 
@@ -330,7 +332,8 @@ struct AutogradCompilerCall {
     all_size_inputs.emplace_back(
         default_dyn_type, s.guard_int(__FILE__, __LINE__));
     if (active_node_call_idx.has_value()) {
-      size_input_origins.emplace_back(active_node_call_idx.value());
+      size_input_origins.emplace_back(
+          static_cast<uint32_t>(active_node_call_idx.value()));
     }
   }
 
@@ -663,7 +666,7 @@ class CompiledNodeArgs {
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
-    _node_call.tensor_pre_hooks.emplace_back(fn_id, index);
+    _node_call.tensor_pre_hooks.emplace_back(static_cast<int>(fn_id), index);
   }
 
   void add_cpp_single_tensor_pre_hook(
@@ -680,25 +683,26 @@ class CompiledNodeArgs {
 
     auto hook_id = _compiler.emplace_cpp_tensor_pre_hook(std::move(wrapper));
     collect_size(hook_id);
-    _node_call.cpp_tensor_pre_hooks.emplace_back(hook_id, idx);
+    _node_call.cpp_tensor_pre_hooks.emplace_back(
+        static_cast<int>(hook_id), static_cast<int>(idx));
   }
 
   void add_pre_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
-    _node_call.pre_hooks.emplace_back(fn_id);
+    _node_call.pre_hooks.emplace_back(static_cast<int>(fn_id));
   }
 
   void add_post_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
-    _node_call.post_hooks.emplace_back(fn_id);
+    _node_call.post_hooks.emplace_back(static_cast<int>(fn_id));
   }
 
   void add_post_acc_grad_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
-    _node_call.post_acc_grad_hooks.emplace_back(fn_id);
+    _node_call.post_acc_grad_hooks.emplace_back(static_cast<int>(fn_id));
   }
 
   // Need to template the size_t to silence internal 32-bit build errors due to
@@ -710,7 +714,7 @@ class CompiledNodeArgs {
     constexpr uint8_t encode_as_u64 = std::numeric_limits<uint8_t>::max();
     constexpr uint8_t encode_as_u32 = encode_as_u64 - 1;
     constexpr uint8_t encode_as_u16 = encode_as_u64 - 2;
-    if (C10_UNLIKELY(s >= encode_as_u16)) {
+    if (s >= encode_as_u16) [[unlikely]] {
       // first write a byte indicating the path we followed, then the data
       if (s <= std::numeric_limits<uint16_t>::max()) {
         // 3 bytes
@@ -753,8 +757,8 @@ class CompiledNodeArgs {
  private:
   template <typename T>
   void specialize_on_bytes(const T& t) {
-    while (C10_UNLIKELY(
-        _specialization_key_size + sizeof(T) > _specialization_key_storage)) {
+    while (_specialization_key_size + sizeof(T) > _specialization_key_storage)
+        [[unlikely]] {
       _specialization_key_storage *= 2;
       // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       _specialization_key = (uint8_t*)std::realloc(

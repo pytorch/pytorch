@@ -634,7 +634,7 @@ TEST_F(CudaGraphManagerTest, RunsOnTheGivenStream) {
   EXPECT_EQ(region.calls, 2);
 }
 
-TEST_F(CudaGraphManagerTest, RejectsInputsOnOtherDevices) {
+TEST_F(CudaGraphManagerTest, RejectsInputsOnOtherDevicesMultiGpu) {
   CudaGraphManager manager(0);
   Region region(affine);
   // Even during warm-up, which would otherwise run the region eagerly.
@@ -647,7 +647,7 @@ TEST_F(CudaGraphManagerTest, RejectsInputsOnOtherDevices) {
   EXPECT_EQ(region.calls, 0);
 }
 
-TEST_F(CudaGraphManagerTest, RunsOnItsDeviceWhileAnotherIsCurrent) {
+TEST_F(CudaGraphManagerTest, RunsOnItsDeviceWhileAnotherIsCurrentMultiGpu) {
   if (c10::cuda::device_count() < 2) {
     GTEST_SKIP() << "Needs 2 GPUs";
   }
