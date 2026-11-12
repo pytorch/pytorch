@@ -817,7 +817,7 @@ static cublasHandle_t getCurrentCUDABlasHandleImpl(
 #if !defined(USE_ROCM)
   CUcontext pctx = nullptr;
   at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx);
-  if (C10_UNLIKELY(!pctx)) {
+  if (!pctx) [[unlikely]] {
     TORCH_WARN_ONCE("Attempting to run cuBLAS, but there was no current CUDA context! Attempting to set the primary context...");
     at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(&pctx, device);
     at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
@@ -988,7 +988,7 @@ CUDABlasHandleWithWorkspace::~CUDABlasHandleWithWorkspace() {
 #else
   const cublasStatus_t status = cublasSetStream(handle_, stream_);
 #endif
-  if (C10_UNLIKELY(status != CUBLAS_STATUS_SUCCESS)) {
+  if (status != CUBLAS_STATUS_SUCCESS) [[unlikely]] {
     // The handle may still refer to this allocation. Retain it rather than
     // leaving a dangling workspace pointer in a pooled handle. Destructors
     // cannot report this failure by throwing.
@@ -1102,7 +1102,7 @@ void releaseCaptureCublasWorkspaces(c10::CaptureId_t capture_id) {
       // A handle kept past the capture must not write into memory the graph
       // owns.
       const cublasStatus_t status = cublasSetWorkspace(handle, nullptr, 0);
-      if (C10_UNLIKELY(status != CUBLAS_STATUS_SUCCESS)) {
+      if (status != CUBLAS_STATUS_SUCCESS) [[unlikely]] {
         // Keep the allocations rather than leave the handle bound to freed
         // memory. It is bound to whichever stream's workspace it used last.
         for (auto& workspace : handle_workspaces) {

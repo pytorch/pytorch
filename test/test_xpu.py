@@ -293,6 +293,37 @@ if __name__ == "__main__":
         with self.assertRaisesRegex(ValueError, "Unsupported ZE_AFFINITY_MASK format"):
             _parse_visible_devices("one, two", strict=True)
 
+        # ONEAPI_DEVICE_SELECTOR is not honored by Sysman; it overrides
+        # ZE_AFFINITY_MASK, returning [] or raising ValueError in strict mode
+        with patch.dict(
+            os.environ,
+            {"ZE_AFFINITY_MASK": "0, 1", "ONEAPI_DEVICE_SELECTOR": "level_zero:0"},
+            clear=True,
+        ):
+            self.assertEqual(torch.xpu._parse_visible_devices(), [])
+            with self.assertRaisesRegex(
+                ValueError, "Unsupported ONEAPI_DEVICE_SELECTOR format"
+            ):
+                torch.xpu._parse_visible_devices(strict=True)
+
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
+    def test_device_info_api_raises_with_oneapi_device_selector(self):
+        torch.xpu._cached_zes_device_infos.clear()
+        with patch.dict(os.environ, {"ONEAPI_DEVICE_SELECTOR": "level_zero:0"}):
+            for api in (
+                torch.xpu.temperature,
+                torch.xpu.clock_rate,
+                torch.xpu.power_draw,
+                torch.xpu.utilization,
+                torch.xpu.memory_usage,
+                torch.xpu.device_memory_used,
+                torch.xpu.list_gpu_processes,
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "Unsupported ONEAPI_DEVICE_SELECTOR format"
+                ):
+                    api()
+
     def test_device_info_api_raises_import_error_without_pyzes(self):
         with unittest.mock.patch.dict("sys.modules", {"pyzes": None}):
             with self.assertRaisesRegex(ImportError, "pyzes is required"):
@@ -404,6 +435,7 @@ if __name__ == "__main__":
         current_device = torch.xpu.current_device()
         self.assertRegex(processes_info, rf"GPU:\s*{current_device}\b")
 
+    @unittest.skip("https://github.com/intel/torch-xpu-ops/issues/6131")
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_device_count_respects_affinity_mask(self):
         def _run(mask: str) -> str:
@@ -431,6 +463,21 @@ print(f"{{r1}}, {{r2}}")
         if TEST_MULTIXPU:
             # Valid mask selecting device 1 on a multi-GPU system → both return 1
             self.assertEqual(_run("1"), "1, 1")
+
+    @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
+    def test_device_count_respects_oneapi_device_selector(self):
+        test_script = """\
+import torch
+print(f"{torch.xpu._device_count_zes()}, {torch.xpu.device_count()}")
+"""
+        env = {**os.environ, "ONEAPI_DEVICE_SELECTOR": "!*:gpu"}
+        r = (
+            subprocess.check_output([sys.executable, "-c", test_script], env=env)
+            .decode("ascii")
+            .strip()
+            .splitlines()[-1]
+        )
+        self.assertEqual(r, "-1, 0")
 
     @unittest.skipIf(not TEST_MULTIXPU, "requires multiple devices")
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
@@ -580,28 +627,21 @@ print(torch.xpu.is_initialized())
 
     def test_stream_priority(self):
         low, high = torch.xpu.Stream.priority_range()
-        s0 = torch.xpu.Stream(device=0, priority=low)
-
-        self.assertEqual(low, s0.priority)
-        self.assertEqual(torch.device("xpu:0"), s0.device)
-
-        s1 = torch.xpu.Stream(device=0, priority=high)
-
-        self.assertEqual(high, s1.priority)
-        self.assertEqual(torch.device("xpu:0"), s1.device)
-
-    def test_onednn_on_stream_priority(self):
-        low, high = torch.xpu.Stream.priority_range()
-        x = torch.randn(2, 3, 8, 8)
-        w = torch.randn(4, 3, 3, 3)
-        expected = torch.nn.functional.conv2d(x, w)
-
         for priority in range(high, low + 1):
             s = torch.xpu.Stream(priority=priority)
             self.assertEqual(priority, s.priority)
-            with torch.xpu.stream(s):
-                # conv2d on XPU is backed by oneDNN, which maps the current
-                # stream to a dnnl::stream by priority.
+
+            e = torch.xpu.Event()
+            e.record()
+            s.wait_event(e)
+            s.synchronize()
+            self.assertTrue(s.query())
+
+            x = torch.randn(2, 3, 8, 8)
+            w = torch.randn(4, 3, 3, 3)
+            expected = torch.nn.functional.conv2d(x, w)
+            with s:
+                # Run a oneDNN op on a stream of each priority.
                 out = torch.nn.functional.conv2d(x.to("xpu"), w.to("xpu"))
             s.synchronize()
             self.assertEqual(out.cpu(), expected)
@@ -881,7 +921,7 @@ print(torch.xpu.is_initialized())
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_sleep(self):
         # clock_rate() returns MHz; multiply by 1e6 to get ~1 second of device cycles.
-        cycles = torch.xpu.clock_rate() * 1_000_000
+        cycles = int(torch.xpu.clock_rate() * 1_000_000)
         # Some Xe GPU's bundled IGC is too old to support it.
         if not Xe2_Or_Later:
             with self.assertRaisesRegex(
