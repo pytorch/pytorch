@@ -11085,6 +11085,10 @@ from user code:
             with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
                 saved.check_compatibility(here, "cuda")
             dataclasses.replace(saved, gpu_name=None).check_compatibility(here, "cuda")
+            # A host whose device info could not be read records no name.
+            unread = dataclasses.replace(here, gpu_name=None, gpu_arch=None)
+            with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
+                saved.check_compatibility(unread, "cuda")
 
     def test_the_aot_load_check_names_the_saved_gpu_as_cached(self):
         def fn(x):
@@ -11111,16 +11115,18 @@ from user code:
     def test_a_python_patch_release_shares_an_artifact(self):
         saved = dataclasses.replace(SystemInfo.current(), python_version="3.12.4")
         saved.check_compatibility(dataclasses.replace(saved, python_version="3.12.9"))
-        for other in ("3.13.4", "3.12.0rc1"):
-            with self.assertRaisesRegex(RuntimeError, "different Python version"):
-                saved.check_compatibility(
-                    dataclasses.replace(saved, python_version=other)
-                )
         alpha = dataclasses.replace(saved, python_version="3.14.0a3")
-        with self.assertRaisesRegex(RuntimeError, "different Python version"):
-            alpha.check_compatibility(
-                dataclasses.replace(saved, python_version="3.14.0b1")
-            )
+        alpha.check_compatibility(alpha)
+        for package, other in [
+            (saved, "3.13.4"),
+            (saved, "3.12.0rc1"),
+            (alpha, "3.14.0b1"),
+        ]:
+            with self.subTest(other=other):
+                with self.assertRaisesRegex(RuntimeError, "different Python version"):
+                    package.check_compatibility(
+                        dataclasses.replace(package, python_version=other)
+                    )
 
     def test_a_recorded_device_the_host_lacks_refuses_the_compile(self):
         # __post_init__ runs at the end of a compile as well as on load, so the

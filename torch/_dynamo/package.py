@@ -924,8 +924,10 @@ class SystemInfo:
                     toolkit_version = getattr(torch.version, device_type)
                     if device_type == "cuda":
                         interface = get_interface_for_device(device_type)
-                        gpu_arch = interface.get_compute_capability()
-                        gpu_sm_count = interface.get_multi_processor_count()
+                        gpu_arch, gpu_sm_count = (
+                            interface.get_compute_capability(),
+                            interface.get_multi_processor_count(),
+                        )
                     break
                 except Exception:
                     logger.debug(
@@ -949,8 +951,10 @@ class SystemInfo:
     ) -> None:
         """
         Check that a package recorded with this SystemInfo can load on a system
-        described by ``current``. A field the package did not record is not
-        compared. Raises RuntimeError if incompatible.
+        described by ``current``. What the package did not record is not
+        compared: a Triton version of (0, 0), a GPU name of None, and the GPU
+        arch and SM count when either side has no arch. Raises RuntimeError if
+        incompatible.
         """
         if _bytecode_version(self.python_version) != _bytecode_version(
             current.python_version
