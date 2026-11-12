@@ -30,7 +30,7 @@ dnnl::deconvolution_forward::primitive_desc get_primitive_desc(
     const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::deconvolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto src_desc_query = src_desc.to_format_any();
   auto weights_desc_query = weights_desc.to_format_any();
   auto bias_desc_query =
@@ -188,7 +188,7 @@ void do_prepare(
     const Attr& attr,
     dnnl::algorithm aalgorithm,
     dnnl::prop_kind aprop_kind,
-    const ideep::lowp_kind alowp_kind) {
+    const lowp_kind alowp_kind) {
   ITensor::desc src_desc, weights_desc, bias_desc, dst_desc;
   Attr op_attr, src_attr, weights_attr, bias_attr;
   ITensor weights_grouped;
@@ -313,7 +313,7 @@ void do_compute(
       args.insert({DNNL_ARG_ATTR_ZERO_POINTS | dnnl_arg, zp_m});
     }
   }
-  primitive.execute(ideep::stream::default_stream(), args);
+  primitive.execute(Stream::default_stream(), args);
 }
 
 // Ported from ideep::convolution_transpose_forward::compute_impl.
@@ -378,7 +378,7 @@ void compute_impl(
     const Attr& attr,
     dnnl::algorithm aalgorithm,
     dnnl::prop_kind aprop_kind,
-    const ideep::lowp_kind alowp_kind) {
+    const lowp_kind alowp_kind) {
   deconv_forward_params param;
   do_prepare<with_bias>(
       param,
@@ -422,7 +422,7 @@ void backward_weights_compute_impl(
     bool is_channels_last,
     const Attr& attr,
     dnnl::algorithm aalgorithm) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   if (is_avx2_vnni_2() &&
       one_of(
           diff_dst.get_data_type(),
@@ -433,7 +433,7 @@ void backward_weights_compute_impl(
         "DNNL does not support bf16/f16 backward on the platform with avx2_vnni_2");
   }
   // make diff_weights and dilates compatible with DNNL
-  auto dilates_ = ideep::utils::get_compatible_dilates(dilates);
+  auto dilates_ = utils::get_compatible_dilates(dilates);
 
   // dim: [i, o, ...]
   auto diff_weights_desc = ITensor::desc(
@@ -531,7 +531,7 @@ void backward_weights_compute_impl(
   if (with_diff_bias) {
     diff_bias.reinit_if_possible(pd.diff_bias_desc());
     dnnl::deconvolution_backward_weights(pd).execute(
-        ideep::stream::default_stream(),
+        Stream::default_stream(),
         {{DNNL_ARG_DIFF_DST, expected_diff_dst},
          {DNNL_ARG_SRC, expected_src},
          {DNNL_ARG_DIFF_WEIGHTS, expected_diff_weights},
@@ -539,7 +539,7 @@ void backward_weights_compute_impl(
          {DNNL_ARG_SCRATCHPAD, scratchpad}});
   } else {
     dnnl::deconvolution_backward_weights(pd).execute(
-        ideep::stream::default_stream(),
+        Stream::default_stream(),
         {{DNNL_ARG_DIFF_DST, expected_diff_dst},
          {DNNL_ARG_SRC, expected_src},
          {DNNL_ARG_DIFF_WEIGHTS, expected_diff_weights},
@@ -580,7 +580,7 @@ void convolution_transpose_forward_compute(
     const Attr& attr,
     dnnl::algorithm aalgorithm,
     dnnl::prop_kind aprop_kind,
-    const ideep::lowp_kind alowp_kind) {
+    const lowp_kind alowp_kind) {
   bool is_channels_last = src.get_desc().is_channels_last() ||
       weights.get_desc().is_channels_last();
   if (bias.is_empty()) {
@@ -650,7 +650,7 @@ void convolution_transpose_forward_prepare(
     const Attr& attr,
     dnnl::algorithm aalgorithm,
     dnnl::prop_kind aprop_kind,
-    const ideep::lowp_kind alowp_kind) {
+    const lowp_kind alowp_kind) {
   bool is_channels_last = src.get_desc().is_channels_last() ||
       weights.get_desc().is_channels_last();
   if (bias.is_empty()) {
@@ -819,7 +819,7 @@ ITensor::desc convolution_transpose_forward_expected_weights_desc(
       weights_dims.size(); // weights_dims is 4 for conv2d and 5 for conv3d
   auto grouped = groups > 1;
   auto weights_dims_g = grouped
-      ? ideep::utils::group_dims(weights_dims, groups)
+      ? utils::group_dims(weights_dims, groups)
       : weights_dims;
   // (g)iohw -> (g)oihw
   std::swap(weights_dims_g[grouped + 0], weights_dims_g[grouped + 1]);
@@ -828,7 +828,7 @@ ITensor::desc convolution_transpose_forward_expected_weights_desc(
   auto dims_in = weights_desc.get_dims();
   auto ndims = dims_in.size();
   auto g = grouped ? dims_in[0] : 1;
-  auto dilates_ = ideep::utils::get_compatible_dilates(dilates);
+  auto dilates_ = utils::get_compatible_dilates(dilates);
 
   dnnl::memory::dims x_dims, y_dims, kernel_size;
   auto ic = g * dims_in[1 + grouped];
@@ -929,7 +929,7 @@ void convolution_transpose_backward_data_compute_v3(
     bool is_channels_last,
     const Attr& attr,
     dnnl::algorithm aalgorithm) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   if (is_avx2_vnni_2() &&
       one_of(
           diff_dst.get_data_type(),
@@ -941,7 +941,7 @@ void convolution_transpose_backward_data_compute_v3(
   }
   // make weights and dilates compatible with DNNL
   auto weights_ = weights.make_grouped_weights(groups, true);
-  auto dilates_ = ideep::utils::get_compatible_dilates(dilates);
+  auto dilates_ = utils::get_compatible_dilates(dilates);
 
   // bool is_nhwc = diff_dst.get_desc().is_nhwc();
   // bool is_ndhwc = diff_dst.get_desc().is_ndhwc();
@@ -1000,7 +1000,7 @@ void convolution_transpose_backward_data_compute_v3(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::deconvolution_backward_data(pd).execute(
-      ideep::stream::default_stream(),
+      Stream::default_stream(),
       {{DNNL_ARG_DIFF_DST, expected_diff_dst},
        {DNNL_ARG_WEIGHTS, expected_weights},
        {DNNL_ARG_DIFF_SRC, diff_src},
@@ -1160,7 +1160,7 @@ template void convolution_transpose_forward_compute<true, true>(
     const Attr&,
     dnnl::algorithm,
     dnnl::prop_kind,
-    const ideep::lowp_kind);
+    const lowp_kind);
 
 template void convolution_transpose_forward_compute<false, false>(
     const deconv_forward_params&,

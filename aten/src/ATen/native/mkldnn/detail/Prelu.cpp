@@ -10,7 +10,7 @@ void prelu_forward(
     const ITensor& weight,
     ITensor& dst,
     dnnl::prop_kind prop_kind) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto weight_in = weight;
   if (src.ndims() != weight.ndims()) {
     dnnl::memory::dims dim_w(src.ndims(), 1);
@@ -33,7 +33,7 @@ void prelu_forward(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::prelu_forward(pd).execute(
-      ideep::stream::default_stream(),
+      Stream::default_stream(),
       {{DNNL_ARG_SRC, src},
        {DNNL_ARG_WEIGHTS, expected_weights},
        {DNNL_ARG_DST, dst},
@@ -55,7 +55,7 @@ void prelu_backward(
         dnnl_invalid_arguments,
         "DNNL does not support bf16/f16 backward on the platform with avx2_vnni_2");
   }
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto weight_dims = weight.get_dims();
   auto weight_in = weight;
   if (src.ndims() != weight.ndims()) {
@@ -98,7 +98,7 @@ void prelu_backward(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::prelu_backward(pd).execute(
-      ideep::stream::default_stream(),
+      Stream::default_stream(),
       {{DNNL_ARG_DIFF_DST, expected_diff_dst},
        {DNNL_ARG_SRC, expected_src},
        {DNNL_ARG_WEIGHTS, expected_weights},

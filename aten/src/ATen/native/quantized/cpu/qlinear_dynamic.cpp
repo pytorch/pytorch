@@ -598,7 +598,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
           params, x, w, b, y,
           src_scales, weights_scales, std::vector<float>(),
           src_zero_point, std::vector<int32_t>(), 1.0f, 1.0f, op_attr,
-          dnnl::memory::data_type::f32, std::is_signed_v<input_qtype> ? ideep::s8s8 : ideep::u8s8);
+          dnnl::memory::data_type::f32, std::is_signed_v<input_qtype> ? at::native::mkldnn::s8s8 : at::native::mkldnn::u8s8);
       get_cache() = LinearPrimitiveCache(cache_key, params);
       w = w.reorder_if_differ_in(params.pd.weights_desc());
   });
@@ -696,7 +696,7 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
   // Get op attr for primitive
   auto op_attr = relu_fused ? at::native::mkldnn::Attr::fuse_relu() : at::native::mkldnn::Attr();
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-  auto engine = ideep::engine::cpu_engine();
+  auto engine = at::native::mkldnn::Engine::cpu_engine();
   auto primitive_desc = with_bias ?
       dnnl::matmul::primitive_desc(engine, src_desc, weights_desc, bias_desc, dst_desc, op_attr) :
       dnnl::matmul::primitive_desc(engine, src_desc, weights_desc, dst_desc, op_attr);
@@ -715,7 +715,7 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
   if (with_bias) {
     args.insert({DNNL_ARG_BIAS, onednn_bias.value()});
   }
-  primitive.execute(ideep::stream::default_stream(), args);
+  primitive.execute(at::native::mkldnn::Stream::default_stream(), args);
   return dim == 2 ? output : output.reshape(output_size);
 }
 

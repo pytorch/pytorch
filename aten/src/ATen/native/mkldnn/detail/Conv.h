@@ -55,7 +55,7 @@ void prepare_parameters(
     const std::vector<int32_t>& src_zero_points,
     const std::vector<int32_t>& dst_zero_points,
     const Attr& attr,
-    const ideep::lowp_kind alowp_kind,
+    const lowp_kind alowp_kind,
     bool with_bias,
     bool is_deconv,
     ITensor& weight_grouped, /* Output */
@@ -273,7 +273,7 @@ void convolution_forward_prepare(
     const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::convolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward,
-    const ideep::lowp_kind alowp_kind = ideep::u8s8);
+    const lowp_kind alowp_kind = u8s8);
 
 // Ported from ideep::convolution_forward::compute (pre-prepared params).
 // Conv computation with pre-prepared params, with bias
@@ -314,7 +314,7 @@ void convolution_forward_compute(
     const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::convolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward,
-    const ideep::lowp_kind alowp_kind = ideep::u8s8);
+    const lowp_kind alowp_kind = u8s8);
 
 // Ported from ideep::convolution_backward_data::compute_v2.
 void convolution_backward_data_compute_v2(

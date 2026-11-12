@@ -12,7 +12,7 @@ void eltwise_forward(
     dnnl::prop_kind prop_kind,
     float alpha,
     float beta) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto src_in = src;
   // Quantized inputs are dequantized here for every algorithm except relu.
   if (algorithm != dnnl::algorithm::eltwise_relu &&
@@ -38,7 +38,7 @@ void eltwise_forward(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::eltwise_forward(pd).execute(
-      ideep::stream::default_stream(),
+      Stream::default_stream(),
       {{DNNL_ARG_SRC, src_in},
        {DNNL_ARG_DST, dst},
        {DNNL_ARG_SCRATCHPAD, scratchpad}});
@@ -65,7 +65,7 @@ void eltwise_backward(
         dnnl_invalid_arguments,
         "DNNL does not support bf16/f16 backward on the platform with avx2_vnni_2");
   }
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto src_desc = src.get_desc();
 
   auto forward_hints = dnnl::eltwise_forward::primitive_desc(
@@ -112,7 +112,7 @@ void eltwise_backward(
   auto expected_src_dst = src.reorder_if_differ_in(expected_src_dst_desc);
   ITensor scratchpad(pd.scratchpad_desc());
   dnnl::eltwise_backward(pd).execute(
-      ideep::stream::default_stream(),
+      Stream::default_stream(),
       {{DNNL_ARG_DIFF_DST, expected_diff_dst},
        {src_dst_arg, expected_src_dst},
        {DNNL_ARG_DIFF_SRC, expected_diff_src},

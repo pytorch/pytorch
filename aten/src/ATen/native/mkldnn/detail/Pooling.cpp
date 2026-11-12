@@ -17,7 +17,7 @@ void pooling_forward(
     const dnnl::memory::dims& padding_r,
     dnnl::algorithm algorithm,
     dnnl::prop_kind prop_kind) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   const bool with_workspace = prop_kind == dnnl::prop_kind::forward_training &&
       algorithm == dnnl::algorithm::pooling_max;
 
@@ -62,7 +62,7 @@ void pooling_forward(
     args.insert({DNNL_ARG_WORKSPACE, dst.get_workspace()});
   }
 
-  dnnl::pooling_forward(pd).execute(ideep::stream::default_stream(), args);
+  dnnl::pooling_forward(pd).execute(Stream::default_stream(), args);
 }
 
 void pooling_backward(
@@ -84,7 +84,7 @@ void pooling_backward(
         dnnl_invalid_arguments,
         "DNNL does not support bf16/f16 backward on the platform with avx2_vnni_2");
   }
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto src_desc = src.get_desc();
   auto dst_desc = dst.get_desc();
 
@@ -134,7 +134,7 @@ void pooling_backward(
     args.insert({DNNL_ARG_WORKSPACE, expected_workspace});
   }
 
-  dnnl::pooling_backward(pd).execute(ideep::stream::default_stream(), args);
+  dnnl::pooling_backward(pd).execute(Stream::default_stream(), args);
 }
 
 } // namespace at::native::mkldnn

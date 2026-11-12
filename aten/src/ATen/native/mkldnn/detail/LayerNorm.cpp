@@ -12,7 +12,7 @@ void layer_normalization_forward(
     ITensor& mean,
     ITensor& variance,
     float epsilon) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   const auto flags = dnnl::normalization_flags::use_scale |
       dnnl::normalization_flags::use_shift;
   auto src_desc = src.get_desc();
@@ -34,7 +34,7 @@ void layer_normalization_forward(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::layer_normalization_forward(pd).execute(
-      ideep::stream::default_stream(),
+      Stream::default_stream(),
       {{DNNL_ARG_SRC, expected_src},
        {DNNL_ARG_SCALE, scale},
        {DNNL_ARG_SHIFT, shift},

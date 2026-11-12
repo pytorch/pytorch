@@ -35,7 +35,7 @@ get_primitive_desc(
     const bool with_bias = false,
     const Attr& attr = Attr(),
     const dnnl::prop_kind prop_kind = dnnl::prop_kind::forward) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   dnnl::inner_product_forward::primitive_desc pd;
   if (with_bias) {
     pd = dnnl::inner_product_forward::primitive_desc(
@@ -55,7 +55,7 @@ dnnl::inner_product_forward::primitive_desc get_primitive_desc(
     const bool with_bias = false,
     const Attr& attr = Attr(),
     const dnnl::prop_kind prop_kind = dnnl::prop_kind::forward) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto key = utils::create_key(
       prop_kind,
       src_desc,
@@ -249,7 +249,7 @@ void do_compute_binary(
       expected_dst = dst;
     }
     args.insert({DNNL_ARG_DST, expected_dst});
-    primitive.execute(ideep::stream::default_stream(), args);
+    primitive.execute(Stream::default_stream(), args);
 
     // reorder back to dst's buffer if needed
     if (dst.is_empty() ||
@@ -272,7 +272,7 @@ void do_compute_binary(
 #endif
     }
     args.insert({DNNL_ARG_DST, dst});
-    primitive.execute(ideep::stream::default_stream(), args);
+    primitive.execute(Stream::default_stream(), args);
   }
 }
 
@@ -325,7 +325,7 @@ void do_compute_(
       expected_dst = dst;
     }
     args.insert({DNNL_ARG_DST, expected_dst});
-    primitive.execute(ideep::stream::default_stream(), args);
+    primitive.execute(Stream::default_stream(), args);
 
     // reorder back to dst's buffer if needed
     if (dst.is_empty() ||
@@ -348,7 +348,7 @@ void do_compute_(
 #endif
     }
     args.insert({DNNL_ARG_DST, dst});
-    primitive.execute(ideep::stream::default_stream(), args);
+    primitive.execute(Stream::default_stream(), args);
   }
 }
 
@@ -397,7 +397,7 @@ void backward_weights_compute_impl(
         dnnl_invalid_arguments,
         "DNNL does not support bf16/f16 backward on the platform with avx2_vnni_2");
   }
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto src_desc = src.get_desc().to_format_any();
   auto diff_dst_desc = diff_dst.get_desc().to_format_any();
   auto diff_weights_dims = src.get_dims();
@@ -486,7 +486,7 @@ void backward_weights_compute_impl(
   }
 
   dnnl::inner_product_backward_weights(pd).execute(
-      ideep::stream::default_stream(), args);
+      Stream::default_stream(), args);
   // reorder back to diff_weights's buffer if needed
   if (diff_weights.is_empty() ||
       diff_weights.get_desc() == expected_diff_weights.get_desc() ||
@@ -562,7 +562,7 @@ ITensor::desc inner_product_forward_expected_weights_desc(
     dnnl::memory::data_type dtype,
     dnnl::memory::data_type x_dtype,
     dnnl::prop_kind prop_kind) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto x_dims = weights_dims;
   // 128 is default batch size for inner product
   x_dims[0] = src_dims.empty() ? 128 : src_dims[0];
@@ -600,7 +600,7 @@ void inner_product_backward_data(
         dnnl_invalid_arguments,
         "DNNL does not support bf16/f16 backward on the platform with avx2_vnni_2");
   }
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto weights_ = weights;
 
   // workaround: diff_src and weights from caffe2 may have different dims.
@@ -663,7 +663,7 @@ void inner_product_backward_data(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::inner_product_backward_data(pd).execute(
-      ideep::stream::default_stream(),
+      Stream::default_stream(),
       {{DNNL_ARG_DIFF_DST, expected_diff_dst},
        {DNNL_ARG_WEIGHTS, expected_weights},
        {DNNL_ARG_DIFF_SRC, expected_diff_src},

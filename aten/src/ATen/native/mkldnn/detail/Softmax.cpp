@@ -9,7 +9,7 @@ void softmax_forward(
     ITensor& dst,
     int softmax_axis,
     dnnl::prop_kind prop_kind) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto src_desc = src.get_desc();
   // May replace dst's buffer and layout when they differ from src's.
   dst.reinit_if_possible(src_desc);
@@ -27,7 +27,7 @@ void softmax_forward(
       op_attr);
   ITensor scratchpad(pd.scratchpad_desc());
   dnnl::softmax_forward(pd).execute(
-      ideep::stream::default_stream(),
+      Stream::default_stream(),
       {{DNNL_ARG_SRC, src},
        {DNNL_ARG_DST, dst},
        {DNNL_ARG_SCRATCHPAD, scratchpad}});

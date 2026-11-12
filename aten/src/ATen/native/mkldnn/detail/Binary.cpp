@@ -10,7 +10,7 @@ void sum(
     const std::vector<float>& scales,
     const std::vector<ITensor>& srcs,
     ITensor& dst) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   std::vector<dnnl::memory::desc> src_descs;
   src_descs.reserve(srcs.size());
   for (const auto& src : srcs) {
@@ -31,7 +31,7 @@ void sum(
     args.insert({DNNL_ARG_MULTIPLE_SRC + static_cast<int>(i), srcs[i]});
   }
 
-  dnnl::sum(pd).execute(ideep::stream::default_stream(), args);
+  dnnl::sum(pd).execute(Stream::default_stream(), args);
 }
 
 void binary(
@@ -39,7 +39,7 @@ void binary(
     const ITensor& src1,
     ITensor& dst,
     dnnl::algorithm algorithm) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto src0_desc = src0.get_desc();
   auto src1_desc = src1.get_desc();
   auto dst_desc = src0_desc.to_format_any();
@@ -58,7 +58,7 @@ void binary(
   dst.reinit_if_possible(pd.dst_desc());
 
   dnnl::binary(pd).execute(
-      ideep::stream::default_stream(),
+      Stream::default_stream(),
       {{DNNL_ARG_SRC_0, expected_src0},
        {DNNL_ARG_SRC_1, expected_src1},
        {DNNL_ARG_DST, dst},

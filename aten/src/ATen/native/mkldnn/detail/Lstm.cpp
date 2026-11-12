@@ -17,7 +17,7 @@ void lstm_forward_inference(
     ITensor& dst_iter_c,
     bool reverse,
     dnnl::prop_kind prop_kind) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto direction = reverse ? dnnl::rnn_direction::unidirectional_right2left
                            : dnnl::rnn_direction::unidirectional_left2right;
 
@@ -72,7 +72,7 @@ void lstm_forward_inference(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::lstm_forward(pd).execute(
-      ideep::stream::default_stream(),
+      Stream::default_stream(),
       {{DNNL_ARG_SRC_LAYER, src_layer},
        {DNNL_ARG_SRC_ITER, src_iter},
        {DNNL_ARG_SRC_ITER_C, src_iter_c},
@@ -95,7 +95,7 @@ lstm_forward_inference_expected_weights_desc(
     const ITensor& weights_iter,
     const ITensor& bias,
     bool reverse) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto direction = reverse ? dnnl::rnn_direction::unidirectional_right2left
                            : dnnl::rnn_direction::unidirectional_left2right;
 
@@ -156,7 +156,7 @@ dnnl::lstm_forward::primitive_desc lstm_forward_training_prepare(
     const ITensor& dst_iter,
     const ITensor& dst_iter_c,
     bool reverse) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   auto direction = reverse ? dnnl::rnn_direction::unidirectional_right2left
                            : dnnl::rnn_direction::unidirectional_left2right;
 
@@ -205,7 +205,7 @@ void lstm_forward_training(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::lstm_forward(pd).execute(
-      ideep::stream::default_stream(),
+      Stream::default_stream(),
       {{DNNL_ARG_SRC_LAYER, src_layer},
        {DNNL_ARG_SRC_ITER, src_iter},
        {DNNL_ARG_SRC_ITER_C, src_iter_c},
@@ -250,7 +250,7 @@ void lstm_backward(
         dnnl_invalid_arguments,
         "DNNL does not support bf16/f16 backward on the platform with avx2_vnni_2");
   }
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   constexpr auto f32 = dnnl::memory::data_type::f32;
   auto direction = reverse ? dnnl::rnn_direction::unidirectional_right2left
                            : dnnl::rnn_direction::unidirectional_left2right;
@@ -327,7 +327,7 @@ void lstm_backward(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::lstm_backward(pd).execute(
-      ideep::stream::default_stream(),
+      Stream::default_stream(),
       {{DNNL_ARG_SRC_LAYER, src_layer},
        {DNNL_ARG_SRC_ITER, src_iter},
        {DNNL_ARG_SRC_ITER_C, src_iter_c},

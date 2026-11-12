@@ -1310,7 +1310,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
             src_zero_points, dst_zero_points, op_attr,
             dnnl::algorithm::deconvolution_direct,
             dnnl::prop_kind::forward_inference,
-            ideep::u8s8);
+            at::native::mkldnn::u8s8);
         get_deconv_cache() = DeconvPrimitiveCache(cache_key, params);
         auto expected_weight_desc = at::native::mkldnn::ITensor::desc(params.pd.weights_desc(), groups());
         weights = weights.reorder_if_differ_in(expected_weight_desc);
@@ -1328,7 +1328,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
           src_zero_points, dst_zero_points, op_attr,
           dnnl::algorithm::deconvolution_direct,
           dnnl::prop_kind::forward_inference,
-          ideep::u8s8);
+          at::native::mkldnn::u8s8);
     }
   } else {  // not transposed
     PrimitiveCacheKey cache_key = std::make_tuple(
@@ -1342,7 +1342,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
             src_zero_points, dst_zero_points,
             op_attr, dnnl::algorithm::convolution_direct,
             dnnl::prop_kind::forward_inference,
-            ideep::u8s8);
+            at::native::mkldnn::u8s8);
         get_conv_cache() = ConvPrimitiveCache(cache_key, params);
         auto expected_weight_desc = at::native::mkldnn::ITensor::desc(params.pd.weights_desc(), groups());
         weights = weights.reorder_if_differ_in(expected_weight_desc);
@@ -1359,7 +1359,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
           src_zero_points, dst_zero_points, op_attr,
           dnnl::algorithm::convolution_direct,
           dnnl::prop_kind::forward_inference,
-          ideep::u8s8);
+          at::native::mkldnn::u8s8);
     }
   }
   if (has_accum) {
@@ -1801,7 +1801,7 @@ static at::Tensor _quantized_convolution_onednn(
     op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
   }
   int oc_per_group = weight_grouped.get_dim(0) / groups;
-  int wei_scale_mask = ideep::utils::conv_weight_scale_mask(weight_scales.numel(), oc_per_group, groups, false);
+  int wei_scale_mask = at::native::mkldnn::utils::conv_weight_scale_mask(weight_scales.numel(), oc_per_group, groups, false);
   op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, wei_scale_mask);
   if (output_scale != 1.0f) {
     op_attr.set_scales_mask(DNNL_ARG_DST, 0);
@@ -1810,8 +1810,8 @@ static at::Tensor _quantized_convolution_onednn(
     op_attr.set_zero_points_mask(DNNL_ARG_DST, 0);
   }
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-  auto engine = ideep::engine::cpu_engine();
-  auto dilates_dnnl = ideep::utils::get_compatible_dilates(dilation.vec());
+  auto engine = at::native::mkldnn::Engine::cpu_engine();
+  auto dilates_dnnl = at::native::mkldnn::utils::get_compatible_dilates(dilation.vec());
   auto primitive_desc = with_bias ?
       dnnl::convolution_forward::primitive_desc(
         engine, dnnl::prop_kind::forward_inference, dnnl::algorithm::convolution_direct,
@@ -1856,7 +1856,7 @@ static at::Tensor _quantized_convolution_onednn(
   if (output_zero_point != 0) {
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zp_t});
   }
-  primitive.execute(ideep::stream::default_stream(), args);
+  primitive.execute(at::native::mkldnn::Stream::default_stream(), args);
 #else
   // Scales of ONEDNN and PyTorch are reciprocal
   const std::vector<float>& src_scales = std::vector<float>(1, 1.0 / act_scale);
@@ -1880,7 +1880,7 @@ static at::Tensor _quantized_convolution_onednn(
       src_zero_points, dst_zero_points,
       op_attr, dnnl::algorithm::convolution_direct,
       dnnl::prop_kind::forward_inference,
-      ideep::u8s8);
+      at::native::mkldnn::u8s8);
   auto expected_weight_desc = at::native::mkldnn::ITensor::desc(params.pd.weights_desc(), groups);
   at::native::mkldnn::ITensor expected_weight = packed_weight.reorder_if_differ_in(expected_weight_desc);
 
