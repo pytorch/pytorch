@@ -122,7 +122,12 @@ from torch.utils.weak import TensorWeakRef
 from .. import config, graph_break_hints, mutation_guard, replay_record, trace_rules
 from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, raise_observed_exception, unimplemented
-from ..guards import GuardBuilder, install_guard, make_dupe_guard
+from ..guards import (
+    GuardBuilder,
+    install_builtin_method_guard,
+    install_guard,
+    make_dupe_guard,
+)
 from ..pgo import (
     auto_dynamic,
     auto_unset,
@@ -186,6 +191,7 @@ from ..utils import (
     get_locals_to_steal,
     get_static_address_type,
     get_type_dict_no_user_code,
+    has_custom_metaclass_accessor,
     InvalidOrderedDict,
     is_frozen_dataclass,
     is_function,
@@ -200,7 +206,6 @@ from ..utils import (
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
-    iter_mro_static_attrs,
     list_reverseiterator,
     list_reverseiterator_backing_list,
     list_reverseiterator_len,
@@ -214,6 +219,7 @@ from ..utils import (
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
+    UnsupportedOrderedDictRuntime,
     unwrap_with_attr_name_if_wrapper,
     wrap_fake_exception,
 )
@@ -251,8 +257,8 @@ from .dicts import (
     ConstDictVariable,
     DictKeysVariable,
     MappingProxyVariable,
-    NNModuleGlobalHookFlagsDictVariable,
-    NNModuleGlobalOrderedHookFlagsDictVariable,
+    NNModuleGlobalHooksDictVariable,
+    NNModuleGlobalHooksOrderedDictVariable,
     OrderedDictVariable,
 )
 from .distributed import WorldMetaClassVariable
@@ -710,16 +716,7 @@ def normalize_descriptor_source(
     if isinstance(source.base, AttrSource) and source.base.member == "__dict__":
         cls = tx.output.resolve_source_value(source.base.base)
         if issubclass(type(cls), type):
-            metacls = type(cls)
-            custom_getattribute = (
-                next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
-                is not type.__dict__["__getattribute__"]
-            )
-            custom_dict = (
-                next(iter_mro_static_attrs(metacls, "__dict__"), None)
-                is not type.__dict__["__dict__"]
-            )
-            if custom_getattribute or custom_dict:
+            if has_custom_metaclass_accessor(cls, "__dict__"):
                 unimplemented(
                     gb_type="Unsupported descriptor source",
                     context="class __dict__ source",
@@ -950,6 +947,18 @@ def _is_dim_dynamic_from_source_dynamism(
 def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
     try:
         return list(enumerate_items_with_dict_position(value))
+    except UnsupportedOrderedDictRuntime as error:
+        unimplemented(
+            gb_type="Unsupported OrderedDict snapshot runtime",
+            context=str(error),
+            explanation="This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
+            hints=[
+                "Use a supported Python version; free-threaded nonempty snapshots require Python 3.14.1+.",
+            ],
+            from_exc=error,
+            skip_frame=True,
+            apply_to_code=False,
+        )
     except InvalidOrderedDict as error:
         unimplemented(
             gb_type="OrderedDict storage differs from linked keys",
@@ -957,9 +966,9 @@ def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
             explanation="Dynamo cannot safely match this OrderedDict's linked order to its dictionary storage.",
             hints=[
                 "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
-                "On free-threaded builds, use Python 3.14.1 or newer.",
                 *graph_break_hints.FUNDAMENTAL,
             ],
+            from_exc=error,
             skip_frame=True,
             apply_to_code=False,
         )
@@ -1540,7 +1549,19 @@ class VariableBuilder:
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
+            global_hooks = istype(value, (dict, collections.OrderedDict)) and any(
+                value is getattr(torch.nn.modules.module, name)
+                for name in (
+                    "_global_forward_hooks_with_kwargs",
+                    "_global_forward_hooks_always_called",
+                    "_global_forward_pre_hooks",
+                    "_global_forward_hooks",
+                    "_global_backward_pre_hooks",
+                    "_global_backward_hooks",
+                )
+            )
+            if not (global_hooks and config.skip_nnmodule_hook_guards):
+                self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in dict.keys(value))
 
             # For all_const, we don't have to guard on anything yet. We guard on
@@ -1585,17 +1606,11 @@ class VariableBuilder:
 
             result = _build_dict_items(value, build_key_value)
 
-            if istype(value, (dict, collections.OrderedDict)) and any(
-                value is getattr(torch.nn.modules.module, name)
-                for name in (
-                    "_global_forward_hooks_with_kwargs",
-                    "_global_forward_hooks_always_called",
-                )
-            ):
+            if global_hooks:
                 flags_cls = (
-                    NNModuleGlobalOrderedHookFlagsDictVariable
+                    NNModuleGlobalHooksOrderedDictVariable
                     if istype(value, collections.OrderedDict)
-                    else NNModuleGlobalHookFlagsDictVariable
+                    else NNModuleGlobalHooksDictVariable
                 )
                 result = flags_cls(result, source=self.source)
             elif istype(value, collections.defaultdict):
@@ -2256,23 +2271,14 @@ class VariableBuilder:
             if isinstance(descriptor, types.ClassMethodDescriptorType) and issubclass(
                 type(method_self), type
             ):
-                metacls = type(method_self)
-                custom_getattribute = (
-                    next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
-                    is not type.__dict__["__getattribute__"]
-                )
-                custom_dict = (
-                    next(iter_mro_static_attrs(metacls, "__dict__"), None)
-                    is not type.__dict__["__dict__"]
-                )
-                if custom_getattribute or custom_dict:
+                if has_custom_metaclass_accessor(method_self, "__dict__"):
                     unimplemented(
                         gb_type="Bound builtin classmethod with custom metaclass",
                         context=f"{descriptor.__qualname__} bound to a class with a custom metaclass",
                         explanation="Dynamo cannot safely wrap the class receiver without invoking metaclass hooks.",
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
-            self.install_guards(GuardBuilder.ID_MATCH)
+            install_builtin_method_guard(self.tx, self.source, value)
             obj_source = self.source and AttrSource(self.source, "__self__")
             obj_vt = VariableTracker.build(self.tx, method_self, obj_source)
             return BoundBuiltinMethodVariable(
@@ -2382,30 +2388,32 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = PropertyVariable(value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
-        elif isinstance(value, types.MethodWrapperType):
-            # Attribute lookup can create a fresh method-wrapper. For descriptor
-            # receivers, guard the receiver and operation instead of wrapper identity.
-            descriptor = inspect.getattr_static(type(value.__self__), value.__name__)
+        elif type(value) is types.MethodWrapperType:
+            # Fresh wrappers can bind a base slot on a subclass. Guard the binding,
+            # rather than wrapper identity, so equivalent fresh wrappers can reuse graphs.
+            descriptor = inspect.getattr_static(value.__objclass__, value.__name__)
             if not isinstance(descriptor, types.WrapperDescriptorType):
                 raise AssertionError(
                     f"expected WrapperDescriptorType, got {type(descriptor)}"
                 )
             obj_source = self.source and AttrSource(self.source, "__self__")
-            if (
-                obj_source is not None
-                and not is_constant_source(obj_source)
-                and isinstance(
-                    value.__self__,
-                    (types.GetSetDescriptorType, types.MemberDescriptorType),
-                )
-            ):
+            if obj_source is not None and not is_constant_source(obj_source):
                 self.install_guards(GuardBuilder.TYPE_MATCH)
                 install_guard(
                     AttrSource(self.source, "__name__").make_guard(
                         GuardBuilder.EQUALS_MATCH
                     )
                 )
-                install_guard(obj_source.make_guard(GuardBuilder.ID_MATCH))
+                install_guard(
+                    AttrSource(self.source, "__objclass__").make_guard(
+                        GuardBuilder.BUILTIN_MATCH
+                    )
+                )
+                if isinstance(
+                    value.__self__,
+                    (types.GetSetDescriptorType, types.MemberDescriptorType),
+                ):
+                    install_guard(obj_source.make_guard(GuardBuilder.ID_MATCH))
             obj_vt = VariableTracker.build(self.tx, value.__self__, obj_source)
             return MethodWrapperVariable(descriptor, obj_vt)
         elif issubclass(type(value), type) and issubclass(value, BaseException):
@@ -5932,8 +5940,8 @@ class SourcelessBuilder:
             if issubclass(type(value), type) and issubclass(value, BaseException):
                 return UserDefinedExceptionClassVariable(value)
             return UserDefinedClassVariable(value)
-        elif isinstance(value, types.MethodWrapperType):
-            descriptor = inspect.getattr_static(type(value.__self__), value.__name__)
+        elif type(value) is types.MethodWrapperType:
+            descriptor = inspect.getattr_static(value.__objclass__, value.__name__)
             if not isinstance(descriptor, types.WrapperDescriptorType):
                 raise AssertionError(
                     f"expected WrapperDescriptorType, got {type(descriptor)}"

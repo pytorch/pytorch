@@ -18,7 +18,12 @@ from torch._subclasses.fake_tensor import maybe_get_fake_constant
 
 from .. import graph_break_hints, variables
 from ..exc import raise_observed_exception, unimplemented
-from ..guards import GuardBuilder, install_guard
+from ..guards import (
+    _method_identity_guards_filtered,
+    GuardBuilder,
+    install_builtin_method_guard,
+    install_guard,
+)
 from ..source import (
     AttrSource,
     ConstDictKeySource,
@@ -148,14 +153,13 @@ class BuiltinMethodKeyTracker:
             if source is None:
                 continue
             sources = tuple(group)
+            values = tuple(self.receivers[item] for item in sources)
             install_guard(
                 source.make_guard(
                     functools.partial(
                         GuardBuilder.BUILTIN_METHOD_RECEIVER_ALIAS,
                         sources=sources,
-                        aliases=_receiver_alias_pattern(
-                            tuple(self.receivers[item] for item in sources)
-                        ),
+                        aliases=_receiver_alias_pattern(values),
                     )
                 )
             )
@@ -164,7 +168,7 @@ class BuiltinMethodKeyTracker:
         self.has_method_keys |= unguarded
         tracer = tx.output.current_tracer
         while tracer is not None:
-            tracer.has_builtin_method_keys = True
+            tracer.has_builtin_method_identity = True
             tracer = tracer.parent
 
     def add_receiver(
@@ -190,8 +194,8 @@ class BuiltinMethodKeyTracker:
                     if type(value) is not variables.DeletedVariable
                 ),
             )
-            summary.size = len(keys)
-            self.summaries[id(keys)] = (keys, summary)
+            summary.size = len(keys)  # removals invalidate even same-size changes
+            self.summaries[id(keys)] = (keys, summary)  # keep storage alive
             return summary
         return KeySummary(self, keys)
 
@@ -235,13 +239,17 @@ class KeySummary:
         if self.connected and tx is not None:
             self.connect(tx, key.method_receivers)
             if self.pinned or self.pinned_types:
-                for source in key.method_receivers:
-                    if source is not None and (
-                        self.pinned
-                        or id(type(self.tracker.add_receiver(tx, source)))
-                        in self.pinned_types
-                    ):
-                        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+                self.pin_receivers(tx, key.method_receivers)
+
+    def pin_receivers(
+        self, tx: "InstructionTranslatorBase", sources: Iterable[Source | None]
+    ) -> None:
+        for source in sources:
+            if source is not None and (
+                self.pinned
+                or id(type(self.tracker.add_receiver(tx, source))) in self.pinned_types
+            ):
+                install_builtin_method_guard(tx, source)
 
     def connect(
         self,
@@ -254,7 +262,7 @@ class KeySummary:
             return
         self.connected = True
         for method in self.input_methods:
-            install_guard(method.make_guard(GuardBuilder.ID_MATCH))
+            install_builtin_method_guard(tx, method)
         self.input_methods.clear()
         for source in self.receivers if sources is None else sources:
             if source is None:
@@ -326,7 +334,7 @@ def guard_key_collisions(
     if not tx.output.builtin_method_keys.has_method_keys:
         return None
     tracker = tx.output.builtin_method_keys
-    # Safe ordinary probes cannot observe a method identity; keep the two-operand policy.
+    # Read lazy equality sources before consulting custom-equality flags.
     probe = collections[1] if len(collections) == 2 else ()
     probe_equalities = None
     if type(probe) is tuple and len(probe) == 1 and not probe[0].has_builtin_method:
@@ -396,14 +404,9 @@ def guard_key_collisions(
             if (custom and not summary.pinned) or not fixed_types.issubset(
                 summary.pinned_types
             ):
-                for source in summary.receivers:
-                    if source is not None and (
-                        custom
-                        or id(type(tracker.add_receiver(tx, source))) in fixed_types
-                    ):
-                        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
                 summary.pinned |= custom
                 summary.pinned_types.update(fixed_types)
+                summary.pin_receivers(tx, summary.receivers)
     return result
 
 
@@ -439,6 +442,12 @@ def _guard_lazy_key(vt: VariableTracker) -> VariableTracker:
                 type(value) is types.BuiltinMethodType
                 and bound_builtin_method_descriptor(value) is not None
             ):
+                from ..symbolic_convert import InstructionTranslator
+
+                tx = InstructionTranslator.current_tx()
+                skip_install = TracingContext.get().guards_context.skip_install
+                if not skip_install and _method_identity_guards_filtered(tx):
+                    return vt.realize()
                 install_guard(vt.source.make_guard(GuardBuilder.ID_MATCH))
                 return vt
         # Constructed keys must guard their elements, not just a trace-time hash.
@@ -552,6 +561,7 @@ class HashableTracker:
             self._key_types = ()
             self.has_builtin_method = True
             self.method_keys_guarded = vt.value is not None
+            self.method_keys_guarded &= not self._hash_is_identity
             self.method_receivers = (vt.obj.source,)
             if vt.obj.source is None and not vt.has_fresh_container_receiver():
                 self.method_receivers = ()
@@ -613,7 +623,7 @@ class HashableTracker:
             # Constructed keys guard elements; input keys stay lazy until observed.
             if tuple_storage:
                 children = cast(variables.TupleVariable, vt).items
-                items = [HashableTracker(item.realize()) for item in children]
+                items = [HashableTracker(item) for item in children]
                 self._hash = hash(tuple(RawHash(item._hash) for item in items))
             else:
                 items = list(cast(variables.FrozensetVariable, vt).items)
