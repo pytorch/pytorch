@@ -14,9 +14,11 @@ phase 1 zero the histogram one bin per thread).
   2. Gather at-or-above that threshold. Deterministic: prefix-sum slots
      preserve input order, lowest-index ties win. Otherwise LDS atomic
      counters claim slots and ties resolve per run.
-  3. Bitonic sort over ``sort_len`` slots; padding is the int64 minimum.
-     A real key's low half is ``~idx``, never zero, so the pad stays strictly
-     below every real key. Comparator is always lexicographic
+  3. Bitonic sort over ``sort_len`` slots. Slots beyond K are filled with
+     ``INT64_MIN = [ INT32_MIN | 0 ]``. Every real ``[ ord | ~idx ]`` key is
+     greater: either ``ord > INT32_MIN``, or ``~idx`` is nonzero when
+     ``ord == INT32_MIN``.
+     Comparator is always lexicographic
      ``(ord desc, idx asc)``; ``deterministic`` only controls which
      threshold-tied elements phase 2 gathers.
   4. Write K (value, index) pairs.
