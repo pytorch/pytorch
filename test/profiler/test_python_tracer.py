@@ -4,18 +4,14 @@ import json
 import subprocess
 import sys
 import time
+import unittest
 
 from torch.profiler import profile, ProfilerActivity
-from torch.testing._internal.common_utils import (
-    run_tests,
-    skipIfPythonVersionMismatch,
-    TemporaryFileName,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TemporaryFileName, TestCase
 
 
 class TestPythonTracer(TestCase):
-    @skipIfPythonVersionMismatch(lambda major, minor, micro: major == 3 and minor == 12)
+    @unittest.skipUnless(sys.version_info[:2] == (3, 12), "Python version mismatch")
     def test_method_with_c_function(self):
         class A:
             method_with_c_function = classmethod(repr)
@@ -46,7 +42,7 @@ class TestPythonTracer(TestCase):
                             break
                 self.assertTrue(found)
 
-    @skipIfPythonVersionMismatch(lambda major, minor, micro: major == 3 and minor == 12)
+    @unittest.skipUnless(sys.version_info[:2] == (3, 12), "Python version mismatch")
     def test_monitoring_callback(self):
         vi = sys.version_info
         from sys import monitoring

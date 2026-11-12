@@ -6,6 +6,7 @@ import torch._dynamo.test_case
 import torch.nn as nn
 from torch._dynamo.source import (
     AttrSource,
+    DictKeysSource,
     GlobalSource,
     is_from_local_source,
     LocalSource,
@@ -18,6 +19,11 @@ class CausalLMOutputWithPast:
 
 
 class SourceTests(torch._dynamo.test_case.TestCase):
+    def test_dict_keys_snapshot_cannot_create_guards(self):
+        source = DictKeysSource(LocalSource("mapping"))
+        with self.assertRaisesRegex(NotImplementedError, "codegen-only"):
+            source.make_guard(lambda _: None)
+
     def test_type_dict_source_bypasses_metaclass_getattribute(self):
         class Meta(type):
             def __getattribute__(cls, name):
