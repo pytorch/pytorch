@@ -14,6 +14,7 @@ namespace torch::fake_tensor {
 // weak, so Python can collect the wrapper while C++ still uses the mode.
 // Every C++-to-Python lookup reuses the live wrapper or recreates it around
 // the same mode. All persistent state must therefore live on the C++ mode.
+// Reconstruction does not create a converter for a mode made without one.
 // A returned py::object keeps the wrapper alive for the duration of a callback.
 //
 // ShapeEnv and the converter must not strongly hold the mode's fakes: Python
@@ -266,7 +267,7 @@ py::object getCppFakeTensorModePyObj(
       return py::reinterpret_steal<py::object>(py_mode);
     }
   }
-  // The object is gone; see Note [C++ FakeTensorMode Python object lifetime].
+  // No live wrapper; see Note [C++ FakeTensorMode Python object lifetime].
   auto py_mode = py::reinterpret_steal<py::object>(cpp_fake_tensor_mode_new(
       reinterpret_cast<PyTypeObject*>(get_cpp_fake_tensor_mode_class().ptr()),
       nullptr,
