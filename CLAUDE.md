@@ -209,6 +209,13 @@ Rules for working with ghstack:
   stay associated with their existing PRs; commits without trailers will get a
   fresh PR on submit. A full `ghstack` run is usually appropriate here.
 
+# GitHub-native stacks (`gh stack`)
+
+- **After part of a stack lands.** Follow
+  [Continue a GitHub-native stack after part of it lands](CONTRIBUTING.md#continue-a-github-native-stack-after-part-of-it-lands):
+  don't run `gh stack` on a stack until all of it has landed, and keep the rest
+  up to date with plain git merges.
+
 # Coding Style Guidelines
 
 Follow these rules for all code changes in this repository:
