@@ -77,6 +77,12 @@ if TYPE_CHECKING:
     from .symbolic_convert import InstructionTranslatorBase
 
 
+def _is_mutable_container(value: VariableTracker) -> bool:
+    return isinstance(value, (ConstDictVariable, SetVariable)) or (
+        isinstance(value, BaseListVariable) and not isinstance(value, TupleVariable)
+    )
+
+
 # Templates for the runtime-gated pregraph profiler marker (see
 # PyCodegen.make_call_generated_code). Emitted via bytecode_from_template so the
 # `if` compiles to the correct per-Python-version jump opcodes. The values
@@ -159,7 +165,7 @@ class PyCodegen:
             items = value.items
         elif isinstance(value, FrozensetVariable):
             items = [key.vt for key in value.set_items]
-        elif isinstance(value, (BaseListVariable, ConstDictVariable, SetVariable)):
+        elif _is_mutable_container(value):
             # Probing container members would specialize their lazy children.
             return True
         else:
@@ -391,11 +397,7 @@ class PyCodegen:
                 self.add_cache(value)
         elif (
             # Keep container members out of constant probing.
-            not isinstance(value, (ConstDictVariable, SetVariable))
-            and not (
-                isinstance(value, BaseListVariable)
-                and not isinstance(value, TupleVariable)
-            )
+            not _is_mutable_container(value)
             # Do not embed trace-time child objects in co_consts. Respect this
             # codegen pass's source-reconstruction policy (export stack restoration
             # disables it, but other export codegen paths can keep it enabled).

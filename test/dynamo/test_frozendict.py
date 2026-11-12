@@ -1049,6 +1049,24 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(list(result[1]), ["b", "a"])
         self.assertIs(result[1]["a"], result[1]["b"])
 
+    def test_union_empty_hook_registry_identity(self):
+        frozen = builtins.frozendict(v=1)
+
+        def fn(x, module):
+            result = frozen | module._forward_hooks
+            return x + 1, result, result is frozen
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for kind in (dict, OrderedDict, dict):
+            module = torch.nn.Identity()
+            module._forward_hooks = kind()
+            actual = compiled(x, module)
+            self.assertEqual(actual, fn(x, module))
+            self.assertIs(actual[1] is frozen, kind is dict)
+        self.assertEqual(counter.frame_count, 2)
+
     @parametrize("mapping_type", [OrderedDict, defaultdict])
     @parametrize("reverse", [False, True])
     @parametrize("direct", [False, True])
