@@ -47,6 +47,7 @@
 #include "src/ThrowUtil.h"
 #include "test/MockActivitySubProfiler.h"
 #include "test/MockCpuActivityBuffer.h"
+#include "test/NoOpTypedMetadataVisitor.h"
 #include "test/TestUtils.h"
 
 using namespace std::chrono;
@@ -70,49 +71,25 @@ bool isAsyncKernel(const rocprofAsyncRow& async) {
   return async.domain == ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH;
 }
 
-struct RocmStreamTypedMetadataVisitor final : public ITypedMetadataVisitor {
+struct RocmStreamTypedMetadataVisitor final : public NoOpTypedMetadataVisitor {
   void visitValue(const MetadataField<int64_t>& field, int64_t value) override {
-    if (field.name == RocmMetadataFields::kStream.name) {
+    if (field == RocmMetadataFields::kStream) {
       stream = value;
     }
   }
 
   void visitValue(const MetadataField<uint64_t>& field, uint64_t value)
       override {
-    if (field.name == RocmMetadataFields::kHsaQueue.name) {
+    if (field == RocmMetadataFields::kHsaQueue) {
       hsaQueue = value;
     }
   }
 
-  void visitValue(
-      [[maybe_unused]] const MetadataField<double>& field,
-      [[maybe_unused]] double value) override {}
-  void visitValue(
-      [[maybe_unused]] const MetadataField<bool>& field,
-      [[maybe_unused]] bool value) override {}
-  void visitValue(
-      [[maybe_unused]] const MetadataField<std::string>& field,
-      [[maybe_unused]] std::string_view value) override {}
-  void visitValue(
-      [[maybe_unused]] const MetadataField<std::vector<int64_t>>& field,
-      [[maybe_unused]] const std::vector<int64_t>& value) override {}
-  void visitValue(
-      [[maybe_unused]] const MetadataField<std::vector<std::string>>& field,
-      [[maybe_unused]] const std::vector<std::string>& value) override {}
-  void visitValue(
-      [[maybe_unused]] const MetadataField<RawJson>& field,
-      [[maybe_unused]] const RawJson& value) override {}
-  void visitValue(
-      [[maybe_unused]] const MetadataField<InputShapes>& field,
-      [[maybe_unused]] const InputShapes& value) override {}
-
-  void visitUnsupported(std::string_view /*name*/) override {}
-
-  void beginDict(std::string_view /*name*/) override {}
-  void endDict() override {}
-
   std::optional<int64_t> stream;
   std::optional<uint64_t> hsaQueue;
+
+ private:
+  using NoOpTypedMetadataVisitor::visitValue;
 };
 } // namespace
 
