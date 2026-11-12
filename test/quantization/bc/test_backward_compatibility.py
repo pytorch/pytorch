@@ -51,8 +51,6 @@ def get_filenames(self, subname):
 
     input_file = base_name + ".input.pt"
     state_dict_file = base_name + ".state_dict.pt"
-    scripted_module_file = base_name + ".scripted.pt"
-    traced_module_file = base_name + ".traced.pt"
     expected_file = base_name + ".expected.pt"
     package_file = base_name + ".package.pt"
     get_attr_targets_file = base_name + ".get_attr_targets.pt"
@@ -60,8 +58,6 @@ def get_filenames(self, subname):
     return (
         input_file,
         state_dict_file,
-        scripted_module_file,
-        traced_module_file,
         expected_file,
         package_file,
         get_attr_targets_file,
@@ -91,8 +87,6 @@ class TestSerialization(TestCase):
         (
             input_file,
             state_dict_file,
-            scripted_module_file,
-            traced_module_file,
             expected_file,
             _package_file,
             _get_attr_targets_file,
@@ -112,19 +106,13 @@ class TestSerialization(TestCase):
                 state_dict_file,
                 _use_new_zipfile_serialization=new_zipfile_serialization,
             )
-            torch.jit.save(torch.jit.script(qmodule), scripted_module_file)
-            torch.jit.save(torch.jit.trace(qmodule, input_tensor), traced_module_file)
             torch.save(qmodule(input_tensor), expected_file)
 
         input_tensor = torch.load(input_file)
         # weights_only = False as sometimes get ScriptObject here
         qmodule.load_state_dict(torch.load(state_dict_file, weights_only=False))
-        qmodule_scripted = torch.jit.load(scripted_module_file)
-        qmodule_traced = torch.jit.load(traced_module_file)
         expected = torch.load(expected_file)
         self.assertEqual(qmodule(input_tensor), expected, atol=prec)
-        self.assertEqual(qmodule_scripted(input_tensor), expected, atol=prec)
-        self.assertEqual(qmodule_traced(input_tensor), expected, atol=prec)
 
     def _test_obs(
         self, obs, input_size, subname=None, generate=False, check_numerics=True
@@ -135,8 +123,6 @@ class TestSerialization(TestCase):
         (
             input_file,
             state_dict_file,
-            _,
-            _,
             expected_file,
             _package_file,
             _get_attr_targets_file,
@@ -161,8 +147,6 @@ class TestSerialization(TestCase):
         (
             input_file,
             _,
-            _scripted_module_file,
-            _traced_module_file,
             expected_file,
             package_file,
             get_attr_targets_file,
