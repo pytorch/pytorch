@@ -8,6 +8,7 @@
 #include <ATen/ops/permute_native.h>
 #include <ATen/ops/repeat_interleave_native.h>
 #include <ATen/ops/repeat_native.h>
+#include <c10/util/safe_conv.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -85,10 +86,10 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   if (use_repeat_kernel(self, repeats, result)) {
     // A size-1 dim never adds an offset, but its stride can exceed int32.
     const std::array<int32_t, 4> sizes_strides = {
-        c10::checked_convert<int32_t>(self.size(1), "int32_t"),
-        c10::checked_convert<int32_t>(self.size(0), "int32_t"),
-        c10::checked_convert<int32_t>(self.size(1) == 1 ? 0 : self.stride(1), "int32_t"),
-        c10::checked_convert<int32_t>(self.size(0) == 1 ? 0 : self.stride(0), "int32_t")};
+        c10::safe_conv<int32_t>(self.size(1), "self.size(1)"),
+        c10::safe_conv<int32_t>(self.size(0), "self.size(0)"),
+        c10::safe_conv<int32_t>(self.size(1) == 1 ? 0 : self.stride(1), "self.stride(1)"),
+        c10::safe_conv<int32_t>(self.size(0) == 1 ? 0 : self.stride(0), "self.stride(0)")};
     auto* stream = getCurrentMPSStream();
     at::mps::dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {

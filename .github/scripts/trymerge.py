@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import os
 import re
+import socket
 import time
 import traceback
 import urllib.parse
 from collections import defaultdict
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cache, partial
 from pathlib import Path
 from re import Pattern
-from typing import Any, cast, NamedTuple, TYPE_CHECKING
+from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
+from urllib.error import HTTPError, URLError
 from warnings import warn
 
 import yaml
@@ -493,6 +496,36 @@ IMPORT_STATUS_CHECKRUN_NAME = "Import Status"
 # Also caps how many gates one merge may skip on an AI CI Advisor verdict -- see
 # categorize_checks.
 IGNORABLE_FAILED_CHECKS_THESHOLD = 10
+# How long merge() waits between checks of a PR's pending jobs.
+MERGE_RETRY_INTERVAL_SECONDS = 5 * 60
+# How long one merge treats a failed job as pending while its Dr.CI classification is
+# still on the way: Dr.CI has not listed the job yet (it reads jobs from a database that
+# lags GitHub), or the AI CI Advisor is still analyzing it (AI_PENDING). Either may move
+# the job into a non-blocking category minutes later, and a merge that fails first makes
+# the author retry by hand. Three 5-minute retries, fewer when Dr.CI answers slowly,
+# cover the advisor's 6-minute p95 from dispatch to verdict. A job still blocking after
+# that fails the merge as before.
+CLASSIFICATION_WAIT_SECONDS = 15 * 60
+# The details URL of a GitHub Actions job's check run, the only kind that can wait. App
+# check runs (EasyCLA, the Meta internal-changes check) link elsewhere, and CRCR relay
+# checks, which Dr.CI matches by name, link to a downstream run with no job part.
+RE_GHA_JOB_URL = re.compile(r"/actions/runs/\d+/job/\d+")
+# Classifications get_classifications gives a failed job whose classification is still
+# on the way, and the reason with_waiting_reasons gives for it in messages.
+AWAITING_CLASSIFICATIONS = {
+    "DRCI_PENDING": "failed, waiting for Dr.CI to classify it",
+    "AI_PENDING": "failed, waiting for the AI CI Advisor's verdict",
+}
+# Pauses before each retry of a failed Dr.CI call. Back-to-back retries land in the
+# same second and fail together, as on #199675 and #201134, whose merges were then
+# blocked by failures the AI CI Advisor had cleared.
+DRCI_RETRY_DELAYS_SECONDS = (5, 15, 30)
+# Longest a Dr.CI socket may sit silent. HUD caps the endpoint at 900 s
+# (maxDuration in drci.ts) and sends nothing until it finishes, so only a
+# connection that is truly stuck waits longer. A timed-out call is not retried.
+DRCI_TIMEOUT_SECONDS = 960
+# What to do after a failed Dr.CI call; see _drci_retry_kind.
+DrciRetry = Literal["pause", "now", "stop"]
 
 REVIEWS_PER_PAGE = 100
 REVIEW_PAGE_LIMIT = 10
@@ -508,6 +541,10 @@ REVIEW_PAGE_LIMIT = 10
 # #190927 / #186302 land race).
 DOCKER_CI_PATH = ".ci/docker"
 DOCKER_BUILDS_WORKFLOW_NAME = "docker-builds"
+# GitHub's GraphQL API can report a workflow by its file path instead of its
+# `name:` (for example after a run of the workflow file failed to start), which
+# prefixes its check names with the path.
+DOCKER_BUILDS_WORKFLOW_PATH = ".github/workflows/docker-builds.yml"
 
 
 def iter_issue_timeline_until_comment(
@@ -637,11 +674,14 @@ def is_docker_affecting_files(files: Iterable[str]) -> bool:
 
 def get_docker_build_checks(checks: JobNameToStateDict) -> JobNameToStateDict:
     """Return the subset of checks that belong to the docker-builds workflow."""
+    workflow_names = (DOCKER_BUILDS_WORKFLOW_NAME, DOCKER_BUILDS_WORKFLOW_PATH)
     return {
         name: check
         for name, check in checks.items()
-        if name == DOCKER_BUILDS_WORKFLOW_NAME
-        or name.startswith(f"{DOCKER_BUILDS_WORKFLOW_NAME} / ")
+        if any(
+            name == workflow_name or name.startswith(f"{workflow_name} / ")
+            for workflow_name in workflow_names
+        )
     }
 
 
@@ -1603,8 +1643,11 @@ class GitHubPR:
         labels = self.get_labels() if self.labels is not None else []
         full_label = label_base
         count = 0
+        numbered = re.compile(rf"{re.escape(label_base)}X\d+")
         for label in labels:
-            if label_base in label:
+            # Count only this label's own repeats: a substring match let an
+            # unrelated label such as "mergedog" turn "merged" into "mergedX1".
+            if label == label_base or numbered.fullmatch(label):
                 count += 1
                 full_label = f"{label_base}X{count}"
         self.add_label(full_label, dry_run)
@@ -1622,6 +1665,7 @@ class GitHubPR:
         ignore_current_checks: set[tuple[int, str]] | None = None,
         greenlight_wait: GreenlightWaitWindow | None = None,
         native_stack: NativeStack | None = None,
+        classification_wait: ClassificationWaitWindow | None = None,
     ) -> None:
         skip_internal_checks = can_skip_internal_checks(self, comment_id)
         # Raises exception if matching rule is not found
@@ -1636,6 +1680,7 @@ class GitHubPR:
             skip_mandatory_checks=skip_mandatory_checks,
             skip_internal_checks=skip_internal_checks,
             ignore_current_checks=ignore_current_checks,
+            classification_wait=classification_wait,
         )
         ghstack_prs: list[tuple[GitHubPR, str]] | None = None
         stack: NativeStack | None = None
@@ -1648,15 +1693,18 @@ class GitHubPR:
             stack = get_native_stack(self.org, self.project, self.pr_num)
             native_prs = get_native_stack_prs(repo, self, stack)
             prs_to_merge = [pr for pr, _, _ in native_prs]
-            for pr in prs_to_merge:
-                if pr.pr_num != self.pr_num:
-                    check_stacked_pr_merge_rule(
-                        pr,
-                        repo,
-                        skip_mandatory_checks=skip_mandatory_checks,
-                        skip_internal_checks=skip_internal_checks,
-                        ignore_current_checks=ignore_current_checks,
-                    )
+        # Before the greenlight check: whether a lower PR's human approvals suffice can
+        # depend on its CI, so that question waits until the PR's own checks pass.
+        for pr in prs_to_merge:
+            if pr.pr_num != self.pr_num:
+                check_stacked_pr_merge_rule(
+                    pr,
+                    repo,
+                    skip_mandatory_checks=skip_mandatory_checks,
+                    skip_internal_checks=skip_internal_checks,
+                    ignore_current_checks=ignore_current_checks,
+                    classification_wait=classification_wait,
+                )
 
         check_greenlight_reviewed_head_sha(
             self,
@@ -1694,8 +1742,9 @@ class GitHubPR:
                 repo,
                 skip_mandatory_checks,
                 comment_id,
+                # Checked above, before the greenlight check.
+                skip_all_rule_checks=True,
                 ghstack_prs=ghstack_prs,
-                ignore_current_checks=ignore_current_checks,
             )
 
             # Log, but do not block on, a docker land race.
@@ -1782,11 +1831,27 @@ class GitHubPR:
         ignore_current_checks: set[tuple[int, str]] | None = None,
     ) -> list[GitHubPR]:
         """
-        :param skip_all_rule_checks: If true, skips all rule checks on ghstack PRs, useful for dry-running merge locally
+        Commits the PR, or the open PRs of its ghstack stack up to and including it,
+        onto `branch` (the default branch when None) in `repo`, without pushing them.
+
+        First fetches `branch` from the remote, which needs network access, and
+        force-resets the local `branch` to `<remote>/<branch>`, discarding any local
+        commits on it, so commits an earlier attempt left in `repo` never land.
+
+        :param skip_all_rule_checks: If true, skips the rule checks of a ghstack stack's
+            lower PRs. merge_into passes it, having checked them before the greenlight
+            check, and so does --check-mergeability, which only tests that the stack
+            applies.
         """
         branch_to_merge_into = self.default_branch() if branch is None else branch
-        if repo.current_branch() != branch_to_merge_into:
-            repo.checkout(branch_to_merge_into)
+        remote_tip = f"refs/remotes/{repo.remote}/{branch_to_merge_into}"
+        try:
+            repo.fetch(f"+refs/heads/{branch_to_merge_into}", remote_tip)
+        except RuntimeError as e:
+            raise RuntimeError(
+                f"Could not fetch {branch_to_merge_into} from {repo.remote}: {e}"
+            ) from e
+        repo._run_git("checkout", "-B", branch_to_merge_into, remote_tip)
 
         # It's okay to skip the commit SHA check for ghstack PRs since
         # authoring requires write access to the repo.
@@ -1990,6 +2055,7 @@ def find_matching_merge_rule(
     skip_internal_checks: bool = False,
     ignore_current_checks: set[tuple[int, str]] | None = None,
     approved_by_override: set[str] | None = None,
+    classification_wait: ClassificationWaitWindow | None = None,
 ) -> tuple[
     MergeRule,
     list[tuple[str, str | None, int | None]],
@@ -2002,6 +2068,9 @@ def find_matching_merge_rule(
 
     approved_by_override replaces the PR's real approver set, so a caller can ask what
     would happen if a given approval were absent. None keeps the PR's real approvers.
+
+    classification_wait lets a failed job whose classification is still on the way
+    count as pending rather than failed; see get_classifications.
 
     NB: this function is used in Meta-internal workflows, see the comment at the top of
     this file for details.
@@ -2031,6 +2100,7 @@ def find_matching_merge_rule(
         pr.project,
         checks,
         ignore_current_checks=ignore_current_checks,
+        classification_wait=classification_wait,
     )
 
     # This keeps the list of all approvers that could stamp the change
@@ -2125,11 +2195,13 @@ def find_matching_merge_rule(
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
+                note = waited_note(failed_checks, classification_wait)
                 reject_reason = "\n".join(
                     (
                         f"{len(failed_checks)} mandatory check(s) failed.  The first few are:",
                         *checks_to_markdown_bullets(failed_checks),
                         "",
+                        *([note, ""] if note else []),
                         f"Dig deeper by [viewing the failures on hud]({hud_link})",
                     )
                 )
@@ -2140,7 +2212,9 @@ def find_matching_merge_rule(
                 reject_reason = "\n".join(
                     (
                         f"{len(pending_checks)} mandatory check(s) are pending/not yet run.  The first few are:",
-                        *checks_to_markdown_bullets(pending_checks),
+                        *checks_to_markdown_bullets(
+                            with_waiting_reasons(pending_checks, checks)
+                        ),
                         "",
                         f"Dig deeper by [viewing the pending checks on hud]({hud_link})",
                     )
@@ -2183,22 +2257,47 @@ def check_stacked_pr_merge_rule(
     skip_mandatory_checks: bool,
     skip_internal_checks: bool,
     ignore_current_checks: set[tuple[int, str]] | None,
+    classification_wait: ClassificationWaitWindow | None = None,
 ) -> None:
     """find_matching_merge_rule for `pr`, which lands below the PR being merged, with
-    any refusal naming `pr`."""
+    any refusal naming `pr`. Unless `skip_mandatory_checks`, `pr` is then held to the
+    checks merge() holds the merged PR to, not only the mandatory ones of its rule: a
+    startup failure, or a failure Dr.CI does not excuse, refuses and a pending check
+    waits."""
     try:
-        find_matching_merge_rule(
+        _, pending, failing, _ = find_matching_merge_rule(
             pr,
             repo,
             skip_mandatory_checks=skip_mandatory_checks,
             skip_internal_checks=skip_internal_checks,
             ignore_current_checks=ignore_current_checks,
+            classification_wait=classification_wait,
         )
     except MergeRuleFailedError as ex:
         raise type(ex)(
             f"Merge rule check failed for stacked PR #{pr.pr_num}:\n\n{ex}",
             ex.rule,
         ) from ex
+    if skip_mandatory_checks:
+        return
+    startup_failures = filter_checks_with_lambda(
+        pr.get_checkrun_conclusions(), lambda status: status == "STARTUP_FAILURE"
+    )
+    if startup_failures:
+        raise RuntimeError(
+            f"{len(startup_failures)} STARTUP failures reported on stacked PR #{pr.pr_num}, please check workflows syntax! "
+            + ", ".join(f"[{x.name}]({x.url})" for x in startup_failures[:5])
+        )
+    if failing:
+        raise RuntimeError(
+            f"{len(failing)} jobs have failed on stacked PR #{pr.pr_num}, first few of them are: "
+            + ", ".join(f"[{x[0]}]({x[1]})" for x in failing[:5])
+        )
+    if pending:
+        raise MandatoryChecksMissingError(
+            f"Still waiting for {len(pending)} jobs to finish on stacked PR #{pr.pr_num}, "
+            + f"first few of them are: {', '.join(x[0] for x in pending[:5])}"
+        )
 
 
 # One merge command runs as one process, and its retry loop re-asks this question every
@@ -2225,6 +2324,9 @@ def is_authorized_without_greenlight(
     `find_matching_merge_rule`. Relaxing any of them here would let a rule that the real
     gate rejects answer this question, and the real gate would then fall through to the
     Greenlight rule -- leaving greenlight the sole authority with the guard switched off.
+    The one argument not passed is `classification_wait`: without it a job still waiting
+    on its classification counts as failed here, which can only make this check stricter.
+    `merge_into` asks only after every PR it lands has passed its own rule check.
 
     An answer is cached per approver set and head commit. Both are re-read from GitHub on
     every retry, so an approval added mid-merge still takes effect; what the cache drops
@@ -2293,6 +2395,8 @@ def check_greenlight_reviewed_head_sha(
 
     The gate arguments are the ones `merge_into` gave the real `find_matching_merge_rule`,
     so that asking whether greenlight's approval is load-bearing asks it of the same gate.
+    `classification_wait` is the exception, left out on purpose: see
+    is_authorized_without_greenlight.
 
     The ghstack path lands a cherry-pick of each PR's head rather than the head itself,
     but get_ghstack_prs has already proven the two carry identical content, and the head
@@ -2452,6 +2556,39 @@ def checks_to_str(checks: list[tuple[str, str | None]]) -> str:
     return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
 
 
+def with_waiting_reasons(
+    pending: list[tuple[str, str | None, int | None]], checks: JobNameToStateDict
+) -> list[tuple[str, str | None, int | None]]:
+    """`pending` for a message: a failed job waiting on its classification says so."""
+
+    def label(name: str) -> str:
+        check = checks.get(name)
+        reason = (
+            AWAITING_CLASSIFICATIONS.get(check.classification or "") if check else None
+        )
+        return f"{name} ({reason})" if reason else name
+
+    return [(label(name), url, job_id) for name, url, job_id in pending]
+
+
+def waited_note(
+    failed: list[tuple[str, str | None, int | None]],
+    classification_wait: ClassificationWaitWindow | None,
+) -> str:
+    """A sentence for a failure message when the merge waited on some of `failed`."""
+    if classification_wait is None:
+        return ""
+    waited = sum(
+        1 for _, _, job_id in failed if job_id in classification_wait.waited_on
+    )
+    if not waited:
+        return ""
+    return (
+        "Blocking jobs that the merge waited on for a Dr.CI or AI CI Advisor "
+        f"classification: {waited}."
+    )
+
+
 def checks_to_markdown_bullets(
     checks: list[tuple[str, str | None, int | None]],
 ) -> list[str]:
@@ -2603,26 +2740,104 @@ def save_merge_record(
         json.dump(data, f)
 
 
-@retries_decorator()
 def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
     """
-    Query HUD API to find similar failures to decide if they are flaky
+    Query HUD API to find similar failures to decide if they are flaky.
+
+    Returns None when every attempt has failed, or after a single attempt that
+    timed out, stalled on its error body or got HTTP 504. get_classifications
+    reads None as "Dr.CI unavailable" and answers from the Dr.CI check run
+    summary -- a fallback that drops AI_NOT_RELATED, so a failed call here
+    un-clears every failure the AI CI Advisor cleared.
     """
     # NB: This doesn't work internally atm because this requires making an
     # external API call to HUD
-    failures = gh_fetch_url(
-        f"https://hud.pytorch.org/api/drci/drci?prNumber={pr_num}",
-        data=f"repo={project}",
-        headers={
-            "Authorization": os.getenv("DRCI_BOT_KEY", ""),
-            "Accept": "application/vnd.github.v3+json",
-            "x-hud-internal-bot": os.getenv("HUD_API_TOKEN", ""),
-        },
-        method="POST",
-        reader=json.load,
-    )
+    delays = (0, *DRCI_RETRY_DELAYS_SECONDS)
+    retry: DrciRetry = "now"
+    for attempt, delay in enumerate(delays):
+        if retry == "stop":
+            break
+        if retry == "pause":
+            time.sleep(delay)
+        try:
+            failures = gh_fetch_url(
+                f"https://hud.pytorch.org/api/drci/drci?prNumber={pr_num}",
+                data=f"repo={project}",
+                headers={
+                    "Authorization": os.getenv("DRCI_BOT_KEY", ""),
+                    "Accept": "application/vnd.github.v3+json",
+                    "x-hud-internal-bot": os.getenv("HUD_API_TOKEN", ""),
+                },
+                method="POST",
+                reader=json.load,
+                timeout=DRCI_TIMEOUT_SECONDS,
+            )
+            return failures.get(str(pr_num), {}) if failures else {}
+        except HTTPError as err:
+            # gh_fetch_url has already printed the status. Dr.CI answers 400 for
+            # any exception it hits while recomputing and names it only in the
+            # body.
+            try:
+                body, retry = _http_error_body(err), _drci_retry_kind(err)
+            except TimeoutError as e:  # the body stalled after the headers
+                body, retry = f"<body timed out: {e}>", "stop"
+            print(
+                f"Attempt {attempt + 1} of {len(delays)} to call Dr.CI failed, "
+                f"response body: {body}"
+            )
+        except Exception as e:
+            print(
+                f"Attempt {attempt + 1} of {len(delays)} to call Dr.CI failed "
+                f'with "{e}"'
+            )
+            retry = _drci_retry_kind(e)
+    return None
 
-    return failures.get(str(pr_num), {}) if failures else {}
+
+def _drci_retry_kind(err: Exception) -> DrciRetry:
+    """How to follow a failed Dr.CI call, guessed from the exception type:
+    "pause" when waiting may clear it, "now" to retry at once, "stop" when
+    another attempt would only wait out the endpoint's time limit again."""
+    if isinstance(err, HTTPError):
+        if err.code == 504:  # HUD ran out its maxDuration
+            return "stop"
+        return "pause" if err.code in (400, 408, 429) or err.code >= 500 else "now"
+    if isinstance(err, TimeoutError):  # silent for DRCI_TIMEOUT_SECONDS
+        return "stop"
+    if isinstance(err, URLError):
+        reason = err.reason
+        if isinstance(reason, TimeoutError):
+            # No errno: DRCI_TIMEOUT_SECONDS ran out while sending. An errno
+            # (ETIMEDOUT): the kernel gave up while connecting or sending, which
+            # a later attempt may get past; Dr.CI's recompute is safe to repeat.
+            return "stop" if reason.errno is None else "pause"
+        # urlopen wraps errors raised while connecting and sending. Refused
+        # connections, no route (as on internal runners) and unknown hosts do
+        # not clear by waiting; a temporary DNS failure or a connection broken
+        # mid-send may.
+        if isinstance(reason, socket.gaierror):
+            return "pause" if reason.errno == socket.EAI_AGAIN else "now"
+        broken = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
+        return "pause" if isinstance(reason, broken) else "now"
+    # Raised while waiting for or reading the response, e.g. RemoteDisconnected,
+    # IncompleteRead, or JSONDecodeError on a cut-off body. Anything else is
+    # most likely a bug, which waiting will not fix.
+    transient = (
+        http.client.HTTPException,
+        OSError,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+    )
+    return "pause" if isinstance(err, transient) else "now"
+
+
+def _http_error_body(err: HTTPError, limit: int = 500) -> str:
+    try:
+        return err.read(limit).decode("utf-8", errors="replace")
+    except TimeoutError:
+        raise
+    except Exception as e:
+        return f"<unreadable body: {e}>"
 
 
 REMOVE_JOB_NAME_SUFFIX_REGEX = re.compile(r", [0-9]+, [0-9]+, .+\)$")
@@ -2767,16 +2982,136 @@ def is_ai_not_related(check: JobCheckState, drci_classifications: Any) -> bool:
     )
 
 
+def is_ai_pending(check: JobCheckState, drci_classifications: Any) -> bool:
+    """Return True if Dr.CI says the AI CI Advisor still owes this failure a verdict.
+
+    Dr.CI lists such a job under ``AI_PENDING`` and keeps it in its blocking category
+    too: the list only says an answer that may clear the job is coming. Matched on the
+    job id only, for the reason given in is_ai_not_related.
+    """
+    if not check or not drci_classifications or not check.job_id:
+        return False
+
+    # A new category whose shape production has not confirmed yet: skip a malformed
+    # entry rather than fail the merge on it, as is_unlisted_by_drci does.
+    pending = drci_classifications.get("AI_PENDING")
+    if not isinstance(pending, list):
+        return False
+    return any(
+        isinstance(job, dict) and check.job_id == job.get("id") for job in pending
+    )
+
+
+def is_unlisted_by_drci(check: JobCheckState, drci_classifications: Any) -> bool:
+    """Return True if this GitHub Actions job is in none of Dr.CI's categories.
+
+    Dr.CI files every failed job it knows about under some category, but it reads jobs
+    from a database that lags GitHub, so a job that failed moments ago may not be in
+    its answer yet -- nor dispatched to the AI CI Advisor, which Dr.CI does while
+    answering. Only meaningful for a live answer: the check-run summary is a snapshot.
+    awaiting_classification checks first that the check is a GitHub Actions job's.
+    """
+    if not check or not drci_classifications or not check.job_id:
+        return False
+
+    # Unlike its siblings, which read known categories, this walks every key, so it
+    # skips anything that is not a job list rather than fail the merge on it.
+    return all(
+        check.job_id != job.get("id")
+        for jobs in drci_classifications.values()
+        if isinstance(jobs, list)
+        for job in jobs
+        if isinstance(job, dict)
+    )
+
+
+@dataclass
+class ClassificationWaitWindow:
+    """How long one merge command has waited on each failed job's classification.
+
+    Owned by merge() and carried across its retries, like GreenlightWaitWindow. Each
+    job gets its own budget, opened the first time this merge saw it waiting, so a
+    rerun -- a new job id -- opens a new one. Without a window, get_classifications
+    never waits, which keeps every other caller as it was.
+    """
+
+    opened_at: dict[int, float] = field(default_factory=dict)
+    # The AWAITING_CLASSIFICATIONS key each job last waited under.
+    reasons: dict[int, str] = field(default_factory=dict)
+    # Jobs the latest classification of their PR left waiting.
+    waiting: set[int] = field(default_factory=set)
+    # Jobs that were waiting when merge() went to sleep for a retry.
+    waited_on: set[int] = field(default_factory=set)
+
+    def within_budget(self, job_id: int, now: float) -> bool:
+        """Record that the job is waiting. True while its budget lasts."""
+        opened = self.opened_at.setdefault(job_id, now)
+        return now - opened < CLASSIFICATION_WAIT_SECONDS
+
+    def note_retry(self) -> None:
+        """Called by merge() before it sleeps: every job waiting now was waited on."""
+        self.waited_on.update(self.waiting)
+
+
+def awaiting_classification(
+    check: JobCheckState,
+    live_classifications: Any,
+    classification_wait: ClassificationWaitWindow,
+) -> str | None:
+    """The AWAITING_CLASSIFICATIONS key for a failed job whose classification is still
+    on the way, or None.
+
+    Only a plain FAILURE of a GitHub Actions job qualifies (see RE_GHA_JOB_URL): it is
+    the only conclusion the AI CI Advisor can clear, and the case where Dr.CI's lag has
+    been seen to fail a merge. A job Dr.CI has already put in a blocking category with
+    no verdict coming is not waited on. Without a live answer, a job whose wait is
+    already open keeps the reason it last waited under.
+    """
+    if check.status != "FAILURE" or not RE_GHA_JOB_URL.search(check.url or ""):
+        return None
+    if not live_classifications:
+        return classification_wait.reasons.get(check.job_id)
+    if is_unlisted_by_drci(check, live_classifications):
+        return "DRCI_PENDING"
+    if is_ai_pending(check, live_classifications):
+        return "AI_PENDING"
+    return None
+
+
 def get_classifications(
     pr_num: int,
     project: str,
     checks: dict[str, JobCheckState],
     ignore_current_checks: set[tuple[int, str]] | None,
+    classification_wait: ClassificationWaitWindow | None = None,
 ) -> dict[str, JobCheckState]:
+    """Classify each failed check from Dr.CI's answer.
+
+    With a ClassificationWaitWindow, a failed job whose classification is still on the
+    way (awaiting_classification) is classified with its AWAITING_CLASSIFICATIONS key
+    while the window allows, so categorize_checks counts it as pending and merge()
+    retries instead of failing. Only a live Dr.CI answer can start a wait; without
+    one (the call failed, or answered {}), a failed job whose wait is already open
+    keeps waiting under its last reason until its budget runs out.
+    """
     # Get the failure classification from Dr.CI, which is the source of truth
     # going forward. It's preferable to try calling Dr.CI API directly first
     # to get the latest results as well as update Dr.CI PR comment
     drci_classifications = get_drci_classifications(pr_num=pr_num, project=project)
+    # Taken before the fallback below can replace it with the check-run summary. An
+    # empty answer starts no wait: Dr.CI answers {} for a PR none of whose jobs it has
+    # ingested, which is rare by the time a merge sees a failure, but also for every PR
+    # of a repo it has no data for, where a wait would delay every failed merge.
+    live_classifications = drci_classifications or None
+    if classification_wait is not None:
+        # This answer replaces the last one for these jobs; other PRs of a stack
+        # share the window, so theirs stay. A live answer also retires their saved
+        # reasons, so a job it settled does not wait again on a later failed call.
+        job_ids = {c.job_id for c in checks.values() if c.job_id}
+        classification_wait.waiting -= job_ids
+        if live_classifications is not None:
+            for job_id in job_ids:
+                classification_wait.reasons.pop(job_id, None)
 
     def get_readable_drci_results(drci_classifications: Any) -> str:
         try:
@@ -2916,6 +3251,27 @@ def get_classifications(
                 check.url,
                 check.status,
                 "IGNORE_CURRENT_CHECK",
+                check.job_id,
+                check.title,
+                check.summary,
+            )
+            continue
+
+        if classification_wait is None or not check.job_id:
+            continue
+        awaiting = awaiting_classification(
+            check, live_classifications, classification_wait
+        )
+        if awaiting is not None and classification_wait.within_budget(
+            check.job_id, time.time()
+        ):
+            classification_wait.reasons[check.job_id] = awaiting
+            classification_wait.waiting.add(check.job_id)
+            checks_with_classifications[name] = JobCheckState(
+                check.name,
+                check.url,
+                check.status,
+                awaiting,
                 check.job_id,
                 check.title,
                 check.summary,
@@ -3405,6 +3761,10 @@ def categorize_checks(
             # ignored anyway. This is useful to not need to wait for scarce resources
             # like ROCm, which is also frequently in unstable mode
             pending_checks.append((checkname, url, job_id))
+        elif classification in AWAITING_CLASSIFICATIONS:
+            # Failed, but its classification is still on the way and may clear it, so
+            # it is waited on like a running job. get_classifications bounds the wait.
+            pending_checks.append((checkname, url, job_id))
         elif classification == "INVALID_CANCEL":
             continue
         elif not is_passing_status(check_runs[checkname].status):
@@ -3548,6 +3908,8 @@ def merge(
     # Owned out here so the greenlight wait budget spans every iteration below rather
     # than restarting each time merge_into is re-entered.
     greenlight_wait = GreenlightWaitWindow()
+    # Likewise for the per-job wait on a classification still on the way.
+    classification_wait = ClassificationWaitWindow()
     while elapsed_time < timeout_minutes * 60:
         check_for_sev(pr.org, pr.project, skip_mandatory_checks)
         current_time = time.time()
@@ -3566,7 +3928,10 @@ def merge(
             ignore_flaky_failures = True
             try:
                 find_matching_merge_rule(
-                    pr, repo, ignore_current_checks=ignore_current_checks
+                    pr,
+                    repo,
+                    ignore_current_checks=ignore_current_checks,
+                    classification_wait=classification_wait,
                 )
             except MandatoryChecksMissingError as ex:
                 if ex.rule is not None:
@@ -3581,6 +3946,7 @@ def merge(
                 pr.project,
                 checks,
                 ignore_current_checks=ignore_current_checks,
+                classification_wait=classification_wait,
             )
             pending, failing, _ = categorize_checks(
                 checks,
@@ -3601,17 +3967,22 @@ def merge(
             # END of HACK
 
             if len(failing) > 0:
-                raise RuntimeError(
+                message = (
                     f"{len(failing)} jobs have failed, first few of them are: "
                     + ", ".join(f"[{x[0]}]({x[1]})" for x in failing[:5])
                 )
+                note = waited_note(failing, classification_wait)
+                raise RuntimeError(f"{message}. {note}" if note else message)
             if len(pending) > 0:
                 if failed_rule_message is not None:
                     raise failed_rule_message
                 else:
                     raise MandatoryChecksMissingError(
                         f"Still waiting for {len(pending)} jobs to finish, "
-                        + f"first few of them are: {', '.join(x[0] for x in pending[:5])}"
+                        + "first few of them are: "
+                        + ", ".join(
+                            x[0] for x in with_waiting_reasons(pending[:5], checks)
+                        )
                     )
 
             return pr.merge_into(
@@ -3622,14 +3993,16 @@ def merge(
                 ignore_current_checks=ignore_current_checks,
                 greenlight_wait=greenlight_wait,
                 native_stack=native_stack,
+                classification_wait=classification_wait,
             )
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(
-                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in 5 min",
+                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in {MERGE_RETRY_INTERVAL_SECONDS // 60} min",
                 flush=True,
             )
-            time.sleep(5 * 60)
+            classification_wait.note_retry()
+            time.sleep(MERGE_RETRY_INTERVAL_SECONDS)
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"
