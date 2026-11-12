@@ -16,8 +16,8 @@ phase 1 zero the histogram one bin per thread).
      counters claim slots and ties resolve per run.
   3. Bitonic sort over ``sort_len`` slots. Slots beyond K are filled with
      ``INT64_MIN = [ INT32_MIN | 0 ]``. Every real ``[ ord | ~idx ]`` key is
-     greater: either ``ord > INT32_MIN``, or ``~idx`` is nonzero when
-     ``ord == INT32_MIN``.
+     greater. When ``ord == INT32_MIN``, a collision would require
+     ``idx == 0xFFFFFFFF`` (-1), but valid indices are nonnegative.
      Comparator is always lexicographic
      ``(ord desc, idx asc)``; ``deterministic`` only controls which
      threshold-tied elements phase 2 gathers.
