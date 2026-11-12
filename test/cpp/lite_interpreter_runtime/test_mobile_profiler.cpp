@@ -1,4 +1,5 @@
 #include <ATen/Functions.h>
+#include <c10/util/Exception.h>
 #include <gtest/gtest.h>
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/api/module.h>
@@ -6,6 +7,7 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/profiler_edge.h>
+#include <algorithm>
 #include <fstream>
 
 #include <unordered_set>
@@ -42,6 +44,19 @@ bool checkMetaData(
   }
   return false;
 }
+
+class CapturingWarningHandler : public c10::WarningHandler {
+ public:
+  void process(const c10::Warning& warning) override {
+    messages_.push_back(warning.msg());
+  }
+  const std::vector<std::string>& messages() const {
+    return messages_;
+  }
+
+ private:
+  std::vector<std::string> messages_;
+};
 } // namespace
 
 TEST(MobileProfiler, ModuleHierarchy) {
@@ -207,6 +222,31 @@ TEST(MobileProfiler, ProfilerEvent) {
      */
     ASSERT_TRUE(checkMetaData("aten::__getitem__", event, "", trace_file));
   }
+}
+
+// The profiler saves its trace in its destructor, where an exception would
+// terminate the process, so a trace that cannot be saved must only warn.
+TEST(MobileProfiler, UnwritableTraceFileWarns) {
+  auto testModelFile = torch::testing::getResourcePath(
+      "test/cpp/lite_interpreter_runtime/to_be_profiled_module.ptl");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(at::rand({64, 64}));
+  inputs.emplace_back(at::rand({64, 64}));
+  const std::string bogusPath = "/kineto-test-nonexistent-dir/trace.json";
+
+  CapturingWarningHandler handler;
+  c10::WarningUtils::WarningHandlerGuard guard(&handler);
+  mobile::Module bc = _load_for_mobile(testModelFile.string());
+  {
+    KinetoEdgeCPUProfiler profiler(bc, bogusPath);
+    bc.forward(inputs);
+  } // End of profiler
+  const auto& messages = handler.messages();
+  const std::string expected = "Failed to save the edge profiler trace";
+  EXPECT_TRUE(std::any_of(messages.begin(), messages.end(), [&](const auto& m) {
+    return m.find(expected) != std::string::npos;
+  }));
 }
 
 } // namespace mobile
