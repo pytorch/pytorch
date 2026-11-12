@@ -79,7 +79,7 @@ class TestInnerTreeStagedIndex(TestCase):
         b200 = rt._ITREE_ARCH[(10, 0)]
         with mock.patch.object(rt, "_itree_arch", return_value=b200):
             plan = rt.itree_plan(n, m, 4, device=x.device)
-            combine = rt.itree_combine_plan(plan, 8, x.device, nfields=2, nrows=m)
+            combine = rt.itree_combine_plan(plan, 8, x.device, nrows=m, trait=trait)
             self.assertGreater(combine.combine_tile, 0)
             (got,) = rt._run_itree(trait, "argmax_int64_split", x, [torch.int64], plan)
         self.assertEqual(got, torch.full((m,), 700001, device=device))
