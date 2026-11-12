@@ -138,7 +138,7 @@ def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv
 # XCDs that workgroups are dispatched round-robin across, by base arch.
 # TODO: add gfx1250 (MI450) once its XCD count and dispatch order are confirmed
 # and the remap is benchmarked there.
-_NUM_XCDS = {"gfx950": 8}
+_NUM_XCDS = {"gfx942": 8, "gfx950": 8}
 
 
 def _default_num_xcds(device: torch.device) -> int | None:

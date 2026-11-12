@@ -306,8 +306,9 @@ class FlexKernelOptions(TypedDict, total=False):
 
     NUM_XCDS: NotRequired[int]
     """ROCm-specific number of XCDs to remap Triton kernel programs across, so
-    the blocks of one (batch, head) share an XCD's L2. Defaults to 8 on gfx950
-    and off elsewhere; 0 disables it. May add a size guard with dynamic shapes."""
+    the blocks of one (batch, head) share an XCD's L2. Defaults to 8 on gfx942
+    and gfx950 and off elsewhere; 0 disables it. May add a size guard with
+    dynamic shapes."""
 
     BACKEND: NotRequired[_Backend]
     """Selects a specific kernel backend.
