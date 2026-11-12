@@ -3202,17 +3202,15 @@ class OutputGraph(OutputGraphCommon):
 
             dce_hop_extra_outputs(gm)
 
-            # Saved tensors hooks can only affect a graph that records autograd.
-            # Guarding on them otherwise recompiles e.g. a no_grad optimizer step
-            # when it is later called inside a hooks context.
+            # Saved tensors hooks only affect graphs that record autograd; guarding
+            # otherwise recompiles e.g. a no_grad optimizer step under a hooks context.
             def has_grad_fn(t: object) -> bool:
                 if not isinstance(t, torch.Tensor) or not t.requires_grad:
                     return False
                 try:
                     return t.grad_fn is not None
                 except RuntimeError:
-                    # grad_fn raises for a multi-output view whose base was
-                    # modified in place; such a view is still part of a graph.
+                    # Multi-output view of an in-place-modified base: still in a graph.
                     return True
 
             records_autograd = any(
