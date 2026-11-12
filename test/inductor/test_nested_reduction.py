@@ -16,6 +16,7 @@ from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
+    add_skip_condition,
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
@@ -1765,6 +1766,12 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x,))
         self.check_fusion()
 
+    add_skip_condition(
+        test_looped_standalone_sub_parent_large_group,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
+
     def test_standalone_sub_parent_declines_benchmark_fusion(self):
         # benchmark_fusion re-expands a group through generic scheduling, which
         # cannot represent the epilogue's derived group. The group must decline
@@ -1883,6 +1890,12 @@ class _NestedReductionBase:
 
         self._check_looped_internal_source(f, (B, D), expected_passes=2)
 
+    add_skip_condition(
+        test_looped_internal_source_uses_second_pass,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
+
     def test_looped_internal_source_uses_reduced_output(self):
         B, D = 8, 16384
 
@@ -1896,6 +1909,12 @@ class _NestedReductionBase:
             return pairs[..., 0] + 1, pairs[..., 1] + 2
 
         self._check_looped_internal_source(f, (B, D), expected_passes=2)
+
+    add_skip_condition(
+        test_looped_internal_source_uses_reduced_output,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
 
     def test_looped_internal_source_reuses_final_reduction_pass(self):
         B, D = 8, 16384
@@ -1911,6 +1930,12 @@ class _NestedReductionBase:
 
         self._check_looped_internal_source(f, (B, D), expected_passes=2)
 
+    add_skip_condition(
+        test_looped_internal_source_reuses_final_reduction_pass,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
+
     def test_looped_internal_source_closes_final_reduction_pass(self):
         B, D = 8, 16384
 
@@ -1925,6 +1950,12 @@ class _NestedReductionBase:
             return pairs[..., 0] / scale, pairs[..., 1] / scale
 
         self._check_looped_internal_source(f, (B, D), expected_passes=3)
+
+    add_skip_condition(
+        test_looped_internal_source_closes_final_reduction_pass,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
 
     @parametrize("shifted", [False, True])
     def test_producer_consumer_mxfp6_preshuffled_four_to_three_pack(self, shifted):
@@ -2104,6 +2135,12 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x,))
         self.check_no_fusion()
 
+    add_skip_condition(
+        test_looped_mxfp6_rejects_source_before_reduction,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
+
     def test_looped_mxfp6_rejects_source_chain_used_by_reduction(self):
         if self.force_persistent_outer_reduction is not False:
             self.skipTest("requires a looped reduction")
@@ -2121,6 +2158,12 @@ class _NestedReductionBase:
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
         self.check_nested_matches_unnested(f, (x,))
         self.check_no_fusion()
+
+    add_skip_condition(
+        test_looped_mxfp6_rejects_source_chain_used_by_reduction,
+        lambda cls: cls.force_persistent_outer_reduction is not False,
+        "requires a looped reduction",
+    )
 
     def test_standalone_sub_parent_rejects_output_fullres_reader(self):
         B, D, G = 32, 1024, 16
@@ -3455,6 +3498,12 @@ class _InternalsBase:
 
         FileCheck().check_not("rsplit").check_not("RSPLIT").run(kernel_code)
         self.check_axis_classification_contract(kernel_code, min_rblock=16)
+
+    add_skip_condition(
+        test_nested_kernel_disables_cooperative_reduction,
+        lambda cls: cls.force_persistent_outer_reduction is False,
+        "cooperative reduction only applies to persistent kernels",
+    )
 
     def test_producer_consumer_amax_kernel_form(self):
         self.assert_single_kernel_form(
