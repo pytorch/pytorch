@@ -29,16 +29,16 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #endif
 
 static SoftmaxParams<uint32_t> narrow_params(const SoftmaxParams<uint64_t>& params) {
-  SoftmaxParams<uint32_t> result{.dim_size = c10::safe_conv<uint32_t>(params.dim_size, "uint32_t"),
-                                 .num_rows = c10::safe_conv<uint32_t>(params.num_rows, "uint32_t"),
-                                 .inner_size = c10::safe_conv<uint32_t>(params.inner_size, "uint32_t"),
-                                 .chunk_size = c10::safe_conv<uint32_t>(params.chunk_size, "uint32_t"),
-                                 .n_chunks = c10::safe_conv<uint32_t>(params.n_chunks, "uint32_t"),
+  SoftmaxParams<uint32_t> result{.dim_size = c10::safe_conv<uint32_t>(params.dim_size, "softmax dimension size"),
+                                 .num_rows = c10::safe_conv<uint32_t>(params.num_rows, "number of softmax rows"),
+                                 .inner_size = c10::safe_conv<uint32_t>(params.inner_size, "softmax inner size"),
+                                 .chunk_size = c10::safe_conv<uint32_t>(params.chunk_size, "softmax chunk size"),
+                                 .n_chunks = c10::safe_conv<uint32_t>(params.n_chunks, "number of softmax chunks"),
                                  .ndim = params.ndim,
                                  .dim = params.dim};
   for (const auto d : c10::irange(params.ndim)) {
-    result.sizes[d] = c10::safe_conv<uint32_t>(params.sizes[d], "uint32_t");
-    result.strides[d] = c10::safe_conv<uint32_t>(params.strides[d], "uint32_t");
+    result.sizes[d] = c10::safe_conv<uint32_t>(params.sizes[d], "softmax source size");
+    result.strides[d] = c10::safe_conv<uint32_t>(params.strides[d], "softmax source stride");
   }
   return result;
 }
