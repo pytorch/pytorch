@@ -3637,7 +3637,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.per_subkernel_blocks: bool = per_subkernel_blocks
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
-        # Cache of values that can be reused for the prologue.
+        # Cache prologue values across epilogue subgraphs. Descriptor keys must
+        # include the full constructor expression; template block-size constants
+        # are keyed by their variable names.
         self.prologue_cache: dict[str, str] = {}
         self.prologue: IndentedBuffer = IndentedBuffer()
         self.post_loop_combine: IndentedBuffer = IndentedBuffer()
@@ -4833,12 +4835,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and self.range_trees[-1].is_loop
             and indexing.has_rindex()
         ) or indexing.can_lift:
-            if indexing.can_lift and var in self.prologue_cache:
-                # Check for epilogue subtiling to reuse the same
-                # tensor descriptor.
-                block_descriptor = self.prologue_cache[var]
+            block_ptr_line = indexing.format(var, roffset=False)
+            if indexing.can_lift and block_ptr_line in self.prologue_cache:
+                # Reuse lifted descriptors across epilogue subtiles only when
+                # the full constructor matches, including the base offset.
+                block_descriptor = self.prologue_cache[block_ptr_line]
             else:
-                block_ptr_line = indexing.format(var, roffset=False)
                 block_var = self.cse.try_get(block_ptr_line)
 
                 # Early return if block descriptor already exists
@@ -4859,7 +4861,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if indexing.can_lift:
                     self.prologue.writeline(line_body)
                     # Cache the descriptor for epilogue subtiling
-                    self.prologue_cache[var] = block_descriptor
+                    self.prologue_cache[block_ptr_line] = block_descriptor
                 else:
                     self.body.writeline(line_body)
 

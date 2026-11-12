@@ -26,6 +26,7 @@ from torch._inductor.codegen.triton import (
     FixedTritonConfig,
     get_triton_reduction_function,
     IndexingOptions,
+    TensorDescriptorOptions,
     TMACompatibilityChecker,
     TritonCSEVariable,
     TritonKernel,
@@ -45,6 +46,7 @@ from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     get_importable_constexpr_types,
+    IndentedBuffer,
     is_triton_fp8_dtype_supported,
     run_and_get_code,
     run_and_get_kernels,
@@ -61,6 +63,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU_AND_TRITON,
     TRITON_HAS_CPU,
 )
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, TruncToFloat, TruncToInt
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -162,6 +165,77 @@ class TestCodegenTriton(InductorTestCase):
     def tearDown(self):
         self._stack.close()
         super().tearDown()
+
+    @parametrize("field", ("constant_offset", "shape", "strides", "block_shape"))
+    def test_lifted_tensor_descriptor_cache(self, field):
+        self._stack.enter_context(self._graph.set_current_device(torch.device("cpu")))
+        kernel = TritonKernel(
+            {"x": sympy.Integer(512), "r0_": sympy.Integer(1)},
+            features=SIMDKernelFeatures([], sympy.Integer(512), sympy.Integer(1)),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+        params = BlockParameters(
+            shape=[sympy.Integer(512), sympy.Integer(256)],
+            strides=[sympy.Integer(512), sympy.Integer(1)],
+            block_shape=[sympy.Integer(64), sympy.Integer(64)],
+            offsets=[sympy.Integer(0), sympy.Integer(0)],
+        )
+        original = TensorDescriptorOptions(
+            params=params,
+            constant_offset=sympy.Integer(0),
+            order=[1, 0],
+            mask_vars=OrderedSet(),
+            broadcast_shape=params.block_shape,
+            broadcasting_dims=[False, False],
+            final_shape=params.block_shape,
+            stride_sorter=BlockParameters.IdentityStrideSorter([512, 1], [0, 1]),
+            _boundary_check=[],
+            can_lift=True,
+        )
+        if field == "constant_offset":
+            changed = dataclasses.replace(original, constant_offset=sympy.Integer(256))
+        else:
+            values = {
+                "shape": [sympy.Integer(256), sympy.Integer(256)],
+                "strides": [sympy.Integer(1024), sympy.Integer(1)],
+                "block_shape": [sympy.Integer(32), sympy.Integer(64)],
+            }
+            changed = dataclasses.replace(
+                original, params=dataclasses.replace(params, **{field: values[field]})
+            )
+
+        with (
+            V.set_kernel_handler(kernel),
+            patch.object(self._graph, "get_dtype", return_value=torch.bfloat16),
+        ):
+            first, _ = kernel.codegen_block_ptr("packed", "in_ptr0", original)
+            second, _ = kernel.codegen_block_ptr("packed", "in_ptr0", changed)
+            self.assertNotEqual(
+                first, second, "Different descriptor constructors must not alias"
+            )
+
+            # Epilogue subgraphs clear ordinary CSE. Lifted descriptors must
+            # remain reusable without being emitted again.
+            kernel.cse.invalidate(OrderedSet())
+            for options, expected in ((original, first), (changed, second)):
+                actual, _ = kernel.codegen_block_ptr("packed", "in_ptr0", options)
+                self.assertEqual(actual, expected)
+
+            # Load coordinates do not change the descriptor constructor.
+            moved = dataclasses.replace(
+                original,
+                params=dataclasses.replace(
+                    params, offsets=[sympy.Integer(64), sympy.Integer(0)]
+                ),
+            )
+            actual, _ = kernel.codegen_block_ptr("packed", "in_ptr0", moved)
+            self.assertEqual(actual, first)
+            self.assertEqual(
+                kernel.prologue.getvalue().count("tl.make_tensor_descriptor("), 2
+            )
+            kernel.codegen_prologue(IndentedBuffer())
+            self.assertFalse(kernel.prologue_cache)
 
     def test_tma_store_can_use_descriptor_local_int32_indexing(self):
         layout = SimpleNamespace(offset=0, stride=[512, 1])
