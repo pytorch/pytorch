@@ -68,14 +68,13 @@ class WorkerSpec:
                      if not specified then will choose a random free port
         master_addr: fixed master_addr to run the c10d store on rank 0
                      if not specified then will choose hostname on agent rank 0
-        redirects: redirect std streams to a file,
-                   selectively redirect for a particular
-                   local rank by passing a map
-        tee: tees the specified std stream(s) to console + file,
-             selectively tee for a particular local rank by passing a map,
-             takes precedence over ``redirects`` settings.
+        local_addr: address of the local node, informational only; the agent
+                    does not read it. The address advertised during rendezvous
+                    comes from ``RendezvousParameters.local_addr`` (defaults to
+                    the local FQDN)
         event_log_handler: name of the event logging handler as registered in
           `elastic/events/handlers.py <https://docs.pytorch.org/docs/stable/elastic/events.html>`_.
+        numa_options: NUMA binding options for the workers (see :ref:`numa-api`)
         duplicate_stdout_filters: If non-empty, duplicates stdout to a file containing only lines
                                  that match _any_ of the filter strings.
         duplicate_stderr_filters: If non-empty, duplicates stderr to a file containing only lines
@@ -148,7 +147,6 @@ class Worker:
     agent it could be encoded as ``host:port (string)``.
 
     Args:
-        id (Any): uniquely identifies a worker (interpreted by the agent)
         local_rank (int): local rank of the worker
         global_rank (int): global rank of the worker
         role_rank (int): rank of the worker across all workers that have the same role
@@ -462,13 +460,20 @@ class SimpleElasticAgent(ElasticAgent):
     def __init__(
         self,
         spec: WorkerSpec,
-        exit_barrier_timeout: float = 300,
+        exit_barrier_timeout: float | None = None,
         shutdown_timeout: int = 30,
     ):
         self._worker_group = WorkerGroup(spec)
         self._remaining_restarts = self._worker_group.spec.max_restarts
         self._store = None
-        self._exit_barrier_timeout = exit_barrier_timeout
+        # Resolve exit_barrier_timeout: explicit arg wins, then env var, then
+        # the historical default of 300 s.
+        if exit_barrier_timeout is None:
+            self._exit_barrier_timeout = float(
+                os.environ.get("TORCH_ELASTIC_EXIT_BARRIER_TIMEOUT", "300")
+            )
+        else:
+            self._exit_barrier_timeout = exit_barrier_timeout
         self._shutdown_timeout = shutdown_timeout
         self._total_execution_time = 0
         self._in_exit_barrier: bool = False

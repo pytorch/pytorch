@@ -471,7 +471,7 @@ class numeric_limits<c10::BFloat16> {
     return c10::BFloat16(0x7FC0, c10::BFloat16::from_bits());
   }
   static constexpr c10::BFloat16 signaling_NaN() {
-    return c10::BFloat16(0x7F80, c10::BFloat16::from_bits());
+    return c10::BFloat16(0x7FA0, c10::BFloat16::from_bits());
   }
   static constexpr c10::BFloat16 denorm_min() {
     return c10::BFloat16(0x0001, c10::BFloat16::from_bits());

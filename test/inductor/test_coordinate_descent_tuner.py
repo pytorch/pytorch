@@ -13,7 +13,11 @@ from torch._inductor.runtime.hints import (
     TRITON_MAX_TENSOR_NUMEL,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -53,6 +57,7 @@ def mock_compare_config_prefer_larger_XBLOCK(
     return orig_compare_config(self, func, candidate_config, best_config, best_timing)
 
 
+@instantiate_parametrized_tests
 class TestCoordinateDescentTuner(TestCase):
     def test_abs_function(self):
         """
@@ -66,6 +71,19 @@ class TestCoordinateDescentTuner(TestCase):
 
         best_config = tuner.autotune(func, baseline_config)
         self.assertTrue(best_config.kwargs.get("XBLOCK") == 16, str(best_config))
+
+    def test_reduction_blocks(self):
+        tuner = CoordescTuner()
+        for reduction_dim in range(3):
+            block = f"R{reduction_dim}_BLOCK"
+            with self.subTest(block=block):
+                baseline_config = triton.Config({block: 1}, num_warps=8, num_stages=1)
+
+                def func(config, block=block):
+                    return abs(config.kwargs[block] - 15)
+
+                best_config = tuner.autotune(func, baseline_config)
+                self.assertEqual(best_config.kwargs[block], 16)
 
     def test_no_neighbors(self):
         """
@@ -116,8 +134,11 @@ class TestCoordinateDescentTuner(TestCase):
         max_block = TRITON_MAX_BLOCK
         self.assertFalse(tuner.value_too_large("XBLOCK", max_block["X"]))
         self.assertTrue(tuner.value_too_large("XBLOCK", max_block["X"] * 2))
-        self.assertFalse(tuner.value_too_large("R0_BLOCK", max_block["R0_"]))
-        self.assertTrue(tuner.value_too_large("R0_BLOCK", max_block["R0_"] * 2))
+        for prefix in ("R0_", "R1_", "R2_"):
+            with self.subTest(prefix=prefix):
+                block = f"{prefix}BLOCK"
+                self.assertFalse(tuner.value_too_large(block, max_block[prefix]))
+                self.assertTrue(tuner.value_too_large(block, max_block[prefix] * 2))
 
     def test_native_matmul_block_numel_limit(self):
         tuner = CoordescTuner(is_native_matmul=True)
@@ -215,6 +236,53 @@ class TestCoordinateDescentTuner(TestCase):
 
         neighbours = tuner.get_neighbour_configs(baseline, "XBLOCK")
         self.assertNotIn(512, [cfg.kwargs["XBLOCK"] for cfg in neighbours])
+
+    def test_mix_order_reduction_rejects_incompatible_xblock(self):
+        tuner = CoordescTuner(
+            is_mix_order_reduction=True,
+            size_hints={"x": 40961, "r0_": 129},
+        )
+        config = triton.Config(
+            {"XBLOCK": 1, "RSPLIT_SIZE": 17, "NUM_STAGES": 1},
+            num_warps=1,
+            num_stages=1,
+        )
+
+        neighbours = tuner.get_neighbour_configs(config, "XBLOCK")
+        self.assertEqual(neighbours, [])
+
+    @parametrize(
+        "rnumel,inductor_meta,xblock,rsplit_size,num_stages,accepted",
+        (
+            (129, {}, 3, 18, 1, False),
+            (129, {}, 32, 64, 1, False),
+            (129, {}, 2, 18, 4, False),
+            (129, {"mix_order_reduction_allow_multi_stages": False}, 2, 18, 2, False),
+            (129, {"uses_device_tma": True}, 2, 18, 2, False),
+            (16384, {}, 2, 18, 3, False),
+            (129, {}, 2, 18, 3, True),
+            (16384, {}, 2, 18, 2, True),
+        ),
+    )
+    def test_mix_order_reduction_validates_config(
+        self, rnumel, inductor_meta, xblock, rsplit_size, num_stages, accepted
+    ):
+        tuner = CoordescTuner(
+            is_mix_order_reduction=True,
+            size_hints={"x": 40961, "r0_": rnumel},
+            inductor_meta=inductor_meta,
+        )
+        candidate = triton.Config(
+            {
+                "XBLOCK": xblock,
+                "RSPLIT_SIZE": rsplit_size,
+                "NUM_STAGES": num_stages,
+            },
+            num_warps=1,
+            num_stages=1,
+        )
+
+        self.assertEqual(tuner.is_valid_config(candidate), accepted)
 
     def test_native_matmul_persistent_uses_meta_rblock_for_limit(self):
         size_hints = {"x": 4096, "y": 4096, "r0_": 64}

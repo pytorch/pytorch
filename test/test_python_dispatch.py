@@ -26,11 +26,12 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     first_sample,
+    HardwareClassification,
     instantiate_parametrized_tests,
-    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -106,6 +107,8 @@ class _ClassmethodUnflattenWrapper(_TraceableWrapperSubclassTestBase):
 
 
 class TestDispatcherPythonBindings(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_call_boxed(self) -> None:
         sin = torch._C._dispatch_find_schema_or_throw("aten::sin", "")
         x = torch.randn(3)
@@ -114,6 +117,7 @@ class TestDispatcherPythonBindings(TestCase):
 
 
 class TestPythonRegistration(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     test_ns = "_test_python_registration"
 
     def tearDown(self):
@@ -556,6 +560,194 @@ class TestPythonRegistration(TestCase):
         # Validate that the old behavior is restored for sum
         self.assertEqual(torch.sum(x), torch.tensor(3))
 
+    def test_extend_library_with_dispatch_key_arg(self):
+        def my_sum(*args, **kwargs):
+            return args[0].clone()
+
+        with _scoped_library("aten", "IMPL", dispatch_key="CPU") as my_lib1:
+            # RuntimeError: Explicitly provided dispatch key (Conjugate) is
+            # inconsistent with the dispatch key of the enclosing TORCH_LIBRARY_IMPL block
+            with self.assertRaisesRegex(
+                RuntimeError, "inconsistent with the dispatch key"
+            ):
+                my_lib1.impl("sum", my_sum, "Conjugate")
+            my_lib1.impl("aten::sum", my_sum)
+            x = torch.tensor([1, 2])
+            self.assertEqual(torch.sum(x), x)
+
+    def test_create_new_library(self) -> None:
+        with _scoped_library(self.test_ns, "DEF") as my_lib1:
+            my_lib1.define("sum(Tensor self) -> Tensor")
+
+            # Example 1
+            @torch.library.impl(my_lib1, "sum", "CPU")
+            def my_sum(*args, **kwargs):
+                return args[0].clone()
+
+            x = torch.tensor([1, 2])
+            op = getattr(torch.ops, self.test_ns).sum
+            self.assertEqual(op(x), x)
+
+            with _scoped_library(self.test_ns, "IMPL") as my_lib2:
+                # Example 2
+                @torch.library.impl(my_lib2, op.default, "ZeroTensor")
+                def my_sum_zt(*args, **kwargs):
+                    if args[0]._is_zerotensor():
+                        return torch._efficientzerotensor(args[0].shape)
+                    else:
+                        return args[0].clone()
+
+                y = torch._efficientzerotensor(3)
+                self.assertTrue(op(y)._is_zerotensor())
+                self.assertEqual(op(x), x)
+
+    def test_create_new_library_fragment_no_existing(self):
+        with _scoped_library(self.test_ns, "FRAGMENT") as my_lib:
+            my_lib.define("sum2(Tensor self) -> Tensor")
+
+            @torch.library.impl(my_lib, "sum2", "CPU")
+            def my_sum(*args, **kwargs):
+                return args[0]
+
+            x = torch.tensor([1, 2])
+            self.assertEqual(getattr(torch.ops, self.test_ns).sum2(x), x)
+
+    def test_create_new_library_fragment_with_existing(self):
+        with _scoped_library(self.test_ns, "DEF") as my_lib1:
+            # Create a fragment
+            with _scoped_library(self.test_ns, "FRAGMENT") as my_lib2:
+                my_lib2.define("sum4(Tensor self) -> Tensor")
+
+                @torch.library.impl(my_lib2, "sum4", "CPU")
+                def my_sum4(*args, **kwargs):
+                    return args[0]
+
+                x = torch.tensor([1, 2])
+                self.assertEqual(getattr(torch.ops, self.test_ns).sum4(x), x)
+
+                # Create another fragment
+                with _scoped_library(self.test_ns, "FRAGMENT") as my_lib3:
+                    my_lib3.define("sum3(Tensor self) -> Tensor")
+
+                    @torch.library.impl(my_lib3, "sum3", "CPU")
+                    def my_sum3(*args, **kwargs):
+                        return args[0]
+
+                    x = torch.tensor([1, 2])
+                    self.assertEqual(getattr(torch.ops, self.test_ns).sum3(x), x)
+
+    @parametrize("alias_analysis", ("", "FROM_SCHEMA", "CONSERVATIVE"))
+    def test_alias_analysis_compilation_unit(self, alias_analysis):
+        with _scoped_library(self.test_ns, "DEF") as library:
+
+            @torch.library.define(
+                library, "_op() -> None", alias_analysis=alias_analysis
+            )
+            def operation():
+                return None
+
+            unit = torch.jit.CompilationUnit(
+                f"def check_alias() -> None:\n    torch.ops.{self.test_ns}._op()\n"
+            )
+            self.assertEqual(
+                f"{self.test_ns}::_op" in str(unit.check_alias.graph),
+                alias_analysis == "CONSERVATIVE",
+            )
+
+    def test_error_for_unsupported_ns_or_kind(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported kind"):
+            my_lib1 = Library("myns", "BLA")  # noqa: SCOPED_LIBRARY
+
+        for kind in ("DEF", "FRAGMENT"):
+            with self.assertRaisesRegex(ValueError, "reserved namespace"):
+                my_lib1 = Library("prim", kind)  # noqa: SCOPED_LIBRARY
+
+    def test_dispatcher_error_filenames(self) -> None:
+        # Test that dispatcher errors report correct Python filenames and line numbers
+        # when defining duplicate libraries (which triggers the filename tracking)
+        import linecache
+        import re
+
+        # Create first library
+        # NOTE: Using Library directly instead of _scoped_library because this test
+        # specifically verifies filename tracking in error messages, and _scoped_library
+        # would report library.py locations instead of the actual test file locations
+        lib1 = Library(self.test_ns, "DEF")  # FIRST_LIB_MARKER  # noqa: SCOPED_LIBRARY
+        try:
+            lib1.define("duplicate_op(Tensor x) -> Tensor")
+
+            # Try to create another library with same namespace - this should trigger error
+            with self.assertRaises(RuntimeError) as cm:
+                lib2 = Library(  # SECOND_LIB_MARKER  # noqa: SCOPED_LIBRARY
+                    self.test_ns, "DEF"
+                )
+        finally:
+            lib1._destroy()
+
+        error_msg = str(cm.exception)
+
+        # The error should NOT contain /dev/null (the old placeholder)
+        self.assertNotIn("/dev/null", error_msg)
+        # The error should contain the test file name for both registrations
+        self.assertIn("test_python_dispatch.py", error_msg)
+        # Extract line numbers from the error message and verify they point to the right lines
+        line_matches = re.findall(r"test_python_dispatch\.py:(\d+)", error_msg)
+        self.assertEqual(
+            len(line_matches), 2, "Should have exactly 2 line number references"
+        )
+
+        # Get the actual source lines and verify they contain our markers
+        first_line_num, second_line_num = sorted([int(x) for x in line_matches])
+        first_line = linecache.getline(__file__, first_line_num).strip()
+        second_line = linecache.getline(__file__, second_line_num).strip()
+
+        # Verify the lines contain our expected markers
+        self.assertIn("FIRST_LIB_MARKER", first_line)
+        self.assertIn("SECOND_LIB_MARKER", second_line)
+
+    def test_returning_symint(self) -> None:
+        shape_env = ShapeEnv()
+        fake_tensor_mode = FakeTensorMode(shape_env=shape_env)
+
+        ft = fake_tensor_mode.from_tensor(torch.rand(2, 3))
+
+        s0, s1 = ft.shape
+
+        with _scoped_library(self.test_ns, "DEF") as tlib:
+            tlib.define("sqsum(SymInt a, SymInt b) -> SymInt")
+
+            @impl(tlib, "sqsum", "CompositeExplicitAutograd")
+            def sqsum(a: SymInt, b: SymInt):
+                return a * a + b * b
+
+            out = getattr(torch.ops, self.test_ns).sqsum.default(s0, s1)
+            out_val = shape_env.evaluate_expr(out.node.expr)
+        self.assertEqual(out_val, 13)
+
+    def test_register_fallthrough(self):
+        with _scoped_library("aten", "IMPL") as my_lib:
+            my_lib.impl("mm", fallthrough_kernel, "AutocastCPU")
+
+            a = torch.randn(2, 3, device="cpu", dtype=torch.float32)
+            b = torch.randn(3, 2, device="cpu", dtype=torch.float32)
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                # dtype for mm should be float32 since we registered a fallthrough
+                self.assertEqual(torch.mm(a, b).dtype, torch.float32)
+                # ops that don't have a fallthrough registered should not be affected
+                self.assertEqual(torch.matmul(a, b).dtype, torch.bfloat16)
+
+        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            # default behavior should have been restored
+            self.assertEqual(torch.mm(a, b).dtype, torch.bfloat16)
+
+
+instantiate_parametrized_tests(TestPythonRegistration)
+
+
+@unittest.skipUnless(TEST_CUDA and not TEST_WITH_ROCM, "CUDA-only tests")
+class TestPythonRegistrationCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_override_cuda_with_jiterator(self) -> None:
         def override_where_cuda() -> None:
             # Example 1: Invert the behavior of where's condition input
@@ -680,206 +872,15 @@ class TestPythonRegistration(TestCase):
             # behavior restored after deregistration
             self.assertEqual(x_cuda + y_cuda, x_cpu + y_cpu)
 
-        if torch.cuda.is_available() and not TEST_WITH_ROCM:
-            override_where_cuda()
-            override_gelu_cuda()
-            override_exp_cuda()
-            override_add_cuda()
-
-    def test_extend_library_with_dispatch_key_arg(self):
-        def my_sum(*args, **kwargs):
-            return args[0].clone()
-
-        with _scoped_library("aten", "IMPL", dispatch_key="CPU") as my_lib1:
-            # RuntimeError: Explicitly provided dispatch key (Conjugate) is
-            # inconsistent with the dispatch key of the enclosing TORCH_LIBRARY_IMPL block
-            with self.assertRaisesRegex(
-                RuntimeError, "inconsistent with the dispatch key"
-            ):
-                my_lib1.impl("sum", my_sum, "Conjugate")
-            my_lib1.impl("aten::sum", my_sum)
-            x = torch.tensor([1, 2])
-            self.assertEqual(torch.sum(x), x)
-
-    def test_create_new_library(self) -> None:
-        with _scoped_library(self.test_ns, "DEF") as my_lib1:
-            my_lib1.define("sum(Tensor self) -> Tensor")
-
-            # Example 1
-            @torch.library.impl(my_lib1, "sum", "CPU")
-            def my_sum(*args, **kwargs):
-                return args[0].clone()
-
-            x = torch.tensor([1, 2])
-            op = getattr(torch.ops, self.test_ns).sum
-            self.assertEqual(op(x), x)
-
-            with _scoped_library(self.test_ns, "IMPL") as my_lib2:
-                # Example 2
-                @torch.library.impl(my_lib2, op.default, "ZeroTensor")
-                def my_sum_zt(*args, **kwargs):
-                    if args[0]._is_zerotensor():
-                        return torch._efficientzerotensor(args[0].shape)
-                    else:
-                        return args[0].clone()
-
-                y = torch._efficientzerotensor(3)
-                self.assertTrue(op(y)._is_zerotensor())
-                self.assertEqual(op(x), x)
-
-    def test_create_new_library_fragment_no_existing(self):
-        with _scoped_library(self.test_ns, "FRAGMENT") as my_lib:
-            my_lib.define("sum2(Tensor self) -> Tensor")
-
-            @torch.library.impl(my_lib, "sum2", "CPU")
-            def my_sum(*args, **kwargs):
-                return args[0]
-
-            x = torch.tensor([1, 2])
-            self.assertEqual(getattr(torch.ops, self.test_ns).sum2(x), x)
-
-    def test_create_new_library_fragment_with_existing(self):
-        with _scoped_library(self.test_ns, "DEF") as my_lib1:
-            # Create a fragment
-            with _scoped_library(self.test_ns, "FRAGMENT") as my_lib2:
-                my_lib2.define("sum4(Tensor self) -> Tensor")
-
-                @torch.library.impl(my_lib2, "sum4", "CPU")
-                def my_sum4(*args, **kwargs):
-                    return args[0]
-
-                x = torch.tensor([1, 2])
-                self.assertEqual(getattr(torch.ops, self.test_ns).sum4(x), x)
-
-                # Create another fragment
-                with _scoped_library(self.test_ns, "FRAGMENT") as my_lib3:
-                    my_lib3.define("sum3(Tensor self) -> Tensor")
-
-                    @torch.library.impl(my_lib3, "sum3", "CPU")
-                    def my_sum3(*args, **kwargs):
-                        return args[0]
-
-                    x = torch.tensor([1, 2])
-                    self.assertEqual(getattr(torch.ops, self.test_ns).sum3(x), x)
-
-    @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
-    def test_alias_analysis(self):
-        def test_helper(alias_analysis=""):
-            my_lib1 = Library(self.test_ns, "DEF")  # noqa: SCOPED_LIBRARY
-
-            called = [0]
-
-            @torch.library.define(
-                my_lib1, "_op() -> None", alias_analysis=alias_analysis
-            )
-            def _op(*args, **kwargs):
-                called[0] += 1
-
-            @torch.jit.script
-            def _test():
-                torch.ops._test_python_registration._op()
-
-            if "_test_python_registration::_op" not in str(_test.graph):
-                raise AssertionError("expected _test_python_registration::_op in graph")
-
-        with self.assertRaises(AssertionError):
-            test_helper("")  # alias_analysis="FROM_SCHEMA"
-
-        # Run gc to make sure the previous Library is removed.  This is needed in dynamo-wrapped 3.14t
-        gc.collect()
-        test_helper("CONSERVATIVE")
-
-    def test_error_for_unsupported_ns_or_kind(self) -> None:
-        with self.assertRaisesRegex(ValueError, "Unsupported kind"):
-            my_lib1 = Library("myns", "BLA")  # noqa: SCOPED_LIBRARY
-
-        for kind in ("DEF", "FRAGMENT"):
-            with self.assertRaisesRegex(ValueError, "reserved namespace"):
-                my_lib1 = Library("prim", kind)  # noqa: SCOPED_LIBRARY
-
-    def test_dispatcher_error_filenames(self) -> None:
-        # Test that dispatcher errors report correct Python filenames and line numbers
-        # when defining duplicate libraries (which triggers the filename tracking)
-        import linecache
-        import re
-
-        # Create first library
-        # NOTE: Using Library directly instead of _scoped_library because this test
-        # specifically verifies filename tracking in error messages, and _scoped_library
-        # would report library.py locations instead of the actual test file locations
-        lib1 = Library(self.test_ns, "DEF")  # FIRST_LIB_MARKER  # noqa: SCOPED_LIBRARY
-        try:
-            lib1.define("duplicate_op(Tensor x) -> Tensor")
-
-            # Try to create another library with same namespace - this should trigger error
-            with self.assertRaises(RuntimeError) as cm:
-                lib2 = Library(  # SECOND_LIB_MARKER  # noqa: SCOPED_LIBRARY
-                    self.test_ns, "DEF"
-                )
-        finally:
-            lib1._destroy()
-
-        error_msg = str(cm.exception)
-
-        # The error should NOT contain /dev/null (the old placeholder)
-        self.assertNotIn("/dev/null", error_msg)
-        # The error should contain the test file name for both registrations
-        self.assertIn("test_python_dispatch.py", error_msg)
-        # Extract line numbers from the error message and verify they point to the right lines
-        line_matches = re.findall(r"test_python_dispatch\.py:(\d+)", error_msg)
-        self.assertEqual(
-            len(line_matches), 2, "Should have exactly 2 line number references"
-        )
-
-        # Get the actual source lines and verify they contain our markers
-        first_line_num, second_line_num = sorted([int(x) for x in line_matches])
-        first_line = linecache.getline(__file__, first_line_num).strip()
-        second_line = linecache.getline(__file__, second_line_num).strip()
-
-        # Verify the lines contain our expected markers
-        self.assertIn("FIRST_LIB_MARKER", first_line)
-        self.assertIn("SECOND_LIB_MARKER", second_line)
-
-    def test_returning_symint(self) -> None:
-        shape_env = ShapeEnv()
-        fake_tensor_mode = FakeTensorMode(shape_env=shape_env)
-
-        ft = fake_tensor_mode.from_tensor(torch.rand(2, 3))
-
-        s0, s1 = ft.shape
-
-        with _scoped_library(self.test_ns, "DEF") as tlib:
-            tlib.define("sqsum(SymInt a, SymInt b) -> SymInt")
-
-            @impl(tlib, "sqsum", "CompositeExplicitAutograd")
-            def sqsum(a: SymInt, b: SymInt):
-                return a * a + b * b
-
-            out = getattr(torch.ops, self.test_ns).sqsum.default(s0, s1)
-            out_val = shape_env.evaluate_expr(out.node.expr)
-        self.assertEqual(out_val, 13)
-
-    def test_register_fallthrough(self):
-        with _scoped_library("aten", "IMPL") as my_lib:
-            my_lib.impl("mm", fallthrough_kernel, "AutocastCPU")
-
-            a = torch.randn(2, 3, device="cpu", dtype=torch.float32)
-            b = torch.randn(3, 2, device="cpu", dtype=torch.float32)
-            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
-                # dtype for mm should be float32 since we registered a fallthrough
-                self.assertEqual(torch.mm(a, b).dtype, torch.float32)
-                # ops that don't have a fallthrough registered should not be affected
-                self.assertEqual(torch.matmul(a, b).dtype, torch.bfloat16)
-
-        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
-            # default behavior should have been restored
-            self.assertEqual(torch.mm(a, b).dtype, torch.bfloat16)
-
-
-instantiate_parametrized_tests(TestPythonRegistration)
+        override_where_cuda()
+        override_gelu_cuda()
+        override_exp_cuda()
+        override_add_cuda()
 
 
 class TestPythonDispatch(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basic(self) -> None:
         with capture_logs() as logs:
             x = LoggingTensor(torch.tensor([3.0]), requires_grad=True)
@@ -2020,6 +2021,24 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                 self.assertEqual(s.device_index, 2)
                 self.assertEqual(s.device_type, 3)
 
+    def test_mode_returning_wrong_number_of_values(self) -> None:
+        def returning(n):
+            class Mode(TorchDispatchMode):
+                def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                    return tuple(torch.ones(2) for _ in range(n))
+
+            return Mode()
+
+        # Built outside the mode: otherwise the mode also intercepts this
+        # single-return op and fails before max.dim is ever reached.
+        t = torch.ones(2)
+        for n in (3, 1):
+            with self.assertRaisesRegex(
+                RuntimeError, f"to return 2 values but it returned {n} instead"
+            ):
+                with returning(n):
+                    torch.ops.aten.max.dim(t, 0)
+
     def test_none_wrapping(self):
         # A Tensor subclass that returns None when doing add
         # See LoggingTensor above for more details on the subclass
@@ -2792,6 +2811,8 @@ def forward(self, x_1):
 
 
 class TestPythonDispatcher(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basic(self):
         x = torch.randn(2, requires_grad=True)
         r = torch._C._EnablePythonDispatcher()
@@ -2806,7 +2827,9 @@ class TestPythonDispatcher(TestCase):
         self.assertEqual(expected_shape, python_disp_shape)
 
 
-class TestWrapperSubclassAliasing(TestCase):
+class TestWrapperSubclassAliasingDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _test_wrapper_subclass_aliasing(self, op, args, kwargs):
         def to_subclass(t: torch.Tensor):
             return TwoTensor(t, t.clone())
@@ -2926,7 +2949,9 @@ class TestWrapperSubclassAliasing(TestCase):
             self._test_wrapper_subclass_aliasing(torch.ops.aten.fft_fft2, args, kwargs)
 
 
-instantiate_device_type_tests(TestWrapperSubclassAliasing, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestWrapperSubclassAliasingDevice, globals(), allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()

@@ -66,6 +66,7 @@ __all__ = [
     "init",
     "shutdown",
     "stream_timeout",
+    "stream_complete",
     "cpu_timeout",
     "op_timeout",
 ]
@@ -81,6 +82,7 @@ class _StreamMonitor:
     event: object  # torch.cuda.Event
     deadline: float
     callback: Callable[[], None]
+    on_complete: Callable[[], None] | None = None
     cancelled: bool = False
     monitor_id: int = field(default=0, init=False)
 
@@ -190,6 +192,23 @@ class _Watchdog:
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
 
+    def stream_complete(
+        self, callback: Callable[[], None], event: object | None = None
+    ) -> _CancelHandle:
+        self._drain_del_queue()
+        handle = _CancelHandle()
+        if event is None:
+            event = torch.cuda.Event(enable_timing=False)
+            event.record()
+        monitor = _StreamMonitor(
+            event=event,
+            deadline=float("inf"),
+            callback=lambda: None,
+            on_complete=callback,
+        )
+        self._loop.call_soon_threadsafe(self._add_monitor, monitor, handle)
+        return handle
+
     def stream_timeout(
         self, timeout: float | timedelta, callback: Callable[[], None] | None = None
     ) -> _CancelHandle:
@@ -239,6 +258,13 @@ class _Watchdog:
                 pass
 
             if completed:
+                if monitor.on_complete is not None:
+                    try:
+                        monitor.on_complete()
+                    except Exception:
+                        logger.exception(
+                            "Exception in stream completion callback (id=%d)", mid
+                        )
                 to_remove.append(mid)
                 continue
 
@@ -410,6 +436,26 @@ def init(
         )
     if old is not None:
         old.shutdown()
+
+
+def stream_complete(
+    callback: Callable[[], None], event: object | None = None
+) -> _CancelHandle:
+    """Poll a CUDA event and fire callback when the stream work completes.
+
+    Args:
+        callback: Called when the CUDA event completes.
+        event: An already-recorded ``torch.cuda.Event``. If ``None``, a new
+            event is recorded on the current stream.
+
+    Example::
+
+        some_kernel_launch()
+        handle = stream_complete(lambda: fut.set_result(True))
+        # callback fires once the kernel finishes (detected by polling)
+        # handle.cancel() to suppress the callback
+    """
+    return _get_watchdog().stream_complete(callback, event)
 
 
 def stream_timeout(

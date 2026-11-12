@@ -28,7 +28,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
-    skipIfRocm,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
 )
@@ -293,7 +292,6 @@ class TestMemoryPlanning(TestCase):
         ).check("buf1 = alloc_from_pool(pool1, align(4*s77*s77),").run(code)
         self.assertTrue(same(f(*args), result))
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180122")
     def test_cpp_wrapper(self):
         f, args = self._generate(device=GPU_TYPE)
         compiled = torch.compile(f, dynamic=True)

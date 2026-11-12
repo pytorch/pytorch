@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import functools
+import importlib
 import logging
 import os
 import queue
@@ -11,8 +12,8 @@ import tempfile
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeGuard
-from typing_extensions import final, override, Self
+from typing import final, Self, TYPE_CHECKING, TypeGuard
+from typing_extensions import override
 
 import torch._inductor.async_compile
 import torch.fx
@@ -29,6 +30,7 @@ from torch._subclasses import FakeTensorMode
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
+from .codegen.common import custom_backend_codegen_configs
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile, log
 from .debug import DebugContext
 from .graph import GraphLowering
@@ -44,25 +46,19 @@ if TYPE_CHECKING:
     from torch.fx import GraphModule
 
 
-def _graph_contains_triton_kernel_wrappers(gm: GraphModule) -> bool:
+def _graph_contains_user_kernel_wrappers(gm: GraphModule) -> bool:
     """
-    Check if the graph contains triton kernel wrapper nodes. These nodes contain
-    references to the kernel_side_table which is process-local and can't be
-    serialized across processes.
+    Check if the graph contains user-kernel wrapper nodes (triton_kernel_wrapper_*,
+    ...). These nodes contain references to a kernel side table which is
+    process-local and can't be serialized across processes.
     """
-    from torch._higher_order_ops.triton_kernel_wrap import (
-        triton_kernel_wrapper_functional,
-        triton_kernel_wrapper_mutation,
-    )
+    from torch._higher_order_ops.user_kernel_hop import get_user_kernel_hop_info
 
     for module in gm.modules():
         if not isinstance(module, torch.fx.GraphModule):
             continue
         for node in module.graph.nodes:
-            if node.target in (
-                triton_kernel_wrapper_functional,
-                triton_kernel_wrapper_mutation,
-            ):
+            if get_user_kernel_hop_info(node.target) is not None:
                 return True
     return False
 
@@ -216,6 +212,10 @@ class _WireProtocolInput:
     graph_kwargs: _CompileFxKwargs
     tracing_context: torch._guards.TracingContext | None
     config: dict[str, object]
+    # backend configs from the parent process ({module: {key: value}}),
+    # applied in the child instead of reading the worker's own backend
+    # config state
+    backend_configs: dict[str, dict[str, object]]
     virtualized: _VirtualizedSerializer
     deterministic_guard_for_testing: (  # type: ignore[name-defined]  # mypy bug
         torch.testing._internal.common_utils.DeterministicGuard | None
@@ -483,11 +483,11 @@ class _SerializedFxCompile(FxCompile):
             log.debug("Skipping %s compile: %s", type(self), e)
             return None
 
-        # Triton kernel wrapper nodes contain references to the kernel_side_table
+        # User-kernel wrapper nodes contain references to a kernel side table
         # which is process-local and can't be serialized across processes.
-        if _graph_contains_triton_kernel_wrappers(gm):
+        if _graph_contains_user_kernel_wrappers(gm):
             log.debug(
-                "Skipping %s compile: graph contains triton kernel wrappers", type(self)
+                "Skipping %s compile: graph contains user kernel wrappers", type(self)
             )
             return None
 
@@ -521,6 +521,11 @@ class _SerializedFxCompile(FxCompile):
                 graph_kwargs,
                 context,
                 config.save_config_portable(),
+                {
+                    m.__name__: m.get_serializable_config_copy()
+                    for m in custom_backend_codegen_configs.values()
+                    if m is not None
+                },
                 _VirtualizedSerializer.serialize(),
                 deterministic_guard_for_testing,
                 logger_state,
@@ -571,6 +576,8 @@ class _SerializedFxCompile(FxCompile):
             stack.enter_context(input.virtualized.patch())
             stack.enter_context(input.lowering.patch())
             stack.enter_context(config.patch(input.config))
+            for name, values in input.backend_configs.items():
+                stack.enter_context(importlib.import_module(name).patch(values))
             captured_logs = stack.enter_context(input.logger_state)
             if input.deterministic_guard_for_testing:
                 stack.enter_context(input.deterministic_guard_for_testing)

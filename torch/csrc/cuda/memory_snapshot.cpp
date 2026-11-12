@@ -133,7 +133,7 @@ at::CallbackHandle _initRecordAnnotations(bool useGlobalCallback) {
                 {{"name", fn.name()}, {"stage", "START"}});
             return nullptr;
           },
-          [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+          [](const at::RecordFunction& fn, at::ObserverContext* /*ctx_ptr*/) {
             c10::cuda::CUDACachingAllocator::recordAnnotation(
                 {{"name", fn.name()}, {"stage", "END"}});
           })
@@ -152,7 +152,7 @@ at::CallbackHandle _initCompileContexts() {
             }
             return nullptr;
           },
-          [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
+          [](const at::RecordFunction& fn, at::ObserverContext* /*ctx_ptr*/) {
             std::string functionName = fn.name();
             const std::string functionNamePrefix = "Torch-Compiled Region";
             if (functionName.starts_with(functionNamePrefix)) {
@@ -332,9 +332,14 @@ std::string _memory_snapshot_pickled() {
   IValue forward_frames_s = "forward_frames";
   IValue blocks_s = "blocks";
   IValue is_expandable_s = "is_expandable";
+  IValue expandable_segment_base_s = "expandable_segment_base";
+  IValue expandable_reservation_size_s = "expandable_reservation_size";
+  IValue expandable_segment_size_s = "expandable_segment_size";
+  IValue expandable_segment_handle_type_s = "expandable_segment_handle_type";
   IValue time_us_s = "time_us";
   IValue compile_contexts_s = "compile_context";
   IValue user_metadata_s = "user_metadata";
+  IValue internal_metadata_s = "internal_metadata";
   IValue pool_id_s = "pool_id";
 
   auto empty_frames = new_list();
@@ -371,6 +376,18 @@ std::string _memory_snapshot_pickled() {
         segment_pool_id,
         std::tuple<int64_t, int64_t>(segmentInfo.owner_private_pool_id));
     segmentDict.insert(is_expandable_s, segmentInfo.is_expandable);
+    segmentDict.insert(
+        expandable_segment_base_s,
+        (int64_t)segmentInfo.expandable_segment_base);
+    segmentDict.insert(
+        expandable_reservation_size_s,
+        (int64_t)segmentInfo.expandable_reservation_size);
+    segmentDict.insert(
+        expandable_segment_size_s,
+        (int64_t)segmentInfo.expandable_segment_size);
+    segmentDict.insert(
+        expandable_segment_handle_type_s,
+        (int64_t)segmentInfo.expandable_segment_handle_type);
 
     add_frame_key(segmentDict, segmentInfo.context_when_allocated);
 
@@ -455,6 +472,9 @@ std::string _memory_snapshot_pickled() {
     trace_entry.insert(stream_s, int64_t(te.stream_));
     trace_entry.insert(compile_contexts_s, te.compile_context_);
     trace_entry.insert(user_metadata_s, te.user_metadata_);
+    if (!te.internal_metadata_.empty()) {
+      trace_entry.insert(internal_metadata_s, te.internal_metadata_);
+    }
     if (te.context_) {
       auto sc = getCapturedTracebackFromContext(te.context_);
       frame_tracebacks.push_back(sc);
@@ -551,19 +571,26 @@ std::string _memory_snapshot_pickled() {
         allocated_size_s, static_cast<int64_t>(seg.allocated ? seg.size : 0));
     segmentDict.insert(
         active_size_s, static_cast<int64_t>(seg.active ? seg.size : 0));
-    segmentDict.insert(requested_size_s, static_cast<int64_t>(seg.size));
+    segmentDict.insert(
+        requested_size_s,
+        static_cast<int64_t>(seg.active ? seg.requested_size : 0));
     segmentDict.insert(stream_s, int64_t(0));
     segmentDict.insert(segment_type_s, small_s);
     segmentDict.insert(
         segment_pool_id,
         std::tuple<int64_t, int64_t>(seg.owner_private_pool_id));
     segmentDict.insert(is_expandable_s, false);
+    segmentDict.insert(expandable_segment_base_s, (int64_t)0);
+    segmentDict.insert(expandable_reservation_size_s, (int64_t)0);
+    segmentDict.insert(expandable_segment_size_s, (int64_t)0);
+    segmentDict.insert(expandable_segment_handle_type_s, (int64_t)0);
     add_frame_key(segmentDict, seg.context_when_allocated);
 
     auto blockDict = new_dict();
     blockDict.insert(address_s, static_cast<int64_t>(seg.address));
     blockDict.insert(size_s, static_cast<int64_t>(seg.size));
-    blockDict.insert(requested_size_s, static_cast<int64_t>(seg.size));
+    blockDict.insert(
+        requested_size_s, static_cast<int64_t>(seg.requested_size));
     blockDict.insert(
         state_s,
         (seg.allocated ? active_allocated_s

@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import importlib
+import inspect
 import math
 import operator
 import os
@@ -10,6 +11,7 @@ from functools import partial
 
 import torch
 import torch.library
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
@@ -27,21 +29,23 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_FBCODE,
     MI350_ARCH,
     parametrize,
     serialTest,
+    skipIfRocm,
     skipIfRocmArch,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CPU,
     HAS_GPU,
     HAS_MPS,
     patch_inductor_backend,
+    RUN_CPU,
 )
 
 
@@ -61,7 +65,12 @@ importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
-    "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
+    # A symbolic rnumel defeats should_use_persistent_reduction for BOTH halves
+    # of the model, so the parent stops emitting triton_per_ and the
+    # persistent-vs-looped contrast the test asserts no longer exists.
+    "test_regional_codegen_only_config_cpp_wrapper_dynamic_shapes": TestFailure(
+        ("cuda", "xpu"), is_skip=True
+    ),
     # PDL tests are CUDA SM90+ only, skip on CPU
     "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
@@ -74,11 +83,6 @@ test_failures = {
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
-    # This fails on periodic CPU shards but passes on other CPU configurations,
-    # so skip it instead of producing unexpected successes.
-    "test_index_propagation_to_dtype_inf_dynamic_shapes": TestFailure(
-        ("cpu",), is_skip=True
-    ),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
@@ -99,12 +103,22 @@ if any(os.getenv("BUILD_ENVIRONMENT", "").endswith(x) for x in ("-debug", "-asan
 
 
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
+    def skip_dynamic_failures(test):
+        if inspect.unwrap(test).__name__ in (
+            "test_conv_transpose2d_forward_triton",
+            "test_conv_transpose2d_output_padding_triton",
+            "test_conv_transpose1d_triton_fallback",
+        ):
+            return unittest.skip("Expected codegen failure under dynamic shapes")(test)
+        return test
+
     return make_test_cls_with_patches(
         cls,
         "DynamicShapes",
         "_dynamic_shapes",
         (torch._dynamo.config, "assume_static_by_default", False),
         xfail_prop=xfail_prop,
+        decorator=skip_dynamic_failures,
     )
 
 
@@ -132,6 +146,23 @@ class DynamicShapesTestCase(TestCase):
 
 
 class DynamicShapesOpTests:
+    # Reinplacing adds independent overlap guards for sizes 0/1.
+    @config.patch(disabled_passes="reinplace_inplaceable_ops")
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    def test_slice_scatter_default_end_size_oblivious(self):
+        def fn(x):
+            output = torch.zeros_like(x, dtype=torch.int32)
+            output[1:] = x[:-1]
+            return output
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled_fn = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
+        for size in (2, 0, 1, 7, 35):
+            with self.subTest(size=size):
+                x = torch.arange(size, dtype=torch.int64, device=self.device)
+                self.assertEqual(compiled_fn(x), fn(x))
+        self.assertEqual(counter.frame_count, 1)
+
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_prod_backward_keeps_input_shape_dynamic(self):
         def fn(x):
@@ -145,9 +176,10 @@ class DynamicShapesOpTests:
         )
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class DynamicShapesCpuTests(DynamicShapesOpTests, TestCase):
+        hw_classification = HardwareClassification.CPU
         common = check_model
         device = "cpu"
 
@@ -231,14 +263,11 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
         )
 
 
+@unittest.skipIf(not HAS_GPU, "Triton not available")
 class TestInductorDynamic(DynamicShapesTestCase):
-    compile_fn = partial(torch.compile, dynamic=True)
+    compile_fn = staticmethod(partial(torch.compile, dynamic=True))
 
     def setUp(self):
-        # HAS_CUDA_AND_TRITON also checks compute capability to skip tests
-        # on older devices
-        if not HAS_GPU:
-            self.skipTest("Triton not available")
         torch._dynamo.reset()
         super().setUp()
         # this should be in setUpClass, but device-generic tests
@@ -360,6 +389,54 @@ class TestInductorDynamic(DynamicShapesTestCase):
             [], dtype=torch.float32, device=device, requires_grad=False
         )
         self.assertEqual(fn(arg0_test, arg1_test), compiled_fn(arg0_test, arg1_test))
+
+    # Each flag is required for the divergent layout this test needs:
+    # pad_dynamic_shapes (off by default) is what lets inductor pad a
+    # symbolically-shaped buffer at all; comprehensive_padding is on by default
+    # but env-controlled, so pin it; disable_padding_cpu would otherwise make
+    # compile_fx force comprehensive_padding back off on CPU, leaving the CPU
+    # variant unable to fail.
+    @torch._inductor.config.patch(
+        comprehensive_padding=True,
+        pad_dynamic_shapes=True,
+        disable_padding_cpu=False,
+    )
+    def test_saved_activation_symbolic_stride_backward(self, device):
+        # A saved activation's stride must stay symbolic under dynamic shapes.
+        # Without the fix it freezes at the first input's hint (128*112 =
+        # 14336) and the n=96 pass dies in the backward's assert_size_stride
+        # with `stride 24576==14336 at dim=0`.
+        #
+        # The setup is load-bearing. The saved activation must be a computed
+        # intermediate so inductor owns its layout -- a graph input's layout is
+        # fixed by the caller and can never diverge. The innermost dim must be
+        # misaligned (98 pads to 128) so inductor's layout moves off the
+        # contiguous stride the backward placeholder assumes, which is what
+        # makes the restride fire. And the outer stride must depend on a
+        # dynamic dim, so the freeze is observable at a second size.
+        def fn(x, w):
+            h = torch.tanh(x).permute(0, 2, 1)
+            return (h @ w).sum()
+
+        cfn = self.compile_fn(fn)
+        metrics.reset()
+        for n in (56, 96):
+            x = torch.randn(2, 2 * n, 98, device=device, requires_grad=True)
+            w = torch.randn(2, 2 * n, 128, device=device, requires_grad=True)
+            x_ref = x.detach().clone().requires_grad_()
+            w_ref = w.detach().clone().requires_grad_()
+
+            cfn(x, w).backward()
+            fn(x_ref, w_ref).backward()
+
+            self.assertEqual(x.grad, x_ref.grad)
+            self.assertEqual(w.grad, w_ref.grad)
+
+        # The scenario only exercises the restride if padding moved inductor's
+        # layout off the contiguous stride the backward placeholder assumes.
+        # Assert it fired, so this cannot keep passing while silently no longer
+        # covering the fix.
+        self.assertGreater(metrics.num_comprehensive_padding, 0)
 
     def test_arange_dynamic(self, device):
         def fn(a):
@@ -726,6 +803,20 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
         torch.compile(fullgraph=True)(f)(x, w).sum().backward()
         self.assertEqual(orig_w, w.grad)
+
+    @onlyOn(GPU_TYPE)
+    @parametrize("avoid_guards", [False, True])
+    def test_avoid_32bit_indexing_guards(self, device, avoid_guards):
+        def fn(x):
+            return x * 2 + 1
+
+        x = torch.randn(8, 1152, device=device)
+        with config.patch(avoid_32bit_indexing_guards=avoid_guards):
+            actual, (code, *_) = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        self.assertEqual(actual, fn(x))
+        guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
+        self.assertEqual("<= 2147483647" in guards, not avoid_guards)
+        self.assertEqual("'xnumel': 'i64'" in code, avoid_guards)
 
     @onlyOn(GPU_TYPE)
     @torch._dynamo.config.patch(
@@ -1394,6 +1485,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         # N + 1 for automatic dynamic float arguments
         self.assertEqual(cnt.frame_count, 4)
 
+    @skipIfRocm(msg="sort kernel exceeds the inductor compile-worker timeout")
     def test_sort_dynamic_shape_with_check(self, device):
         if torch.device(device).type != GPU_TYPE:
 
@@ -1523,6 +1615,34 @@ class TestInductorDynamic(DynamicShapesTestCase):
             actual = compiled_f(x)
             self.assertEqual(actual, expected)
 
+    @parametrize("cpp_wrapper", (False, True))
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_full_symbolic_fill_respects_dtype(self, device, cpp_wrapper):
+        def f(x):
+            return torch.full((2,), x.item(), dtype=torch.bool, device=device).sum()
+
+        x = torch.tensor(3, device=device)
+        with torch._inductor.config.patch(cpp_wrapper=cpp_wrapper):
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
+    @parametrize("cpp_wrapper", (False, True))
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_full_symbolic_fill_overflow(self, device, cpp_wrapper):
+        def f(x):
+            return torch.full((2,), x.item(), dtype=torch.int8, device=device)
+
+        with torch._inductor.config.patch(cpp_wrapper=cpp_wrapper):
+            compiled_f = torch.compile(f, fullgraph=True)
+            valid = torch.tensor(127, device=device)
+            self.assertEqual(compiled_f(valid), f(valid))
+
+            invalid = torch.tensor(300, device=device)
+            overflow_error = r"without overflow|u\d+ <= 127"
+            with self.assertRaisesRegex(RuntimeError, overflow_error):
+                f(invalid)
+            with self.assertRaisesRegex(RuntimeError, overflow_error):
+                compiled_f(invalid)
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
 
@@ -1530,5 +1650,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
+    if (RUN_CPU or HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")

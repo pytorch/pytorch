@@ -1,14 +1,18 @@
 #pragma once
+#include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/native/FusedAdam.h>
+#include <c10/util/MakeNested.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <ATen/native/cuda/Pow.cuh>
+#include <optional>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace at::native {
-
-enum class ADAM_MODE : uint8_t { ORIGINAL = 0, ADAMW = 1 };
 
 // Validates the dtype configuration for mixed-precision fused Adam/AdamW.
 //
@@ -547,6 +551,111 @@ struct FusedAdamMathFunctorMP {
     }
   }
 };
+
+// Shared host launcher for _fused_adam[w][_amsgrad]_cuda_impl_; max_exp_avg_sqs
+// is ignored when !amsgrad. The AT_DISPATCH lives here so each caller .cu
+// instantiates only its own kernel set.
+template <ADAM_MODE mode, bool amsgrad>
+void _fused_adam_cuda_impl_common(
+    at::TensorList params,
+    at::TensorList grads,
+    at::TensorList exp_avgs,
+    at::TensorList exp_avg_sqs,
+    at::TensorList max_exp_avg_sqs,
+    at::TensorList state_steps,
+    const float* lr_ptr,
+    const double lr,
+    const double beta1,
+    const double beta2,
+    const double weight_decay,
+    const double eps,
+    const bool maximize,
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
+  constexpr int depth = amsgrad ? 5 : 4;
+  constexpr bool is_adamw = (mode == ADAM_MODE::ADAMW);
+  constexpr const char* validate_msg =
+      is_adamw ? "Mixed-precision fused AdamW" : "Mixed-precision fused Adam";
+  constexpr const char* mp_name = is_adamw
+      ? (amsgrad ? "fused_adamw_amsgrad_mp_kernel_cuda"
+                 : "fused_adamw_mp_kernel_cuda")
+      : (amsgrad ? "fused_adam_amsgrad_mp_kernel_cuda"
+                 : "fused_adam_mp_kernel_cuda");
+  constexpr const char* kernel_name = is_adamw
+      ? (amsgrad ? "fused_adamw_amsgrad_kernel_cuda"
+                 : "fused_adamw_kernel_cuda")
+      : (amsgrad ? "fused_adam_amsgrad_kernel_cuda" : "fused_adam_kernel_cuda");
+
+  auto tensor_lists = amsgrad
+      ? c10::make_nested<at::Tensor>(
+            params.vec(),
+            grads.vec(),
+            exp_avgs.vec(),
+            exp_avg_sqs.vec(),
+            max_exp_avg_sqs.vec())
+      : c10::make_nested<at::Tensor>(
+            params.vec(), grads.vec(), exp_avgs.vec(), exp_avg_sqs.vec());
+
+  const float* grad_scale_ptr =
+      grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
+  const float* found_inf_ptr =
+      found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
+
+  if (params[0].scalar_type() != exp_avgs[0].scalar_type()) {
+    if constexpr (amsgrad) {
+      validate_mixed_precision_dtypes(
+          params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, validate_msg);
+    } else {
+      validate_mixed_precision_dtypes(
+          params, grads, exp_avgs, exp_avg_sqs, validate_msg);
+    }
+    AT_DISPATCH_V2(
+        exp_avgs[0].scalar_type(),
+        mp_name,
+        AT_WRAP([&]() {
+          multi_tensor_apply_for_fused_optimizer<depth>(
+              tensor_lists,
+              state_steps,
+              FusedAdamMathFunctorMP<
+                  float,
+                  float,
+                  float,
+                  scalar_t,
+                  scalar_t,
+                  std::conditional_t<amsgrad, scalar_t, float>,
+                  depth,
+                  mode,
+                  amsgrad>(),
+              lr_ptr,
+              lr,
+              beta1,
+              beta2,
+              weight_decay,
+              eps,
+              maximize,
+              grad_scale_ptr,
+              found_inf_ptr);
+        }),
+        kBFloat16);
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kHalf, kBFloat16, params[0].scalar_type(), kernel_name, [&]() {
+          multi_tensor_apply_for_fused_optimizer<depth>(
+              tensor_lists,
+              state_steps,
+              FusedAdamMathFunctor<scalar_t, depth, mode, amsgrad>(),
+              lr_ptr,
+              lr,
+              beta1,
+              beta2,
+              weight_decay,
+              eps,
+              maximize,
+              grad_scale_ptr,
+              found_inf_ptr);
+        });
+  }
+}
 
 } // namespace
 
