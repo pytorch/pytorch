@@ -228,6 +228,14 @@ def fold_decoded(
 UNIFORM_TREE_MAX_LOADS = 64
 
 
+def _combine_equal_issue(trait) -> str | None:
+    flag = getattr(trait, "has_combine_equal", False)
+    if flag and hasattr(trait, "combine_equal"):
+        return None
+    hint = "WelfordOps subclasses must set has_combine_equal = True themselves"
+    return f"a trait with has_combine_equal, got {type(trait).__name__} ({hint})"
+
+
 def _uniform_tree_issue(
     trait,
     count,
@@ -251,8 +259,9 @@ def _uniform_tree_issue(
         return "a fold of inputs, not partials"
     if gidx_from != "r":
         return f"indices from r, got {gidx_from=}"
-    if not getattr(trait, "has_combine_equal", False):
-        return f"a trait with has_combine_equal, got {type(trait).__name__}"
+    issue = _combine_equal_issue(trait)
+    if issue is not None:
+        return issue
     if npairs_red != 1:
         return f"one reduced run, got {npairs_red}"
     if flat_tail or ragged_chunk:
@@ -295,8 +304,10 @@ def uniform_tree_ok(trait, count, threads_per_block, npairs_red):
 
 
 def _uniform_combine_issue(trait, split) -> str | None:
-    if not getattr(trait, "has_combine_uniform", False):
-        return f"a trait with has_combine_uniform, got {type(trait).__name__}"
+    flag = getattr(trait, "has_combine_uniform", False)
+    if not (flag and hasattr(trait, "combine_uniform")):
+        hint = "WelfordOps subclasses must set has_combine_uniform = True themselves"
+        return f"a trait with has_combine_uniform, got {type(trait).__name__} ({hint})"
     if trait.acc is not cutlass.Float32:
         return f"an FP32 accumulator, got {trait.acc}"
     if len(split) != 5:
@@ -783,9 +794,13 @@ def _col_group_issue(trait, axis, combine, vec) -> str | None:
         return "a fold of inputs, not partials"
     if vec != 1:
         return f"vec=1, got {vec=}"
-    if not getattr(trait, "has_combine_equal", False):
-        return f"a trait with has_combine_equal, got {type(trait).__name__}"
-    return None
+    return _combine_equal_issue(trait)
+
+
+def col_group_ok(trait, vec):
+    """Whether TileReduce accepts col_group > 1 for a col-axis fold of inputs with this
+    vec. trait may be a trait or its type."""
+    return _col_group_issue(trait, "col", False, vec) is None
 
 
 @cute.jit
