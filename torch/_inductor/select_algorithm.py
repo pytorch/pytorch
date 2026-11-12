@@ -2178,10 +2178,8 @@ class TritonTemplateKernel(TritonKernel):
                 # (e.g., for FlexAttention templates), freeze immediately
                 node.data.freeze_layout()
             else:
-                # Reuse the layout recorded by an earlier template consumer, which
-                # GraphLowering.finalize freezes the buffer to. Recomputing it can
-                # give different strides, since stride padding is skipped when the
-                # FX node being lowered has dislike_padding set.
+                # Reuse an earlier consumer's layout: recomputing can give different
+                # strides, since padding is skipped for dislike_padding FX nodes.
                 fixed_layout = V.graph.buffer_layout_constraints.get(node_name)
                 if fixed_layout is None:
                     # Compute what strides WOULD be if frozen, without actually freezing
@@ -3772,10 +3770,8 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         )
 
     def output_node(self):
-        # The selected template was rendered against the layouts recorded for its
-        # flexible inputs (see TritonTemplateKernel.get_stride_and_maybe_freeze_layout)
-        # and has no extern fallback, so freeze them now, before a later consumer
-        # or GraphLowering.finalize picks a different layout.
+        # Rendered against its inputs' recorded layouts with no extern fallback, so
+        # freeze them before a later consumer picks a different layout.
         for inp in self.input_nodes:
             if should_use_layout_constraints(inp) and isinstance(
                 inp.get_layout(), ir.FlexibleLayout

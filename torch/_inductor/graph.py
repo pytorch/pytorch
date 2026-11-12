@@ -1847,11 +1847,8 @@ class GraphLowering(torch.fx.Interpreter):
     def finalize(self) -> None:
         selected = self._constrained_buffers_with_selected_template_users()
         for buf in self.buffers:
-            # Freeze to the layout Triton templates were rendered against, see
-            # TritonTemplateKernel.get_stride_and_maybe_freeze_layout, but only if
-            # some consumer actually uses a template. Otherwise forcing the
-            # template's layout only adds copies.
-            # Some buffers (e.g. CPU flex attention subgraph buffers) are unnamed.
+            # Freeze to the layout a selected template was rendered against; if no
+            # template is selected, forcing it only adds copies.
             name = buf.name
             if (
                 name is not None
@@ -1866,11 +1863,9 @@ class GraphLowering(torch.fx.Interpreter):
 
     def _constrained_buffers_with_selected_template_users(self) -> OrderedSet[str]:
         """
-        Names of layout-constrained buffers consumed by a selected Triton template:
-        a TritonTemplateBuffer, or a MultiTemplateBuffer whose best unfused choice
-        is a template. If a MultiTemplateBuffer that prefers an extern kernel picks
-        a template anyway (e.g. through epilogue fusion), the scheduler's layout
-        conflict check falls back to the extern choice.
+        Layout-constrained buffers read by a selected Triton template. A
+        MultiTemplateBuffer counts only if its best unfused choice is a template;
+        otherwise the scheduler's layout conflict check falls back to extern.
         """
         constraints = self.buffer_layout_constraints
         selected: OrderedSet[str] = OrderedSet()
