@@ -260,6 +260,18 @@ jobs:
           s3-bucket: ${{ inputs.s3-bucket }}
           use-gha: ${{ steps.aws-creds.outcome != 'success' }}
 
+      - name: Record package sizes
+        if: steps.build.outcome == 'success' && steps.aws-creds.outcome == 'success'
+        continue-on-error: true
+        env:
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          JOB_ID: ${{ steps.setup-linux.outputs.job-id }}
+          JOB_NAME: ${{ steps.setup-linux.outputs.job-name }}
+        shell: bash
+        run: uv run --no-project --with boto3==1.35.42 --with requests==2.32.3 python -m tools.stats.upload_package_sizes dist
+
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped' && steps.aws-creds.outcome == 'success'
         uses: pytorch/pytorch/.github/actions/upload-sccache-stats@main

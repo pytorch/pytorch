@@ -55,7 +55,7 @@ _Ts = TypeVarTuple("_Ts")
 
 
 def _optimizer_post_hook(
-    optimizer: Optimizer, args: tuple[Unpack[_Ts]], kwargs: dict[str, Any]
+    optimizer: Optimizer, args: tuple[*_Ts], kwargs: dict[str, Any]
 ) -> None:
     KinetoStepTracker.increment_step("Optimizer")
 
