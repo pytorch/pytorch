@@ -29,7 +29,7 @@ class EvalModeForLoadedModule(FileSetup):
                 super().__init__()
                 self.dropout = torch.nn.Dropout(0.1)
 
-            @torch.jit.script_method
+            @torch.jit._script.script_method
             def forward(self, x):
                 x = self.dropout(x)
                 return x
@@ -88,8 +88,8 @@ class TorchSaveJitStream_CUDA(FileSetup):
         model = Model()
 
         # Script the model and save
-        script_model = torch.jit.script(model)
-        torch.jit.save(script_model, self.path)
+        script_model = torch.jit._script.script(model)
+        torch.jit._serialization.save(script_model, self.path)
 
 
 tests = [
