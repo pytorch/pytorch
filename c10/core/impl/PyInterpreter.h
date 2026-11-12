@@ -315,8 +315,8 @@ struct C10_API PyInterpreterVTable {
       torch::jit::Stack* stack,
       const std::shared_ptr<c10::FakeTensorMode>& mode,
       c10::Device common_device) const = 0;
-  // Python callback for prims handling: runs the prims op's Python
-  // prim_meta_impl, if it defines one.
+  // Runs prim_meta_impl with the caller's mode entered. Returns false if
+  // absent; a selected implementation returning NotImplemented raises.
   virtual bool fake_try_prim_meta(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const = 0;
