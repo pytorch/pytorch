@@ -38,9 +38,11 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 TD_RESULTS_PATH = REPO_ROOT / ".additional_ci_files" / "td_results.json"
 MAX_REASON_CHARS = 500
 MUST_RUN_HEURISTICS = (EditedByPR.__name__, PreviouslyFailedInPR.__name__)
-# A file the config records under this many seconds skips there (a CUDA-only file
-# on a CPU job): it cannot catch a failure, so it only takes budget left over.
+# A file the config records under MIN_RUN_SECONDS skips there (a CUDA-only file on a
+# CPU job): it starts and exits in about SKIP_OVERHEAD_SECONDS, so it is charged that
+# instead of the model's overhead_seconds. test-infra's trainer charges the same.
 MIN_RUN_SECONDS = 1.0
+SKIP_OVERHEAD_SECONDS = 3.0
 
 
 class NoModel(Exception):
@@ -206,8 +208,7 @@ def select_tests(
     """The scorer's cut at the cost of TD's own cut, as whole test files.
 
     Files with a non-zero score from a must-run heuristic come first, by name,
-    whatever their cost; the rest fill what is left of the budget by p / cost,
-    files under MIN_RUN_SECONDS last.
+    whatever their cost; the rest fill what is left of the budget by p / cost.
     Costs are summed in integer milliseconds so the order of summation cannot
     change what fits. Raises when the block carries no usable model. Every
     shard computes the same selection: this depends only on its arguments.
@@ -224,8 +225,12 @@ def select_tests(
     seconds = _seconds_lookup(times)
     overhead = float(model["overhead_seconds"])
 
+    def cost(f: str) -> float:
+        s = seconds(f)
+        return s + (SKIP_OVERHEAD_SECONDS if s < MIN_RUN_SECONDS else overhead)
+
     def cost_ms(f: str) -> int:
-        return round((seconds(f) + overhead) * 1000)
+        return round(cost(f) * 1000)
 
     td_files = _unique_files(td_include)
     budget = sum(cost_ms(f) for f in td_files)
@@ -245,13 +250,13 @@ def select_tests(
         if f in must_run:
             continue
         scores = {name: h.get(f, 0.0) for name, h in heuristics.items()}
-        c = seconds(f) + overhead
+        c = cost(f)
         p = file_probability(model, scores, c, build_env_key, test_config, raised)
-        ranked.append((seconds(f) < MIN_RUN_SECONDS, -p / c, f))
+        ranked.append((-p / c, f))
     ranked.sort()
 
     rest: list[str] = []
-    for *_, f in ranked:
+    for _, f in ranked:
         c_ms = cost_ms(f)
         if used + c_ms <= budget:
             selected.append(f)

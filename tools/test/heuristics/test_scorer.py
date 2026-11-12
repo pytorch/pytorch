@@ -528,6 +528,12 @@ def make_block(model: Any = None, **scores: dict[str, float]) -> dict[str, Any]:
     }
 
 
+def file_cost(seconds: float) -> float:
+    if seconds < scorer.MIN_RUN_SECONDS:
+        return seconds + scorer.SKIP_OVERHEAD_SECONDS
+    return seconds + 10.0
+
+
 def td_cut(
     tests: list[str], scores: dict[str, float]
 ) -> tuple[list[TestRun], list[TestRun]]:
@@ -575,27 +581,22 @@ class TestSelection(unittest.TestCase):
             with self.subTest(trial=trial):
                 self.assertLessEqual(info["cost_ms"], info["budget_ms"])
                 cost = sum(
-                    round((times[t.test_file] + 10.0) * 1000) for t in new_include
+                    round(file_cost(times[t.test_file]) * 1000) for t in new_include
                 )
                 self.assertEqual(cost, info["cost_ms"])
                 self.assertEqual(len(new_include) + len(new_exclude), len(tests))
 
-    def test_files_that_skip_here_only_take_budget_left_over(self) -> None:
+    def test_files_that_skip_here_cost_their_start_up(self) -> None:
         tests = [f"t{i}" for i in range(8)]
         times = dict.fromkeys(tests, 0.04)
-        times.update(t6=100.0, t7=100.0)
+        times.update(t5=0.99, t6=100.0, t7=1.0)
         include, exclude = td_cut(tests, {"t6": 1.0, "t7": 1.0})
         self.assertEqual(names(include), ["t6", "t7", "t0"])
         block = make_block(HeuristicA={"t0": 1.0, "t1": 1.0, "t2": 1.0})
         new_include, _, info = self.select(block, include, exclude, times)
-        self.assertEqual(names(new_include), ["t6", "t7", "t0"])
-        self.assertEqual(info["budget_ms"], 230_040)
-        self.assertEqual(info["cost_ms"], 230_040)
-
-        times["t7"] = 0.9
-        include, exclude = td_cut(tests, {"t6": 1.0, "t7": 1.0})
-        new_include, _, _ = self.select(block, include, exclude, times)
-        self.assertEqual(names(new_include), ["t6", "t0", "t1"])
+        self.assertEqual(info["budget_ms"], 110_000 + 11_000 + 3_040)
+        self.assertEqual(names(new_include), ["t0", "t1", "t2", "t3", "t4", "t5", "t7"])
+        self.assertEqual(info["cost_ms"], 5 * 3_040 + 3_990 + 11_000)
 
     def test_deterministic_ties_by_name(self) -> None:
         tests = ["b", "d", "a", "c", "e", "f"]
@@ -616,7 +617,7 @@ class TestSelection(unittest.TestCase):
         self.assertEqual(info["budget_ms"], 30_000)
         self.assertEqual(info["td_seconds"], 20.0)
         _, _, info = self.select(block, [TestRun("d")], [], {})
-        self.assertEqual(info["budget_ms"], 10_000)
+        self.assertEqual(info["budget_ms"], 3_000)
 
     def test_build_env_one_hot_is_keyed_by_the_job_base_name(self) -> None:
         job = "dynamo-unittest / dynamo-test (3.12)"
@@ -652,7 +653,7 @@ class TestSelection(unittest.TestCase):
             tests = [f"t{i:02d}" for i in range(rng.randint(4, 80))]
             k = 25 * len(tests) // 100 + 1
             scores = {t: rng.uniform(0.5, 1.0) for t in rng.sample(tests, k)}
-            times = {t: rng.uniform(scorer.MIN_RUN_SECONDS, 500) for t in tests}
+            times = {t: rng.uniform(0, 500) for t in tests}
             include, exclude = td_cut(tests, scores)
             block = make_block(model=model, HeuristicA=scores)
             new_include, _, info = self.select(block, include, exclude, times)
@@ -705,7 +706,7 @@ class TestSelection(unittest.TestCase):
         block = make_block(HeuristicA=scores)
         new_include, _, info = self.select(block, include, exclude, times)
         median = sorted(times.values())[len(times) // 2]
-        td_cost = sum(times.get(t.test_file, median) + 10.0 for t in include)
+        td_cost = sum(file_cost(times.get(t.test_file, median)) for t in include)
         self.assertAlmostEqual(info["budget_ms"] / 1000, td_cost, delta=1.0)
         self.assertLessEqual(info["cost_ms"], info["budget_ms"])
         self.assertGreater(len(new_include), 0)

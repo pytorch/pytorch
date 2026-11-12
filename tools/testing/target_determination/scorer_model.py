@@ -212,7 +212,8 @@ def file_probability(
     """p that one test file fails in one job.
 
     scores maps heuristic name to this file's score (missing means 0.0); cost is
-    the file's seconds plus overhead_seconds. build_env_key is the job's
+    the file's seconds plus its start-up: overhead_seconds, or less for a file
+    that skips in the job's config (scorer.select_tests). build_env_key is the job's
     test-times key, run_test.py's get_test_times_job_key().
     """
     s = model["scorer"]
