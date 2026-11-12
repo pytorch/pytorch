@@ -4124,10 +4124,10 @@ class SchedulerNode(BaseSchedulerNode):
     def _allows_loop_reindexing(self) -> bool:
         """
         Loop reindexing and index inversion rebuild the loop variables with
-        FloorDiv/ModularIndexing, which would undo avoid_modular_indexing
-        after every lowering kept its indices affine.
+        FloorDiv/ModularIndexing, which would undo affine indexing after every
+        lowering kept its indices affine.
         """
-        return not config.avoid_modular_indexing
+        return V.choices.use_modular_indexing(self.get_device(), kind="reindex")
 
     def apply_indexing_exprs(self, replacements: dict[str, sympy.Expr]) -> bool:
         if self._body is None:
