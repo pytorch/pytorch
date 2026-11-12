@@ -229,30 +229,6 @@ def pyanydict_checkexact(
     return pydict_checkexact(obj) or pyfrozendict_checkexact(obj)
 
 
-_T = TypeVar("_T")
-
-
-def _iter_detecting_mutation(iterator: Iterator[_T]) -> Iterator[_T]:
-    while True:
-        try:
-            item = next(iterator)
-        except StopIteration:
-            return
-        except TorchDynamoException:
-            # User-exception sentinels and graph breaks also inherit RuntimeError;
-            # propagate them before handling iterator mutation errors.
-            raise
-        except RuntimeError as error:
-            unimplemented(
-                gb_type="Dictionary mutated during iteration",
-                context=str(error),
-                explanation="Dynamo cannot trace dictionary iteration that changes its keys.",
-                hints=["Avoid changing dictionary keys during iteration."],
-            )
-        # Keep user code outside the handler so its exceptions propagate.
-        yield item
-
-
 # Mirror PyODict_CheckExact in Include/cpython/odictobject.h.
 def pyodict_checkexact(obj: VariableTracker) -> TypeIs["OrderedDictVariable"]:
     return obj.python_type() is collections.OrderedDict
@@ -299,6 +275,30 @@ def _unpack_dict_update_pair(
             tx.exn_vt_stack.get_raised_exception().set_context(error)
             raise
         tx.do_raise(error, None)
+
+
+_T = TypeVar("_T")
+
+
+def _iter_detecting_mutation(iterator: Iterator[_T]) -> Iterator[_T]:
+    while True:
+        try:
+            item = next(iterator)
+        except StopIteration:
+            return
+        except TorchDynamoException:
+            # User-exception sentinels and graph breaks also inherit RuntimeError;
+            # propagate them before handling iterator mutation errors.
+            raise
+        except RuntimeError as error:
+            unimplemented(
+                gb_type="Dictionary mutated during iteration",
+                context=str(error),
+                explanation="Dynamo cannot trace dictionary iteration that changes its keys.",
+                hints=["Avoid changing dictionary keys during iteration."],
+            )
+        # Keep user code outside the handler so its exceptions propagate.
+        yield item
 
 
 def _is_set_or_dictview(obj: VariableTracker) -> bool:
@@ -790,7 +790,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         #   3b) key_present=False. There is no easy way to selectively apply this
         #   DICT_NOT_CONTAINS guard because our guard are represented via trees.
         #   Be conservative and add DICT_KEYS_MATCH guard.
-        # Method keys instead guard the matched input key, or all keys for a miss.
 
         if not self.source:
             return
@@ -1325,6 +1324,10 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
+        # Union dispatch can distinguish empty dict and OrderedDict hook registries.
+        for operand in (self, other):
+            if isinstance(operand, NNModuleHooksDictVariable):
+                operand._guard_type()
         if pyfrozendict_check(other):
             return FrozenDictVariable.frozen_deferred_operator(other, tx, [], {})
         # ref: https://github.com/python/cpython/blob/3.13/Objects/dictobject.c#L4643-L4658
@@ -1394,9 +1397,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> ConstantVariable:
         # dict not allow setting arbitrary attributes.  OrderedDict and
         # defaultdict allow arbitrary setattr, but not deletion of default attrs
-        # Hook dictionaries defer type guards until their type is observable.
-        if self.source and not is_constant_source(self.source):
-            install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
         cls = self.python_type()
         if any(
             cls is t for t in (dict, collections.OrderedDict, collections.defaultdict)
@@ -2280,6 +2280,16 @@ class NNModuleHooksDictVariable(ConstDictVariable):
             self._guard_type()
         return super().call_method(tx, name, args, kwargs)
 
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        self._guard_type()
+        return super().call_obj_hasattr(tx, name)
+
+    def as_python_constant(self) -> Any:
+        self.materialize_keys(guard_type=True)
+        return super().as_python_constant()
+
     def is_python_constant(self) -> bool:
         return not self.items
 
@@ -2292,21 +2302,22 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         return super()._hashable_key(key)
 
     def _store_item(self, key: HashableTracker, value: VariableTracker) -> None:
-        self._guard_type()
-        self.materialize_keys()
+        self.materialize_keys(guard_type=True)
         super()._store_item(key, value)
 
     def _update_items(self, items: dict[HashableTracker, VariableTracker]) -> None:
-        self._guard_type()
-        self.materialize_keys()
+        self.materialize_keys(guard_type=True)
         super()._update_items(items)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        self._guard_type()
-        self.materialize_keys()
+        self.materialize_keys(guard_type=True)
         return super().tp_repr_impl(tx)
 
-    def materialize_keys(self) -> dict[HashableTracker, VariableTracker]:
+    def materialize_keys(
+        self, *, guard_type: bool = False
+    ) -> dict[HashableTracker, VariableTracker]:
+        if guard_type:
+            self._guard_type()
         # Key lookups, mutations and detached copies can observe IDs without
         # comparing every stored key. Ordinary hook iteration keeps them lazy.
         for key in self.items:
@@ -2315,15 +2326,13 @@ class NNModuleHooksDictVariable(ConstDictVariable):
 
     def clone(self, **kwargs: Any) -> VariableTracker:
         if self.source is not None and kwargs.get("source", self.source) is None:
-            self._guard_type()
-            self.materialize_keys()
+            self.materialize_keys(guard_type=True)
         return super().clone(**kwargs)
 
     def _new_dict(
         self, items: dict[HashableTracker, VariableTracker]
     ) -> "ConstDictVariable":
-        self._guard_type()
-        self.materialize_keys()
+        self.materialize_keys(guard_type=True)
         cls = (
             OrderedDictVariable
             if isinstance(self, OrderedDictVariable)

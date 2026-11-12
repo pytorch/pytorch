@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
+    subtest,
 )
 
 
@@ -100,7 +101,14 @@ class IdTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertEqual(result, id(False))
 
-    @parametrize("factory", [lambda x: ..., lambda x: x.dtype, lambda x: x.layout])
+    @parametrize(
+        "factory",
+        [
+            subtest(lambda x: ..., name="ellipsis"),
+            subtest(lambda x: x.dtype, name="dtype"),
+            subtest(lambda x: x.layout, name="layout"),
+        ],
+    )
     def test_sourceless_singleton_id_remains_internal(self, factory):
         def fn(x):
             return x + 1, id(factory(x))
