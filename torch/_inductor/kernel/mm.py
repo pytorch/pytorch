@@ -174,7 +174,8 @@ blackwell_ws_persistent_tma_main_loop_scaling_template = TritonTemplate(
     grid=persistent_mm_grid,
     source=load_kernel_template(
         "triton_blackwell_ws_persistent_tma_main_loop_scaled_mm"
-    ),
+    )
+    + load_kernel_template("triton_gemm_helpers"),
 )
 
 main_loop_sw_scaled_mm_template = TritonTemplate(
