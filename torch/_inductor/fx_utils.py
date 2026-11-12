@@ -812,7 +812,13 @@ class FakeTensorUpdater:
                     continue
 
             with V.fake_mode, enable_python_dispatcher():
-                new_fake_tensor = node.target(*args, **kwargs)
+                if node.target is torch.ops.higher_order.with_effects:
+                    # Post-reinplace wrappers can contain a mutable inner operator.
+                    new_fake_tensor = node.target.dispatch(
+                        torch._C.DispatchKey.Python, *args, **kwargs
+                    )
+                else:
+                    new_fake_tensor = node.target(*args, **kwargs)
 
             if update_node_fake_tensor(node, new_fake_tensor):
                 nodes_updated += 1
