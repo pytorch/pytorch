@@ -3,23 +3,24 @@
 Two kernels, picked by (K, N) - see ``flydsl_kernels.py``:
 
   * register: K in ``_REGISTER_KS``, N pow2 in ``_REGISTER_N_BOUNDS``. Keys
-    are ``(ord << 32) | ~idx``, so ties come out ``(value desc, idx asc)``.
-    Reproducible on its own, so ``_run`` picks it regardless of
-    ``torch.use_deterministic_algorithms``; only the gather invariant is
-    checked against aten, not the tie order.
+    are ``(ord << 32) | ~idx``, so the smaller index wins equal ordinals in
+    either ordering direction. Reproducible on its own, so ``_run`` picks it
+    regardless of ``torch.use_deterministic_algorithms``; only the gather
+    invariant is checked against aten, not the tie order.
   * radix: (K, N) in a row of ``_RADIX_GATE_RANGES``, K padded up to a
     power of 2 for the bitonic network. For finite inputs, deterministic
     mode gathers in input order and matches aten on values and indices;
     otherwise indices on threshold ties vary across runs. All NaNs share
     one ordinal, so distinct NaN payload/index choices can differ from aten.
 
-``_cond`` also requires fp32 on ``_SUPPORTED_ARCHES``, largest+sorted, a
-contiguous last-axis reduction, one CU-wave of rows, and the input
-(``M * N * itemsize``), values (``M * K * 4``), and indices (``M * K * 8``)
-buffers inside the 32-bit span an AMD buffer descriptor addresses. Values are
-not checked separately because the indices bound is tighter. The N bounds are closed
-intervals - both kernels lose to aten again at large N; anything outside
-falls through.
+``_cond`` also requires a supported dtype on ``_SUPPORTED_ARCHES``, sorted
+output, a contiguous last-axis reduction, one CU-wave of rows, and the input
+(``M * N * itemsize``), values (``M * K * itemsize``), and indices
+(``M * K * 8``) buffers inside the 32-bit span an AMD buffer descriptor
+addresses. Values are not checked separately because every supported dtype is
+at most 4 bytes, so the indices bound is tighter. The N bounds are closed
+intervals - both kernels lose to aten again at large N; anything outside falls
+through.
 
 ``self`` is read through ``ConstTensorWrapper`` so a COW input dispatches
 without materialising; writable ``out=`` buffers materialise through
@@ -37,6 +38,14 @@ from ._common import flatten_last_dim, last_dim_row_major_ok, unflatten_last_dim
 
 
 _SUPPORTED_ARCHES = ("gfx950",)
+_SUPPORTED_DTYPES = (
+    torch.float32,
+    torch.float16,
+    torch.bfloat16,
+    torch.int32,
+    torch.int16,
+    torch.int8,
+)
 _REGISTER_KS: frozenset[int] = frozenset({2, 4, 8, 16})
 
 # One (min, max) N range shared by every K in _REGISTER_KS, tuned on MI355.
@@ -86,14 +95,14 @@ def _min_rows_for_full_wave(device_idx: int) -> int:
 def _eligible(
     self: torch.Tensor, k: int, dim: int, largest: bool, sorted_: bool
 ) -> bool:
-    if not self.is_cuda or self.dtype != torch.float32:
+    if not self.is_cuda or self.dtype not in _SUPPORTED_DTYPES:
         return False
     device_index = self.device.index
     if device_index is None or not fu._is_supported_arch(
         device_index, _SUPPORTED_ARCHES
     ):
         return False
-    if not largest or not sorted_:
+    if not sorted_:
         return False
     if not last_dim_row_major_ok(self, dim):
         return False
@@ -134,7 +143,7 @@ def _out_cond(
     if not _cond(self, k, dim, largest, sorted):
         return False
     expected_shape = self.shape[:-1] + (int(k),)
-    if values.dtype != torch.float32 or values.shape != expected_shape:
+    if values.dtype != self.dtype or values.shape != expected_shape:
         return False
     if indices.dtype != torch.int64 or indices.shape != expected_shape:
         return False
@@ -143,7 +152,9 @@ def _out_cond(
     return True
 
 
-def _run(self: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
+def _run(
+    self: torch.Tensor, k: int, largest: bool
+) -> tuple[torch.Tensor, torch.Tensor]:
     from .flydsl_kernels import topk_radix, topk_register
 
     self_2d = flatten_last_dim(self)
@@ -151,9 +162,9 @@ def _run(self: torch.Tensor, k: int) -> tuple[torch.Tensor, torch.Tensor]:
 
     def _launch() -> tuple[torch.Tensor, torch.Tensor]:
         if kernel == "register":
-            return topk_register(self_2d, k)
+            return topk_register(self_2d, k, largest=largest)
         deterministic = torch.are_deterministic_algorithms_enabled()
-        return topk_radix(self_2d, k, deterministic=deterministic)
+        return topk_radix(self_2d, k, deterministic=deterministic, largest=largest)
 
     # Python-native dispatch does not install a CUDA device guard before
     # launching (unlike generated ATen); see cutedsl_impl.py / #187983.
@@ -173,7 +184,11 @@ def _flatten_topk_out(out: torch.Tensor, k: int) -> torch.Tensor:
 
 
 def _run_out(
-    self: torch.Tensor, k: int, values: torch.Tensor, indices: torch.Tensor
+    self: torch.Tensor,
+    k: int,
+    largest: bool,
+    values: torch.Tensor,
+    indices: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     from .flydsl_kernels import topk_radix_out, topk_register_out
 
@@ -184,7 +199,7 @@ def _run_out(
             or torch._C._overlaps(self, values)
             or torch._C._overlaps(self, indices)
         ):
-            v, i = _run(self, k)
+            v, i = _run(self, k, largest)
             values.copy_(v)
             indices.copy_(i)
             return values, indices
@@ -194,11 +209,16 @@ def _run_out(
         indices_2d = _flatten_topk_out(indices, k)
         kernel = _kernel_for(k, self_2d.shape[-1])
         if kernel == "register":
-            topk_register_out(self_2d, k, values_2d, indices_2d)
+            topk_register_out(self_2d, k, values_2d, indices_2d, largest=largest)
         else:
             deterministic = torch.are_deterministic_algorithms_enabled()
             topk_radix_out(
-                self_2d, k, values_2d, indices_2d, deterministic=deterministic
+                self_2d,
+                k,
+                values_2d,
+                indices_2d,
+                deterministic=deterministic,
+                largest=largest,
             )
         return values, indices
 
@@ -218,7 +238,7 @@ def _impl(
     *args,
     **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    return _run(self, int(k))
+    return _run(self, int(k), bool(largest))
 
 
 def _out_impl(
@@ -231,7 +251,7 @@ def _out_impl(
     values: torch.Tensor,
     indices: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    return _run_out(self, int(k), values, indices)
+    return _run_out(self, int(k), bool(largest), values, indices)
 
 
 def register_to_dispatch() -> None:
