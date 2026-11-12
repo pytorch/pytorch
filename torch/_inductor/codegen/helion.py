@@ -48,7 +48,6 @@ from __future__ import annotations
 import collections
 import contextlib
 import itertools
-import logging
 import math
 from dataclasses import dataclass
 from typing import Any, cast, TYPE_CHECKING
@@ -94,8 +93,6 @@ if TYPE_CHECKING:
 TileShape = tuple[str | int, ...]
 TILE_NAMES = {"z": "tile_z", "y": "tile_y", "x": "tile_x", "r0_": "tile_r"}
 TILE_AXES = {name: axis for axis, name in TILE_NAMES.items()}
-
-log = logging.getLogger(__name__)
 
 
 def literal(value: bool | float | int) -> str:
@@ -409,6 +406,40 @@ def is_helion_matmul(node: BaseSchedulerNode) -> bool:
     return False
 
 
+def helion_supports(node: BaseSchedulerNode) -> bool:
+    """Whether HelionKernel generates `node`, alone or fused with others.
+
+    It must be a scheduler node of HELION_OPS, with static indices and without
+    atomic stores or CPU scalar reads, whose reduction, if any, is in
+    REDUCTIONS or a Helion matmul's dot. Checked before codegen, so that the others are Triton
+    kernels; e.g. a layer norm's welford_reduce, a @ b + c[i] (c[i] reads
+    through indirect_indexing) and a @ b + torch.tensor(2.0), whose CPU scalar
+    the kernel would get as a CPU tensor:
+        ValueError: Pointer argument cannot be accessed from Triton (cpu tensor?)
+    """
+    if not isinstance(node, SchedulerNode) or node.is_template():
+        return False
+    reduction_type = cast(ComputedBuffer, node.node).get_reduction_type()
+    return (
+        not OrderedSet(node._body.op_counts) - HELION_OPS
+        and (
+            reduction_type in (None, *REDUCTIONS)
+            or (reduction_type == "dot" and is_helion_matmul(node))
+        )
+        and not any(
+            entry.mode for entry in node._body.memory_usage[MemoryUsageType.STORE]
+        )
+        and not any(V.graph.is_unspec_arg(dep.name) for dep in node.read_writes.reads)
+        # A static tiling can still index by a dynamic size, which
+        # index_tensor_expr() rejects:
+        #   NotImplementedError: Unsupported Helion index: s77 + 1
+        and all(
+            index.free_symbols <= OrderedSet(node._body.var_ranges)
+            for index in node._body.indexing_exprs.values()
+        )
+    )
+
+
 @dataclass(frozen=True)
 class HelionTensorArg:
     """A kernel parameter: a buffer, or a view of one that the wrapper passes."""
@@ -441,14 +472,23 @@ class HelionKernel(SIMDKernel[CSEVariable]):
 
     overrides = HelionOverrides  # type: ignore[assignment]
 
+    @staticmethod
+    def supports_tiling(tiling: dict[str, sympy.Expr]) -> bool:
+        """Whether a Helion kernel can take `tiling`: static, over (z, y, x, r0_).
+
+        Not, e.g., x.sum(-1) with a dynamic first dim, whose tiling is
+        {'x': s77, 'r0_': 100}, or a reduction over two axes (r0_, r1_).
+        """
+        return OrderedSet(tiling) <= OrderedSet(TILE_NAMES) and all(
+            isinstance(numel, (int, sympy.Integer)) for numel in tiling.values()
+        )
+
     def __init__(self, tiling: dict[str, sympy.Expr], **kwargs: Any) -> None:
         # Values defined outside the reduction loops, which stay in scope.
         self.outer_vars: OrderedSet[CSEVariable] = OrderedSet()
         super().__init__(tiling, **kwargs)
-        if unsupported := OrderedSet(self.numels) - OrderedSet(TILE_NAMES):
-            raise NotImplementedError(f"Helion kernels do not tile {unsupported}")
-        if not all(isinstance(n, (int, sympy.Integer)) for n in self.numels.values()):
-            raise NotImplementedError("Helion kernels have static shapes")
+        if not self.supports_tiling(tiling):
+            raise AssertionError(f"Helion kernels do not tile {tiling}")
         nodes = tuple(self.features.scheduler_nodes())
         self.is_matmul = any(node.is_native_matmul() for node in nodes)
         order = ("z", "y", "r0_", "x") if self.is_matmul else ("z", "y", "x", "r0_")
@@ -909,9 +949,8 @@ class HelionKernel(SIMDKernel[CSEVariable]):
     def kernel_args(self) -> list[HelionTensorArg]:
         return sorted(self.arguments.values(), key=lambda arg: arg.output)
 
-    def call_kernel(
-        self, name: str, node: IRNode | None = None, deallocate_ws: bool = True
-    ) -> None:
+    def call_args(self) -> list[str]:
+        """The wrapper's argument of each kernel parameter, e.g. arg0_1 or a view."""
         # An output can take over an input's storage, e.g. for a @ b + cumsum(x):
         #   buf2 = buf0; del buf0  # reuse
         # Passing the input by its own name would then fail:
@@ -931,10 +970,32 @@ class HelionKernel(SIMDKernel[CSEVariable]):
                 if isinstance(operand, ReinterpretView)
                 else operand.get_name()
             )
+        return args
+
+    def codegen_nan_check(self) -> None:
+        # config.nan_asserts checks every tensor argument after the call, as for
+        # a Triton kernel:
+        #   helion_fused_mm_0(arg0_1, arg1_1, buf0)
+        #   assert not buf0.isnan().any().item()
+        #   assert not buf0.isinf().any().item()
         wrapper = V.graph.wrapper_code
-        wrapper.writeline(wrapper.wrap_kernel_call(name, args))
+        for arg in OrderedSet(self.call_args()):
+            wrapper.writeline(f"assert not {arg}.isnan().any().item()")
+            wrapper.writeline(f"assert not {arg}.isinf().any().item()")
+
+    def call_kernel(
+        self, name: str, node: IRNode | None = None, deallocate_ws: bool = True
+    ) -> None:
+        wrapper = V.graph.wrapper_code
+        wrapper.writeline(wrapper.wrap_kernel_call(name, self.call_args()))
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
+        """Read buffer `name` at `index`, by tile where subscript() can.
+
+        A native matmul's dot operand is a whole matrix tile, in0[tile_y, tile_r]
+        or in1[tile_r, tile_x]; other loads take the shape of the tiles they
+        depend on, and inside ops.masked() bodies an extra_mask.
+        """
         if name in self.outer_stores:
             return self.in_scope(self.outer_stores[name])
         buffer = V.graph.get_buffer(name)
@@ -962,14 +1023,22 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             return self.cse.generate(
                 self.loads, line, dtype=buffer.get_dtype(), shape=shape
             )
-        found = self.subscript(buffer, index, axes)
-        if found is None:
+        mask, mask_axes = self.load_mask(axes)
+        if not mask_axes <= OrderedSet(axes):
+            # The mask also covers axes the address does not depend on. The
+            # load then reads a flat index, which hl.load broadcasts against
+            # the mask. F.pad(x * r, (1, 1, 1, 1)).sum(-1) for r of shape
+            # [64, 1] reads r under a mask over (tile_x, tile_r):
+            #   tmp13 = hl.load(in1, [(-1) + tile_x.index.reshape([tile_x, 1])], extra_mask=tmp11)
+            axes = [axis for axis in self.axes if axis in axes or axis in mask_axes]
+            arg, coordinates, shape = self.flat_subscript(buffer, index, axes)
+        elif (found := self.subscript(buffer, index, axes)) is not None:
+            arg, coordinates, shape = found
+        else:
             raise AssertionError("expected a flat subscript")
-        arg, coordinates, shape = found
         dtype = upcast_compute_type(buffer.get_dtype())
         cast_suffix = "" if dtype == buffer.get_dtype() else f".to({dtype})"
         subscript = ", ".join(coordinates)
-        mask = self.load_mask(shape)
         if mask is None:
             line = f"{arg.name}[{subscript}]{cast_suffix}"
         else:
@@ -1100,8 +1169,10 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         }
         return HelionPrinter().doprint(index.xreplace(replacements), simplify=False)
 
-    def load_mask(self, shape: TileShape) -> CSEVariable | None:
-        """The extra_mask for a load of `shape` inside ops.masked() bodies.
+    def load_mask(
+        self, axes: Sequence[str]
+    ) -> tuple[CSEVariable | None, OrderedSet[str]]:
+        """The extra_mask for a load over `axes` inside ops.masked() bodies, and its axes.
 
         A mask over axes the load does not use cannot move its address, e.g.
         cat((bias.expand(10, N), c)) masks rows while bias is read as
@@ -1109,26 +1180,28 @@ class HelionKernel(SIMDKernel[CSEVariable]):
         no mask and masked() alone selects the rows. Passing the (tile_y, 1)
         mask to that load would fail:
             NotImplementedError: Cannot broadcast Helion ('tile_y', 1) to ('tile_x',)
+        A mask over some of the load's axes and others does apply, and load()
+        reads under it with a flat index.
         """
-        # A broadcast dim is 1, not a tile name: torch.bmm(a, b).view(2, 3, 40,
-        # 136) + c for c of shape [2, 1, 1, 136] would otherwise fail with
-        # KeyError: '1'.
-        load_axes = OrderedSet(TILE_AXES[str(dim)] for dim in shape if dim != 1)
+        load_axes = OrderedSet(axes)
         guards = []
+        guard_axes: OrderedSet[str] = OrderedSet()
         for mask in self.load_masks:
+            # A broadcast dim is 1, not a tile name: torch.bmm(a, b).view(2, 3,
+            # 40, 136) + c for c of shape [2, 1, 1, 136] would otherwise fail
+            # with KeyError: '1'.
             mask_axes = OrderedSet(
                 TILE_AXES[str(dim)] for dim in mask.shape or () if dim != 1
             )
-            if mask_axes <= load_axes:
+            if mask_axes <= load_axes or mask_axes & load_axes:
                 guards.append(mask)
-            elif mask_axes & load_axes:
-                raise NotImplementedError("Helion cannot apply a mask over other axes")
+                guard_axes |= mask_axes
         if not guards:
-            return None
+            return None, guard_axes
         result = guards[0]
         for guard in guards[1:]:
             result = V.ops.logical_and(result, guard)
-        return result
+        return result, guard_axes
 
     def masked(
         self,
@@ -1211,11 +1284,25 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             # dot() already accumulated into acc.
             return value
         if self.is_matmul or reduction_type not in REDUCTIONS:
-            raise NotImplementedError(f"Helion kernels do not support {reduction_type}")
-        if not isinstance(value, CSEVariable) or "tile_r" not in map(
-            str, value.shape or ()
-        ):
-            raise NotImplementedError("Helion reductions need a tile_r value")
+            raise AssertionError(f"Helion kernels do not support {reduction_type}")
+        if not isinstance(value, CSEVariable):
+            raise AssertionError(f"expected one value to reduce, got {value}")
+        if "tile_r" not in map(str, value.shape or ()):
+            # A value that does not vary along R is broadcast over tile_r, so
+            # that each block reduces one copy per lane. x[:, :1].expand(64,
+            # 100).sum(-1) emits
+            #   tmp1 = tmp0.reshape([tile_x, 1])
+            #   tmp2 = tmp1 + hl.zeros([tile_x, tile_r], dtype=torch.float32)
+            #   acc = acc + torch.sum(tmp2, -1)
+            # With acc + torch.sum(tmp1, -1), each block of 32 adds one copy:
+            # 4 * x[:, 0] instead of 100 * x[:, 0].
+            axes = [TILE_AXES[str(dim)] for dim in value.shape or () if dim != 1]
+            shape = self.value_shape([*axes, "r0_"])
+            zeros = f"hl.zeros([{', '.join(map(str, shape))}], dtype={value.dtype})"
+            line = f"{self.align(value, self.value_shape())} + {zeros}"
+            value = self.cse.generate(
+                self.compute, line, dtype=value.dtype, shape=shape
+            )
         init = REDUCTIONS[reduction_type](upcast_compute_type(src_dtype))
         acc = self.accumulator(init, upcast_compute_type(dtype))
         block = {
@@ -1231,14 +1318,17 @@ class HelionKernel(SIMDKernel[CSEVariable]):
 class HelionScheduling(TritonScheduling):
     """Emit schedules as Helion kernels where HelionKernel supports them.
 
-    Native matmul schedules are always Helion kernels. Another schedule is a
-    Helion kernel if HelionKernel generates it without NotImplementedError, e.g.
-    a pointwise or reduction kernel, and a Triton kernel otherwise.
+    A schedule with a Helion matmul is a Helion kernel. Another schedule, e.g.
+    a pointwise or reduction kernel, is a Helion kernel if each of its nodes
+    passes helion_supports() and its tiling HelionKernel.supports_tiling(), and
+    a Triton kernel otherwise. Both are decided before codegen.
     """
 
     def __init__(self, scheduler: Any) -> None:
         super().__init__(scheduler)
-        # Set while codegen_node_schedule() tries a HelionKernel.
+        # Set while codegen_node_schedule() emits a schedule whose nodes
+        # HelionKernel supports. Only that path emits them as Helion kernels;
+        # the kernels of fusion benchmarking and combo kernels stay Triton.
         self.use_helion = False
 
     @staticmethod
@@ -1261,14 +1351,8 @@ class HelionScheduling(TritonScheduling):
         why = WhyNoFuse(node1, node2)
         nodes = [*node1.get_nodes(), *node2.get_nodes()]
         for node in nodes:
-            if not isinstance(node, SchedulerNode) or node.is_template():
-                why("Helion matmul kernel fuses only scheduler nodes")
-                return False
-            if node.is_native_matmul() and not is_helion_matmul(node):
-                why("Helion matmul kernel does not fuse a Triton native matmul")
-                return False
-            if unsupported := OrderedSet(node._body.op_counts) - HELION_OPS:
-                why("Helion kernels do not support %s", unsupported)
+            if not helion_supports(node):
+                why("Helion kernels do not support %s", node.get_name())
                 return False
         dots = [node for node in nodes if node.is_native_matmul()]
         # An epilogue node runs once per output element, (B*)M*N, split into
@@ -1286,12 +1370,6 @@ class HelionScheduling(TritonScheduling):
             pointwise = node.group[1] == (numel, 1)
             if not pointwise or not SIMDKernel.is_compatible(groups, node.get_ranges()):
                 why("Helion epilogue must iterate over the matmul output tiles")
-                return False
-            # a @ b + torch.tensor(2.0) reads a CPU scalar, which the kernel
-            # would get as a CPU tensor:
-            #   ValueError: Pointer argument cannot be accessed from Triton (cpu tensor?)
-            if any(V.graph.is_unspec_arg(dep.name) for dep in node.read_writes.reads):
-                why("Helion kernels do not read CPU scalars")
                 return False
         return super().can_fuse(node1, node2)
 
@@ -1327,50 +1405,21 @@ class HelionScheduling(TritonScheduling):
             required_post_reduction_index=required_post_reduction_index,
         )
 
-    @staticmethod
-    def helion_candidate(kernel_features: Any) -> bool:
-        """Whether a schedule without a dot uses only what HelionKernel supports.
-
-        Checked before codegen, as SchedulerNode.codegen() logs any error at
-        critical level, e.g. "Error in codegen for ComputedBuffer(...
-        reduction_type=welford_reduce ...)" for a layer norm.
-        """
-        return all(
-            isinstance(node, SchedulerNode)
-            and not node.is_template()
-            and not node.is_native_matmul()
-            and not OrderedSet(node._body.op_counts) - HELION_OPS
-            and (
-                not isinstance(node.node, ComputedBuffer)
-                or node.node.get_reduction_type() in (None, *REDUCTIONS)
-            )
-            and not any(
-                entry.mode for entry in node._body.memory_usage[MemoryUsageType.STORE]
-            )
-            and not any(
-                V.graph.is_unspec_arg(dep.name) for dep in node.read_writes.reads
-            )
+    def codegen_node_schedule(self, kernel_features):
+        self.use_helion = all(
+            helion_supports(node) and not node.is_native_matmul()
             for node in kernel_features.scheduler_nodes()
         )
-
-    def codegen_node_schedule(self, kernel_features):
-        if not self.helion_candidate(kernel_features):
-            return super().codegen_node_schedule(kernel_features)
-        # Codegen fails before anything reaches the wrapper (define_kernel), so
-        # the schedule can start over as a Triton kernel.
-        self.use_helion = True
         try:
             return super().codegen_node_schedule(kernel_features)
-        except NotImplementedError as e:
-            log.debug("Emitting a Triton kernel instead of a Helion kernel: %s", e)
         finally:
             self.use_helion = False
-        return super().codegen_node_schedule(kernel_features)
 
     def create_kernel_choices(self, kernel_features, kernel_args, kernel_kwargs):
-        if self.use_helion or any(
+        (tiling,) = kernel_args
+        if any(
             is_helion_matmul(node) for node in kernel_features.scheduler_nodes()
-        ):
+        ) or (self.use_helion and HelionKernel.supports_tiling(tiling)):
             return [HelionKernel(*kernel_args, **kernel_kwargs)]
         return super().create_kernel_choices(
             kernel_features, kernel_args, kernel_kwargs

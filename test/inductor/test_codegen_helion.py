@@ -13,7 +13,7 @@ import sympy
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
-from torch._inductor import config
+from torch._inductor import config, metrics
 from torch._inductor.codegen.helion import (
     HelionOverrides,
     HelionPrinter,
@@ -80,7 +80,11 @@ class TestHelionNativeMatmul(TestCase):
         """
         if backend == "cute" and not HAS_CUTE:
             self.skipTest("requires CuTeDSL")
-        with config.patch({"helion.backend": backend}):
+        # Helion or Triton is decided before codegen, so codegen logs no error.
+        with (
+            config.patch({"helion.backend": backend}),
+            self.assertNoLogs("torch._inductor.scheduler", level="CRITICAL"),
+        ):
             result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
         if expected is None:
             low = (torch.float16, torch.bfloat16)
@@ -745,7 +749,9 @@ class TestHelionReduction(TestCase):
 
     def compile(self, fn, *args, tol=None):
         """Run compiled `fn`, check it against eager, and return the Helion kernel modules."""
-        result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+        # Helion or Triton is decided before codegen, so codegen logs no error.
+        with self.assertNoLogs("torch._inductor.scheduler", level="CRITICAL"):
+            result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
         self.assertEqual(result, fn(*args), atol=tol, rtol=tol)
         self.code = "\n".join(codes)
         return SOURCE_RE.findall(self.code)
@@ -874,11 +880,43 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, out0: torch.Tensor) -> None:
         }[case]
         if case == "dynamic":
             torch._dynamo.mark_dynamic(x, 0)
-        # Online softmax, Welford, any and argmax are not Helion reductions yet;
-        # they are rejected before codegen, which would log them as errors.
-        with self.assertNoLogs("torch._inductor.scheduler", level="CRITICAL"):
-            self.assertEqual(self.compile(fn, x, tol=1e-4), [])
-        self.assertIn("@triton.jit", self.code)
+        # Online softmax, Welford, any and argmax are not Helion reductions yet.
+        metrics.reset()
+        self.assertEqual(self.compile(fn, x, tol=1e-4), [])
+        # No HelionKernel was started: each generated kernel is a Triton kernel.
+        self.assertEqual(metrics.generated_kernel_count, self.code.count("@triton.jit"))
+
+    def test_reduction_of_broadcast_value(self):
+        (source,) = self.compile(
+            lambda x: x[:, :1].expand(64, 100).sum(-1),
+            torch.randn(64, 100, device="cuda"),
+            tol=1e-4,
+        )
+        self.assertIn(" + hl.zeros([tile_x, tile_r], dtype=torch.float32)", source)
+
+    def test_mask_over_other_axes(self):
+        # The pad mask covers (tile_x, tile_r) and r is read over tile_x.
+        (source,) = self.compile(
+            lambda x, r: torch.nn.functional.pad(x * r, (1, 1, 1, 1)).sum(-1),
+            torch.randn(64, 100, device="cuda"),
+            torch.randn(64, 1, device="cuda"),
+            tol=1e-4,
+        )
+        self.assertRegex(
+            source,
+            r"hl\.load\(in1, \[\(-1\) \+ tile_x\.index\.reshape\(\[tile_x, 1\]\)\], extra_mask=tmp\d+\)",
+        )
+
+    @config.patch(nan_asserts=True)
+    def test_nan_asserts(self):
+        x, y = torch.randn(64, 100, device="cuda"), torch.randn(64, 100, device="cuda")
+        expected = x + y
+        _, (code,) = run_and_get_code(torch.compile(lambda x, y: x.add_(y)), x, y)
+        # The kernel runs once, and its arguments are checked after it.
+        self.assertEqual(x, expected)
+        calls = re.findall(r"^\s+helion_\w+\(", code, re.MULTILINE)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("assert not arg0_1.isnan().any().item()", code)
 
 
 @instantiate_parametrized_tests
