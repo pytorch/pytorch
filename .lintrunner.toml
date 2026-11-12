@@ -230,7 +230,6 @@ exclude_patterns = [
     'torch/csrc/profiler/kineto/libkineto/src/Roc*',
     'torch/csrc/profiler/kineto/libkineto/src/plugin/xpupti/**',
     'torch/csrc/distributed/**/*.cu',
-    'torch/csrc/distributed/c10d/WinSockUtils.hpp',
     'torch/csrc/distributed/c10d/quantization/quantization_gpu.h',
     'torch/csrc/dynamo/eval_frame.h',
     'torch/csrc/inductor/aoti_torch/c/shim.h',

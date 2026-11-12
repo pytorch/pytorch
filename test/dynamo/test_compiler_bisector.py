@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import unittest
 from contextlib import contextmanager
 from importlib import import_module
 
@@ -14,10 +13,9 @@ from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    skipPRIVATEUSE1,
+    skipIf,
 )
-from torch.testing._internal.common_utils import HardwareClassification, requires_cuda
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils._triton import has_triton, has_triton_for_device
 
 
@@ -29,8 +27,9 @@ i64 = torch.int64
 i32 = torch.int32
 
 
-@unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
 class TestCompilerBisector(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     test_ns = "_test_bisector"
 
     def tearDown(self):
@@ -139,47 +138,6 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.backend, "eager")
         self.assertEqual(out.subsystem, None)
 
-    # XPU doesn't support cudagrah
-    @requires_cuda
-    def test_cudagraph_bisect_max(self):
-        """Test that cudagraph bisector can limit number of cudagraphed graphs."""
-        import os
-        from unittest.mock import patch
-
-        from torch._dynamo.utils import counters
-        from torch._inductor.compiler_bisector import get_env_val
-
-        def foo(x):
-            return x + 1
-
-        def bar(x):
-            return x * 2
-
-        env = {
-            "TORCH_BISECT_BACKEND": "inductor",
-            "TORCH_BISECT_SUBSYSTEM": "cudagraphs",
-            "TORCH_BISECT_MAX": "0",
-        }
-
-        with patch.dict(os.environ, env):
-            get_env_val.cache_clear()
-            CompilerBisector.reset_counters()
-            torch._dynamo.reset()
-            counters.clear()
-            CompilerBisector.bisection_enabled = True
-            try:
-                foo_c = torch.compile(foo, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
-                bar_c = torch.compile(bar, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
-                x = torch.randn(10, device=GPU_TYPE)
-                foo_c(x)
-                bar_c(x)
-
-                # With max=0, all graphs should be skipped
-                self.assertGreater(counters["inductor"]["cudagraph_skips"], 0)
-            finally:
-                CompilerBisector.bisection_enabled = False
-                get_env_val.cache_clear()
-
 
 class TestCompilerBisectorDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -214,6 +172,7 @@ class TestCompilerBisectorDevice(TestCase):
                     "run",
                     "python",
                     str(test_file),
+                    device,
                 ],
                 stdout=subprocess.PIPE,
                 check=True,
@@ -412,20 +371,63 @@ class TestCompilerBisectorDevice(TestCase):
         self.assertEqual(out.subsystem, "inductor_emulate_precision_casts")
 
 
+# mode="reduce-overhead" exercises CUDA cudagraphs, which XPU does not
+# support, so this test stays device-specific rather than joining the
+# accelerator-wide TestCompilerBisectorDevice class.
+class TestCompilerBisectorCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @skipIf(not has_triton(), "requires triton", device_type=("cuda"))
+    def test_cudagraph_bisect_max(self, device):
+        """Test that cudagraph bisector can limit number of cudagraphed graphs."""
+        import os
+        from unittest.mock import patch
+
+        from torch._dynamo.utils import counters
+        from torch._inductor.compiler_bisector import get_env_val
+
+        def foo(x):
+            return x + 1
+
+        def bar(x):
+            return x * 2
+
+        env = {
+            "TORCH_BISECT_BACKEND": "inductor",
+            "TORCH_BISECT_SUBSYSTEM": "cudagraphs",
+            "TORCH_BISECT_MAX": "0",
+        }
+
+        with patch.dict(os.environ, env):
+            get_env_val.cache_clear()
+            CompilerBisector.reset_counters()
+            torch._dynamo.reset()
+            counters.clear()
+            CompilerBisector.bisection_enabled = True
+            try:
+                foo_c = torch.compile(foo, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
+                bar_c = torch.compile(bar, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
+                x = torch.randn(10, device=device)
+                foo_c(x)
+                bar_c(x)
+
+                # With max=0, all graphs should be skipped
+                self.assertGreater(counters["inductor"]["cudagraph_skips"], 0)
+            finally:
+                CompilerBisector.bisection_enabled = False
+                get_env_val.cache_clear()
+
+
 instantiate_device_type_tests(
     TestCompilerBisectorDevice, globals(), except_for="cpu", allow_xpu=True
 )
+instantiate_device_type_tests(TestCompilerBisectorCuda, globals(), only_for="cuda")
 
 
-@unittest.skipIf(not has_triton(), "requires Triton")
 class TestCompilerBisectorRNG(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    # `preserve_rng_state` only saves/restores CPU, CUDA and XPU RNG state, so
-    # the eager-vs-compiled RNG comparison below is only meaningful on those
-    # accelerator devices; PrivateUse1 backends are skipped explicitly rather
-    # than silently diverging.
-    @skipPRIVATEUSE1
+    @skipIf(not has_triton(), "requires triton", device_type=("cuda", "xpu"))
     def test_rng(self, device):
         def foo():
             return torch.rand([10], device=device) + 1

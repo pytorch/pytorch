@@ -1052,11 +1052,11 @@ jobs:
           use_bedrock: "true"
           # The actor is whoever triggered Stage 1: on `labeled`, whoever
           # applied `in progress`; on a push, the pusher. The action rejects
-          # bot actors unless listed here. pytorch-bot applies the label on
-          # `@pytorchbot pre-review accept` once every assigned reviewer has
-          # accepted. On a co-dev PR, meta-codesync pushes each re-export of
-          # the internal diff, so it is the actor of the re-reviews those
-          # pushes trigger. Name each bot exactly; never "*".
+          # bot actors unless listed here. pytorch-bot applies the label once
+          # the PR is triaged, and again when the PR returns to `in progress`.
+          # On a co-dev PR, meta-codesync pushes each re-export of the internal
+          # diff, so it is the actor of the re-reviews those pushes trigger.
+          # Name each bot exactly; never "*".
           allowed_bots: "pytorch-bot[bot],meta-codesync[bot]"
           # On a push, the actor is the pusher, usually the PR author, and most
           # contributors lack write access. Without `github_token` the action
