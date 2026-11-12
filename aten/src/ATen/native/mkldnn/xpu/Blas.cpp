@@ -217,6 +217,12 @@ Tensor& baddbmm_out(
   checkBackend("baddbmm_out", {input, batch1, batch2}, Backend::XPU);
   TORCH_CHECK(batch1.dim() == 3, "expected 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "expected 3D tensor");
+  TORCH_CHECK(
+      batch1.scalar_type() == batch2.scalar_type(),
+      "expected batch1 and batch2 to have the same dtype, but got: ",
+      batch1.scalar_type(),
+      " != ",
+      batch2.scalar_type());
 
   std::vector<int64_t> result_shape = {
       batch1.size(0), batch1.size(1), batch2.size(2)};
@@ -321,6 +327,12 @@ Tensor& bmm_out(const Tensor& self, const Tensor& batch2, Tensor& result) {
   checkBackend("bmm_out", {result, self, batch2}, Backend::XPU);
   TORCH_CHECK(self.dim() == 3, "expected 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "expected 3D tensor");
+  TORCH_CHECK(
+      self.scalar_type() == batch2.scalar_type(),
+      "expected batch1 and batch2 to have the same dtype, but got: ",
+      self.scalar_type(),
+      " != ",
+      batch2.scalar_type());
 
   result.resize_({self.size(0), self.size(1), batch2.size(2)});
   if (self.numel() == 0 || batch2.numel() == 0) {
