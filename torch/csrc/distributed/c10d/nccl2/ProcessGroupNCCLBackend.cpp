@@ -644,7 +644,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather(
   for (int r = 0; r < getSize(); ++r) {
     outputList.at(r).copy_(rows[r].view_as(outputList.at(r)));
   }
-  work->setOutputsOnCurrentStream();
+  work->setOutputsStream(at::cuda::getCurrentCUDAStream(device_.index()));
   return work;
 }
 
