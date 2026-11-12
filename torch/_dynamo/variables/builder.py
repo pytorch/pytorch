@@ -186,6 +186,7 @@ from ..utils import (
     get_locals_to_steal,
     get_static_address_type,
     get_type_dict_no_user_code,
+    has_custom_metaclass_accessor,
     InvalidOrderedDict,
     is_frozen_dataclass,
     is_function,
@@ -200,7 +201,6 @@ from ..utils import (
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
-    iter_mro_static_attrs,
     list_reverseiterator,
     list_reverseiterator_backing_list,
     list_reverseiterator_len,
@@ -214,6 +214,7 @@ from ..utils import (
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
+    UnsupportedOrderedDictRuntime,
     unwrap_with_attr_name_if_wrapper,
     wrap_fake_exception,
 )
@@ -708,16 +709,7 @@ def normalize_descriptor_source(
     if isinstance(source.base, AttrSource) and source.base.member == "__dict__":
         cls = tx.output.resolve_source_value(source.base.base)
         if issubclass(type(cls), type):
-            metacls = type(cls)
-            custom_getattribute = (
-                next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
-                is not type.__dict__["__getattribute__"]
-            )
-            custom_dict = (
-                next(iter_mro_static_attrs(metacls, "__dict__"), None)
-                is not type.__dict__["__dict__"]
-            )
-            if custom_getattribute or custom_dict:
+            if has_custom_metaclass_accessor(cls, "__dict__"):
                 unimplemented(
                     gb_type="Unsupported descriptor source",
                     context="class __dict__ source",
@@ -948,6 +940,18 @@ def _is_dim_dynamic_from_source_dynamism(
 def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
     try:
         return list(enumerate_items_with_dict_position(value))
+    except UnsupportedOrderedDictRuntime as error:
+        unimplemented(
+            gb_type="Unsupported OrderedDict snapshot runtime",
+            context=str(error),
+            explanation="This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
+            hints=[
+                "Use a supported Python version; free-threaded nonempty snapshots require Python 3.14.1+.",
+            ],
+            from_exc=error,
+            skip_frame=True,
+            apply_to_code=False,
+        )
     except InvalidOrderedDict as error:
         unimplemented(
             gb_type="OrderedDict storage differs from linked keys",
@@ -955,9 +959,9 @@ def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
             explanation="Dynamo cannot safely match this OrderedDict's linked order to its dictionary storage.",
             hints=[
                 "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
-                "On free-threaded builds, use Python 3.14.1 or newer.",
                 *graph_break_hints.FUNDAMENTAL,
             ],
+            from_exc=error,
             skip_frame=True,
             apply_to_code=False,
         )
@@ -2205,16 +2209,7 @@ class VariableBuilder:
             if isinstance(descriptor, types.ClassMethodDescriptorType) and issubclass(
                 type(method_self), type
             ):
-                metacls = type(method_self)
-                custom_getattribute = (
-                    next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
-                    is not type.__dict__["__getattribute__"]
-                )
-                custom_dict = (
-                    next(iter_mro_static_attrs(metacls, "__dict__"), None)
-                    is not type.__dict__["__dict__"]
-                )
-                if custom_getattribute or custom_dict:
+                if has_custom_metaclass_accessor(method_self, "__dict__"):
                     unimplemented(
                         gb_type="Bound builtin classmethod with custom metaclass",
                         context=f"{descriptor.__qualname__} bound to a class with a custom metaclass",

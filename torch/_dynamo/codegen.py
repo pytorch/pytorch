@@ -160,7 +160,7 @@ class PyCodegen:
         elif isinstance(value, FrozensetVariable):
             items = [key.vt for key in value.set_items]
         elif isinstance(value, (BaseListVariable, ConstDictVariable, SetVariable)):
-            # Probing mutable containers would specialize their lazy children.
+            # Probing container members would specialize their lazy children.
             return True
         else:
             return not value.is_python_constant() or not is_safe_constant(
@@ -372,23 +372,33 @@ class PyCodegen:
             ):
                 return self(value.source)
 
-        if isinstance(value, ComputedLazyConstantVariable) and not value.is_realized():
-            # Recompute from the operands at runtime instead of burning in the value
+        if isinstance(value, ComputedLazyConstantVariable) and (
+            not value.is_realized()
+            or (
+                self.graph_output_var is None
+                and isinstance(value.realize(), SymNodeVariable)
+            )
+        ):
+            # The common case is an unrealized ComputedLazyConstant which we want to recompute from its operands.
+            # However there's a special case where a cycle can form and a (realized) ComputedLazyConstant becomes both a
+            # graph output and an indirect graph input.  There's probably a more general fix, but for now we handle it
+            # by detecting when no graph outputs are available and the value is symbolic (which is needed for the cycle
+            # to form)
             self.uses[value] += 1
             self.call_reconstruct(value)
             if allow_cache and value in self.tempvars:
                 self._output.append(create_dup_top())
                 self.add_cache(value)
         elif (
-            # Mutable containers cannot use LOAD_CONST. Do not specialize their children.
+            # Keep container members out of constant probing.
             not isinstance(value, (ConstDictVariable, SetVariable))
             and not (
                 isinstance(value, BaseListVariable)
                 and not isinstance(value, TupleVariable)
             )
-            # LOAD_CONST lets CPython intern aggregate elements. Reconstruct
-            # sourced children and mutable members to preserve identity, except
-            # during export, which deliberately disables reconstruction by source.
+            # Do not embed trace-time child objects in co_consts. Respect this
+            # codegen pass's source-reconstruction policy (export stack restoration
+            # disables it, but other export codegen paths can keep it enabled).
             and not (
                 self.value_from_source
                 and isinstance(value, (TupleVariable, FrozensetVariable, SliceVariable))
