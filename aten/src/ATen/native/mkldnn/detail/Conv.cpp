@@ -1,4 +1,5 @@
 #include <ATen/native/mkldnn/detail/Conv.h>
+#include <ATen/native/mkldnn/detail/PrimitiveCache.h>
 #include <ATen/native/mkldnn/detail/Utils.h>
 
 #if AT_MKLDNN_ENABLED()
@@ -330,8 +331,7 @@ void prepare_parameters(
 namespace {
 
 // Ported from ideep::convolution_forward::get_primitive_desc. On x86 the
-// descriptor comes from ideep's primitive cache, shared with ideep's own
-// convolution_forward.
+// descriptor comes from the primitive cache in detail/PrimitiveCache.h.
 #ifdef __aarch64__
 template <bool with_bias>
 std::pair<
@@ -448,7 +448,7 @@ dnnl::convolution_forward::primitive_desc get_primitive_desc(
     dst_desc_query = dst_desc.to_format(memory_format);
   }
 
-  auto key = ideep::utils::create_key(
+  auto key = utils::create_key(
       aprop_kind,
       aalgorithm,
       src_desc_query,
@@ -462,7 +462,7 @@ dnnl::convolution_forward::primitive_desc get_primitive_desc(
       padding_r,
       attr,
       omp_get_max_threads());
-  return ideep::utils::computation_cache<
+  return utils::computation_cache<
       dnnl::convolution_forward::primitive_desc>::
       fetch_or_create(key, [&]() {
         if (with_bias) {
