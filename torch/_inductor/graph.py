@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import functools
 import itertools
 import logging
@@ -199,6 +200,17 @@ def getattr_recursive(
             )
         attr_itr = getattr(attr_itr, atom)
     return attr_itr
+
+
+@dataclasses.dataclass(frozen=True)
+class UserVisibleAliases:
+    """Storage aliasing among user-visible graph inputs and outputs, as in eager."""
+
+    # (input_idx, output_idx) pairs that share a storage
+    input_output: tuple[tuple[int, int], ...]
+    # (i, j) output pairs, i < j, that share a storage
+    output_output: tuple[tuple[int, int], ...]
+    visible_outputs: tuple[int, ...] = ()
 
 
 def get_user_visible_output_strides(g: Graph) -> dict[Node, tuple[int, ...]]:
@@ -1999,6 +2011,58 @@ class GraphLowering(torch.fx.Interpreter):
             if isinstance(ir_value, ir.TensorBox):
                 ir_value.realize()
 
+    def _fix_user_visible_aliases(self, output_node: torch.fx.Node) -> None:
+        """Copy user-visible outputs that alias an input or another output after
+        lowering (e.g. `x + 0` was removed) but did not alias it in eager."""
+        old_aliases = output_node.meta.get("original_user_visible_aliases")
+        if old_aliases is None or not old_aliases.visible_outputs:
+            return
+        old_input_output = OrderedSet(old_aliases.input_output)
+        old_output_output = OrderedSet(old_aliases.output_output)
+
+        # Tensors alias after lowering iff they share a buffer, so group by name.
+        new_inputs_by_buffer: dict[str, list[int]] = defaultdict(list)
+        for input_idx, name in enumerate(self.graph_input_names):
+            if name in self.graph_inputs_original:
+                buffer = self.graph_inputs_original[name].get_name()
+                new_inputs_by_buffer[buffer].append(input_idx)
+        new_outputs_by_buffer: dict[str, list[int]] = defaultdict(list)
+        for output_idx in old_aliases.visible_outputs:
+            output = self.graph_outputs[output_idx]
+            if isinstance(output, ir.IRNode) and output.has_tensor_output():
+                if (buffer := output.maybe_get_name()) is not None:
+                    new_outputs_by_buffer[buffer].append(output_idx)
+
+        fx_outputs = output_node.args[0]
+        if not isinstance(fx_outputs, (tuple, list)):
+            fx_outputs = (fx_outputs,)
+        for buffer, output_idxs in new_outputs_by_buffer.items():
+            input_idxs = new_inputs_by_buffer.get(buffer, ())
+            # Outputs that keep the shared buffer; copied ones get their own.
+            kept: list[int] = []
+            for output_idx in output_idxs:
+                if all(
+                    (input_idx, output_idx) in old_input_output
+                    for input_idx in input_idxs
+                ) and all(
+                    (kept_idx, output_idx) in old_output_output for kept_idx in kept
+                ):
+                    kept.append(output_idx)
+                    continue
+                copy = ir.ExternKernel.copy_input(self.graph_outputs[output_idx])
+                # Keep the eager strides, which the copy would otherwise lose.
+                fx_output = fx_outputs[output_idx]
+                strides = (
+                    self.user_visible_output_strides.get(fx_output)
+                    if isinstance(fx_output, torch.fx.Node)
+                    else None
+                )
+                if strides and not free_unbacked_symbols(strides):
+                    copy = ir.ExternKernel.require_exact_strides(
+                        copy, strides, allow_padding=config.pad_outputs
+                    )
+                self.graph_outputs[output_idx] = copy
+
     def run_node(self, n: torch.fx.Node) -> object:
         """Lower and execute a single FX node into Inductor IR."""
 
@@ -2134,6 +2198,9 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 debug("")
                 result = super().run_node(n)
+
+            if n.op == "output":
+                self._fix_user_visible_aliases(n)
 
             # require the same stride order for dense outputs,
             # 1. user-land view() will not throw because inductor

@@ -131,7 +131,8 @@ from .fx_passes.post_grad import (
     view_to_reshape,
 )
 from .fx_passes.pre_grad import pre_grad_passes
-from .graph import GraphLowering
+from .fx_utils import get_storage
+from .graph import GraphLowering, UserVisibleAliases
 from .ir import get_device_type, IRNode, is_triton
 from .triton_bundler import TritonBundler
 from .utils import (
@@ -432,6 +433,79 @@ def record_original_output_strides(gm: GraphModule) -> None:
             # pyrefly: ignore [bad-argument-type]
             output_strides.append(None)
     output_node.meta["original_output_strides"] = output_strides
+
+
+def get_storage_aliases(gm: GraphModule) -> UserVisibleAliases | None:
+    output = output_node(gm)
+    inputs = list(gm.graph.find_nodes(op="placeholder"))
+    outputs = pytree.arg_tree_leaves(*output.args)
+    # Only Dynamo's example_value shares storages exactly as in eager. A graph that is
+    # already functionalized, like the one torch.compiler.precompile passes in, only
+    # has val, which can drop aliases:
+    #
+    #   def f(x): return x.detach()
+    #   # graph: alias = aten.alias(flat_1); return [alias]
+    #   # flat_1 and alias have different val storages
+    #
+    # Recording that would make Inductor copy the output, which aliases x in eager.
+    nodes = [node for node in (*inputs, *outputs) if isinstance(node, torch.fx.Node)]
+    if not all("example_value" in node.meta for node in nodes):
+        return None
+
+    def storage(node: Any) -> int | None:
+        if not isinstance(node, torch.fx.Node):
+            return None
+        val = node.meta["example_value"]
+        if not isinstance(val, torch.Tensor) or not torch._C._has_storage(val):
+            return None
+        return get_storage(val)
+
+    input_storages = [storage(node) for node in inputs]
+    output_storages = [storage(node) for node in outputs]
+
+    input_output_aliases: list[tuple[int, int]] = []
+    output_output_aliases: list[tuple[int, int]] = []
+    for output_idx, output_storage in enumerate(output_storages):
+        if output_storage is None:
+            continue
+        input_output_aliases.extend(
+            (input_idx, output_idx)
+            for input_idx, input_storage in enumerate(input_storages)
+            if input_storage == output_storage
+        )
+        output_output_aliases.extend(
+            (other_output_idx, output_idx)
+            for other_output_idx in range(output_idx)
+            if output_storages[other_output_idx] == output_storage
+        )
+
+    return UserVisibleAliases(tuple(input_output_aliases), tuple(output_output_aliases))
+
+
+def _has_new_user_visible_alias(gm: GraphModule) -> bool:
+    # The kernel-free path returns the FX graph as is and skips the repair in
+    # GraphLowering. Without kernels, an output aliases an input only by being its
+    # placeholder, and another output only by being the same node:
+    #
+    #   def f(x): return x + 0    # after joint graph passes:  return (arg0_1,)
+    #   def f(x): return x        # Dynamo + AOT:              return (arg0_1,)
+    #
+    # Both graphs return the input, but only the second aliases it in eager, so
+    # only the first has to go through GraphLowering to get a copy.
+    output = output_node(gm)
+    aliases = output.meta.get("original_user_visible_aliases")
+    if aliases is None:
+        return False
+    outputs = pytree.arg_tree_leaves(*output.args)
+    inputs = {n: i for i, n in enumerate(gm.graph.find_nodes(op="placeholder"))}
+    visible = aliases.visible_outputs
+    return any(
+        outputs[j] in inputs and (inputs[outputs[j]], j) not in aliases.input_output
+        for j in visible
+    ) or any(
+        outputs[i] is outputs[j] and (i, j) not in aliases.output_output
+        for i, j in itertools.combinations(visible, 2)
+    )
 
 
 def _recursive_record_original_output_strides(gm: GraphModule) -> None:
@@ -1140,6 +1214,7 @@ def _compile_fx_inner(
 
     if (
         dynamo_utils.count_calls(gm.graph) == 0
+        and not _has_new_user_visible_alias(gm)
         and not aot_mode
         and not torch._functorch.config.bundled_autograd_cache
     ):
@@ -2703,18 +2778,17 @@ def partition_fn(
     )
 
     if partitioner_fn_override is not None:
-        return partitioner_fn_override(
+        partition_result = partitioner_fn_override(
             gm,
             joint_inputs,
             static_lifetime_input_indices=static_lifetime_input_indices,
             **kwargs,
         )
-
-    if config.custom_partitioner_fn is None:
+    elif config.custom_partitioner_fn is None:
         with dynamo_utils.dynamo_timed(
             "min_cut_rematerialization_partition", log_pt2_compile_event=True
         ):
-            return min_cut_rematerialization_partition(
+            partition_result = min_cut_rematerialization_partition(
                 gm,
                 joint_inputs,
                 compiler="inductor",
@@ -2732,13 +2806,16 @@ def partition_fn(
             config.custom_partitioner_fn.__class__.__name__,
             log_pt2_compile_event=True,
         ):
-            return config.custom_partitioner_fn(
+            partition_result = config.custom_partitioner_fn(
                 gm,
                 joint_inputs,
                 compiler="inductor",
                 static_lifetime_input_indices=static_lifetime_input_indices,
                 **kwargs,
             )
+
+    fw_module, bw_module = partition_result
+    return fw_module, bw_module
 
 
 def get_num_model_outputs(model: GraphModule) -> int:
@@ -2765,6 +2842,8 @@ class CompilerConfigExtra:
     forward_device_index: BoxedDeviceIndex
     forward_is_cudagraph_partitioned: BoxedBool
     cudagraphs_bwd_override: bool | None = None
+    # Input/output storage aliasing of the Dynamo graph (pre-functionalization).
+    original_user_visible_aliases: UserVisibleAliases | None = None
 
 
 def create_compiler_config_extra(
@@ -2828,6 +2907,9 @@ def create_compiler_config_extra(
         forward_device_index=forward_device_index,
         cudagraphs_bwd_override=cudagraphs_bwd_override,
         forward_is_cudagraph_partitioned=forward_is_cudagraph_partitioned,
+        original_user_visible_aliases=(
+            get_storage_aliases(gm) if isinstance(gm, GraphModule) else None
+        ),
     )
 
 
@@ -2903,13 +2985,15 @@ def compile_fx_forward(
 
     model_outputs_node = output_node(gm)
     clone_live_user_outputs = _cudagraph_trees_clone_live_user_outputs()
+    context = torch._guards.TracingContext.try_get()
+    original_aliases = compiler_config_extra.original_user_visible_aliases
+    keep_aliases = original_aliases is not None
     model_outputs = None
     user_visible_output_idxs: list[int] = []
-    if config.keep_output_stride or clone_live_user_outputs:
+    if config.keep_output_stride or clone_live_user_outputs or keep_aliases:
         model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
         num_model_outputs = len(model_outputs)
 
-        context = torch._guards.TracingContext.try_get()
         # See Note [User Outputs in the inductor graph]
         if context is not None and context.fw_metadata and not is_inference:
             original_output_start_index = (
@@ -2951,6 +3035,20 @@ def compile_fx_forward(
             for idx in range(original_output_start_index, orig_output_end_idx)
             if isinstance(model_outputs[idx], torch.fx.Node)
         ]
+
+        if original_aliases is not None:
+            # Aliasing from the Dynamo graph's FakeTensors (pre-functionalization).
+            # Its output indices exclude mutated inputs.
+            start = original_output_start_index
+            io_pairs = original_aliases.input_output
+            oo_pairs = original_aliases.output_output
+            model_outputs_node.meta["original_user_visible_aliases"] = (
+                UserVisibleAliases(
+                    input_output=tuple((i, start + j) for i, j in io_pairs),
+                    output_output=tuple((start + i, start + j) for i, j in oo_pairs),
+                    visible_outputs=tuple(user_visible_output_idxs),
+                )
+            )
 
     if config.keep_output_stride or clone_live_user_outputs:
         model_outputs_node.meta["user_visible_output_idxs"] = user_visible_output_idxs
