@@ -125,6 +125,7 @@ def _make_conv(dtype=None):
 @instantiate_parametrized_tests
 class CudaReproTests(TestCase):
     device = device_type
+    _device_at_collection = device_type
     common = check_model_cuda
 
     def test_mm_out_dtype_compile(self):
@@ -1986,6 +1987,11 @@ class CudaReproTests(TestCase):
         not (TEST_CUDA or TEST_XPU),
         "requires CUDA or XPU: the cast runs on every non-CPU device",
     )
+    @skipIfXpu(
+        msg="triton-xpu folds the fp32 -> fp16 precision barrier and the "
+        "compiled-vs-eager check assumes cuDNN rounding; "
+        "intel/intel-xpu-backend-for-triton#7491, torch-xpu-ops: 4358"
+    )
     @config.patch(emulate_precision_casts_on_saved_tensors=True)
     def test_conv_bias_rounds_before_log_softmax(
         self, lowp_dtype, emulate_precision_casts, conv_offset
@@ -3185,6 +3191,25 @@ def foo(x):
     return x + 1
 
 # somehow gives different results.. still, check that it doesn't error
+foo(torch.rand([256], device=\"{device_type}\"))
+"""
+
+        subprocess.run([sys.executable, "-c", script], check=True)
+
+    @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
+    def test_triton_interpret_pdl(self):
+        import subprocess
+
+        script = f"""
+import os
+os.environ["TRITON_INTERPRET"] = "1"
+os.environ["TORCHINDUCTOR_ENABLE_PDL"] = "1"
+import torch
+
+@torch.compile()
+def foo(x):
+    return x + 1
+
 foo(torch.rand([256], device=\"{device_type}\"))
 """
 

@@ -83,6 +83,7 @@ from ..source import (
     CallFunctionNoArgsSource,
     GlobalStateSource,
     ImportSource,
+    is_constant_source,
     SyntheticLocalSource,
     TensorProperty,
     TensorPropertySource,
@@ -587,8 +588,10 @@ class BaseTorchVariable(VariableTracker):
             install_guard(source.make_guard(GuardBuilder.MODULE_MATCH))
         elif inspect.isfunction(value):
             install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
-        elif inspect.isbuiltin(value) or isinstance(
-            value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
+        elif (
+            inspect.isbuiltin(value)
+            or (inspect.ismethoddescriptor(value) and not is_constant_source(source))
+            or isinstance(value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket))
         ):
             install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         elif is_wrapper_or_member_descriptor(value) or isinstance(
@@ -622,6 +625,13 @@ class BaseTorchVariable(VariableTracker):
 
     def get_real_python_backed_value(self) -> Any:
         return self.value
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
     def nb_or_impl(
         self,
@@ -660,15 +670,8 @@ class BaseTorchVariable(VariableTracker):
             return VariableTracker.build(tx, NotImplemented)
         return VariableTracker.build(tx, result)
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -1003,6 +1006,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             )
         elif self.value is torch.nn.attention.sdpa_kernel.__wrapped__:  # type: ignore[attr-defined]
             name_to_arg_map = bind_args_cached(
+                self,
                 self.value,
                 tx,
                 self.source,
@@ -1150,7 +1154,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # Read dynamically: the cached dict always has True, but
             # is_exporting() should only be True during torch.export.
             if self.value is torch.compiler.is_exporting:
-                return VariableTracker.build(tx, torch.compiler._is_exporting_flag)
+                return VariableTracker.build(tx, torch.compiler.is_exporting())
             return VariableTracker.build(tx, tracing_state_functions()[self.value])
 
         @register(*dispatch_key_set_functions)
@@ -1843,7 +1847,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         "torch.compile regions.",
                     ],
                 )
-            if tx.output.current_tracer.is_export or torch.compiler._is_exporting_flag:
+            if tx.output.current_tracer.is_export or torch.compiler.is_exporting():
                 unimplemented(
                     gb_type="COW tensor check during export",
                     context="torch._C._is_cow_tensor during export",
@@ -5043,13 +5047,6 @@ class DispatchKeySetVariable(BaseTorchVariable):
     ) -> "DispatchKeySetVariable":
         install_guard(source.make_guard(GuardBuilder.DISPATCH_KEY_SET_MATCH))
         return cls(value, source=source)
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import python_constant_richcompare_impl
-
-        return python_constant_richcompare_impl(self, tx, other, op)
 
     def has(
         self,

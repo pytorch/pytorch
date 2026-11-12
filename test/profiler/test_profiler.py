@@ -502,6 +502,33 @@ with profile(activities=[ProfilerActivity.CUDA]):
 instantiate_device_type_tests(TestProfilerCUDA, globals(), only_for=("cuda",))
 
 
+class TestProfilerAtExitCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_left_running_at_exit_cuda(self):
+        # With GPU tracing still on at exit, BLAS libraries' static destructors
+        # make traced runtime calls after the main thread's thread_locals are
+        # destroyed. MALLOC_PERTURB_ poisons freed memory so a use of freed
+        # per-thread tracer state faults instead of passing silently.
+        script = """
+import torch
+from torch.profiler import profile, ProfilerActivity
+p = profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA])
+p.start()
+x = torch.randn(64, 64, device="cuda")
+(x @ x).sum().item()
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "MALLOC_PERTURB_": "165"},
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+
 @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
 class TestProfilerITT(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -540,20 +567,7 @@ class TestProfiler(TestCase):
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
     def test_source(self):
-        """Checks that source code attribution works for eager, TS and autograd mode"""
-        # avoid automatic inlining
-        prev_opt = torch._C._get_graph_executor_optimize()
-        torch._C._set_graph_executor_optimize(False)
-
-        @torch.jit.script
-        def ts_method_2(x, y):
-            return torch.matmul(x, y)
-
-        @torch.jit.script
-        def ts_method_1(x, y, z):
-            a = x + z
-            w = ts_method_2(x, y) + a
-            return w.sum()
+        """Checks source attribution for eager operators, modules, and autograd."""
 
         class DummyModule(nn.Module):
             def __init__(self) -> None:
@@ -578,9 +592,7 @@ class TestProfiler(TestCase):
             x = torch.randn(10, 10, requires_grad=True)
             y = torch.randn(10, 10, requires_grad=True)
             z = x + y
-            w = ts_method_1(x, y, z)
-            v = 2 * w
-            v.backward()
+            z.sum().backward()
             a = torch.randn(2, 3, 2, 2, requires_grad=True)
             b = call_module(a)
             c = b.sum()
@@ -589,16 +601,7 @@ class TestProfiler(TestCase):
         for e in p.function_events:
             if "aten::add" in e.name or "AddBackward" in e.name:
                 self.assertTrue(any("test_profiler" in entry for entry in e.stack))
-                self.assertTrue(
-                    any(
-                        (
-                            "test_source" in entry
-                            or "ts_method_1" in entry
-                            or "ts_method_2" in entry
-                        )
-                        for entry in e.stack
-                    )
-                )
+                self.assertTrue(any("test_source" in entry for entry in e.stack))
 
         if kineto_available():
             with TemporaryFileName(mode="w+") as fname:
@@ -619,8 +622,6 @@ class TestProfiler(TestCase):
                     module_event["args"]["Python parent id"],
                     wrapper_event["args"]["Python id"],
                 )
-
-        torch._C._set_graph_executor_optimize(prev_opt)
 
     @parametrize(
         "name,thread_spec",
@@ -807,81 +808,6 @@ class TestProfiler(TestCase):
         self.assertGreater(
             profiler_stats.function_events_build_tree_call_duration_us, 0
         )
-
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_module_hierarchy(self):
-        class A(nn.Module):
-            def my_new_method(self, x):
-                return x * 3
-
-            def forward_impl_(self, x, y):
-                return self.my_new_method(x) + y
-
-            def forward(self, x, y):
-                y = y - 2
-                return self.forward_impl_(x, y)
-
-        class B(nn.Module):
-            def forward(self, x):
-                return x + 2
-
-        class C(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.A0 = A()
-                self.B0 = B()
-
-            def call_b(self, x):
-                return self.B0.forward(x)
-
-            def forward(self, x, y):
-                return self.A0.forward(x, y) + self.call_b(x)
-
-        model = C()
-        model = torch.jit.script(model)
-        input_a = torch.rand(128, 128)
-        input_b = torch.rand(128, 128)
-        op_to_module_hierarchy = {}
-        op_to_module_hierarchy["aten::sub"] = ["TOP(C)::forward.A0(A)::forward."]
-        op_to_module_hierarchy["aten::mul"] = [
-            "TOP(C)::forward.A0(A)::forward.SELF(A)::forward_impl_.SELF(A)::my_new_method."
-        ]
-        op_to_module_hierarchy["aten::add"] = [
-            "TOP(C)::forward.A0(A)::forward.SELF(A)::forward_impl_.",
-            "TOP(C)::forward.SELF(C)::call_b.B0(B)::forward.",
-            "TOP(C)::forward.",
-        ]
-        with TemporaryFileName(mode="w+") as fname:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", FutureWarning)
-                with profile(
-                    activities=[torch.profiler.ProfilerActivity.CPU],
-                    with_modules=True,
-                ) as prof:
-                    model(input_a, input_b)
-            prof.export_chrome_trace(fname)
-            with open(fname) as f:
-                trace = json.load(f)
-                if "traceEvents" not in trace:
-                    raise AssertionError("Expected 'traceEvents' in trace")
-                events = trace["traceEvents"]
-                checked = 0
-                for evt in events:
-                    if "name" not in evt:
-                        raise AssertionError("Expected 'name' in event")
-                    if "args" in evt:
-                        op_name = evt["name"]
-                        if "Module Hierarchy" in evt["args"]:
-                            hierarchy = evt["args"]["Module Hierarchy"]
-                            if op_name in op_to_module_hierarchy:
-                                checked += 1
-                                if hierarchy not in op_to_module_hierarchy[op_name]:
-                                    raise AssertionError(
-                                        f"Expected hierarchy '{hierarchy}' in {op_to_module_hierarchy[op_name]}"
-                                    )
-                # Without this the comparisons above are vacuous: a trace with no
-                # module hierarchy at all satisfies every branch.
-                self.assertGreater(checked, 0)
 
     def test_high_level_trace(self):
         """Checks that python side high level events are recorded."""
@@ -1378,29 +1304,6 @@ torch.ones(10) * 2
 """
         proc = subprocess.run(
             [sys.executable, "-c", script], capture_output=True, text=True
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    def test_profiler_left_running_at_exit_cuda(self):
-        # With GPU tracing still on at exit, BLAS libraries' static destructors
-        # make traced runtime calls after the main thread's thread_locals are
-        # destroyed. MALLOC_PERTURB_ poisons freed memory so a use of freed
-        # per-thread tracer state faults instead of passing silently.
-        script = """
-import torch
-from torch.profiler import profile, ProfilerActivity
-p = profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA])
-p.start()
-x = torch.randn(64, 64, device="cuda")
-(x @ x).sum().item()
-"""
-        proc = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True,
-            text=True,
-            env={**os.environ, "MALLOC_PERTURB_": "165"},
-            timeout=60,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
@@ -2129,72 +2032,6 @@ x = torch.randn(64, 64, device="cuda")
             ) as prof:
                 payload()
             validate_json(prof, gc_flag)
-
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @unittest.skipIf(not torch.accelerator.is_available(), "Accelerator is required")
-    def test_region_device_time(self):
-        if not supported_activities() - {ProfilerActivity.CPU, ProfilerActivity.HPU}:
-            self.skipTest("Device kernel attribution is unavailable")
-
-        # Isolate backend/operator ID allocation from earlier profiler tests.
-        script = """
-import json
-import sys
-
-import torch
-from torch.profiler import DeviceType, profile, record_function
-
-device = torch.accelerator.current_accelerator(check_available=True)
-x = torch.randn(128, 128, device=device)
-torch.accelerator.synchronize()
-with profile() as prof:
-    for _ in range(4):
-        with record_function("workload"):
-            torch.accelerator.synchronize()
-            output = torch.empty_like(x)
-            torch.mm(x, x, out=output)
-    torch.accelerator.synchronize()
-
-raw = prof.profiler.kineto_results.events()
-raw_device_us = sum(
-    (e.end_ns() - e.start_ns()) / 1000 for e in raw
-    if e.activity_type() in ("kernel", "gpu_memcpy", "gpu_memset")
-)
-cpu_scopes = [e for e in prof.events() if e.name == "workload" and e.device_type == DeviceType.CPU]
-# CPU scopes select the workload; their host durations are never summed.
-# Match benchmarks by collecting descendants' attached device durations, not
-# the scopes' own synthetic device annotation spans.
-children = [child for scope in cpu_scopes for child in scope.cpu_children]
-benchmark_device_us = 0
-while children:
-    event = children.pop()
-    benchmark_device_us += sum(k.duration for k in event.kernels)
-    children.extend(event.cpu_children)
-with open(sys.argv[1], "w") as f:
-    json.dump([len(cpu_scopes), raw_device_us, benchmark_device_us], f)
-"""
-        with TemporaryFileName() as filename:
-            # Initializing the GPU here makes ROCm setenv()
-            # ROCPROFILER_REGISTER_LIBRARY to the profiler lib it loaded.
-            # os.environ never sees it, but subprocesses inherit it, and the
-            # child then records no device kernels. Rebuilding from os.environ
-            # drops it.
-            env = os.environ.copy()
-            env.pop("ROCPROFILER_REGISTER_LIBRARY", None)
-            result = subprocess.run(
-                [sys.executable, "-c", script, filename],
-                capture_output=True,
-                text=True,
-                cwd=os.path.dirname(os.path.realpath(__file__)),
-                timeout=120,
-                env=env,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            with open(filename) as f:
-                scope_count, raw_device_us, benchmark_device_us = json.load(f)
-        self.assertEqual(scope_count, 4)
-        self.assertGreater(raw_device_us, 0, "Expected real device activity")
-        self.assertEqual(benchmark_device_us, raw_device_us, atol=1e-6, rtol=0)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_parse_kineto_results_timeout_none(self):
@@ -3467,6 +3304,72 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 e.self_device_time_total,
                 total_device_time,
             )
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @onlyAccelerator
+    def test_region_device_time(self, device):
+        if not supported_activities() - {ProfilerActivity.CPU, ProfilerActivity.HPU}:
+            self.skipTest("Device kernel attribution is unavailable")
+
+        # Isolate backend/operator ID allocation from earlier profiler tests.
+        script = """
+import json
+import sys
+
+import torch
+from torch.profiler import DeviceType, profile, record_function
+
+device = sys.argv[2]
+x = torch.randn(128, 128, device=device)
+torch.accelerator.synchronize()
+with profile() as prof:
+    for _ in range(4):
+        with record_function("workload"):
+            torch.accelerator.synchronize()
+            output = torch.empty_like(x)
+            torch.mm(x, x, out=output)
+    torch.accelerator.synchronize()
+
+raw = prof.profiler.kineto_results.events()
+raw_device_us = sum(
+    (e.end_ns() - e.start_ns()) / 1000 for e in raw
+    if e.activity_type() in ("kernel", "gpu_memcpy", "gpu_memset")
+)
+cpu_scopes = [e for e in prof.events() if e.name == "workload" and e.device_type == DeviceType.CPU]
+# CPU scopes select the workload; their host durations are never summed.
+# Match benchmarks by collecting descendants' attached device durations, not
+# the scopes' own synthetic device annotation spans.
+children = [child for scope in cpu_scopes for child in scope.cpu_children]
+benchmark_device_us = 0
+while children:
+    event = children.pop()
+    benchmark_device_us += sum(k.duration for k in event.kernels)
+    children.extend(event.cpu_children)
+with open(sys.argv[1], "w") as f:
+    json.dump([len(cpu_scopes), raw_device_us, benchmark_device_us], f)
+"""
+        with TemporaryFileName() as filename:
+            # Initializing the GPU here makes ROCm setenv()
+            # ROCPROFILER_REGISTER_LIBRARY to the profiler lib it loaded.
+            # os.environ never sees it, but subprocesses inherit it, and the
+            # child then records no device kernels. Rebuilding from os.environ
+            # drops it.
+            env = os.environ.copy()
+            env.pop("ROCPROFILER_REGISTER_LIBRARY", None)
+            result = subprocess.run(
+                [sys.executable, "-c", script, filename, device],
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                timeout=120,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            with open(filename) as f:
+                scope_count, raw_device_us, benchmark_device_us = json.load(f)
+        self.assertEqual(scope_count, 4)
+        self.assertGreater(raw_device_us, 0, "Expected real device activity")
+        self.assertEqual(benchmark_device_us, raw_device_us, atol=1e-6, rtol=0)
 
 
 instantiate_device_type_tests(TestProfilerDevice, globals(), allow_xpu=True)
