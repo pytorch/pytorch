@@ -460,8 +460,10 @@ class TestKernelGeneral(TestCase):
             var, mean = torch.var_mean(x.double(), dim=1)
         expected = [var.float(), mean.float()][: len(outs)]
         atol, rtol = (1e-3, 1e-4) if shift else (1e-5, 1e-5)
-        self.assertEqual(dense, expected, atol=atol, rtol=rtol)
-        self.assertEqual(outs, expected, atol=atol, rtol=rtol)
+        for got in (dense, outs):
+            self.assertEqual(got[0], expected[0], atol=atol, rtol=rtol)
+            # The pairwise tree keeps the mean within the default fp32 tolerance.
+            self.assertEqual(got[1:], expected[1:])
 
     def test_uniform_welford_tree_counts_share_kernels(self):
         # A tail kernel serves every count strictly between nloads * block and
@@ -670,8 +672,26 @@ class TestKernelGeneral(TestCase):
         cap64 = 64 * tile.UNIFORM_TREE_MAX_LOADS
         span = f"128 to {cap} values per output for 128 threads, got"
         fold, clamp = "a linear general-axis fold, got axis=", "an unclamped run, got"
+
+        class OwnCombine(T.WelfordOps):
+            def combine(self, a, b):
+                return super().combine(a, b)
+
+        # A replacing class may opt back in; its plain subclasses keep that choice.
+        class OptedIn(OwnCombine):
+            has_combine_equal = True
+
+        class KeepsOptIn(OptedIn):
+            pass
+
+        opted = tree | dict(trait=KeepsOptIn(acc=cutlass.Float32))
+        self.assertEqual(kg.ReduceBlock(**opted).tile.uniform_tree_loads, 1024 // 128)
         for bad, reason in (
             (dict(trait=trait), "a trait with has_combine_equal, got SumOps"),
+            (
+                dict(trait=OwnCombine(acc=cutlass.Float32)),
+                "a trait with has_combine_equal, got OwnCombine",
+            ),
             (dict(count=0, red_pairs=((0, 1),)), f"{span} 0"),
             (dict(count=64, red_pairs=((64, 1),)), f"{span} 64"),
             (dict(count=cap + 1, red_pairs=((cap + 1, 1),)), f"{span} {cap + 1}"),
@@ -878,6 +898,21 @@ class TestKernelGeneral(TestCase):
             want = y.sum(dim=1)
         self.assertEqual(got, want)
 
+    def test_replay_inside_a_recording_runs_unrecorded(self):
+        # A cold call inside a recording takes the full path and stores nothing, so the
+        # outer recording captures its launches.
+        x = torch.randn(64, 256, device="cuda")
+        trait = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
+        with _L.recording(x) as record:
+            out = kg.replay_reduce(trait, "replay_nested", x, 1, torch.float32)
+        self.assertNotIn("replay_nested", [k[0] for k in kg._REPLAYS])
+        replay = record.finish([out])
+        self.assertIsNotNone(replay)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.sum(dim=1)
+        self.assertEqual(out, want)
+        self.assertEqual(replay(x)[0], want)
+
     @unittest.skipIf(
         rt.inner_tree_order_enabled(), "requires unordered reduction order"
     )
@@ -963,7 +998,7 @@ class TestReplayRecords(TestCase):
         self.assertEqual(cache.pop("a"), 1)
         self.assertEqual(list(cache), ["c"])
         self.assertIsNone(cache.pop("a", None))
-        with self.assertRaises(KeyError):
+        with self.assertRaisesRegex(KeyError, "'a'"):
             cache.pop("a")
 
     def test_recordings_do_not_nest(self):

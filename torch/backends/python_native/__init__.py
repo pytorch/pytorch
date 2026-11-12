@@ -178,10 +178,9 @@ class DSLController:
     def disabled(self):
         """Context manager to temporarily disable DSL.
 
-        Also masks the native-AOT kernel stubs (kernels AOT-compiled
-        from this DSL and embedded in the aten kernels themselves) so
-        code inside the block sees stock aten behavior, e.g. for
-        reference computations in tests.
+        Also masks the native-AOT kernel stubs of every DSL (AOT-compiled kernels
+        embedded in the aten kernels themselves), process-wide, so code inside the
+        block sees stock aten behavior, e.g. for reference computations in tests.
 
         Two things stay active by design, because for them the override IS
         the implementation and masking would change results rather than

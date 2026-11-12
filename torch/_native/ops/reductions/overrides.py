@@ -22,8 +22,8 @@ symbol. cutedsl.disabled() does the same as enabled = False while its block runs
 PYTORCH_NATIVE_INNER_TREE also orders served calls: a user who asks for the inner-tree
 order gets it, and serving an unordered request in that order is fine. The condition
 ignores the order, so with the variable set to "strict" a served call whose layout
-cannot take the inner tree raises (with "1" it warns and runs unordered). Calls the
-condition declines go to ATen, which does not follow the order.
+cannot take the inner tree raises (with any other value than "" or "0" it warns and runs
+unordered). Calls the condition declines go to ATen, which does not follow the order.
 """
 
 from __future__ import annotations

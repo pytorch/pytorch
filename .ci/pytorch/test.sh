@@ -492,13 +492,7 @@ PYTHON_NATIVE_CUTEDSL_SUITES=(
   python_native/test_traits
   python_native/test_instrumentation
   python_native/test_tile_datapath
-  python_native/test_reductions_cutedsl
 )
-# test_reductions and test_ops checks of the CuTeDSL sum, mean, amax, amin and prod overrides.
-# test_ref_ runs only the dtypes they serve (as a -k substring, float16 also matches
-# bfloat16); test_ops keeps its dtype-less tests (test_dtypes_, test_errors_, ...).
-PYTHON_NATIVE_REDUCTIONS_FILTER='test_ref_ and cuda and not large_input and (_sum_ or _mean_ or _amax_ or _amin_ or _prod_) and (float16 or float32)'
-PYTHON_NATIVE_REDUCTION_OPS_FILTER='(_sum_cuda or _mean_cuda or _amax_cuda or _amin_cuda or _prod_cuda) and not scatter_reduce and not index_reduce and not cartesian and not var_mean and not std_mean and not number_mean'
 
 test_python_smoke() {
   # Smoke tests for H100/B200
@@ -559,6 +553,13 @@ if not green_contexts.is_localization_supported():
 PY
   )
 }
+
+# test_reductions and test_ops checks of the CuTeDSL sum, mean, amax, amin and prod overrides.
+# test_ref_ runs only the dtypes they serve and has no bfloat16 variants, so bfloat16
+# coverage comes from test_ops and test_reductions_cutedsl.py; test_ops keeps its dtype-less
+# tests (test_dtypes_, test_errors_, ...).
+PYTHON_NATIVE_REDUCTIONS_FILTER='test_ref_ and cuda and not large_input and (_sum_ or _mean_ or _amax_ or _amin_ or _prod_) and (float16 or float32)'
+PYTHON_NATIVE_REDUCTION_OPS_FILTER='(_sum_cuda or _mean_cuda or _amax_cuda or _amin_cuda or _prod_cuda) and not scatter_reduce and not index_reduce and not cartesian and not var_mean and not std_mean and not number_mean'
 
 # PYTHON_TEST_EXTRA_OPTION intentionally expands into multiple arguments.
 # shellcheck disable=SC2086
