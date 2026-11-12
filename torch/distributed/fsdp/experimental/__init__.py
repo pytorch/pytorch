@@ -12,7 +12,9 @@ can improve performance for wide tensors with small ``outer_size`` (the product 
 dimensions before the shard dimension), such as ``Shard(1)`` over ``[2, F, D]``.
 Their CPU time, GPU time, and metadata memory grow with the total outer size of a
 parameter group, and strided collective buffers take a slower path. Benchmark
-the callbacks on the target workload before enabling them.
+the callbacks on the target workload before enabling them. Groups with
+parameters sharded unevenly on a nonzero dim take the default copy-out, and the
+native reduce-scatter copy-in rejects their gradients.
 
 All-gather extensions can return ``AllGatherInput`` records from
 ``fsdp_pre_all_gather`` to declare each payload's concatenation dimension. FSDP
@@ -53,7 +55,9 @@ def all_gather_output_fn_with_native_copy(
     r"""Copy gathered payloads directly into their final layout.
 
     See the module documentation for the performance tradeoffs. Groups with a
-    tensor payload smaller than its cached output use the default copy-out.
+    tensor payload smaller than its cached output, or with an output smaller than
+    its gathered chunks, as of parameters sharded unevenly on a nonzero dim, use
+    the default copy-out.
     """
     # The op copies within one dtype, so mixed-dtype groups copy bytes
     copy_outputs = outputs
@@ -90,13 +94,22 @@ def reduce_scatter_input_fn_with_native_copy(
 
     Contiguous nonzero-dimension shards copy directly into the collective buffer.
     Noncontiguous gradients sharded on a nonzero dim use the existing
-    chunk-and-concatenate reorder.
+    chunk-and-concatenate reorder. Gradients sharded unevenly on a nonzero dim
+    raise ``NotImplementedError``.
     """
     num_leading_dims = [0] * len(unsharded_grads)
     if world_size > 1:
         for i, shard_dim in enumerate(shard_dims):
             if shard_dim == 0:
                 continue
+            size = unsharded_grads[i].shape
+            if size[shard_dim] % world_size:
+                raise NotImplementedError(
+                    "reduce_scatter_input_fn_with_native_copy does not support "
+                    f"gradients sharded unevenly on dim {shard_dim}: size "
+                    f"{tuple(size)} over {world_size} ranks. Use the default "
+                    "reduce-scatter copy-in."
+                )
             if unsharded_grads[i].is_contiguous():
                 num_leading_dims[i] = shard_dim
             else:
