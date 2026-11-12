@@ -992,12 +992,6 @@ coverage_ignore_functions = [
     "get_file_pathnames_from_root",
     "match_masks",
     "validate_pathname_binary_tuple",
-    # torch.utils.data.datapipes.utils.decoder
-    "audiohandler",
-    "extension_extract_fn",
-    "imagehandler",
-    "mathandler",
-    "videohandler",
     # torch.utils.data.graph_settings
     "apply_random_seed",
     "apply_sharding",
@@ -1986,8 +1980,6 @@ coverage_ignore_classes = [
     "BatcherIterDataPipe",
     "GrouperIterDataPipe",
     "UnBatcherIterDataPipe",
-    # torch.utils.data.datapipes.iter.routeddecoder
-    "RoutedDecoderIterDataPipe",
     # torch.utils.data.datapipes.iter.selecting
     "FilterIterDataPipe",
     # torch.utils.data.datapipes.iter.sharding
@@ -2006,10 +1998,6 @@ coverage_ignore_classes = [
     "BatcherMapDataPipe",
     # torch.utils.data.datapipes.map.utils
     "SequenceWrapperMapDataPipe",
-    # torch.utils.data.datapipes.utils.decoder
-    "Decoder",
-    "ImageHandler",
-    "MatHandler",
     # torch.utils.data.dataset
     "ConcatDataset",
     # torch.utils.data.distributed
