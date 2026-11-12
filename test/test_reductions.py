@@ -319,7 +319,7 @@ class TestReductionsDevice(TestCase):
                 self.assertEqual(result, torch.full_like(result, torch.nan))
             else:
                 # Reducing along empty slice should raise an error
-                with self.assertRaises(IndexError):
+                with self.assertRaisesRegex(IndexError, "Expected reduction dim"):
                     op(t, *args, dim=dim, **kwargs)
 
     @skipIfMPS
