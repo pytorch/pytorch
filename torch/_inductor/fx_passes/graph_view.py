@@ -97,10 +97,19 @@ def _clean_stack_name(stack_name: str) -> str:
     Example:
         Input: "L['self']._modules['layers']['0']._modules['attention']"
         Output: "layers.0.attention"
+        Input: "L['enc'].fc"
+        Output: "enc.fc"
     """
-    cleaned = re.sub(r"^L\['self'\]\.?", "", stack_name)
-    parts = re.findall(r"\['([^']+)'\]", cleaned)
-    return ".".join(parts) if parts else cleaned
+
+    # Drop `L['self']` (the compiled module) so names match state_dict; keep other
+    # roots like `L['enc']` so modules passed in as arguments stay distinct.
+    def frame_root(match: re.Match[str]) -> str:
+        return "" if match.group(2) == "self" else match.group(2)
+
+    cleaned = re.sub(r"^[LG]\[(['\"])(.*?)\1\]", frame_root, stack_name, count=1)
+    cleaned = re.sub(r"\._modules(?=\[)", "", cleaned)
+    cleaned = re.sub(r"\['([^']+)'\]", r".\1", cleaned)
+    return cleaned.lstrip(".")
 
 
 def _is_root(stack: str) -> bool:
