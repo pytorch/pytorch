@@ -79,6 +79,7 @@ from .runtime_utils import (
     cache_dir,
     ceildiv,
     conditional_product,
+    config_ctas_per_cga,
     create_bandwidth_info_str,
     dynamo_timed,
     extra_options_to_hashable,
@@ -242,8 +243,13 @@ def get_total_reduction_numel(numels: dict[str, int]) -> int:
     )
 
 
-def _resolve_dims(dims, cfg_kwargs, constants):
-    """Resolve a list of block/shape/stride dims to concrete ints."""
+def _resolve_dims(dims, cfg_kwargs, constants, launch_dims=False):
+    """Resolve a list of block/shape/stride dims for a host-side TMA descriptor.
+
+    Dims resolve to ints where possible. With `launch_dims`, a dim left over is
+    launcher source for a dynamic size, which tma_descriptor() validated and
+    rendered at codegen (e.g. ks0), and is kept as that source (a str).
+    """
     result = []
     for s in dims:
         if isinstance(s, int):
@@ -256,10 +262,17 @@ def _resolve_dims(dims, cfg_kwargs, constants):
             # Template descriptors render dims via texpr(), so a literal comes
             # through as a decimal string rather than an int.
             result.append(int(s))
+        elif isinstance(s, str) and launch_dims:
+            result.append(s)
         else:
             log.debug("host-side TMA: unresolved descriptor dim %r; skipping", s)
             return None
     return result
+
+
+def _launcher_dims(dims) -> str:
+    """Launcher source for a resolved dim list; launch-time dims stay code."""
+    return "[" + ", ".join(str(d) for d in dims) + "]"
 
 
 @functools.lru_cache(None)
@@ -798,7 +811,9 @@ class CachingAutotuner(KernelInterface):
 
         # Cached launcher for fast path — bypasses all preamble after first
         # successful steady-state launch.  Set to None until populated.
+        # _cached_profiler_kwargs is read only while _cached_launcher is set.
         self._cached_launcher: LauncherType | None = None
+        self._cached_profiler_kwargs: dict[str, Any] = {}
         # Pre-compute static eligibility for launcher caching.  These flags
         # are set once in __init__ and never change, so we avoid re-checking
         # them on every kernel launch.
@@ -1435,18 +1450,28 @@ class CachingAutotuner(KernelInterface):
         host_tma_args = self.inductor_meta.get("host_tma_descriptor_args")
         if host_tma_args:
             all_constants = compile_meta["constants"]
+            # The launchers build exactly these descriptors, with these dims, so
+            # whether an arg is compiled as tensordesc<> is decided once, here.
+            resolved_descs: dict[str, dict[str, list[int | str]]] = {}
             for key in list(compile_meta["signature"]):
                 desc_info = host_tma_args.get(key)
                 if desc_info is None or not isinstance(desc_info, dict):
+                    continue
+                launch_args = desc_info.get("launch_args", [])
+                if any(
+                    a not in compile_meta["signature"] or a in all_constants
+                    for a in launch_args
+                ):
+                    # A size the dims read was specialized into a constant.
                     continue
                 block_shape_vals = _resolve_dims(
                     desc_info["block_shape"], cfg_kwargs, all_constants
                 )
                 shape_vals = _resolve_dims(
-                    desc_info["shape"], cfg_kwargs, all_constants
+                    desc_info["shape"], cfg_kwargs, all_constants, bool(launch_args)
                 )
                 stride_vals = _resolve_dims(
-                    desc_info["strides"], cfg_kwargs, all_constants
+                    desc_info["strides"], cfg_kwargs, all_constants, bool(launch_args)
                 )
                 if (
                     block_shape_vals is None
@@ -1465,6 +1490,13 @@ class CachingAutotuner(KernelInterface):
                 compile_meta["signature"][key] = (
                     f"tensordesc<{dtype_str}{list(block_shape_vals)}>"
                 )
+                resolved_descs[key] = {
+                    "block_shape": block_shape_vals,
+                    "shape": shape_vals,
+                    "strides": stride_vals,
+                    "launch_args": launch_args,
+                }
+            compile_meta["host_tma_descriptors"] = resolved_descs
 
         compile_meta["debug"] = _should_enable_triton_debug_asserts(self.inductor_meta)
 
@@ -2670,8 +2702,8 @@ class CachingAutotuner(KernelInterface):
         # After the first successful launch in steady state, cache the launcher
         # and skip all preamble on subsequent calls (~2µs savings).
         # Conditions here deliberately differ from the cache-population block
-        # below: we re-check dynamic conditions (profiler, debug mode) every
-        # call so enabling them at runtime falls back to the slow path.
+        # below: we re-check debug mode every call so enabling it at runtime
+        # falls back to the slow path; an active profiler only adds a per-launch record.
         # Static conditions (interpret, dump flags, launcher count) were
         # already validated when the cache was populated.
         # `not kwargs` is checked here but not at population time because
@@ -2682,10 +2714,16 @@ class CachingAutotuner(KernelInterface):
             fast is not None
             and not benchmark_run
             and not kwargs
-            and not autograd_profiler._is_profiler_enabled
             and not get_active_debug_mode()
         ):
-            return fast(*args, stream=stream)
+            if not autograd_profiler._is_profiler_enabled:
+                return fast(*args, stream=stream)
+            with torch._C._profiler._RecordFunctionFast(
+                self.inductor_meta.get("kernel_name", "triton kernel"),
+                args,
+                {**self._cached_profiler_kwargs, "stream": stream},
+            ):
+                return fast(*args, stream=stream)
 
         debug_mode = get_active_debug_mode()
         if debug_mode:
@@ -2788,13 +2826,13 @@ class CachingAutotuner(KernelInterface):
             and self._cache_eligible
             and not benchmark_run
             and not debug_mode
-            and not autograd_profiler._is_profiler_enabled
             and len(self.launchers) == 1
             # The fast path skips save_gpu_kernel. A later AOTI compile that reuses
             # this kernel must save its params again, because CudaKernelParamCache
             # is keyed by kernel name and shared by every compile in the process.
             and not launcher.store_cubin
         ):
+            self._cached_profiler_kwargs = self.get_profiler_kwargs(None, launcher)
             self._cached_launcher = self._build_fast_launcher(launcher) or launcher
         return result
 
@@ -3013,6 +3051,29 @@ class CompileResult(Generic[_T]):
 
     def make_launcher(self) -> LauncherType: ...
 
+    def _host_tma_descriptors(
+        self, call_args: list[str]
+    ) -> dict[str, dict[str, list[int | str]]]:
+        """The host-side TMA descriptors to build at launch, keyed by arg.
+
+        _create_compile_meta decided which args were compiled as tensordesc<> and
+        resolved their dims; the launchers reuse that decision. (Results cached
+        before that record existed are not loaded: every cache holding a compile
+        result is keyed on torch_key(), which hashes this file.)
+        """
+        descriptors = {}
+        for name, dims in self.compile_meta.get("host_tma_descriptors", {}).items():
+            if name not in call_args:
+                continue
+            missing = OrderedSet(dims.get("launch_args", ())) - OrderedSet(call_args)
+            if missing:
+                raise RuntimeError(
+                    f"host-side TMA descriptor for {name} was compiled with dims "
+                    f"{dims} but the launcher does not receive {sorted(missing)}"
+                )
+            descriptors[name] = dims
+        return descriptors
+
     def _host_tma_pre_runner_lines(
         self, runner_args: list[str], call_args: list[str]
     ) -> tuple[list[str], list[str]]:
@@ -3027,18 +3088,10 @@ class CompileResult(Generic[_T]):
                 "host-side TMA requires a Triton with the stable TMA API "
                 "(triton.tools.tensor_descriptor.TensorDescriptor)"
             )
-        cfg_kwargs = self.config.kwargs
-        all_constants = self.compile_meta["constants"]
-        for inner_name, desc_info in host_tma_args.items():
-            if inner_name not in call_args or not isinstance(desc_info, dict):
-                continue
-            block_shape_vals = _resolve_dims(
-                desc_info["block_shape"], cfg_kwargs, all_constants
-            )
-            shape_vals = _resolve_dims(desc_info["shape"], cfg_kwargs, all_constants)
-            stride_vals = _resolve_dims(desc_info["strides"], cfg_kwargs, all_constants)
-            if block_shape_vals is None or shape_vals is None or stride_vals is None:
-                continue
+        for inner_name, dims in self._host_tma_descriptors(call_args).items():
+            block_shape_vals = dims["block_shape"]
+            shape_vals = dims["shape"]
+            stride_vals = dims["strides"]
             desc_var = f"{inner_name}_host_tma_desc"
             aligned_var = f"{inner_name}_aligned"
             # _host_tma_aligned clones (warning once) only if misaligned.
@@ -3046,8 +3099,8 @@ class CompileResult(Generic[_T]):
                 f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
             )
             pre_runner_lines.append(
-                f"{desc_var} = TensorDescriptor({aligned_var}, {shape_vals},"
-                f" {stride_vals}, {block_shape_vals})"
+                f"{desc_var} = TensorDescriptor({aligned_var}, {_launcher_dims(shape_vals)},"
+                f" {_launcher_dims(stride_vals)}, {block_shape_vals})"
             )
             runner_args = [desc_var if a == inner_name else a for a in runner_args]
         return pre_runner_lines, runner_args
@@ -3059,7 +3112,7 @@ class CompileResult(Generic[_T]):
         rebuilding a TensorDescriptor every call, emit a cached expander
         (expand_host_tma_descriptor) that returns the flat kernel params
         (CUtensorMap + shape + strides) and reuses the encoded CUtensorMap when
-        the input address is unchanged -- skipping the descriptor build and
+        the input address, shape and strides recur -- skipping the descriptor build and
         cuTensorMapEncodeTiled on the hot path. The expanded params are spliced
         into the runner call. Returns (pre_runner_lines, runner_args, scope).
         """
@@ -3076,8 +3129,6 @@ class CompileResult(Generic[_T]):
                 "host-side TMA requires a Triton with the stable TMA API "
                 "(triton.tools.tensor_descriptor.TensorDescriptor)"
             )
-        cfg_kwargs = self.config.kwargs
-        all_constants = self.compile_meta["constants"]
         meta = getattr(self.kernel, "tensordesc_meta", None)
         # triton keys tensordesc_meta by position among the compiled kernel's
         # tensordesc<> args, so index by name rather than by encounter order.
@@ -3085,19 +3136,13 @@ class CompileResult(Generic[_T]):
         # fall back to encounter order.
         desc_names = getattr(self.kernel, "tensordesc_arg_names", None)
         pos = 0
-        for inner_name, desc_info in host_tma_args.items():
-            if inner_name not in call_args or not isinstance(desc_info, dict):
-                continue
+        for inner_name, dims in self._host_tma_descriptors(call_args).items():
             if desc_names and inner_name not in desc_names:
                 # not lowered to a tensordesc<> param: pass the tensor through
                 continue
-            block_shape_vals = _resolve_dims(
-                desc_info["block_shape"], cfg_kwargs, all_constants
-            )
-            shape_vals = _resolve_dims(desc_info["shape"], cfg_kwargs, all_constants)
-            stride_vals = _resolve_dims(desc_info["strides"], cfg_kwargs, all_constants)
-            if block_shape_vals is None or shape_vals is None or stride_vals is None:
-                continue
+            block_shape_vals = dims["block_shape"]
+            shape_vals = dims["shape"]
+            stride_vals = dims["strides"]
             idx = desc_names.index(inner_name) if desc_names else pos
             desc_var = f"{inner_name}_host_tma_desc"
             aligned_var = f"{inner_name}_aligned"
@@ -3106,8 +3151,9 @@ class CompileResult(Generic[_T]):
             )
             pre_runner_lines.append(
                 f"{desc_var} = expand_host_tma_descriptor(_tma_cache, {idx}, "
-                f"{aligned_var}, {aligned_var} is {inner_name}, {shape_vals}, "
-                f"{stride_vals}, {block_shape_vals}, _tma_meta[{idx}])"
+                f"{aligned_var}, {aligned_var} is {inner_name}, "
+                f"{_launcher_dims(shape_vals)}, {_launcher_dims(stride_vals)}, "
+                f"{block_shape_vals}, _tma_meta[{idx}])"
             )
             runner_args = [
                 f"*{desc_var}" if a == inner_name else a for a in runner_args
@@ -3854,6 +3900,12 @@ def hash_configs(configs: list[Config]):
         hasher.update(
             f"{sorted(cfg.kwargs.items())} {cfg.num_warps} {cfg.num_stages}\n".encode()
         )
+        # Only when set, like extra_options below; triton_config_to_hashable also
+        # tells configs apart by these.
+        if (maxnreg := getattr(cfg, "maxnreg", None)) is not None:
+            hasher.update(f"maxnreg={maxnreg}\n".encode())
+        if (ctas_per_cga := config_ctas_per_cga(cfg)) is not None:
+            hasher.update(f"ctas_per_cga={ctas_per_cga}\n".encode())
         if extra_options := getattr(cfg, "extra_options", None):
             # Preserve existing hashes when no backend-specific options exist.
             hasher.update(
@@ -5524,7 +5576,7 @@ def template(
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,
         filename=filename,
-        # Its config carries compile options, such as ctas_per_cga, a table row does not.
+        # A template keeps the config it is built with, even if a hand edit names it.
         pinnable=False,
     )
 
@@ -5536,6 +5588,7 @@ def _pop_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
         "num_warps",
         "num_stages",
         "num_ctas",
+        "ctas_per_cga",
         "maxnreg",
         "num_consumer_groups",
         "num_buffers_warp_spec",
@@ -5543,6 +5596,9 @@ def _pop_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
         val = config.pop(key, None)
         if val is not None:
             popped[key] = val
+    # A dict read from JSON (e.g. autotune_lookup_table) holds the cluster shape as a list.
+    if "ctas_per_cga" in popped:
+        popped["ctas_per_cga"] = tuple(popped["ctas_per_cga"])
     return popped
 
 
@@ -5556,6 +5612,10 @@ def config_to_dict(config: Config) -> dict[str, Any]:
     # survive the round trip or a user config's register cap silently vanishes.
     if getattr(config, "maxnreg", None) is not None:
         config_dict["maxnreg"] = config.maxnreg
+    # Likewise ctas_per_cga, as the tuple config_from_dict restores: precomputed
+    # grids are looked up by comparing these dicts.
+    if (ctas_per_cga := config_ctas_per_cga(config)) is not None:
+        config_dict["ctas_per_cga"] = ctas_per_cga
     if HAS_WARP_SPEC:
         config_dict.update(
             {

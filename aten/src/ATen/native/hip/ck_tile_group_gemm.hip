@@ -119,7 +119,20 @@ namespace at::hip::detail {
             using GemmEpilogue = std::conditional_t<EightWaves, DirectEpilogue,
                 std::conditional_t<Config::UseNoSplitKEpilogue, NoSplitKEpilogue<CShuffleEpilogue>, CShuffleEpilogue>>;
 
+#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__)
             using Kernel = ck_tile::GroupedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
+#else
+            // Standalone rather than derived from GroupedGemmKernel, so device passes for other targets never instantiate
+            // GemmPipeline: newer CK static_asserts against eight-wave CompV3 on gfx11/gfx12 (including gfx1250).
+            struct Kernel {
+                static constexpr index_t kBlockSize = Config::M_Warp * Config::N_Warp * Config::K_Warp * 64;
+                CK_TILE_HOST static dim3 BlockSize() { return dim3(kBlockSize); }
+                template <typename GroupArgs>
+                CK_TILE_DEVICE void operator()(GroupArgs* group_args, index_t group_count) const {
+                    __builtin_trap();
+                }
+            };
+#endif
         };
 
         // helper function to get the number of elements in one 16 byte load vector op
