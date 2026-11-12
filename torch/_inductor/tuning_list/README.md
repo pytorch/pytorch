@@ -127,7 +127,8 @@ Three mechanisms can decide a codegen kernel's configuration:
 Supplied candidates are built by the device's heuristic class, with the constructor it uses for its own, and go through
 everything generated ones do:
 
-- in `append` mode, the heuristic's own post-processing of its list, such as ROCm's `_finalize_configs`
+- in `append` mode, the heuristic's own post-processing of its list, such as ROCm's `_finalize_configs`; reductions
+  skip it where the heuristic returns early for an `INNER`, `OUTER` or `OUTER_TINY` hint
 - filtering for TMA restrictions and for deterministic reductions
 - the mix-order reduction rewrite, which overwrites `XBLOCK` and `NUM_STAGES` on every candidate with values derived
   from the split size, so naming a block size has no effect on those kernels
