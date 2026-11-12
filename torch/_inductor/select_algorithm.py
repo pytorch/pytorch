@@ -3249,7 +3249,9 @@ class TritonTemplate(KernelTemplate):
         if not (code is not None and extra is not None):
             raise AssertionError("code and extra must not be None")
 
-        mod = PyCodeCache.load(code, extra, set_sys_modules=False)
+        # Key by code alone, as the precompile worker does: the module name is part
+        # of @triton.jit helper names, so another key misses the worker's compile.
+        mod = PyCodeCache.load(code, set_sys_modules=False)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
         load_input_fusion_allowed_inputs = (
