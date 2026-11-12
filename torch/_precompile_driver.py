@@ -51,7 +51,7 @@ if TYPE_CHECKING:
     _PACKAGE: str = ""
     # False as emitted; load(allow_serve_time_compiles=True) flips it to True.
     _ALLOW_SERVE_TIME_COMPILES: bool = False
-    # The inductor CUDA graph config the subgraphs are post-compiled under.
+    # The capture's CUDA graph config, which the subgraphs are post-compiled under.
     CUDAGRAPH_CONFIG: dict[str, bool] = {}
     # The capture's normalized mode/options, which a serve-time compile uses;
     # None when they have no literal form.
@@ -638,6 +638,7 @@ def _build_multigraph_forward():
     frames = pickle.loads(base64.b64decode(_FRAMES))
     backends = pickle.loads(base64.b64decode(_BACKENDS))
     entry_binding = pickle.loads(base64.b64decode(_ENTRY_BINDING))
+    # Post-compile decides CUDA graph wrapping by the Inductor config.
     with torch._inductor.config.patch(CUDAGRAPH_CONFIG):
         compiled = {
             _backend_id: torch._dynamo.disable(_artifact.after_deserialization())
@@ -994,11 +995,8 @@ def _build_installed_forward():
         # caching_precompile would make optimize(package=None) create its own
         # package, which context(fn) fills from the on-disk Dynamo cache.
         backend: object = BACKEND
-        if _ALLOW_SERVE_TIME_COMPILES and BACKEND == "inductor":
-            # CUDAGRAPH_CONFIG holds the capture's CUDA graph keys, ambient ones
-            # too.
-            options = {**(INDUCTOR_OPTIONS or {}), **CUDAGRAPH_CONFIG}
-            backend = torch._TorchCompileInductorWrapper(None, options, None)
+        if _ALLOW_SERVE_TIME_COMPILES and INDUCTOR_OPTIONS:
+            backend = torch._TorchCompileInductorWrapper(None, INDUCTOR_OPTIONS, None)
         with torch._dynamo.config.patch(caching_precompile=False):
             context = torch._dynamo.optimize(
                 backend, package=None if _ALLOW_SERVE_TIME_COMPILES else package

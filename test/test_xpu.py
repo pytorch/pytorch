@@ -637,6 +637,14 @@ print(torch.xpu.is_initialized())
         self.assertEqual(high, s1.priority)
         self.assertEqual(torch.device("xpu:0"), s1.device)
 
+        # Streams of every priority must be usable, including the lowest one.
+        event = torch.xpu.Event()
+        for stream in (s0, s1):
+            event.record()
+            stream.wait_event(event)
+            stream.synchronize()
+            self.assertTrue(stream.query())
+
     def test_stream_event_repr(self):
         s = torch.xpu.current_stream()
         self.assertTrue("torch.xpu.Stream" in str(s))
