@@ -320,6 +320,24 @@ __global__ void CatArrayBatchedCopy_alignedK_contig(
     }
 }
 
+// Returns true when `t` is the transpose(-1, -2) of a contiguous tensor.
+inline bool is_transpose_of_contiguous(const Tensor& t, int64_t nDims) {
+  if (nDims < 2 || t.is_contiguous()) {
+    return false;
+  }
+  if (t.stride(nDims - 2) != 1 || t.stride(nDims - 1) != t.size(nDims - 2)) {
+    return false;
+  }
+  int64_t expected = t.size(nDims - 1) * t.size(nDims - 2);
+  for (int64_t k = nDims - 3; k >= 0; --k) {
+    if (t.stride(k) != expected) {
+      return false;
+    }
+    expected *= t.size(k);
+  }
+  return true;
+}
+
 template <typename scalar_t, int batch_size, int stride_size>
 void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, int64_t dimension,
                   int nDims, c10::MemoryFormat memory_format) {
@@ -607,6 +625,25 @@ TORCH_IMPL_FUNC(cat_out_cuda)
 
   int nDims = materialized[valid].get().dim();
 
+  // Concatenating transpose(-1, -2) views of contiguous tensors along the last
+  // dim is faster through the per-input copy_ fallback below than through the
+  // generic strided CatArrayBatchedCopy kernel, whose strided reads thrash L2 on
+  // large batches. copy_ reuses the tiled transpose in Copy.cu, which reads and
+  // writes coalesced. Only take this path when the output is contiguous, every
+  // input is at least kMinTransposeCatBytes (mirrors the threshold in Copy.cu's
+  // maybe_tiled_transpose_copy), and the dtype is one the tiled transpose
+  // supports; otherwise the batched generic kernel wins (fewer launches for
+  // many small inputs).
+  constexpr int64_t kMinTransposeCatBytes = int64_t(4) << 20;
+  const bool is_transpose_cat = (dim == nDims - 1) && result.is_contiguous() &&
+      std::all_of(materialized.begin(), materialized.end(), [&](const Tensor& t) {
+        return t.dim() == nDims &&
+            t.scalar_type() != at::kBool &&
+            t.element_size() <= 8 &&
+            is_transpose_of_contiguous(t, nDims) &&
+            t.numel() * t.element_size() >= kMinTransposeCatBytes;
+      });
+
   // We support the contiguous inputs and non-contiguous input (<=4 dims) in different ways
   // For contiguous input, we don't need to pass stride meta data to cuda kernel through constant
   // memory. Therefore, we could pass more inputs to cuda threads.
@@ -651,7 +688,8 @@ TORCH_IMPL_FUNC(cat_out_cuda)
       nDims <= CAT_ARRAY_MAX_INPUT_DIMS &&
       all32BitIndexable &&
       all_same_dtype &&
-      memory_format == c10::MemoryFormat::Contiguous) {
+      memory_format == c10::MemoryFormat::Contiguous &&
+      !is_transpose_cat) {
       if (isBitsType(result.scalar_type())) {
         AT_DISPATCH_BIT_TYPES(result.scalar_type(), "cat_cuda", [&]() {
           using dtype = OpaqueType<sizeof(scalar_t)>;
