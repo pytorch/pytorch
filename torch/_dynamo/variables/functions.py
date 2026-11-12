@@ -1350,7 +1350,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
         self.remaining_items: list[VariableTracker] = []
-        self.frame = FrameVariable(inline_tracer)
+        self.frame = FrameVariable(inline_tracer)  # noqa: RVT001
         inline_tracer.output.track_generator(self)
 
     def get_code(self) -> types.CodeType:
