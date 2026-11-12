@@ -22,6 +22,9 @@ log = logging.getLogger(__name__)
 # Positional order of block sizes in the config constructors.
 AXIS_ORDER = ("x", "y", "z", "r0_")
 
+# The config constructors' argument for each block size.
+BLOCK_ARGS = {"XBLOCK": "x", "YBLOCK": "y", "ZBLOCK": "z", "R0_BLOCK": "r"}
+
 # Everything else a supplied entry may carry. These reach the constructor as keywords, so
 # the set is deliberately narrow: an unknown key is a caller mistake, not a stale config.
 KNOB_ARGS: dict[str, frozenset[str]] = {
@@ -119,7 +122,7 @@ def check(
     names = _block_names(heuristic, size_hints)
     knobs = _knob_names(heuristic, size_hints)
     configs = [
-        _validate_config(heuristic, names, knobs, one, label)
+        _validate_config(one, heuristic, names, knobs, label)
         for one in entry["configs"]
     ]
     return {"mode": mode, "configs": configs}
@@ -128,15 +131,17 @@ def check(
 def supplied_configs(
     inductor_meta: dict[str, Any], build: Callable[..., Config]
 ) -> tuple[list[Config], bool]:
-    """Build the configs codegen carried for this kernel with the heuristic's own
-    constructor, and say whether they replace the heuristic's candidates."""
+    """Build the configs codegen carried for this kernel, and say whether they replace
+    the heuristic's candidates. build is the heuristic's own constructor; it gets the
+    block sizes as x, y, z and r, and knobs by name."""
     entry = inductor_meta.get("tuning_list")
     if entry is None:
         return [], False
     supplied = []
     for one in entry["configs"]:
+        kwargs = {BLOCK_ARGS.get(name, name): value for name, value in one.items()}
         try:
-            supplied.append(build(**one))
+            supplied.append(build(**kwargs))
         except Exception as exc:
             # A list fitted on one corpus meets kernels it was not fitted on, so a config
             # that will not build for this shape is expected rather than exceptional.
@@ -161,16 +166,16 @@ def _knob_names(category: str, size_hints: dict[str, int]) -> frozenset[str]:
 
 
 def _validate_config(
-    category: str, names: list[str], knobs: frozenset[str], supplied: Any, label: str
+    config: Any, category: str, names: list[str], knobs: frozenset[str], label: str
 ) -> dict[str, int]:
     """Check one supplied config and return it with plain int values."""
-    if not isinstance(supplied, dict):
+    if not isinstance(config, dict):
         raise InvalidTuningList(
-            f"tuning_list entry for {label} holds {type(supplied).__name__}, expected a "
+            f"tuning_list entry for {label} holds {type(config).__name__}, expected a "
             "dict of block sizes and knobs"
         )
 
-    unknown = OrderedSet(supplied) - OrderedSet(names) - knobs
+    unknown = OrderedSet(config) - OrderedSet(names) - knobs
     if unknown:
         reason = ""
         if category == "persistent_reduction" and "R0_BLOCK" in unknown:
@@ -183,7 +188,7 @@ def _validate_config(
         )
 
     for name in names:
-        if name not in supplied:
+        if name not in config:
             raise InvalidTuningList(
                 f"tuning_list entry for {label} does not name {name}; these kernels take "
                 f"{names}"
@@ -192,7 +197,7 @@ def _validate_config(
     # Stored as plain ints: the kernel source carries the config's repr, and a NumPy
     # int's repr (np.int64(8)) does not evaluate there.
     checked: dict[str, int] = {}
-    for name, value in supplied.items():
+    for name, value in config.items():
         problem = f"tuning_list entry for {label} has {name}={value!r}, expected"
         try:
             number = None if isinstance(value, bool) else operator.index(value)

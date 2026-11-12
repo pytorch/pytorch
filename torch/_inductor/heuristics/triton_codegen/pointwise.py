@@ -7,6 +7,7 @@ differ from the base.
 
 from __future__ import annotations
 
+import functools
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -42,10 +43,7 @@ class PointwiseHeuristic(CodegenConfigHeuristics):
     ) -> list[Any]:
         inductor_meta = inductor_meta or {}
         supplied, replace = tuning_list.supplied_configs(
-            inductor_meta,
-            lambda XBLOCK, YBLOCK=None, ZBLOCK=None, **knobs: triton_config_fn(
-                size_hints, XBLOCK, YBLOCK, ZBLOCK, **knobs
-            ),
+            inductor_meta, functools.partial(triton_config_fn, size_hints)
         )
         if supplied and replace:
             return supplied

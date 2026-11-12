@@ -7,6 +7,7 @@ from the base.
 
 from __future__ import annotations
 
+import functools
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -297,13 +298,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
         supplied, replace = tuning_list.supplied_configs(
             inductor_meta,
-            lambda XBLOCK, R0_BLOCK, YBLOCK=None, **knobs: make_config(
-                XBLOCK,
-                R0_BLOCK,
-                register_intensive=register_intensive,
-                y=YBLOCK,
-                **knobs,
-            ),
+            functools.partial(make_config, register_intensive=register_intensive),
         )
         if supplied and replace:
             return supplied
@@ -562,10 +557,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 )
             )
 
-        supplied, replace = tuning_list.supplied_configs(
-            inductor_meta,
-            lambda XBLOCK, YBLOCK=None, **knobs: make_config(XBLOCK, YBLOCK, **knobs),
-        )
+        supplied, replace = tuning_list.supplied_configs(inductor_meta, make_config)
         configs = supplied if supplied and replace else configs + supplied
 
         for c in configs:

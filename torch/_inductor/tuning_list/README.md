@@ -45,9 +45,9 @@ Each value is a dictionary with:
 
 ### What a configuration names
 
-Block names follow the constructors' positional order, `XBLOCK`, `YBLOCK`, `ZBLOCK`, `R0_BLOCK`, restricted to the axes
-the kernel has. A knob left out is derived by the constructor the heuristic uses. A reduction with many loads gets that
-constructor's register-pressure limit on every supplied configuration; the heuristic gives it to only some of its own.
+The block names are `XBLOCK`, `YBLOCK`, `ZBLOCK` and `R0_BLOCK`, for the axes the kernel has. A knob left out is
+derived by the constructor the heuristic uses. A reduction with many loads gets that constructor's register-pressure
+limit on every supplied configuration; the heuristic gives it to only some of its own.
 
 | Category | Blocks | Knobs |
 | --- | --- | --- |

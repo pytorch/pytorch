@@ -48,6 +48,7 @@ except ImportError:
 KERNELS = {
     "pointwise": (pointwise, {"x": 1048576}, None),
     "tiled_pointwise": (pointwise, {"y": 1024, "x": 1024}, None),
+    "pointwise_3d": (pointwise, {"z": 64, "y": 64, "x": 256}, None),
     "reduction": (reduction, {"x": 8192, "r0_": 512}, ReductionHint.INNER),
     "outer_reduction": (reduction, {"x": 8192, "r0_": 512}, ReductionHint.OUTER),
     "tiny_reduction": (reduction, {"x": 8192, "r0_": 512}, ReductionHint.OUTER_TINY),
@@ -61,6 +62,11 @@ KERNELS = {
     "inner_persistent_reduction": (
         persistent_reduction,
         {"x": 8192, "r0_": 128},
+        ReductionHint.INNER,
+    ),
+    "tiled_persistent_reduction": (
+        persistent_reduction,
+        {"x": 512, "y": 64, "r0_": 128},
         ReductionHint.INNER,
     ),
     "tiled_reduction": (
@@ -101,8 +107,10 @@ DEVICES = {
 BLOCKS = {
     "pointwise": {"XBLOCK": 64},
     "tiled_pointwise": {"XBLOCK": 64, "YBLOCK": 32},
+    "pointwise_3d": {"XBLOCK": 32, "YBLOCK": 8, "ZBLOCK": 4},
     "reduction": {"XBLOCK": 8, "R0_BLOCK": 128},
     "persistent_reduction": {"XBLOCK": 16},
+    "tiled_persistent_reduction": {"XBLOCK": 16, "YBLOCK": 8},
     "tiled_reduction": {"XBLOCK": 8, "YBLOCK": 8, "R0_BLOCK": 64},
 }
 
@@ -133,11 +141,11 @@ def fake_device(**overrides):
 class TestTuningList(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def lookup(self, label, table, inductor_meta=None, **triton_meta):
+    def lookup(self, label, table, triton_meta=None, inductor_meta=None):
         """The entry codegen would carry in this kernel's source, or None."""
         entry_point, size_hints, _ = KERNELS[label]
         heuristic = entry_point.__name__
-        triton_meta.setdefault("device", fake_device())
+        triton_meta = {"device": fake_device(), **(triton_meta or {})}
         inductor_meta = inductor_meta or {}
         with inductor_config.patch({"tuning_list.table": table}):
             supplied = V.choices.triton_kernel_configs(
@@ -151,7 +159,7 @@ class TestTuningList(TestCase):
         """The candidates the compiler would benchmark, looked up as codegen does."""
         entry_point, size_hints, reduction_hint = KERNELS[label]
         device = fake_device(**DEVICES[device_type])
-        if entry := self.lookup(label, table or {}, inductor_meta, device=device):
+        if entry := self.lookup(label, table or {}, {"device": device}, inductor_meta):
             inductor_meta["tuning_list"] = entry
         kwargs = {
             "size_hints": size_hints,
@@ -250,12 +258,19 @@ class TestTuningList(TestCase):
         )
         self.assertEqual(appended[-1].kwargs, BLOCKS[label])
 
-    @parametrize("label", ["pointwise", "reduction", "persistent_reduction"])
+    @parametrize(
+        "label",
+        [
+            "pointwise",
+            "pointwise_3d",
+            "reduction",
+            "persistent_reduction",
+            "tiled_persistent_reduction",
+        ],
+    )
     def test_replace_drops_the_generated_candidates(self, label):
         replaced = self.candidates(label, self.table(label, mode="replace"))
-        self.assertEqual(
-            [c.kwargs["XBLOCK"] for c in replaced], [BLOCKS[label]["XBLOCK"]]
-        )
+        self.assertEqual([c.kwargs for c in replaced], [BLOCKS[label]])
 
     # Each hint returns from a different place in the heuristic.
     @parametrize(
@@ -300,7 +315,9 @@ class TestTuningList(TestCase):
             supplied = self.candidates("reduction", self.table("reduction"))
             # The kernels under Not Covered stay so whoever supplies the entry.
             self.assertIsNone(self.lookup("cooperative_reduction", {}))
-            self.assertIsNone(self.lookup("tiled_reduction", {}, native_matmul=True))
+            self.assertIsNone(
+                self.lookup("tiled_reduction", {}, {"native_matmul": True})
+            )
         self.assertEqual([c.kwargs for c in supplied[1:]], [SECOND["reduction"]])
 
     def test_choices_handler_entry_is_checked_like_a_table_entry(self):
@@ -368,7 +385,7 @@ class TestTuningList(TestCase):
             "reduction/2": {"configs": [BLOCKS["reduction"]]},
             "gfx942+reduction/2": {"configs": [SECOND["reduction"]]},
         }
-        entry = self.lookup("reduction", table, device=fake_device(cc="gfx942"))
+        entry = self.lookup("reduction", table, {"device": fake_device(cc="gfx942")})
         self.assertEqual(entry["configs"], [SECOND["reduction"]])
 
     def test_generic_key_matches_when_the_device_has_no_entry(self):
@@ -376,7 +393,7 @@ class TestTuningList(TestCase):
             "reduction/2": {"configs": [BLOCKS["reduction"]]},
             "gfx90a+reduction/2": {"configs": [SECOND["reduction"]]},
         }
-        entry = self.lookup("reduction", table, device=fake_device(cc="gfx942"))
+        entry = self.lookup("reduction", table, {"device": fake_device(cc="gfx942")})
         self.assertEqual(entry["configs"], [BLOCKS["reduction"]])
 
     def test_cuda_compute_capability_is_a_device_key(self):
@@ -399,19 +416,21 @@ class TestTuningList(TestCase):
     def test_native_matmul_kernel_is_left_alone(self):
         # Its configs come from a matmul-specific constructor with its own limits.
         table = self.table("tiled_reduction")
-        self.assertIsNone(self.lookup("tiled_reduction", table, native_matmul=True))
+        self.assertIsNone(
+            self.lookup("tiled_reduction", table, {"native_matmul": True})
+        )
 
     @parametrize(
-        "label,inductor_meta,triton_meta,reason",
+        "label,triton_meta,inductor_meta,reason",
         [
             ("cooperative_reduction", {}, {}, "only pointwise"),
-            ("tiled_reduction", {}, {"native_matmul": True}, "native matmul"),
-            ("reduction", {"strict_reduction_rblock": 512}, {}, "is planned"),
+            ("tiled_reduction", {"native_matmul": True}, {}, "native matmul"),
+            ("reduction", {}, {"strict_reduction_rblock": 512}, "is planned"),
             ("two_axis_reduction", {}, {}, "two reduction axes"),
         ],
     )
     def test_skipping_a_matching_entry_is_logged(
-        self, label, inductor_meta, triton_meta, reason
+        self, label, triton_meta, inductor_meta, reason
     ):
         # A cooperative reduction is looked up under the reduction it splits.
         table = {
@@ -419,7 +438,7 @@ class TestTuningList(TestCase):
             "reduction/3": {"configs": [BLOCKS["tiled_reduction"]]},
         }
         with self.assertLogs("torch._inductor.tuning_list.table", "DEBUG") as logged:
-            self.assertIsNone(self.lookup(label, table, inductor_meta, **triton_meta))
+            self.assertIsNone(self.lookup(label, table, triton_meta, inductor_meta))
         self.assertIn(reason, logged.output[-1])
 
     def test_numpy_ints_are_stored_as_plain_ints(self):
