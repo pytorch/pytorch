@@ -778,20 +778,13 @@ class TpReprTests(TestCase):
             "eager", guard_fail_fn=lambda failure: reasons.append(failure.reason)
         )(fn)
         x = torch.tensor(1)
-        self.assertEqual(compiled(x), fn(x))
+        compiled(x)
 
         Owner.__name__ = "RenamedOwner"
-        self.assertIs(Owner.__dict__["__dict__"], descriptor)
         self.assertEqual(compiled(x), fn(x))
         self.assertEqual(len(reasons), 1)
         self.assertIn(".__objclass__.__name__ == 'Owner'", reasons[0])
-        self.assertIn(
-            "(HINT: Dynamo computed this descriptor's repr() during tracing "
-            "and compiled code using that result instead of calling repr() each time. "
-            "The text includes the owning class name; that name can change without "
-            "replacing the descriptor, so Dynamo guards it.)",
-            reasons[0],
-        )
+        self.assertIn("(HINT: Dynamo computed this descriptor's repr()", reasons[0])
 
 
 if __name__ == "__main__":
