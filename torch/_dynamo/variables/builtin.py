@@ -76,6 +76,7 @@ from ..utils import (
     extract_fake_example_value,
     get_fake_value,
     has_torch_function,
+    is_safe_constant,
     is_tensor_getset_descriptor,
     is_torch_class,
     istype,
@@ -109,6 +110,7 @@ from .dicts import (
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
 from .misc import CellVariable, NullVariable, StringFormatVariable
 from .object_protocol import (
+    _is_skipped_constant_property,
     _NO_DEFAULT,
     binary_iop,
     binary_op,
@@ -345,6 +347,10 @@ def _try_computed_lazy_constant(
         ):
             any_unrealized = True
         elif not isinstance(arg, ConstantVariable):
+            return None
+        elif arg.source is None and not is_safe_constant(arg.as_python_constant()):
+            # Output bytecode recomputes the op from its operands, so each one
+            # must be loadable from a source or as a LOAD_CONST
             return None
     if not any_unrealized:
         return None
@@ -1956,12 +1962,9 @@ class BuiltinVariable(BaseBuiltinVariable):
             )
 
         if self.fn is object and not args and not kwargs:
-            # object() -> a fresh opaque instance, wrapped as ObjectVariable to
-            # match how SourcelessBuilder wraps bare `object` instances. Falling
-            # through to the constant handler cannot build a VT from object().
-            from .builder import SourcelessBuilder
-
-            return SourcelessBuilder.create(tx, object())
+            # object() -> a fresh opaque instance. Falling through to the
+            # constant handler cannot build a VT from object().
+            return VariableTracker.build(tx, object())
 
         key: tuple[object, ...]
         if kwargs:
@@ -3732,7 +3735,16 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
         no_keywords(tx, "getattr", kwargs)
         check_positional(tx, "getattr", len(args), 2, 3)
         try:
-            return self._call_getattr(tx, args, kwargs)
+            fold_constant = False
+            if args[1].is_python_constant():
+                name = args[1].as_python_constant()
+                fold_constant = (
+                    isinstance(name, str)
+                    and _is_skipped_constant_property(tx, args[0], name)
+                    and check_unspec_or_constant_args(args, kwargs)
+                )
+            if not fold_constant:
+                return self._call_getattr(tx, args, kwargs)
         except Unsupported:
             # Replicate the constant-fold fallback from BuiltinVariable._make_handler:
             # if all args are python constants, evaluate getattr() directly rather
@@ -3744,17 +3756,24 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
                 obj, variables.UserDefinedClassVariable
             ) and obj.getattr_needs_tracing(tx, args[1].as_python_constant()):
                 raise
-            try:
-                result = getattr(*[a.as_python_constant() for a in args])
-            except AttributeError:
-                raise_observed_exception(AttributeError, tx)
-                raise
-            except AsPythonConstantNotImplementedError:
-                raise
-            except Exception as exc:
-                raise_observed_exception(type(exc), tx, args=list(exc.args))
-                raise
-            return VariableTracker.build(tx, result)
+        return self._call_constant_getattr(tx, args)
+
+    def _call_constant_getattr(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+    ) -> VariableTracker:
+        try:
+            result = getattr(*[a.as_python_constant() for a in args])
+        except AttributeError:
+            raise_observed_exception(AttributeError, tx)
+            raise
+        except AsPythonConstantNotImplementedError:
+            raise
+        except Exception as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
+            raise
+        return VariableTracker.build(tx, result)
 
     def _call_getattr(
         self,
