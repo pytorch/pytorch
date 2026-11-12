@@ -412,6 +412,31 @@ class _TestLinalgMixin:
                 # beta=1 to test epilogue fusions with either vector or matrix input
                 self._test_addmm_addmv(func, c, m1, m2, beta=beta, transpose_out=t4, activation=activation)
 
+    def _svd_driver_calls(self, A, driver):
+        return (
+            ("svd", partial(torch.linalg.svd, A, driver=driver)),
+            ("svd_out", partial(
+                torch.linalg.svd, A, driver=driver,
+                out=(A.new_empty(0), A.real.new_empty(0), A.new_empty(0)))),
+            ("svdvals", partial(torch.linalg.svdvals, A, driver=driver)),
+            ("svdvals_out", partial(
+                torch.linalg.svdvals, A, driver=driver, out=A.real.new_empty(0))),
+        )
+
+    def _assert_svd_driver_error(self, A, driver, msg):
+        for op, call in self._svd_driver_calls(A, driver):
+            with self.subTest(shape=A.shape, op=op):
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    call()
+
+    def _call_without_rocm_driver_warning(self, call):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with set_warn_always_context(True):
+                result = call()
+        self.assertFalse([w.message for w in caught if "ignored on ROCm" in str(w.message)])
+        return result
+
 
 class TestLinalg(TestCase):
     """Device-independent and CPU-only regression tests, run once rather than per device."""
@@ -1469,44 +1494,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
         uplos = ["U", "L"]
         for shape, batch, uplo in itertools.product(shapes, batches, uplos):
             run_test(shape, batch, uplo)
-
-    @onlyCUDA
-    @skipCUDAIfNotRocm
-    @serialTest()
-    def test_eigh_workspace_growth_with_full_caching_allocator(self, device):
-        # Warm up n=1024 so the rocBLAS GEMM code objects are loaded. Then
-        # allocate until the device is full: 1 GiB blocks, then 64 MiB, 2 MiB,
-        # and 256 KiB, so the leftover hole is under 256 KiB. Deleting those
-        # tensors returns the blocks to the caching allocator without
-        # empty_cache. rocBLAS hipMalloc still cannot grow the handle
-        # workspace. The n=2048 syevd workspace is taken from that cache.
-        def spd(n):
-            a = torch.randn(4, n, n, device=device)
-            return a @ a.mT + torch.eye(n, device=device)
-
-        warmup = spd(1024)
-        torch.linalg.eigh(warmup)
-        torch.cuda.synchronize()
-        del warmup
-
-        chunks = []
-        try:
-            for size in (1 << 30, 64 << 20, 2 << 20, 256 << 10):
-                try:
-                    while True:
-                        chunks.append(torch.empty(size, dtype=torch.uint8, device=device))
-                except torch.OutOfMemoryError:
-                    pass
-            del chunks
-            chunks = []
-            values, _ = torch.linalg.eigh(spd(2048))
-            torch.cuda.synchronize()
-            # isnan on device would load a new kernel while the device is still
-            # full. The copy is a memcpy of the finished eigenvalues.
-            self.assertFalse(torch.isnan(values.cpu()).any())
-        finally:
-            del chunks
-            torch.cuda.empty_cache()
 
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
@@ -3320,31 +3307,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                 S_s = torch.svd(A, compute_uv=False).S
                 self.assertEqual(S_s, S)
 
-    def _svd_driver_calls(self, A, driver):
-        return (
-            ("svd", partial(torch.linalg.svd, A, driver=driver)),
-            ("svd_out", partial(
-                torch.linalg.svd, A, driver=driver,
-                out=(A.new_empty(0), A.real.new_empty(0), A.new_empty(0)))),
-            ("svdvals", partial(torch.linalg.svdvals, A, driver=driver)),
-            ("svdvals_out", partial(
-                torch.linalg.svdvals, A, driver=driver, out=A.real.new_empty(0))),
-        )
-
-    def _assert_svd_driver_error(self, A, driver, msg):
-        for op, call in self._svd_driver_calls(A, driver):
-            with self.subTest(shape=A.shape, op=op):
-                with self.assertRaisesRegex(RuntimeError, msg):
-                    call()
-
-    def _call_without_rocm_driver_warning(self, call):
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            with set_warn_always_context(True):
-                result = call()
-        self.assertFalse([w.message for w in caught if "ignored on ROCm" in str(w.message)])
-        return result
-
     @onlyNativeDeviceTypes
     @parametrize("mode", ("real", "fake"))
     @parametrize("op", ("svd", "svd_out", "svdvals", "svdvals_out"))
@@ -3388,20 +3350,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                 self._assert_svd_driver_error(
                     torch.empty(shape, device=device), driver, msg)
 
-    @onlyCUDA
-    @skipIfRocm
-    @skipCUDAIf(not torch.cuda.has_magma, "requires MAGMA")
-    @setLinalgBackendsToDefaultFinally
-    def test_svd_driver_magma(self, device):
-        torch.backends.cuda.preferred_linalg_library("magma")
-        msg = "keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend"
-
-        for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
-            A = torch.empty(shape, device=device)
-            for driver in ("gesvd", "gesvdj", "gesvda"):
-                self._assert_svd_driver_error(A, driver, msg)
-            self._assert_svd_driver_error(A, "invalid", "torch.linalg.svd: unknown svd driver")
-
     @onlyNativeDeviceTypes
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
@@ -3416,24 +3364,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             for op, call in self._svd_driver_calls(A, None):
                 actual = self._call_without_rocm_driver_warning(call)
                 self.assertEqual(actual, S if "svdvals" in op else (U, S, Vh))
-
-    @onlyCUDA
-    @skipCUDAIfNoCusolver
-    @skipCUDAIfNotRocm
-    @dtypes(torch.float32, torch.complex64)
-    def test_svd_driver_ignored_on_rocm(self, device, dtype):
-        # These convergent controls check warnings and ignored selection, not fallback execution.
-        for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
-            A = (torch.diag(torch.tensor([2.0, 1.0], device=device, dtype=dtype))
-                 if shape == (2, 2) else torch.empty(shape, device=device, dtype=dtype))
-            expected = [self._call_without_rocm_driver_warning(call)
-                        for _, call in self._svd_driver_calls(A, None)]
-            for driver in ("gesvd", "gesvdj", "gesvda"):
-                for (op, call), result in zip(self._svd_driver_calls(A, driver), expected):
-                    with self.subTest(shape=shape, driver=driver, op=op):
-                        with self.assertWarnsOnceRegex(UserWarning, ".*driver.*ignored on ROCm"):
-                            actual = call()
-                        self.assertEqual(actual, result)
 
     @skipCPUIfNoLapack
     @skipCUDAIf(
@@ -12033,6 +11963,76 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
         if n == 20481 and dtype != torch.complex128:
             self.skipTest("Reaches no new panel width")
         self._check_ldl_factor_random(n, device, dtype)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @serialTest()
+    def test_eigh_workspace_growth_with_full_caching_allocator(self, device):
+        # Warm up n=1024 so the rocBLAS GEMM code objects are loaded. Then
+        # allocate until the device is full: 1 GiB blocks, then 64 MiB, 2 MiB,
+        # and 256 KiB, so the leftover hole is under 256 KiB. Deleting those
+        # tensors returns the blocks to the caching allocator without
+        # empty_cache. rocBLAS hipMalloc still cannot grow the handle
+        # workspace. The n=2048 syevd workspace is taken from that cache.
+        def spd(n):
+            a = torch.randn(4, n, n, device=device)
+            return a @ a.mT + torch.eye(n, device=device)
+
+        warmup = spd(1024)
+        torch.linalg.eigh(warmup)
+        torch.cuda.synchronize()
+        del warmup
+
+        chunks = []
+        try:
+            for size in (1 << 30, 64 << 20, 2 << 20, 256 << 10):
+                try:
+                    while True:
+                        chunks.append(torch.empty(size, dtype=torch.uint8, device=device))
+                except torch.OutOfMemoryError:
+                    pass
+            del chunks
+            chunks = []
+            values, _ = torch.linalg.eigh(spd(2048))
+            torch.cuda.synchronize()
+            # isnan on device would load a new kernel while the device is still
+            # full. The copy is a memcpy of the finished eigenvalues.
+            self.assertFalse(torch.isnan(values.cpu()).any())
+        finally:
+            del chunks
+            torch.cuda.empty_cache()
+
+    @onlyCUDA
+    @skipIfRocm
+    @skipCUDAIf(not torch.cuda.has_magma, "requires MAGMA")
+    @setLinalgBackendsToDefaultFinally
+    def test_svd_driver_magma(self, device):
+        torch.backends.cuda.preferred_linalg_library("magma")
+        msg = "keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend"
+
+        for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+            A = torch.empty(shape, device=device)
+            for driver in ("gesvd", "gesvdj", "gesvda"):
+                self._assert_svd_driver_error(A, driver, msg)
+            self._assert_svd_driver_error(A, "invalid", "torch.linalg.svd: unknown svd driver")
+
+    @onlyCUDA
+    @skipCUDAIfNoCusolver
+    @skipCUDAIfNotRocm
+    @dtypes(torch.float32, torch.complex64)
+    def test_svd_driver_ignored_on_rocm(self, device, dtype):
+        # These convergent controls check warnings and ignored selection, not fallback execution.
+        for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+            A = (torch.diag(torch.tensor([2.0, 1.0], device=device, dtype=dtype))
+                 if shape == (2, 2) else torch.empty(shape, device=device, dtype=dtype))
+            expected = [self._call_without_rocm_driver_warning(call)
+                        for _, call in self._svd_driver_calls(A, None)]
+            for driver in ("gesvd", "gesvdj", "gesvda"):
+                for (op, call), result in zip(self._svd_driver_calls(A, driver), expected):
+                    with self.subTest(shape=shape, driver=driver, op=op):
+                        with self.assertWarnsOnceRegex(UserWarning, ".*driver.*ignored on ROCm"):
+                            actual = call()
+                        self.assertEqual(actual, result)
 
 
 class TestLinalgCpuOnly(_TestLinalgMixin, TestCase):
