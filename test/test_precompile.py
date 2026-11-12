@@ -5007,6 +5007,25 @@ class TestPrecompileDynamoCapture(TestCase):
         if not TEST_WITH_CROSSREF:
             self._serve_in_fresh_process([((self.x2,), {}, y)])
 
+    def test_a_cpp_wrapper_capture_records_that_it_compiled_no_cudagraphs(self):
+        # cpp_wrapper compiles no CUDA graphs under graph_partition.
+        options = {
+            "triton.cudagraphs": True,
+            "cpp_wrapper": True,
+            "graph_partition": True,
+        }
+        seen = self._compiles_see("triton.cudagraphs")
+        with self._capture(self.mod.single, options=options) as cap:
+            y = cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            config = _parse_artifact_metadata(f.read())["CUDAGRAPH_CONFIG"]
+        self.assertFalse(config["triton.cudagraphs"])
+        self.assertTrue(config["graph_partition"])
+        self.assertEqual(set(seen), {False})
+        # Under crossref the guards hold only inside the harness's mode.
+        if not TEST_WITH_CROSSREF:
+            self._serve_in_fresh_process([((self.x2,), {}, y)])
+
     def test_capture_takes_pathlike_paths(self):
         import pathlib
 

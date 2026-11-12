@@ -170,18 +170,25 @@ def _capture_cudagraph_config(
     partitioned, or not, when it compiled.
     """
     import torch._inductor.config as inductor_config
+    from torch._inductor.compile_fx import cpp_wrapper_supports_cudagraphs
 
     config = {
         "triton.cudagraphs": inductor_config.triton.cudagraphs,
         "triton.cudagraph_trees": inductor_config.triton.cudagraph_trees,
         "graph_partition": inductor_config.graph_partition,
     }
+    cpp_wrapper = inductor_config.cpp_wrapper
     if not isinstance(backend, str):
         config.update((k, v) for k, v in backend.config.items() if k in config)
+        cpp_wrapper = backend.config.get("cpp_wrapper", cpp_wrapper)
     # Without CUDA graphs the other two decide nothing at load, so the calls
     # compile them as configured.
     if not config["triton.cudagraphs"]:
         return {"triton.cudagraphs": False}
+    # compile_fx compiles such a graph without CUDA graphs whatever the flag says
+    # (get_cpp_wrapper_config), so that is what the calls compile and load serves.
+    if cpp_wrapper and not cpp_wrapper_supports_cudagraphs(config["graph_partition"]):
+        config["triton.cudagraphs"] = False
     return config
 
 
@@ -2183,7 +2190,8 @@ class PrecompileSession(Generic[_P, _R]):
                     f"override_cudagraphs(fwd={fwd}, bwd={bwd}) under "
                     f"triton.cudagraphs={flag}: the artifact records the capture's "
                     "CUDA graph config (CUDAGRAPH_CONFIG), not each graph's. Set "
-                    "triton.cudagraphs to match, or remove the override."
+                    "triton.cudagraphs to match (cpp_wrapper under graph_partition "
+                    "compiles without CUDA graphs), or remove the override."
                 )
 
     def _collect_backends(self) -> dict[str, BackendCacheArtifact[Any]]:
