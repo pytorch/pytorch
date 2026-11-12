@@ -57,8 +57,8 @@ std::unique_ptr<torch::inductor::AOTIModelContainerRunner>
 create_aoti_model_container_runner_cpu(
     const std::string& model_so_path,
     size_t num_models,
-    const std::string& device_str,
-    const std::string& cubin_dir,
+    const std::string& /*device_str*/,
+    const std::string& /*cubin_dir*/,
     const bool run_single_threaded) {
   return std::make_unique<torch::inductor::AOTIModelContainerRunnerCpu>(
       model_so_path,
@@ -78,7 +78,7 @@ AOTIDelegateExecutor::AOTIDelegateExecutor(
     const std::shared_ptr<Weights>& weights,
     const ExecutorConfig& executorConfig,
     caffe2::serialize::PyTorchStreamReader* packageReader,
-    const MakeProxyExecutorFn& makeProxyExecutorFunc)
+    const MakeProxyExecutorFn& /*makeProxyExecutorFunc*/)
     : ETDelegateExecutor(torch::_export::archive_spec::AOTINDUCTOR_DIR, node) {
   TORCH_CHECK(
       packageReader, "Package reader cannot be null for lowered modules");
@@ -89,7 +89,7 @@ AOTIDelegateExecutor::AOTIDelegateExecutor(
 
   std::optional<std::string> model_name = std::nullopt;
   for (const auto& record : packageReader->getAllRecords()) {
-    if (c10::starts_with(record, path) && c10::ends_with(record, ".so")) {
+    if (record.starts_with(path) && record.ends_with(".so")) {
       model_name = record.substr(record.find_last_of("/\\") + 1);
       break;
     }

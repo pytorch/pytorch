@@ -400,7 +400,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) const {
   TORCH_INTERNAL_ASSERT(size > 0);
   // first value is unique id managed by AUTOGRAD_FUNCTION_COUNTER
   auto key = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), 0));
-  if (C10_UNLIKELY(key < 0)) {
+  if (key < 0) [[unlikely]] {
     TORCH_CHECK(PyErr_Occurred(), "key must be positive");
     throw_python_error();
   }
@@ -412,7 +412,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) const {
   f->compiled_autograd_symints.reserve(size - 1);
   for (const auto i : c10::irange(1, size)) {
     auto val = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), i));
-    if (C10_UNLIKELY(val == -1 && PyErr_Occurred()))
+    if (val == -1 && PyErr_Occurred()) [[unlikely]]
       throw_python_error();
     f->compiled_autograd_symints.emplace_back(val);
   }
@@ -1389,6 +1389,50 @@ PyObject* THPFunction_input_metadata(PyObject* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_input_grad_buffers(PyObject* self, void* unused) {
+  HANDLE_TH_ERRORS
+  auto* py_fn = reinterpret_cast<THPFunction*>(self);
+  auto node = py_fn->cdata;
+  check_legacy_fn_attr_access(node, "input_grad_buffers");
+  TORCH_CHECK(
+      node->post_hooks().empty(),
+      "input_grad_buffers does not support post-hooks on the producing "
+      "autograd node because directly accumulated gradients are returned as "
+      "None and cannot be observed or replaced by those hooks");
+
+  variable_list buffers;
+  {
+    pybind11::gil_scoped_release no_gil;
+    buffers = get_current_input_grad_buffers(node.get());
+  }
+
+  THPObjectPtr result(
+      PyTuple_New(static_cast<Py_ssize_t>(py_fn->is_variable_input.size())));
+  if (!result) {
+    return nullptr;
+  }
+
+  size_t variable_idx = 0;
+  for (const auto i : c10::irange(py_fn->is_variable_input.size())) {
+    THPObjectPtr item;
+    if (!py_fn->is_variable_input[i] || !buffers[variable_idx].defined()) {
+      item = Py_NewRef(Py_None);
+    } else {
+      item = THPVariable_Wrap(buffers[variable_idx]);
+    }
+    if (!item) {
+      return nullptr;
+    }
+    if (py_fn->is_variable_input[i]) {
+      ++variable_idx;
+    }
+    PyTuple_SET_ITEM(result.get(), i, item.release());
+  }
+  TORCH_INTERNAL_ASSERT(variable_idx == buffers.size());
+  return result.release();
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPFunction_maybe_clear_saved_tensors(
     PyObject* self,
     PyObject* noargs) {
@@ -2269,6 +2313,11 @@ static struct PyGetSetDef THPFunction_properties[] = {
     {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
     {"_input_metadata",
      (getter)THPFunction_input_metadata,
+     nullptr,
+     nullptr,
+     nullptr},
+    {"_input_grad_buffers",
+     (getter)THPFunction_input_grad_buffers,
      nullptr,
      nullptr,
      nullptr},

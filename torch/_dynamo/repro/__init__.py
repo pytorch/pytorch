@@ -63,6 +63,7 @@ class ReproOptions(Protocol):
     # after_aot-only attributes.
     tracing_mode: str | None
     check_str: str | None
+    is_inference: bool
     isolate: bool
     offload_to_disk: bool
     skip_saving_eager_intermediates: bool

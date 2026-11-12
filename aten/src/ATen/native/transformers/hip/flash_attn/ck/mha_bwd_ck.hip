@@ -221,7 +221,9 @@ aiter::mha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
     float p_undrop = 1.0 - p_dropout;
 
     aiter::mha_bwd_args args{};
-    args.use_asm_v3     = hdim <= 192; // ASM v3 only supports head dim <= 192
+    // ASM v3 only supports head dim <= 192. On gfx950 its hd128 kernel (used for head
+    // dims 65..128) returns wrong dq/dk/dv at seqlen_q == 1; use CK tile for any seqlen_q == 1.
+    args.use_asm_v3     = hdim <= 192 && seqlen_q > 1;
     args.v3_atomic_fp32 = true;
     args.v3_bf16_cvt    = 1;
     args.v3_api_check   = false;
@@ -372,7 +374,11 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(out.stride(-1) == 1, "out tensor must have contiguous last dimension");
-    TORCH_CHECK(dout.stride(-1) == 1, "dout tensor must have contiguous last dimension");
+    // A 0-element grad has no meaningful last-dim stride, and an empty batch reaches here
+    // with one: `out.sum().backward()` expands a scalar, giving stride 0. CUDA accepts it
+    // because its early return sits above this check (flash_api.cpp mha_bwd).
+    TORCH_CHECK(dout.numel() == 0 || dout.stride(-1) == 1,
+                "dout tensor must have contiguous last dimension");
 
     TORCH_CHECK((bias_requires_grad && grad_bias.has_value()) || (!bias_requires_grad),
             "If bias_requires_grad is set, grad_bias must have a value");

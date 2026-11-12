@@ -547,17 +547,21 @@ class JsonProfile:
             else:
                 op_gbps = 0
 
+            achieved_flops = 0.0
+            achieved_bandwidth = 0.0
             if dev.info is not None:
                 dtype = self.convert_dtype(event) or self.dtype
                 if dtype is None:
                     raise RuntimeError(
                         "dtype is not found on tensor and default dtype is not set"
                     )
-                achieved_flops = 100 * op_flops / (1e12 * dev.info.tops[dtype])
                 achieved_bandwidth = 100 * op_gbps / dev.info.dram_bw_gbs
-            else:
-                achieved_flops = 0
-                achieved_bandwidth = 0
+                # No entry lists a peak for the integer, bool and complex dtypes
+                # `convert_dtype` can return, so those kernels have no flops ceiling
+                # to report against and keep the 0 above.
+                dtype_tops = dev.info.tops.get(dtype)
+                if dtype_tops is not None:
+                    achieved_flops = 100 * op_flops / (1e12 * dtype_tops)
 
             if "name" not in event["args"]:
                 continue

@@ -427,7 +427,7 @@ class ChunkDataset final
 
  private:
   /// running on worker thread to preload chunk data.
-  void preloader(size_t id) {
+  void preloader(size_t /*id*/) {
     while (!quit_worker_.load()) {
       try {
         std::vector<size_t> chunk_idx;

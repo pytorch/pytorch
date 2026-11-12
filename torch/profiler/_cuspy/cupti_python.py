@@ -38,7 +38,7 @@ except ModuleNotFoundError as exc:
 
 # Generated from the CUPTI ABI header (tools/gen_cupti_stubs.py): the
 # CUpti_ActivityAttribute selectors, so their (ABI-renumbered) ints are never hardcoded.
-from torch.profiler._cuspy._cupti_stubs import ActivityAttr
+from torch.profiler._cuspy._cupti_stubs import ActivityAttr, BUILD_CUPTI_API_VERSION
 
 
 if TYPE_CHECKING:
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
 
-# libcupti soname for the supported CUDA major (Cuspy's floor is 13.3). Loaded
+# libcupti soname for the supported CUDA major (Cuspy's floor is 13.5). Loaded
 # by name so dlopen returns the copy already mapped into the process: torch front-loads
 # the nvidia-cuda-cupti wheel (torch._preload_cuda_deps) and cupti-python / kineto load
 # it otherwise, so every consumer shares one CUPTI -- a second instance would collide
@@ -56,6 +56,7 @@ LIBCUPTI_SONAME = "libcupti.so.13"
 # CUPTI C-API result/flag constants (cupti_result.h / cupti_activity.h). These
 # are stable ABI values, so they are spelled out rather than resolved.
 CUPTI_SUCCESS = 0
+CUPTI_ACTIVITY_FLAG_FLUSH_FORCED = 1
 
 # CUpti_ActivityAttribute selectors Cuspy sets on its subscription
 # (ActivityAttr.USER_DEFINED_RECORDS / .ENABLE_KERNEL_LATENCY_TIMESTAMPS /
@@ -64,9 +65,12 @@ CUPTI_SUCCESS = 0
 # header) rather than hardcoded ints -- they are renumbered vs cupti-python's own enum.
 
 # Minimum libcupti Cuspy supports. The v2 user-defined-record API arrived in
-# 13.2, but only 13.3 populates pBufferCompleteInfo->ppRecordLayouts (CUPTI's own
-# per-kind record layout) that Cuspy decodes against, so 13.3 is the floor.
-LIBCUPTI_MIN_VERSION = 130300
+# 13.2 and 13.3 first populates pBufferCompleteInfo->ppRecordLayouts (CUPTI's own
+# per-kind record layout) that Cuspy decodes against; Cuspy is only supported on 13.5+.
+LIBCUPTI_MIN_VERSION = 130500
+
+# Minimum CUDA version PyTorch must be built with (torch.version.cuda) for Cuspy.
+CUDA_MIN_VERSION = (13, 5)
 
 # CUPTI overhead-kind codes (CUpti_ActivityOverheadKind in cupti_activity.h).
 # cupti-python does not surface these as an enum, so the code -> name mapping is
@@ -317,6 +321,23 @@ class _PyLibCupti:
 
     def __init__(self, lib: ctypes.CDLL) -> None:
         self._lib = lib
+        version = self.get_version()
+        if version // 10000 != BUILD_CUPTI_API_VERSION // 10000:
+            raise RuntimeError(
+                f"Cuspy requires CUPTI major version {BUILD_CUPTI_API_VERSION // 10000} "
+                f"(stubs API version {BUILD_CUPTI_API_VERSION}), but loaded "
+                f"{LIBCUPTI_SONAME} reports API version {version}."
+            )
+        if version < BUILD_CUPTI_API_VERSION:
+            logger.warning(
+                "Cuspy loaded %s with CUPTI API version %d, but its stubs were generated "
+                "with CUPTI API version %d. Profiling may fail because the runtime "
+                "does not support all generated fields or attributes. "
+                "Install a matching or newer CUPTI runtime within the same major version.",
+                LIBCUPTI_SONAME,
+                version,
+                BUILD_CUPTI_API_VERSION,
+            )
 
     def _result_string(self, rc: int) -> str:
         result = ctypes.c_char_p()
@@ -407,13 +428,17 @@ class _PyLibCupti:
             ctypes.byref(val),
         )
 
-    def activity_flush_all(self) -> None:
-        """Hand over COMPLETED buffers only (``cuptiActivityFlushAll(0)``). Cuspy
-        never forces in-progress buffers (``CUPTI_ACTIVITY_FLAG_FLUSH_FORCED``): a
-        forced flush consumes a still-running kernel's record (its real completion is
-        then never re-delivered) and racing it against concurrent host activity is the
-        flush race that corrupts the HES heap and freezes the decode worker."""
-        self._check(self._lib.cuptiActivityFlushAll(0), "cuptiActivityFlushAll")
+    def activity_flush_all(self, *, forced: bool = False) -> None:
+        """``cuptiActivityFlushAll``. Plain (``forced=False``, flag 0) hands over buffers
+        whose records are all complete and leaves a buffer holding an in-progress record
+        with CUPTI. ``forced=True`` (``CUPTI_ACTIVITY_FLAG_FLUSH_FORCED``) hands over every
+        buffer, in-progress records included: a still-running kernel comes back with a
+        zero end timestamp and its completion is never re-delivered, so callers must
+        device-sync first. The CUPTI usage guide (User-Defined Activity Records, Usage)
+        makes the forced flush mandatory between disabling a kind and re-enabling it with
+        a different field selection; that is Cuspy's only forced flush."""
+        flag = CUPTI_ACTIVITY_FLAG_FLUSH_FORCED if forced else 0
+        self._check(self._lib.cuptiActivityFlushAll(flag), "cuptiActivityFlushAll")
 
     def activity_get_num_dropped_records(
         self, sub_handle: int, ctx: int, stream_id: int
@@ -441,6 +466,30 @@ class _PyLibCupti:
             self._lib.cuptiActivityEnableHWTrace(1 if enabled else 0),
             "cuptiActivityEnableHWTrace",
         )
+
+    def activity_enable_hes(self) -> None:
+        """Turn on HES (hardware event) timestamps process-wide through
+        CUPTI_ACTIVITY_ATTR_ENABLE_HES, the v2 form of cuptiActivityEnableHWTrace. Must be
+        set before any subscriber enables an activity kind. libcupti 13.5 rejects
+        user-defined records (CUPTI_ERROR_NOT_COMPATIBLE) once HES was turned on through
+        cuptiActivityEnableHWTrace, but not through this attribute. Falls back to
+        cuptiActivityEnableHWTrace when the attribute is unavailable or rejected, so an
+        unsupported platform still reports CUPTI_ERROR_NOT_SUPPORTED."""
+        attr = getattr(ActivityAttr, "ENABLE_HES", None)
+        set_attribute = getattr(self._lib, "cuptiActivitySetAttribute_v2", None)
+        if attr is not None and set_attribute is not None:
+            enabled = ctypes.c_uint8(1)
+            size = ctypes.c_size_t(1)
+            rc = set_attribute(None, attr, ctypes.byref(size), ctypes.byref(enabled))
+            if rc == CUPTI_SUCCESS:
+                return
+            logger.warning(
+                "cuptiActivitySetAttribute_v2(ENABLE_HES) failed with %s; falling back "
+                "to cuptiActivityEnableHWTrace, after which libcupti >= 13.5 rejects "
+                "user-defined records",
+                self._result_string(rc),
+            )
+        self.activity_enable_hw_trace(True)
 
     def finalize(self) -> None:
         """cuptiFinalize -- detach and release ALL of CUPTI process-wide. This is a

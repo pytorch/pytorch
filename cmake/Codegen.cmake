@@ -71,7 +71,7 @@ if(INTERN_BUILD_ATEN_OPS)
   endif(MSVC)
 
   if(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
-    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/MapAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/MapAllocator.cpp PROPERTIES COMPILE_OPTIONS "-fno-openmp")
   endif()
 
   file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../torchgen/*.py")
@@ -273,6 +273,12 @@ if(INTERN_BUILD_ATEN_OPS)
   # source alone is what nvcc was given. This runs after both (caffe2/ is a
   # subdirectory of the top-level list file), so ${TORCH_CUDA_ARCH_LIST} here is it.
   file(WRITE "${CMAKE_BINARY_DIR}/native_aot/arch_list.txt" "${TORCH_CUDA_ARCH_LIST}")
+  # Native-AOT declarations are codegen inputs: they add DispatchStub
+  # declarations and structured-wrapper call sites (torchgen/native_aot.py;
+  # the loader torchgen consumes is torchgen/native_aot_decl.py, already
+  # covered by all_python above).
+  file(GLOB native_aot_manifests CONFIGURE_DEPENDS
+       "${CMAKE_CURRENT_LIST_DIR}/../torch/_native/ops/*/aot.py")
   set(declarations_yaml_templates "")
 
   foreach(gen_type "headers" "sources" "declarations_yaml")
@@ -339,6 +345,7 @@ if(INTERN_BUILD_ATEN_OPS)
       DEPENDS ${all_python} ${${gen_type}_templates}
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/tags.yaml
+        ${native_aot_manifests}
       WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
   endforeach()
@@ -433,13 +440,13 @@ if(INTERN_BUILD_ATEN_OPS)
     add_compile_definitions("HAVE_VSX_CPU_DEFINITION")
     LIST(APPEND CPU_CAPABILITY_NAMES "VSX")
     LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_VSX_FLAGS}")
-  endif(CXX_VSX_FOUND)
+  endif()
 
   if(CXX_ZVECTOR_FOUND AND NOT "$ENV{USE_CPU_VECTORIZATION}" STREQUAL "0")
     add_compile_definitions("HAVE_ZVECTOR_CPU_DEFINITION")
     LIST(APPEND CPU_CAPABILITY_NAMES "ZVECTOR")
     LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_ZVECTOR_FLAGS}")
-  endif(CXX_ZVECTOR_FOUND)
+  endif()
 
   if(CXX_SVE256_FOUND AND NOT "$ENV{USE_CPU_VECTORIZATION}" STREQUAL "0")
     add_compile_definitions("HAVE_SVE_CPU_DEFINITION")

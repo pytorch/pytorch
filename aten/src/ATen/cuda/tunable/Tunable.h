@@ -329,9 +329,9 @@ TORCH_CUDA_CPP_API DynamicDimsMask GetCurrentDynamicDimsMask();
 // construction and pops on destruction. Use to wrap a single GEMM call (or a
 // scope containing GEMM calls) with the mask that applies to that op.
 //
-// Lives in at::cuda::tunable so it is reachable from both ATen Blas.cpp
-// callers (eager mode) and the AOTI cpp_wrapper-emitted code in compiled .so
-// shared libraries (which include this header).
+// Lives in at::cuda::tunable so it is reachable from ATen callers and the
+// libtorch-owned AOTI C shim. Generated model.so code must use that stable C
+// ABI instead of including this private ATen header directly.
 //
 // Thread affinity: construct and destroy on the same thread, in LIFO order.
 // The stack is thread-local and deliberately unsynchronized -- this sits on

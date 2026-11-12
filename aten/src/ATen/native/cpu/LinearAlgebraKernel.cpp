@@ -8,6 +8,15 @@
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/irange.h>
 
+// Explicitly avoid FMA contraction in this kernel
+#if defined(__GNUC__)
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#else
+#pragma GCC optimize("fp-contract=off")
+#endif
+#endif
+
 namespace at::native { namespace {
 
 void addr_kernel(TensorIterator &iter,

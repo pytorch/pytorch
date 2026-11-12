@@ -257,8 +257,22 @@ void* mmap(
   return pData;
 }
 
+// length is ignored: this shim only supports unmapping a whole view.
 int munmap(void* addr, size_t length) {
-  if (!UnmapViewOfFile(addr)) {
+  // mmap rounds the file offset down to dwAllocationGranularity and returns
+  // lpMapAddress + iViewDelta, so addr can point into the middle of the view
+  // while UnmapViewOfFile requires the allocation base. VirtualQuery also
+  // succeeds for freed and heap addresses, so check that this really is a
+  // mapped view before unmapping it. Validation failures report EFAULT and an
+  // unmap failure reports EINVAL, so that the caller's strerror() output
+  // distinguishes a bad pointer from a genuine unmap error.
+  MEMORY_BASIC_INFORMATION mbi{};
+  if (VirtualQuery(addr, &mbi, sizeof(mbi)) == 0 || mbi.State == MEM_FREE ||
+      mbi.Type != MEM_MAPPED) {
+    errno = EFAULT;
+    return -1;
+  }
+  if (!UnmapViewOfFile(mbi.AllocationBase)) {
     errno = EINVAL;
     return -1;
   }
@@ -269,15 +283,23 @@ int munmap(void* addr, size_t length) {
 #include <dlfcn.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#if defined(__linux__)
+#include <sched.h>
+#endif
 #endif // _WIN32
 
 #include <fcntl.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <chrono>
+#include <condition_variable>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <mutex>
 #include <optional>
@@ -287,6 +309,7 @@ int munmap(void* addr, size_t length) {
 #include <thread>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 // WARNING: Be careful when adding new includes here. This header will be used
 // in model.so, and should not refer to any aten/c10 headers except the stable
@@ -301,7 +324,22 @@ int munmap(void* addr, size_t length) {
 #else
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #endif // USE_XPU
+#ifdef USE_MTIA
+#include <torch/csrc/inductor/aoti_runtime/utils_mtia.h>
+#endif // USE_MTIA
 #include <torch/csrc/inductor/aoti_runtime/constant_type.h>
+
+#if defined(USE_CUDA) && defined(USE_ROCM) && \
+    TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && !defined(_WIN32)
+// Weak, so that a model .so still loads into a libtorch without this function.
+// Its address is then null and sharedConstantsH2DStream() uses a stream of its
+// own instead.
+extern "C" __attribute__((weak)) AOTITorchError
+aoti_torch_get_constants_copy_cuda_stream(
+    int32_t device_index,
+    void** ret_stream);
+#define AOTI_HAS_CONSTANTS_COPY_STREAM_SHIM 1
+#endif
 
 // At codegen time, we write out a binary file called constants.bin.
 // We then turn the raw binary to an object file that exposes this
@@ -329,6 +367,8 @@ inline void setUsePinnedAsyncConstantsCopy(bool enabled);
 inline bool usePinnedAsyncConstantsCopy();
 inline void setPinnedAsyncConstantsCopyStageBufferBytes(size_t bytes);
 inline size_t pinnedAsyncConstantsCopyStageBufferBytes();
+inline void setPinnedAsyncConstantsCopyCpuThreads(size_t threads);
+inline size_t pinnedAsyncConstantsCopyCpuThreads();
 } // namespace torch::aot_inductor
 
 // S646785: env-gated logging for the AOTI constant-load pipeline. Emits when
@@ -338,7 +378,7 @@ inline size_t pinnedAsyncConstantsCopyStageBufferBytes();
   do {                                                                         \
     static const bool _aoti_log_ = std::getenv("AOTI_LOG_LOADING") != nullptr; \
     if (_aoti_log_) {                                                          \
-      std::cerr << "[AOTI_LOAD] " << msg << std::endl;                         \
+      std::cerr << "[AOTI_LOAD] " << msg << '\n';                              \
     }                                                                          \
   } while (0)
 
@@ -352,21 +392,26 @@ using torch::aot_inductor::RAIIAtenTensorHandle;
 
 #ifdef USE_CUDA
 
-// Process-wide, per-device H2D stream shared by every PinnedStagingPool.
+// Per-device, non-blocking H2D stream used by every PinnedStagingPool.
 //
 // A stream must NOT be created per pool. On ROCm, destroying a stream that is
-// not CU-masked does not release its hsa_queue_t: Device::releaseQueue
-// (rocclr/device/rocm/rocdevice.cpp) only calls hsa_queue_destroy and erases
-// from queuePool_ when the queue is CU-masked, so the queue stays parked at
-// refcount 0 until ~Device. One stream per constant load or in-place update
-// therefore ratchets the process up to GPU_MAX_HW_QUEUES and never gives the
-// queues back. Once the pool saturates at the cap, every queue above the four
-// MI300X scheduling pipes adds queue-switch overhead to serving streams.
+// not CU-masked does not release its hsa_queue_t: it stays in the device's
+// queue pool until the process exits. One stream per constant load, in-place
+// update or model .so therefore ratchets the process up to GPU_MAX_HW_QUEUES
+// and never gives the queues back (on MI300X with ROCm 7.0, 24 cycles of
+// creating, using and destroying a stream took the pool from 0 to the cap of
+// 16). Once the pool saturates at the cap, every queue above the four MI300X
+// scheduling pipes adds queue-switch overhead to serving streams.
 //
-// Created once per device and intentionally never destroyed, so the process
-// holds exactly one extra queue per device no matter how many loads or updates
-// run. Returns nullptr when the device cannot be resolved or stream creation
-// fails, so callers fall back to the synchronous copy path.
+// On ROCm the stream comes from libtorch
+// (aoti_torch_get_constants_copy_cuda_stream), which creates it once per
+// device and never destroys it, so the process holds exactly one extra queue
+// per device no matter how many models, loads or updates run. The statics
+// below are this .so's own: they are used on CUDA, where a stream per model
+// .so costs no hardware queue, and on ROCm against a libtorch without that
+// function, in which case every loaded model .so holds one stream per device.
+// Returns nullptr when the device cannot be resolved or stream creation fails,
+// so callers fall back to the synchronous copy path.
 //
 // Creation is retried on a later call if it fails, rather than latched with
 // call_once: these processes are long-lived and serve many loads, so a
@@ -375,14 +420,31 @@ using torch::aot_inductor::RAIIAtenTensorHandle;
 // is baked in. The lock is uncontended in practice -- it is taken once per pool
 // construction (per constant load or update), never on a per-chunk path.
 inline cudaStream_t sharedConstantsH2DStream() {
-  static std::mutex mutex;
-  static std::unordered_map<int, cudaStream_t> streams;
-
   int device = 0;
   if (cudaGetDevice(&device) != cudaSuccess) {
     (void)cudaGetLastError();
     return nullptr;
   }
+
+#ifdef AOTI_HAS_CONSTANTS_COPY_STREAM_SHIM
+  if (aoti_torch_get_constants_copy_cuda_stream != nullptr) {
+    void* process_stream = nullptr;
+    if (aoti_torch_get_constants_copy_cuda_stream(device, &process_stream) ==
+            AOTI_TORCH_SUCCESS &&
+        process_stream != nullptr) {
+      AOTI_LOG_LOADING(
+          "PinnedStagingPool: using process-wide H2D stream "
+          << process_stream << " for device " << device);
+      return static_cast<cudaStream_t>(process_stream);
+    }
+    AOTI_LOG_LOADING(
+        "PinnedStagingPool: process-wide H2D stream unavailable for device "
+        << device << "; using this model's own");
+  }
+#endif
+
+  static std::mutex mutex;
+  static std::unordered_map<int, cudaStream_t> streams;
 
   std::lock_guard<std::mutex> guard(mutex);
   // Value-initializes to nullptr on first use of this device.
@@ -406,6 +468,155 @@ inline cudaStream_t sharedConstantsH2DStream() {
   return stream;
 }
 
+struct StageCopyTask {
+  uint8_t* dst;
+  const uint8_t* src;
+  size_t size;
+};
+
+// Per-load worker pool used only to fill pinned staging buffers. The caller
+// participates as worker 0, so num_threads is the total number of copy threads.
+// Workers live for the PinnedStagingPool lifetime to avoid per-window thread
+// creation overhead.
+class ParallelStageCopyPool {
+ public:
+  static std::unique_ptr<ParallelStageCopyPool> tryCreate(size_t num_threads) {
+    if (num_threads <= 1) {
+      return nullptr;
+    }
+    try {
+      auto pool = std::unique_ptr<ParallelStageCopyPool>(
+          new ParallelStageCopyPool(num_threads));
+      if (!pool->startWorkers()) {
+        return nullptr;
+      }
+      return pool;
+    } catch (...) {
+      return nullptr;
+    }
+  }
+
+  void copy(const std::vector<StageCopyTask>& tasks) {
+    if (tasks.empty()) {
+      return;
+    }
+
+    ++parallel_windows_;
+
+    {
+      std::lock_guard<std::mutex> guard(mutex_);
+      tasks_ = &tasks;
+      next_task_.store(0, std::memory_order_relaxed);
+      completed_workers_ = 0;
+      ++generation_;
+    }
+    work_cv_.notify_all();
+
+    copyTasks();
+
+    std::unique_lock<std::mutex> lock(mutex_);
+    done_cv_.wait(
+        lock, [this] { return completed_workers_ == workers_.size(); });
+    tasks_ = nullptr;
+  }
+
+  size_t parallelWindows() const {
+    return parallel_windows_;
+  }
+
+  ~ParallelStageCopyPool() {
+    {
+      std::lock_guard<std::mutex> guard(mutex_);
+      stop_ = true;
+    }
+    work_cv_.notify_all();
+    for (auto& worker : workers_) {
+      if (worker.joinable()) {
+        worker.join();
+      }
+    }
+  }
+
+  ParallelStageCopyPool(const ParallelStageCopyPool&) = delete;
+  ParallelStageCopyPool& operator=(const ParallelStageCopyPool&) = delete;
+  ParallelStageCopyPool(ParallelStageCopyPool&&) = delete;
+  ParallelStageCopyPool& operator=(ParallelStageCopyPool&&) = delete;
+
+ private:
+  explicit ParallelStageCopyPool(size_t num_threads)
+      : num_threads_(num_threads) {}
+
+  bool startWorkers() noexcept {
+    try {
+      workers_.reserve(num_threads_ - 1);
+      for (size_t index = 1; index < num_threads_; ++index) {
+        workers_.emplace_back([this] { workerMain(); });
+      }
+      return true;
+    } catch (...) {
+      {
+        std::lock_guard<std::mutex> guard(mutex_);
+        stop_ = true;
+      }
+      work_cv_.notify_all();
+      for (auto& worker : workers_) {
+        if (worker.joinable()) {
+          worker.join();
+        }
+      }
+      workers_.clear();
+      return false;
+    }
+  }
+
+  void workerMain() {
+    size_t observed_generation = 0;
+    while (true) {
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        work_cv_.wait(lock, [this, &observed_generation] {
+          return stop_ || generation_ != observed_generation;
+        });
+        if (stop_) {
+          return;
+        }
+        observed_generation = generation_;
+      }
+
+      copyTasks();
+
+      {
+        std::lock_guard<std::mutex> guard(mutex_);
+        ++completed_workers_;
+      }
+      done_cv_.notify_one();
+    }
+  }
+
+  void copyTasks() {
+    while (true) {
+      const size_t index = next_task_.fetch_add(1, std::memory_order_relaxed);
+      if (index >= tasks_->size()) {
+        return;
+      }
+      const StageCopyTask& task = (*tasks_)[index];
+      std::memcpy(task.dst, task.src, task.size);
+    }
+  }
+
+  const size_t num_threads_;
+  std::vector<std::thread> workers_;
+  std::mutex mutex_;
+  std::condition_variable work_cv_;
+  std::condition_variable done_cv_;
+  bool stop_{false};
+  size_t generation_{0};
+  size_t completed_workers_{0};
+  const std::vector<StageCopyTask>* tasks_{nullptr};
+  std::atomic<size_t> next_task_{0};
+  size_t parallel_windows_{0};
+};
+
 // RAII ping-pong pinned staging pool for non-blocking H2D copies of AOTI
 // constants without triggering CUDA/HIP's device-wide implicit sync.
 //
@@ -417,8 +628,11 @@ inline cudaStream_t sharedConstantsH2DStream() {
 // cudaMemcpyAsync(pinned -> device) on the shared per-device non-blocking
 // stream above. Two pinned staging buffers ping-pong via cudaEvents so CPU
 // fill of one buffer overlaps GPU H2D from the other. Pools that overlap in
-// time share the stream, so their copies serialize; that costs little, since
-// they would contend for the same host-to-device link anyway.
+// time and use the same stream serialize their copies; that costs little,
+// since they would contend for the same host-to-device link anyway. Because
+// the stream is not ordered with the default or the current stream, each pool
+// first makes it wait for the work already queued on both (see
+// waitForQueuedWork()).
 //
 // Pinned host buffers are allocated via the stable C ABI
 // aoti_torch_empty_strided_pinned, which routes through ATen's cached
@@ -431,18 +645,28 @@ inline cudaStream_t sharedConstantsH2DStream() {
 class PinnedStagingPool {
  public:
   static constexpr size_t kDefaultBufferBytes = 64ULL * 1024 * 1024;
+  static constexpr size_t kMaxCpuCopyThreads = 16;
 
   // Returns nullptr on pinned-host alloc / stream / event creation failure
   // so callers can fall back to the synchronous copy path.
-  static std::unique_ptr<PinnedStagingPool> tryCreate(size_t buffer_bytes) {
+  static std::unique_ptr<PinnedStagingPool> tryCreate(
+      size_t buffer_bytes,
+      bool use_copy_tasks,
+      size_t cpu_copy_threads) {
     std::unique_ptr<PinnedStagingPool> pool(new PinnedStagingPool());
     pool->buffer_bytes_ = buffer_bytes;
+    pool->use_copy_tasks_ = use_copy_tasks;
+    pool->cpu_copy_threads_ =
+        use_copy_tasks ? std::max<size_t>(cpu_copy_threads, 1) : 1;
     // Borrowed, not owned: shared per-device stream, never destroyed.
     pool->stream_ = sharedConstantsH2DStream();
     if (pool->stream_ == nullptr) {
       AOTI_LOG_LOADING(
           "PinnedStagingPool: shared per-device H2D stream unavailable; "
           "falling back to sync copy");
+      return nullptr;
+    }
+    if (!pool->waitForQueuedWork()) {
       return nullptr;
     }
     cudaError_t rc = cudaSuccess;
@@ -483,17 +707,36 @@ class PinnedStagingPool {
         return nullptr;
       }
     }
+    if (pool->cpu_copy_threads_ > 1) {
+      pool->cpu_copy_pool_ =
+          ParallelStageCopyPool::tryCreate(pool->cpu_copy_threads_);
+      if (pool->cpu_copy_pool_ == nullptr) {
+        AOTI_LOG_LOADING(
+            "PinnedStagingPool: failed to create CPU copy worker pool; "
+            "falling back to one CPU copy thread");
+        pool->cpu_copy_threads_ = 1;
+      }
+    }
     AOTI_LOG_LOADING(
         "PinnedStagingPool: allocated 2x"
-        << (buffer_bytes / (1024 * 1024))
-        << " MiB pinned staging buffers via cached pinned host allocator");
+        << (buffer_bytes / (size_t{1024} * 1024))
+        << " MiB pinned staging buffers via cached pinned host allocator; "
+        << "copy_tasks=" << pool->use_copy_tasks_
+        << " cpu_copy_threads=" << pool->cpu_copy_threads_);
     return pool;
   }
 
-  // Chunked copy of a host source range through the ping-pong pinned
-  // buffers. Multiple back-to-back calls keep the H2D stream filled.
+  // Copy host ranges through ping-pong pinned buffers. Eligible initial loads
+  // collect disjoint CPU copy tasks until a staging window is full, execute
+  // them with one barrier, and then issue one asynchronous H2D copy. Other
+  // paths retain the existing per-range behavior.
   // Caller-owned dst must remain valid until the destructor synchronizes.
   void copyH2DViaStage(void* dst, const void* src, size_t total) {
+    if (use_copy_tasks_) {
+      enqueueCopyTasks(dst, src, total);
+      return;
+    }
+
     const auto* src_bytes = static_cast<const uint8_t*>(src);
     auto* dst_bytes = static_cast<uint8_t*>(dst);
     size_t offset = 0;
@@ -501,14 +744,10 @@ class PinnedStagingPool {
       const size_t chunk = std::min(buffer_bytes_, total - offset);
       // Wait for GPU to release this staging buffer.
       AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(events_[buf_]));
-      memcpy(stage_[buf_], src_bytes + offset, chunk);
-      AOTI_RUNTIME_CUDA_CHECK(cudaMemcpyAsync(
-          dst_bytes + offset,
-          stage_[buf_],
-          chunk,
-          cudaMemcpyHostToDevice,
-          stream_));
-      AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(events_[buf_], stream_));
+      std::memcpy(stage_[buf_], src_bytes + offset, chunk);
+      submitCurrentBuffer(dst_bytes + offset, chunk);
+      ++h2d_copies_;
+      copied_bytes_ += chunk;
       buf_ ^= 1;
       offset += chunk;
     }
@@ -523,34 +762,55 @@ class PinnedStagingPool {
   // Call before destroying the pool so a failed load is not silently swallowed
   // by the no-throw destructor and passed downstream as a populated buffer.
   //
-  // Waits on this pool's own events rather than the shared stream: a
-  // stream-wide sync would also block on concurrent pools' copies and would
-  // report their errors here. Each event is recorded after the last copy out
-  // of its buffer, so waiting on both covers every copy this pool issued.
+  // Waits on this pool's own events rather than synchronizing the shared
+  // stream, so copies queued after this pool's (by another pool on the same
+  // stream) do not gate it and their errors are not reported here. Each event
+  // is recorded after the last copy out of its buffer, so waiting on both
+  // covers every copy this pool issued, and whatever was queued on the stream
+  // before them.
   // cudaEventSynchronize on a never-recorded event returns immediately, which
   // is the correct no-op for a pool that copied nothing.
   void finish() {
+    if (use_copy_tasks_) {
+      flushPending();
+    }
     for (cudaEvent_t event : events_) {
       if (event != nullptr) {
         AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(event));
       }
     }
+    AOTI_LOG_LOADING(
+        "PinnedStagingPool: completed "
+        << copied_bytes_ << " bytes in " << h2d_copies_
+        << " H2D submissions using " << cpu_copy_threads_
+        << " CPU copy thread(s); "
+        << (cpu_copy_pool_ != nullptr ? cpu_copy_pool_->parallelWindows() : 0)
+        << " staging window(s) copied in parallel as " << parallel_copy_tasks_
+        << " task(s)");
   }
 
   ~PinnedStagingPool() {
     // Best-effort cleanup: never throw from a destructor, but log rc on
-    // failure so leaks are visible in production. Sync the stream FIRST so
-    // no in-flight async H2D is still reading from the pinned buffers when
-    // their RAIIAtenTensorHandle members run (which return the blocks to
-    // ATen's cached pinned host allocator pool). Members are destroyed after
-    // this body returns, in reverse declaration order; stage_tensors_ is
-    // last-declared so it runs first among members.
+    // failure so leaks are visible in production. Stop CPU workers, then wait
+    // for in-flight async H2D before the pinned buffers are returned to ATen's
+    // cached allocator. Members are destroyed after this body returns, in
+    // reverse declaration order; stage_tensors_ is last-declared so it runs
+    // first among members.
     //
     // stream_ is borrowed from sharedConstantsH2DStream() and is deliberately
     // NOT destroyed here; see that function for why destroying it would leak
-    // an hsa_queue_t on ROCm. Wait on this pool's own events rather than the
-    // shared stream so an unrelated pool's in-flight copies do not gate this
-    // destructor.
+    // an hsa_queue_t on ROCm. Wait on this pool's own events rather than
+    // synchronizing the shared stream, so copies queued after this pool's do
+    // not gate this destructor.
+    if (pending_bytes_ != 0) {
+      AOTI_LOG_LOADING(
+          "~PinnedStagingPool: destroyed with "
+          << pending_bytes_
+          << " unflushed staged bytes; finish() was not called");
+    }
+    // A failed CPU-side synchronization primitive must not let pinned tensors
+    // destruct while a worker can still be writing them.
+    cpu_copy_pool_.reset();
     for (int i = 0; i < 2; ++i) {
       if (events_[i] == nullptr) {
         continue;
@@ -570,30 +830,245 @@ class PinnedStagingPool {
             << ")");
       }
     }
+    for (cudaEvent_t event : order_events_) {
+      if (event != nullptr) {
+        (void)cudaEventDestroy(event);
+      }
+    }
     // Clear any error left by best-effort cleanup.
     (void)cudaGetLastError();
   }
 
   PinnedStagingPool(const PinnedStagingPool&) = delete;
   PinnedStagingPool& operator=(const PinnedStagingPool&) = delete;
+  PinnedStagingPool(PinnedStagingPool&&) = delete;
+  PinnedStagingPool& operator=(PinnedStagingPool&&) = delete;
 
  private:
+  static constexpr size_t kMinBytesPerThread = 1ULL * 1024 * 1024;
+
   PinnedStagingPool() = default;
 
+  // Makes stream_ wait for the work already queued on the default stream and
+  // on the current stream. The copies may overwrite constants that queued
+  // kernels still read: an in-place update right after a run, or an update of
+  // the inactive buffer right after a swap. A synchronous cudaMemcpy on the
+  // default stream is ordered after such work; stream_ is non-blocking, so it
+  // is not unless it waits. Uses its own events rather than events_, whose
+  // records gate reuse of the staging buffers. Returns false when the wait
+  // cannot be set up, so the caller falls back to the synchronous copy.
+  bool waitForQueuedWork() {
+    int device = 0;
+    void* current_stream = nullptr;
+    if (cudaGetDevice(&device) != cudaSuccess ||
+        aoti_torch_get_current_cuda_stream(device, &current_stream) !=
+            AOTI_TORCH_SUCCESS) {
+      (void)cudaGetLastError();
+      AOTI_LOG_LOADING(
+          "PinnedStagingPool: current stream unavailable; "
+          "falling back to sync copy");
+      return false;
+    }
+    const std::array<cudaStream_t, 2> queued_streams{
+        nullptr, static_cast<cudaStream_t>(current_stream)};
+    for (size_t i = 0; i < queued_streams.size(); ++i) {
+      if (i > 0 && queued_streams[i] == queued_streams[0]) {
+        break;
+      }
+      cudaError_t rc =
+          cudaEventCreateWithFlags(&order_events_[i], cudaEventDisableTiming);
+      if (rc == cudaSuccess) {
+        rc = cudaEventRecord(order_events_[i], queued_streams[i]);
+      }
+      if (rc == cudaSuccess) {
+        rc = cudaStreamWaitEvent(stream_, order_events_[i], 0);
+      }
+      if (rc != cudaSuccess) {
+        (void)cudaGetLastError();
+        AOTI_LOG_LOADING(
+            "PinnedStagingPool: waiting for queued work failed rc="
+            << rc << " (" << cudaGetErrorString(rc)
+            << "); falling back to sync copy");
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void acquireCurrentBuffer() {
+    if (!current_buffer_acquired_) {
+      AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(events_[buf_]));
+      current_buffer_acquired_ = true;
+    }
+  }
+
+  void submitCurrentBuffer(void* dst, size_t size) {
+    AOTI_RUNTIME_CUDA_CHECK(cudaMemcpyAsync(
+        dst, stage_[buf_], size, cudaMemcpyHostToDevice, stream_));
+    const cudaError_t record_rc = cudaEventRecord(events_[buf_], stream_);
+    if (record_rc != cudaSuccess) {
+      // The async copy may already be reading the staging buffer. If event
+      // recording fails, synchronize the stream before propagating the error
+      // so exception unwinding cannot return that buffer to the pinned cache
+      // while DMA is still in flight.
+      const cudaError_t sync_rc = cudaStreamSynchronize(stream_);
+      if (sync_rc != cudaSuccess) {
+        AOTI_LOG_LOADING(
+            "PinnedStagingPool: cudaStreamSynchronize after failed "
+            "cudaEventRecord also failed rc="
+            << sync_rc << " (" << cudaGetErrorString(sync_rc) << ")");
+      }
+      AOTI_RUNTIME_CUDA_CHECK(record_rc);
+    }
+  }
+
+  void appendParallelTasks(const StageCopyTask& task) {
+    if (task.size < cpu_copy_threads_ * kMinBytesPerThread) {
+      parallel_tasks_.push_back(task);
+      return;
+    }
+
+    constexpr size_t kAlignment = 64;
+    const size_t bytes_per_thread =
+        task.size / cpu_copy_threads_ + (task.size % cpu_copy_threads_ != 0);
+    const size_t shard_bytes =
+        ((bytes_per_thread + kAlignment - 1) / kAlignment) * kAlignment;
+    for (size_t offset = 0; offset < task.size; offset += shard_bytes) {
+      const size_t size = std::min(shard_bytes, task.size - offset);
+      parallel_tasks_.push_back({task.dst + offset, task.src + offset, size});
+    }
+  }
+
+  void executePendingTasks() {
+    if (cpu_copy_pool_ == nullptr ||
+        pending_copy_bytes_ < cpu_copy_threads_ * kMinBytesPerThread) {
+      for (const StageCopyTask& task : pending_tasks_) {
+        std::memcpy(task.dst, task.src, task.size);
+      }
+      return;
+    }
+
+    parallel_tasks_.clear();
+    for (const StageCopyTask& task : pending_tasks_) {
+      appendParallelTasks(task);
+    }
+    if (parallel_tasks_.size() == 1) {
+      const StageCopyTask& task = parallel_tasks_.front();
+      std::memcpy(task.dst, task.src, task.size);
+      return;
+    }
+    parallel_copy_tasks_ += parallel_tasks_.size();
+    cpu_copy_pool_->copy(parallel_tasks_);
+  }
+
+  void flushPending() {
+    if (pending_bytes_ == 0) {
+      return;
+    }
+    executePendingTasks();
+    submitCurrentBuffer(pending_dst_begin_, pending_bytes_);
+    ++h2d_copies_;
+    copied_bytes_ += pending_bytes_;
+    pending_dst_begin_ = nullptr;
+    pending_bytes_ = 0;
+    pending_copy_bytes_ = 0;
+    pending_tasks_.clear();
+    current_buffer_acquired_ = false;
+    buf_ ^= 1;
+  }
+
+  void enqueueCopyTasks(void* dst, const void* src, size_t total) {
+    auto* dst_bytes = static_cast<uint8_t*>(dst);
+    auto* src_bytes = static_cast<const uint8_t*>(src);
+    size_t remaining = total;
+
+    while (remaining > 0) {
+      if (pending_bytes_ == 0) {
+        acquireCurrentBuffer();
+        pending_dst_begin_ = dst_bytes;
+      } else {
+        const auto* pending_dst_end = pending_dst_begin_ + pending_bytes_;
+        if (dst_bytes < pending_dst_end) {
+          // Overlapping or out-of-order destinations cannot share one
+          // contiguous H2D submission. Preserve correctness by flushing.
+          flushPending();
+          continue;
+        }
+
+        const size_t gap = static_cast<size_t>(dst_bytes - pending_dst_end);
+        const size_t available = buffer_bytes_ - pending_bytes_;
+        const size_t expected_gap =
+            (AOTI_CONST_ALIGNMENT -
+             reinterpret_cast<uintptr_t>(pending_dst_end) %
+                 AOTI_CONST_ALIGNMENT) %
+            AOTI_CONST_ALIGNMENT;
+        // Only include the exact padding inserted by compute_constant_blob().
+        // Any other gap may contain a live constant and requires a new window.
+        if (gap != expected_gap || gap > available) {
+          flushPending();
+          continue;
+        }
+
+        if (gap > 0) {
+          // Coalescing copies the inter-constant alignment padding along with
+          // the constants, so the padding is zero-filled here. The per-range
+          // path left it holding whatever cudaMalloc returned; anything that
+          // checksums or diffs raw constant blob bytes will see the change.
+          std::memset(
+              static_cast<uint8_t*>(stage_[buf_]) + pending_bytes_, 0, gap);
+          pending_bytes_ += gap;
+        }
+      }
+
+      const size_t chunk = std::min(buffer_bytes_ - pending_bytes_, remaining);
+      if (chunk == 0) {
+        flushPending();
+        continue;
+      }
+      pending_tasks_.push_back(
+          {static_cast<uint8_t*>(stage_[buf_]) + pending_bytes_,
+           src_bytes,
+           chunk});
+      pending_bytes_ += chunk;
+      pending_copy_bytes_ += chunk;
+      dst_bytes += chunk;
+      src_bytes += chunk;
+      remaining -= chunk;
+
+      if (pending_bytes_ == buffer_bytes_) {
+        flushPending();
+      }
+    }
+  }
+
   // Borrowed from sharedConstantsH2DStream(); not owned, never destroyed.
-  // Concurrent pools share it, which serializes their copies but keeps the
-  // process at one hardware queue per device.
+  // Pools that get the same stream serialize their copies; see that function
+  // for which pools do.
   cudaStream_t stream_{nullptr};
-  cudaEvent_t events_[2]{nullptr, nullptr};
+  std::array<cudaEvent_t, 2> events_{};
+  // Recorded on the default and current streams; see waitForQueuedWork().
+  std::array<cudaEvent_t, 2> order_events_{};
   // Cached borrowed pointers into stage_tensors_[i] to avoid a shim call
   // per chunk in the hot path.
-  void* stage_[2]{nullptr, nullptr};
+  std::array<void*, 2> stage_{};
   size_t buffer_bytes_{0};
   int buf_{0};
+  bool use_copy_tasks_{false};
+  size_t cpu_copy_threads_{1};
+  std::unique_ptr<ParallelStageCopyPool> cpu_copy_pool_;
+  bool current_buffer_acquired_{false};
+  uint8_t* pending_dst_begin_{nullptr};
+  size_t pending_bytes_{0};
+  size_t pending_copy_bytes_{0};
+  std::vector<StageCopyTask> pending_tasks_;
+  std::vector<StageCopyTask> parallel_tasks_;
+  size_t h2d_copies_{0};
+  size_t copied_bytes_{0};
+  size_t parallel_copy_tasks_{0};
   // Owns the pinned host allocations via ATen's cached pinned host
   // allocator. Declared last so it is destroyed first among members
   // (after the destructor body has synchronized the stream).
-  RAIIAtenTensorHandle stage_tensors_[2]{};
+  std::array<RAIIAtenTensorHandle, 2> stage_tensors_{};
 };
 
 inline bool envFlagIsEnabled(const char* env) {
@@ -608,21 +1083,38 @@ inline bool envFlagIsEnabled(const char* env) {
   return value != "0" && value != "false";
 }
 
+// Number of CPUs this process is allowed to run on, or 0 when that is not
+// known. This mirrors c10::TaskThreadPoolBase::defaultNumThreads, which cannot
+// be reused here because this header must not depend on c10. Worth keeping:
+// under a cpuset or taskset restriction std::thread::hardware_concurrency()
+// still reports the whole host, which is exactly the case where oversubscribing
+// hurts.
+inline size_t cpuset_cpu_count() {
+#if defined(__linux__)
+  cpu_set_t cpu_set;
+  CPU_ZERO(&cpu_set);
+  if (sched_getaffinity(0, sizeof(cpu_set), &cpu_set) == 0) {
+    return static_cast<size_t>(CPU_COUNT(&cpu_set));
+  }
+#endif
+  return 0;
+}
+
 // Returns a PinnedStagingPool when pinned async constant copies are enabled
 // and host pinning succeeds. Returns nullptr otherwise so callers fall back to
 // the synchronous copy path. Per-buffer size comes from
-// AOTI_COPY_STAGE_BUFFER_BYTES (default 64 MiB).
-inline std::unique_ptr<PinnedStagingPool> tryMakeConstantsStagingPool() {
+// AOTI_COPY_STAGE_BUFFER_BYTES (default 64 MiB). Eligible initial embedded-
+// constant loads are coalesced even with one CPU copy thread. Additional CPU
+// staging workers are controlled by AOTI_COPY_STAGE_CPU_THREADS or its C API
+// setter.
+inline std::unique_ptr<PinnedStagingPool> tryMakeConstantsStagingPool(
+    bool use_copy_tasks = false) {
   if (!torch::aot_inductor::usePinnedAsyncConstantsCopy()) {
     return nullptr;
   }
-  const size_t explicit_buffer_bytes =
-      torch::aot_inductor::pinnedAsyncConstantsCopyStageBufferBytes();
-  if (explicit_buffer_bytes > 0) {
-    return PinnedStagingPool::tryCreate(explicit_buffer_bytes);
-  }
-  // Resolve the env var once into a cached value, not the raw getenv pointer.
-  // Per POSIX that pointer may be invalidated by setenv/putenv/unsetenv.
+
+  // Resolve env vars once into cached values, not raw getenv pointers. Per
+  // POSIX those pointers may be invalidated by setenv/putenv/unsetenv.
   static const size_t env_buffer_bytes = [] {
     const char* env = std::getenv("AOTI_COPY_STAGE_BUFFER_BYTES");
     size_t bytes = PinnedStagingPool::kDefaultBufferBytes;
@@ -633,12 +1125,63 @@ inline std::unique_ptr<PinnedStagingPool> tryMakeConstantsStagingPool() {
           bytes = static_cast<size_t>(parsed);
         }
       } catch (...) {
-        // Ignore parse errors; use default.
+        bytes = PinnedStagingPool::kDefaultBufferBytes;
       }
     }
     return bytes;
   }();
-  return PinnedStagingPool::tryCreate(env_buffer_bytes);
+  static const size_t env_cpu_copy_threads = [] {
+    const char* env = std::getenv("AOTI_COPY_STAGE_CPU_THREADS");
+    if (env == nullptr || env[0] == '\0') {
+      return size_t{1};
+    }
+    const std::string value(env);
+    const bool all_digits =
+        std::all_of(value.begin(), value.end(), [](unsigned char c) {
+          return std::isdigit(c) != 0;
+        });
+    try {
+      const size_t threads = all_digits ? std::stoull(value) : 0;
+      if (threads > 0) {
+        return std::min(threads, PinnedStagingPool::kMaxCpuCopyThreads);
+      }
+    } catch (const std::exception& error) {
+      AOTI_LOG_LOADING(
+          "PinnedStagingPool: failed to parse AOTI_COPY_STAGE_CPU_THREADS: "
+          << error.what());
+    }
+    AOTI_LOG_LOADING(
+        "PinnedStagingPool: invalid AOTI_COPY_STAGE_CPU_THREADS; "
+        "using one CPU copy thread");
+    return size_t{1};
+  }();
+
+  const size_t explicit_buffer_bytes =
+      torch::aot_inductor::pinnedAsyncConstantsCopyStageBufferBytes();
+  const size_t buffer_bytes =
+      explicit_buffer_bytes > 0 ? explicit_buffer_bytes : env_buffer_bytes;
+  const size_t explicit_cpu_copy_threads =
+      torch::aot_inductor::pinnedAsyncConstantsCopyCpuThreads();
+  // Staging is memory-bandwidth bound, and pools that share the H2D stream
+  // serialize their copies, so more copy threads than the process may run on
+  // only adds contention.
+  size_t max_cpu_copy_threads = PinnedStagingPool::kMaxCpuCopyThreads;
+  // hardware_concurrency() is allowed to return 0, and it reports the host
+  // topology rather than the CPUs this process is confined to.
+  const size_t hardware_threads = std::thread::hardware_concurrency();
+  if (hardware_threads > 0) {
+    max_cpu_copy_threads = std::min(max_cpu_copy_threads, hardware_threads);
+  }
+  const size_t cpuset_threads = cpuset_cpu_count();
+  if (cpuset_threads > 0) {
+    max_cpu_copy_threads = std::min(max_cpu_copy_threads, cpuset_threads);
+  }
+  const size_t cpu_copy_threads = std::min(
+      explicit_cpu_copy_threads > 0 ? explicit_cpu_copy_threads
+                                    : env_cpu_copy_threads,
+      max_cpu_copy_threads);
+  return PinnedStagingPool::tryCreate(
+      buffer_bytes, use_copy_tasks, cpu_copy_threads);
 }
 
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
@@ -676,11 +1219,28 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
 
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
+#ifdef AOT_INDUCTOR_USE_CACHING_ALLOCATOR
+  // Use caching allocator for allocating GPU memory
+  void* data_ptr = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_xpu_caching_allocator_raw_alloc(num_bytes, &data_ptr));
+  auto deleter = [](void* ptr) noexcept {
+    auto err = aoti_torch_xpu_caching_allocator_raw_delete(ptr);
+    if (err != AOTI_TORCH_SUCCESS) {
+      std::cerr
+          << "Failed to free GPU memory in AOTInductor model (caching allocator): error code "
+          << err << '\n';
+    }
+  };
+  return RAIIDataPtr(data_ptr, deleter);
+#else
+  // Use sycl::malloc_device directly for allocating GPU memory
   sycl::queue* queue_ptr = nullptr;
   aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
   void* data_ptr = sycl::malloc_device(num_bytes, *queue_ptr);
   auto deleter = [queue_ptr](void* ptr) { sycl::free(ptr, *queue_ptr); };
   return RAIIDataPtr(data_ptr, deleter);
+#endif
 }
 
 #elif defined(USE_MPS)
@@ -696,12 +1256,81 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
 
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   void* data_ptr = std::malloc(num_bytes);
   AOTI_RUNTIME_CHECK(
       data_ptr, "Failed to allocate " + std::to_string(num_bytes) + " bytes");
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   auto deleter = [](void* ptr) { std::free(ptr); };
   return RAIIDataPtr(data_ptr, deleter);
 }
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
+// The stable C ABI has no raw MTIA allocator or memcpy, so the MTIA constant
+// blob is the storage of a uint8 tensor, and copies go through aten copy_.
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
+RAIIDataPtr RAII_mtiaMalloc(size_t num_bytes, int32_t device_index) {
+  const int64_t size = static_cast<int64_t>(num_bytes);
+  const int64_t stride = 1;
+  AtenTensorHandle handle = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
+      1,
+      &size,
+      &stride,
+      aoti_torch_dtype_uint8(),
+      aoti_torch_device_type_mtia(),
+      device_index,
+      &handle));
+  RAIIAtenTensorHandle tensor(handle);
+  void* data_ptr = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(tensor.get(), &data_ptr));
+  auto deleter = [handle = tensor.release()](void* /*ptr*/) noexcept {
+    auto err = aoti_torch_delete_tensor_object(handle);
+    if (err != AOTI_TORCH_SUCCESS) {
+      std::cerr
+          << "Failed to free MTIA memory in AOTInductor model: error code "
+          << err << '\n';
+    }
+  };
+  return RAIIDataPtr(data_ptr, deleter);
+}
+
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
+void mtia_memcpy_h2d(
+    void* dst,
+    const void* src,
+    size_t num_bytes,
+    int32_t device_index) {
+  const int64_t size = static_cast<int64_t>(num_bytes);
+  const int64_t stride = 1;
+  AtenTensorHandle dst_handle = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
+      dst,
+      1,
+      &size,
+      &stride,
+      0,
+      aoti_torch_dtype_uint8(),
+      aoti_torch_device_type_mtia(),
+      device_index,
+      &dst_handle));
+  RAIIAtenTensorHandle dst_tensor(dst_handle);
+  AtenTensorHandle src_handle = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
+      const_cast<void*>(src),
+      1,
+      &size,
+      &stride,
+      0,
+      aoti_torch_dtype_uint8(),
+      aoti_torch_device_type_cpu(),
+      0,
+      &src_handle));
+  RAIIAtenTensorHandle src_tensor(src_handle);
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_copy_(dst_handle, src_handle, /*non_blocking=*/0));
+}
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
 } // anonymous namespace
 
 namespace torch::aot_inductor {
@@ -724,8 +1353,20 @@ inline bool usePinnedAsyncConstantsCopy() {
     return setting == 1;
   }
 #ifdef USE_CUDA
+  // Only the env var is latched; setUsePinnedAsyncConstantsCopy() is checked
+  // above on every call and overrides it, including the ROCm default.
   static const bool enabled_from_env = [] {
     const char* env = std::getenv("AOTI_COPY_USE_PINNED_ASYNC");
+#ifdef USE_ROCM
+    // On by default on ROCm, where an unset or empty value counts as unset. A
+    // large pageable copy out of the .so's read-only constant pages makes ROCm
+    // try to pin those pages; on MI300X the pinning fails thousands of times
+    // per container and creating a container took 40-50 s instead of 0.5 s
+    // with the staged copy. AOTI_COPY_USE_PINNED_ASYNC=0 turns it off.
+    if (env == nullptr || env[0] == '\0') {
+      return true;
+    }
+#endif
     return envFlagIsEnabled(env);
   }();
   return enabled_from_env;
@@ -750,6 +1391,22 @@ inline size_t pinnedAsyncConstantsCopyStageBufferBytes() {
       std::memory_order_relaxed);
 }
 
+inline std::atomic<size_t>& pinnedAsyncConstantsCopyCpuThreadsSetting() {
+  // 0: use env/default fallback. Nonzero values are total CPU copy threads.
+  static std::atomic<size_t> threads{0};
+  return threads;
+}
+
+inline void setPinnedAsyncConstantsCopyCpuThreads(size_t threads) {
+  pinnedAsyncConstantsCopyCpuThreadsSetting().store(
+      threads, std::memory_order_relaxed);
+}
+
+inline size_t pinnedAsyncConstantsCopyCpuThreads() {
+  return pinnedAsyncConstantsCopyCpuThreadsSetting().load(
+      std::memory_order_relaxed);
+}
+
 using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
 // valid device strs are: cpu, cuda, cuda:0, cuda:1, ...
@@ -758,7 +1415,7 @@ inline void parse_device_str(
     const std::string& device_str,
     int32_t& device_type,
     int32_t& device_idx) {
-  std::regex re("(cpu|cuda|xpu|mps)(:([0-9]+))?");
+  std::regex re("(cpu|cuda|xpu|mps|mtia)(:([0-9]+))?");
   std::smatch sm;
   bool matched = std::regex_match(device_str, sm, re);
   AOTI_RUNTIME_CHECK(matched, "Invalid device: " + device_str);
@@ -774,6 +1431,10 @@ inline void parse_device_str(
 #ifdef USE_MPS
   } else if (sm[1].str() == "mps") {
     device_type = aoti_torch_device_type_mps();
+#endif
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
+  } else if (sm[1].str() == "mtia") {
+    device_type = aoti_torch_device_type_mtia();
 #endif
   } else {
     AOTI_RUNTIME_CHECK(false, "Invalid device: " + device_str);
@@ -798,7 +1459,7 @@ struct AOTICudaMemcpyThrottleConfig {
 
  private:
   static AOTICudaMemcpyThrottleConfig read_from_env() {
-    AOTICudaMemcpyThrottleConfig cfg;
+    AOTICudaMemcpyThrottleConfig cfg{};
     const char* chunk_env = std::getenv("AOTI_CUDA_COPY_CHUNK_SIZE");
     const char* sleep_env = std::getenv("AOTI_CUDA_COPY_SLEEP_US");
     try {
@@ -860,6 +1521,15 @@ class AOTInductorModelBase {
         include_weights(include_weights) {
     parse_device_str(device_str, device_type_, device_idx_);
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
+    if (device_type_ == aoti_torch_device_type_mtia()) {
+      if (device_idx_ == -1) {
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_get_current_device_index(&device_idx_));
+      }
+    }
+#endif
+
 #ifdef USE_CUDA
     if (device_idx_ == -1) {
       AOTI_RUNTIME_CUDA_CHECK(cudaGetDevice(&device_idx_));
@@ -884,6 +1554,14 @@ class AOTInductorModelBase {
 
   // NOLINTNEXTLINE(modernize-use-equals-default)
   ~AOTInductorModelBase() {
+#ifdef USE_MMAP_SELF
+    if (self_mmap) {
+      if (munmap(self_mmap, self_mmap_size) != 0) {
+        std::cerr << "Failed to unmap AOTInductor model constants: "
+                  << std::strerror(errno) << '\n';
+      }
+    }
+#endif // USE_MMAP_SELF
 #ifdef USE_CUDA
     if (run_finished_) {
       auto code = cudaEventDestroy(*run_finished_);
@@ -1064,6 +1742,8 @@ class AOTInductorModelBase {
     if (blob_size > 0) {
 #if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
       constant_blob_ = RAII_gpuMalloc(blob_size);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
+      constant_blob_ = RAII_mtiaMalloc(blob_size, device_idx_);
 #else
       constant_blob_ = RAII_cpuMalloc(blob_size);
 #endif
@@ -1079,10 +1759,22 @@ class AOTInductorModelBase {
     size_t aux_cpu_blob_idx = 0;
 
 #ifdef USE_CUDA
-    // Opt-in pinned async staging pool for the constant H2D copies below.
-    // nullptr (default / on allocation failure) keeps the throttled
-    // synchronous path.
-    auto staging_pool = tryMakeConstantsStagingPool();
+    // Pinned async staging pool for the constant H2D copies below (see
+    // usePinnedAsyncConstantsCopy()). nullptr (disabled, nothing to copy, or
+    // allocation failure) keeps the throttled synchronous path.
+    bool use_copy_tasks = !force && include_weights && blob_size > 0;
+    if (use_copy_tasks) {
+      for (size_t i = 0; i < num_constants; ++i) {
+        if (!this->constant_from_folded(i) &&
+            this->constant_device_type(i) != device_type_) {
+          use_copy_tasks = false;
+          break;
+        }
+      }
+    }
+    auto staging_pool = blob_size > 0
+        ? tryMakeConstantsStagingPool(use_copy_tasks)
+        : std::unique_ptr<PinnedStagingPool>();
     PinnedStagingPool* pool_raw = staging_pool.get();
 #endif
 
@@ -1249,8 +1941,8 @@ class AOTInductorModelBase {
           .wait();
 #elif USE_CUDA
       // Prefer the pinned async staging path when the caller supplied a pool
-      // (AOTI_COPY_USE_PINNED_ASYNC). Otherwise fall back to the throttled
-      // synchronous copy (master default).
+      // (see usePinnedAsyncConstantsCopy()). Otherwise fall back to the
+      // throttled synchronous copy.
       if (staging_pool != nullptr) {
         staging_pool->copyH2DViaStage(
             internal_ptr, _get_constants_start() + bytes_read, data_size);
@@ -1269,6 +1961,12 @@ class AOTInductorModelBase {
           data_size,
           _get_constants_start());
       return constants_ptr;
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
+      mtia_memcpy_h2d(
+          internal_ptr,
+          _get_constants_start() + bytes_read,
+          data_size,
+          device_idx_);
 #else
       memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size);
 #endif
@@ -1547,6 +2245,7 @@ class AOTInductorModelBase {
     close(fd);
     AOTI_RUNTIME_CHECK(ptr != MAP_FAILED, "mmap() failed");
     self_mmap = static_cast<uint8_t*>(ptr);
+    self_mmap_size = static_cast<size_t>(weights_size);
     AOTI_RUNTIME_CHECK(
         reinterpret_cast<uint64_t*>(
             self_mmap + weights_size - sizeof(uint64_t))[0] == magic_number,
@@ -1592,6 +2291,8 @@ class AOTInductorModelBase {
 #if defined(USE_MMAP_SELF)
   // Mapped memory for weights
   uint8_t* self_mmap = NULL;
+  // Length passed to mmap, so the destructor unmaps exactly what was mapped.
+  size_t self_mmap_size = 0;
 #endif
 
 #if defined(USE_MMAP_EXTERNAL)
@@ -1629,6 +2330,13 @@ class AOTInductorModelBase {
 // Codegen-ed classes can derive from this to keep pointers to loaded kernels.
 class AOTInductorModelKernelsBase {
  public:
+  AOTInductorModelKernelsBase() = default;
+  AOTInductorModelKernelsBase(const AOTInductorModelKernelsBase&) = delete;
+  AOTInductorModelKernelsBase(AOTInductorModelKernelsBase&&) noexcept = delete;
+  AOTInductorModelKernelsBase& operator=(const AOTInductorModelKernelsBase&) =
+      delete;
+  AOTInductorModelKernelsBase& operator=(
+      AOTInductorModelKernelsBase&&) noexcept = delete;
   // NOLINTNEXTLINE(modernize-use-equals-default)
   virtual ~AOTInductorModelKernelsBase() {
 #ifdef USE_CUDA

@@ -3,9 +3,11 @@
 r"""Importing this file includes common utility methods for checking quantized
 tensors and modules.
 """
+import functools
 import numpy as np
 import torch
 from torch import Tensor
+from torch.nn.functional import SwizzleType
 from contextlib import contextmanager
 from torch.testing._internal.common_utils import TEST_WITH_TSAN, IS_PPC, IS_MACOS, IS_WINDOWS, IS_ARM64
 
@@ -152,6 +154,22 @@ def _snr(x, x_hat):
     snr_db = 20 * snr.log10()
     return signal, noise, snr_db
 
+
+def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    r"""Computes the error between two tensors in dB.
+
+    For more details see:
+        https://en.wikipedia.org/wiki/Signal-to-noise_ratio
+
+    Args:
+        x: The original tensor.
+        y: The tensor to compare to the original tensor.
+    """
+    Ps = torch.norm(x)
+    Pn = torch.norm(x - y)
+    return 20 * torch.log10(Ps / Pn)
+
+
 @contextmanager
 def override_quantized_engine(qengine):
     previous = torch.backends.quantized.engine
@@ -175,6 +193,7 @@ def override_cpu_allocator_for_qnnpack(qengine_is_qnnpack):
 # Currently for some of the tests it seems to have inconsistent params
 # for fbgemm vs qnnpack.
 def override_qengines(qfunction):
+    @functools.wraps(qfunction)
     def test_fn(*args, **kwargs):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
@@ -504,15 +523,33 @@ def from_blocked(input, input_scales, blocksize) -> torch.Tensor:
 
     return output_scales
 
-def from_blocked_format(x_mxfp8, scales_unswizzled, blocksize=32):
+def from_blocked_format(
+    x_mxfp8,
+    scales_unswizzled,
+    blocksize=32,
+    swizzle_type: SwizzleType = SwizzleType.NO_SWIZZLE,
+):
+    if swizzle_type == SwizzleType.SWIZZLE_32_4_4:
+        scales_unswizzled = from_blocked(
+            x_mxfp8, scales_unswizzled.flatten(), blocksize
+        )
+    elif swizzle_type != SwizzleType.NO_SWIZZLE:
+        raise ValueError(f"unsupported MXFP swizzle type: {swizzle_type}")
+
     # expand scales
-    scales = torch.repeat_interleave(scales_unswizzled, blocksize, dim=1)
+    scales = torch.repeat_interleave(scales_unswizzled, blocksize, dim=-1)
 
     # de-scale and convert
     x_f32 = x_mxfp8.to(torch.float) * scales.to(torch.float)
     return x_f32.to(torch.bfloat16)
 
-def to_blocked(input_matrix) -> torch.Tensor:
+def from_blocked_3d(input, input_scales, blocksize) -> torch.Tensor:
+    output = []
+    for matrix, scales in zip(input, input_scales, strict=True):
+        output.append(from_blocked(matrix, scales.flatten(), blocksize))
+    return torch.stack(output)
+
+def to_blocked(input_matrix, swizzle_32_8: bool = False) -> torch.Tensor:
     """
     Rearrange a large matrix by breaking it into blocks and applying the rearrangement pattern.
 
@@ -521,11 +558,29 @@ def to_blocked(input_matrix) -> torch.Tensor:
 
     Args:
         input_matrix: Input tensor of shape (H, W)
+        swizzle_32_8: build the gfx950 32x8-tiled layout that hipBLASLt calls
+            BLK32_UE8M0_32_8 instead of the default one. Pass
+            `rocm_mx_swizzle(mat_dtype)` to follow whichever layout the current
+            device takes for the data these scales belong to.
 
     Returns:
-        Rearranged tensor of shape (32*ceil_div(H,128), 16*ceil_div(W,4))
+        Flattened tensor of 32*ceil_div(H,128) * 16*ceil_div(W,4) elements, or
+        32*ceil_div(H,32) * 8*ceil_div(W,8) when `swizzle_32_8` is set.
     """
     rows, cols = input_matrix.shape
+
+    if swizzle_32_8:
+        padded_rows = ceil_div(rows, 32) * 32
+        padded_cols = ceil_div(cols, 8) * 8
+
+        padded = input_matrix
+        if (rows, cols) != (padded_rows, padded_cols):
+            padded = torch.zeros((padded_rows, padded_cols), device=input_matrix.device, dtype=input_matrix.dtype)
+            padded[:rows, :cols] = input_matrix
+
+        blocks = padded.view(padded_rows // 32, 2, 16, padded_cols // 8, 2, 4)
+        return blocks.permute(0, 3, 5, 2, 4, 1).flatten()
+
     n_row_blocks = ceil_div(rows, 128)
     n_col_blocks = ceil_div(cols, 4)
 
@@ -574,13 +629,79 @@ def _bfloat16_to_float4_e2m1fn_x2(x):
     return x
 
 
+def data_to_nvfp4_scale(x, block_size=16):
+    """Compute per-block E4M3 scales for NVFP4 test inputs."""
+    orig_shape = x.shape
+    x = x.reshape(-1, block_size)
+    max_abs = torch.amax(torch.abs(x), 1) + 1e-12
+    scale = (max_abs / 6.0).clamp(max=torch.finfo(torch.float8_e4m3fn).max)
+    return scale.to(torch.float8_e4m3fn).reshape(orig_shape[0], -1)
+
+
+E8M0_EXPONENT_NAN_VAL = 255
+E8M0_EXPONENT_BIAS = 127
+
+
+def _f32_to_e8m0_rceil(value: torch.Tensor) -> torch.Tensor:
+    # copied from https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/torchao/prototype/mx_formats/mx_tensor.py#L110
+
+    # We can't just use value.to(float8_e8m0fnu) because it doesn't support
+    # passing round="up". See https://github.com/pytorch/pytorch/issues/175409
+    value = value.to(torch.float32)
+    value_bits = value.view(torch.int32)
+    biased_exponent = torch.bitwise_right_shift(value_bits, MBITS_F32) & 0xFF
+    mantissa = value_bits & 0x7FFFFF
+
+    # Normal FP32 values round up when any mantissa bit is set. For FP32
+    # subnormals, E8M0 byte 0 is 2^-127, so only values above that round to 1.
+    needs_round_up = torch.where(
+        biased_exponent == 0,
+        mantissa > 0x400000,
+        mantissa != 0,
+    )
+    e8m0_biased = biased_exponent + needs_round_up.to(torch.int32)
+    return torch.where(torch.isfinite(value), e8m0_biased, E8M0_EXPONENT_NAN_VAL).to(
+        torch.uint8
+    )
+
+def _e8m0_scale_to_reciprocal_fp32(
+    scale_e8m0_biased: torch.Tensor,
+) -> torch.Tensor:
+    # copied from
+    # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/torchao/prototype/mx_formats/mx_tensor.py#L131
+    reciprocal_e8m0_biased = (
+        2 * E8M0_EXPONENT_BIAS - scale_e8m0_biased.to(torch.int32)
+    ).to(torch.uint8)
+    return reciprocal_e8m0_biased.view(torch.float8_e8m0fnu).to(torch.float32)
+
+
+# RCEIL
+def _to_mx_rceil(
+    data_hp: torch.Tensor,
+    max_abs: torch.Tensor,
+    max_pos: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # copied from
+    # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/torchao/prototype/mx_formats/mx_tensor.py#L160
+
+    descale = max_abs * (1.0 / max_pos)
+    exponent = _f32_to_e8m0_rceil(descale)
+    rcp_fp32 = _e8m0_scale_to_reciprocal_fp32(exponent)
+    # Scale the data
+    data_lp = data_hp * rcp_fp32
+    return exponent, data_lp
+
+
 # This function is extracted from https://github.com/pytorch/ao/blob/v0.12.0/torchao/prototype/mx_formats/mx_tensor.py#L142
 def to_mxfp(
     data_hp: torch.Tensor,
     block_size: int = 32,
     format: str = "mxfp8",
+    swizzle_type: SwizzleType = SwizzleType.NO_SWIZZLE,
 ):
-    if data_hp.dtype not in (torch.bfloat16, torch.float):
+    if swizzle_type not in (SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_32_4_4):
+        raise ValueError(f"unsupported MXFP swizzle type: {swizzle_type}")
+    if data_hp.dtype not in (torch.bfloat16, torch.float16, torch.float):
         raise AssertionError(f"{data_hp.dtype} is not supported yet")
     if data_hp.shape[-1] % block_size != 0:
         raise AssertionError(
@@ -606,38 +727,6 @@ def to_mxfp(
         F4E2M1_MAX = 6.
         max_pos = F4E2M1_MAX
 
-    # RCEIL
-    def _to_mx_rceil(
-        data_hp: torch.Tensor,
-        max_abs: torch.Tensor,
-        max_pos: float,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        E8M0_EXPONENT_BIAS = 127
-        descale = max_abs / max_pos
-        exponent = torch.where(
-            torch.isnan(descale),
-            0xFF,  # Handle biased exponent for nan
-            # NOTE: descale < (torch.finfo(torch.float32).smallest_normal / 2) is handled through clamping
-            (
-                torch.clamp(
-                    torch.ceil(torch.log2(descale)),
-                    min=-E8M0_EXPONENT_BIAS,
-                    max=E8M0_EXPONENT_BIAS,
-                )
-                + E8M0_EXPONENT_BIAS
-            ).to(torch.uint8),
-        )
-
-        descale_fp = torch.where(
-            exponent == 0,
-            1.0,
-            torch.exp2(E8M0_EXPONENT_BIAS - exponent.to(torch.float32)),
-        )
-
-        # scale and saturated cast the data elements to max of target dtype
-        data_lp = torch.clamp(data_hp * descale_fp, min=-1 * max_pos, max=max_pos)
-        return exponent, data_lp
-
     scale_e8m0_biased, data_lp = _to_mx_rceil(data_hp, max_abs, max_pos)
 
     # cast to target dtype
@@ -653,7 +742,41 @@ def to_mxfp(
 
     scale_e8m0_biased = scale_e8m0_biased.view(torch.float8_e8m0fnu)
     scale_e8m0_biased = scale_e8m0_biased.squeeze(-1)
+    if swizzle_type == SwizzleType.SWIZZLE_32_4_4:
+        if scale_e8m0_biased.dim() != 2:
+            raise ValueError("swizzled MXFP scales require a 2D input")
+        scale_e8m0_biased = to_blocked(scale_e8m0_biased).unsqueeze(0)
     return scale_e8m0_biased, data_lp
+
+
+def mxfp8_32x32_swizzle_f(x):
+    *lead, d1, d2 = x.shape
+    n1, n2 = d1 // 32, d2 // 32
+    x_b = (
+        x.reshape(*lead, n1, 32, n2, 32)
+        .transpose(-3, -2)
+        .contiguous()
+        .reshape(*lead, n1, n2, 32 * 32)
+    )
+    x_b = x_b.to(torch.float32)
+    amax = x_b.abs().amax(dim=-1, keepdim=True)  # (..., n1, n2, 1)
+
+    F8E4M3_MAX = torch.finfo(torch.float8_e4m3fn).max  # 448.0
+    scale_e8m0, qdata_b = _to_mx_rceil(x_b, amax, F8E4M3_MAX)
+    qdata_b = qdata_b.to(torch.float8_e4m3fn)
+
+    qdata = (
+        qdata_b.reshape(*lead, n1, n2, 32, 32)
+        .transpose(-3, -2)
+        .contiguous()
+        .reshape(*lead, d1, d2)
+    )
+
+    # expand and swizzle scale
+    scale_e8m0 = scale_e8m0.squeeze(-1).repeat_interleave(32, dim=0)
+    scale_e8m0 = to_blocked(scale_e8m0).view(torch.float8_e8m0fnu).unsqueeze(0)
+
+    return qdata, scale_e8m0
 
 # Source: https://github.com/pytorch/ao/blob/568c1932a16ae9f30d48da214a88dc0013e98ed8/torchao/prototype/moe_training/utils.py#L310
 def generate_jagged_offs(E, M, multiple_of=16, dtype=torch.int32, device="cuda"):
@@ -691,3 +814,10 @@ def generate_jagged_offs(E, M, multiple_of=16, dtype=torch.int32, device="cuda")
     selected_values, _ = torch.sort(selected_values)
 
     return selected_values.to(dtype).to(device)
+
+
+def to_mnk4(scales):
+    outer, inner = scales.shape
+    padded = torch.nn.functional.pad(scales, (0, -inner % 4, 0, -outer % 4))
+    packed = padded.reshape(padded.shape[0], padded.shape[1] // 4, 4).permute(1, 0, 2)
+    return packed.contiguous().flatten().to(torch.float8_e8m0fnu)

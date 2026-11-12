@@ -28,6 +28,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model,
     check_model_gpu,
     copy_tests,
+    skip_if_device,
 )
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
@@ -35,7 +36,7 @@ from torch.testing._internal.common_utils import TEST_WITH_ROCM
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm
+from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -281,10 +282,8 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertTrue(preserved)
         self.assertEqual(preserved[0], [2])
 
+    @skip_if_device(lambda device: device == "cpu", "MLKDNN Bug")
     def test_autocast(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("MLKDNN Bug")
-
         mod = torch.nn.Linear(10, 10).to(self.device).eval()
         inp = torch.rand([10, 10]).to(self.device).to(torch.half)
 
@@ -728,12 +727,10 @@ class OptimizeForInferenceTemplate(TestCase):
             out_compiled = foo_c(mod, x)
             self.assertEqual(out_eager, out_compiled)
 
+    # TODO: cpu path keeps an extra copy of graph around somewhere,
+    # memory not as important for cpu
+    @skip_if_device(lambda device: device == "cpu", "NYI CPU")
     def test_param_deallocated(self):
-        # TODO: cpu path keeps an extra copy of graph around somewhere,
-        # memory not as important for cpu
-        if self.device == "cpu":
-            raise unittest.SkipTest("NYI CPU")
-
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -802,7 +799,6 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod_eager = mod(x)
                 self.assertEqual(foo(mod, x), mod_eager)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180128")
     @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/106557")
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
