@@ -2040,6 +2040,143 @@ class LAMBDA_GUARD : public LeafGuard {
   py::function _guard_check_fn;
 };
 
+// Prefixes of CPython's private structs in Objects/odictobject.c, unchanged
+// from Python 3.11 through 3.15:
+// https://github.com/python/cpython/blob/v3.11.0/Objects/odictobject.c
+// The public OrderedDict iterator hashes each key. Walking the nodes directly
+// avoids invoking user hash/equality callbacks.
+#if !IS_PYTHON_3_16_PLUS
+struct OrderedDictNodePrefix {
+  PyObject* key;
+  Py_hash_t hash;
+  OrderedDictNodePrefix* next;
+};
+
+struct OrderedDictObjectPrefix {
+  PyDictObject dict;
+  OrderedDictNodePrefix* first;
+};
+
+static std::optional<std::vector<py::object>> ordered_dict_keys(
+    py::handle value) {
+  TORCH_CHECK_TYPE(PyODict_Check(value.ptr()), "expected an OrderedDict");
+  std::optional<std::vector<py::object>> result;
+  const auto size = static_cast<size_t>(PyDict_Size(value.ptr()));
+  std::vector<py::object> keys;
+  // Allocate outside the critical section: an exception must not bypass its
+  // end.
+  keys.reserve(size);
+  Py_BEGIN_CRITICAL_SECTION(value.ptr());
+  if (static_cast<size_t>(PyDict_GET_SIZE(value.ptr())) == size) {
+    auto* node = reinterpret_cast<OrderedDictObjectPrefix*>(value.ptr())->first;
+    while (node != nullptr && keys.size() < size) {
+      keys.push_back(py::reinterpret_borrow<py::object>(node->key));
+      node = node->next;
+    }
+    if (node == nullptr && keys.size() == size) {
+      result = std::move(keys);
+    }
+  }
+  Py_END_CRITICAL_SECTION();
+  return result;
+}
+
+#else
+static std::optional<std::vector<py::object>> ordered_dict_keys(
+    py::handle value) {
+  TORCH_CHECK(false, "Python 3.16+ OrderedDict snapshots are not supported");
+}
+#endif
+
+// Order records dense storage indices in linked order, independent of key IDs.
+// Replay this leaf on tag-cache hits: move_to_end does not change dict tags.
+class ORDERED_DICT_ORDER_MATCH : public LeafGuard {
+ public:
+  ORDERED_DICT_ORDER_MATCH(
+      RootGuardManager* root_guard_manager,
+      std::vector<Py_ssize_t> order,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        _order(std::move(order)) {
+    std::vector<bool> seen(_order.size(), false);
+    for (const auto i : c10::irange(_order.size())) {
+      const auto index = _order[i];
+      TORCH_CHECK_VALUE(
+          index >= 0 && static_cast<size_t>(index) < _order.size() &&
+              !seen[index],
+          "OrderedDict order must be a permutation of its storage positions");
+      seen[index] = true;
+      _storage_order &= static_cast<size_t>(index) == i;
+    }
+  }
+
+  bool check_nopybind(PyObject* value) override {
+#if IS_PYTHON_3_16_PLUS
+    TORCH_CHECK(
+        false, "Python 3.16+ OrderedDict order guards are not supported");
+#else
+    if (!PyODict_Check(value)) {
+      return false;
+    }
+    // Cloned roots share this leaf; scratch space must be per-thread, not
+    // per-leaf. Grow before taking the lock so allocation failure cannot bypass
+    // its end.
+    static thread_local std::vector<PyObject*> keys;
+    if (!_storage_order && keys.size() < _order.size()) {
+      keys.resize(_order.size());
+    }
+    bool result;
+    // CPython 3.14.1+ protects OrderedDict mutations with this lock.
+    // Older free-threaded releases have upstream OrderedDict races.
+    // No Python callbacks run while the lock is held.
+    Py_BEGIN_CRITICAL_SECTION(value);
+    result = check_order(value, keys.data());
+    Py_END_CRITICAL_SECTION();
+    return result;
+#endif
+  }
+
+ private:
+#if !IS_PYTHON_3_16_PLUS
+  bool check_order(PyObject* value, PyObject** keys) const {
+    if (PyDict_GET_SIZE(value) != static_cast<Py_ssize_t>(_order.size())) {
+      return false;
+    }
+    auto* node = reinterpret_cast<OrderedDictObjectPrefix*>(value)->first;
+    PyObject *key = nullptr, *item = nullptr;
+    Py_ssize_t pos = 0;
+    if (_storage_order) {
+      while (PyDict_Next(value, &pos, &key, &item)) {
+        if (node == nullptr || node->key != key) {
+          return false;
+        }
+        node = node->next;
+      }
+    } else {
+      size_t index = 0;
+      while (PyDict_Next(value, &pos, &key, &item)) {
+        keys[index++] = key;
+      }
+      for (const auto index : _order) {
+        if (node == nullptr || node->key != keys[index]) {
+          return false;
+        }
+        node = node->next;
+      }
+    }
+    return node == nullptr;
+  }
+
+#endif
+
+  std::vector<Py_ssize_t> _order;
+  bool _storage_order = true;
+};
+
 class TYPE_MATCH : public LeafGuard {
  public:
   // type_id = id(type(obj))
@@ -2149,6 +2286,30 @@ class NONE_MATCH : public LeafGuard {
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return Py_IsNone(value);
   }
+};
+
+// Checks whether a tensor is a C++ fake. TENSOR_MATCH ignores the Fake key, so
+// that guards built from C++ fakes match real tensors.
+class FAKE_TENSOR_MATCH : public LeafGuard {
+ public:
+  FAKE_TENSOR_MATCH(
+      RootGuardManager* root_guard_manager,
+      bool expected,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        _expected(expected) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return THPVariable_Check(value) &&
+        THPVariable_Unpack(value).is_fake() == _expected;
+  }
+
+ private:
+  bool _expected;
 };
 
 class TRUE_MATCH : public LeafGuard {
@@ -3355,6 +3516,11 @@ bool is_recording_dict_pointers(RootGuardManager* root);
 void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer);
 void record_tensor_pointer(RootGuardManager* root, PyObject* tensor_pointer);
 void record_tensor_metadata(RootGuardManager* root, PyObject* tensor_pointer);
+using RecordedDictTagGuard = std::pair<std::shared_ptr<LeafGuard>, PyObject*>;
+void record_dict_tag_guard(
+    RootGuardManager* root,
+    const std::shared_ptr<LeafGuard>& guard,
+    PyObject* dictionary);
 
 GuardManager* clone_guard_manager(
     GuardManager* from,
@@ -3702,6 +3868,12 @@ class GuardManager {
     _tensor_metadata_pointers[value] = std::move(tensor_metadata);
   }
 
+  void stash_dict_tag_guards(
+      PyObject* value,
+      std::vector<RecordedDictTagGuard>&& guards) {
+    _dict_tag_guards[value] = std::move(guards);
+  }
+
   void disable_recursive_dict_tag_optimization() {
     dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
       disable_recursive_dict_tag_optimization(map);
@@ -3734,6 +3906,9 @@ class GuardManager {
       const py::function& clone_filter_fn) {
     for (const auto& guard : _leaf_guards) {
       cloned_mgr->_leaf_guards.emplace_back(guard);
+      if (std::dynamic_pointer_cast<ORDERED_DICT_ORDER_MATCH>(guard)) {
+        cloned_mgr->add_dict_tag_replay_guard(guard);
+      }
       if (std::shared_ptr<RelationalGuard> relational_guard =
               std::dynamic_pointer_cast<RelationalGuard>(guard)) {
         // Cloned roots do not own the dedicated NO_TENSOR_ALIASING replay
@@ -3892,6 +4067,18 @@ class GuardManager {
     return true;
   }
 
+  bool check_dict_tag_guards_fast(PyObject* value) {
+    auto it = _dict_tag_guards.find(value);
+    if (it != _dict_tag_guards.end()) {
+      for (auto& [guard, dictionary] : it->second) {
+        if (!guard->check_nopybind(dictionary)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   virtual bool check_nopybind(PyObject* value) {
     // -----------------------------------------------------------------------------
     // Recursive Dict‑Tag Matching
@@ -3964,7 +4151,8 @@ class GuardManager {
             std::optional<bool> no_tensor_aliasing_result =
                 check_no_tensor_aliasing_guards_fast(value);
             if (no_tensor_aliasing_result.has_value()) {
-              if (*no_tensor_aliasing_result) {
+              if (*no_tensor_aliasing_result &&
+                  check_dict_tag_guards_fast(value)) {
                 return true;
               }
               _disable_dict_tag_matching = true;
@@ -3992,6 +4180,11 @@ class GuardManager {
           record_dict_pointer(_root, value);
         } else if (_has_no_tensor_aliasing_guard) {
           record_tensor_pointer(_root, value);
+        }
+        // Dict tags do not capture linked order. Replay these leaves on tag
+        // hits.
+        for (const auto& guard : _dict_tag_replay_guards) {
+          record_dict_tag_guard(_root, guard, value);
         }
         // Tensor metadata can mutate in-place without changing dict tags.
         if (_is_immutable && THPVariable_Check(value)) {
@@ -4359,8 +4552,21 @@ class GuardManager {
   }
 
  protected:
+  void add_dict_tag_replay_guard(const std::shared_ptr<LeafGuard>& guard) {
+#if defined(Py_GIL_DISABLED) || !IS_PYTHON_3_12_PLUS
+    // Replay requires live watched dictionaries and the GIL. Python 3.11 has
+    // no watchers; a replacement can free the cached borrowed pointer.
+    _has_unoptimized_relational_guard = true;
+#else
+    _dict_tag_replay_guards.push_back(guard);
+#endif
+  }
+
   void record_leaf_guard_properties(
       const std::shared_ptr<LeafGuard>& leaf_guard) {
+    if (std::dynamic_pointer_cast<ORDERED_DICT_ORDER_MATCH>(leaf_guard)) {
+      add_dict_tag_replay_guard(leaf_guard);
+    }
     std::shared_ptr<RelationalGuard> relational_guard =
         std::dynamic_pointer_cast<RelationalGuard>(leaf_guard);
     if (relational_guard == nullptr) {
@@ -4434,6 +4640,11 @@ class GuardManager {
   std::unordered_map<PyObject*, std::vector<RecordedTensorMetadata>>
       _tensor_metadata_pointers;
   std::vector<WeakEntry> _tag_safe_entries;
+  std::vector<std::shared_ptr<LeafGuard>> _dict_tag_replay_guards;
+  // Ownership paths and watched dictionary tags protect these borrowed
+  // pointers.
+  std::unordered_map<PyObject*, std::vector<RecordedDictTagGuard>>
+      _dict_tag_guards;
 
   // 3.12+ related helper
   bool _dict_callback_installed = false;
@@ -4726,6 +4937,7 @@ class RootGuardManager : public GuardManager {
     _recorded_dict_pointers.clear();
     _recorded_tensor_pointers.clear();
     _recorded_tensor_metadata.clear();
+    _recorded_dict_tag_guards.clear();
   }
 
   void stop_recording_dict_pointers(PyObject* value, bool result) {
@@ -4737,6 +4949,8 @@ class RootGuardManager : public GuardManager {
           value, _recorded_tensor_pointers);
       _current_tag_safe_root->stash_tensor_metadata(
           value, std::move(_recorded_tensor_metadata));
+      _current_tag_safe_root->stash_dict_tag_guards(
+          value, std::move(_recorded_dict_tag_guards));
     }
     reset_dict_tag_recording_variables();
   }
@@ -4764,6 +4978,12 @@ class RootGuardManager : public GuardManager {
             tensor,
             coor_device_index_is_current(_compile_on_one_rank, tensor)),
     });
+  }
+
+  void record_dict_tag_guard(
+      const std::shared_ptr<LeafGuard>& guard,
+      PyObject* dictionary) {
+    _recorded_dict_tag_guards.emplace_back(guard, dictionary);
   }
 
   // Whether this graph was traced with compile_on_one_rank. Set from Python
@@ -4831,6 +5051,7 @@ class RootGuardManager : public GuardManager {
   GuardManager* _current_tag_safe_root{nullptr};
   std::vector<std::pair<PyObject*, uint64_t>> _recorded_dict_pointers;
   std::vector<py::weakref> _recorded_tensor_pointers;
+  std::vector<RecordedDictTagGuard> _recorded_dict_tag_guards;
   std::vector<RecordedTensorMetadata> _recorded_tensor_metadata;
 };
 
@@ -4902,11 +5123,6 @@ class DictGuardManager : public GuardManager {
       return false;
     }
 
-    // Early return
-    if (_size == 0) {
-      return true;
-    }
-
     // Invokes the base class's check_nopybind method. We permit a limited set
     // of leaf guards and accessors within the DictGuardManager framework.
     // Integrating certain guards or accessors directly within the
@@ -4958,11 +5174,6 @@ class DictGuardManager : public GuardManager {
     if (PyDict_Size(obj) != _size) {
       return GuardDebugInfo(
           false, "len(" + get_source() + ") != " + std::to_string(_size), 0);
-    }
-
-    // Early return
-    if (_size == 0) {
-      return GuardDebugInfo(true, 0);
     }
 
     // Invokes the base class's check_nopybind method. We permit a limited set
@@ -5283,6 +5494,13 @@ void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer) {
 
 void record_tensor_pointer(RootGuardManager* root, PyObject* tensor_pointer) {
   root->record_tensor_pointer(tensor_pointer);
+}
+
+void record_dict_tag_guard(
+    RootGuardManager* root,
+    const std::shared_ptr<LeafGuard>& guard,
+    PyObject* dictionary) {
+  root->record_dict_tag_guard(guard, dictionary);
 }
 
 void record_tensor_metadata(RootGuardManager* root, PyObject* tensor_pointer) {
@@ -7931,6 +8149,18 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "LAMBDA_GUARD")
       .def(py::init<RootGuardManager*, py::function, py::list, py::object>())
       .def("__call__", &LAMBDA_GUARD::check);
+  py::class_<
+      ORDERED_DICT_ORDER_MATCH,
+      LeafGuard,
+      std::shared_ptr<ORDERED_DICT_ORDER_MATCH>>(
+      py_m, "ORDERED_DICT_ORDER_MATCH")
+      .def(py::init<
+           RootGuardManager*,
+           std::vector<Py_ssize_t>,
+           py::list,
+           py::object>())
+      .def("__call__", &ORDERED_DICT_ORDER_MATCH::check);
+  py_m.def("ordered_dict_keys", ordered_dict_keys);
   py::class_<TYPE_MATCH, LeafGuard, std::shared_ptr<TYPE_MATCH>>(
       py_m, "TYPE_MATCH")
       .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
@@ -8340,6 +8570,19 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(user_stack)));
           })
       .def(
+          "add_fake_tensor_match_guard",
+          [](GuardManager& self,
+             bool expected,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("FAKE_TENSOR_MATCH");
+            self.add_leaf_guard(std::make_shared<FAKE_TENSOR_MATCH>(
+                self.get_root(),
+                expected,
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
+          })
+      .def(
           "add_true_match_guard",
           [](GuardManager& self,
              py::object verbose_code_parts,
@@ -8384,6 +8627,19 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_leaf_guard(std::make_shared<LENGTH_CHECK>(
                 self.get_root(),
                 std::move(value),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
+          })
+      .def(
+          "add_ordered_dict_order_guard",
+          [](GuardManager& self,
+             std::vector<Py_ssize_t> order,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("ORDERED_DICT_ORDER_MATCH");
+            self.add_leaf_guard(std::make_shared<ORDERED_DICT_ORDER_MATCH>(
+                self.get_root(),
+                std::move(order),
                 std::move(verbose_code_parts),
                 std::move(user_stack)));
           })
@@ -9125,6 +9381,20 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("add_type_match_guard", &DictGuardManager::skip_adding_guard)
       .def("add_dict_length_check_guard", &DictGuardManager::skip_adding_guard)
       // Permitted leaf guards
+      .def(
+          "add_ordered_dict_order_guard",
+          [](DictGuardManager& self,
+             std::vector<Py_ssize_t> order,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("ORDERED_DICT_ORDER_MATCH");
+            self.add_permitted_leaf_guard(
+                std::make_shared<ORDERED_DICT_ORDER_MATCH>(
+                    self.get_root(),
+                    std::move(order),
+                    std::move(verbose_code_parts),
+                    std::move(user_stack)));
+          })
       .def(
           "add_dict_contains_guard",
           [](DictGuardManager& self,
