@@ -247,9 +247,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x, left, right), x + 8)
         self.assertEqual(counter.frame_count, 2)
 
-    def test_mro_guards_omit_builtin_object_tail(self):
-        class Input:
+    def test_mro_guards_pin_builtin_object_tail(self):
+        class Base:
             scale = 1
+
+        class Input(Base):
+            pass
 
         def fn(x, obj):
             return x + obj.scale
@@ -257,15 +260,63 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x, obj = torch.ones(1), Input()
         explanation = torch._dynamo.explain(fn)(x, obj)
         self.assertEqual(explanation.graph_count, 1)
-        self.assertFalse(
-            any(
-                guard.create_fn_name() == "ID_MATCH"
-                and guard.name == "type(L['obj']).__mro__[1]"
-                for guard in explanation.out_guards
-            )
-        )
+        guards = {
+            (guard.create_fn_name(), guard.name) for guard in explanation.out_guards
+        }
+        self.assertIn(("SEQUENCE_LENGTH", "type(L['obj']).__mro__"), guards)
+        self.assertIn(("ID_MATCH", "type(L['obj']).__mro__[1]"), guards)
+        self.assertIn(("ID_MATCH", "type(L['obj']).__mro__[2]"), guards)
 
-    def test_mro_guards_bypass_metaclass_lookup(self):
+    @parametrize("initial_builtin", [False, True])
+    def test_shared_mro_owner_non_object_tail(self, initial_builtin):
+        class Tail:
+            def f(self, x):
+                return x + 1
+
+        class OtherTail:
+            def f(self, x):
+                return x + 2
+
+            def __format__(self, spec):
+                return "changed"
+
+        tail = object if initial_builtin else Tail
+
+        class Meta(type):
+            def mro(cls):
+                return [cls, tail] if initial_builtin else [cls, object, tail]
+
+        class LeftBase(metaclass=Meta):
+            pass
+
+        class RightBase(metaclass=Meta):
+            pass
+
+        class Left:
+            pass
+
+        class Right:
+            pass
+
+        left, right = (Left, Right) if initial_builtin else (Left(), Right())
+        Left.__bases__ = (LeftBase,)
+        Right.__bases__ = (RightBase,)
+
+        def fn(x, left, right):
+            if initial_builtin:
+                return x + (left.__format__ is right.__format__)
+            return left.f(x) + right.f(x)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x, left, right), fn(x, left, right))
+        tail = OtherTail
+        RightBase.__bases__ = (object,)
+        self.assertEqual(compiled(x, left, right), fn(x, left, right))
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_mro_guards_custom_metaclass_fallback(self):
         class Meta(type):
             def __getattribute__(cls, name):
                 if name == "__mro__":
@@ -281,9 +332,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + obj.scale
 
         obj, x = Input(), torch.ones(1)
-        self.assertEqual(
-            torch.compile(fn, backend="eager", fullgraph=True)(x, obj), x + 3
-        )
+        with self.assertRaisesRegex(Unsupported, "Custom metaclass metadata access"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, obj)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, obj), x + 3)
 
     @parametrize("suppressed", ["context", "source"])
     @parametrize("change", ["bases", "shadow"])

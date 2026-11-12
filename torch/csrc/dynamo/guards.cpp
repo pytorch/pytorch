@@ -2058,10 +2058,12 @@ struct OrderedDictObjectPrefix {
 };
 
 static std::optional<std::vector<py::object>> ordered_dict_keys(
-    py::handle value) {
+    py::handle value,
+    bool empty_only) {
   TORCH_CHECK_TYPE(PyODict_Check(value.ptr()), "expected an OrderedDict");
   std::optional<std::vector<py::object>> result;
-  const auto size = static_cast<size_t>(PyDict_Size(value.ptr()));
+  const auto size =
+      empty_only ? 0 : static_cast<size_t>(PyDict_Size(value.ptr()));
   std::vector<py::object> keys;
   // Allocate outside the critical section: an exception must not bypass its
   // end.
@@ -2083,7 +2085,8 @@ static std::optional<std::vector<py::object>> ordered_dict_keys(
 
 #else
 static std::optional<std::vector<py::object>> ordered_dict_keys(
-    py::handle value) {
+    py::handle value,
+    bool) {
   TORCH_CHECK(false, "Python 3.16+ OrderedDict snapshots are not supported");
 }
 #endif
@@ -8160,7 +8163,12 @@ PyObject* torch_c_dynamo_guards_init() {
            py::list,
            py::object>())
       .def("__call__", &ORDERED_DICT_ORDER_MATCH::check);
-  py_m.def("ordered_dict_keys", ordered_dict_keys);
+  py_m.def(
+      "ordered_dict_keys",
+      ordered_dict_keys,
+      py::arg("value"),
+      py::kw_only(),
+      py::arg("empty_only") = false);
   py::class_<TYPE_MATCH, LeafGuard, std::shared_ptr<TYPE_MATCH>>(
       py_m, "TYPE_MATCH")
       .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
