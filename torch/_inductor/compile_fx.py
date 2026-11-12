@@ -435,16 +435,27 @@ def record_original_output_strides(gm: GraphModule) -> None:
     output_node.meta["original_output_strides"] = output_strides
 
 
-def get_storage_aliases(gm: GraphModule) -> UserVisibleAliases:
+def get_storage_aliases(gm: GraphModule) -> UserVisibleAliases | None:
     output = output_node(gm)
     inputs = list(gm.graph.find_nodes(op="placeholder"))
     outputs = pytree.arg_tree_leaves(*output.args)
+    # Only Dynamo's example_value shares storages exactly as in eager. A graph that is
+    # already functionalized, like the one torch.compiler.precompile passes in, only
+    # has val, which can drop aliases:
+    #
+    #   def f(x): return x.detach()
+    #   # graph: alias = aten.alias(flat_1); return [alias]
+    #   # flat_1 and alias have different val storages
+    #
+    # Recording that would make Inductor copy the output, which aliases x in eager.
+    nodes = [node for node in (*inputs, *outputs) if isinstance(node, torch.fx.Node)]
+    if not all("example_value" in node.meta for node in nodes):
+        return None
 
     def storage(node: Any) -> int | None:
         if not isinstance(node, torch.fx.Node):
             return None
-        # Dynamo sets example_value; graphs from other tracers only have val
-        val = node.meta.get("example_value", node.meta.get("val"))
+        val = node.meta["example_value"]
         if not isinstance(val, torch.Tensor) or not torch._C._has_storage(val):
             return None
         return get_storage(val)
@@ -471,16 +482,30 @@ def get_storage_aliases(gm: GraphModule) -> UserVisibleAliases:
     return UserVisibleAliases(tuple(input_output_aliases), tuple(output_output_aliases))
 
 
-def _may_alias_user_visible_output(gm: GraphModule) -> bool:
-    # Conservative check for the kernel-free path; GraphLowering repairs new aliases.
+def _has_new_user_visible_alias(gm: GraphModule) -> bool:
+    # The kernel-free path returns the FX graph as is and skips the repair in
+    # GraphLowering. Without kernels, an output aliases an input only by being its
+    # placeholder, and another output only by being the same node:
+    #
+    #   def f(x): return x + 0    # after joint graph passes:  return (arg0_1,)
+    #   def f(x): return x        # Dynamo + AOT:              return (arg0_1,)
+    #
+    # Both graphs return the input, but only the second aliases it in eager, so
+    # only the first has to go through GraphLowering to get a copy.
     output = output_node(gm)
     aliases = output.meta.get("original_user_visible_aliases")
     if aliases is None:
         return False
     outputs = pytree.arg_tree_leaves(*output.args)
-    visible = [outputs[idx] for idx in aliases.visible_outputs]
-    has_placeholder = any(node.op == "placeholder" for node in visible)
-    return has_placeholder or len(OrderedSet(visible)) < len(visible)
+    inputs = {n: i for i, n in enumerate(gm.graph.find_nodes(op="placeholder"))}
+    visible = aliases.visible_outputs
+    return any(
+        outputs[j] in inputs and (inputs[outputs[j]], j) not in aliases.input_output
+        for j in visible
+    ) or any(
+        outputs[i] is outputs[j] and (i, j) not in aliases.output_output
+        for i, j in itertools.combinations(visible, 2)
+    )
 
 
 def _recursive_record_original_output_strides(gm: GraphModule) -> None:
@@ -1189,7 +1214,7 @@ def _compile_fx_inner(
 
     if (
         dynamo_utils.count_calls(gm.graph) == 0
-        and not _may_alias_user_visible_output(gm)
+        and not _has_new_user_visible_alias(gm)
         and not aot_mode
         and not torch._functorch.config.bundled_autograd_cache
     ):

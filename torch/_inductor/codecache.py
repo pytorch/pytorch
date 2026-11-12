@@ -1615,9 +1615,10 @@ class FxGraphHashDetails:
         )
         # Lives in node meta and can't be recovered from the graph: `return y, y[:]`
         # and `return y, y + 0` look the same after joint graph passes.
+        output_nodes = gm.graph.find_nodes(op="output") if gm is not None else []
         self.original_user_visible_aliases = (
-            gm.graph.output_node().meta.get("original_user_visible_aliases")
-            if gm is not None
+            output_nodes[0].meta.get("original_user_visible_aliases")
+            if output_nodes
             else None
         )
 
