@@ -32,7 +32,7 @@ CUDA_STABLE = "13.2"
 # wheels are on the download.pytorch.org index.
 CUDA_ARCHES_FULL_VERSION = {
     "13.2": "13.2.2",
-    "13.4": "13.4.1",
+    "13.4": "13.4.3",
 }
 # CUDA versions that can only produce the runtime docker image. The devel image
 # apt-installs cuda-toolkit-<major>-<minor> from NVIDIA's repo.
@@ -72,7 +72,9 @@ CUDA_AARCH64_ARCHES = [
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "13.2": {
         "linux": (
-            "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.2; platform_system == 'Linux' | "
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusparse,cufile,nvjitlink,nvtx]==13.2.2; platform_system == 'Linux' | "
+            "nvidia-cublas==13.4.3.11; platform_system == 'Linux' | "
+            "nvidia-cusolver==12.2.0.11; platform_system == 'Linux' | "
             "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
             "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
             "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Linux' | "
@@ -88,7 +90,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     },
     "13.4": {
         "linux": (
-            "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusparse,cufile,nvjitlink,nvtx]==13.4.1; platform_system == 'Linux' | "
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusparse,cufile,nvjitlink,nvtx]==13.4.3; platform_system == 'Linux' | "
             "nvidia-cublas>=13.7.0.27,<=13.8.1.7; platform_system == 'Linux' | "
             "nvidia-cusolver==12.3.2.15; platform_system == 'Linux' | "
             "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
@@ -99,7 +101,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
             "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
         ),
         "windows": (
-            "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.2; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.3; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "cuda-pathfinder>=1.8.5; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Windows' and platform_machine == 'AMD64'"
