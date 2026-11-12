@@ -87,4 +87,10 @@ struct C10_API FakeTensorMode {
       constant_storage_mapping_;
 };
 
+// Indirection shared by fakes and saved dispatch state. Python ownership
+// will be attached here without changing their storage types again.
+struct C10_API FakeTensorModeHandle {
+  std::shared_ptr<FakeTensorMode> mode;
+};
+
 } // namespace c10

@@ -42,6 +42,7 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_mps import mps_ops_modifier
 from torch.testing._internal.common_utils import (
+    decorateIf,
     gradcheck,
     HardwareClassification,
     is_iterable_of_tensors,
@@ -295,6 +296,7 @@ class TestUnaryUfuncs(TestCase):
     @suppress_warnings
     @ops(reference_filtered_ops)
     @slowTestIf(IS_WINDOWS)
+    @decorateIf(unittest.skip("bool has no small values"), lambda p: p["dtype"] is torch.bool)
     def test_reference_numerics_small(self, device, dtype, op):
         if dtype == torch.bool:
             raise self.skipTest("bool has no small values")
@@ -307,6 +309,10 @@ class TestUnaryUfuncs(TestCase):
     @suppress_warnings
     @ops(reference_filtered_ops)
     @slowTestIf(IS_WINDOWS)
+    @decorateIf(
+        unittest.skip("bool, uint8, and int8 dtypes have no large values"),
+        lambda p: p["dtype"] in (torch.bool, torch.uint8, torch.int8),
+    )
     def test_reference_numerics_large(self, device, dtype, op):
         if dtype in (torch.bool, torch.uint8, torch.int8):
             raise self.skipTest("bool, uint8, and int8 dtypes have no large values")

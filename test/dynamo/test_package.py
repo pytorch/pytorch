@@ -46,6 +46,7 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTenso
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    decorateIf,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -53,6 +54,18 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
 )
 from torch.utils._triton import has_triton
+
+
+_requires_triton_for_inductor = decorateIf(
+    unittest.skip("Requires Triton"),
+    lambda params: params["device"] != "cpu"
+    and params["backend"] == "inductor"
+    and (not has_triton()),
+)
+_requires_triton_for_accelerator = decorateIf(
+    unittest.skip("Requires Triton"),
+    lambda params: params["device"] != "cpu" and (not has_triton()),
+)
 
 
 def import_from_path(module_name, file_path):
@@ -1934,6 +1947,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         torch._dynamo.reset()
         PrecompileContext.clear()
 
+    @_requires_triton_for_inductor
     @parametrize("backend", ("eager", "inductor"))
     def test_basic_fn(self, device, backend):
         if device != "cpu" and backend == "inductor" and not has_triton():
@@ -1974,6 +1988,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             package.install(backends)
             self.assertEqual(expected, compiled_fn(*args))
 
+    @_requires_triton_for_inductor
     @parametrize("backend", ("eager", "inductor"))
     def test_lazy_backward(self, device, backend):
         if device != "cpu" and backend == "inductor" and not has_triton():
@@ -2017,6 +2032,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             package.install(backends)
             self.assertEqual(expected, compiled_fn(*args))
 
+    @_requires_triton_for_accelerator
     def test_install_survives_a_cold_bundled_autotune_cache(self, device):
         # AutotuneCacheBundler keeps one bundle per compile context, left open
         # on a remote-cache miss, and install() post-compiles both of the
@@ -2063,6 +2079,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
                 for x in args:
                     self.assertEqual(compiled_fn(x), fn(x))
 
+    @_requires_triton_for_inductor
     @parametrize("backend", ("eager", "inductor"))
     def test_graph_break_bomb(self, device, backend):
         if device != "cpu" and backend == "inductor" and not has_triton():
@@ -2123,6 +2140,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(torch.tensor(N), 0, N - 1)
 
+    @_requires_triton_for_inductor
     @parametrize("backend", ("eager", "inductor"))
     def test_dynamic_shape(self, device, backend):
         if device != "cpu" and backend == "inductor" and not has_triton():
@@ -2169,6 +2187,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(*args2)
 
+    @_requires_triton_for_accelerator
     def test_dynamo_cache_manual_load(self, device):
         if device != "cpu" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
@@ -2202,6 +2221,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             self.assertEqual(expected, [result1, result2])
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @_requires_triton_for_accelerator
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_serialize(self, device):
         if device != "cpu" and not has_triton():
@@ -2233,6 +2253,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             self.assertEqual(expected, [result1, result2])
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @_requires_triton_for_accelerator
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_import_source_guard(self, device):
         if device != "cpu" and not has_triton():
@@ -2261,6 +2282,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             self.assertEqual(result, expected)
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @_requires_triton_for_accelerator
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_recompiles(self, device):
         if device != "cpu" and not has_triton():
@@ -2291,6 +2313,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         self.assertEqual(result2, expected2)
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @_requires_triton_for_accelerator
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO or IS_LINUX,
         "https://github.com/pytorch/pytorch/issues/183810",
@@ -2338,6 +2361,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             # Should have same number of frames as on cold start
             self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @_requires_triton_for_accelerator
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/184832")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_lazy_backward(self, device):
@@ -2365,6 +2389,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
 
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @_requires_triton_for_accelerator
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_graph_break_partial_backend(self, device):
         if device != "cpu" and not has_triton():
@@ -2409,6 +2434,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         # One recompile on a new frame, so total_frames should increase by 1
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames + 1)
 
+    @_requires_triton_for_accelerator
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_call_function_from_resume(self, device):
         if device != "cpu" and not has_triton():
@@ -2434,6 +2460,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
 
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @_requires_triton_for_accelerator
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_code_with_generator(self, device):
         if device != "cpu" and not has_triton():
@@ -2452,6 +2479,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         compiled_fn(*args)
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
+    @_requires_triton_for_accelerator
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_graph_breaks_from_print_model_as_fn(self, device):
         if device != "cpu" and not has_triton():
@@ -2498,6 +2526,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             compiled_fn(x)
             self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @_requires_triton_for_accelerator
     @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self, device):
         if device != "cpu" and not has_triton():
@@ -2517,6 +2546,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         x = torch.randn(10, 10, device=device)
         compiled_fn(x)
 
+    @_requires_triton_for_accelerator
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_classmethod_qualname(self, device):
         if device != "cpu" and not has_triton():
