@@ -3338,6 +3338,96 @@ def forward(self, x_1, y_1):
         self.assertEqual(ep.module()(x), expected)
         self.assertEqual(ep.run_decompositions().module()(x), expected)
 
+    def test_wrap_cutedsl_dynamo_graph_breaks(self):
+        # Dynamo does not capture a call of a wrapper, of a subclass too, one that
+        # overrides __call__ included: it graph-breaks at the call, with a CuTeDSL
+        # graph break type and the kernel named, not on whatever it skips inside
+        # __call__. torch.compile(fullgraph=True) and strict export refuse the call.
+        # Without fullgraph the call runs outside the graph, on the wrapper rebuilt
+        # from its source, and Dynamo resumes after it: the relu that follows is
+        # compiled, also where the call comes first. The wrapper is guarded by type
+        # and by the host function it wraps, so another wrapper of add_kernel reuses
+        # the compiled code, one of another kernel recompiles it, and a branch on
+        # w.kernel is right for both: every @cute.jit host function has the same
+        # __code__, which is all that Dynamo would guard on for a read of w.kernel.
+        # Any other use of the wrapper is traced as for any object.
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        gb_type = "CuTeDSL kernel wrapper not supported"
+
+        class Keeps(TraceableCuteDSLKernelWrapper):
+            pass
+
+        class Doubling(TraceableCuteDSLKernelWrapper):
+            def __call__(self, x, y, out, n):
+                super().__call__(x, y, out, n)
+                out.mul_(2)
+
+        def launch(w, x, y):
+            out = torch.empty_like(x)
+            w(x, y, out, x.numel())
+            return out.relu()
+
+        def launch_first(x, y, out):
+            add_w(x, y, out, x.numel())
+            return out.relu()
+
+        def read_and_write(w, x):
+            w.calls = 1
+            return x + len(w.mutates_args) + w.calls
+
+        def branch_on_kernel(w, x):
+            return x + (1 if w.kernel is add_kernel else 2)
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return launch(add_w, x, y)
+
+        def relu_compiled(backend):
+            nodes = (n for gm in backend.graphs for n in gm.graph.nodes)
+            return any(n.target == "relu" for n in nodes)
+
+        x, y = _rand(1000), _rand(1000)
+        torch._dynamo.reset()
+        for w in (add_w, Keeps(add_kernel, ["mOut"]), Doubling(add_kernel, ["mOut"])):
+            with self.subTest(wrapper=type(w).__name__):
+                with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+                    torch.compile(launch, backend="eager", fullgraph=True)(w, x, y)
+                self.assertEqual(cm.exception.gb_type, gb_type)
+                message = str(cm.exception)
+                self.assertIn("CuTeDSL kernel add_kernel: Dynamo does not", message)
+                self.assertIn("use make_fx or non-strict torch.export", message)
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(launch, backend=backend)
+        self.assertEqual(compiled(add_w, x, y), (x + y).relu())
+        reasons = list(torch._dynamo.utils.counters["graph_break"])
+        self.assertTrue(any(r.startswith(gb_type) for r in reasons), reasons)
+        self.assertTrue(relu_compiled(backend))
+        other_add_w = wrap_cutedsl(add_kernel, mutates_args=["mOut"])
+        self.assertEqual(compiled(other_add_w, x, y), (x + y).relu())
+        self.assertEqual(len(_debug_get_cache_entry_list(launch.__code__)), 1)
+        self.assertEqual(compiled(same_name_sub_w, x, y), (x - y).relu())
+        self.assertEqual(len(_debug_get_cache_entry_list(launch.__code__)), 2)
+        compiled = torch.compile(branch_on_kernel, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(add_w, x), x + 1)
+        self.assertEqual(compiled(same_name_sub_w, x), x + 2)
+        backend = EagerAndRecordGraphs()
+        out = torch.empty_like(x)
+        compiled = torch.compile(launch_first, backend=backend)
+        self.assertEqual(compiled(x, y, out), (x + y).relu())
+        self.assertTrue(relu_compiled(backend))
+        w = wrap_cutedsl(add_kernel, mutates_args=["mOut"])
+        compiled = torch.compile(read_and_write, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(w, x), x + 2)
+        self.assertEqual(w.calls, 1)
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as cm:
+            torch.export.export(M(), (x, y), strict=True)
+        self.assertEqual(cm.exception.gb_type, gb_type)
+
     def test_wrap_cutedsl_compiles_under_compile_lock(self):
         # CuTeDSL's preprocessor and library init are not thread-safe: every
         # in-process cute.compile holds CUTEDSL_COMPILE_LOCK.
