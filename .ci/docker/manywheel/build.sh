@@ -29,6 +29,7 @@ MANY_LINUX_VERSION=${MANY_LINUX_VERSION:-}
 DOCKERFILE_SUFFIX=${DOCKERFILE_SUFFIX:-}
 OPENBLAS_VERSION=${OPENBLAS_VERSION:-}
 ACL_VERSION=${ACL_VERSION:-}
+DOCKER_GPU_BUILD_ARGS=()
 
 case ${image} in
     manylinux2_28-builder:cpu)
@@ -38,7 +39,7 @@ case ${image} in
         MANY_LINUX_VERSION="2_28"
         ;;
     manylinux2_28_aarch64-builder:cpu-aarch64)
-        TARGET=final
+        TARGET=cpu_final
         GPU_IMAGE=arm64v8/almalinux:8
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=13"
         MANY_LINUX_VERSION="2_28_aarch64"
@@ -71,8 +72,7 @@ case ${image} in
         TARGET=cuda_final
         GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=13"
-        MANY_LINUX_VERSION="aarch64"
-        DOCKERFILE_SUFFIX="_cuda_aarch64"
+        MANY_LINUX_VERSION="2_28_aarch64"
         ;;
     manylinux2_28-builder:rocm*)
         MANY_LINUX_VERSION="2_28"
@@ -80,12 +80,21 @@ case ${image} in
         PYTORCH_ROCM_ARCH="gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx1150;gfx1151;gfx1250"
         TARGET=rocm_final
         GPU_IMAGE=amd64/almalinux:8
-        if [[ "${GPU_ARCH_VERSION}" == "7.14" ]]; then
-            THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
+        ROCM_VERSION="${GPU_ARCH_VERSION}"
+        if [[ "${DOCKER_TAG_PREFIX}" == "rocm-preview" ]]; then
+            THEROCK_INDEX_URL="https://nightly.repo.amd.com/rocm/core/whl-next/"
+            ROCM_VERSION=$(tr -d '[:space:]' < "${TOPDIR}/.ci/docker/ci_commit_pins/rocm-preview.txt")
+            DOCKER_GPU_BUILD_ARG=""
+            DOCKER_GPU_BUILD_ARGS=(
+                --build-arg "ROCM_VERSION=${ROCM_VERSION}"
+                --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}"
+                --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}"
+                --build-arg "THEROCK_INDEX_URL=${THEROCK_INDEX_URL}"
+            )
         else
             THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
+            DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION} --build-arg THEROCK_INDEX_URL=${THEROCK_INDEX_URL}"
         fi
-        DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${GPU_ARCH_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION} --build-arg THEROCK_INDEX_URL=${THEROCK_INDEX_URL}"
         ;;
     manylinux2_28-builder:xpu)
         TARGET=xpu_final
@@ -114,6 +123,7 @@ fi
 
 docker buildx build \
     ${DOCKER_GPU_BUILD_ARG} \
+    "${DOCKER_GPU_BUILD_ARGS[@]}" \
     --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
     --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
     --build-arg "ACL_VERSION=${ACL_VERSION:-}" \

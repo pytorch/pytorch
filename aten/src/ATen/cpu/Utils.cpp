@@ -164,7 +164,21 @@ std::unordered_map<std::string, c10::IValue> get_cpu_capabilities() {
   }
 #endif
 
-#endif // !defined(__s390x__) && !defined(__powerpc__)
+#elif defined(__s390x__)
+#if defined(_SC_LEVEL1_DCACHE_SIZE)
+  {
+    auto value = sysconf(_SC_LEVEL1_DCACHE_SIZE);
+    capabilities["l1d_cache_size"] = static_cast<int64_t>((value > 0) ? value : 0);
+  }
+#endif // !defined(_SC_LEVEL1_DCACHE_SIZE)
+
+#if defined(_SC_LEVEL2_CACHE_SIZE)
+  {
+    auto value = sysconf(_SC_LEVEL2_CACHE_SIZE);
+    capabilities["l2_cache_size"] = static_cast<int64_t>((value > 0) ? value : 0);
+  }
+#endif // !defined(_SC_LEVEL2_CACHE_SIZE)
+#endif // !defined(__powerpc__)
 
   return capabilities;
 }

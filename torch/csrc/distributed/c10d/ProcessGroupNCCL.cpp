@@ -131,16 +131,12 @@ ncclRedOpRAII getNcclReduceOp(
     switch (reduceOp) {
       case ReduceOp::BAND:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BAND with NCCL");
-        break;
       case ReduceOp::BOR:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with NCCL");
-        break;
       case ReduceOp::BXOR:
         C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BXOR with NCCL");
-        break;
       default:
         C10_THROW_ERROR(ValueError, "Unhandled ReduceOp");
-        break;
     }
   }
 }
@@ -1130,9 +1126,13 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
   bool useNb = useNonblocking();
   options_->config.blocking = useNb ? 0 : 1;
   auto comm = getNCCLComm(key);
-  if (comm == nullptr) {
-    LOG(ERROR) << logPrefix()
-               << "No parent communicator exists for nocolor split";
+  // Must match the parent-comm check in initNCCLComm: without a healthy parent
+  // comm, members create the child via a fresh init instead of ncclCommSplit,
+  // so there is no collective split to join.
+  if (comm == nullptr || comm->isAborted()) {
+    LOG(INFO) << logPrefix()
+              << "No healthy parent communicator, skipping nocolor split";
+    return;
   }
   NCCLComm::split(comm.get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
 }
@@ -1563,10 +1563,16 @@ void ProcessGroupNCCL::shutdown() {
   // Flush all collectives
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    // Since NCCL 2.31, ncclCommFinalize ends with a barrier among the comm's
+    // host-local ranks. Ranks can hold different comms (e.g. lazily created
+    // 2-rank P2P comms) and iterate this map in different orders, so finalize
+    // them in one group to let NCCL progress them concurrently.
+    C10D_NCCL_CHECK(ncclGroupStart(), std::nullopt);
     for (auto& it : devNCCLCommMap_) {
       auto& ncclComm = it.second;
       ncclComm->finalize();
     }
+    C10D_NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), std::nullopt);
   }
   // Wait for all operations to complete.  If NCCL comm is non-blocking and
   // timeout is reach, this will throw an exception.
@@ -1611,11 +1617,12 @@ void ProcessGroupNCCL::shutdown() {
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#if defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT) && !defined(USE_ROCM)
   // Drop our entry from each per-device NCCLDevCommManager. Skip aborted
   // comms -- a successor PG may have already re-registered under the same
   // group_uid (e.g. restart-after-error), and unconditionally clearing
   // would silently wipe the successor's entry.
+  // ROCm retires through the comm's pre-invalidate hook; see initNCCLComm.
   {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& [_, ncclComm] : devNCCLCommMap_) {
@@ -1999,7 +2006,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     debugLog.integers["global_rank"] = pg_->globalRank();
     debugLog.integers["world_size"] = pg_->getSize();
     debugLog.strings["flight_recorder_version"] = c10d::version_val_str;
-    for (int i = 0; i < 2; i++) {
+    for (const auto i : c10::irange(2)) {
       std::future<bool> asyncDebugDump =
           std::async(std::launch::async, [this, dumpStackTrace, onlyActive]() {
             return this->pg_->dumpDebuggingInfo(dumpStackTrace, onlyActive);
@@ -2388,6 +2395,7 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
 
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
+        desyncDebugger_.flush();
         LOG(ERROR) << c10::str(
             pg_->logPrefix(),
             " failure detected by watchdog at work sequence id: ",
@@ -2551,6 +2559,9 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
       heartbeat_++;
     }
     done = pg_->workMetaList_.empty();
+
+    lock.unlock();
+    desyncDebugger_.flush();
   }
 }
 
@@ -2583,6 +2594,8 @@ void ProcessGroupNCCL::DesyncDebugger::init(
 void ProcessGroupNCCL::DesyncDebugger::run() {
   if (!enabled_)
     return;
+  // Publish this rank's state before reading the report.
+  flush();
   auto logPrefix = c10::str("Rank ", rank_);
   ::c10d::C10dLoggingData log;
   log.integers["pg_id"] = pgId_;
@@ -2618,7 +2631,6 @@ void ProcessGroupNCCL::DesyncDebugger::run() {
   }
 }
 
-// Log work start to store.
 void ProcessGroupNCCL::DesyncDebugger::logWorkStart(WorkNCCL& work) {
   if (!enabled_)
     return;
@@ -2626,12 +2638,9 @@ void ProcessGroupNCCL::DesyncDebugger::logWorkStart(WorkNCCL& work) {
     return;
 
   work.startTraceUpdated_ = true;
-  // If not successful, disable the debugger
-  enabled_ = c10d::traceUpdate(
-      store_, traceKeyStart_, work.seq_, opTypeToString(work.opType_));
+  pendingStart_ = {work.seq_, opTypeToString(work.opType_)};
 }
 
-// Log work end to store.
 void ProcessGroupNCCL::DesyncDebugger::logWorkEnd(WorkNCCL& work) {
   if (!enabled_)
     return;
@@ -2641,9 +2650,21 @@ void ProcessGroupNCCL::DesyncDebugger::logWorkEnd(WorkNCCL& work) {
     logWorkStart(work);
   }
 
-  // If not successful, disable the debugger
-  enabled_ = c10d::traceUpdate(
-      store_, traceKeyEnd_, work.seq_, opTypeToString(work.opType_));
+  pendingEnd_ = {work.seq_, opTypeToString(work.opType_)};
+}
+
+void ProcessGroupNCCL::DesyncDebugger::flush() {
+  auto start = std::exchange(pendingStart_, std::nullopt);
+  auto end = std::exchange(pendingEnd_, std::nullopt);
+  if (enabled_ && start.has_value()) {
+    // If not successful, disable the debugger
+    enabled_ =
+        c10d::traceUpdate(store_, traceKeyStart_, start->first, start->second);
+  }
+  if (enabled_ && end.has_value()) {
+    // If not successful, disable the debugger
+    enabled_ = c10d::traceUpdate(store_, traceKeyEnd_, end->first, end->second);
+  }
 }
 
 // We want to have both PG ID and global unique ID (guid) for the logging
@@ -2978,7 +2999,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
       globalRankStride_, // globalRankStride_
       size_); // worldSize
 
-  for (size_t r = 0; r < ncclIDs.size(); r++) {
+  for (const auto r : c10::irange(ncclIDs.size())) {
     storeKeys.emplace_back("UniqueNCCLID:" + std::to_string(r));
   }
   // For non-root rank, rootIdx is set to -1.
@@ -3017,7 +3038,7 @@ void ProcessGroupNCCL::allgatherUniqueNCCLIDs(
             ". This may indicate a possible application crash on rank 0 or a network set up issue."));
   }
 
-  for (size_t r = 0; r < ncclIDs.size(); r++) {
+  for (const auto r : c10::irange(ncclIDs.size())) {
     TORCH_CHECK_WITH(
         DistBackendError,
         results[r].size() == NCCL_UNIQUE_ID_BYTES,
@@ -3317,11 +3338,37 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     // group name, avoiding dynamic_cast back to ProcessGroupNCCL.
     // Other producers (e.g. torchcomms' TorchCommNCCLX) populate the same
     // registry, giving symm_mem a uniform group_name -> ncclComm_t lookup
-    // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-    // (excludes ROCm) since the registry has no other consumer there.
-    // Unregistered in ~ProcessGroupNCCL.
-    c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
-        getGroupUid(), ncclComm->getNcclComm());
+    // regardless of backend. Gated on NCCL_HAS_SYMMEM_DEVICE_SUPPORT. Only the
+    // collective comm is published: a lazily created 2-rank send/recv comm
+    // would otherwise replace it under the same group uid. On CUDA,
+    // ~ProcessGroupNCCL unregisters it unless it was already aborted or
+    // destroyed.
+    if (!singleP2POp) {
+#ifdef USE_ROCM
+      // Register and install the retire hook as one step under the comm's own
+      // lock, which abort() and destroy() also take, so an invalidation cannot
+      // land in between. The pair is captured because abort() nulls the
+      // handle, and the generation tells our entry apart from a successor's at
+      // the same address.
+      NCCLComm::LockType commLock(ncclComm->mutex_);
+      if (!ncclComm->aborted_) {
+        auto& devCommManager =
+            c10d::symmetric_memory::NCCLDevCommManager::get(device);
+        ncclComm_t registeredComm = ncclComm->getNcclComm();
+        devCommManager.register_comm(getGroupUid(), registeredComm);
+        const uint64_t generation =
+            devCommManager.get_comm_generation(getGroupUid(), registeredComm);
+        ncclComm->preInvalidateHook_ =
+            [device, groupUid = getGroupUid(), registeredComm, generation]() {
+              c10d::symmetric_memory::NCCLDevCommManager::get(device)
+                  .unregister_comm(groupUid, registeredComm, generation);
+            };
+      }
+#else
+      c10d::symmetric_memory::NCCLDevCommManager::get(device).register_comm(
+          getGroupUid(), ncclComm->getNcclComm());
+#endif
+    }
 #endif
   }
 
@@ -5089,19 +5136,24 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
             at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
-          auto ncclFunc = ncclReduceScatter;
-#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 7)
-          // Work around single-rank reduce-scatter corruption (#168092).
-          // All-reduce is equivalent for one rank, including PreMulSum.
-          if (this->getSize() == 1) {
-            ncclFunc = ncclAllReduce;
-          }
-#endif
-
           const auto ncclDataType = getNcclDataType(input.scalar_type());
           const auto ncclReduceOp =
               getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-          return ncclFunc(
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 7)
+          // All-reduce avoids #168092 while preserving PreMulSum for one rank.
+          // Direct calls preserve lazy binding of weak NCCL symbols.
+          if (this->getSize() == 1) {
+            return ncclAllReduce(
+                input.data_ptr(),
+                output.data_ptr(),
+                output.numel(),
+                ncclDataType,
+                ncclReduceOp,
+                comm,
+                stream.stream());
+          }
+#endif
+          return ncclReduceScatter(
               input.data_ptr(),
               output.data_ptr(),
               output.numel(),
@@ -5207,18 +5259,23 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_single(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        auto ncclFunc = ncclReduceScatter;
-#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 7)
-        // All-reduce avoids #168092 while preserving PreMulSum for one rank.
-        if (this->getSize() == 1) {
-          ncclFunc = ncclAllReduce;
-        }
-#endif
-
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-        return ncclFunc(
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 7)
+        // All-reduce avoids #168092 while preserving PreMulSum for one rank.
+        if (this->getSize() == 1) {
+          return ncclAllReduce(
+              input.data_ptr(),
+              output.data_ptr(),
+              output.numel(),
+              ncclDataType,
+              ncclReduceOp,
+              comm,
+              stream.stream());
+        }
+#endif
+        return ncclReduceScatter(
             input.data_ptr(),
             output.data_ptr(),
             output.numel(),
@@ -5267,18 +5324,23 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_single_coalesced(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        auto ncclFunc = ncclReduceScatter;
-#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 7)
-        // All-reduce avoids #168092 while preserving PreMulSum for one rank.
-        if (this->getSize() == 1) {
-          ncclFunc = ncclAllReduce;
-        }
-#endif
-
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
-        return ncclFunc(
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 7)
+        // All-reduce avoids #168092 while preserving PreMulSum for one rank.
+        if (this->getSize() == 1) {
+          return ncclAllReduce(
+              input.data_ptr(),
+              output.data_ptr(),
+              output.numel(),
+              ncclDataType,
+              ncclReduceOp,
+              comm,
+              stream.stream());
+        }
+#endif
+        return ncclReduceScatter(
             input.data_ptr(),
             output.data_ptr(),
             output.numel(),

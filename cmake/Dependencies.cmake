@@ -87,9 +87,7 @@ if(USE_XPU)
     "Suppress this warning with -DUSE_XPU=OFF.")
     caffe2_update_option(USE_XPU OFF)
   endif()
-  foreach(flag ${XPU_HOST_CXX_FLAGS})
-    add_definitions(${flag})
-  endforeach()
+  add_compile_definitions(${XPU_HOST_CXX_DEFINITIONS})
 endif()
 
 # ---[ Custom Protobuf
@@ -338,7 +336,7 @@ endif()
 # mismatch between these shared dependencies, explicitly declare our intent to these
 # libraries that we are interested in using the exact same source dependencies for all.
 
-if(USE_NNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
+if(USE_PYTORCH_QNNPACK OR USE_XNNPACK)
   set(DISABLE_NNPACK_AND_FAMILY OFF)
 
   # Sanity checks - Can we actually build NNPACK and family given the configuration provided?
@@ -378,13 +376,11 @@ if(USE_NNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
   endif()
 
   if(DISABLE_NNPACK_AND_FAMILY)
-    caffe2_update_option(USE_NNPACK OFF)
     caffe2_update_option(USE_PYTORCH_QNNPACK OFF)
     caffe2_update_option(USE_XNNPACK OFF)
   else()
     # Disable unsupported NNPack combinations with MSVC
     if(MSVC)
-      caffe2_update_option(USE_NNPACK OFF)
       caffe2_update_option(USE_PYTORCH_QNNPACK OFF)
     endif()
 
@@ -515,23 +511,6 @@ if(USE_PYTORCH_QNNPACK)
     endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS pytorch_qnnpack)
-endif()
-
-# ---[ NNPACK
-if(USE_NNPACK)
-  include(${CMAKE_CURRENT_LIST_DIR}/External/nnpack.cmake)
-  if(NNPACK_FOUND)
-    if(TARGET nnpack)
-      # ---[ NNPACK is being built together with Caffe2: explicitly specify dependency
-      list(APPEND Caffe2_DEPENDENCY_LIBS nnpack)
-    else()
-      include_directories(SYSTEM ${NNPACK_INCLUDE_DIRS})
-      list(APPEND Caffe2_DEPENDENCY_LIBS ${NNPACK_LIBRARIES})
-    endif()
-  else()
-    message(WARNING "Not compiling with NNPACK. Suppress this warning with -DUSE_NNPACK=OFF")
-    caffe2_update_option(USE_NNPACK OFF)
-  endif()
 endif()
 
 # ---[ XNNPACK
@@ -715,6 +694,18 @@ if(USE_FBGEMM)
     target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
     target_compile_options_if_supported(asmjit -Wno-unused-variable)
 
+    # fbgemm passes "/arch:AVX512 /arch:AVX2" to fbgemm_avx512, and clang-cl
+    # honors the last /arch. Its AVX512 kernels also use AVX512-BF16, which
+    # clang-cl's /arch:AVX512 doesn't enable. MSVC accepts the intrinsics as is.
+    if(MSVC AND TARGET fbgemm_avx512)
+      get_target_property(FBGEMM_AVX512_OPTIONS fbgemm_avx512 COMPILE_OPTIONS)
+      list(REMOVE_ITEM FBGEMM_AVX512_OPTIONS ${CXX_AVX2_FLAGS})
+      set_property(TARGET fbgemm_avx512 PROPERTY COMPILE_OPTIONS ${FBGEMM_AVX512_OPTIONS})
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(fbgemm_avx512 PRIVATE -mavx512bf16)
+      endif()
+    endif()
+
     # fbgemm's cpp_library() gives source-less aggregate targets (like fbgemm
     # itself) a placeholder .cc named via STRING(RANDOM) and rewritten with
     # file(WRITE) on every configure. Since we reconfigure on every build, that
@@ -864,9 +855,9 @@ if(NOT Python_Interpreter_FOUND)
   message(FATAL_ERROR "Python3 could not be found.")
 endif()
 
-if(${Python_VERSION} VERSION_LESS 3.10)
+if(${Python_VERSION} VERSION_LESS 3.11)
   message(FATAL_ERROR
-    "Found Python libraries version ${Python_VERSION}. Python < 3.10 is no longer supported by PyTorch.")
+    "Found Python libraries version ${Python_VERSION}. Python < 3.11 is no longer supported by PyTorch.")
 endif()
 
 # ---[ Python + Numpy
@@ -1072,18 +1063,19 @@ if(USE_ROCM)
     if(HIPBLASLT_VEC_EXT)
       list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_VEC_EXT)
     endif()
-    # composable_kernel has no gfx1250 support, so aten/src/ATen/CMakeLists.txt
-    # filters gfx1250 out of the ck_gemm target's HIP_ARCHITECTURES. When gfx1250
-    # is the only requested arch that list is empty and CMake fails at generate
-    # time with 'HIP_ARCHITECTURES is empty for target "ck_gemm"', so turn CK GEMM
-    # off entirely here -- before -DUSE_ROCM_CK_GEMM is added below, since the
-    # non-CK TUs guarded by that define (HIPBlas.cpp, HIPHooks.cpp, GroupedBlas.cpp)
-    # would otherwise reference symbols the unbuilt ck_gemm target never provides.
-    # Mirrors the USE_ROCM_CK_SDPA / USE_MSLK auto-disable pattern in
-    # aten/src/ATen/CMakeLists.txt. Remove once the CK submodule supports gfx1250.
+    # composable_kernel supports CK GEMM only on an allowlist of gfx archs
+    # (torch_filter_ck_gemm_arches in cmake/public/utils.cmake; mirrors the
+    # allowlist in at::Context::ckGemmSupported()). aten/src/ATen/CMakeLists.txt
+    # restricts the ck_gemm target's HIP_ARCHITECTURES to that subset. When none
+    # of the requested archs are supported that list is empty and CMake fails at
+    # generate time with 'HIP_ARCHITECTURES is empty for target "ck_gemm"', so
+    # turn CK GEMM off entirely here -- before -DUSE_ROCM_CK_GEMM is added below,
+    # since the non-CK TUs guarded by that define (HIPBlas.cpp, HIPHooks.cpp,
+    # GroupedBlas.cpp) would otherwise reference symbols the unbuilt ck_gemm
+    # target never provides. Mirrors the USE_ROCM_CK_SDPA / USE_MSLK auto-disable
+    # pattern in aten/src/ATen/CMakeLists.txt.
     if(USE_ROCM_CK_GEMM)
-      set(_ck_gemm_supported_arches ${PYTORCH_ROCM_ARCH})
-      list(REMOVE_ITEM _ck_gemm_supported_arches "gfx1250")
+      torch_filter_ck_gemm_arches(_ck_gemm_supported_arches)
       if(_ck_gemm_supported_arches STREQUAL "")
         message(STATUS "USE_ROCM_CK_GEMM disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no arch supported by composable_kernel")
         caffe2_update_option(USE_ROCM_CK_GEMM OFF)
@@ -1218,10 +1210,10 @@ if(USE_NCCL)
 endif()
 
 # ---[ NCCL EP
-# Defines the __caffe2_nccl_ep interface target (libnccl_ep.so + headers). It is
+# Defines the __caffe2_nccl_ep interface target (libnccl_ep + headers). It is
 # NOT added to Caffe2_CUDA_DEPENDENCY_LIBS: the EP code lives in its own optional
 # extension (torch._nccl_ep, see torch/CMakeLists.txt), which links it, so
-# libtorch_cuda does not depend on libnccl_ep and torch imports without nccl4py.
+# libtorch_cuda does not depend on libnccl_ep and torch imports without nccl-extensions.
 if(USE_NCCL_EP)
   message(STATUS "USE_NCCL_EP is ON")
   include(${CMAKE_CURRENT_LIST_DIR}/External/nccl_ep.cmake)
@@ -1268,8 +1260,6 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
     endif()
     set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
-    add_compile_definitions(TORCH_USE_LIBUV)
-    include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/tensorpipe/third_party/libuv/include)
     set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     # Tensorpipe uses cuda_add_library
@@ -1283,12 +1273,6 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     if(USE_CUDA)
       target_compile_options_if_supported(tensorpipe_cuda -Wno-missing-template-arg-list-after-template-kw)
     endif()
-    # Workaround for relocation truncated to fit: R_AARCH64_CALL26 against symbol __aarch64_swp4_relax'
-    # When compiling for ARMv8.0, build uv with embedded atomics, which are slightly slower
-    # But are used only once during shutdown
-    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
-      target_compile_options_if_supported(tensorpipe_uv -mno-outline-atomics)
-    endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
     list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)
@@ -1301,6 +1285,51 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       # list(APPEND Caffe2_HIP_DEPENDENCY_LIBS tensorpipe_hip)
     endif()
   endif()
+endif()
+
+# libuv for the TCPStore server. Windows uses libuv_ROOT, the same libuv Gloo
+# uses; elsewhere use the TensorPipe submodule copy.
+if(USE_DISTRIBUTED)
+  if(WIN32)
+    find_library(
+      libuv_LIBRARY
+      NAMES uv libuv
+      HINTS ${libuv_ROOT} ENV libuv_ROOT
+      PATH_SUFFIXES lib/release lib/debug lib
+      REQUIRED
+      NO_DEFAULT_PATH)
+    find_path(
+      libuv_INCLUDE_DIR
+      NAMES uv.h
+      HINTS ${libuv_ROOT} ENV libuv_ROOT
+      PATH_SUFFIXES include
+      REQUIRED
+      NO_DEFAULT_PATH)
+    include_directories(SYSTEM ${libuv_INCLUDE_DIR})
+    list(APPEND Caffe2_DEPENDENCY_LIBS ${libuv_LIBRARY})
+  else()
+    set(_libuv_dir ${PROJECT_SOURCE_DIR}/third_party/tensorpipe/third_party/libuv)
+    # TensorPipe builds libuv as tensorpipe_uv and links it into tensorpipe.
+    if(TARGET tensorpipe_uv)
+      set(_libuv_target tensorpipe_uv)
+    else()
+      if(NOT EXISTS "${_libuv_dir}/CMakeLists.txt")
+        message(FATAL_ERROR "third_party/tensorpipe/third_party/libuv is missing. Please run: git submodule update --init --recursive")
+      endif()
+      add_subdirectory(${_libuv_dir} ${PROJECT_BINARY_DIR}/third_party/libuv EXCLUDE_FROM_ALL)
+      set_target_properties(uv_a PROPERTIES POSITION_INDEPENDENT_CODE ON)
+      list(APPEND Caffe2_DEPENDENCY_LIBS uv_a)
+      set(_libuv_target uv_a)
+    endif()
+    # Workaround for relocation truncated to fit: R_AARCH64_CALL26 against symbol __aarch64_swp4_relax'
+    # When compiling for ARMv8.0, build uv with embedded atomics, which are slightly slower
+    # But are used only once during shutdown
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+      target_compile_options_if_supported(${_libuv_target} -mno-outline-atomics)
+    endif()
+    include_directories(BEFORE SYSTEM ${_libuv_dir}/include)
+  endif()
+  add_compile_definitions(TORCH_USE_LIBUV)
 endif()
 
 if(USE_GLOO)
@@ -1506,6 +1535,10 @@ if(NOT INTERN_BUILD_MOBILE)
     if(WERROR)
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13)
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-dangling-reference ")
+      endif()
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 12)
+        # Match the C++ host-compiler setting without changing public type layouts.
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-interference-size ")
       endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-extra-semi ")
@@ -1736,13 +1769,30 @@ if(USE_KINETO)
   endif()
 
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party" CACHE STRING "")
-  set(KINETO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kineto/libkineto" CACHE STRING "")
-  set(KINETO_BUILD_TESTS OFF CACHE BOOL "")
+  set(KINETO_SOURCE_DIR "${PROJECT_SOURCE_DIR}/torch/csrc/profiler/kineto/libkineto" CACHE STRING "")
   set(KINETO_LIBRARY_TYPE "static" CACHE STRING "")
+
+  # Kineto's unit tests need gtest, which only exists when BUILD_TEST is on.
+  set(KINETO_BUILD_TESTS "${BUILD_TEST}" CACHE BOOL "" FORCE)
+  # Install alongside PyTorch's own test binaries, where the Windows CI
+  # runner looks for C++ tests.
+  set(KINETO_INSTALL_TESTS ${INSTALL_TEST} CACHE BOOL "" FORCE)
+  set(KINETO_TEST_INSTALL_DIR "test" CACHE STRING "" FORCE)
+
+  # Kineto's tests link nlohmann_json. Create the target from PyTorch's copy
+  # so Kineto skips adding its own; both pin the same version. This mirrors
+  # how fmt is already shared with Kineto above.
+  if(KINETO_BUILD_TESTS AND NOT TARGET nlohmann_json)
+    set(JSON_BuildTests OFF CACHE INTERNAL "")
+    set(JSON_Install OFF CACHE INTERNAL "")
+    add_subdirectory("${CAFFE2_THIRD_PARTY_ROOT}/nlohmann"
+                     "${CMAKE_BINARY_DIR}/third_party/nlohmann")
+  endif()
 
   message(STATUS "Configuring Kineto dependency:")
   message(STATUS "  KINETO_SOURCE_DIR = ${KINETO_SOURCE_DIR}")
   message(STATUS "  KINETO_BUILD_TESTS = ${KINETO_BUILD_TESTS}")
+  message(STATUS "  KINETO_INSTALL_TESTS = ${KINETO_INSTALL_TESTS}")
   message(STATUS "  KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
   message(STATUS "  KINETO_BACKEND = ${KINETO_BACKEND}")
 
@@ -1753,7 +1803,23 @@ if(USE_KINETO)
   endif()
 
   if(NOT TARGET kineto)
+    # Send Kineto's test binaries to their own subdirectory of build/bin so
+    # the CI runner can glob them without sweeping up PyTorch's tests too.
+    set(_kineto_saved_runtime_output_dir "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/kineto")
+    # Kineto registers its tests with gtest_discover_tests, which defaults to
+    # running every test binary during the build to enumerate its cases. Those
+    # binaries link CUPTI, whose DLL is not on PATH while a Windows build runs,
+    # so each one fails to start and takes the build down with it. Defer
+    # discovery to test time instead. Nothing is lost: PyTorch finds these
+    # tests by listing the built binaries rather than through CTest.
+    set(_kineto_saved_discovery_mode "${CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE}")
+    set(CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE PRE_TEST)
     add_subdirectory("${KINETO_SOURCE_DIR}")
+    set(CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE "${_kineto_saved_discovery_mode}")
+    unset(_kineto_saved_discovery_mode)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${_kineto_saved_runtime_output_dir}")
+    unset(_kineto_saved_runtime_output_dir)
     set_property(TARGET kineto PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)

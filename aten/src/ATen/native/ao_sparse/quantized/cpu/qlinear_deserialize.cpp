@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #ifdef USE_FBGEMM
 #include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
@@ -51,18 +52,18 @@ void unpack_bcsr(
   if (qscheme_per_tensor) {
     memset(dst, zero_points[0], R * C * sizeof(int8_t));
   } else {
-    for (int64_t i = 0; i < R; i++) {
+    for (const auto i : c10::irange(R)) {
       memset(dst + i * C, zero_points[i], C * sizeof(int8_t));
     }
   }
   const auto& [weight_values, row_indices, col_indices] = bcsr;
   int64_t rowBlocks = (R + RB - 1) / RB;
-  for (int64_t i = 0; i < rowBlocks; ++i) {
+  for (const auto i : c10::irange(rowBlocks)) {
     // For the current tile, rowBPtr starts from currentTileIdx
     for (int64_t r = row_indices[i]; r < row_indices[i + 1]; ++r) {
       int64_t curColIdx = col_indices[r];
-      for (int64_t ib = 0; ib < RB; ++ib) {
-        for (int64_t jb = 0; jb < CB; ++jb) {
+      for (const auto ib : c10::irange(RB)) {
+        for (const auto jb : c10::irange(CB)) {
           // Are we within bounds of destination matrix?
           if ((i * RB + ib) < R && (curColIdx * CB + jb) < C) {
             dst[(i * RB + ib) * ld + curColIdx * CB + jb] =
@@ -98,8 +99,8 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::deserialize(
     weight_origin = at::_empty_affine_quantized(
         {output_channels, input_channels},
         at::device(c10::kCPU).dtype(c10::kQInt8),
-        std::get<weight_scales_index>(serialized).data_ptr<float>()[0],
-        weight_zero_points.data_ptr<int8_t>()[0]);
+        std::get<weight_scales_index>(serialized).const_data_ptr<float>()[0],
+        weight_zero_points.const_data_ptr<int8_t>()[0]);
   } else if (q_scheme == c10::kPerChannelAffine) {
     weight_origin = at::_empty_per_channel_affine_quantized(
         {output_channels, input_channels},
@@ -132,7 +133,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::deserialize(
   // Unpack as non backend specific untiled BCSR then pack as Fbgemm tiled BCSR
   // because untiled Fbgemm BCSR currently doesn't exist
   unpack_bcsr(
-      reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>()),
+      reinterpret_cast<int8_t*>(weight_origin.mutable_data_ptr<c10::qint8>()),
       AT_DISPATCH_INTEGRAL_TYPES(
           row_block_indices.scalar_type(),
           "packed_linear_weight_fbgemm_setup_bcsr",
@@ -148,7 +149,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::deserialize(
       input_channels,
       out_features_block_size,
       in_features_block_size,
-      weight_zero_points.data_ptr<int8_t>(),
+      weight_zero_points.const_data_ptr<int8_t>(),
       q_scheme == c10::kPerTensorAffine);
 
   return PackedLinearWeight::prepack(
@@ -297,10 +298,10 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
         using unsigned_t = UnsignedIndicesTypeTrait<scalar_t>::t;
         return qnnpack::generateBlockCSRMatrix<unsigned_t>(
             reinterpret_cast<unsigned_t*>(
-                deserialized_bcsr_col_block_indices_.data_ptr<scalar_t>()),
+                deserialized_bcsr_col_block_indices_.mutable_data_ptr<scalar_t>()),
             reinterpret_cast<unsigned_t*>(
-                deserialized_bcsr_row_block_indices_.data_ptr<scalar_t>()),
-            deserialized_bcsr_weight_values_.data_ptr<uint8_t>(),
+                deserialized_bcsr_row_block_indices_.mutable_data_ptr<scalar_t>()),
+            deserialized_bcsr_weight_values_.mutable_data_ptr<uint8_t>(),
             deserialized_bcsr_col_block_indices_.numel(),
             deserialized_bcsr_row_block_indices_.numel(),
             deserialized_bcsr_weight_values_.numel(),

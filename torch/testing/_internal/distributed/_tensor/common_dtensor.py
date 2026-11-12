@@ -61,6 +61,8 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
+    preserves_unittest_skip_marks,
+    set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
     TEST_PRIVATEUSE1,
@@ -629,7 +631,13 @@ def skip_unless_torch_gpu(method: T) -> T:
     >>>   ...
     """
     # The builtin @skip_if_no_gpu relies on os.environ['WORLD_SIZE'] being set.
-    return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
+    # Runtime skip stays skip_if_lt_x_gpu(NUM_DEVICES), which scales with the
+    # machine. Pytest collects the object this decorator returns, so stamp that
+    # object with 2. A capacity-scaled stamp would look like a 4-GPU requirement
+    # to --multigpu-min-gpus.
+    wrapped = skip_if_lt_x_gpu(NUM_DEVICES)(method)
+    wrapped._min_gpus_required = 2
+    return cast(T, wrapped)
 
 
 def _get_device_type(world_size: int) -> str:
@@ -717,13 +725,11 @@ class DTensorContinuousTestBase(DTensorTestMixin, MultiProcContinuousTest):
         super()._init_pg(rank, world_size, rdvz_file)
 
 
+@preserves_unittest_skip_marks()
 class LocalDTensorContinuousTestBase(DTensorContinuousTestBase):
     @property
     def is_local_tensor_enabled(self) -> bool:
         return True
-
-    def _handle_test_skip(self, msg: str) -> None:
-        self.skipTest(msg)
 
     def _get_local_tensor_mode(self):
         return LocalTensorMode(frozenset(range(self.world_size)))
@@ -756,6 +762,8 @@ class LocalDTensorContinuousTestBase(DTensorContinuousTestBase):
     def setUp(self):
         unittest.TestCase.setUp(self)
         self.__class__._ensure_processes_spawned()
+        # Match MultiProcContinuousTest, which reseeds before every test.
+        set_rng_seed()
         torch.autograd._enable_record_function(False)
 
     def tearDown(self):
@@ -1102,13 +1110,11 @@ class DTensorConverter:
             raise RuntimeError(f"Trying to convert to DTensor, but got {type(t)}")
 
 
+@preserves_unittest_skip_marks("join_or_run")
 class LocalDTensorOpTestBase(DTensorOpTestBase):
     @property
     def is_local_tensor_enabled(self) -> bool:
         return True
-
-    def _handle_test_skip(self, msg: str) -> None:
-        self.skipTest(msg)
 
     def _get_local_tensor_mode(self):
         return LocalTensorMode(frozenset(range(self.world_size)))
@@ -1164,13 +1170,11 @@ class LocalDTensorOpTestBase(DTensorOpTestBase):
         torch.manual_seed(0)
 
 
+@preserves_unittest_skip_marks("join_or_run")
 class LocalDTensorTestBase(DTensorTestBase):
     @property
     def is_local_tensor_enabled(self) -> bool:
         return True
-
-    def _handle_test_skip(self, msg: str) -> None:
-        self.skipTest(msg)
 
     def _get_local_tensor_mode(self):
         return LocalTensorMode(frozenset(range(self.world_size)))
@@ -1254,7 +1258,9 @@ def create_local_tensor_test_class(
         if not callable(fn):
             continue
         elif name in skipped_tests:
-            dct[name] = lambda self: self.skipTest("Skipped test")
+            dct[name] = unittest.skip("Skipped test")(
+                lambda self: self.skipTest("Skipped test")
+            )
         elif name.startswith("test_"):
             ctxs = [
                 lambda test: test._get_local_tensor_mode(),

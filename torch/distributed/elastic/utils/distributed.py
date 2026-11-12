@@ -38,13 +38,11 @@ def create_c10d_store(
 ):
     if use_libuv is not None:
         logger.warning(
-            "argument use_libuv is deprecated and ignored. Set USE_LIBUV environment "
-            'variable to "0" to disable libuv, or "1" to enable it. If the env var '
-            "is not set, libuv will be used by default."
+            "argument use_libuv is deprecated and ignored. TCPStore always uses libuv."
         )
 
-    # check os.environ for use_libuv
-    use_libuv = os.environ.get("USE_LIBUV", "1") == "1"  # libuv is the default option
+    # USE_LIBUV=0 is deprecated and ignored; TCPStore warns.
+    use_libuv = os.environ.get("USE_LIBUV", "1") == "1"
 
     if server_port == -1 and world_size > 1:
         raise ValueError(
@@ -66,14 +64,12 @@ def create_c10d_store(
             "Creating c10d store on %s:%s\n"
             "  world_size  : %s\n"
             "  is_server   : %s\n"
-            "  timeout(sec): %s\n"
-            "  use_libuv   : %s\n",
+            "  timeout(sec): %s\n",
             server_addr,
             port,
             world_size,
             is_server,
             timeout,
-            use_libuv,
         )
 
         try:
@@ -123,13 +119,13 @@ def _check_full_rank(store, world_size, timeout):
 
 def get_free_port():
     """
-    Returns an unused port on localhost.
+    Returns a port that is unused on all local addresses.
 
-    This function finds an unused port on localhost by opening to socket to bind
-    to a port and then closing it.
+    This function finds an unused port by binding a socket to the wildcard
+    address and then closing it.
 
     Returns:
-        int: an unused port on localhost
+        int: a port that is unused on all local addresses
 
     Example:
         >>> # xdoctest: +SKIP("Nondeterministic")
@@ -147,8 +143,8 @@ def get_free_port():
 
 def get_socket_with_port() -> socket.socket:
     """
-    Returns a free port on localhost that is "reserved" by binding a temporary
-    socket on it. Close the socket before passing the port to the entity
+    Returns a free port that is "reserved" by binding a temporary socket to it
+    on the wildcard address. Close the socket before passing the port to the entity
     that requires it. Usage example
 
     ::
@@ -162,15 +158,21 @@ def get_socket_with_port() -> socket.socket:
         func(port)
     """
 
-    addrs = socket.getaddrinfo(
-        host="localhost", port=None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
-    )
-    for addr in addrs:
-        family, type, proto, _, _ = addr
-        s = socket.socket(family, type, proto)
+    # Bind the wildcard address (dual-stack first), like the TCPStore server that
+    # consumes the port. A port that is free on loopback may already be bound on
+    # another interface, e.g. by NCCL/Gloo, and the server's bind would then fail.
+    # Don't listen(): a wildcard listener would accept, and never serve,
+    # connections meant for the server while the port is reserved.
+    for family, host in ((socket.AF_INET6, "::"), (socket.AF_INET, "0.0.0.0")):
         try:
-            s.bind(("localhost", 0))
-            s.listen(0)
+            s = socket.socket(family, socket.SOCK_STREAM)
+        except OSError as e:
+            logger.warning("Socket creation attempt failed.", exc_info=e)
+            continue
+        try:
+            if family == socket.AF_INET6:
+                s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+            s.bind((host, 0))
             return s
         except OSError as e:
             s.close()

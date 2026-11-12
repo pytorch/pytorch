@@ -19,7 +19,9 @@ from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_device_type import ops, OpDTypes, instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    ops, OpDTypes, instantiate_device_type_tests, preserves_device_selection,
+)
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
@@ -102,13 +104,9 @@ class IncorrectAliasTensor(torch.Tensor):
         return tree_map(wrap, out)
 
 # Tests various schema checking functionalities.
+@unittest.skipIf(TEST_WITH_TORCHDYNAMO, "SchemaCheckMode is ignored by dynamo")
 class TestSchemaCheck(JitTestCase):
     hw_classification = HardwareClassification.GENERIC
-
-    def setUp(self):
-        if TEST_WITH_TORCHDYNAMO:
-            self.skipTest("SchemaCheckMode is ignored by dynamo")
-        super().setUp()
 
     # Tests that SchemaCheckMode records operator order with grad
     def test_schema_check_mode_operator_order(self):
@@ -212,24 +210,27 @@ class TestSchemaCheck(JitTestCase):
         )
 
     # Tests that SchemaCheckMode records mutations and aliases with aliasing outputs
+    # log_sigmoid_forward is used rather than aminmax because aminmax rejects
+    # overlapping out= tensors; any op with two out= arguments of the same dtype
+    # exercises the same recording path.
     def test_schema_check_mode_mutated_aliasing_aliasing_outputs(self):
         x = torch.rand((3, 3))
-        actual = torch.zeros(3)
+        actual = torch.zeros(3, 3)
         with SchemaCheckMode() as schema_check:
-            torch.aminmax(x, dim=0, out=[actual, actual])
+            torch.ops.aten.log_sigmoid_forward.output(x, output=actual, buffer=actual)
         self.assertEqual(
             [
-                ('aten::aminmax', 'min'),
-                ('aten::aminmax', 'max')
+                ('aten::log_sigmoid_forward', 'output'),
+                ('aten::log_sigmoid_forward', 'buffer')
             ],
             schema_check.mutated
         )
         self.assertEqual(
             [
-                ('aten::aminmax', 'min', 'output_0'),
-                ('aten::aminmax', 'min', 'output_1'),
-                ('aten::aminmax', 'max', 'output_0'),
-                ('aten::aminmax', 'max', 'output_1')
+                ('aten::log_sigmoid_forward', 'output', 'output_0'),
+                ('aten::log_sigmoid_forward', 'output', 'output_1'),
+                ('aten::log_sigmoid_forward', 'buffer', 'output_0'),
+                ('aten::log_sigmoid_forward', 'buffer', 'output_1')
             ],
             schema_check.aliasing
         )
@@ -312,10 +313,10 @@ class TestSchemaCheck(JitTestCase):
     # Tests that SchemaCheckMode wraps Torch.tensor with aliasing outputs due to aliasing inputs
     def test_schema_check_mode_functionality_with_multiple_outputs_aliasing(self):
         x = torch.rand((3, 3))
-        actual = torch.zeros(3)
+        actual = torch.zeros(3, 3)
         with SchemaCheckMode():
-            torch.aminmax(x, dim=0, out=[actual, actual])
-        self.assertEqual(torch.amax(x, dim=0), actual)
+            torch.ops.aten.log_sigmoid_forward.output(x, output=actual, buffer=actual)
+        self.assertEqual(torch.nn.functional.logsigmoid(x), actual)
 
     # Tests that SchemaCheckMode wraps Torch.tensor in ops with real Device input
     def test_schema_check_mode_functionality_device_input(self):
@@ -505,6 +506,7 @@ class TestSchemaCheck(JitTestCase):
 
 class TestSchemaCheckModeOpInfo(JitTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+    setUp = preserves_device_selection(JitTestCase.setUp)
 
     @ops(op_db, dtypes=OpDTypes.supported)
     @slowTestIf(IS_WINDOWS)
