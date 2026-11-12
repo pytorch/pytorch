@@ -2978,11 +2978,12 @@ class TorchPatcher:
         # with torch.deploy internally.
         from .decorators import disable
 
-        torch.jit.trace = disable(
-            torch.jit.trace, reason="tracing into TorchScript not fully supported"
+        torch.jit._trace.trace = disable(
+            torch.jit._trace.trace,
+            reason="tracing into TorchScript not fully supported",
         )
-        torch.jit.trace_module = disable(
-            torch.jit.trace_module,
+        torch.jit._trace.trace_module = disable(
+            torch.jit._trace.trace_module,
             reason="tracing into TorchScript not fully supported",
         )
         torch.jit._get_trace_graph = disable(
