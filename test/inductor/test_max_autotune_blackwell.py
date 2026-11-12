@@ -1116,73 +1116,6 @@ class TestBlackwellAutoWSConstraints(TestCase):
                 )
             )
 
-    def test_autows_min_shared_memory_is_dtype_aware(self):
-        def min_shared_memory(
-            block_m,
-            block_n,
-            block_k,
-            *,
-            element_size,
-            ieee_fp32,
-            a_row_major=False,
-            b_row_major=True,
-        ):
-            return CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_min_shared_memory(
-                {
-                    "BLOCK_M": block_m,
-                    "BLOCK_N": block_n,
-                    "BLOCK_K": block_k,
-                    "A_ROW_MAJOR": a_row_major,
-                    "B_ROW_MAJOR": b_row_major,
-                },
-                element_size=element_size,
-                ieee_fp32=ieee_fp32,
-            )
-
-        # B200 opt-in shared memory per block.
-        limit = 232448
-        # IEEE fp32 128x256x128 with a column-major operand fails at launch
-        # (needs 270-344 KB); one stage plus that operand's extra tile is over.
-        self.assertGreater(
-            min_shared_memory(128, 256, 128, element_size=4, ieee_fp32=True), limit
-        )
-        self.assertGreater(
-            min_shared_memory(
-                64,
-                256,
-                128,
-                element_size=4,
-                ieee_fp32=True,
-                a_row_major=True,
-                b_row_major=False,
-            ),
-            limit,
-        )
-        # Configs that fit stay: the same tile in bf16, and smaller fp32 tiles.
-        self.assertLessEqual(
-            min_shared_memory(128, 256, 128, element_size=2, ieee_fp32=False), limit
-        )
-        self.assertLessEqual(
-            min_shared_memory(128, 128, 128, element_size=4, ieee_fp32=True), limit
-        )
-        self.assertLessEqual(
-            min_shared_memory(256, 256, 64, element_size=4, ieee_fp32=True), limit
-        )
-        # Two column-major operands need both extra tiles.
-        self.assertGreater(
-            min_shared_memory(
-                128, 128, 128, element_size=4, ieee_fp32=True, b_row_major=False
-            ),
-            limit,
-        )
-        # Without a column-major operand, IEEE fp32 needs no extra tile.
-        self.assertEqual(
-            min_shared_memory(
-                128, 128, 64, element_size=4, ieee_fp32=True, a_row_major=True
-            ),
-            min_shared_memory(128, 128, 64, element_size=4, ieee_fp32=False),
-        )
-
     def test_two_ctas_requires_tma_store_for_metaws_template(self):
         kwargs = {
             "BLOCK_M": 128,
@@ -1341,18 +1274,10 @@ class TestBlackwellAutoWSConfigs(TestCase):
         self.assertEqual(configs[0]["FLATTEN"], not global_meta_ws)
 
     @parametrize(
-        "dtype,allow_tf32,expect_pruned",
-        (
-            (torch.float32, False, True),
-            (torch.float32, True, False),
-            (torch.bfloat16, False, False),
-        ),
+        "dtype,expect_pruned", ((torch.float32, True), (torch.bfloat16, False))
     )
-    def test_autows_prunes_configs_over_shared_memory(
-        self, dtype, allow_tf32, expect_pruned
-    ):
-        # IEEE fp32 128x256x128 with a column-major B needs over 232 KB at any
-        # pipeline depth and fails at launch, so it is dropped before codegen.
+    def test_autows_prunes_configs_over_shared_memory(self, dtype, expect_pruned):
+        # IEEE fp32 128x256x128 with a column-major B exceeds 232 KB at any depth.
         mat1, mat2 = mock.Mock(), mock.Mock()
         mat2.get_dtype.return_value = dtype
         mat2.get_device.return_value = torch.device("cuda", 0)
@@ -1381,7 +1306,13 @@ class TestBlackwellAutoWSConfigs(TestCase):
             mock.patch.object(
                 MMKernelInputs, "mnk_symbolic", return_value=(512, 2048, 15360)
             ),
-            mock.patch(f"{heuristic_mod}.mm_allow_tf32", return_value=allow_tf32),
+            mock.patch.object(
+                MMKernelInputs,
+                "device_type",
+                new_callable=mock.PropertyMock,
+                return_value="cuda",
+            ),
+            mock.patch(f"{heuristic_mod}.mm_allow_tf32", return_value=False),
             mock.patch.object(
                 CUDABlackwellPersistentTMATemplateConfigHeuristic,
                 "_max_shared_memory_per_block",

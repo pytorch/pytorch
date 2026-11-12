@@ -3119,12 +3119,8 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
     def _autows_min_shared_memory(
         template_kwargs: dict[str, Any], *, element_size: int, ieee_fp32: bool
     ) -> int:
-        """Lower bound on the shared memory an autoWS config allocates.
-
-        The autoWS memory planner lowers the pipeline depth to fit, but keeps
-        at least one stage of the full A and B tiles (2CTA does not halve B's
-        buffer). Configs above the device limit even at that bound fail at
-        launch.
+        """Lower bound on autoWS shared memory: the planner reduces pipeline depth
+        to fit but keeps one stage of the full A and B tiles (2CTA does not halve B).
         """
         block_m = template_kwargs["BLOCK_M"]
         block_n = template_kwargs["BLOCK_N"]
