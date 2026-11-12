@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import re
 from dataclasses import FrozenInstanceError
 
 import torch
@@ -118,6 +119,53 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
             unexpected_backend = "extern_kernels.mm" if max_autotune else "triton_tem_"
             self.assertIn(expected_backend, code)
             self.assertNotIn(unexpected_backend, code)
+
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        benchmark_fusion=True, fx_graph_cache=False, fx_graph_remote_cache=False
+    )
+    def test_nested_region_inductor_config_deterministic(self):
+        """A region can compile in deterministic mode while the rest of the graph
+        doesn't. Deterministic mode doesn't allow benchmark_fusion, so the region
+        turns that off too."""
+        patches = {"deterministic": True, "benchmark_fusion": False}
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches=patches, bw_inductor_config_patches=patches
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def region(x):
+            return torch.softmax(x, -1)
+
+        def fn(x, y):
+            return torch.cat((region(x), torch.softmax(y, -1)))
+
+        inputs = [
+            torch.randn(8, 64, device=GPU_TYPE, requires_grad=True) for _ in range(2)
+        ]
+        result, codes = run_fw_bw_and_get_code(
+            lambda: torch.compile(fn, backend="inductor", fullgraph=True)(*inputs)
+        )
+        self.assertEqual(result, fn(*inputs))
+
+        def deterministic(code, signature):
+            body = self._generated_fn_body(code, signature)
+            kernels = re.findall(r"(triton_\w+)\.run\(", body)
+            self.assertTrue(kernels)
+            metas = []
+            for kernel in kernels:
+                end = code.index(f"\ndef {kernel}(")
+                metas.append(code[code.rindex("@triton_heuristics.", 0, end) : end])
+            return {"'deterministic': True" in meta for meta in metas}
+
+        fw_code, bw_code = codes
+        fw_region = "def partitioned_fw_subgraph_0_0("
+        bw_region = "def partitioned_bw_subgraph_0_0("
+        self.assertEqual(deterministic(fw_code, fw_region), {True})
+        self.assertEqual(deterministic(bw_code, bw_region), {True})
+        for code in (fw_code, bw_code):
+            self.assertEqual(deterministic(code, "    def call(self, args):"), {False})
 
     def test_invalid_inductor_config(self):
         """Test that invalid inductor config keys are caught with a clear error."""
