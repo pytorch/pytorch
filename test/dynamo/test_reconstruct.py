@@ -3,11 +3,16 @@
 import collections
 import contextlib
 import dis
+import functools
+import inspect
+import types
 import unittest
+from unittest import mock
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.exc import Unsupported
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -16,12 +21,27 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import (
     has_triton_experimental_host_tma,
+    has_triton_package,
     has_triton_tensor_descriptor_host_tma,
 )
 
 
 def _filter_instructions(instructions, opname):
     return list(filter(lambda x: x.opname == opname, instructions))
+
+
+@contextlib.contextmanager
+def _force_tensor_descriptor_support():
+    import torch.utils._triton as triton_utils
+
+    with mock.patch.object(
+        triton_utils, "_device_supports_tensor_descriptor", return_value=True
+    ):
+        triton_utils.has_triton_tensor_descriptor_host_tma.cache_clear()
+        try:
+            yield
+        finally:
+            triton_utils.has_triton_tensor_descriptor_host_tma.cache_clear()
 
 
 @instantiate_parametrized_tests
@@ -534,12 +554,12 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(backend.graphs), 1)
         self.assertEqual(ref[1].desc, res[1].desc)
 
-    @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
-    @unittest.skipIf(
-        not has_triton_tensor_descriptor_host_tma(),
-        "Test requires triton.tools.tensor_descriptor API",
-    )
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @_force_tensor_descriptor_support()
     def test_tma_stable_reconstruct(self):
+        if not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor API")
+
         import triton
 
         def create_tma(tensor):
@@ -549,13 +569,910 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             )
             return tensor + 1, tma
 
-        x = torch.randn(128, 128, device=GPU_TYPE)
+        x = torch.randn(128, 128)
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
 
         ref = create_tma(x)
         res = torch.compile(create_tma, backend=backend)(x)
         self.assertEqual(len(backend.graphs), 1)
         self.assertEqual(ref, res)
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @_force_tensor_descriptor_support()
+    def test_tma_stable_reconstruct_inherited_classmethod(self):
+        if not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor API")
+
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        class ClassMethodDescriptor(descriptor_module.TensorDescriptor):
+            @classmethod
+            def from_tensor(cls, tensor, block_shape):
+                return cls(tensor, tensor.shape, tensor.stride(), block_shape)
+
+        class InheritedClassMethodDescriptor(ClassMethodDescriptor):
+            pass
+
+        descriptor_class = InheritedClassMethodDescriptor
+
+        def create_tma(tensor):
+            descriptor = descriptor_class.from_tensor(tensor, [16])
+            return tensor + 1, descriptor
+
+        with self.assertRaisesRegex(
+            Unsupported,
+            "TMA descriptor class is not importable",
+        ):
+            torch.compile(create_tma, backend="eager", fullgraph=True)(torch.randn(16))
+
+        torch._dynamo.reset()
+        descriptor_class.__module__ = descriptor_module.__name__
+        setattr(descriptor_module, descriptor_class.__name__, descriptor_class)
+        try:
+            x = torch.randn(16)
+            backend = torch._dynamo.testing.EagerAndRecordGraphs()
+            result, descriptor = torch.compile(
+                create_tma, backend=backend, fullgraph=True
+            )(x)
+
+            self.assertEqual(len(backend.graphs), 1)
+            self.assertEqual(result, x + 1)
+            self.assertIsInstance(descriptor, descriptor_class)
+            self.assertEqual(descriptor.block_shape, [16])
+        finally:
+            delattr(descriptor_module, descriptor_class.__name__)
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @_force_tensor_descriptor_support()
+    def test_tma_stable_sourceless_classmethod_lookup(self):
+        if not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor API")
+
+        from triton.tools.tensor_descriptor import TensorDescriptor
+
+        from torch._dynamo.variables.functions import UserMethodVariable
+        from torch._dynamo.variables.user_defined import UserDefinedClassVariable
+
+        class ClassMethodDescriptor(TensorDescriptor):
+            @classmethod
+            def from_tensor(cls, tensor, block_shape):
+                return cls(tensor, tensor.shape, tensor.stride(), block_shape)
+
+        descriptor_class_vt = UserDefinedClassVariable(ClassMethodDescriptor)
+        factory_vt = descriptor_class_vt.resolve_cls_descriptor(
+            None,
+            "from_tensor",
+            ClassMethodDescriptor.__dict__["from_tensor"],
+            None,
+        )
+        self.assertIsInstance(factory_vt, UserMethodVariable)
+        self.assertIs(factory_vt.im_self, descriptor_class_vt)
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @parametrize(
+        "call_style", ["padding", "rounding", "both", "positional", "keywords"]
+    )
+    def test_tma_stable_factory_explicit_defaults(self, call_style):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        with _force_tensor_descriptor_support():
+            if not has_triton_tensor_descriptor_host_tma():
+                self.skipTest("requires triton.tools.tensor_descriptor API")
+
+            def create_tma(tensor):
+                factory = descriptor_module.TensorDescriptor.from_tensor
+                if call_style == "padding":
+                    descriptor = factory(tensor, [16], padding="zero")
+                elif call_style == "rounding":
+                    descriptor = factory(tensor, [16], round_f32_to_tf32=False)
+                elif call_style == "both":
+                    descriptor = factory(
+                        tensor, [16], padding="zero", round_f32_to_tf32=False
+                    )
+                elif call_style == "positional":
+                    descriptor = factory(tensor, [16], "zero", False)
+                else:
+                    descriptor = factory(
+                        tensor=tensor,
+                        block_shape=[16],
+                        padding="zero",
+                        round_f32_to_tf32=False,
+                    )
+                return tensor + 1, descriptor
+
+            tensor = torch.randn(16)
+            backend = torch._dynamo.testing.EagerAndRecordGraphs()
+            result, descriptor = torch.compile(
+                create_tma, backend=backend, fullgraph=True
+            )(tensor)
+            self.assertEqual(len(backend.graphs), 1)
+            self.assertEqual(result, tensor + 1)
+            self.assertIsInstance(descriptor, descriptor_module.TensorDescriptor)
+            self.assertEqual(descriptor.base, tensor)
+            self.assertEqual(descriptor.block_shape, [16])
+            self.assertEqual(descriptor.padding, "zero")
+            self.assertFalse(descriptor.round_f32_to_tf32)
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @parametrize("flag", [False, 0])
+    @parametrize("structured", [False, True])
+    @parametrize("fullgraph", [False, True])
+    def test_tma_stable_factory_default_type(self, flag, structured, fullgraph):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        with _force_tensor_descriptor_support():
+            if not has_triton_tensor_descriptor_host_tma():
+                self.skipTest("requires triton.tools.tensor_descriptor API")
+
+            default = (False,) if structured else False
+            if structured:
+                flag = (flag,)
+
+            class FlagDescriptor(descriptor_module.TensorDescriptor):
+                @classmethod
+                def from_tensor(cls, tensor, block_shape, flag=default):
+                    if structured:
+                        flag = flag[0]
+                    padding = "zero" if flag is False else "nan"
+                    return cls(
+                        tensor, tensor.shape, tensor.stride(), block_shape, padding
+                    )
+
+            FlagDescriptor.__module__ = descriptor_module.__name__
+            with mock.patch.object(
+                descriptor_module, "FlagDescriptor", FlagDescriptor, create=True
+            ):
+
+                def create_tma(tensor):
+                    descriptor = FlagDescriptor.from_tensor(tensor, [16], flag=flag)
+                    return tensor + 1, descriptor
+
+                tensor = torch.randn(16)
+                eager_result, eager_descriptor = create_tma(tensor)
+                compiled = torch.compile(
+                    create_tma, backend="eager", fullgraph=fullgraph
+                )
+                if fullgraph and (structured or flag is not False):
+                    with self.assertRaisesRegex(
+                        Unsupported, "Unsupported TMA descriptor factory call"
+                    ):
+                        compiled(tensor)
+                else:
+                    result, descriptor = compiled(tensor)
+                    self.assertEqual(result, eager_result)
+                    self.assertEqual(descriptor.padding, eager_descriptor.padding)
+                    if structured:
+                        factory = FlagDescriptor.from_tensor.__func__
+                        with mock.patch.object(factory, "__defaults__", ((0,),)):
+                            self.assertEqual(
+                                compiled(tensor)[1].padding,
+                                create_tma(tensor)[1].padding,
+                            )
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @parametrize("mutation", ["default_order", "keyword_only"])
+    @parametrize("fullgraph", [False, True])
+    def test_tma_stable_factory_code_mutation(self, mutation, fullgraph):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        with _force_tensor_descriptor_support():
+            if not has_triton_tensor_descriptor_host_tma():
+                self.skipTest("requires triton.tools.tensor_descriptor API")
+
+            class CodeDescriptor(descriptor_module.TensorDescriptor):
+                @classmethod
+                def from_tensor(cls, tensor, block_shape, padding="zero", other="nan"):
+                    return cls(
+                        tensor, tensor.shape, tensor.stride(), block_shape, padding
+                    )
+
+            if mutation == "default_order":
+
+                def replacement(cls, tensor, block_shape, other="zero", padding="nan"):
+                    return cls(
+                        tensor, tensor.shape, tensor.stride(), block_shape, padding
+                    )
+
+            else:
+
+                def replacement(cls, *, tensor, block_shape, padding):
+                    return cls(
+                        tensor, tensor.shape, tensor.stride(), block_shape, padding
+                    )
+
+            CodeDescriptor.__module__ = descriptor_module.__name__
+            with mock.patch.object(
+                descriptor_module, "CodeDescriptor", CodeDescriptor, create=True
+            ):
+
+                def create_tma(tensor):
+                    descriptor = CodeDescriptor.from_tensor(
+                        tensor=tensor, block_shape=[16], padding="zero"
+                    )
+                    return tensor + 1, descriptor
+
+                tensor = torch.randn(16)
+                counter = torch._dynamo.testing.CompileCounter()
+                compiled = torch.compile(
+                    create_tma, backend=counter, fullgraph=fullgraph
+                )
+                self.assertEqual(compiled(tensor)[1].padding, "zero")
+                self.assertEqual(counter.frame_count, 1)
+                factory = CodeDescriptor.from_tensor.__func__
+                original_code = factory.__code__
+                try:
+                    factory.__code__ = replacement.__code__
+                    self.assertEqual(create_tma(tensor)[1].padding, "zero")
+                    if fullgraph:
+                        with self.assertRaisesRegex(
+                            Unsupported, "Unsupported TMA descriptor factory call"
+                        ):
+                            compiled(tensor)
+                    else:
+                        result, descriptor = compiled(tensor)
+                        self.assertEqual(result, tensor + 1)
+                        self.assertEqual(descriptor.padding, "zero")
+                finally:
+                    factory.__code__ = original_code
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @parametrize("default_kind", ["positional", "positional_length", "keyword"])
+    @parametrize("fullgraph", [False, True])
+    def test_tma_stable_factory_default_mutation(self, default_kind, fullgraph):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        with _force_tensor_descriptor_support():
+            if not has_triton_tensor_descriptor_host_tma():
+                self.skipTest("requires triton.tools.tensor_descriptor API")
+
+            if default_kind == "keyword":
+
+                class KeywordDescriptor(descriptor_module.TensorDescriptor):
+                    @classmethod
+                    def from_tensor(cls, tensor, block_shape, *, padding="zero"):
+                        return cls(
+                            tensor,
+                            tensor.shape,
+                            tensor.stride(),
+                            block_shape,
+                            padding=padding,
+                        )
+
+                descriptor_class = KeywordDescriptor
+                descriptor_class.__module__ = descriptor_module.__name__
+                patcher = mock.patch.object(
+                    descriptor_module,
+                    "KeywordDescriptor",
+                    descriptor_class,
+                    create=True,
+                )
+                factory = descriptor_class.from_tensor.__func__
+            else:
+                descriptor_class = descriptor_module.TensorDescriptor
+                factory = descriptor_class.from_tensor
+                patcher = mock.patch.object(
+                    factory, "__defaults__", factory.__defaults__
+                )
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+            def create_tma(tensor):
+                descriptor = descriptor_class.from_tensor(tensor, [16], padding="zero")
+                return tensor + 1, descriptor
+
+            tensor = torch.randn(16)
+            counter = torch._dynamo.testing.CompileCounter()
+            compiled = torch.compile(create_tma, backend=counter, fullgraph=fullgraph)
+            self.assertEqual(compiled(tensor)[1].padding, "zero")
+            self.assertEqual(counter.frame_count, 1)
+
+            if default_kind == "keyword":
+                factory.__kwdefaults__["padding"] = "nan"
+            elif default_kind == "positional_length":
+                factory.__defaults__ = ("zero", "nan", False)
+            else:
+                factory.__defaults__ = ("nan", False)
+
+            self.assertEqual(create_tma(tensor)[1].padding, "zero")
+            if fullgraph:
+                with self.assertRaisesRegex(
+                    Unsupported, "Unsupported TMA descriptor factory call"
+                ):
+                    compiled(tensor)
+            else:
+                result, descriptor = compiled(tensor)
+                self.assertEqual(result, tensor + 1)
+                self.assertEqual(descriptor.padding, "zero")
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @parametrize(
+        "signature_kind", ["keyword_only", "custom_signature", "reordered", "required"]
+    )
+    @parametrize("fullgraph", [False, True])
+    def test_tma_stable_factory_incompatible_reconstruction(
+        self, signature_kind, fullgraph
+    ):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        with _force_tensor_descriptor_support():
+            if not has_triton_tensor_descriptor_host_tma():
+                self.skipTest("requires triton.tools.tensor_descriptor API")
+
+            class SignatureDescriptor(descriptor_module.TensorDescriptor):
+                pass
+
+            if signature_kind in ("keyword_only", "custom_signature"):
+
+                @classmethod
+                def from_tensor(cls, *, tensor, block_shape):
+                    return cls(tensor, tensor.shape, tensor.stride(), block_shape)
+
+            elif signature_kind == "reordered":
+
+                @classmethod
+                def from_tensor(cls, block_shape, tensor):
+                    return cls(tensor, tensor.shape, tensor.stride(), block_shape)
+
+            else:
+
+                @classmethod
+                def from_tensor(cls, tensor, block_shape, required):
+                    return cls(tensor, tensor.shape, tensor.stride(), block_shape)
+
+            if signature_kind == "custom_signature":
+                from_tensor.__func__.__signature__ = inspect.Signature(
+                    inspect.Parameter(name, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                    for name in ("cls", "tensor", "block_shape")
+                )
+            SignatureDescriptor.from_tensor = from_tensor
+            SignatureDescriptor.__module__ = descriptor_module.__name__
+            with mock.patch.object(
+                descriptor_module,
+                "SignatureDescriptor",
+                SignatureDescriptor,
+                create=True,
+            ):
+
+                def create_tma(tensor):
+                    descriptor = SignatureDescriptor.from_tensor(
+                        tensor=tensor, block_shape=[16]
+                    )
+                    if signature_kind == "required":
+                        return tensor + 1
+                    return tensor + 1, descriptor
+
+                tensor = torch.randn(16)
+                compiled = torch.compile(
+                    create_tma, backend="eager", fullgraph=fullgraph
+                )
+                if fullgraph:
+                    with self.assertRaisesRegex(
+                        Unsupported, "Unsupported TMA descriptor factory call"
+                    ):
+                        compiled(tensor)
+                elif signature_kind == "required":
+                    with self.assertRaisesRegex(TypeError, "required"):
+                        compiled(tensor)
+                else:
+                    result, descriptor = compiled(tensor)
+                    self.assertEqual(result, tensor + 1)
+                    self.assertIsInstance(descriptor, SignatureDescriptor)
+                    self.assertEqual(descriptor.base, tensor)
+                    self.assertEqual(descriptor.block_shape, [16])
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @parametrize("fixed_inputs", [0, 1, 2])
+    @parametrize("call_style", ["positional", "mixed", "keywords"])
+    def test_tma_stable_factory_plain_forwarder(self, call_style, fixed_inputs):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        with _force_tensor_descriptor_support():
+            if not has_triton_tensor_descriptor_host_tma():
+                self.skipTest("requires triton.tools.tensor_descriptor API")
+
+            original = descriptor_module.TensorDescriptor.from_tensor
+
+            if fixed_inputs == 0:
+
+                def from_tensor(*args, **kwargs):
+                    return original(*args, **kwargs)
+
+            elif fixed_inputs == 1:
+
+                def from_tensor(tensor, *args, **kwargs):
+                    return original(tensor, *args, **kwargs)
+
+            else:
+
+                def from_tensor(tensor, block_shape, *args, **kwargs):
+                    return original(tensor, block_shape, *args, **kwargs)
+
+            with mock.patch.object(
+                descriptor_module.TensorDescriptor,
+                "from_tensor",
+                staticmethod(from_tensor),
+            ):
+
+                def create_tma(tensor):
+                    factory = descriptor_module.TensorDescriptor.from_tensor
+                    if call_style == "positional":
+                        descriptor = factory(tensor, [16])
+                    elif call_style == "mixed":
+                        descriptor = factory(tensor, block_shape=[16])
+                    else:
+                        descriptor = factory(tensor=tensor, block_shape=[16])
+                    return tensor + 1, descriptor
+
+                tensor = torch.randn(16)
+                backend = torch._dynamo.testing.EagerAndRecordGraphs()
+                result, descriptor = torch.compile(
+                    create_tma, backend=backend, fullgraph=True
+                )(tensor)
+                self.assertEqual(len(backend.graphs), 1)
+                self.assertEqual(result, tensor + 1)
+                self.assertEqual(descriptor.base, tensor)
+                self.assertEqual(descriptor.block_shape, [16])
+                self.assertEqual(descriptor.padding, "zero")
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @parametrize("wrapper_kind", ["wrapped", "signature"])
+    @parametrize("explicit", [False, True])
+    @parametrize("fullgraph", [False, True])
+    def test_tma_stable_factory_wrapped_defaults(
+        self, wrapper_kind, explicit, fullgraph
+    ):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        with _force_tensor_descriptor_support():
+            if not has_triton_tensor_descriptor_host_tma():
+                self.skipTest("requires triton.tools.tensor_descriptor API")
+
+            original = descriptor_module.TensorDescriptor.from_tensor
+            if wrapper_kind == "wrapped":
+
+                @functools.wraps(original)
+                def from_tensor(tensor, block_shape, padding=None):
+                    if padding is None:
+                        return original(tensor, block_shape)
+                    return original(tensor, block_shape, padding)
+
+            else:
+
+                def from_tensor(*args, **kwargs):
+                    return original(*args, **kwargs)
+
+                from_tensor.__signature__ = inspect.signature(original)
+
+            with (
+                mock.patch.object(
+                    descriptor_module.TensorDescriptor,
+                    "from_tensor",
+                    staticmethod(from_tensor),
+                ),
+                mock.patch.object(original, "__defaults__", original.__defaults__),
+            ):
+
+                def create_tma(tensor):
+                    factory = descriptor_module.TensorDescriptor.from_tensor
+                    if explicit:
+                        descriptor = factory(tensor, [16], padding="zero")
+                    else:
+                        descriptor = factory(tensor, [16])
+                    return tensor + 1, descriptor
+
+                tensor = torch.randn(16)
+                compiled = torch.compile(
+                    create_tma, backend="eager", fullgraph=fullgraph
+                )
+                if explicit and fullgraph:
+                    with self.assertRaisesRegex(
+                        Unsupported, "Unsupported TMA descriptor factory call"
+                    ):
+                        compiled(tensor)
+                    return
+
+                self.assertEqual(compiled(tensor)[1].padding, "zero")
+                original.__defaults__ = ("nan", False)
+                result, descriptor = compiled(tensor)
+                self.assertEqual(result, tensor + 1)
+                self.assertEqual(descriptor.padding, "zero" if explicit else "nan")
+                self.assertEqual(descriptor.padding, create_tma(tensor)[1].padding)
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @parametrize("argument", ["padding", "rounding", "nonconstant"])
+    def test_tma_stable_factory_nondefault_arguments(self, argument):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        with _force_tensor_descriptor_support():
+            if not has_triton_tensor_descriptor_host_tma():
+                self.skipTest("requires triton.tools.tensor_descriptor API")
+
+            def create_tma(tensor):
+                factory = descriptor_module.TensorDescriptor.from_tensor
+                if argument == "padding":
+                    return factory(tensor, [16], padding="nan")
+                if argument == "rounding":
+                    return factory(tensor, [16], round_f32_to_tf32=True)
+                return factory(tensor, [16], round_f32_to_tf32=tensor)
+
+            with self.assertRaisesRegex(
+                Unsupported, "Unsupported TMA descriptor factory call"
+            ):
+                torch.compile(create_tma, backend="eager", fullgraph=True)(
+                    torch.randn(16)
+                )
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    def test_tma_stable_factory_concrete_signature(self):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        with _force_tensor_descriptor_support():
+            if not has_triton_tensor_descriptor_host_tma():
+                self.skipTest("requires triton.tools.tensor_descriptor API")
+
+            class ClassMethodDescriptor(descriptor_module.TensorDescriptor):
+                @classmethod
+                def from_tensor(cls, base, block, *, padding="nan"):
+                    return cls(base, base.shape, base.stride(), block, padding=padding)
+
+            ClassMethodDescriptor.__module__ = descriptor_module.__name__
+            with mock.patch.object(
+                descriptor_module,
+                "ClassMethodDescriptor",
+                ClassMethodDescriptor,
+                create=True,
+            ):
+
+                def create_tma(tensor):
+                    descriptor = ClassMethodDescriptor.from_tensor(
+                        base=tensor, block=[16], padding="nan"
+                    )
+                    return tensor + 1, descriptor
+
+                tensor = torch.randn(16)
+                result, descriptor = torch.compile(
+                    create_tma, backend="eager", fullgraph=True
+                )(tensor)
+                self.assertEqual(result, tensor + 1)
+                self.assertIsInstance(descriptor, ClassMethodDescriptor)
+                self.assertEqual(descriptor.base, tensor)
+                self.assertEqual(descriptor.block_shape, [16])
+                self.assertEqual(descriptor.padding, "nan")
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @parametrize(
+        "factory_kind",
+        ["base", "classmethod", "inherited_classmethod", "inherited_staticmethod"],
+    )
+    @parametrize("as_argument", [False, True])
+    def test_tma_stable_factory_python_type(self, factory_kind, as_argument):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        with _force_tensor_descriptor_support():
+            if not has_triton_tensor_descriptor_host_tma():
+                self.skipTest("requires triton.tools.tensor_descriptor API")
+
+            class ClassMethodDescriptor(descriptor_module.TensorDescriptor):
+                @classmethod
+                def from_tensor(cls, tensor, block_shape):
+                    return cls(tensor, tensor.shape, tensor.stride(), block_shape)
+
+            class InheritedClassMethodDescriptor(ClassMethodDescriptor):
+                pass
+
+            class InheritedStaticMethodDescriptor(descriptor_module.TensorDescriptor):
+                pass
+
+            descriptor_class = {
+                "base": descriptor_module.TensorDescriptor,
+                "classmethod": ClassMethodDescriptor,
+                "inherited_classmethod": InheritedClassMethodDescriptor,
+                "inherited_staticmethod": InheritedStaticMethodDescriptor,
+            }[factory_kind]
+
+            def inspect_factory(tensor, factory=None):
+                if factory is None:
+                    factory = descriptor_class.from_tensor
+                return (
+                    tensor + 1,
+                    isinstance(factory, types.MethodType),
+                    isinstance(factory, types.FunctionType),
+                    type(factory),
+                )
+
+            x = torch.randn(16)
+            args = (x, descriptor_class.from_tensor) if as_argument else (x,)
+            compiled = torch.compile(inspect_factory, backend="eager", fullgraph=True)
+            self.assertEqual(compiled(*args), inspect_factory(*args))
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    def test_tma_stable_factory_and_import_rebinding(self):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        with _force_tensor_descriptor_support():
+            if not has_triton_tensor_descriptor_host_tma():
+                self.skipTest("requires triton.tools.tensor_descriptor API")
+
+            class FactoryA(descriptor_module.TensorDescriptor):
+                @classmethod
+                def from_tensor(cls, tensor, block_shape):
+                    return cls(tensor, tensor.shape, tensor.stride(), block_shape)
+
+            class FactoryB(FactoryA):
+                pass
+
+            for descriptor_type in (FactoryA, FactoryB):
+                descriptor_type.__module__ = descriptor_module.__name__
+
+            with (
+                mock.patch.object(descriptor_module, "FactoryA", FactoryA, create=True),
+                mock.patch.object(descriptor_module, "FactoryB", FactoryB, create=True),
+            ):
+                factory = FactoryA.from_tensor
+
+                def create_tma(tensor):
+                    return tensor + 1, factory(tensor, [16])
+
+                counter = torch._dynamo.testing.CompileCounter()
+                compiled = torch.compile(create_tma, backend=counter, fullgraph=True)
+                x = torch.randn(16)
+
+                self.assertIsInstance(compiled(x)[1], FactoryA)
+                self.assertEqual(counter.frame_count, 1)
+                factory = FactoryB.from_tensor
+                self.assertIsInstance(compiled(x)[1], FactoryB)
+                self.assertEqual(counter.frame_count, 2)
+
+                def create_from_class(tensor):
+                    return tensor + 1, FactoryA.from_tensor(tensor, [16])
+
+                counter = torch._dynamo.testing.CompileCounter()
+                compiled = torch.compile(
+                    create_from_class, backend=counter, fullgraph=True
+                )
+
+                self.assertIsInstance(compiled(x)[1], FactoryA)
+                self.assertEqual(counter.frame_count, 1)
+                descriptor_module.FactoryA = FactoryB
+                with self.assertRaisesRegex(
+                    Unsupported, "TMA descriptor class is not importable"
+                ):
+                    compiled(x)
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @parametrize("is_classmethod", [False, True])
+    @parametrize("fullgraph", [False, True])
+    def test_tma_stable_same_code_factory_rebinding(self, is_classmethod, fullgraph):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        with _force_tensor_descriptor_support():
+            if not has_triton_tensor_descriptor_host_tma():
+                self.skipTest("requires triton.tools.tensor_descriptor API")
+
+            class FactoryA(descriptor_module.TensorDescriptor):
+                pass
+
+            class FactoryB(FactoryA):
+                pass
+
+            def make_factory(descriptor_type):
+                if is_classmethod:
+
+                    def from_tensor(cls, tensor, block_shape):
+                        return descriptor_type(
+                            tensor, tensor.shape, tensor.stride(), block_shape
+                        )
+
+                else:
+
+                    def from_tensor(tensor, block_shape):
+                        return descriptor_type(
+                            tensor, tensor.shape, tensor.stride(), block_shape
+                        )
+
+                from_tensor.__module__ = descriptor_module.__name__
+                return from_tensor
+
+            first = make_factory(FactoryA)
+            second = make_factory(FactoryB)
+            self.assertIs(first.__code__, second.__code__)
+            factory_decorator = classmethod if is_classmethod else staticmethod
+            for descriptor_type in (FactoryA, FactoryB):
+                descriptor_type.__module__ = descriptor_module.__name__
+
+            with (
+                mock.patch.object(descriptor_module, "FactoryA", FactoryA, create=True),
+                mock.patch.object(descriptor_module, "FactoryB", FactoryB, create=True),
+                mock.patch.object(FactoryA, "from_tensor", factory_decorator(first)),
+                mock.patch.object(FactoryB, "from_tensor", factory_decorator(second)),
+            ):
+                factory = FactoryA.from_tensor
+
+                def create_tma(tensor):
+                    return tensor + 1, factory(tensor, [16])
+
+                counter = torch._dynamo.testing.CompileCounter()
+                compiled = torch.compile(
+                    create_tma, backend=counter, fullgraph=fullgraph
+                )
+                x = torch.randn(16)
+                self.assertIs(type(compiled(x)[1]), FactoryA)
+                self.assertEqual(counter.frame_count, 1)
+
+                factory = (
+                    types.MethodType(second, FactoryA) if is_classmethod else second
+                )
+                self.assertIs(type(create_tma(x)[1]), FactoryB)
+                if is_classmethod and fullgraph:
+                    with self.assertRaisesRegex(
+                        Unsupported, "captured TMA descriptor factory no longer matches"
+                    ):
+                        compiled(x)
+                else:
+                    result, descriptor = compiled(x)
+                    self.assertEqual(result, x + 1)
+                    self.assertIs(type(descriptor), FactoryB)
+                    self.assertEqual(counter.frame_count, 2)
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    def test_tma_stable_factory_owner_after_class_reuse(self):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        with _force_tensor_descriptor_support():
+            if not has_triton_tensor_descriptor_host_tma():
+                self.skipTest("requires triton.tools.tensor_descriptor API")
+
+            class FactoryA(descriptor_module.TensorDescriptor):
+                @classmethod
+                def from_tensor(cls, tensor, block_shape):
+                    return cls(tensor, tensor.shape, tensor.stride(), block_shape)
+
+            class FactoryB(FactoryA):
+                pass
+
+            for descriptor_type in (FactoryA, FactoryB):
+                descriptor_type.__module__ = descriptor_module.__name__
+
+            with (
+                mock.patch.object(descriptor_module, "FactoryA", FactoryA, create=True),
+                mock.patch.object(descriptor_module, "FactoryB", FactoryB, create=True),
+                mock.patch.object(torch, "_tma_guard_owner", FactoryA, create=True),
+            ):
+
+                def create_tma(tensor, factory):
+                    name = torch._tma_guard_owner.__name__
+                    return tensor + 1, factory(tensor, [16]), name
+
+                counter = torch._dynamo.testing.CompileCounter()
+                compiled = torch.compile(create_tma, backend=counter, fullgraph=True)
+                x = torch.randn(16)
+                self.assertIs(type(compiled(x, FactoryA.from_tensor)[1]), FactoryA)
+                self.assertEqual(counter.frame_count, 1)
+                self.assertIs(type(create_tma(x, FactoryB.from_tensor)[1]), FactoryB)
+                result, descriptor, name = compiled(x, FactoryB.from_tensor)
+                self.assertEqual(result, x + 1)
+                self.assertIs(type(descriptor), FactoryB)
+                self.assertEqual(name, "FactoryA")
+                self.assertEqual(counter.frame_count, 2)
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @parametrize("replace_owner", [False, True])
+    @parametrize("fullgraph", [False, True])
+    def test_tma_stable_retained_factory_alias(self, replace_owner, fullgraph):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        with _force_tensor_descriptor_support():
+            if not has_triton_tensor_descriptor_host_tma():
+                self.skipTest("requires triton.tools.tensor_descriptor API")
+
+            class FactoryA(descriptor_module.TensorDescriptor):
+                @classmethod
+                def from_tensor(cls, tensor, block_shape):
+                    return cls(tensor, tensor.shape, tensor.stride(), block_shape)
+
+            class FactoryB(FactoryA):
+                pass
+
+            for descriptor_type in (FactoryA, FactoryB):
+                descriptor_type.__module__ = descriptor_module.__name__
+
+            with (
+                mock.patch.object(descriptor_module, "FactoryA", FactoryA, create=True),
+                mock.patch.object(descriptor_module, "FactoryB", FactoryB, create=True),
+            ):
+                factory = FactoryA.from_tensor
+
+                def create_tma(tensor):
+                    return tensor + 1, factory(tensor, [16])
+
+                counter = torch._dynamo.testing.CompileCounter()
+                compiled = torch.compile(
+                    create_tma, backend=counter, fullgraph=fullgraph
+                )
+                x = torch.randn(16)
+                self.assertIs(type(compiled(x)[1]), FactoryA)
+                self.assertEqual(counter.frame_count, 1)
+
+                if replace_owner:
+                    replacement = FactoryB.from_tensor
+                else:
+
+                    @classmethod
+                    def replacement(cls, tensor, block_shape):
+                        return FactoryB(
+                            tensor, tensor.shape, tensor.stride(), block_shape
+                        )
+
+                with mock.patch.object(FactoryA, "from_tensor", replacement):
+                    self.assertIs(type(create_tma(x)[1]), FactoryA)
+                    if fullgraph:
+                        with self.assertRaisesRegex(
+                            Unsupported,
+                            "captured TMA descriptor factory no longer matches",
+                        ):
+                            compiled(x)
+                    else:
+                        result, descriptor = compiled(x)
+                        self.assertEqual(result, x + 1)
+                        self.assertIs(type(descriptor), FactoryA)
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    def test_tma_stable_inherited_staticmethod_owner(self):
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        with _force_tensor_descriptor_support():
+            if not has_triton_tensor_descriptor_host_tma():
+                self.skipTest("requires triton.tools.tensor_descriptor API")
+
+            class InheritedDescriptor(descriptor_module.TensorDescriptor):
+                pass
+
+            def create_tma(tensor):
+                return tensor + 1, InheritedDescriptor.from_tensor(tensor, [16])
+
+            x = torch.randn(16)
+            result, descriptor = torch.compile(
+                create_tma, backend="eager", fullgraph=True
+            )(x)
+
+            self.assertEqual(result, x + 1)
+            self.assertIsInstance(descriptor, descriptor_module.TensorDescriptor)
+            self.assertNotIsInstance(descriptor, InheritedDescriptor)
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @_force_tensor_descriptor_support()
+    def test_tma_stable_backend_subclass_reconstruct(self):
+        if not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor API")
+
+        import triton.tools.tensor_descriptor as descriptor_module
+
+        class BackendDescriptor(descriptor_module.TensorDescriptor):
+            @staticmethod
+            def from_tensor(tensor, block_shape):
+                return BackendDescriptor(
+                    tensor, tensor.shape, tensor.stride(), block_shape
+                )
+
+        BackendDescriptor.__module__ = descriptor_module.__name__
+        with mock.patch.object(
+            descriptor_module, "BackendDescriptor", BackendDescriptor, create=True
+        ):
+
+            def create_tma(tensor):
+                descriptor = BackendDescriptor.from_tensor(tensor, [16])
+                return tensor + 1, descriptor
+
+            x = torch.randn(16)
+            backend = torch._dynamo.testing.EagerAndRecordGraphs()
+            result, descriptor = torch.compile(
+                create_tma, backend=backend, fullgraph=True
+            )(x)
+
+            self.assertEqual(len(backend.graphs), 1)
+            self.assertEqual(result, x + 1)
+            self.assertIsInstance(descriptor, BackendDescriptor)
+            self.assertEqual(descriptor.block_shape, [16])
 
     def test_self_referential_sourceful(self):
         l = []

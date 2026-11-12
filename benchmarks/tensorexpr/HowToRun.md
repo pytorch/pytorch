@@ -4,7 +4,7 @@ python -m benchmarks.tensorexpr --help
 ```
 to show documentation.
 
-An example of an actual command line that one might use as a starting point:
+An example of an eager CPU benchmark:
 ```
-python -m benchmarks.tensorexpr --device gpu --mode fwd --jit-mode trace --cuda-fuser=te
+python -m benchmarks.tensorexpr --device cpu --mode fwd batch_matmul_fwd_cpu_1_4_4_4
 ```
