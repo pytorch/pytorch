@@ -164,13 +164,6 @@ inline scalar_t interpolate_non_separable(char* src, char** data, const int64_t*
 //         -> interpolate_separable_1d
 //       -> basic_loop_separable_1d_vertical  (for other spatial dims, e.g. H, D)
 //         -> interpolate_separable_1d_zero_strides
-//
-// The vertical kernel assumes that the indices and weights are constant along
-// the innermost loop (i.e. the innermost loop runs over W, along which they
-// have zero strides). When that does not hold, e.g. output width is 1 so that
-// TensorIterator squashes W and the interpolated dim itself becomes the
-// innermost loop, the vertical pass falls back to the horizontal kernel which
-// reads the indices and weights per output element.
 
 template <typename scalar_t, typename index_t>
 inline scalar_t interpolate_separable_1d_zero_strides(
@@ -1676,14 +1669,7 @@ void upsample_separable_1d(
             // width is 1 (TensorIterator squashes size-1 dims) or, in
             // channels last, when C == 1 and W == 1. The horizontal kernel
             // handles arbitrary strides, so use it in that case.
-            bool has_zero_strides = true;
-            for (const auto k : c10::irange(2, ntensors)) {
-              if (strides[k] != 0) {
-                has_zero_strides = false;
-                break;
-              }
-            }
-            if (has_zero_strides) {
+            if (is_zero_stride<5>(&strides[2])) {
               basic_loop_separable_1d_vertical<scalar_t>(data, strides, n, weights_precision);
             } else {
               basic_loop_separable_1d_horizontal<scalar_t>(data, strides, n, weights_precision);
