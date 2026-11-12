@@ -142,6 +142,8 @@ void compute_triu_tril(const Tensor& self, int64_t k, const Tensor &result) {
     return;
   }
 
+  checkTrilTriuMatrixOverlap(result);
+
   bool inplace_op = self.is_same(result);
 
   bool inplace_update = false;
