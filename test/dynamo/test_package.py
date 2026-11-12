@@ -33,6 +33,7 @@ from torch._dynamo.package import (
     DiskDynamoStore,
     DynamoCache,
     load_guards_state,
+    SourceInfo,
 )
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.precompile_package import default_guard_filter_fn
@@ -248,6 +249,18 @@ _mislabeled_holder = _hold(_exec_function())
 
 def _package_op(x):
     return x + 1
+
+
+def _inlined_add(x):
+    return x + 1
+
+
+def _inlined_mul(x):
+    return x * 2
+
+
+def _inlined_layer(x):
+    return _inlined_mul(_inlined_add(x)).sin()
 
 
 @torch._dynamo.disable
@@ -962,6 +975,89 @@ print(eval(f"bbmod.{name}.{path}") is code)
         self.assertFalse(entry.bypassed)
         self.assertEqual(entry.backend_ids, [backend_id])
         self.assertTrue(package.cache_entry().source_info.inlined_sources)
+
+    def _count_add_code(self):
+        calls = []
+        original = SourceInfo.add_code
+
+        def add_code(info, code):
+            calls.append(code)
+            return original(info, code)
+
+        self.enterContext(patch.object(SourceInfo, "add_code", add_code))
+        return calls
+
+    def test_add_inlined_source_records_each_code_once(self):
+        a, b = _inlined_add.__code__, _inlined_mul.__code__
+        expected = SourceInfo(inlined_sources=set())
+        for code in (a, b, a, a, b, b, a):
+            expected.add_code(code)
+
+        package = CompilePackage(_inlined_layer)
+        calls = self._count_add_code()
+        with package.code_context(_inlined_layer.__code__):
+            package.add_inlined_source([a, b, a, a, b])
+        with package.code_context(_inlined_layer.__code__):
+            package.add_inlined_source([b, a])
+        self.assertEqual(calls, [a, b])
+        self.assertEqual(
+            package.cache_entry().source_info.inlined_sources,
+            expected.inlined_sources,
+        )
+
+    def test_add_inlined_source_equal_code_from_two_modules(self):
+        # Code equality ignores co_filename, so equal functions from two files
+        # must each be recorded.
+        source = "def f(x):\n    return x + 1\n"
+        codes = []
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("_inlined_dedup_mod_a", "_inlined_dedup_mod_b"):
+                path = os.path.join(d, f"{name}.py")
+                with open(path, "w") as f:
+                    f.write(source)
+                self.addCleanup(sys.modules.pop, name, None)
+                codes.append(import_from_path(name, path).f.__code__)
+            a, b = codes
+            self.assertEqual(a, b)
+            self.assertIsNot(a, b)
+
+            package = CompilePackage(_inlined_layer)
+            calls = self._count_add_code()
+            with package.code_context(_inlined_layer.__code__):
+                package.add_inlined_source([a, b, a, b])
+            self.assertEqual(len(calls), 2)
+            self.assertIs(calls[0], a)
+            self.assertIs(calls[1], b)
+            modules = {
+                s.module for s in package.cache_entry().source_info.inlined_sources
+            }
+            self.assertEqual(modules, {"_inlined_dedup_mod_a", "_inlined_dedup_mod_b"})
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_repeated_inlines_record_each_code_once(self):
+        def fn(x):
+            for _ in range(8):
+                x = _inlined_layer(x)
+            return x
+
+        calls = self._count_add_code()
+        traced = []
+        original_add_inlined_source = CompilePackage.add_inlined_source
+
+        def add_inlined_source(package, sources):
+            traced.extend(sources)
+            return original_add_inlined_source(package, sources)
+
+        x = torch.randn(3)
+        with patch.object(CompilePackage, "add_inlined_source", add_inlined_source):
+            compiled = torch.compile(fn, backend="eager")
+            self.assertEqual(compiled(x), fn(x))
+        # Dynamo saw each layer code object once per inline call site.
+        self.assertEqual(traced.count(_inlined_layer.__code__), 8)
+        self.assertEqual(traced.count(_inlined_add.__code__), 8)
+        self.assertEqual(len(calls), len({id(code) for code in calls}))
+        for code in (_inlined_layer, _inlined_add, _inlined_mul):
+            self.assertIn(code.__code__, calls)
 
     @parametrize("config_cls", (ConfigThatCannotPickle, UnpicklableConfig))
     @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)

@@ -1275,6 +1275,10 @@ class CompilePackage:
         # For debugging/testing purpose only.
         self._cached_backends: dict[_BackendId, Any] = {}
         self._source_info: SourceInfo = SourceInfo(inlined_sources=set())
+        # Code objects already recorded in _source_info, keyed by id because
+        # equal code objects can come from different files. The value keeps
+        # the code alive so its id is not reused.
+        self._recorded_inlined_codes: dict[int, types.CodeType] = {}
         self._resume_codes: set[types.CodeType] = set()
         self._initialized = False
         if fn is not None:
@@ -1296,6 +1300,7 @@ class CompilePackage:
         if self._initialized:
             raise AssertionError("CompilePackage is already initialized")
         self._source_info = SourceInfo(inlined_sources=set())
+        self._recorded_inlined_codes = {}
         self._innermost_fn = innermost_fn(fn)  # type: ignore[assignment]
         if self._innermost_fn is None:
             raise AssertionError("innermost_fn returned None")
@@ -1475,9 +1480,14 @@ class CompilePackage:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_inlined_source")
         for code in sources:
+            # traced_code has one entry per inline call site, so a model with
+            # many identical layers repeats each code object many times.
+            if id(code) in self._recorded_inlined_codes:
+                continue
             if code in self._resume_codes:
                 continue
             self._source_info.add_code(code)
+            self._recorded_inlined_codes[id(code)] = code
 
     def update_device_type(self, graph: torch.fx.Graph | None) -> None:
         # One call per compiled frame, and a package spans frames (a graph
