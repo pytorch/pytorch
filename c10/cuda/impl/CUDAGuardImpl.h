@@ -135,17 +135,14 @@ struct C10_CUDA_API CUDAGuardImpl final
     // orig_device == -1. Guard the whole body so we warn instead of
     // terminating.
     try {
+      c10::impl::InlineDeviceGuard<CUDAGuardImpl> guard(device_index);
       auto cuda_event = static_cast<cudaEvent_t>(event);
-      DeviceIndex orig_device{-1};
-      C10_CUDA_CHECK_WARN(c10::cuda::GetDevice(&orig_device));
-      C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(device_index));
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_event_deletion(
             c10::kCUDA, reinterpret_cast<uintptr_t>(cuda_event));
       }
       C10_CUDA_CHECK_WARN(cudaEventDestroy(cuda_event));
-      C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(orig_device));
     } catch (const std::exception& e) {
       TORCH_WARN("destroyEvent() ignoring error: ", e.what());
     } catch (...) {
