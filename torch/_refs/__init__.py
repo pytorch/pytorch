@@ -6735,7 +6735,9 @@ def exponential(self, rate=1, generator=None):
         lambda: f"exponential_ expects lambda > 0.0, but found lambda={rate}",
     )
 
+    # rand_like has range [0, 1) change it to (0,1] by sending 0 -> 1
     uniform_val = torch.rand_like(self)
+    uniform_val = torch.where(uniform_val == 0, 1, uniform_val)
 
     # -log1p(-u) takes small results from u near 0, where rand_like is dense; -log(u) would take them from u near 1
     # and lose the small tail (see standard_exponential in aten/src/ATen/native/cuda/DistributionTemplates.h).
