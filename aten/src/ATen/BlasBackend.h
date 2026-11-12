@@ -47,6 +47,38 @@ enum class SwizzleType : std::uint8_t {
   SWIZZLE_32_8 = 2, // hipBLASLt BLK32_UE8M0_32_8
 };
 
+inline const char* ScalingTypeToString(ScalingType value) {
+  switch (value) {
+    case ScalingType::TensorWise:
+      return "TensorWise";
+    case ScalingType::RowWise:
+      return "RowWise";
+    case ScalingType::BlockWise1x16:
+      return "BlockWise1x16";
+    case ScalingType::BlockWise1x32:
+      return "BlockWise1x32";
+    case ScalingType::BlockWise1x128:
+      return "BlockWise1x128";
+    case ScalingType::BlockWise128x128:
+      return "BlockWise128x128";
+    default:
+      return "UnknownScalingType";
+  }
+}
+
+inline const char* SwizzleTypeToString(SwizzleType value) {
+  switch (value) {
+    case SwizzleType::NO_SWIZZLE:
+      return "NO_SWIZZLE";
+    case SwizzleType::SWIZZLE_32_4_4:
+      return "SWIZZLE_32_4_4";
+    case SwizzleType::SWIZZLE_32_8:
+      return "SWIZZLE_32_8";
+    default:
+      return "UnknownSwizzleType";
+  }
+}
+
 } // namespace blas
 
 } // namespace at
