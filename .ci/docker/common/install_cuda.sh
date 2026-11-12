@@ -208,11 +208,14 @@ function install_130 {
 }
 
 function install_132 {
+  CUBLAS_VERSION=13.4.3.11
   CUDNN_VERSION=9.26.0.51
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.2 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.2 in the same container
   install_cuda 13.2.2 cuda_13.2.2_595.71.05_linux
+
+  install_cublas $CUBLAS_VERSION
 
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
   install_cudnn 13 $CUDNN_VERSION
@@ -232,7 +235,7 @@ function install_134 {
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.4 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.4 in the same container
-  install_cuda 13.4.1 cuda_13.4.1_linux
+  install_cuda 13.4.3 cuda_13.4.3_linux
 
   install_cublas $CUBLAS_VERSION
 

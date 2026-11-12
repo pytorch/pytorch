@@ -77,6 +77,13 @@ def _use_backend(backend):
         yield
 
 
+_skip_cudnn_varlen_unsupported = decorateIf(
+    unittest.skip("cuDNN varlen attention is not supported on this device"),
+    lambda p: not PLATFORM_SUPPORTS_CUDNN_ATTENTION
+    or not varlen_attention._should_use_cudnn(torch.device(p["device"]).index),
+)
+
+
 def _check_cudnn_varlen_supported(device):
     if not PLATFORM_SUPPORTS_CUDNN_ATTENTION:
         raise unittest.SkipTest("cuDNN Attention is not supported on this system")
@@ -938,6 +945,14 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
     @parametrize("backend", [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION])
+    @decorateIf(
+        unittest.skip("cuDNN varlen attention is not supported on this device"),
+        lambda p: p["backend"] == SDPBackend.CUDNN_ATTENTION
+        and (
+            not PLATFORM_SUPPORTS_CUDNN_ATTENTION
+            or not varlen_attention._should_use_cudnn(torch.device(p["device"]).index)
+        ),
+    )
     def test_varlen_lse_is_not_differentiable(self, device, backend):
         if backend == SDPBackend.CUDNN_ATTENTION:
             _check_cudnn_varlen_supported(device)
@@ -981,6 +996,17 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         + (["fa3"] if IS_SM90 else [])
         + (["fa4"] if SM100OrLater and not SM120OrLater else [])
         + ["cudnn"],
+    )
+    @decorateIf(
+        unittest.skip("cuDNN does not support this window_size or num_splits"),
+        lambda p: p["backend"] == "cudnn"
+        and (
+            p["window_size"] not in ((-1, -1), (-1, 0)) or p["num_splits"] is not None
+        ),
+    )
+    @decorateIf(
+        unittest.skip("num_splits is not supported on ROCm"),
+        lambda p: TEST_WITH_ROCM and p["num_splits"] is not None,
     )
     def test_batch_invariance(
         self, device, dtype, num_splits, window_size, backend, sdpa_backend=None
@@ -1268,6 +1294,10 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         "backend",
         _varlen_backends(include_fa4_paged_kv=True),
     )
+    @decorateIf(
+        unittest.skip("FA2 paged KV requires page_size divisible by 256"),
+        lambda p: p["backend"] == "fa2" and p["page_size"] % 256 != 0,
+    )
     def test_block_table_kv_cache(
         self, device, dtype, page_size, compile, actual_kv_lens, backend
     ):
@@ -1506,6 +1536,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @_skip_cudnn_varlen_unsupported
     def test_cudnn_causal_varlen_requires_shared_cu_seq(self, device):
         _check_cudnn_varlen_supported(device)
         seq_len = 256
@@ -1552,6 +1583,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
 
     @skipIfRocm
     @parametrize("different_kv_stride", [False, True])
+    @_skip_cudnn_varlen_unsupported
     def test_cudnn_varlen_shared_cu_seq(self, device, different_kv_stride):
         """Reusing shared Q/K metadata preserves forward and backward results."""
         _check_cudnn_varlen_supported(device)
@@ -1582,6 +1614,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
     @skipIfRocm
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("different_kv_stride", [False, True])
+    @_skip_cudnn_varlen_unsupported
     def test_cudnn_varlen_cumulative_sequence_lengths(
         self, device, dtype, different_kv_stride
     ):
@@ -1635,6 +1668,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
 
     @skipIfRocm
     @parametrize("tensor_idx", [0, 1, 2])
+    @_skip_cudnn_varlen_unsupported
     def test_cudnn_varlen_unaligned_input_raises(self, device, tensor_idx):
         """Reject varlen inputs whose row strides are not 16-byte aligned.
 
@@ -1666,6 +1700,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @_skip_cudnn_varlen_unsupported
     def test_cudnn_varlen_unaligned_grad_out(self, device, dtype):
         """Unaligned grad_output row strides are contiguified, not crashed on."""
         _check_cudnn_varlen_supported(device)
@@ -1712,6 +1747,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
             (256, 256, True, False),
         ],
     )
+    @_skip_cudnn_varlen_unsupported
     def test_cudnn_varlen_large_head_dims(
         self, device, qk_dim, value_dim, requires_backward, supported
     ):
@@ -1769,6 +1805,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
                     )
 
     @skipIfRocm
+    @_skip_cudnn_varlen_unsupported
     def test_cudnn_varlen_key_head_dim_mismatch_raises(self, device):
         """A mismatched key head dim must raise instead of overreading K."""
         _check_cudnn_varlen_supported(device)
@@ -1784,6 +1821,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
                 varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
 
     @skipIfRocm
+    @_skip_cudnn_varlen_unsupported
     def test_cudnn_varlen_empty_batch(self, device):
         """Zero-token batches return well-formed empties, matching Flash."""
         _check_cudnn_varlen_supported(device)
@@ -1799,6 +1837,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
         self.assertEqual(lse.shape, torch.Size([num_heads, 0]))
 
     @skipIfRocm
+    @_skip_cudnn_varlen_unsupported
     def test_cudnn_varlen_empty_kv(self, device):
         """Empty KV returns constant outputs and zero gradients."""
         _check_cudnn_varlen_supported(device)
@@ -1835,6 +1874,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @_skip_cudnn_varlen_unsupported
     def test_cudnn_varlen_compile_noncontiguous_query(self, device):
         """The real and fake ops preserve the query's dimension order."""
         _check_cudnn_varlen_supported(device)
@@ -1995,6 +2035,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @_skip_cudnn_varlen_unsupported
     def test_cudnn_varlen_decode_falls_back_to_flash(self, device):
         """Affected cuDNN versions do not receive max_q == 1 varlen calls."""
         _check_cudnn_varlen_supported(device)
@@ -2118,6 +2159,11 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("head_dim", [128, 256])
     @parametrize("page_size", [16, 256, 528])
+    @unittest.skipIf(
+        (torch.backends.cudnn.version() or 0) < 92400,
+        "cuDNN >= 9.24 is required for causal KV caches",
+    )
+    @_skip_cudnn_varlen_unsupported
     def test_cudnn_causal_gqa_paged_kv_cache(self, device, dtype, head_dim, page_size):
         """cuDNN serves causal GQA paged prefill with max_q <= 128."""
         _check_cudnn_varlen_supported(device)
@@ -2236,6 +2282,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
         self.assertEqual(lse_out, lse)
 
     @skipIfRocm
+    @_skip_cudnn_varlen_unsupported
     def test_cudnn_non_power_of_two_page_rejected(self, device):
         """Callers must expose paged KV to cuDNN with power-of-two pages."""
         _check_cudnn_varlen_supported(device)
@@ -2264,6 +2311,11 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
 
     @skipIfRocm
     @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @unittest.skipIf(
+        (torch.backends.cudnn.version() or 0) < 92400,
+        "cuDNN >= 9.24 is required for max_q <= 128",
+    )
+    @_skip_cudnn_varlen_unsupported
     def test_cudnn_short_query_gqa_backward(self, device, dtype):
         """cuDNN supports GQA forward/backward when max_q <= 128."""
         _check_cudnn_varlen_supported(device)
@@ -2323,6 +2375,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
             )
 
     @skipIfRocm
+    @_skip_cudnn_varlen_unsupported
     def test_cudnn_varlen_out_layout_validation(self, device):
         """The cuDNN out variant validates the preallocated output."""
         _check_cudnn_varlen_supported(device)
@@ -2453,6 +2506,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
 
     @skipIfRocm
     @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @_skip_cudnn_varlen_unsupported
     def test_cudnn_varlen_cached_graph_aux_layouts(self, device, dtype):
         """Key cached backward graphs by output and LSE layouts."""
         _check_cudnn_varlen_supported(device)
