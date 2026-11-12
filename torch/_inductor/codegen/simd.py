@@ -519,10 +519,11 @@ def template_reduction_axis(
     m, n = template.get_size()
 
     def reads(node, is_valid):
-        return all(
-            isinstance(dep, MemoryDep) and is_valid(dep)
-            for dep in node.read_writes.reads
-            if dep.name in produced
+        # A reduction that reads none of them (e.g. one over a template input)
+        # isn't an epilogue, however its group happens to match.
+        deps = [dep for dep in node.read_writes.reads if dep.name in produced]
+        return bool(deps) and all(
+            isinstance(dep, MemoryDep) and is_valid(dep) for dep in deps
         )
 
     def col_major(dep):
@@ -579,14 +580,14 @@ def template_reduction_axis(
         # row x. Indices are checked unnormalized: normalized dependencies
         # can't tell a row index from a column index when m == n.
         body, x, r = linear_loop_body(node)
-        if all(
+        deps = [dep for dep in body._reads if dep.name in produced]
+        if deps and all(
             isinstance(dep, MemoryDep)
             and (
                 sympy.expand(dep.index - (r + n * x)) == 0
                 or (sympy.expand(dep.index - x) == 0 and is_row_stat(dep.name))
             )
-            for dep in body._reads
-            if dep.name in produced
+            for dep in deps
         ):
             return 0
     unsplit = node.unsplit_reduction()
