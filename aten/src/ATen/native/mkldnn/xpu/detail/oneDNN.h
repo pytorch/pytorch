@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/BlasBackend.h>
+#include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
@@ -145,14 +146,14 @@ at::Tensor quantized_convolution(
     std::optional<std::string_view> unary_algorithm);
 
 void quantized_matmul(
-    at::Tensor mat1, // act
+    const at::Tensor& mat1, // act
     double input_scale,
     int64_t input_zero_point,
-    at::Tensor mat2, // weight
+    const at::Tensor& mat2, // weight
     at::Tensor& weight_scales,
     at::Tensor& weight_zero_points,
     at::Tensor& b_raw,
-    at::Tensor result, // output
+    const at::Tensor& result, // output
     double output_scale,
     int64_t output_zero_point,
     std::optional<c10::ScalarType> output_dtype,
@@ -223,4 +224,15 @@ sycl::event scaled_matmul(
     const std::optional<at::Tensor>& scale_result,
     bool use_fast_accum,
     const std::optional<at::Tensor>& alpha = std::nullopt);
+
+sycl::event scaled_grouped_matmul(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const std::optional<Tensor> scale_a,
+    const std::optional<Tensor> scale_b,
+    const std::optional<at::blas::ScalingType> scaling_choice_a,
+    const std::optional<at::blas::ScalingType> scaling_choice_b,
+    const Tensor& offs,
+    Tensor& out,
+    const std::optional<Tensor> alpha = std::nullopt);
 } // namespace at::native::onednn
