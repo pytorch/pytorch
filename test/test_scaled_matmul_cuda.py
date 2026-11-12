@@ -2732,8 +2732,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
     @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
     @decorateIf(
-        unittest.skip('nvfp4 not supported on ROCm, skipping'),
-        lambda p: torch.version.hip and p['recipe'] == 'nvfp4',
+        unittest.skip('nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping'),
+        lambda p: torch.version.hip and p['recipe'] == 'nvfp4' and not rocm_nvfp4_supported(),
     )
     @decorateIf(
         unittest.skip('fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping'),
@@ -3019,8 +3019,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         lambda p: 'xpu' in p['device'],
     )
     @decorateIf(
-        unittest.skip('nvfp4 not supported on ROCm, skipping'),
-        lambda p: p['recipe'] == 'nvfp4' and torch.version.hip,
+        unittest.skip('nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping'),
+        lambda p: p['recipe'] == 'nvfp4' and torch.version.hip and not rocm_nvfp4_supported(),
     )
     @decorateIf(
         unittest.skip('MXFP4 on CUDA only supported on B200/B300'),
@@ -3341,8 +3341,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("recipe", ["nvfp4", "mxfp4"])
     @decorateIf(
-        unittest.skip('nvfp4 not supported on ROCm, skipping'),
-        lambda p: p['recipe'] == 'nvfp4' and torch.version.hip,
+        unittest.skip('nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping'),
+        lambda p: p['recipe'] == 'nvfp4' and torch.version.hip and not rocm_nvfp4_supported(),
     )
     @decorateIf(
         unittest.skip('MXFP4 on CUDA only supported on B200/B300'),
