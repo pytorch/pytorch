@@ -2567,7 +2567,7 @@ class TestSDPAGeneric(NNTestCase):
         for both cpu and cuda. If you're test is only applicable to cuda,
         add it to TestSDPAAccelerator.
     """
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @parametrize("dtype", [torch.float16, torch.float32, torch.float64])
     @parametrize("ref_dtype", [None, torch.float16, torch.float32, torch.float64])
@@ -7579,7 +7579,7 @@ class TestSDPAXpuOnly(NNTestCase):
             self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
 
 class TestAttnBias(NNTestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def run_test(
         self,

@@ -24,15 +24,14 @@ from torch.quantization._quantized_conversions import (
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     _get_torch_rocm_version,
-    _get_torch_cuda_version,
     BF16X9_API_SUPPORTED,
     BF16X9_SUPPORTED,
     blas_library_context,
     IS_SM90,
     PLATFORM_SUPPORTS_BF16,
+    PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM,
     SM90OrLater,
     SM100OrLater,
-    SM120OrLater,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -1298,9 +1297,7 @@ class TestMatmulCuda(InductorTestCase):
             return torch.cat(outputs, dim=1)
         return torch.stack([torch.mm(a, b) for a, b in zip(A, B)])
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
-    @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 3), "cublaslt grouped gemm requires CUDA Toolkit >= 13.3")
-    @unittest.skipIf(not SM90OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 9.0-11.0")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM, "requires CUDA >= 13.3 and SM9.x-SM11.x")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("jagged_size", [31, 32])
     @parametrize("a_row_major", [False, True])
@@ -1313,9 +1310,7 @@ class TestMatmulCuda(InductorTestCase):
             C = torch._grouped_mm(A, B, offs=offs)
         self.assertEqual(C, C_ref)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
-    @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 3), "cublaslt grouped gemm requires CUDA Toolkit >= 13.3")
-    @unittest.skipIf(not SM90OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 9.0-11.0")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM, "requires CUDA >= 13.3 and SM9.x-SM11.x")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("jagged_size", [31, 32])
     @parametrize("a_row_major", [False, True])
@@ -1351,9 +1346,7 @@ class TestMatmulCuda(InductorTestCase):
         with self.assertRaisesRegex(RuntimeError, "Invalid strides/sizes"):
             torch._grouped_mm(A, B, offs=offs)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support cuBLASLt grouped GEMM")
-    @unittest.skipIf(TEST_CUDA and _get_torch_cuda_version() < (13, 3), "cublaslt grouped gemm requires CUDA Toolkit >= 13.3")
-    @unittest.skipIf(not SM90OrLater or SM120OrLater, "cublaslt grouped gemm requires SM 9.0-11.0")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM, "requires CUDA >= 13.3 and SM9.x-SM11.x")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/3d"])
     def test_grouped_gemm_cublaslt_int64_indexing(self, op):
         # Verify that the int64 indexing path works correctly when a
