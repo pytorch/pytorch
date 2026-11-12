@@ -1,7 +1,5 @@
 # Owner(s): ["module: inductor"]
 
-import unittest
-
 import torch
 from torch._inductor import config, ir
 from torch._inductor.codecache import PyCodeCache
@@ -15,9 +13,9 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TEST_CUDA,
     TestCase,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 def graph():
@@ -68,8 +66,9 @@ def trace(data):
     return buffer.get_default_sizes_body()
 
 
+@requires_cuda_and_triton
 class TestJaggedReductionIR(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CUDA
 
     def test_bound_dependencies(self):
         j_range = JaggedRange("j")
@@ -81,16 +80,7 @@ class TestJaggedReductionIR(TestCase):
             return ops.load("values", start + rindex[0])
 
         with V.set_graph_handler(graph()):
-            reduction = ir.Reduction(
-                device=torch.device("cpu"),
-                dtype=torch.float32,
-                inner_fn=inner_fn,
-                ranges=[4],
-                reduction_ranges=[j_range],
-                reduction_type="sum",
-                src_dtype=torch.float32,
-                reduction_hint=ir.ReductionHint.DEFAULT,
-            )
+            reduction = row_sum(inner_fn, j_range)
             self.assertIn("ops.register_jagged_range(", str(reduction))
             tensor = ir.TensorBox.create(reduction)
             tensor.realize()
@@ -207,40 +197,44 @@ class TestJaggedReductionIR(TestCase):
         with self.assertRaisesRegex(AssertionError, "must start with 'j'"):
             JaggedRange("u0")
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
-    def test_triton_row_sum_bj_to_b(self):
-        # Row 2 is longer than one reduction block; row 1 is empty.
-        offsets = torch.tensor([0, 2, 2, 1029, 1030], device="cuda")
-        values = torch.randn(1030, device="cuda")
+    @parametrize("cooperative", [False, True])
+    def test_triton_row_sum_bj_to_b(self, cooperative):
+        # Row 2 is longer than any R0_BLOCK autotuning picks (at most 4096), so
+        # its loop runs more than once; rows 1 and 4 are empty. Integer values
+        # keep the sums exact. A forced cooperative reduction must still be
+        # turned off.
+        offsets = torch.tensor([0, 2, 2, 4099, 4100, 4100], device="cuda")
+        values = torch.randint(-8, 8, (4100,), device="cuda").float()
         j_range = JaggedRange("j")
 
         def inner_fn(index, rindex):
             b = index[0]
             length = ops.load("offsets", b + 1) - ops.load("offsets", b)
             ops.register_jagged_range(length, j_range)
-            start = ops.indirect_indexing(ops.load("offsets", b), values.numel())
-            return ops.load("values", start + rindex[0])
+            row = ops.load("offsets", b) + ops.index_expr(rindex[0], torch.int64)
+            return ops.load("values", ops.indirect_indexing(row, values.numel()))
 
         reduction = ir.Reduction(
             device=values.device,
             dtype=values.dtype,
             inner_fn=inner_fn,
-            ranges=[4],
+            ranges=[5],
             reduction_ranges=[j_range],
             reduction_type="sum",
             src_dtype=values.dtype,
             reduction_hint=ir.ReductionHint.DEFAULT,
         )
-        actual, _ = compile_and_run(reduction, {"offsets": offsets, "values": values})
+        inputs = {"offsets": offsets, "values": values}
+        with config.patch({"triton.force_cooperative_reductions": cooperative}):
+            actual, _ = compile_and_run(reduction, inputs)
         self.assertEqual(actual, torch.segment_reduce(values, "sum", offsets=offsets))
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_triton_row_sum_bjd_to_bd(self):
         # Enough rows that a (y, x) tiling would otherwise be picked.
         lengths = torch.randint(0, 8, (256,), device="cuda")
-        lengths[1], lengths[2] = 0, 1027
+        lengths[1], lengths[2] = 0, 4097
         offsets = torch.nn.functional.pad(lengths.cumsum(0), (1, 0))
-        values = torch.randn(int(offsets[-1]), 3, device="cuda")
+        values = torch.randint(-8, 8, (int(offsets[-1]), 3), device="cuda").float()
         j_range = JaggedRange("j")
 
         def inner_fn(index, rindex):
