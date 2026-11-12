@@ -782,6 +782,40 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @unittest.skipIf(torch.xpu.is_available(), "no SM carveout on XPU")
+    def test_sm_carveout_is_in_the_cache_key(self):
+        # get_num_sms() subtracts the carveout and kernels bake it into NUM_SMS.
+        def fn(x, y):
+            return x * 2 + (y @ y).view(25)
+
+        a = torch.rand(25)
+        b = torch.rand(5, 5)
+        try:
+            for carveout, misses, hits in ((None, 1, 0), (8, 2, 0), (8, 2, 1)):
+                torch._C._set_sm_carveout_experimental(carveout)
+                self.assertEqual(torch.compile(fn)(a, b), fn(a, b))
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], misses)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], hits)
+                self.reset()
+        finally:
+            torch._C._set_sm_carveout_experimental(None)
+
+    @unittest.skipIf(torch.xpu.is_available(), "no SM carveout on XPU")
+    def test_sm_carveout_is_in_the_autotune_inputs_key(self):
+        from torch._inductor.select_algorithm import create_inputs_key
+
+        try:
+            keys = []
+            for carveout in (None, 8, 16):
+                torch._C._set_sm_carveout_experimental(carveout)
+                keys.append(create_inputs_key([]))
+        finally:
+            torch._C._set_sm_carveout_experimental(None)
+        self.assertEqual(keys[0], create_inputs_key([]))
+        self.assertEqual(len(set(keys)), 3)
+
     def _check_cpu_thread_count_cache_key_no_input(self, return_expr):
         script = textwrap.dedent(
             f"""
