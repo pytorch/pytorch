@@ -81,6 +81,20 @@ if HAS_GPU_AND_TRITON:
         output = x + 1
         tl.store(out_ptr + offsets, output, mask=mask)
 
+    @triton.jit
+    def times_two_and_three_kernel(
+        in_ptr0,
+        out_ptr0,
+        out_ptr1,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        tl.store(out_ptr0 + offsets, x * 2, mask=mask)
+        tl.store(out_ptr1 + offsets, x * 3, mask=mask)
+
 
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
@@ -212,7 +226,12 @@ def count_shared_recompute_calls(gm, args, expected):
     for name, mod in gm.named_children():
         if not name.startswith("recompute_"):
             continue
-        unread = [p.name for p in mod.graph.find_nodes(op="placeholder") if not p.users]
+        # (A SymInt input binds its symbol.)
+        unread = [
+            p.name
+            for p in mod.graph.find_nodes(op="placeholder")
+            if not p.users and not isinstance(p.meta.get("val"), torch.SymInt)
+        ]
         if unread:
             raise AssertionError(f"{name} doesn't read {unread} in {gm}")
     return gm
@@ -3091,7 +3110,7 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
                 self.assertEqual(len(shared_recompute_code(bw_code, "bw")), 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
 
-    @parametrize("case", ["attribute", "unbacked", "separate_input", "in_place"])
+    @parametrize("case", ["unbacked", "separate_input", "in_place"])
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_not_yet_shared(self, device, case):
         # Recompute that later commits share is left as partitioned for now,
@@ -3099,9 +3118,6 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         from torch._functorch._aot_autograd import deterministic_recompute
 
         def gn(x, w, buf):
-            if case == "attribute":
-                c = torch.tensor([1.0, 2.0, 3.0, 4.0], device=x.device)
-                return (x @ w * c).sin()
             if case == "unbacked":
                 return (x @ w)[torch.nonzero(x[:, 0] > 0).squeeze(-1)].sin()
             if case == "in_place":
@@ -3122,7 +3138,6 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             return y
 
         reason = {
-            "attribute": "is a scalar or a graph attribute",
             "unbacked": "carries an unbacked symbol",
             "separate_input": "isn't available in the backward",
             "in_place": "writes in place",
@@ -3321,9 +3336,11 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
     @torch._inductor.config.patch(force_disable_caches=True)
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_input_free_piece(self, device):
-        # The recompute of a factory op and what is computed from it reads no
-        # tensor input, so its forward call has nowhere to fall back to; it's
-        # left as partitioned.
+        # The recompute is only constants (a factory op and its exp), which are
+        # copied into the pieces that read them, so it has no piece of its own;
+        # the backward reads the exp directly, which the log says.
+        from torch._functorch._aot_autograd import deterministic_recompute
+
         def fn(x):
             return torch.utils.checkpoint.checkpoint(
                 lambda x: x * torch.full((16,), 0.5, device=x.device).exp(),
@@ -3332,39 +3349,60 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             )
 
         x = torch.randn(16, 16, device=device, requires_grad=True)
-        _, codes = run_and_get_code(self._validate, fn, "inductor", x)
+        with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
+            _, codes = run_and_get_code(self._validate, fn, "inductor", x)
         for code in codes:
             self.assertNotIn("def recompute_", code)
+        self.assertIn("the backward reads it directly", logs.output[0])
 
-    @parametrize("case", ["view", "no_size_asserts"])
+    @parametrize("case", ["view", "saved_cat", "no_size_asserts"])
     @requires_gpu_and_triton
     @torch._inductor.config.patch(force_disable_caches=True)
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_unbound_symbols(self, device, case):
-        # Under dynamic shapes the region reads h, of size s0*s1 by s2: no input
-        # of its piece binds s0 or s1 on its own, so Inductor couldn't compile
-        # the subgraph, and it's left as partitioned. Without size_asserts,
-        # Inductor binds no symbol from an input's sizes at all.
-        from torch._functorch._aot_autograd import deterministic_recompute
+        # Under dynamic shapes the piece's input has a size that binds no
+        # symbol for Inductor on its own: h is s0*s1 by s2, a saved cat is
+        # 2*(s0//2) by s1, and without size_asserts no input size binds one.
+        # The piece also takes the SymInt graph inputs that are those symbols.
+        def policy(ctx, op, *args, **kwargs):
+            if op is torch.ops.aten.cat.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
 
-        def fn(x, w):
+        def view(x, w):
             h = x.view(-1, x.shape[-1]) @ w if case == "view" else x @ w
             return torch.utils.checkpoint.checkpoint(
                 lambda h: h.sin().sin(), h, use_reentrant=False
             )
 
-        shape = (4, 8, 16) if case == "view" else (8, 16)
+        def saved_cat(x, w):
+            def gn(x, w):
+                half = x[: x.shape[0] // 2]
+                return ((torch.cat([half, half]) @ w).sin() @ w).cos()
+
+            return torch.utils.checkpoint.checkpoint(
+                gn,
+                x,
+                w,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts, policy
+                ),
+            )
+
+        fn = saved_cat if case == "saved_cat" else view
+        shape = {"view": (4, 8, 16), "saved_cat": (6, 16)}.get(case, (8, 16))
         x = torch.randn(shape, device=device, requires_grad=True)
         w = torch.randn(16, 16, device=device, requires_grad=True)
         xe, we = (t.detach().clone().requires_grad_() for t in (x, w))
         fn(xe, we).sum().backward()
-        with (
-            torch._inductor.config.patch(size_asserts=case == "view"),
-            self.assertLogs(deterministic_recompute.log, level="INFO") as logs,
-        ):
+        with torch._inductor.config.patch(size_asserts=case != "no_size_asserts"):
             compiled = torch.compile(fn, backend="inductor", dynamic=True)
-            compiled(x, w).sum().backward()
-        self.assertIn("no input binds the symbols its sizes use", logs.output[0])
+            _, (fw_code, bw_code) = run_and_get_code(
+                lambda: compiled(x, w).sum().backward()
+            )
+        self.assertEqual(len(shared_recompute_code(fw_code, "fw")), 1)
+        self.assertEqual(len(shared_recompute_code(bw_code, "bw")), 1)
         self.assertEqual(x.grad, xe.grad, atol=1e-4, rtol=1e-4)
         self.assertEqual(w.grad, we.grad, atol=1e-4, rtol=1e-4)
 
@@ -3395,6 +3433,61 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
                     compiled(x, w).sum().backward()
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+
+    @requires_gpu_and_triton
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_get_attr(self, device):
+        # A tensor constant and flex_attention's score_mod are graph attributes
+        # (get_attr). They are copied into the pieces that read them, so the
+        # recompute reading them, and everything computed from it, is shared.
+        from torch.nn.attention.flex_attention import flex_attention
+
+        def const_gn(x, w):
+            c = torch.tensor([1.0, 2.0, 3.0, 4.0], device=x.device).repeat(4)
+            return ((x @ w).sin() * c @ w).sigmoid()
+
+        def flex_gn(x, w):
+            q = (x @ w).view(1, 1, 16, 16)
+            out = flex_attention(q, q, q, score_mod=lambda s, b, h, i, j: s * 0.5)
+            return out.view(16, 16).sin() @ w
+
+        recomputed = {
+            "const": [torch.ops.aten.sin.default, torch.ops.aten.sigmoid.default],
+            "flex": [torch.ops.higher_order.flex_attention, torch.ops.aten.sin.default],
+        }
+
+        def check(gm, args, name):
+            unshared = [n for n in gm.graph.nodes if n.target in recomputed[name]]
+            if unshared:
+                raise AssertionError(f"recomputed outside a shared piece: {unshared}")
+            return gm
+
+        for name, gn in (("const", const_gn), ("flex", flex_gn)):
+            aot = aot_autograd(
+                fw_compiler=functools.partial(check, name=name),
+                bw_compiler=functools.partial(check, name=name),
+                partition_fn=min_cut_rematerialization_partition,
+            )
+            for backend in (aot, "inductor"):
+                with self.subTest(name, inductor=backend == "inductor"):
+
+                    def fn(x, w, gn=gn):
+                        return torch.utils.checkpoint.checkpoint(
+                            gn, x, w, use_reentrant=False
+                        )
+
+                    x = torch.randn(16, 16, device=device, requires_grad=True)
+                    w = torch.randn(16, 16, device=device, requires_grad=True)
+                    xe, we = (t.detach().clone().requires_grad_() for t in (x, w))
+                    fn(xe, we).sum().backward()
+                    compiled = torch.compile(fn, backend=backend, fullgraph=True)
+                    _, code = run_and_get_code(lambda: compiled(x, w).sum().backward())
+                    if backend == "inductor":
+                        fw_code, bw_code = code
+                        self.assertEqual(len(shared_recompute_code(fw_code, "fw")), 1)
+                        self.assertEqual(len(shared_recompute_code(bw_code, "bw")), 1)
+                    self.assertEqual(x.grad, xe.grad, atol=1e-3, rtol=1e-3)
+                    self.assertEqual(w.grad, we.grad, atol=1e-3, rtol=1e-3)
 
     @parametrize("save_mm", [False, True])
     @torch._functorch.config.patch(deterministic_recompute=True)
@@ -3478,6 +3571,35 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         )
         args = [torch.randn(4, 4, device=device, requires_grad=True) for _ in range(2)]
         self._validate(fn, backend, *args)
+
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_dynamic_shapes(self, device):
+        # The region reshapes by a SymInt computed from x's size, which the
+        # piece computes itself.
+        def gn(x, y):
+            h = torch.sigmoid(torch.matmul(x, y))
+            return h.reshape(x.shape[0] // 2, -1).cos()
+
+        for sac in (False, True):
+            kwargs = {"context_fn": save_mm_context_fn} if sac else {}
+            with self.subTest(sac=sac):
+                torch._dynamo.reset()
+
+                def fn(x, y):
+                    return torch.utils.checkpoint.checkpoint(
+                        gn, x, y, use_reentrant=False, **kwargs
+                    ).sum()
+
+                x = torch.randn(8, 4, device=device, requires_grad=True)
+                y = torch.randn(4, 4, device=device, requires_grad=True)
+                xe, ye = (t.detach().clone().requires_grad_() for t in (x, y))
+                fn(xe, ye).backward()
+                backend = self._shared_recompute_backend(1)
+                torch.compile(fn, backend=backend, fullgraph=True, dynamic=True)(
+                    x, y
+                ).backward()
+                self.assertEqual(x.grad, xe.grad)
+                self.assertEqual(y.grad, ye.grad)
 
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_sac(self, device):
@@ -3898,6 +4020,44 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             self._validate(fn, backend, *args)
         self.assertIn("its input getitem depends on its own recompute", logs.output[0])
 
+    @requires_gpu_and_triton
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_user_triton_kernel(self, device):
+        # A user Triton kernel's wrapper returns a dict of its results, which a
+        # piece can't return. Computed in each graph like a scalar, it would run
+        # twice in the forward, which reads one result outside the piece, so the
+        # piece is left as partitioned.
+        from torch._functorch._aot_autograd import deterministic_recompute
+
+        class TwoOutputs(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y, z = torch.empty_like(x), torch.empty_like(x)
+                n = x.numel()
+                times_two_and_three_kernel[(triton.cdiv(n, 16),)](
+                    x, y, z, n, BLOCK_SIZE=16
+                )
+                return y, z
+
+            @staticmethod
+            def backward(ctx, gy, gz):
+                return gy * 2 + gz * 3
+
+        def gn(x, w):
+            y, z = TwoOutputs.apply(x @ w)
+            return (y.sin() @ w).cos(), z
+
+        def fn(x, w):
+            out, z = torch.utils.checkpoint.checkpoint(gn, x, w, use_reentrant=False)
+            return out + z.tanh()
+
+        args = [
+            torch.randn(16, 16, device=device, requires_grad=True) for _ in range(2)
+        ]
+        with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
+            self._validate(fn, self._shared_recompute_backend(0), *args)
+        self.assertIn("isn't a tensor or a scalar", logs.output[0])
+
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_scalar_result(self, device):
         # A custom op returns a tensor and an int, which only its backward reads,
@@ -3925,26 +4085,99 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 
             scale_and_len.register_autograd(backward, setup_context=setup_context)
 
-            def fn(x, w):
-                return torch.utils.checkpoint.checkpoint(
-                    lambda x, w: scale_and_len((x @ w).sin())[0].cos(),
-                    x,
-                    w,
-                    use_reentrant=False,
-                )
+            def gn(x, w):
+                return scale_and_len((x @ w).sin())[0].cos()
 
-            args = [
-                torch.randn(8, 8, device=device, requires_grad=True) for _ in range(2)
-            ]
-            ref = [a.detach().clone().requires_grad_() for a in args]
-            fn(*ref).sum().backward()
-            backend = self._shared_recompute_backend(0)
-            with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
-                compiled = torch.compile(fn, backend=backend, dynamic=True)
-                compiled(*args).sum().backward()
-            self.assertIn("getitem_1 isn't a tensor", logs.output[0])
-            for a, r in zip(args, ref):
-                self.assertEqual(a.grad, r.grad)
+            def piece_reads_it(x, w):
+                # The piece reads the int too, sizing a constant it copies in.
+                y, n = scale_and_len((x @ w).sin())
+                return (y * torch.arange(n, device=x.device).float().sum()).cos()
+
+            for region in (gn, piece_reads_it):
+                with self.subTest(region.__name__):
+                    torch._dynamo.reset()
+
+                    def fn(x, w, region=region):
+                        return torch.utils.checkpoint.checkpoint(
+                            region, x, w, use_reentrant=False
+                        )
+
+                    args = [
+                        torch.randn(8, 8, device=device, requires_grad=True)
+                        for _ in range(2)
+                    ]
+                    ref = [a.detach().clone().requires_grad_() for a in args]
+                    fn(*ref).sum().backward()
+                    backend = self._shared_recompute_backend(0)
+                    log = deterministic_recompute.log
+                    with self.assertLogs(log, level="INFO") as logs:
+                        compiled = torch.compile(fn, backend=backend, dynamic=True)
+                        compiled(*args).sum().backward()
+                    self.assertIn("getitem_1 isn't a tensor", logs.output[-1])
+                    for a, r in zip(args, ref):
+                        self.assertEqual(a.grad, r.grad)
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(force_disable_caches=True)
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_symint_constant(self, device):
+        # The cos table's length h.shape[-1] // 2 is SymInt arithmetic the
+        # partitioner recomputes outside the region rather than saves, so the
+        # backward has no value of it to pass: the piece copies it in.
+        def gn(x, w):
+            h = x @ w
+            c = (torch.arange(h.shape[-1] // 2, device=x.device).float() / 32).cos()
+            a, b = h.chunk(2, -1)
+            return torch.cat((a * c - b * c, a * c + b * c), -1).sin()
+
+        def fn(x, w):
+            return torch.utils.checkpoint.checkpoint(gn, x, w, use_reentrant=False)
+
+        x = torch.randn(16, 16, device=device, requires_grad=True)
+        w = torch.randn(16, 16, device=device, requires_grad=True)
+        xe, we = (t.detach().clone().requires_grad_() for t in (x, w))
+        fn(xe, we).sum().backward()
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        _, (fw_code, bw_code) = run_and_get_code(
+            lambda: compiled(x, w).sum().backward()
+        )
+        self.assertEqual(len(shared_recompute_code(fw_code, "fw")), 1)
+        self.assertEqual(len(shared_recompute_code(bw_code, "bw")), 1)
+        self.assertEqual(x.grad, xe.grad, atol=1e-3, rtol=1e-3)
+        self.assertEqual(w.grad, we.grad, atol=1e-3, rtol=1e-3)
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(force_disable_caches=True)
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_saved_symint(self, device):
+        # The arange's length T // 2 is SymInt arithmetic the partitioner saves,
+        # since the backward reshapes a gradient with it. The piece takes it as
+        # an operand, and also the SymInt input T, which binds the symbol its
+        # sizes use.
+        def gn(h0, w, T):
+            h = h0 @ w
+            c = torch.arange(T // 2, device=h.device).float()
+            y = (h.unsqueeze(1) * c.view(1, -1, 1)).sin()
+            return y.reshape(h.shape[0], (T // 2) * h.shape[1]).cos()
+
+        def fn(h0, w, t):
+            return torch.utils.checkpoint.checkpoint(
+                gn, h0, w, t.shape[0], use_reentrant=False
+            )
+
+        h0 = torch.randn(4, 8, device=device, requires_grad=True)
+        w = torch.randn(8, 8, device=device, requires_grad=True)
+        t = torch.randn(6, device=device)
+        he, we = (a.detach().clone().requires_grad_() for a in (h0, w))
+        fn(he, we, t).sum().backward()
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        _, (fw_code, bw_code) = run_and_get_code(
+            lambda: compiled(h0, w, t).sum().backward()
+        )
+        self.assertEqual(len(shared_recompute_code(fw_code, "fw")), 1)
+        self.assertEqual(len(shared_recompute_code(bw_code, "bw")), 1)
+        self.assertEqual(h0.grad, he.grad, atol=1e-3, rtol=1e-3)
+        self.assertEqual(w.grad, we.grad, atol=1e-3, rtol=1e-3)
 
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_nested_list_result(self, device):
@@ -4096,7 +4329,8 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             return
         with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
             self._validate(fn, backend, x)
-        self.assertIn("accumulates in an order that can change", logs.output[0])
+        expected = "accumulates in an order that can change"
+        self.assertTrue(any(expected in line for line in logs.output), logs.output)
 
 
 class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase):
