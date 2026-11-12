@@ -831,7 +831,8 @@ def extract_loop_body_with_args(
             None,  # type: ignore[arg-type]
             None,  # type: ignore[arg-type]
         )
-    # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
+    # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] and
+    # fn.memory_usage[MemoryUsageType.JAGGED_RANGE] intentionally skipped
     return inner
 
 
