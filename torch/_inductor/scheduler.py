@@ -7780,8 +7780,8 @@ class Scheduler:
                 choice: torch._inductor.select_algorithm.TritonTemplateCaller,
             ) -> tuple[ir.ChoiceCaller, float]:
                 """The fastest of choice's variants with all or none of its
-                reduction epilogue's extra outputs on TMA, and its fused time;
-                choice and inf if both fail too."""
+                reduction epilogue's extra outputs and inputs on TMA, and its fused
+                time; choice and inf if both fail too."""
                 best: tuple[ir.ChoiceCaller, float] = (choice, float("inf"))
                 for plan in ("plain", "all"):
                     variant = choice.with_epilogue_tma_plan(plan)
