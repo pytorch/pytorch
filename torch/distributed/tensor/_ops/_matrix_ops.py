@@ -361,8 +361,10 @@ def scaled_mm_v2_single_dim_strategy(
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     # Strategy format: [output, self, mat2, *scale_a, *scale_b]
     scale_a_metas = args_schema[2]
+    recipe_a = args_schema[3]
     swizzle_a = args_schema[4]
     scale_b_metas = args_schema[5]
+    recipe_b = args_schema[6]
     swizzle_b = args_schema[7]
     if not isinstance(scale_a_metas, (list, tuple)) or not all(
         isinstance(m, TensorMeta) for m in scale_a_metas
@@ -374,17 +376,48 @@ def scaled_mm_v2_single_dim_strategy(
         raise AssertionError
     if args_schema[8] is not None:
         raise AssertionError("_scaled_mm_v2 on DTensors doesn't support bias")
-
-    # Swizzled scales use a padded, tiled layout whose rows and columns do not
-    # line up with slices of the data operand, so an operand with a swizzled
-    # scale cannot be sharded on any dim. Keep it Replicate or Partial.
+    if not isinstance(recipe_a, (list, tuple)) or not isinstance(
+        recipe_b, (list, tuple)
+    ):
+        raise AssertionError
     if not isinstance(swizzle_a, (list, tuple)) or not isinstance(
         swizzle_b, (list, tuple)
     ):
         raise AssertionError
+
+    # An operand can be sharded only when each of its scales is indexed by the
+    # operand's own dims: TensorWise (one element) or RowWise ([M, 1] for
+    # self, [1, N] for mat2), unswizzled. Every other recipe's scale is
+    # block-granular and its layout is backend-specific: e.g. on CUDA a
+    # BlockWise1x128 scale_b is [N, ceil(K/128)] for a [K, N] mat2, and a
+    # BlockWise128x128 scale_a is [round_up(ceil(K/128), 4), ceil(M/128)].
+    # Swizzled MX/NVFP4 scales are padded and tiled. Copying the data shard
+    # onto such a scale picks the wrong dim or cuts through a block, so those
+    # operands stay Replicate or Partial (with Replicate scales).
+    shardable_recipes = (
+        torch.nn.functional.ScalingType.TensorWise.value,
+        torch.nn.functional.ScalingType.RowWise.value,
+    )
     no_swizzle = torch.nn.functional.SwizzleType.NO_SWIZZLE.value
-    self_swizzled = any(s != no_swizzle for s in swizzle_a)
-    mat2_swizzled = any(s != no_swizzle for s in swizzle_b)
+
+    def _can_shard(
+        recipes: list[int] | tuple[int, ...],
+        swizzles: list[int] | tuple[int, ...],
+        metas: list[TensorMeta] | tuple[TensorMeta, ...],
+        contracting_dim: int,
+    ) -> bool:
+        return (
+            all(r in shardable_recipes for r in recipes)
+            and all(s == no_swizzle for s in swizzles)
+            and all(
+                guard_or_false(prod(m.shape) == 1)
+                or (len(m.shape) == 2 and guard_or_false(m.shape[contracting_dim] == 1))
+                for m in metas
+            )
+        )
+
+    self_shardable = _can_shard(recipe_a, swizzle_a, scale_a_metas, 1)
+    mat2_shardable = _can_shard(recipe_b, swizzle_b, scale_b_metas, 0)
 
     def _is_sharded(
         p: Placement | _ShardingPlaceholder,
@@ -395,8 +428,8 @@ def scaled_mm_v2_single_dim_strategy(
     result: list[list[Placement | _ShardingPlaceholder]] = []
     for strat in gen_single_dim_einsum_strategies("mk,kn->mn"):
         # strat is [output, self, mat2]; derive one placement per scale tensor
-        if (self_swizzled and _is_sharded(strat[1])) or (
-            mat2_swizzled and _is_sharded(strat[2])
+        if (not self_shardable and _is_sharded(strat[1])) or (
+            not mat2_shardable and _is_sharded(strat[2])
         ):
             continue
         scale_a_ps = [

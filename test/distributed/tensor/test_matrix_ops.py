@@ -739,64 +739,174 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
         self.assertIsNotNone(result)
         self.assertEqual(result, Replicate())
 
-    def test_scaled_mm_v2_swizzled_operand_is_not_sharded(self):
-        """A swizzled scale's tiled layout does not map to slices of its data
-        operand, so the _scaled_mm_v2 strategy must not shard that operand."""
+    def _scaled_mm_v2_strategies(
+        self, scale_a, recipe_a, scale_b, recipe_b, swizzle_a=(), swizzle_b=()
+    ):
+        """Run the _scaled_mm_v2 single-dim strategy on (m, k) @ (k, n) metas
+        with the given scale shapes, recipes and swizzles."""
         from torch.distributed.tensor._dtensor_spec import TensorMeta
         from torch.distributed.tensor._ops._matrix_ops import (
             scaled_mm_v2_single_dim_strategy,
         )
 
-        m, k, n = 128, 256, 128
-        no_swizzle = int(F.SwizzleType.NO_SWIZZLE)
-        swizzle = int(F.SwizzleType.SWIZZLE_32_4_4)
-        recipe = int(F.ScalingType.BlockWise1x32)
-
-        def meta(*shape):
+        def meta(shape):
             return TensorMeta(torch.Size(shape), (1,) * len(shape), torch.float32)
 
-        def strategies(swizzle_a, swizzle_b):
-            args = (
-                meta(m, k),
-                meta(k, n),
-                [meta(m, k // 32)],
-                [recipe],
-                swizzle_a,
-                [meta(n, k // 32)],
-                [recipe],
-                swizzle_b,
-                None,
-                torch.bfloat16,
-                [],
-                False,
-            )
-            return scaled_mm_v2_single_dim_strategy(
-                torch.ops.aten._scaled_mm_v2.default, args, {}
-            )
+        m, k, n = 256, 512, 384
+        args = (
+            meta((m, k)),
+            meta((k, n)),
+            [meta(s) for s in scale_a],
+            [int(r) for r in recipe_a],
+            [int(s) for s in swizzle_a],
+            [meta(s) for s in scale_b],
+            [int(r) for r in recipe_b],
+            [int(s) for s in swizzle_b],
+            None,
+            torch.bfloat16,
+            [],
+            False,
+        )
+        return scaled_mm_v2_single_dim_strategy(
+            torch.ops.aten._scaled_mm_v2.default, args, {}
+        )
+
+    def test_scaled_mm_v2_rowwise_scale_follows_operand(self):
+        """TensorWise and RowWise scales are indexed by their operand's dims,
+        so the operand may be sharded and the scale follows it."""
+        m, n = 256, 384
+        rw = F.ScalingType.RowWise
+        tw = F.ScalingType.TensorWise
 
         def sharded(p):
             return isinstance(p, (_ShardingPlaceholder, Shard))
 
-        unswizzled = strategies([no_swizzle], [no_swizzle])
-        self.assertTrue(any(sharded(s[1]) for s in unswizzled))
-        self.assertTrue(any(sharded(s[2]) for s in unswizzled))
+        def dim(p):
+            return p.dim if sharded(p) else None
+
+        # [output, self, mat2, scale_a, scale_b]
+        rowwise = self._scaled_mm_v2_strategies([(m, 1)], [rw], [(1, n)], [rw])
+        pairs = {(dim(s[1]), dim(s[3])) for s in rowwise}
+        pairs |= {(dim(s[2]), dim(s[4])) for s in rowwise}
+        # self Shard(0) (M) -> scale_a Shard(0); mat2 Shard(1) (N) ->
+        # scale_b Shard(1); a shard on K leaves the scale replicated.
+        self.assertIn((0, 0), pairs)
+        self.assertIn((1, 1), pairs)
+        self.assertIn((1, None), pairs)
+        self.assertIn((0, None), pairs)
+        self.assertNotIn((0, 1), pairs)
+        self.assertNotIn((1, 0), pairs)
         # An empty swizzle list means no swizzle. (_ShardingPlaceholder has no
         # __eq__, so compare the reprs.)
-        self.assertEqual(str(strategies([], [])), str(unswizzled))
+        no_swizzle = [F.SwizzleType.NO_SWIZZLE]
+        self.assertEqual(
+            str(
+                self._scaled_mm_v2_strategies(
+                    [(m, 1)], [rw], [(1, n)], [rw], no_swizzle, no_swizzle
+                )
+            ),
+            str(rowwise),
+        )
 
-        only_a = strategies([swizzle], [no_swizzle])
-        self.assertFalse(any(sharded(s[1]) or sharded(s[3]) for s in only_a))
-        self.assertTrue(any(sharded(s[2]) for s in only_a))
+        tensorwise = self._scaled_mm_v2_strategies([()], [tw], [(1, 1)], [tw])
+        self.assertTrue(any(sharded(s[1]) for s in tensorwise))
+        self.assertTrue(any(sharded(s[2]) for s in tensorwise))
+        self.assertTrue(all(s[3] == Replicate() for s in tensorwise))
+        self.assertTrue(all(s[4] == Replicate() for s in tensorwise))
 
-        both = strategies([swizzle], [swizzle])
-        self.assertFalse(any(sharded(p) for s in both for p in s[1:]))
-        # Partial inputs (row-parallel style reductions) stay allowed.
-        self.assertTrue(any(isinstance(s[1], Partial) for s in both))
+        # The kernel also takes an [N, 1] RowWise scale_b, whose dim 0 is N,
+        # not mat2's dim 0 (K). Don't shard mat2 then; self is unaffected.
+        transposed = self._scaled_mm_v2_strategies([(m, 1)], [rw], [(n, 1)], [rw])
+        self.assertFalse(any(sharded(s[2]) or sharded(s[4]) for s in transposed))
+        self.assertTrue(any(sharded(s[1]) for s in transposed))
+
+    def test_scaled_mm_v2_blockwise_operand_is_not_sharded(self):
+        """Block-wise scales are block-granular and laid out per backend
+        (e.g. a CUDA BlockWise1x128 scale_b is [N, ceil(K/128)] for a [K, N]
+        mat2, and a BlockWise128x128 scale_a is transposed and padded), and
+        swizzled scales are tiled, so the operand must stay Replicate or
+        Partial with a replicated scale."""
+        m, k, n = 256, 512, 384
+        b1x128 = F.ScalingType.BlockWise1x128
+        b128x128 = F.ScalingType.BlockWise128x128
+        mx = F.ScalingType.BlockWise1x32
+        nvfp4 = F.ScalingType.BlockWise1x16
+        tw = F.ScalingType.TensorWise
+        swz = F.SwizzleType.SWIZZLE_32_4_4
+        kb = k // 128
+        kb_pad = (kb + 3) // 4 * 4
+
+        def blocked(rows, cols):
+            return ((rows + 127) // 128 * 128 * ((cols + 3) // 4 * 4),)
+
+        cases = {
+            # CUDA DeepSeek-style layouts (ScaledBlas.cpp)
+            "1x128_1x128": ([(m, kb)], [b1x128], [(n, kb)], [b1x128], (), ()),
+            "1x128_128x128": (
+                [(m, kb)],
+                [b1x128],
+                [(kb_pad, n // 128)],
+                [b128x128],
+                (),
+                (),
+            ),
+            "128x128_1x128": (
+                [(kb_pad, m // 128)],
+                [b128x128],
+                [(n, kb)],
+                [b1x128],
+                (),
+                (),
+            ),
+            # Unswizzled MX scales, [M, K/32] and [N, K/32]
+            "mx_unswizzled": ([(m, k // 32)], [mx], [(n, k // 32)], [mx], (), ()),
+            "mx_swizzled": (
+                [blocked(m, k // 32)],
+                [mx],
+                [blocked(n, k // 32)],
+                [mx],
+                [swz],
+                [swz],
+            ),
+            # Two-level NVFP4: swizzled block scale plus a tensor-wise scale
+            "nvfp4_two_level": (
+                [blocked(m, k // 16), ()],
+                [nvfp4, tw],
+                [blocked(n, k // 16), ()],
+                [nvfp4, tw],
+                [swz, F.SwizzleType.NO_SWIZZLE],
+                [swz, F.SwizzleType.NO_SWIZZLE],
+            ),
+        }
+        for name, case in cases.items():
+            with self.subTest(name):
+                strategies = self._scaled_mm_v2_strategies(*case)
+                self.assertTrue(strategies)
+                for s in strategies:
+                    self.assertFalse(isinstance(s[1], (_ShardingPlaceholder, Shard)))
+                    self.assertFalse(isinstance(s[2], (_ShardingPlaceholder, Shard)))
+                    self.assertTrue(all(p == Replicate() for p in s[3:]))
+                # Partial inputs (row-parallel style reductions) stay allowed.
+                self.assertTrue(any(isinstance(s[1], Partial) for s in strategies))
+                self.assertTrue(any(isinstance(s[2], Partial) for s in strategies))
+
+        # Only the block-wise operand is held back: a RowWise operand next to
+        # a swizzled one is still sharded.
+        mixed = self._scaled_mm_v2_strategies(
+            [blocked(m, k // 32)],
+            [mx],
+            [(1, n)],
+            [F.ScalingType.RowWise],
+            [swz],
+            [],
+        )
+        self.assertFalse(any(isinstance(s[1], _ShardingPlaceholder) for s in mixed))
+        self.assertTrue(any(isinstance(s[2], _ShardingPlaceholder) for s in mixed))
 
     @with_comms
     def test_scaled_mm_v2_swizzle_is_in_cache_key(self):
-        """The _scaled_mm_v2 strategy depends on swizzle_a / swizzle_b, so they
-        must be part of the sharding propagation cache key."""
+        """The _scaled_mm_v2 strategy depends on the recipes and swizzles, so
+        they must be part of the sharding propagation cache key."""
         from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
         from torch.distributed.tensor._op_schema import OpSchema
 
@@ -812,7 +922,7 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
             meta = TensorMeta(torch.Size((rows, cols)), (cols, 1), torch.float32)
             return DTensorSpec(mesh, (Replicate(),), tensor_meta=meta)
 
-        def schema(swizzle_b):
+        def schema(swizzle_b, recipe_b=recipe):
             args = (
                 spec(128, 128),
                 spec(128, 128),
@@ -820,7 +930,7 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
                 [recipe],
                 swizzle,
                 [spec(128, 4)],
-                [recipe],
+                [recipe_b],
                 swizzle_b,
                 None,
                 torch.bfloat16,
@@ -831,6 +941,9 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
 
         self.assertNotEqual(schema(no_swizzle), schema(swizzle))
         self.assertEqual(schema(swizzle), schema(swizzle))
+        self.assertNotEqual(
+            schema(no_swizzle), schema(no_swizzle, int(F.ScalingType.RowWise))
+        )
 
     @with_comms
     def test_matmul(self):
