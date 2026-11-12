@@ -240,8 +240,17 @@ static void calc_log_alpha_beta(
   }
 
   // Iterate over the rest of the time steps, for each of the target tokens
-  // assigned to this thread.
-  for (T_index block_s = 0; block_s < S_max; block_s += tptg) {
+  // assigned to this thread. When S_max exceeds the threadgroup size, the
+  // positions are processed in blocks of `tptg`, and each block runs the full
+  // time recursion before the next block starts. The recursion over `s` has
+  // cross-block dependencies: alpha[s] reads s-1 and s-2 (an earlier block),
+  // beta[s] reads s+1 and s+2 (a later block). Blocks therefore have to be
+  // visited in dependency order: ascending for alpha, descending for beta.
+  const auto tptg_i = static_cast<T_index>(tptg);
+  const auto num_blocks = ceil_div(S_max, tptg_i);
+  for (T_index block_idx = 0; block_idx < num_blocks; block_idx++) {
+    T_index block_s =
+        (beta ? (num_blocks - 1 - block_idx) : block_idx) * tptg_i;
     T_index s = block_s + tid;
     T_index target_token;
     bool use_C;
@@ -562,6 +571,18 @@ struct huber_backward_functor {
   }
 };
 
+struct bce_backward_functor {
+  template <typename T, typename A>
+  inline T operator()(
+      const T input,
+      const T target,
+      const T grad,
+      const A norm) {
+    return norm * grad * (input - target) /
+        ::metal::max((1 - input) * input, T(1e-12));
+  }
+};
+
 #define INSTANTIATE_CTC_LOSS(T, T_target, T_index)                  \
   template [[host_name("ctc_loss_" #T "_" #T_target "_" #T_index)]] \
   kernel void ctc_loss<T, T_target, T_index>(                       \
@@ -719,3 +740,7 @@ REGISTER_OPMATH_TERNARY_ALPHA_OP(smooth_l1_backward, uchar, uchar, uchar);
 REGISTER_OPMATH_TERNARY_ALPHA_OP(huber_backward, float, float, float);
 REGISTER_OPMATH_TERNARY_ALPHA_OP(huber_backward, half, float, half);
 REGISTER_OPMATH_TERNARY_ALPHA_OP(huber_backward, bfloat, float, bfloat);
+
+REGISTER_OPMATH_TERNARY_ALPHA_OP(bce_backward, float, float, float);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(bce_backward, half, float, half);
+REGISTER_OPMATH_TERNARY_ALPHA_OP(bce_backward, bfloat, float, bfloat);
