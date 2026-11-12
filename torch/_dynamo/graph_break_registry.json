@@ -1281,6 +1281,16 @@
       "Hints": []
     }
   ],
+  "GB0705": [
+    {
+      "Gb_type": "Custom metaclass metadata access",
+      "Context": "metadata={attr}, name={name}",
+      "Explanation": "Dynamo cannot safely construct a class metadata source through custom metaclass accessors.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB6012": [
     {
       "Gb_type": "Cannot trace user-defined __len__",
@@ -2498,6 +2508,16 @@
       "Explanation": "Missing dynamo support for converting {value} into a list for slice assignment.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4524": [
+    {
+      "Gb_type": "Unsupported OrderedDict snapshot runtime",
+      "Context": "str(error)",
+      "Explanation": "This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
+      "Hints": [
+        "Use a supported Python version; free-threaded nonempty snapshots require Python 3.14.1+."
       ]
     }
   ],
@@ -7150,6 +7170,15 @@
     }
   ],
   "GB8811": [
+    {
+      "Gb_type": "OrderedDict storage differs from linked keys",
+      "Context": "OrderedDict input snapshot: {error}",
+      "Explanation": "Dynamo cannot safely match this OrderedDict's linked order to its dictionary storage.",
+      "Hints": [
+        "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    },
     {
       "Gb_type": "OrderedDict storage differs from linked keys",
       "Context": "OrderedDict input snapshot: {error}",

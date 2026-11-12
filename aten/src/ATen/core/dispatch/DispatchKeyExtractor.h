@@ -166,11 +166,11 @@ struct TORCH_API DispatchKeyExtractor final {
         dispatch_arg_indices_reverse_, [&](size_t reverse_arg_index) {
           const auto& ivalue =
               torch::jit::peek(*stack, 0, reverse_arg_index + 1);
-          if (C10_LIKELY(ivalue.isTensor())) {
+          if (ivalue.isTensor()) [[likely]] {
             // NB: Take care not to introduce a refcount bump (there's
             // no safe toTensorRef method, alas)
             ks = ks | ivalue.unsafeToTensorImpl()->key_set();
-          } else if (C10_UNLIKELY(ivalue.isTensorList())) {
+          } else if (ivalue.isTensorList()) [[unlikely]] {
             // NB: use toListRef as it doesn't induce refcount bumps
             // (toTensorListRef is not a thing)
             for (const auto& nv : ivalue.toListRef()) {
@@ -179,7 +179,7 @@ struct TORCH_API DispatchKeyExtractor final {
             }
           }
           // Tensor?[] translates to c10::List<IValue> so we need to peek inside
-          else if (C10_UNLIKELY(ivalue.isList())) {
+          else if (ivalue.isList()) [[unlikely]] {
             for (const auto& elt : ivalue.toListRef()) {
               if (elt.isTensor()) {
                 ks = ks | elt.toTensor().key_set();
