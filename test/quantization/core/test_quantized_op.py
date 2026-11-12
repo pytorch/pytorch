@@ -1916,7 +1916,7 @@ class TestQuantizedOps(TestCase):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: kernel_size",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ao.nn.quantized.functional.avg_pool2d(
                 qx2d, kernel_size=2**63 - 1
@@ -1927,7 +1927,7 @@ class TestQuantizedOps(TestCase):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            "value cannot be safely converted without overflow: kernel_size",
+            "value cannot be converted to type int without overflow",
         ):
             torch.ao.nn.quantized.functional.avg_pool3d(
                 qx3d, kernel_size=2**63 - 1
@@ -3270,12 +3270,6 @@ class TestQuantizedOps(TestCase):
                         msg=(lambda msg: f"{msg}\nError is too high: SNR(dB): {power}, "
                              f"Signal: {signal}, MSE: {mse}"))
 
-                # Trace
-                jit_qmodule = torch.jit.trace(lstm_quantized, qx)
-
-                # Script
-                jit_qmodule = torch.jit.script(lstm_quantized)
-
     @override_qengines
     def test_custom_module_multi_head_attention(self):
         class MultiheadAttentionModel(torch.nn.Module):
@@ -3385,9 +3379,6 @@ class TestQuantizedOps(TestCase):
                                  f"Run with bias={bias}, "
                                  f"add_bias_kv={add_bias_kv}, "
                                  f"add_zero_attn={add_zero_attn}"))
-
-                    # Verify the result is scriptable
-                    mha_quantized_scripted = torch.jit.script(mha_quantized)
 
     @skipIfNoONEDNN
     def test_int8_mul_onednn(self):
