@@ -1910,6 +1910,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "TRACER",
         "SERVING_MODE",
         "_ALLOW_SERVE_TIME_COMPILES",
+        "CUDAGRAPH_CONFIG",
         "INDUCTOR_OPTIONS",
         "POLICY_DROPPED_GUARDS",
         "DROPPED_GUARD_CODE",
@@ -2863,6 +2864,7 @@ def _build_multigraph_python_source(
     custom_op_modules: tuple[str, ...],
     custom_ops: tuple[tuple[str, str], ...],
     custom_op_keys: Mapping[tuple[str, str], tuple[str, ...]],
+    cudagraph_config: dict[str, bool],
     inductor_options: Mapping[str, object] | None,
 ) -> str:
     """Render a multi-graph capture as ``python_code``.
@@ -2904,6 +2906,11 @@ def _build_multigraph_python_source(
         buf.writeline(f"INDUCTOR_OPTIONS = {options if recordable else None!r}")
     buf.writeline(f"FN_NAME = {entry.fn_name!r}")
     buf.writeline(f"ENTRY_MODULE = {entry.codes[0].python_module!r}")
+    buf.writeline(
+        "# The inductor CUDA graph config the capture compiled under. Load wraps"
+    )
+    buf.writeline("# the subgraphs by it, not by the loading process's config.")
+    buf.writeline(f"CUDAGRAPH_CONFIG = {cudagraph_config!r}")
     buf.writeline(f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}")
     buf.writeline(f"TORCH_VERSION = {torch.__version__!r}")
     buf.writeline("# Frame modules: section 0 imports those CUSTOM_OP_MODULES lists,")
@@ -3028,6 +3035,7 @@ def _build_multigraph_artifact(
     summary: PrecompileSummary,
     backend: str,
     entry_fn: object,
+    cudagraph_config: dict[str, bool],
     *,
     custom_op_modules: tuple[str, ...],
     custom_ops: tuple[tuple[str, str], ...],
@@ -3062,6 +3070,7 @@ def _build_multigraph_artifact(
         mode,
         unreachable,
         *imports,
+        cudagraph_config,
         inductor_options,
     )
     inductor_bundle = None
@@ -4078,23 +4087,71 @@ def capture(
 
     ``mode`` and ``options`` configure Inductor as they do for
     :func:`torch.compile`: at most one of them may be given, and only with
-    ``backend="inductor"``. They apply to every graph the capture compiles. A
-    ``mode`` or ``options`` that turns on ``triton.cudagraphs`` (such as
-    ``mode="reduce-overhead"``) is refused: a loaded :class:`DynamoTracer`
-    artifact does not serve the capture's CUDA graph choice yet, and a
-    :class:`MakeFxTracer` capture's standalone module runs outside Inductor's
-    CUDA graph wrapper. Either tracer refuses ``triton.autotune_at_compile_time``
-    off and a nonzero ``triton.multi_kernel``, which the paragraph above turns
-    off. A :class:`DynamoTracer` capture refuses ``freezing``
-    and ``force_disable_caches``, whose compiles file no AOTAutograd cache
-    entry for the artifact to ship, ``fx_wrapper``, whose graphs Inductor does
-    not cache, and ``bundled_autotune_remote_cache`` on, which the capture
-    turns off (its eager backward lowering fails on a remote autotune cache
-    miss); its ``cpp_wrapper`` graphs capture on CPU only. A
-    :class:`MakeFxTracer` capture refuses options its standalone module pins:
-    ``size_asserts`` or ``scalar_asserts`` off, ``cpp_wrapper``,
-    ``fx_wrapper``, ``benchmark_harness`` or ``freezing`` on (freezing's
-    compiler would rewrite the graph the module is built from). Other options
+    ``backend="inductor"``. They apply to every graph the capture compiles.
+
+    CUDA graphs: ``mode="reduce-overhead"`` (or ``"max-autotune"``, or
+    ``options={"triton.cudagraphs": True}``) makes a :class:`DynamoTracer`
+    capture serve its loaded graphs as CUDA graphs, as the capture ran them:
+    the artifact records ``triton.cudagraphs``, ``triton.cudagraph_trees``
+    and ``graph_partition`` (which picks how a partitioned graph is wrapped)
+    as the capture compiled under them (``mode`` and ``options`` over the
+    process's ``torch._inductor.config`` when ``capture()`` is called) in its
+    ``CUDAGRAPH_CONFIG``, and the loading process records its CUDA graphs
+    afresh on its first calls. Unlike under ``torch.compile``, whose options
+    reach only Inductor, the capture's calls are traced under these three
+    keys too, so with CUDA graphs on Dynamo specializes every Python float
+    argument (each distinct value is its own captured variant) rather than
+    turning one that changes into a CPU scalar tensor, which would keep the
+    graph out of CUDA graphs. Whether a graph can run as a CUDA graph at all
+    (``triton.cudagraph_support_input_mutation``,
+    ``force_disable_cudagraph_TESTING_ONLY``) is decided when it compiles, and
+    that decision ships with it. The settings CUDA graph trees read while the
+    graphs run (``triton.cudagraph_capture_sizes``,
+    ``triton.cudagraph_dynamic_shape_rerecord_limit``,
+    ``triton.cudagraph_or_error``, ...) are the serving process's, as under
+    ``torch.compile``, whose options also cover only the compile.
+
+    ``cudagraph_policy``, which wraps the graphs again at load and is a Python
+    object, is refused in ``options``, and a capture with CUDA graphs on refuses
+    one set in ``torch._inductor.config``: unset it while capturing and set it
+    in the loading process. Under ``cpp_wrapper`` with ``graph_partition`` the
+    capture compiles without CUDA graphs, as :func:`torch.compile` does, and
+    records that. ``triton.cudagraphs``, ``triton.cudagraph_trees``,
+    ``graph_partition`` and ``cpp_wrapper`` are read when ``capture()`` is
+    called. A capture with CUDA graphs on compiles every call under them and
+    raises on a call made after one of them changed. One without records only
+    that they are off and compiles the rest as configured; it raises on a call
+    made with ``triton.cudagraphs`` turned on in ``torch._inductor.config``,
+    which it would ignore, unless its ``mode`` or ``options`` set
+    ``triton.cudagraphs`` (they win, as under :func:`torch.compile`). With
+    ``backend="inductor"``, a capture is refused when a
+    :func:`torch._dynamo.override_cudagraphs` changes whether a graph runs as a
+    CUDA graph from what the capture's ``triton.cudagraphs`` decides (``fwd``
+    differing from it, or ``bwd=False`` under a CUDA-graphed forward): the
+    artifact records the capture's CUDA graph config, not each graph's.
+
+    As under ``torch.compile``, a
+    graph's outputs are overwritten by its next replay, so clone what you keep
+    across calls or call :func:`torch.compiler.cudagraph_mark_step_begin`
+    between iterations; a graph Inductor cannot capture (CPU tensors, mutated
+    inputs, ...) runs without one and logs a cudagraph skip; and a frame served
+    eagerly (``PrecompileSummary.eager_fallbacks``) runs no CUDA graph.
+
+    Refused options: a :class:`DynamoTracer` capture refuses ``freezing`` and
+    ``force_disable_caches``, whose compiles file no AOTAutograd cache entry
+    for the artifact to ship, ``fx_wrapper``, whose graphs Inductor does not
+    cache, and ``bundled_autotune_remote_cache`` on, which the capture turns
+    off (its eager backward lowering fails on a remote autotune cache miss);
+    its ``cpp_wrapper`` graphs capture on CPU only. A :class:`MakeFxTracer`
+    capture refuses a ``mode`` or ``options`` that turns on
+    ``triton.cudagraphs``, since its standalone module runs outside Inductor's
+    CUDA graph wrapper (it ignores the ambient flag, as before), and options
+    that module pins: ``size_asserts`` or ``scalar_asserts`` off,
+    ``cpp_wrapper``, ``fx_wrapper``, ``benchmark_harness`` or ``freezing`` on
+    (freezing's compiler would rewrite the graph the module is built from).
+    Either tracer refuses ``triton.autotune_at_compile_time`` off and a nonzero
+    ``triton.multi_kernel``, which an ``"inductor"`` capture turns off while its
+    graphs lower (see the tuning paragraph above). Other options
     pass through unchecked, as under :func:`torch.compile`.
 
     .. note::
@@ -4130,28 +4187,34 @@ def capture(
                 "Either mode or options can be specified, but both can't be "
                 "specified at the same time."
             )
-        # Refused before the wrapper is built, which sets CUPTI environment
-        # variables for a CUDA graph config. A value that is not a bool is left
-        # to the wrapper's type check.
-        from torch._inductor import list_mode_options
-
-        requested = list_mode_options(mode) if mode is not None else options or {}
-        if requested.get("triton.cudagraphs") is True:
-            remedy = (
-                "Use mode='max-autotune-no-cudagraphs'."
-                if mode is not None
-                else "Drop triton.cudagraphs from options."
+        # Keys normalized as the wrapper does; it cannot take this one at all
+        # (its type check fails on the string annotation).
+        keys = {k.replace("-", "_") for k in options or ()}
+        if "cudagraph_policy" in keys:
+            raise PrecompileError(
+                "precompile cannot record options={'cudagraph_policy': ...}: the "
+                "policy wraps the graphs again at load, and an artifact holds no "
+                "Python objects. Set torch._inductor.config.cudagraph_policy in the "
+                "loading process instead."
             )
-            if isinstance(tracer, MakeFxTracer):
+        if isinstance(tracer, MakeFxTracer):
+            # Refused before the wrapper is built, which sets CUPTI environment
+            # variables for a CUDA graph config. A value that is not a bool is
+            # left to the wrapper's type check.
+            from torch._inductor import list_mode_options
+
+            requested = list_mode_options(mode) if mode is not None else options or {}
+            if requested.get("triton.cudagraphs") is True:
+                remedy = (
+                    "use mode='max-autotune-no-cudagraphs'"
+                    if mode is not None
+                    else "drop triton.cudagraphs from options"
+                )
                 raise PrecompileError(
                     "a MakeFxTracer capture cannot serve CUDA graphs: its standalone "
-                    f"module runs outside Inductor's CUDA graph wrapper. {remedy}"
+                    "module runs outside Inductor's CUDA graph wrapper. Capture with "
+                    f"tracer=DynamoTracer(), or {remedy}."
                 )
-            raise PrecompileError(
-                "precompile cannot serve CUDA graphs yet: a loaded artifact wraps "
-                "its graphs in them by the loading process's triton.cudagraphs, not "
-                f"the capture's. {remedy}"
-            )
         # torch.compile's own parsing: mode expands to its options, and an unknown
         # option or a value of the wrong type raises here rather than mid-capture.
         dynamic = tracer.dynamic if isinstance(tracer, DynamoTracer) else None
@@ -4262,6 +4325,26 @@ def load(
     nothing, so the rest of the call from that frame on, its callees included,
     runs as plain Python; whatever ran before it, such as the entry's variant
     up to a graph break whose continuation fell back, still ran compiled.
+
+    The graphs a :class:`DynamoTracer` artifact ships are wrapped in CUDA graphs
+    by its capture's ``triton.cudagraphs``, ``triton.cudagraph_trees`` and
+    ``graph_partition`` (``CUDAGRAPH_CONFIG``), whatever the loading process's
+    ``torch._inductor.config`` says, unless the loading process sets
+    ``cudagraph_policy``, which wraps them again. Whether each graph can run as
+    a CUDA graph at all (``triton.cudagraph_skip_dynamic_graphs``,
+    ``triton.cudagraph_support_input_mutation``, ...) was decided when it
+    compiled and ships with it. The settings read while the graphs are wrapped
+    and run (``triton.cudagraph_capture_sizes``, the rerecord limits,
+    ``triton.cudagraph_or_error``, the warmup and sync knobs, ...) are the
+    loading process's. A serve-time
+    compile (``allow_serve_time_compiles``) is lowered by Inductor under the
+    capture's ``mode`` or ``options`` and ``CUDAGRAPH_CONFIG`` over the loading
+    process's config, but Dynamo traces it under the loading process's own
+    ``triton.cudagraphs``, which decides whether a Python float that changed
+    since capture is specialized; set it as the capture did to trace alike. A
+    loaded artifact does not apply :func:`torch.compile`'s CUPTI workaround for
+    CUDA graphs: when profiling repeatedly on CUDA older than 12.6, set
+    ``DISABLE_CUPTI_LAZY_REINIT=1`` and ``TEARDOWN_CUPTI=0`` yourself.
 
     Frozen C++ kernels are keyed by their build command with the PyTorch install
     taken out, so they serve a host that installed the same PyTorch build
