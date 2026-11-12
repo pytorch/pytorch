@@ -78,10 +78,6 @@ else()
   # TODO: this list might be incomplete.
   append_torchlib_if_found(c10)
 
-  if(@USE_NNPACK@)
-    append_torchlib_if_found(nnpack)
-  endif()
-
   if(@USE_PYTORCH_QNNPACK@)
     append_torchlib_if_found(pytorch_qnnpack)
   endif()
