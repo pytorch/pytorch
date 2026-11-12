@@ -14,7 +14,7 @@ namespace c10 {
 // much higher memory footprint.
 template <typename Flag, typename F, typename... Args>
 inline void call_once(Flag& flag, F&& f, Args&&... args) {
-  if (C10_LIKELY(flag.test_once())) {
+  if (flag.test_once()) [[likely]] {
     return;
   }
   flag.call_once_slow(std::forward<F>(f), std::forward<Args>(args)...);
