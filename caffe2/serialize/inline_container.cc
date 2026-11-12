@@ -305,7 +305,7 @@ bool PyTorchStreamReader::hasRecord(const std::string& name) {
   std::lock_guard<std::mutex> guard(reader_lock_);
 
   if ((!load_debug_symbol_) &&
-      c10::ends_with(std::string_view(name), kDebugPklSuffix)) {
+      std::string_view(name).ends_with(kDebugPklSuffix)) {
     return false;
   }
   std::string ss = archive_name_plus_slash_ + name;
@@ -343,9 +343,8 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
           buf);
     }
     if ((load_debug_symbol_) ||
-        (!c10::ends_with(
-            std::string_view(buf + archive_name_plus_slash_.size()),
-            kDebugPklSuffix))) {
+        (!std::string_view(buf + archive_name_plus_slash_.size())
+              .ends_with(kDebugPklSuffix))) {
       // NOLINTNEXTLINE(modernize-use-emplace)
       out.push_back(buf + archive_name_plus_slash_.size());
     }
@@ -370,7 +369,7 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
     const std::string& name,
     std::optional<at::Allocator*> allocator) {
   std::lock_guard<std::mutex> guard(reader_lock_);
-  if ((!load_debug_symbol_) && c10::ends_with(name, kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && name.ends_with(kDebugPklSuffix)) {
     at::DataPtr retval;
     return std::make_tuple(std::move(retval), 0);
   }
@@ -465,7 +464,7 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
     return getRecord(name, allocator);
   }
 
-  if ((!load_debug_symbol_) && c10::ends_with(name, kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && name.ends_with(kDebugPklSuffix)) {
     at::DataPtr retval;
     return std::make_tuple(std::move(retval), 0);
   }
@@ -491,7 +490,7 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
 size_t
 PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n) {
   std::lock_guard<std::mutex> guard(reader_lock_);
-  if ((!load_debug_symbol_) && c10::ends_with(name, kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && name.ends_with(kDebugPklSuffix)) {
     return 0;
   }
   size_t key = getRecordID(name);
@@ -523,7 +522,7 @@ size_t PyTorchStreamReader::getRecord(
   }
 
   if ((!load_debug_symbol_) &&
-      c10::ends_with(std::string_view(name), kDebugPklSuffix)) {
+      std::string_view(name).ends_with(kDebugPklSuffix)) {
     return 0;
   }
   size_t key = getRecordID(name);
@@ -554,7 +553,7 @@ size_t PyTorchStreamReader::getRecord(
     void* buf,
     const std::function<void(void*, const void*, size_t)>& memcpy_func) {
   std::lock_guard<std::mutex> guard(reader_lock_);
-  if ((!load_debug_symbol_) && c10::ends_with(name, kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && name.ends_with(kDebugPklSuffix)) {
     return 0;
   }
   if (chunk_size <= 0) {
@@ -667,26 +666,34 @@ size_t ostream_write_func(
     const void* pBuf,
     size_t n) {
   auto self = static_cast<PyTorchStreamWriter*>(pOpaque);
-  if (self->current_pos_ != file_ofs) {
-    CAFFE_THROW("unexpected pos ", self->current_pos_, " vs ", file_ofs);
+  if (self->writer_func_error_) {
+    return 0;
   }
-  size_t ret = self->writer_func_(pBuf, n);
-  if (n != ret) {
-    self->err_seen_ = true;
-  }
-  self->current_pos_ += ret;
+  try {
+    if (self->current_pos_ != file_ofs) {
+      CAFFE_THROW("unexpected pos ", self->current_pos_, " vs ", file_ofs);
+    }
+    size_t ret = self->writer_func_(pBuf, n);
+    if (n != ret) {
+      self->err_seen_ = true;
+    }
+    self->current_pos_ += ret;
 
-  // Get the CRC32 of uncompressed data from the data descriptor, if the written
-  // data is identified as the data descriptor block.
-  // See [Note: write_record_metadata] for why we check for non-null pBuf here
-  if (pBuf && n >= 8 && MZ_READ_LE32(pBuf) == MZ_ZIP_DATA_DESCRIPTOR_ID) {
-    const int8_t* pInt8Buf = (const int8_t*)pBuf;
-    const uint32_t uncomp_crc32 = MZ_READ_LE32(pInt8Buf + 4);
-    self->combined_uncomp_crc32_ =
-        c10::hash_combine(self->combined_uncomp_crc32_, uncomp_crc32);
-  }
+    // Get the CRC32 of uncompressed data from the data descriptor, if the
+    // written data is identified as the data descriptor block.
+    // See [Note: write_record_metadata] for why we check for non-null pBuf here
+    if (pBuf && n >= 8 && MZ_READ_LE32(pBuf) == MZ_ZIP_DATA_DESCRIPTOR_ID) {
+      const int8_t* pInt8Buf = (const int8_t*)pBuf;
+      const uint32_t uncomp_crc32 = MZ_READ_LE32(pInt8Buf + 4);
+      self->combined_uncomp_crc32_ =
+          c10::hash_combine(self->combined_uncomp_crc32_, uncomp_crc32);
+    }
 
-  return ret;
+    return ret;
+  } catch (...) {
+    self->writer_func_error_ = std::current_exception();
+    return 0;
+  }
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
@@ -779,9 +786,9 @@ void PyTorchStreamWriter::writeRecord(
   if (files_written_.count(name) > 0) {
     // Allow multiple writes for triton binaries
     bool is_triton_extension =
-        c10::ends_with(name, ".so") ||
-        c10::ends_with(name, ".cubin") ||
-        c10::ends_with(name, ".hsaco");
+        name.ends_with(".so") ||
+        name.ends_with(".cubin") ||
+        name.ends_with(".hsaco");
 
     if (is_triton_extension) {
       LOG(WARNING) << "File '" << name << "' is being serialized multiple times";
@@ -820,11 +827,15 @@ void PyTorchStreamWriter::writeRecord(
       /*user_extra_data_len=*/padding_size,
       /*user_extra_data_central=*/nullptr,
       /*user_extra_data_central_len=*/0);
+  throwIfWriterFuncError();
   valid("writing file ", name.c_str());
   files_written_.insert(name);
 }
 
 void PyTorchStreamWriter::writeEndOfFile() {
+  if (finalized_) {
+    return;
+  }
   // Ensurers that finalized is set to true even
   // exception is raised during the method call.
   // I.e. even partial call to writeEndOfFile() should mark
@@ -873,6 +884,7 @@ void PyTorchStreamWriter::writeEndOfFile() {
   finalized_ = true;
 
   mz_zip_writer_finalize_archive(ar_.get());
+  throwIfWriterFuncError();
   mz_zip_writer_end(ar_.get());
   valid("writing central directory for archive ", archive_name_.c_str());
   c10::LogAPIUsageMetadata(
@@ -883,6 +895,20 @@ void PyTorchStreamWriter::writeEndOfFile() {
   if (file_stream_.is_open()) {
     file_stream_.close();
   }
+}
+
+void PyTorchStreamWriter::throwIfWriterFuncError() {
+  if (!writer_func_error_) {
+    return;
+  }
+
+  auto error = std::move(writer_func_error_);
+  writer_func_error_ = nullptr;
+  finalized_ = true;
+  // A callback failure leaves an incomplete archive; release miniz state and
+  // prevent further writes or finalization.
+  mz_zip_writer_end(ar_.get());
+  std::rethrow_exception(error);
 }
 
 void PyTorchStreamWriter::valid(const char* what, const char* info) {

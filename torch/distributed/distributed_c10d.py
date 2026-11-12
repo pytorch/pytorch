@@ -23,13 +23,14 @@ from typing import (
     Literal,
     NamedTuple,
     NewType,
+    NotRequired,
     overload,
     Protocol,
     TYPE_CHECKING,
     TypeAlias,
     TypeVar,
 )
-from typing_extensions import deprecated, NotRequired, TypedDict, TypeIs
+from typing_extensions import deprecated, TypedDict, TypeIs
 
 import torch
 from torch._C import _DistStoreError as DistStoreError
@@ -51,16 +52,24 @@ from torch._C._distributed_c10d import (
     GatherOptions,
     get_debug_level,
     HealthCheckHook,
+    HookOpName,  # noqa: F401
     NanCheckHook,
+    PostHookArgs,  # noqa: F401
     PrefixStore,
+    PreHookArgs,  # noqa: F401
     ProcessGroup,
+    PutOptions,  # noqa: F401
     ReconfigureOptions,
     ReduceOp,
     ReduceOptions,
     ReduceScatterOptions,
     ScatterOptions,
+    SignalOptions,  # noqa: F401
     Store,
+    WaitSignalOptions,  # noqa: F401
     Window,
+    WindowAccessType,  # noqa: F401
+    WindowAttr,  # noqa: F401
     Work,
 )
 from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
@@ -643,6 +652,11 @@ class Backend(str):  # noqa: SLOT000
                 break
 
         if backend_entrypoint is None:
+            # Fake is built in; register it where entry points are unavailable (e.g. Buck).
+            if normalized_name == Backend.FAKE:
+                from torch.distributed._backends.fake import _register_fake_backend
+
+                _register_fake_backend()
             return
 
         try:
@@ -859,6 +873,7 @@ def _create_nccl2_process_group(
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
     pg_options.group_name = opts.group_id
+    pg_options.group_desc = opts.group_desc
     if opts.enable_reconfigure:
         pg_options.enable_reconfigure = True
     if opts.split_from:
@@ -887,6 +902,7 @@ def _create_nccl_lazy_process_group(
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
     pg_options.group_name = opts.group_id
+    pg_options.group_desc = opts.group_desc
     if opts.enable_reconfigure:
         pg_options.enable_reconfigure = True
     if opts.split_from:
@@ -2713,7 +2729,7 @@ def init_process_group(
         # backward compatible API
         if store is None:
             if backend == Backend.FAKE:
-                from torch.testing._internal.distributed.fake_pg import FakeStore
+                from torch.distributed._backends.fake import FakeStore
 
                 store = FakeStore()
             else:
@@ -2880,18 +2896,17 @@ def _get_backend_name_for_device(
     return result
 
 
-# Backends that feed a FlightRecorder without any help: ProcessGroupGloo
-# unconditionally, ProcessGroupNCCL and ProcessGroupXCCL through their own
-# integrations. "fake" and "undefined" never communicate, so recording them is
-# pure noise. Everything else -- nccl2, nccl-lazy, mpi, ucc, out-of-tree
-# plugins -- is invisible to the flight recorder unless a hook is attached.
+# Backends that feed a FlightRecorder without any help: ProcessGroupNCCL and
+# ProcessGroupXCCL through their own integrations. "fake" and "undefined" never
+# communicate, so recording them is pure noise. Everything else -- gloo, nccl2,
+# nccl-lazy, mpi, ucc, out-of-tree plugins -- is invisible to the flight
+# recorder unless a hook is attached.
 #
 # Backend.NCCL is not in here by construction: which implementation the name
 # builds is a runtime choice, so its registrar puts it in or takes it out when
 # it makes that choice, and this stays the single answer to "does this backend
 # record itself".
 _FR_SELF_RECORDING_BACKENDS = {
-    Backend.GLOO,
     "nccl-legacy",
     Backend.XCCL,
     Backend.FAKE,
@@ -2917,9 +2932,10 @@ def _maybe_attach_flight_recorder(
     # A hook is attached per ProcessGroup but backends are per device, and the
     # hook now resolves per op: it skips whatever a self-recording backend
     # serves and records the rest into that backend's own recorder instance. So
-    # a mixed group ("cpu:gloo,cuda:nccl2") gets its nccl2 half without
-    # duplicating gloo's native entries, and only a group that is self-recording
-    # on every device is still skipped -- a hook there would record nothing.
+    # a mixed group ("cpu:gloo,cuda:nccl-legacy") gets its gloo half without
+    # duplicating nccl-legacy's native entries, and only a group that is
+    # self-recording on every device is still skipped -- a hook there would
+    # record nothing.
     if all(
         backend_str in _FR_SELF_RECORDING_BACKENDS
         for backend_str in backend_config.get_device_backend_map().values()
@@ -2938,6 +2954,15 @@ def _maybe_attach_flight_recorder(
     # handle returned by attach() is dropped. Park it with the rest of the
     # group's state, which destroy_process_group tears down.
     _world.pg_flight_recorder_hooks[pg] = FlightRecorderHook.attach(pg, global_ranks)
+
+
+def _remove_flight_recorder_hook(pg: ProcessGroup) -> None:
+    # remove() rather than drop the handle: the hook may hold Works, and once
+    # dropped it can be destroyed by a running result callback, on the
+    # backend's watchdog.
+    hook = _world.pg_flight_recorder_hooks.pop(pg, None)
+    if hook is not None:
+        hook.remove()
 
 
 def _new_process_group_helper(
@@ -3123,6 +3148,7 @@ def _new_process_group_helper(
                 # pyrefly: ignore [bad-argument-type]
                 dist_backend_opts.timeout = timeout
                 dist_backend_opts.group_id = group_name
+                dist_backend_opts.group_desc = group_desc
                 dist_backend_opts.global_ranks_in_group = global_ranks_in_group
                 dist_backend_opts.process_group = pg
                 dist_backend_opts.split_from = split_from
@@ -3245,6 +3271,51 @@ def _release_nvshmem_team_pool(group_name: str) -> None:
         release(group_name)
 
 
+def _release_nvshmem_team_pool_after_abort(group_name: str) -> None:
+    # The release synchronizes the device, which raises on a sticky CUDA error.
+    try:
+        _release_nvshmem_team_pool(group_name)
+    except Exception:
+        logger.warning(
+            "Failed to release NVSHMEM team pool of group %s after abort",
+            group_name,
+            exc_info=True,
+        )
+
+
+def _finalize_torchcomm(comm, *, best_effort: bool) -> None:
+    try:
+        comm.finalize()
+    except Exception:
+        if not best_effort:
+            raise
+        logger.warning(
+            "Failed to finalize TorchComms communicator after abort", exc_info=True
+        )
+
+
+def _finalize_torchcomms(pg: ProcessGroup, *, best_effort: bool = False) -> None:
+    if not _TORCHCOMM_AVAILABLE:
+        return
+    # A single comm may be shared across multiple device types (e.g. a
+    # gloo group reports both 'cuda' and 'cpu' device types backed by the
+    # same _BackendWrapper). Deduplicate by comm identity so we finalize
+    # each comm exactly once; finalize() is not idempotent and raises
+    # "already finalized" on a second call.
+    finalized_comm_ids: set[int] = set()
+    for device_type in pg._device_types:
+        backend = pg._get_backend(device_type)
+        if isinstance(backend, _BackendWrapper):
+            comm = backend.get_comm()
+            if id(comm) not in finalized_comm_ids:
+                _finalize_torchcomm(comm, best_effort=best_effort)
+                finalized_comm_ids.add(id(comm))
+    if finalized_comm_ids:
+        _world.comms[:] = [
+            comm for comm in _world.comms if id(comm) not in finalized_comm_ids
+        ]
+
+
 def destroy_process_group(
     group: ProcessGroup | _NonGroupMember | None = None,
 ) -> None:
@@ -3304,7 +3375,8 @@ def destroy_process_group(
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
-        _world.pg_flight_recorder_hooks.clear()
+        for hooked_pg in list(_world.pg_flight_recorder_hooks):
+            _remove_flight_recorder_hook(hooked_pg)
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
@@ -3317,24 +3389,7 @@ def destroy_process_group(
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
     else:
-        if _TORCHCOMM_AVAILABLE:
-            # A single comm may be shared across multiple device types (e.g. a
-            # gloo group reports both 'cuda' and 'cpu' device types backed by the
-            # same _BackendWrapper). Deduplicate by comm identity so we finalize
-            # each comm exactly once — finalize() is not idempotent and raises
-            # "already finalized" on a second call.
-            finalized_comm_ids: set[int] = set()
-            for device_type in pg._device_types:
-                backend = pg._get_backend(device_type)
-                if isinstance(backend, _BackendWrapper):
-                    comm = backend.get_comm()
-                    if id(comm) not in finalized_comm_ids:
-                        comm.finalize()
-                        finalized_comm_ids.add(id(comm))
-            if finalized_comm_ids:
-                _world.comms[:] = [
-                    comm for comm in _world.comms if id(comm) not in finalized_comm_ids
-                ]
+        _finalize_torchcomms(pg)
         _release_nvshmem_team_pool(_world.pg_names[pg])
         pg.shutdown()
         del _world.pg_map[pg]
@@ -3348,7 +3403,7 @@ def destroy_process_group(
                 stacklevel=2,
             )
             del _world.pg_coalesce_state[pg]
-        _world.pg_flight_recorder_hooks.pop(pg, None)
+        _remove_flight_recorder_hook(pg)
 
         tag = _world.pg_to_tag.get(pg)
         del _world.pg_to_tag[pg]
@@ -3418,6 +3473,15 @@ def _abort_process_group(
             ):
                 pg_to_abort.abort()
 
+        # Only after the aborts: an aborted TorchComms comm finalizes without
+        # its collective destroy, and the NVSHMEM release synchronizes the
+        # device, which would wait on hung NCCL kernels before the abort.
+        for comm in _world.comms:
+            _finalize_torchcomm(comm, best_effort=True)
+        _world.comms.clear()
+        for pg_name in _world.pg_names.values():
+            _release_nvshmem_team_pool_after_abort(pg_name)
+
         _update_default_pg(None)
         _world.pg_map.clear()
         _world.pg_names.clear()
@@ -3426,7 +3490,8 @@ def _abort_process_group(
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
-        _world.pg_flight_recorder_hooks.clear()
+        for hooked_pg in list(_world.pg_flight_recorder_hooks):
+            _remove_flight_recorder_hook(hooked_pg)
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
@@ -3440,6 +3505,9 @@ def _abort_process_group(
         _world.group_count = 0
     else:
         pg.abort()
+        # As for WORLD above, only after the abort.
+        _finalize_torchcomms(pg, best_effort=True)
+        _release_nvshmem_team_pool_after_abort(_world.pg_names[pg])
         del _world.pg_map[pg]
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
@@ -3451,7 +3519,7 @@ def _abort_process_group(
                 stacklevel=2,
             )
             del _world.pg_coalesce_state[pg]
-        _world.pg_flight_recorder_hooks.pop(pg, None)
+        _remove_flight_recorder_hook(pg)
 
         tag = _world.pg_to_tag.get(pg)
         del _world.pg_to_tag[pg]
@@ -8260,7 +8328,7 @@ def _cleanup_process_group_global_state(pg: ProcessGroup) -> None:
 
         # Clean up coalesce state if present
         _world.pg_coalesce_state.pop(pg, None)
-        _world.pg_flight_recorder_hooks.pop(pg, None)
+        _remove_flight_recorder_hook(pg)
 
     except Exception:
         # Log cleanup failures but don't propagate - we want to continue with other cleanups

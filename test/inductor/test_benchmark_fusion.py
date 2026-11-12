@@ -32,6 +32,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model_gpu,
     copy_tests,
     skip_if_cpp_wrapper,
+    skip_if_device,
 )
 from torch._inductor import config
 from torch._inductor.ir import MultiTemplateBuffer
@@ -139,6 +140,7 @@ class BenchmarkFusionTestTemplate:
 
         self.common(f, (a, b))
 
+    @skip_if_device(lambda device: device != GPU_TYPE, "GPU only")
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
@@ -363,7 +365,7 @@ if HAS_GPU_AND_TRITON:
             out, code = run_and_get_code(torch.compile(f), a, b, bias)
             self.assertEqual(out, f(a, b, bias), atol=1e-1, rtol=1e-2)
             FileCheck().check("triton_tem_fused").check_count(
-                "async_compile.triton(", 1, exactly=True
+                "@triton.jit", 1, exactly=True
             ).run(code[0])
 
         @unittest.skipIf(

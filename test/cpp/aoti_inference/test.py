@@ -168,9 +168,6 @@ def generate_cuda_alloc_test():
 
 # AOTI model which will create additional tensors during autograd.
 def generate_test_with_additional_tensors():
-    if not torch.cuda.is_available():
-        return
-
     model = NetWithTensorConstants()
     x = torch.randn((30, 1), device="cuda")
     y = torch.randn((30, 1), device="cuda")
@@ -198,9 +195,10 @@ def generate_test_with_additional_tensors():
 
 generate_basic_tests()
 generate_basic_tests_consts_cpp()
-generate_large_tests()
-generate_test_with_additional_tensors()
-generate_cuda_alloc_test()
+if torch.cuda.is_available():
+    generate_large_tests()
+    generate_test_with_additional_tensors()
+    generate_cuda_alloc_test()
 
 
 # Use this to communicate tensors to the cpp code
@@ -211,9 +209,9 @@ class Serializer(torch.nn.Module):
             setattr(self, key, data[key])
 
 
-torch.jit.script(Serializer(data)).save("data.pt")
-torch.jit.script(Serializer(large_data)).save("large_data.pt")
-torch.jit.script(Serializer(data_with_tensor_constants)).save(
+torch.jit._script.script(Serializer(data)).save("data.pt")
+torch.jit._script.script(Serializer(large_data)).save("large_data.pt")
+torch.jit._script.script(Serializer(data_with_tensor_constants)).save(
     "data_with_tensor_constants.pt"
 )
-torch.jit.script(Serializer(cuda_alloc_data)).save("cuda_alloc_data.pt")
+torch.jit._script.script(Serializer(cuda_alloc_data)).save("cuda_alloc_data.pt")

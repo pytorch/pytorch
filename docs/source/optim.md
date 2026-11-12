@@ -436,6 +436,8 @@ hooks that apply to every optimizer instead of one optimizer instance.
 ## Utilities
 
 ```{eval-rst}
+.. autofunction:: preserve_state_dtype_on_load
+
 .. autofunction:: swap_in_optimizer_params_and_state
 ```
 

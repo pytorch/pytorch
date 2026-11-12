@@ -16,12 +16,12 @@ recompilation to enable efficient distributed training while maintaining the ben
 of compilation.
 """
 
+import contextlib
 import logging
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
-from unittest import mock
 
 import torch
 from torch import fx
@@ -29,7 +29,10 @@ from torch._dynamo.backends.registry import CompiledFn, CompilerFn
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch._logging import trace_structured
-from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.fake_tensor import (
+    allow_non_fake_inputs_temporarily,
+    is_fake_tensor,
+)
 from torch.fx.node import Node
 
 
@@ -279,9 +282,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
         if not self.fake_mode:
             raise AssertionError("fake_mode must be set")
         for arg in args:
-            if isinstance(arg, torch.Tensor) and not isinstance(
-                arg, torch._subclasses.FakeTensor
-            ):
+            if isinstance(arg, torch.Tensor) and not is_fake_tensor(arg):
                 new_args.append(torch._dynamo.utils.to_fake_tensor(arg, self.fake_mode))
             else:
                 new_args.append(arg)
@@ -319,25 +320,18 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # appropriate strides. Then, all of aot autograd's runtime logic is replayed.
             # This gives us the appropriately strided outputs here which will reflect runtime strides.
 
-            class FakeifyFirstAOTInvocationGuard:
-                def __init__(self) -> None:
-                    self.tc = torch._guards.TracingContext.try_get()
-                    if not self.tc:
-                        raise AssertionError("TracingContext must be set")
-                    self.tc.fakify_first_call = True
-
-                def __del__(self) -> None:
-                    self.tc.fakify_first_call = False  # type: ignore[union-attr]
-
             # For aot_eager and other backends, tracing context is not set
             has_tracing_context = torch._guards.TracingContext.try_get() is not None
             if has_tracing_context:
-                g = FakeifyFirstAOTInvocationGuard()  # noqa: F841
+                fakify_ctx = torch._guards.TracingContext.patch(fakify_first_call=True)
+            else:
+                fakify_ctx = contextlib.nullcontext()
 
             from torch._dynamo.utils import counters
 
             init = counters["aot_autograd"]["total"]
-            compiled_submod_real = self.compile_submod(real_mod, new_args, kwargs)
+            with fakify_ctx:
+                compiled_submod_real = self.compile_submod(real_mod, new_args, kwargs)
 
             # TODO - better way of doing this?
             # Only aot autograd handles fakifying first call
@@ -354,7 +348,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # Because parameters are not fake we patch fake tensor mode to allow non fake inputs
             with (
                 self.fake_mode,
-                mock.patch.object(self.fake_mode, "allow_non_fake_inputs", True),
+                allow_non_fake_inputs_temporarily(self.fake_mode),
             ):
                 if has_tracing_context and invoked_aot_autograd:
                     tracing_ctx = torch._guards.TracingContext.try_get()
