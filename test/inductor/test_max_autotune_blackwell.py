@@ -1273,6 +1273,56 @@ class TestBlackwellAutoWSConfigs(TestCase):
         self.assertTrue(configs[0]["WARP_SPECIALIZE"])
         self.assertEqual(configs[0]["FLATTEN"], not global_meta_ws)
 
+    @parametrize(
+        "dtype,expect_pruned", ((torch.float32, True), (torch.bfloat16, False))
+    )
+    def test_autows_prunes_configs_over_shared_memory(self, dtype, expect_pruned):
+        # IEEE fp32 128x256x128 with a column-major B exceeds 232 KB at any depth.
+        mat1, mat2 = mock.Mock(), mock.Mock()
+        mat2.get_dtype.return_value = dtype
+        mat2.get_device.return_value = torch.device("cuda", 0)
+        kernel_inputs = MMKernelInputs([mat1, mat2], mat1_idx=0, mat2_idx=1)
+        base = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 256,
+            "BLOCK_K": 128,
+            "EPILOGUE_SUBTILE": 8,
+            "DATA_PARTITION_FACTOR": 1,
+            "TWO_CTAS": False,
+            "A_ROW_MAJOR": True,
+            "B_ROW_MAJOR": False,
+            "num_stages": 3,
+            "num_warps": 4,
+            "USE_META_WS": True,
+        }
+        heuristic_mod = "torch._inductor.heuristics.template.triton"
+        with (
+            mock.patch.dict(BaseHeuristicSingleton._instances, clear=True),
+            mock.patch.object(
+                TMATemplateConfigMixin,
+                "_get_template_configs_impl",
+                return_value=iter([base]),
+            ),
+            mock.patch.object(
+                MMKernelInputs, "mnk_symbolic", return_value=(512, 2048, 15360)
+            ),
+            mock.patch.object(
+                MMKernelInputs,
+                "device_type",
+                new_callable=mock.PropertyMock,
+                return_value="cuda",
+            ),
+            mock.patch(f"{heuristic_mod}.mm_allow_tf32", return_value=False),
+            mock.patch.object(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic,
+                "_max_shared_memory_per_block",
+                return_value=232448,
+            ),
+        ):
+            heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
+            configs = list(heuristic._get_template_configs_impl(kernel_inputs, "mm"))
+        self.assertEqual(len(configs), 0 if expect_pruned else 1)
+
 
 @instantiate_parametrized_tests
 class TestBlackwellBMMTemplate(TestCase):
