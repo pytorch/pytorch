@@ -12869,9 +12869,10 @@ class Scheduler:
                 return False
             # Backed size symbols are sympy-positive even when their range
             # includes 0 (backed_size_oblivious), so guard-based reasoning is
-            # trusted only when every symbol is at least 1.
+            # trusted only when every sympy-positive symbol is at least 1.
+            # Unbacked symbols assume no positivity, so their checks hold as is.
             return bound_sympy(size, var_to_range).lower >= 1 or (
-                all(var_to_range[s].lower >= 1 for s in symbols)
+                all(var_to_range[s].lower >= 1 for s in symbols if s.is_positive)
                 and (
                     sizevars.statically_known_gt(size, 0)
                     or sizevars.statically_known_true(sympy.Ne(size, 0))
@@ -13473,6 +13474,10 @@ class BaseScheduling:  # noqa: docstring_linter
     ) -> Kernel[Any] | MultiKernel | None:
         """
         Generate a kernel given a list of pre-fused nodes.
+
+        Backends that can use PDL (the SIMD ones) return the kernel they
+        launched, or a MultiKernel, and None only when they launch nothing:
+        the PDL running list in _codegen treats None as no launch.
         """
         raise NotImplementedError
 
