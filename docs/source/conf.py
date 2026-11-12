@@ -266,6 +266,8 @@ autosummary_filename_map = {
     "torch.cpu.Stream": "torch.cpu.Stream_class",
     "torch.cuda.stream": "torch.cuda.stream_function",
     "torch.cuda.Stream": "torch.cuda.Stream_class",
+    "torch.mps.stream": "torch.mps.stream_function",
+    "torch.mps.Stream": "torch.mps.Stream_class",
     "torch.xpu.stream": "torch.xpu.stream_function",
     "torch.xpu.Stream": "torch.xpu.Stream_class",
 }
@@ -990,12 +992,6 @@ coverage_ignore_functions = [
     "get_file_pathnames_from_root",
     "match_masks",
     "validate_pathname_binary_tuple",
-    # torch.utils.data.datapipes.utils.decoder
-    "audiohandler",
-    "extension_extract_fn",
-    "imagehandler",
-    "mathandler",
-    "videohandler",
     # torch.utils.data.graph_settings
     "apply_random_seed",
     "apply_sharding",
@@ -1984,8 +1980,6 @@ coverage_ignore_classes = [
     "BatcherIterDataPipe",
     "GrouperIterDataPipe",
     "UnBatcherIterDataPipe",
-    # torch.utils.data.datapipes.iter.routeddecoder
-    "RoutedDecoderIterDataPipe",
     # torch.utils.data.datapipes.iter.selecting
     "FilterIterDataPipe",
     # torch.utils.data.datapipes.iter.sharding
@@ -2004,10 +1998,6 @@ coverage_ignore_classes = [
     "BatcherMapDataPipe",
     # torch.utils.data.datapipes.map.utils
     "SequenceWrapperMapDataPipe",
-    # torch.utils.data.datapipes.utils.decoder
-    "Decoder",
-    "ImageHandler",
-    "MatHandler",
     # torch.utils.data.dataset
     "ConcatDataset",
     # torch.utils.data.distributed

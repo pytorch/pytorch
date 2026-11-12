@@ -138,6 +138,9 @@ def guarding_hint_or_throw(
     and Python int for integer inputs (SymInt, int).
     """
     if isinstance(a, SymNode):
+        # maybe_set_item_memo relies on this never filling in a SymFloat's hint
+        if a.pytype not in (int, bool):
+            raise AssertionError(f"Expected an int or bool SymNode, got {a.pytype}")
         if a._hint is not None:
             return a._hint  # pyrefly: ignore[bad-return]
         if a.shape_env is None:
@@ -1868,25 +1871,14 @@ def constrain_range(a: SymInt, *, min: int | None, max: int | None = None) -> No
     a.node.shape_env._constrain_range(a.node.expr, min, max)
 
 
+@deprecated(
+    "`torch.fx.experimental.symbolic_shapes.constrain_unify` is deprecated, "
+    "please use `torch._check(a == b)` instead.",
+    category=FutureWarning,
+)
 def constrain_unify(a: torch.SymInt, b: torch.SymInt) -> None:
-    """
-    Given two SymInts, constrain them so that they must be equal.  NB:
-    this will not work with SymInts that represent nontrivial expressions
-    (yet!)
-    """
-    if not isinstance(a, SymInt):
-        if not isinstance(b, SymInt):
-            if a != b:
-                raise AssertionError(f"Expected {a} == {b}")
-            return
-        else:
-            shape_env = b.node.shape_env
-    else:
-        shape_env = a.node.shape_env
-
-    if shape_env is None:
-        raise AssertionError("shape_env should not be None")
-    shape_env._constrain_unify(a, b)
+    """Given two SymInts, constrain them so that they must be equal."""
+    torch._check(a == b)
 
 
 # Assume that a boolean is true for the purposes of subsequent symbolic
@@ -4654,47 +4646,6 @@ class ShapeEnv:
                 compiler_min=min,
                 compiler_max=max,
             )
-
-    @record_shapeenv_event()
-    def _constrain_unify(self, a: SymInt, b: SymInt) -> None:
-        """
-        Given two SymInts, constrain them so that they must be equal.  NB:
-        this will not work with SymInts that represent nontrivial expressions
-        (yet!)
-        """
-        # TODO: this does not install a deferred runtime assert yet
-
-        # TODO: Maybe dedupe this with _maybe_guard_rel?
-        # Update Feb 2024: this is extra important to do, this doesn't handle
-        # unbacked replacements properly nor does it generate deferred runtime
-        # asserts
-        if not isinstance(a, SymInt):
-            if not isinstance(b, SymInt):
-                if a != b:
-                    raise AssertionError(f"Expected {a} == {b}")
-            else:
-                if not isinstance(b.node.expr, sympy.Symbol):
-                    raise AssertionError("constraining non-Symbols NYI")
-                if b.node.shape_env is not self:
-                    raise AssertionError("b.node.shape_env must be self")
-                self.replacements[b.node.expr] = sympy.Integer(a)
-        else:
-            # TODO: Actually, we can support this as long as one of them is a symbol.
-            # NB: We can't actually do "unification" as our operators are not
-            # injective
-            if not isinstance(a.node.expr, sympy.Symbol):
-                raise AssertionError("constraining non-Symbols NYI")
-            if a.node.shape_env is not self:
-                raise AssertionError("a.node.shape_env must be self")
-            if not isinstance(b, SymInt):
-                self.replacements[a.node.expr] = sympy.Integer(b)
-            else:
-                if a.node.shape_env is not b.node.shape_env:
-                    raise AssertionError("a.node.shape_env must be b.node.shape_env")
-                if not isinstance(b.node.expr, sympy.Symbol):
-                    raise AssertionError("constraining non-Symbols NYI")
-                new_var = self._find(a.node.expr)
-                self.replacements[b.node.expr] = new_var
 
     def _ignore_fresh_unbacked_symbols_tls(self) -> bool:
         return _ignore_fresh_unbacked_symbols_tls()
@@ -8718,14 +8669,9 @@ class ShapeEnv:
             raise AssertionError("frame must not be None")
 
         insts = list(dis.get_instructions(frame.f_code))
-        if sys.version_info >= (3, 11):
-            # For Python >= 3.11, instructions can be 2-4 bytes long.
-            from bisect import bisect_left
+        from bisect import bisect_left
 
-            cur = bisect_left(insts, frame.f_lasti, key=lambda x: x.offset)
-        else:
-            # For Python <= 3.10, instructions are always 2 bytes.
-            cur = frame.f_lasti // 2
+        cur = bisect_left(insts, frame.f_lasti, key=lambda x: x.offset)
 
         if sys.version_info >= (3, 13):
             if insts[cur].opname in ("TO_BOOL", "COMPARE_OP"):
