@@ -21,7 +21,7 @@ from typing import Any, Generic, Literal, NamedTuple, Never, TYPE_CHECKING, Type
 import torch
 import torch.fx as fx
 import torch.utils._pytree as pytree
-from torch import Tensor
+from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import _dispatch_keys, DispatchKey
 from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger, TRIGGER_DSLS
 from torch._higher_order_ops.utils import redirect_to_mode
@@ -35,7 +35,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.fx.experimental.symbolic_shapes import guard_or_false
+from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_scalar
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -120,6 +120,11 @@ class ConstantRules:
         a value whose copy is itself, such as an enum member."""
         return None
 
+    def keyed_by_content(self, value: object) -> bool:
+        """Whether ``value``, a callable object, is keyed and copied by its attributes
+        as a plain object is (other callables are keyed as themselves)."""
+        return False
+
     def refusal(self, cls: type) -> str | None:
         """What to pass instead of a value of type ``cls``, one of the DSL's objects
         that PT2 makes for each launch itself (a DSL tensor or stream, say), which a
@@ -136,9 +141,16 @@ def _object_state(value: object, rules: ConstantRules) -> dict[str, object] | No
     value, the DSL's own values included, and for an object, a dataclass instance
     too, that keeps state outside its __dict__ (see _has_hidden_state).
 
+    A callable object that the DSL keys by content (ConstantRules.keyed_by_content),
+    such as a CuTeDSL kernel object (its class's __call__ is @cute.jit; a host function
+    takes one as a Constexpr and calls it), is keyed and copied as a plain object is,
+    not as a functor (below): equal objects share one side-table entry and one compile,
+    kernel objects built for each call included, and one mutated between launches is
+    compiled again.
+
     Limitation: an object with state in __slots__ attributes that are not dataclass
-    fields or in a built-in base (see _has_hidden_state), or a callable object other
-    than a dataclass instance (a functor), is keyed as itself, by identity unless its
+    fields or in a built-in base (see _has_hidden_state), or any other callable object
+    but a dataclass instance (a functor), is keyed as itself, by identity unless its
     class defines equality and hashing (a dataclass's compares its fields alone), and
     refused if it is unhashable (as a dataclass with eq=True that is not frozen is): a
     mutation of it leaves its key as it was, and a new object with the same contents
@@ -162,8 +174,8 @@ def _object_state(value: object, rules: ConstantRules) -> dict[str, object] | No
     if (
         (cls.__hash__ is None or cls.__hash__ is object.__hash__)
         and hasattr(value, "__dict__")
-        and not callable(value)
         and not isinstance(value, types.ModuleType)
+        and (not callable(value) or rules.keyed_by_content(value))
     ):
         return vars(value)
     return None
@@ -903,3 +915,10 @@ class UserKernelHOPifier:
 
     def get_value(self, val: Any) -> Any:
         raise NotImplementedError("abstract method")
+
+
+def specialize_symbolic(arg: Any) -> Any:
+    # See [Note: Specialize tl.constexpr args in user-defined triton kernels]
+    if isinstance(arg, (SymInt, SymBool, SymFloat)):
+        return guard_scalar(arg)
+    return arg
