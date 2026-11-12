@@ -564,7 +564,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         #   3b) key_present=False. There is no easy way to selectively apply this
         #   DICT_NOT_CONTAINS guard because our guard are represented via trees.
         #   Be conservative and add DICT_KEYS_MATCH guard.
-        # Method keys instead guard the matched input key, or all keys for a miss.
 
         if not self.source:
             return
