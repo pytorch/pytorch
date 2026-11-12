@@ -784,7 +784,7 @@ inline CUdeviceptr getPointerFast(PyObject* obj) {
   // Fast type check: inductor-generated tensors are always exact THPVariable
   // (or Parameter). Use CheckExact — a single Py_TYPE pointer comparison —
   // instead of THPVariable_Check which also calls PyObject_IsInstance.
-  if (C10_LIKELY(THPVariable_CheckExact(obj))) {
+  if (THPVariable_CheckExact(obj)) [[likely]] {
     auto tensor = THPVariable_Unpack(obj);
     TORCH_CHECK(
         tensor.defined(),
