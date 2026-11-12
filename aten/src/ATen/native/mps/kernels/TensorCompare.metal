@@ -115,3 +115,135 @@ struct isneginf_functor {
 REGISTER_ISINF_OPS(float);
 REGISTER_ISINF_OPS(half);
 REGISTER_ISINF_OPS(bfloat);
+
+template <typename T>
+inline uint lower_bound(device const T* data, uint size, T value) {
+  uint lo = 0, hi = size;
+  while (lo < hi) {
+    const auto mid = lo + (hi - lo) / 2;
+    if (data[mid] < value) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
+template <typename T>
+inline bool contains(
+    device const T* test_elements,
+    uint num_test,
+    T element,
+    bool_constant<false>) {
+  bool found = false;
+  for (uint i = 0; i < num_test; ++i) {
+    found |= element == test_elements[i];
+  }
+  return found;
+}
+
+template <typename T>
+inline bool contains(
+    device const T* test_elements,
+    uint num_test,
+    T element,
+    bool_constant<true>) {
+  const auto lo = lower_bound(test_elements, num_test, element);
+  return lo < num_test && test_elements[lo] == element;
+}
+
+template <typename T, bool SORTED>
+kernel void isin(
+    device const T* elements [[buffer(0)]],
+    device const T* test_elements [[buffer(1)]],
+    device bool* out [[buffer(2)]],
+    constant uint& num_test [[buffer(3)]],
+    constant bool& invert [[buffer(4)]],
+    uint index [[thread_position_in_grid]]) {
+  const auto found = contains(
+      test_elements, num_test, elements[index], bool_constant<SORTED>{});
+  out[index] = found != invert;
+}
+
+template <typename T, bool SORTED>
+kernel void isin_mark(
+    device const T* elements [[buffer(0)]],
+    device const T* test_elements [[buffer(1)]],
+    device atomic_uint* found [[buffer(2)]],
+    constant uint& num_elements [[buffer(3)]],
+    uint index [[thread_position_in_grid]]) {
+  const auto test_element = test_elements[index];
+  const uint lo =
+      SORTED ? lower_bound(elements, num_elements, test_element) : 0;
+  for (auto i = lo; i < num_elements; ++i) {
+    if (elements[i] == test_element &&
+        reinterpret_cast<device const uint*>(found)[i] == 0) {
+      atomic_store_explicit(found + i, 1u, memory_order_relaxed);
+    }
+    if IF_CONSTEXPR (SORTED) {
+      break;
+    }
+  }
+}
+
+template <typename T, bool SORTED>
+kernel void isin_gather(
+    device const T* elements [[buffer(0)]],
+    device const T* lookup [[buffer(1)]],
+    device bool* out [[buffer(2)]],
+    constant uint& num_elements [[buffer(3)]],
+    constant bool& invert [[buffer(4)]],
+    device const uint* found [[buffer(5)]],
+    uint index [[thread_position_in_grid]]) {
+  const auto element = elements[index];
+  const auto i = SORTED ? lower_bound(lookup, num_elements, element) : index;
+  out[index] = (i < num_elements && lookup[i] == element && found[i]) != invert;
+}
+
+#define REGISTER_ISIN_OP(NAME, T, SORTED)                      \
+  template [[host_name(NAME #T)]] kernel void isin<T, SORTED>( \
+      device const T*,                                         \
+      device const T*,                                         \
+      device bool*,                                            \
+      constant uint&,                                          \
+      constant bool&,                                          \
+      uint)
+
+#define REGISTER_ISIN_MARK_OP(NAME, T, SORTED)                      \
+  template [[host_name(NAME #T)]] kernel void isin_mark<T, SORTED>( \
+      device const T*,                                              \
+      device const T*,                                              \
+      device atomic_uint*,                                          \
+      constant uint&,                                               \
+      uint)
+
+#define REGISTER_ISIN_GATHER_OP(NAME, T, SORTED)                      \
+  template [[host_name(NAME #T)]] kernel void isin_gather<T, SORTED>( \
+      device const T*,                                                \
+      device const T*,                                                \
+      device bool*,                                                   \
+      constant uint&,                                                 \
+      constant bool&,                                                 \
+      device const uint*,                                             \
+      uint)
+
+#define REGISTER_ISIN_OPS(T)                           \
+  REGISTER_ISIN_OP("isin_", T, false);                 \
+  REGISTER_ISIN_OP("isin_sorted_", T, true);           \
+  REGISTER_ISIN_MARK_OP("isin_mark_", T, false);       \
+  REGISTER_ISIN_MARK_OP("isin_mark_sorted_", T, true); \
+  REGISTER_ISIN_GATHER_OP("isin_gather_", T, false);   \
+  REGISTER_ISIN_GATHER_OP("isin_gather_sorted_", T, true)
+
+REGISTER_ISIN_OPS(float);
+REGISTER_ISIN_OPS(half);
+REGISTER_ISIN_OPS(bfloat);
+REGISTER_ISIN_OPS(long);
+REGISTER_ISIN_OPS(int);
+REGISTER_ISIN_OPS(short);
+REGISTER_ISIN_OPS(char);
+REGISTER_ISIN_OPS(uchar);
+REGISTER_ISIN_OPS(ushort);
+REGISTER_ISIN_OPS(uint);
+REGISTER_ISIN_OPS(ulong);

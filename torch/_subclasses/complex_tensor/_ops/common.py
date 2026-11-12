@@ -1,6 +1,6 @@
 from collections.abc import Callable
-from typing import Any, overload, TypeAlias
-from typing_extensions import Never, ParamSpec, TypeIs, TypeVar
+from typing import Any, Never, overload, TypeAlias
+from typing_extensions import ParamSpec, TypeIs, TypeVar
 
 import torch
 from torch import Tensor
