@@ -164,10 +164,20 @@ def _welford_denom(acc_dtype, nf, correction):
 class WelfordOps:
     # acc = (mean, m2, nf). `reduce` is the ONLINE Welford update and `combine` the PARALLEL Chan
     # merge -- deliberately different formulas. project divides m2 by the clamped dof.
-    # has_combine_equal enables combine_equal's closed-form equal-count merges; a subclass
-    # that changes leaf, combine or the (mean, m2, nf) layout must set it to False.
+    # has_combine_equal enables combine_equal's closed-form equal-count merges. They assume
+    # these leaf and combine methods, so a subclass that replaces either must opt back in;
+    # its subclasses inherit that choice.
     nfields = 3
     has_combine_equal = True
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        for c in cls.__mro__[: cls.__mro__.index(WelfordOps)]:
+            if "has_combine_equal" in vars(c):
+                break
+            if "leaf" in vars(c) or "combine" in vars(c):
+                cls.has_combine_equal = False
+                break
 
     def __init__(self, correction=1, take_sqrt=False, return_mean=False, acc=Float32):
         self.correction = float(correction)

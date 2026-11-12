@@ -472,10 +472,13 @@ class TestColTileHost(TestCase):
         "case,error",
         [
             (dict(col_group=2), "col_group must be 1, 4, 8 or 16"),
-            (dict(axis="row"), "column groups need"),
-            (dict(combine=True), "column groups need"),
-            (dict(vec=4), "column groups need"),
-            (dict(trait=T.SumOps(acc=cutlass.Float32)), "column groups need"),
+            (dict(axis="row"), "column groups need the col axis, got axis='row'$"),
+            (dict(combine=True), "column groups need a fold of inputs, not partials$"),
+            (dict(vec=4), "column groups need vec=1, got vec=4$"),
+            (
+                dict(trait=T.SumOps(acc=cutlass.Float32)),
+                "column groups need a trait with has_combine_equal, got SumOps$",
+            ),
         ],
         name_fn=lambda case, error: "_".join(case),
     )
@@ -485,6 +488,11 @@ class TestColTileHost(TestCase):
         trait, axis = kwargs.pop("trait"), kwargs.pop("axis")
         with self.assertRaisesRegex(ValueError, error):
             tile.TileReduce(trait, cutlass.Float32, axis, 1024, **kwargs)
+
+    def test_column_groups_report_a_missing_vec_first(self):
+        welford = T.WelfordOps(acc=cutlass.Float32)
+        with self.assertRaisesRegex(ValueError, "the col axis needs an explicit vec$"):
+            tile.TileReduce(welford, cutlass.Float32, "col", 1024, col_group=4)
 
     def test_column_groups_share_unroll_variants(self):
         # The grouped fold ignores unroll, so configs differing only in it share a plan.
