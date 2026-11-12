@@ -1168,10 +1168,11 @@ static bool visit(
       return true;
     }
   } else if (PyList_Check(o)) {
-    // Check that this List is TensorList
+    // Only tensors and None are valid tensor-list entries.
     if constexpr (skip_tensors_in_non_tensorlist) {
       for (const auto i : c10::irange(PyList_GET_SIZE(o))) {
-        if (!THPVariable_Check(PyList_GET_ITEM(o, i))) {
+        auto* item = PyList_GET_ITEM(o, i);
+        if (item != Py_None && !THPVariable_Check(item)) {
           return false;
         }
       }
@@ -1188,7 +1189,7 @@ static bool visit(
 
 // Visiting of tensors in args and kwargs,
 // only List container is visited.
-// skip_tensors_in_non_tensorlist will skip any List with non-Tensor.
+// With skip_tensors_in_non_tensorlist, only tensors and None are allowed.
 // Lambda returning true means short circuit, traversal stops after that.
 template <bool skip_tensors_in_non_tensorlist>
 static void visit_tensors(
@@ -1215,7 +1216,7 @@ static void visit_tensors(
 }
 
 // Returns true if any of the args, kwargs tensor leaves have requires_grad.
-// Only List[Tensor] container in args is supported.
+// Only List[Tensor] and List[Optional[Tensor]] containers are supported.
 static PyObject* any_requires_grad(
     PyObject* _unused,
     PyObject* args,

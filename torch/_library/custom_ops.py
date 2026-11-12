@@ -6,7 +6,7 @@ import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, overload, TypeAlias, Union
+from typing import Any, overload, TYPE_CHECKING, TypeAlias, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -15,6 +15,10 @@ from torch.utils._exposed_in import exposed_in
 
 from . import autograd, utils
 from .effects import EffectType
+
+
+if TYPE_CHECKING:
+    from .infer_schema import _TupleInputSpec
 
 
 device_types_t: TypeAlias = str | Sequence[str] | None  # noqa: PYI042
@@ -230,14 +234,22 @@ def custom_op(
         >>> y = torch.randn(3)
         >>> out = weighted_sum([x, y], [0.3, 0.7])
 
+    Tuple input annotations are also supported when their elements can be
+    represented by a dispatcher list type. Fixed-length tuples have their length
+    and per-position element types checked before real or fake implementations
+    run. As with other sequence inputs, the dispatcher passes lists to kernels.
+
     """
 
     def inner(fn: Callable[..., object]) -> CustomOpDef:
         import torch
 
         normalized_tags = _normalize_tags(tags)
+        tuple_input_specs = None
         if schema is None:
-            schema_str = torch.library.infer_schema(
+            from .infer_schema import _infer_schema
+
+            schema_str, tuple_input_specs = _infer_schema(
                 fn,
                 mutates_args=mutates_args,
                 tags=normalized_tags,
@@ -246,7 +258,14 @@ def custom_op(
             schema_str = schema
 
         namespace, opname = name.split("::")
-        result = CustomOpDef(namespace, opname, schema_str, fn, normalized_tags)
+        result = CustomOpDef(
+            namespace,
+            opname,
+            schema_str,
+            fn,
+            normalized_tags,
+            tuple_input_specs=tuple_input_specs,
+        )
         if schema is not None:
             # Check that schema's alias annotations match those of `mutates_args`.
             expected = set()
@@ -291,6 +310,8 @@ class CustomOpDef:
         schema: str,
         fn: Callable,
         tags: tags_t = None,
+        *,
+        tuple_input_specs: "dict[str, _TupleInputSpec] | None" = None,
     ) -> None:
         # Fields used to interface with the PyTorch dispatcher
         self._namespace = namespace
@@ -299,6 +320,9 @@ class CustomOpDef:
         self._tags = _normalize_tags(tags)
 
         self._init_fn = fn
+        self._tuple_input_specs: dict[str, "_TupleInputSpec"] = (
+            {} if tuple_input_specs is None else tuple_input_specs
+        )
 
         self._backend_fns: dict[str | None, Callable] = {}
         # The utils.caller_module() of each register_kernel call, by dispatch key,
@@ -413,11 +437,24 @@ class CustomOpDef:
 
         return wrapped_fn
 
+    def _check_tuple_inputs(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> None:
+        if not self._tuple_input_specs:
+            return
+        schema = self._opoverload._schema
+        args, kwargs = utils.fill_defaults(schema, args, kwargs)
+        for argument, value in utils.zip_schema(schema, args, kwargs):
+            spec = self._tuple_input_specs.get(argument.name)
+            if spec is not None:
+                spec.validate(value, argument.name, self._qualname)
+
     def _make_backend_impl(self, device_type: str | None) -> Callable[..., object]:
         """Makes the dispatcher kernel for device_type, which runs the function
         registered for it and checks the result against the schema."""
 
         def backend_impl(*args, **kwargs):
+            self._check_tuple_inputs(args, kwargs)
             result = self._backend_fns[device_type](*args, **kwargs)
 
             def get_module():
@@ -798,6 +835,7 @@ class CustomOpDef:
 
     def _register_fake_dispatcher_impl(self) -> None:
         def fake_impl(*args, **kwargs):
+            self._check_tuple_inputs(args, kwargs)
             if self._abstract_fn is None:
                 if utils.can_generate_trivial_fake_impl(self._opoverload):
                     return utils.generate_trivial_fake_impl(

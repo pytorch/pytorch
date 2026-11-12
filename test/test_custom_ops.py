@@ -3131,6 +3131,173 @@ class MiniOpTest(CustomOpTestCaseBase):
 
 class TestCustomOpAPI(TestCase):
     @parametrize(
+        "annotation, schema",
+        (
+            (tuple[Tensor], "Tensor[]"),
+            (Tuple[Tensor, Tensor], "Tensor[]"),
+            (tuple[Tensor, Optional[Tensor]], "Tensor?[]"),
+            (tuple[Tensor, ...], "Tensor[]"),
+            (tuple[Optional[Tensor], ...], "Tensor?[]"),
+            (tuple[int, int], "SymInt[]"),
+            (tuple[float, float], "float[]"),
+            (tuple[bool, bool], "bool[]"),
+        ),
+    )
+    def test_infer_schema_tuple_inputs(self, annotation, schema):
+        def fn(xs: annotation) -> Tensor:
+            raise NotImplementedError
+
+        self.assertEqual(
+            torch.library.infer_schema(fn, mutates_args=()),
+            f"({schema} xs) -> Tensor",
+        )
+
+    @parametrize("annotation", (tuple[int, float], tuple[Tensor, int], tuple[str]))
+    def test_infer_schema_unsupported_tuple_inputs(self, annotation):
+        def fn(xs: annotation) -> Tensor:
+            raise NotImplementedError
+
+        with self.assertRaisesRegex(ValueError, "unsupported tuple type"):
+            torch.library.infer_schema(fn, mutates_args=())
+
+    @parametrize("use_list", (False, True))
+    @parametrize("optional", (False, True))
+    @parametrize("requires_grad", (False, True))
+    def test_custom_op_fixed_tuple_inputs(self, use_list, optional, requires_grad):
+        called = False
+
+        @torch.library.custom_op("_torch_testing::tuple_inputs", mutates_args=())
+        def fn(xs: tuple[Tensor, Optional[Tensor]]) -> Tensor:
+            nonlocal called
+            called = True
+            return torch.empty(1)
+
+        xs = (
+            torch.randn(3, requires_grad=requires_grad),
+            None if optional else torch.randn(3),
+        )
+        result = fn(list(xs) if use_list else xs)
+        self.assertTrue(called)
+        self.assertEqual(result.shape, (1,))
+
+        called = False
+        with self.assertRaisesRegex(RuntimeError, "argument 'xs'.*2 values.*1"):
+            fn((xs[0],))
+        self.assertFalse(called)
+
+        with self.assertRaisesRegex(RuntimeError, "argument 'xs' at index 0"):
+            fn((None, xs[0]))
+        self.assertFalse(called)
+
+    def test_custom_op_tuple_inputs_autograd(self):
+        @torch.library.custom_op("_torch_testing::tuple_autograd", mutates_args=())
+        def fn(xs: tuple[Tensor, Optional[Tensor]]) -> Tensor:
+            return xs[0].clone()
+
+        called = False
+
+        def backward(ctx, grad):
+            nonlocal called
+            called = True
+            return [grad, None]
+
+        fn.register_autograd(backward)
+        x = torch.randn(3, requires_grad=True)
+        torch.autograd.grad(fn((x, None)).sum(), x)
+        self.assertTrue(called)
+
+    @parametrize("requires_grad", (False, True))
+    @parametrize("none_first", (False, True))
+    def test_tuple_optional_tensor_requires_grad(self, requires_grad, none_first):
+        x = torch.randn(3, requires_grad=requires_grad)
+        values = [None, x] if none_first else [x, None]
+        self.assertEqual(torch._C._any_requires_grad(values), requires_grad)
+        self.assertEqual(torch._C._any_requires_grad(values=values), requires_grad)
+        self.assertFalse(torch._C._any_requires_grad([None, None]))
+        self.assertFalse(torch._C._any_requires_grad([x, 1]))
+
+    @parametrize("unused_grad", (False, True))
+    @parametrize("all_none", (False, True))
+    def test_optional_tensorlist_unused_gradient(self, unused_grad, all_none):
+        @torch.library.custom_op("_torch_testing::optional_unused", mutates_args=())
+        def fn(x: Tensor, unused: list[Optional[Tensor]]) -> Tensor:
+            return x.clone()
+
+        def backward(ctx, grad):
+            return grad, None
+
+        fn.register_autograd(backward)
+        x = torch.randn(3, requires_grad=True)
+        value = None if all_none else torch.randn(3, requires_grad=unused_grad)
+        unused = [value, None]
+        (grad,) = torch.autograd.grad(fn(x, unused).sum(), x)
+        self.assertEqual(grad.shape, x.shape)
+
+    def test_custom_op_tuple_inputs_keyword(self):
+        @torch.library.custom_op("_torch_testing::tuple_keyword", mutates_args=())
+        def fn(x: Tensor, *, size: tuple[int, int]) -> Tensor:
+            return x.new_empty(size)
+
+        x = torch.randn(3)
+        self.assertEqual(fn(x, size=(2, 3)).shape, (2, 3))
+        with self.assertRaisesRegex(RuntimeError, "argument 'size'.*2 values.*1"):
+            fn(x, size=(2,))
+
+    @parametrize("mode", ("fake", "compile"))
+    @parametrize("optional", (False, True))
+    def test_custom_op_tuple_inputs_fake_and_compile(self, mode, optional):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        @torch.library.custom_op("_torch_testing::tuple_inputs_fake", mutates_args=())
+        def fn(xs: tuple[Tensor, Optional[Tensor]]) -> Tensor:
+            return xs[0].clone()
+
+        @fn.register_fake
+        def _(xs):
+            return torch.empty_like(xs[0])
+
+        x = torch.randn(3)
+        xs = (x, None if optional else x)
+        if mode == "fake":
+            with FakeTensorMode() as fake_mode:
+                fake_x = fake_mode.from_tensor(x)
+                xs = (fake_x, None if optional else fake_x)
+                result = fn(xs)
+                with self.assertRaisesRegex(RuntimeError, "argument 'xs'.*2 values.*1"):
+                    fn((xs[0],))
+                with self.assertRaisesRegex(RuntimeError, "argument 'xs' at index 0"):
+                    fn((None, xs[0]))
+        else:
+            result = torch.compile(fn, backend="aot_eager", fullgraph=True)(xs)
+        self.assertEqual(result.shape, x.shape)
+
+    def test_custom_op_tuple_inputs_symbolic(self):
+        @torch.library.custom_op("_torch_testing::tuple_symbolic", mutates_args=())
+        def fn(x: Tensor, size: tuple[int, int]) -> Tensor:
+            return x.new_empty(size)
+
+        @fn.register_fake
+        def _(x, size):
+            return x.new_empty(size)
+
+        def f(x):
+            return fn(x, (x.shape[0], x.shape[1]))
+
+        x = torch.randn(3, 4)
+        result = torch.compile(f, backend="aot_eager", fullgraph=True, dynamic=True)(x)
+        self.assertEqual(result.shape, x.shape)
+
+    def test_custom_op_tuple_inputs_string_annotations(self):
+        @torch.library.custom_op("_torch_testing::tuple_string", mutates_args=())
+        def fn(xs: "tuple[Tensor, Optional[Tensor]]") -> Tensor:
+            return torch.empty(1)
+
+        result = fn((torch.randn(3), None))
+        self.assertEqual(result.shape, (1,))
+        with self.assertRaisesRegex(RuntimeError, "argument 'xs'.*2 values.*1"):
+            fn((torch.randn(3),))
+
+    @parametrize(
         "tags, opname",
         [
             subtest((torch.Tag.pointwise, "single"), name="single"),
@@ -6022,7 +6189,7 @@ Please use `add.register_fake` to add an fake impl.""",
                 [torch.zeros(1, requires_grad=True), torch.ones(1, requires_grad=True)]
             )
         )
-        # _C_any_requires_grad supports only List[Tensor] in args, not List[List[Tensor]]
+        # Tensor-list containers are visited, but nested tensor lists are not.
         self.assertFalse(test_fn([[torch.zeros(1, requires_grad=True)]], torch.ones(1)))
         self.assertFalse(test_fn([torch.zeros(1), torch.ones(1)]))
         self.assertTrue(test_fn(torch.zeros(1), a=torch.ones(1, requires_grad=True)))
