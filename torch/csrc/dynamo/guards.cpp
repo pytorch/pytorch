@@ -2060,10 +2060,12 @@ struct OrderedDictObjectPrefix {
 };
 
 static std::optional<std::vector<py::object>> ordered_dict_keys(
-    py::handle value) {
+    py::handle value,
+    bool empty_only) {
   TORCH_CHECK_TYPE(PyODict_Check(value.ptr()), "expected an OrderedDict");
   std::optional<std::vector<py::object>> result;
-  const auto size = static_cast<size_t>(PyDict_Size(value.ptr()));
+  const auto size =
+      empty_only ? 0 : static_cast<size_t>(PyDict_Size(value.ptr()));
   std::vector<py::object> keys;
   // Allocate outside the critical section: an exception must not bypass its
   // end.
@@ -2085,7 +2087,8 @@ static std::optional<std::vector<py::object>> ordered_dict_keys(
 
 #else
 static std::optional<std::vector<py::object>> ordered_dict_keys(
-    py::handle value) {
+    py::handle value,
+    bool) {
   TORCH_CHECK(false, "Python 3.16+ OrderedDict snapshots are not supported");
 }
 #endif
@@ -8039,10 +8042,17 @@ void install_object_alias_pattern_guard(
     py::object user_stack) {
   TORCH_CHECK(!managers.empty() && managers.size() == aliases.size());
   auto* root = managers[0]->get_root();
-  auto state = std::make_shared<ObjectAliasPatternState>(managers.size());
+  // Validate the complete pattern before attaching any participant.
   for (size_t i = 0; i < managers.size(); ++i) {
     TORCH_CHECK(
-        managers[i]->get_root() == root && aliases[i] < managers.size());
+        managers[i]->get_root() == root,
+        "Alias guard managers must share a root");
+    TORCH_CHECK(
+        aliases[i] <= i && aliases[aliases[i]] == aliases[i],
+        "Alias guard labels must identify each class's first participant");
+  }
+  auto state = std::make_shared<ObjectAliasPatternState>(managers.size());
+  for (size_t i = 0; i < managers.size(); ++i) {
     auto guard = std::make_shared<OBJECT_ALIAS_PATTERN>(
         root, state, aliases[i], verbose_code_parts, user_stack);
     root->add_relational_guard_resetter(guard);
@@ -8496,7 +8506,12 @@ PyObject* torch_c_dynamo_guards_init() {
            py::list,
            py::object>())
       .def("__call__", &ORDERED_DICT_ORDER_MATCH::check);
-  py_m.def("ordered_dict_keys", ordered_dict_keys);
+  py_m.def(
+      "ordered_dict_keys",
+      ordered_dict_keys,
+      py::arg("value"),
+      py::kw_only(),
+      py::arg("empty_only") = false);
   py::class_<TYPE_MATCH, LeafGuard, std::shared_ptr<TYPE_MATCH>>(
       py_m, "TYPE_MATCH")
       .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
