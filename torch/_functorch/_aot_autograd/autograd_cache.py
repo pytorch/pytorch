@@ -397,11 +397,8 @@ def check_cacheable(gm: torch.fx.GraphModule) -> None:
         raise BypassAOTAutogradCache(
             "Won't cache a graph with fakify_first_call enabled"
         )
-    # Check the nodes of every nested GraphModule too: HOP bodies (e.g. the
-    # fwd/bwd of autograd_function_apply, invoke_subgraph) and the saved tensors
-    # hooks subgraphs. Their code is hashed into the cache key, but anything they
-    # call into (e.g. an allow_in_graph function) is not, so they need the same
-    # safety check as the top-level graph.
+    # Nested GraphModules (HOP bodies, saved tensors hooks) are hashed as code, but
+    # what they call (e.g. an allow_in_graph function) is not, so check them too.
     for module in _iter_graph_modules(gm):
         for node in module.graph.nodes:
             check_node_safe(node)
