@@ -12,16 +12,13 @@ set(CMAKE_CXX_STANDARD 20)
 if(KINETO_BACKEND STREQUAL "xpu" AND LINUX)
   message(WARNING
     "Kineto tests: force-linking the C++ standard library ahead of PTI "
-    "(${PTI_LIBRARY}), which exports its own copy of std::filesystem. This "
+    "(${PTI_VIEW_LOCATION}), which exports its own copy of std::filesystem. This "
     "workaround can be removed once PTI 1.2.1 or newer is required.")
   add_link_options("LINKER:--push-state,--no-as-needed" -lstdc++ "LINKER:--pop-state")
 endif()
 
 if(KINETO_BACKEND STREQUAL "xpu")
-    set(XPU_XPUPTI_LIBRARY ${PTI_LIBRARY} ${SYCL_LIBRARY})
     add_subdirectory(xpupti)
-else()
-    set(XPU_XPUPTI_LIBRARY "")
 endif()
 
 include_directories(${LIBKINETO_DIR})
@@ -30,24 +27,21 @@ link_libraries(fmt::fmt-header-only)
 add_executable(ApproximateClockTest ApproximateClockTest.cpp)
 target_link_libraries(ApproximateClockTest PRIVATE
     gtest_main
-    kineto_base kineto_api
-    ${XPU_XPUPTI_LIBRARY})
+    kineto_base kineto_api)
 gtest_discover_tests(ApproximateClockTest)
 
 # ConfigTest
 add_executable(ConfigTest ConfigTest.cpp)
 target_link_libraries(ConfigTest PRIVATE
     gtest_main
-    kineto_base kineto_api
-    ${XPU_XPUPTI_LIBRARY})
+    kineto_base kineto_api)
 gtest_discover_tests(ConfigTest)
 
 # ConfigLoaderTest
 add_executable(ConfigLoaderTest ConfigLoaderTest.cpp)
 target_link_libraries(ConfigLoaderTest PRIVATE
     gtest_main
-    kineto_base kineto_api
-    ${XPU_XPUPTI_LIBRARY})
+    kineto_base kineto_api)
 gtest_discover_tests(ConfigLoaderTest)
 
 # ActivityProfilerControllerTest
@@ -56,8 +50,7 @@ add_executable(ActivityProfilerControllerTest
     TestUtils.cpp)
 target_link_libraries(ActivityProfilerControllerTest PRIVATE
     gtest_main
-    kineto_base kineto_api
-    ${XPU_XPUPTI_LIBRARY})
+    kineto_base kineto_api)
 gtest_discover_tests(ActivityProfilerControllerTest)
 
 # AsyncActivityProfilerHandlerTest
@@ -71,8 +64,7 @@ add_executable(AsyncActivityProfilerHandlerTest
 target_link_libraries(AsyncActivityProfilerHandlerTest PRIVATE
     gtest_main
     kineto_base kineto_api
-    nlohmann_json::nlohmann_json
-    ${XPU_XPUPTI_LIBRARY})
+    nlohmann_json::nlohmann_json)
 gtest_discover_tests(AsyncActivityProfilerHandlerTest)
 
 # ConfigLoaderPollThreadExceptionTest
@@ -82,8 +74,7 @@ if(NOT WIN32)
         ConfigLoaderPollThreadExceptionTest.cpp)
     target_link_libraries(ConfigLoaderPollThreadExceptionTest PRIVATE
         gtest_main
-        kineto_base kineto_api
-        ${XPU_XPUPTI_LIBRARY})
+        kineto_base kineto_api)
     gtest_discover_tests(ConfigLoaderPollThreadExceptionTest)
 endif()
 
@@ -93,8 +84,7 @@ if(NOT WIN32 AND NOT APPLE)
     add_executable(InitTest InitTest.cpp)
     target_link_libraries(InitTest PRIVATE
         gtest_main
-        kineto_base kineto_api
-        ${XPU_XPUPTI_LIBRARY})
+        kineto_base kineto_api)
     gtest_discover_tests(InitTest)
 endif()
 
@@ -109,8 +99,7 @@ if(NOT WIN32)
     target_link_libraries(AsyncE2ECpuTraceTest PRIVATE
         gtest_main
         kineto_base kineto_api
-        nlohmann_json::nlohmann_json
-        ${XPU_XPUPTI_LIBRARY})
+        nlohmann_json::nlohmann_json)
     gtest_discover_tests(AsyncE2ECpuTraceTest)
 endif()
 
@@ -122,16 +111,14 @@ if(NOT WIN32)
         SyncActivityProfilerHandlerTest.cpp)
     target_link_libraries(SyncActivityProfilerHandlerTest PRIVATE
         gtest_main
-        kineto_base kineto_api
-        ${XPU_XPUPTI_LIBRARY})
+        kineto_base kineto_api)
     gtest_discover_tests(SyncActivityProfilerHandlerTest)
 
     add_executable(GenericActivityProfilerTeardownTest
         GenericActivityProfilerTeardownTest.cpp)
     target_link_libraries(GenericActivityProfilerTeardownTest PRIVATE
         gtest_main
-        kineto_base kineto_api
-        ${XPU_XPUPTI_LIBRARY})
+        kineto_base kineto_api)
     gtest_discover_tests(GenericActivityProfilerTeardownTest)
 endif()
 
@@ -255,16 +242,14 @@ endif()
 add_executable(LoggerObserverTest LoggerObserverTest.cpp)
 target_link_libraries(LoggerObserverTest PRIVATE
     gtest_main
-    kineto_base kineto_api
-    ${XPU_XPUPTI_LIBRARY})
+    kineto_base kineto_api)
 gtest_discover_tests(LoggerObserverTest)
 
 # RegisterLoggerFactoryTest
 add_executable(RegisterLoggerFactoryTest RegisterLoggerFactoryTest.cpp)
 target_link_libraries(RegisterLoggerFactoryTest PRIVATE
     gtest_main
-    kineto_base kineto_api
-    ${XPU_XPUPTI_LIBRARY})
+    kineto_base kineto_api)
 target_include_directories(RegisterLoggerFactoryTest PRIVATE
     "${LIBKINETO_DIR}"
     "${LIBKINETO_DIR}/include"
@@ -275,16 +260,14 @@ gtest_discover_tests(RegisterLoggerFactoryTest)
 add_executable(PidInfoTest PidInfoTest.cpp)
 target_link_libraries(PidInfoTest PRIVATE
     gtest_main
-    kineto_base kineto_api
-    ${XPU_XPUPTI_LIBRARY})
+    kineto_base kineto_api)
 gtest_discover_tests(PidInfoTest)
 
 # TypedMetadataTest
 add_executable(TypedMetadataTest TypedMetadataTest.cpp)
 target_link_libraries(TypedMetadataTest PRIVATE
     gtest_main
-    kineto_base kineto_api
-    ${XPU_XPUPTI_LIBRARY})
+    kineto_base kineto_api)
 target_include_directories(TypedMetadataTest PRIVATE
     "${LIBKINETO_DIR}"
     "${LIBKINETO_DIR}/include"
@@ -296,8 +279,7 @@ add_executable(GenericTraceActivityMetadataTest
     GenericTraceActivityMetadataTest.cpp)
 target_link_libraries(GenericTraceActivityMetadataTest PRIVATE
     gtest_main
-    kineto_base kineto_api
-    ${XPU_XPUPTI_LIBRARY})
+    kineto_base kineto_api)
 target_include_directories(GenericTraceActivityMetadataTest PRIVATE
     "${LIBKINETO_DIR}"
     "${LIBKINETO_DIR}/include"
@@ -311,8 +293,7 @@ add_executable(OutputJsonTest
 target_link_libraries(OutputJsonTest PRIVATE
     gtest_main
     kineto_base kineto_api
-    nlohmann_json::nlohmann_json
-    ${XPU_XPUPTI_LIBRARY})
+    nlohmann_json::nlohmann_json)
 target_include_directories(OutputJsonTest PRIVATE
     "${LIBKINETO_DIR}"
     "${LIBKINETO_DIR}/include"
