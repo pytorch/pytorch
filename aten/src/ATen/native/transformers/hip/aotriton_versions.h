@@ -33,4 +33,13 @@
 #define AOTRITON_VARLEN_BITS_API 0
 #endif
 
+// AOTriton 0.15 added VarlenBits::principal_diagonal_choice. With it a numeric
+// sliding window can be measured from the bottom-right diagonal of each
+// sequence (flash-attention's convention) instead of the top-left one.
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 15)
+#define AOTRITON_PRINCIPAL_DIAGONAL_API 1
+#else
+#define AOTRITON_PRINCIPAL_DIAGONAL_API 0
+#endif
+
 #endif
