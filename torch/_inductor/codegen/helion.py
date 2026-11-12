@@ -709,6 +709,13 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             name = f"{prefix}{self.argument_counts[prefix]}"
             self.argument_counts[prefix] += 1
             self.arguments[key] = HelionTensorArg(name, operand, output)
+            # Also record the buffer in self.args, which the kernel signature
+            # does not use, but which generate_intermediate_hooks,
+            # warn_mix_layout and remove_kernel_local_buffers() read.
+            if output:
+                self.args.output(operand.get_name())
+            else:
+                self.args.input(operand.get_name())
         return self.arguments[key]
 
     def tiled_view(
