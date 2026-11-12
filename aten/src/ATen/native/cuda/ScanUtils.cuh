@@ -10,9 +10,9 @@
 
 #if defined(USE_ROCM)
 #include <ATen/cuda/DeviceUtils.cuh>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/macros/Macros.h>
-#include <cstring>
 #endif
 
 namespace at::native {
@@ -405,6 +405,10 @@ __global__ void tensor_kernel_scan_innermost_dim(
  * (scan_rows_warp), by a whole block (scan_rows_block), or split into chunks
  * across several blocks (reduce_row_chunks + scan_rows_block) so that a few
  * long rows can still fill the GPU.
+ * The chunked paths here and in outer_scan fold pieces of a line out of order, so
+ * binary_op must be commutative as well as associative.
+ * TODO: in a follow-up PR, add a tag or trait for commutative ops and send other ops
+ * to the stock kernels at compile time, instead of listing the known ops by type.
  */
 namespace inner_scan {
 
@@ -556,7 +560,7 @@ __device__ __forceinline__ void thread_scan(T (&x)[ITEMS], BinaryFunction binary
 // One row per group of blockDim.x (<= kLogicalWarp) lanes; no shared memory or barriers.
 template <typename T, int ITEMS, int VEC, int RUN, class BinaryFunction>
 C10_LAUNCH_BOUNDS_1(kBlock)
-__global__ void scan_rows_warp(T* __restrict__ tgt, const T* __restrict__ src,
+__global__ void scan_rows_warp(T* tgt, const T* src,
                                const uint32_t num_rows, const uint32_t row_size,
                                T init, BinaryFunction binary_op, const bool vec_ok) {
   const int group = blockDim.x;
@@ -591,7 +595,7 @@ __global__ void scan_rows_warp(T* __restrict__ tgt, const T* __restrict__ src,
 // fold of partials[row][0 .. c-1] written by reduce_row_chunks.
 template <typename T, int ITEMS, int VEC, int RUN, class BinaryFunction>
 C10_LAUNCH_BOUNDS_1(kBlock)
-__global__ void scan_rows_block(T* __restrict__ tgt, const T* __restrict__ src,
+__global__ void scan_rows_block(T* tgt, const T* src,
                                 const uint32_t num_rows, const uint32_t row_size,
                                 const uint32_t chunk_size, const uint32_t num_chunks,
                                 const T* __restrict__ partials,
@@ -679,7 +683,8 @@ __device__ __forceinline__ T reduce_tiles(const T* __restrict__ p, uint64_t begi
                                           T init, BinaryFunction binary_op) {
   constexpr int kTileBytes = static_cast<int>(ITEMS * sizeof(T));
   constexpr int kReduceUnroll = kTileBytes >= kReduceBytesInFlight ? 1 : kReduceBytesInFlight / kTileBytes;
-  constexpr int kWidth = kVectorized ? VEC : 1;
+  // Both paths give each thread the same elements, so the result doesn't depend on alignment.
+  constexpr int kWidth = VEC;
   constexpr int kLoads = ITEMS / kWidth;
   constexpr uint64_t tile = static_cast<uint64_t>(kBlock) * ITEMS;
   T acc[kReduceUnroll];
@@ -702,7 +707,10 @@ __device__ __forceinline__ T reduce_tiles(const T* __restrict__ p, uint64_t begi
             v[u][l].v[k] = g.v[k];
           }
         } else {
-          v[u][l].v[0] = *q;
+#pragma unroll
+          for (int k = 0; k < kWidth; ++k) {
+            v[u][l].v[k] = q[k];
+          }
         }
       }
     }
@@ -1343,7 +1351,7 @@ __global__ void scan_partials(T* __restrict__ partials, const uint64_t num_colum
 // landed; the result of tile t-1 is then stored and tile t+2 loaded into the stage tile t-2 used.
 template <typename T, class BinaryFunction>
 C10_LAUNCH_BOUNDS_1(kBlock)
-__global__ void scan_chunks(T* __restrict__ tgt, const T* __restrict__ src, const T* __restrict__ partials,
+__global__ void scan_chunks(T* tgt, const T* src, const T* __restrict__ partials,
                             const Problem p, T init, BinaryFunction binary_op) {
   constexpr int R = Traits<T>::kRows;
   constexpr int E = Traits<T>::kTileElems;
@@ -1403,7 +1411,7 @@ __global__ void scan_chunks(T* __restrict__ tgt, const T* __restrict__ src, cons
 // gfx1250 moves tiles with the Tensor Data Mover; other ROCm targets use ordinary loads and
 // stores (copy_in / copy_out).
 inline bool has_tdm() {
-  return std::strncmp(at::cuda::getCurrentDeviceProperties()->gcnArchName, "gfx1250", 7) == 0;
+  return at::detail::getCUDAHooks().isGPUArch({"gfx1250", "gfx1250-strict"});
 }
 
 template <typename T>
@@ -1480,6 +1488,10 @@ void launch(T* tgt, const T* src, int64_t num_orows, int64_t row_size, int64_t n
 }
 
 } // namespace outer_scan
+#undef AT_OUTER_SCAN_WAIT_TENSORCNT
+#undef AT_OUTER_SCAN_TDM_WAIT_BUILTIN
+#undef AT_OUTER_SCAN_TDM_BUILTINS
+#undef AT_OUTER_SCAN_TDM
 #endif // USE_ROCM
 
 
