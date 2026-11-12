@@ -4411,13 +4411,22 @@ class PythonWrapperCodegen(CodeGen):
                     name, value.size(), value.stride(), value.device, value.dtype
                 )
 
-            if len(V.graph.torchbind_constants) > 0:
+            if V.graph.torchbind_constants or self.user_defined_cutedsl_launchers:
                 output.writeline("import pickle")
-                for name, torchbind_obj in V.graph.torchbind_constants.items():
-                    # all the constants are global variables, that's why we need
-                    # these 'global var_name' lines
-                    output.writeline(f"global {name}")
-                    add_torchbind_input(name, torchbind_obj)
+            for name, torchbind_obj in V.graph.torchbind_constants.items():
+                # all the constants are global variables, that's why we need
+                # these 'global var_name' lines
+                output.writeline(f"global {name}")
+                add_torchbind_input(name, torchbind_obj)
+
+            # Run as a script, the module is not loaded with its launchers. The
+            # process that loaded it with them may call get_args() too
+            # (profile_bandwidth_output), and keeps them.
+            for name, launcher in self.user_defined_cutedsl_launchers.items():
+                output.writeline(f"global {name}")
+                output.writeline(f"if {name!r} not in globals():")
+                with output.indent():
+                    output.writeline(launcher.rebuild_line())
 
             # Generate shared storage buffers for aliased inputs
             for group in storage_groups.values():
@@ -5135,7 +5144,9 @@ class PythonWrapperCodegen(CodeGen):
         The host function cannot be written out as source, so the generated module
         gets a ``CuteDSLKernelLauncher`` object under that name when it is loaded
         (``user_defined_cutedsl_launchers``); its ``run(*args, stream=...)`` takes
-        the runtime arguments positionally.
+        the runtime arguments positionally. A run of the module as a script runs, in
+        get_args() (benchmark_compiled_module), the line its rebuild_line() returns,
+        which rebuilds it or raises why it cannot.
         """
         from torch._native.cutedsl.user_kernel import (
             CuteDSLKernelLauncher,
@@ -5156,7 +5167,7 @@ class PythonWrapperCodegen(CodeGen):
         index = len(self.user_defined_cutedsl_kernel_cache)
         name = self._new_user_kernel_name(f"cutedsl_{kernel.name}", index)
         self.user_defined_cutedsl_launchers[name] = CuteDSLKernelLauncher(
-            kernel.fn, arg_names, constant_args, constant_keys=keys
+            kernel.fn, arg_names, constant_args, name, constant_keys=keys
         )
         # Constants by name and type only: a repr can span lines or be huge.
         fn = inspect.unwrap(kernel.fn)
@@ -5197,8 +5208,16 @@ class PythonWrapperCodegen(CodeGen):
             device, V.graph.name, V.graph.scheduler.current_stream_idx
         )
         arg_strs = {name: arg_str(arg) for name, arg in runtime_args.items()}
+        tensors = [
+            arg_strs[name]
+            for name, arg in runtime_args.items()
+            if isinstance(arg, ir.IRNode)
+        ]
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(tensors, kernel_name, None, None)
         args = ", ".join(arg_strs.values())
-        self.writeline(f"{kernel_name}.run({args}, stream={stream_name})")
+        with debug_printer_manager:
+            self.writeline(f"{kernel_name}.run({args}, stream={stream_name})")
 
     def generate_numel_expr(self, kernel_name: str, tree, suffix: str | None = None):
         sym_name = f"{kernel_name}_{tree.prefix}numel"
