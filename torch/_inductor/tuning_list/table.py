@@ -40,24 +40,34 @@ class InvalidTuningList(ValueError):
 
 
 def table_entry(
-    heuristic: str, size_hints: dict[str, int], triton_meta: TritonMeta
+    heuristic: str,
+    size_hints: dict[str, int],
+    triton_meta: TritonMeta,
+    inductor_meta: dict[str, Any],
 ) -> Any:
     """This kernel's entry in config.tuning_list.table, device-specific key first."""
     table = torch._inductor.config.tuning_list.table
     if not table:
         return None
     for key in table:
-        named, _, arity = str(key).rpartition("+")[2].partition("/")
-        if named not in KNOB_ARGS or not arity.isdigit():
+        category, _, num_axes = str(key).rpartition("+")[2].partition("/")
+        if category not in KNOB_ARGS or not num_axes.isdigit():
             raise InvalidTuningList(
-                f"tuning_list key {key!r} is not '[<device>+]<category>/<arity>' with a "
-                f"category in {sorted(KNOB_ARGS)}"
+                f"tuning_list key {key!r} is not '[<device>+]<category>/<num_axes>' "
+                f"with a category in {sorted(KNOB_ARGS)}"
             )
 
+    if heuristic == "cooperative_reduction":
+        # Looked up as the reduction it splits, so that check() logs the skip.
+        persistent = inductor_meta.get("persistent_reduction")
+        heuristic = "persistent_reduction" if persistent else "reduction"
     suffix = f"{heuristic}/{len(size_hints)}"
-    # DeviceProperties.cc is the gfx arch name on ROCm and an int elsewhere.
+    # DeviceProperties.cc is the gfx arch name on ROCm and the compute capability as an
+    # int on CUDA, such as 90; XPU's is a dict.
     cc = getattr(triton_meta.get("device"), "cc", None)
-    keys = (f"{cc}+{suffix}", suffix) if isinstance(cc, str) and cc else (suffix,)
+    keys = (suffix,)
+    if isinstance(cc, (str, int)) and cc:
+        keys = (f"{cc}+{suffix}", suffix)
     for key in keys:
         if key in table:
             return table[key]
@@ -73,15 +83,25 @@ def check(
 ) -> dict[str, Any] | None:
     """Validate the entry supplied for this kernel and return it with plain int values,
     or None if supplied configs do not apply to it."""
-    if (
-        entry is None
-        or heuristic not in KNOB_ARGS
-        # A native matmul builds its configs its own way, a planned reduction block must
-        # match every candidate, and r1_ kernels share their key with kernels tiled on y.
-        or triton_meta.get("native_matmul")
-        or inductor_meta.get("strict_reduction_rblock") is not None
-        or "r1_" in size_hints
-    ):
+    if entry is None:
+        return None
+    if heuristic not in KNOB_ARGS:
+        skipped = f"only {', '.join(KNOB_ARGS)} kernels are covered"
+    elif triton_meta.get("native_matmul"):
+        skipped = "a native matmul builds its configs its own way"
+    elif inductor_meta.get("strict_reduction_rblock") is not None:
+        skipped = "its R0_BLOCK is planned, and every candidate must match it"
+    elif "r1_" in size_hints:
+        skipped = "it is tiled over two reduction axes"
+    else:
+        skipped = ""
+    if skipped:
+        log.debug(
+            "tuning_list: entry not applied to %s kernel %s: %s",
+            heuristic,
+            size_hints,
+            skipped,
+        )
         return None
 
     label = f"{heuristic}/{len(size_hints)}"

@@ -462,7 +462,9 @@ class InductorChoices:
         """Hook to supply Triton configs for a pointwise or reduction kernel, as
         {"mode": "append" | "replace", "configs": [{"XBLOCK": 64, ...}, ...]}; see
         tuning_list/README.md. The default reads config.tuning_list.table."""
-        return tuning_list.table_entry(heuristic, size_hints, triton_meta)
+        return tuning_list.table_entry(
+            heuristic, size_hints, triton_meta, inductor_meta
+        )
 
     def override_best_choice(
         self,

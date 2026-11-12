@@ -20,17 +20,20 @@ table changed between compiles takes effect on the next one.
 
 ## Table Format
 
-Keys are `[<device>+]<category>/<arity>`:
+Keys are `[<device>+]<category>/<num_axes>`:
 
-- **device** (optional): `DeviceProperties.cc`, which on ROCm is the architecture name, for example `gfx942`. This is
-  not `lookup_table`'s device key, which is the full `gcnArchName` (`gfx942:sramecc+:xnack-`). Backends whose `cc` is a
-  numeric compute capability have no device key and are served by device-agnostic entries only.
+- **device** (optional): `DeviceProperties.cc`, which is the architecture name on ROCm, for example `gfx942`, and the
+  compute capability as an integer on CUDA, for example `90` for sm_90. The ROCm name is not `lookup_table`'s device
+  key, which is the full `gcnArchName` (`gfx942:sramecc+:xnack-`). Other backends have no device key and are served by
+  device-agnostic entries only.
 - **category**: `pointwise`, `reduction` or `persistent_reduction`.
-- **arity**: `len(size_hints)`, the number of axes the kernel has.
+- **num_axes**: `len(size_hints)`, the number of axes the kernel iterates over, reduction axes included, so
+  `reduction/2` is `x` and `r0_`. Read it off the generated kernel's `size_hints` rather than the tensor's shape, since
+  Inductor often flattens dimensions into one axis.
 
-An entry applies to every kernel with that category and arity, whatever its sizes. Codegen kernels are too many and too
-varied for exact-shape keys like `lookup_table`'s, so a list has to serve kernels it was not fitted on, which is why
-`append` is the default.
+An entry applies to every kernel with that category and number of axes, whatever its sizes. Codegen kernels are too
+many and too varied for exact-shape keys like `lookup_table`'s, so a list has to serve kernels it was not fitted on,
+which is why `append` is the default.
 
 Each value is a dictionary with:
 
@@ -93,7 +96,7 @@ Keys are checked whenever a kernel is generated, and an entry when a kernel unde
 
 **Fatal**, raising `InvalidTuningList`:
 
-- a key that is not `[<device>+]<category>/<arity>` with one of the three categories
+- a key that is not `[<device>+]<category>/<num_axes>` with one of the three categories
 - an entry that is not a dictionary, or carries no `configs`
 - an unknown `mode`
 - a name that is neither a block size nor a knob for that category, including the exclusions above
@@ -136,8 +139,15 @@ everything generated ones do:
 - Native matmul kernels (`config.triton.native_matmul`), whose configurations come from a matmul-specific constructor.
 - Kernels tiled over two reduction axes (`config.triton.tile_reductions`), which share their key with kernels tiled on
   `y` but take different blocks.
-- Combo kernels (`config.combo_kernels`) and cooperative reductions.
+- Cooperative reductions, which are looked up as the reduction or persistent reduction they would otherwise be.
+- Split scans, fixed-config kernels and combo kernels (`config.combo_kernels`).
+
+An entry that matches a planned-block, native matmul, two-reduction-axis or cooperative kernel is skipped with a debug
+message on the `torch._inductor.tuning_list.table` logger saying why, which `TORCH_LOGS="+inductor"` shows.
 
 ## Cost
 
-Extra candidates cost benchmarking time on cold builds only; the winner is cached.
+Supplied candidates cost compile and benchmark time on cold builds. At default settings most reductions, `INNER` ones in
+particular, get a single candidate that is compiled and launched without benchmarking; an `append` entry turns each
+kernel under its key into one that compiles every candidate and benchmarks them on its first launch. The winner is
+cached, keyed on the candidate list, so later builds compile only the winner.

@@ -164,7 +164,7 @@ class TestTuningList(TestCase):
         return entry_point(**kwargs)
 
     def key(self, label):
-        """The table key this kernel looks under: its category, then its arity."""
+        """The table key this kernel looks under: its category, then its number of axes."""
         entry_point, size_hints, _ = KERNELS[label]
         return f"{entry_point.__name__}/{len(size_hints)}"
 
@@ -356,7 +356,7 @@ class TestTuningList(TestCase):
         self.assertEqual(warps, [16, 8])
 
     @parametrize("key", ["pointwise/2", "reduction/1", "persistent_reduction/2"])
-    def test_entry_applies_only_to_its_category_and_arity(self, key):
+    def test_entry_applies_only_to_its_category_and_number_of_axes(self, key):
         table = {key: {"configs": [BLOCKS["reduction"]]}}
         self.assertEqual(
             len(self.candidates("reduction", table)),
@@ -379,13 +379,13 @@ class TestTuningList(TestCase):
         entry = self.lookup("reduction", table, device=fake_device(cc="gfx942"))
         self.assertEqual(entry["configs"], [BLOCKS["reduction"]])
 
-    def test_numeric_device_capability_is_not_a_device_key(self):
+    def test_cuda_compute_capability_is_a_device_key(self):
         table = {
             "reduction/2": {"configs": [BLOCKS["reduction"]]},
             "80+reduction/2": {"configs": [SECOND["reduction"]]},
         }
         entry = self.lookup("reduction", table)
-        self.assertEqual(entry["configs"], [BLOCKS["reduction"]])
+        self.assertEqual(entry["configs"], [SECOND["reduction"]])
 
     @parametrize(
         "key", ["reductions/2", "reduction", "reduction/two", "gfx942+reduction"]
@@ -400,6 +400,27 @@ class TestTuningList(TestCase):
         # Its configs come from a matmul-specific constructor with its own limits.
         table = self.table("tiled_reduction")
         self.assertIsNone(self.lookup("tiled_reduction", table, native_matmul=True))
+
+    @parametrize(
+        "label,inductor_meta,triton_meta,reason",
+        [
+            ("cooperative_reduction", {}, {}, "only pointwise"),
+            ("tiled_reduction", {}, {"native_matmul": True}, "native matmul"),
+            ("reduction", {"strict_reduction_rblock": 512}, {}, "is planned"),
+            ("two_axis_reduction", {}, {}, "two reduction axes"),
+        ],
+    )
+    def test_skipping_a_matching_entry_is_logged(
+        self, label, inductor_meta, triton_meta, reason
+    ):
+        # A cooperative reduction is looked up under the reduction it splits.
+        table = {
+            "reduction/2": {"configs": [BLOCKS["reduction"]]},
+            "reduction/3": {"configs": [BLOCKS["tiled_reduction"]]},
+        }
+        with self.assertLogs("torch._inductor.tuning_list.table", "DEBUG") as logged:
+            self.assertIsNone(self.lookup(label, table, inductor_meta, **triton_meta))
+        self.assertIn(reason, logged.output[-1])
 
     def test_numpy_ints_are_stored_as_plain_ints(self):
         # The entry is written into the kernel source, which does not import numpy.
