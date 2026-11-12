@@ -462,97 +462,20 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
         expected_placements = (Replicate(),)
         self.assertEqual(out.placements, expected_placements)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180006")
-    @with_comms
-    @skip_unless_torch_gpu
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
-    )
-    def test_scaled_mm(self):
+    def _check_scaled_mm_placements(self, scaled_mm):
+        """Run the TensorWise/RowWise placement table through scaled_mm(a, b,
+        scale_a, scale_b, recipe), where b is the transposed (k, n) operand."""
         device_mesh = self.build_device_mesh()
         shrd0 = Shard(0)
         shrd1 = Shard(1)
         repl = Replicate()
         part = Partial()
+        tw = F.ScalingType.TensorWise
+        rw = F.ScalingType.RowWise
 
         ws = self.world_size
         # _scaled_mm requires all dimensions to be multiples of 16. Since we'll
         # shard along n and k, we need to ensure this stays true on each rank.
-        m, n, k = 16, 32 * ws, 16 * ws
-
-        t1 = torch.randn(m, k, device=self.device_type, dtype=torch.bfloat16)
-        t2 = torch.randn(n, k, device=self.device_type, dtype=torch.bfloat16)
-
-        for (
-            output_spec,
-            t1_spec,
-            t2_spec,
-            scale1_shape,
-            scale2_shape,
-            scale1_spec,
-            scale2_spec,
-        ) in [
-            # Tensor-wise scaling
-            # Replicated, zero-dim scale
-            (repl, repl, repl, (), (), repl, repl),
-            # Column-parallel, two-dim scale
-            (shrd1, repl, shrd0, (1, 1), (1, 1), repl, repl),
-            # Row-parallel, one-dim scale
-            (part, shrd1, shrd1, (1,), (1,), repl, repl),
-            # Row-wise scaling
-            # Replicated
-            (repl, repl, repl, (m, 1), (n, 1), repl, repl),
-            # Column-parallel
-            (shrd1, repl, shrd0, (m, 1), (n, 1), repl, shrd0),
-            # Row-parallel
-            (part, shrd1, shrd1, (m, 1), (n, 1), repl, repl),
-        ]:
-            full_ref_res = t1 @ t2.t()
-
-            t1_fp8, scale1 = scale_for_fp8(t1, scale1_shape)
-            t2_fp8, scale2 = scale_for_fp8(t2, scale2_shape)
-
-            dist_t1_fp8 = distribute_tensor(t1_fp8, device_mesh, [t1_spec])
-            dist_t2_fp8 = distribute_tensor(t2_fp8, device_mesh, [t2_spec])
-            dist_scale1 = distribute_tensor(scale1, device_mesh, [scale1_spec])
-            dist_scale2 = distribute_tensor(scale2, device_mesh, [scale2_spec])
-
-            with CommDebugMode() as comm_mode:
-                dist_res = cast(
-                    DTensor,
-                    torch._scaled_mm(
-                        dist_t1_fp8,
-                        dist_t2_fp8.t(),
-                        scale_a=dist_scale1,
-                        scale_b=dist_scale2.t(),
-                        out_dtype=torch.bfloat16,
-                    ),
-                )
-
-            self.assertEqual(dist_res.placements[0], output_spec)
-
-            full_dist_res = dist_res.full_tensor()
-            # Fp8 matmuls are quite inaccurate, we need high tolerances
-            self.assertEqual(full_dist_res, full_ref_res, atol=1.5, rtol=7e-2)
-
-            self.assertEqual(comm_mode.get_total_counts(), 0)
-
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180006")
-    @with_comms
-    @skip_unless_torch_gpu
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
-    )
-    def test_scaled_mm_v2(self):
-        device_mesh = self.build_device_mesh()
-        shrd0 = Shard(0)
-        shrd1 = Shard(1)
-        repl = Replicate()
-        part = Partial()
-
-        ws = self.world_size
         m, n, k = 16, 32 * ws, 16 * ws
 
         t1 = torch.randn(m, k, device=self.device_type, dtype=torch.bfloat16)
@@ -569,13 +492,19 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
             scale2_spec,
         ) in [
             # Tensor-wise scaling
-            (F.ScalingType.TensorWise, repl, repl, repl, (), (), repl, repl),
-            (F.ScalingType.TensorWise, shrd1, repl, shrd0, (1, 1), (1, 1), repl, repl),
-            (F.ScalingType.TensorWise, part, shrd1, shrd1, (1,), (1,), repl, repl),
+            # Replicated, zero-dim scale
+            (tw, repl, repl, repl, (), (), repl, repl),
+            # Column-parallel, two-dim scale
+            (tw, shrd1, repl, shrd0, (1, 1), (1, 1), repl, repl),
+            # Row-parallel, one-dim scale
+            (tw, part, shrd1, shrd1, (1,), (1,), repl, repl),
             # Row-wise scaling
-            (F.ScalingType.RowWise, repl, repl, repl, (m, 1), (n, 1), repl, repl),
-            (F.ScalingType.RowWise, shrd1, repl, shrd0, (m, 1), (n, 1), repl, shrd0),
-            (F.ScalingType.RowWise, part, shrd1, shrd1, (m, 1), (n, 1), repl, repl),
+            # Replicated
+            (rw, repl, repl, repl, (m, 1), (n, 1), repl, repl),
+            # Column-parallel
+            (rw, shrd1, repl, shrd0, (m, 1), (n, 1), repl, shrd0),
+            # Row-parallel
+            (rw, part, shrd1, shrd1, (m, 1), (n, 1), repl, repl),
         ]:
             full_ref_res = t1 @ t2.t()
 
@@ -590,14 +519,12 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
             with CommDebugMode() as comm_mode:
                 dist_res = cast(
                     DTensor,
-                    F.scaled_mm(
+                    scaled_mm(
                         dist_t1_fp8,
                         dist_t2_fp8.t(),
-                        scale_a=dist_scale1,
-                        scale_recipe_a=recipe,
-                        scale_b=dist_scale2.t(),
-                        scale_recipe_b=recipe,
-                        output_dtype=torch.bfloat16,
+                        dist_scale1,
+                        dist_scale2.t(),
+                        recipe,
                     ),
                 )
 
@@ -609,7 +536,41 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
 
             self.assertEqual(comm_mode.get_total_counts(), 0)
 
-    @skipIfRocm
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180006")
+    @with_comms
+    @skip_unless_torch_gpu
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    def test_scaled_mm(self):
+        self._check_scaled_mm_placements(
+            lambda a, b, scale_a, scale_b, recipe: torch._scaled_mm(
+                a, b, scale_a=scale_a, scale_b=scale_b, out_dtype=torch.bfloat16
+            )
+        )
+
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180006")
+    @with_comms
+    @skip_unless_torch_gpu
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
+    def test_scaled_mm_v2(self):
+        self._check_scaled_mm_placements(
+            lambda a, b, scale_a, scale_b, recipe: F.scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_recipe_a=recipe,
+                scale_b=scale_b,
+                scale_recipe_b=recipe,
+                output_dtype=torch.bfloat16,
+            )
+        )
+
+    @skipIfRocm(msg="builds the CUDA SWIZZLE_32_4_4 scale layout")
     @with_comms
     @skip_unless_torch_gpu
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "MX GEMM is not supported")
@@ -617,18 +578,22 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
         """Sharded data with replicated swizzled MXFP8 scales must be gathered
         before the GEMM instead of slicing the swizzled scale tensor. With
         m=128 a row shard cuts through a 128-row scale tile, so slicing the
-        swizzled scale like the data would be wrong."""
+        swizzled scale like the data would apply the wrong scales."""
         device_mesh = self.build_device_mesh()
         m, n, k = 128, 128, 128
 
+        def e8m0_scales(rows, cols):
+            # Exponents 2^-4 .. 2^3, different for every block, so a scale
+            # applied to the wrong block changes the result.
+            exponents = torch.randint(
+                123, 131, (rows, cols), device=self.device_type, dtype=torch.uint8
+            )
+            return exponents.view(torch.float8_e8m0fnu)
+
         a = torch.randn(m, k, device=self.device_type).to(torch.float8_e4m3fn)
         b = torch.randn(n, k, device=self.device_type).to(torch.float8_e4m3fn)
-        scale_a = to_blocked(
-            torch.ones(m, k // 32, device=self.device_type, dtype=torch.float8_e8m0fnu)
-        )
-        scale_b = to_blocked(
-            torch.ones(n, k // 32, device=self.device_type, dtype=torch.float8_e8m0fnu)
-        )
+        scale_a = to_blocked(e8m0_scales(m, k // 32))
+        scale_b = to_blocked(e8m0_scales(n, k // 32))
         ref = F.scaled_mm(
             a,
             b.t(),
@@ -641,24 +606,35 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
             output_dtype=torch.bfloat16,
         )
 
-        # NCCL cannot broadcast float8_e8m0fnu, and the scales are identical on
-        # every rank, so wrap them as replicated DTensors without communication.
-        dist_res = F.scaled_mm(
-            distribute_tensor(a, device_mesh, [Shard(0)]),
-            distribute_tensor(b, device_mesh, [Replicate()]).t(),
-            scale_a=DTensor.from_local(
-                scale_a, device_mesh, [Replicate()], run_check=False
-            ),
-            scale_recipe_a=F.ScalingType.BlockWise1x32,
-            scale_b=DTensor.from_local(
-                scale_b, device_mesh, [Replicate()], run_check=False
-            ),
-            scale_recipe_b=F.ScalingType.BlockWise1x32,
-            swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
-            swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
-            output_dtype=torch.bfloat16,
-        )
-        self.assertEqual(cast(DTensor, dist_res).full_tensor(), ref)
+        # The scales are identical on every rank (same seed). NCCL cannot
+        # broadcast float8_e8m0fnu, so wrap them as replicated DTensors
+        # without communication.
+        dist_a = distribute_tensor(a, device_mesh, [Shard(0)])
+        dist_b = distribute_tensor(b, device_mesh, [Replicate()])
+        with CommDebugMode() as comm_mode:
+            dist_res = cast(
+                DTensor,
+                F.scaled_mm(
+                    dist_a,
+                    dist_b.t(),
+                    scale_a=DTensor.from_local(
+                        scale_a, device_mesh, [Replicate()], run_check=False
+                    ),
+                    scale_recipe_a=F.ScalingType.BlockWise1x32,
+                    scale_b=DTensor.from_local(
+                        scale_b, device_mesh, [Replicate()], run_check=False
+                    ),
+                    scale_recipe_b=F.ScalingType.BlockWise1x32,
+                    swizzle_a=F.SwizzleType.SWIZZLE_32_4_4,
+                    swizzle_b=F.SwizzleType.SWIZZLE_32_4_4,
+                    output_dtype=torch.bfloat16,
+                ),
+            )
+        # The Shard(0) operand is all-gathered and the GEMM runs replicated.
+        self.assertEqual(dist_res.placements, (Replicate(),))
+        self.assertEqual(comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1)
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+        self.assertEqual(dist_res.full_tensor(), ref)
 
     def test_scaled_mm_blockwise_1d_scale_placement(self):
         """Test that _scaled_mm_scale_placement handles 1D blockwise scales correctly.
@@ -740,7 +716,14 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
         self.assertEqual(result, Replicate())
 
     def _scaled_mm_v2_strategies(
-        self, scale_a, recipe_a, scale_b, recipe_b, swizzle_a=(), swizzle_b=()
+        self,
+        scale_a,
+        recipe_a,
+        scale_b,
+        recipe_b,
+        swizzle_a=(),
+        swizzle_b=(),
+        bias=None,
     ):
         """Run the _scaled_mm_v2 single-dim strategy on (m, k) @ (k, n) metas
         with the given scale shapes, recipes and swizzles."""
@@ -762,7 +745,7 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
             [meta(s) for s in scale_b],
             [int(r) for r in recipe_b],
             [int(s) for s in swizzle_b],
-            None,
+            None if bias is None else meta(bias),
             torch.bfloat16,
             [],
             False,
@@ -819,6 +802,10 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
         transposed = self._scaled_mm_v2_strategies([(m, 1)], [rw], [(n, 1)], [rw])
         self.assertFalse(any(sharded(s[2]) or sharded(s[4]) for s in transposed))
         self.assertTrue(any(sharded(s[1]) for s in transposed))
+
+        # A bias isn't supported; say so instead of failing as an internal bug.
+        with self.assertRaisesRegex(NotImplementedError, "add the bias"):
+            self._scaled_mm_v2_strategies([(m, 1)], [rw], [(1, n)], [rw], bias=(n,))
 
     def test_scaled_mm_v2_blockwise_operand_is_not_sharded(self):
         """Block-wise scales are block-granular and laid out per backend
@@ -903,7 +890,6 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
         self.assertFalse(any(isinstance(s[1], _ShardingPlaceholder) for s in mixed))
         self.assertTrue(any(isinstance(s[2], _ShardingPlaceholder) for s in mixed))
 
-    @with_comms
     def test_scaled_mm_v2_swizzle_is_in_cache_key(self):
         """The _scaled_mm_v2 strategy depends on the recipes and swizzles, so
         they must be part of the sharding propagation cache key."""

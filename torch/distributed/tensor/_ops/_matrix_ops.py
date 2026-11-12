@@ -66,7 +66,12 @@ def _scaled_mm_scale_placement(
     contracting_dim: int,
 ) -> Placement | _ShardingPlaceholder | None:
     """
-    Derive scale placement from data operand placement for _scaled_mm.
+    Derive scale placement from data operand placement for _scaled_mm and
+    _scaled_mm_v2.
+
+    _scaled_mm_v2 shards an operand only when each of its scales is
+    TensorWise or RowWise and unswizzled; for other recipes it passes
+    Replicate or Partial data here, which gives a Replicate scale.
 
     Handles three cases:
 
@@ -375,7 +380,10 @@ def scaled_mm_v2_single_dim_strategy(
     ):
         raise AssertionError
     if args_schema[8] is not None:
-        raise AssertionError("_scaled_mm_v2 on DTensors doesn't support bias")
+        raise NotImplementedError(
+            "_scaled_mm_v2 on DTensors doesn't support bias; add the bias to "
+            "the result instead"
+        )
     if not isinstance(recipe_a, (list, tuple)) or not isinstance(
         recipe_b, (list, tuple)
     ):
