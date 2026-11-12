@@ -13023,6 +13023,30 @@ Expected a .* tangent but got a plain Tensor.""",
 
         FileCheck().check(expected_msg).run("\n".join(captured.output))
 
+    def test_saved_tensors_hooks_no_recompile_inference(self):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        cnt = CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(backend=cnt)
+        @torch.no_grad()
+        def step(p, g):
+            p.add_(g * 0.1)
+            return p
+
+        p = torch.nn.Parameter(torch.randn(8))
+        g = torch.randn(8)
+        p_ref = p.detach().clone()
+        step(p, g)
+        with torch.autograd.graph.saved_tensors_hooks(
+            *saved_tensors_hooks_to_gm(
+                lambda x: x * 2, lambda x: x / 2, "pack_hash", "unpack_hash"
+            )
+        ):
+            step(p, g)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(p, p_ref + g * 0.1 + g * 0.1, atol=0, rtol=0)
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
