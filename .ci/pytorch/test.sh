@@ -495,7 +495,7 @@ PYTHON_NATIVE_CUTEDSL_SUITES=(
   python_native/test_reductions_cutedsl
 )
 # test_reductions and test_ops checks of the CuTeDSL sum, mean, amax, amin and prod overrides.
-PYTHON_NATIVE_REDUCTIONS_FILTER='test_ref_ and not large_input and (_sum_ or _mean_ or _amax_ or _amin_ or _prod_)'
+PYTHON_NATIVE_REDUCTIONS_FILTER='test_ref_ and cuda and not large_input and (_sum_ or _mean_ or _amax_ or _amin_ or _prod_)'
 PYTHON_NATIVE_REDUCTION_OPS_FILTER='(_sum_cuda or _mean_cuda or _amax_cuda or _amin_cuda or _prod_cuda) and not scatter_reduce and not index_reduce and not cartesian and not var_mean and not std_mean and not number_mean'
 
 test_python_smoke() {

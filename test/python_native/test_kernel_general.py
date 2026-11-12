@@ -962,6 +962,9 @@ class TestReplayRecords(TestCase):
         self.assertIsNone(cache.get("b"))
         self.assertEqual(cache.pop("a"), 1)
         self.assertEqual(list(cache), ["c"])
+        self.assertIsNone(cache.pop("a", None))
+        with self.assertRaises(KeyError):
+            cache.pop("a")
 
     def test_launch_record_declines(self):
         """Decline recordings a replay of the launches alone could not reproduce."""
