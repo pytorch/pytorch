@@ -51,8 +51,6 @@ if TYPE_CHECKING:
     _PACKAGE: str = ""
     # False as emitted; load(allow_serve_time_compiles=True) flips it to True.
     _ALLOW_SERVE_TIME_COMPILES: bool = False
-    # The inductor CUDA graph config the subgraphs are post-compiled under.
-    CUDAGRAPH_CONFIG: dict[str, bool] = {}
     # The capture's normalized mode/options, which a serve-time compile uses;
     # None when they have no literal form.
     INDUCTOR_OPTIONS: dict[str, object] | None = {}
@@ -562,7 +560,6 @@ def _build_multigraph_forward():
 
     import torch
     from torch._dynamo.aot_compile import bind_locals
-    from torch._dynamo.mutation_guard import GenerationTracker
     from torch._dynamo.output_graph import get_builtins_dict
     from torch._dynamo.package import (
         load_guard_manager,
@@ -638,11 +635,10 @@ def _build_multigraph_forward():
     frames = pickle.loads(base64.b64decode(_FRAMES))
     backends = pickle.loads(base64.b64decode(_BACKENDS))
     entry_binding = pickle.loads(base64.b64decode(_ENTRY_BINDING))
-    with torch._inductor.config.patch(CUDAGRAPH_CONFIG):
-        compiled = {
-            _backend_id: torch._dynamo.disable(_artifact.after_deserialization())
-            for _backend_id, _artifact in backends.items()
-        }
+    compiled = {
+        _backend_id: torch._dynamo.disable(_artifact.after_deserialization())
+        for _backend_id, _artifact in backends.items()
+    }
     # Resume names come from a per-process counter (backend ids carry a uuid), so
     # another artifact or a live compile can hold one this artifact mints; the
     # tag hashes both channels so two artifacts of one capture differ.
@@ -874,18 +870,7 @@ def _build_multigraph_forward():
         if scope is not None:
             for _name in _frame["resume_names"]:
                 _seed(scope, _name, dispatcher)
-
-    if entry is None:
-        raise AssertionError("an artifact's entry frame is checked before seeding")
-
-    def forward(*args, **kwargs):
-        # A call starts a new CUDA graph tree generation, as entering
-        # torch.compile's wrapper does (OptimizeContext.on_enter): without it, a
-        # loop that never calls cudagraph_mark_step_begin never ends warmup.
-        GenerationTracker.generation += 1
-        return entry(*args, **kwargs)
-
-    return forward
+    return entry
 
 
 def _build_installed_forward():
@@ -994,11 +979,8 @@ def _build_installed_forward():
         # caching_precompile would make optimize(package=None) create its own
         # package, which context(fn) fills from the on-disk Dynamo cache.
         backend: object = BACKEND
-        if _ALLOW_SERVE_TIME_COMPILES and BACKEND == "inductor":
-            # CUDAGRAPH_CONFIG holds the capture's CUDA graph keys, ambient ones
-            # too.
-            options = {**(INDUCTOR_OPTIONS or {}), **CUDAGRAPH_CONFIG}
-            backend = torch._TorchCompileInductorWrapper(None, options, None)
+        if _ALLOW_SERVE_TIME_COMPILES and INDUCTOR_OPTIONS:
+            backend = torch._TorchCompileInductorWrapper(None, INDUCTOR_OPTIONS, None)
         with torch._dynamo.config.patch(caching_precompile=False):
             context = torch._dynamo.optimize(
                 backend, package=None if _ALLOW_SERVE_TIME_COMPILES else package
@@ -1017,8 +999,7 @@ def _build_installed_forward():
                 eager = [t for t, f in zip(targets, flagged) if f]
                 context.callback = _RefuseRecompileCallback(context.callback, eager)
             compiled = context(fn)
-        with torch._inductor.config.patch(CUDAGRAPH_CONFIG):
-            package.install(package_state["backends"])
+        package.install(package_state["backends"])
     except _PrecompileError:
         raise
     except Exception as _e:
