@@ -126,12 +126,14 @@ class ShapePropagationOpsHandler:
 
     @staticmethod
     def dot(a: sympy.Expr, b: sympy.Expr) -> BlockShapeType:
+        from torch._inductor.codegen.helion import HelionKernel
         from torch._inductor.codegen.triton import TritonKernel
 
-        # Other kernels (Helion) give their dot results a shape themselves;
-        # raising here failed every Helion matmul: "dot supports Triton only".
-        if not isinstance(V.kernel, TritonKernel):
+        # HelionKernel.dot() gives its result a shape itself.
+        if isinstance(V.kernel, HelionKernel):
             return None
+        if not isinstance(V.kernel, TritonKernel):
+            raise AssertionError("dot supports Triton only")
         return ("YBLOCK", "XBLOCK")
 
     @staticmethod

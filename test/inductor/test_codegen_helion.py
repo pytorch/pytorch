@@ -29,7 +29,9 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, HAS_HELION
 
 
-HAS_CUTE = importlib.util.find_spec("cutlass") is not None
+HAS_CUTE = importlib.util.find_spec("cutlass") is not None and (
+    importlib.util.find_spec("cutlass.cute") is not None
+)
 SOURCE_RE = re.compile(r'helion_\w+_source = """\\\n(.*?)"""', re.DOTALL)
 DOT_RE = re.compile(r"torch\.b?addb?mm\(")
 BACKENDS = ["triton", "cute"]
@@ -894,6 +896,17 @@ class TestHelionCodegenUnits(TestCase):
             else:
                 expected = getattr(torch, name)(*args)
             self.assertEqual(result, expected, msg=name)
+
+    @config.patch({"helion.enabled": True})
+    def test_scheduling_without_graph(self):
+        # get_backend_features() builds the scheduling with no scheduler and no
+        # graph, e.g. for has_backend_feature() in a decomposition while tracing.
+        from torch._inductor.codegen.cuda_combined_scheduling import (
+            CUDACombinedScheduling,
+        )
+
+        scheduling = CUDACombinedScheduling(None)
+        self.assertTrue(scheduling.get_backend_features(torch.device("cuda")))
 
     @parametrize("op", [sympy.Min, sympy.Max])
     def test_printer_min_max(self, op):
