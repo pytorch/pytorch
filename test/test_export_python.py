@@ -60,12 +60,26 @@ _ARTIFACTS = os.path.join(os.path.dirname(__file__), "decorated")
 def decorated_scaled(x):
     return (x * 2.0).relu()
 
+def shifted(x):
+    return x * 7.25 + 1
+
 """
 
 
 def _graph_code(path):
     with open(path) as f:
         return f.read().partition(_CODE_BEGIN)[2].rpartition(_CODE_END)[0]
+
+
+def _edit_graph_code(path, old, new):
+    # Only the graph code, as an agent hill-climbing the file would.
+    with open(path) as f:
+        head, begin, rest = f.read().partition(_CODE_BEGIN)
+    code, end, tail = rest.rpartition(_CODE_END)
+    if old not in code:
+        raise AssertionError(f"{old!r} not in the graph code of {path}")
+    with open(path, "w") as f:
+        f.write(head + begin + code.replace(old, new) + end + tail)
 
 
 def _in_a_fresh_process(test, body):
@@ -359,6 +373,54 @@ class TestExportPython(_ExportPythonTestCase):
             self.assertRaisesRegex(PrecompileError, "no captured variant"),
         ):
             run(torch.randn(3, 3))
+
+    def test_an_edited_file_runs_the_edit(self):
+        path = os.path.join(self.dir, "shifted.py")
+        x = torch.randn(8)
+        self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
+        _edit_graph_code(path, "7.25", "3.5")
+        with self.assertRaisesRegex(
+            PrecompileError, "other code for the same compiled"
+        ):
+            self._export("shifted", path)(x)
+        _in_a_fresh_process(
+            self,
+            f"""
+            run = torch.compiler.export_python(path={path!r})(m.shifted)
+            x = torch.ones(8)
+            torch.testing.assert_close(run(x), x * 3.5 + 1)
+            """,
+        )
+
+    def test_a_missing_cache_still_serves(self):
+        path = os.path.join(self.dir, "shifted.py")
+        x = torch.randn(8)
+        self._export("shifted", path)(x)
+        with self.assertNoLogs("torch.compiler._export_python", "INFO"):
+            self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
+        os.remove(path + ".cache")
+        with self.assertLogs("torch.compiler._export_python", "INFO") as logs:
+            self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
+        self.assertIn("serving it without the cache", logs.output[0])
+        with (
+            no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "delete .* to recapture"),
+        ):
+            self._export("shifted", path)(x)
+
+    def test_a_corrupt_cache_is_reported_as_corrupt(self):
+        path = os.path.join(self.dir, "shifted.py")
+        x = torch.randn(8)
+        self._export("shifted", path)(x)
+        with open(path + ".cache", "wb") as f:
+            f.write(b"not a cache")
+        with self.assertLogs("torch._precompile", "WARNING") as logs:
+            self.assertEqual(self._export("shifted", path)(x), x * 7.25 + 1)
+        self.assertIn("could not read the cache envelope", logs.output[0])
+        os.remove(path + ".cache")
+        os.mkdir(path + ".cache")
+        with self.assertRaisesRegex(PrecompileError, "could not read the cache"):
+            self._export("shifted", path)(x)
 
     def test_a_main_module_function_is_refused(self):
         def fn(x):
