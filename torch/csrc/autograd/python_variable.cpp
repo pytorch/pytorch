@@ -1238,20 +1238,34 @@ void log_sharding_prop_cache_hit(
 }
 } // namespace
 
+// The four DTensorSpec fields with no DeviceMesh
+struct CachedSpec {
+  py::object placements;
+  py::object tensor_meta;
+  py::object shard_order;
+  py::object use_strided_shard_as_shard_order;
+};
+
+struct CachedSharding {
+  enum class Shape { None, Single, Tuple, List };
+  Shape shape = Shape::None;
+  std::vector<std::optional<CachedSpec>> specs;
+};
+
 // Map from OpSchema to pyobject sharding propagation config.
 class NativeShardingPropagatorCache {
  public:
-  // Returns an invalid (falsey) py::object if the lookup fails.
-  py::object find(const NativeOpSchema& op_schema) const {
+  // Returns nullptr if the lookup fails.
+  const CachedSharding* find(const NativeOpSchema& op_schema) const {
     if (auto it = repr_.find(op_schema); it != repr_.end()) {
       hits_++;
-      return py::object(it->second);
+      return &it->second;
     }
     misses_++;
-    return py::object();
+    return nullptr;
   }
 
-  void insert(NativeOpSchema&& op_schema, py::object output_sharding) {
+  void insert(NativeOpSchema&& op_schema, CachedSharding output_sharding) {
     auto [it, inserted] =
         repr_.emplace(std::move(op_schema), std::move(output_sharding));
     TORCH_INTERNAL_ASSERT(
@@ -1268,12 +1282,87 @@ class NativeShardingPropagatorCache {
   }
 
  private:
-  c10::FastMap<NativeOpSchema, py::object> repr_;
+  c10::FastMap<NativeOpSchema, CachedSharding> repr_;
   // Cache is thread-local, so we don't take any further action for
   // thread-safety of these.
   mutable std::size_t hits_ = 0;
   mutable std::size_t misses_ = 0;
 };
+
+static CachedSpec make_cached_spec(py::handle spec) {
+  return CachedSpec{
+      spec.attr("placements"),
+      spec.attr(dtensor_interned_strings.tensor_meta),
+      spec.attr("shard_order"),
+      spec.attr("use_strided_shard_as_shard_order")};
+}
+
+static std::optional<CachedSharding> make_cached_sharding(py::handle sharding) {
+  if (checked_istrue(
+          sharding.attr(dtensor_interned_strings.needs_redistribute).ptr())) {
+    return std::nullopt;
+  }
+  CachedSharding result;
+  const auto output_spec = sharding.attr(dtensor_interned_strings.output_spec);
+  if (output_spec.is_none()) {
+    result.shape = CachedSharding::Shape::None;
+  } else if (py::isinstance(output_spec, get_dtensor_spec_class())) {
+    result.shape = CachedSharding::Shape::Single;
+    result.specs.emplace_back(make_cached_spec(output_spec));
+  } else if (
+      PyTuple_Check(output_spec.ptr()) || PyList_Check(output_spec.ptr())) {
+    result.shape = PyTuple_Check(output_spec.ptr())
+        ? CachedSharding::Shape::Tuple
+        : CachedSharding::Shape::List;
+    for (const auto item : py::reinterpret_borrow<py::sequence>(output_spec)) {
+      if (item.is_none()) {
+        result.specs.emplace_back(std::nullopt);
+      } else if (py::isinstance(item, get_dtensor_spec_class())) {
+        result.specs.emplace_back(make_cached_spec(item));
+      } else {
+        return std::nullopt;
+      }
+    }
+  } else {
+    return std::nullopt;
+  }
+  return result;
+}
+
+static py::object make_spec(const CachedSpec& c, py::handle mesh) {
+  return checked_vectorcall(
+      get_dtensor_spec_class().ptr(),
+      mesh.ptr(),
+      c.placements.ptr(),
+      c.tensor_meta.ptr(),
+      c.shard_order.ptr(),
+      c.use_strided_shard_as_shard_order.ptr());
+}
+
+static py::object make_output_sharding(
+    const CachedSharding& cached,
+    py::handle mesh) {
+  py::object spec;
+  switch (cached.shape) {
+    case CachedSharding::Shape::None:
+      spec = py::none();
+      break;
+    case CachedSharding::Shape::Single:
+      spec = make_spec(*cached.specs.front(), mesh);
+      break;
+    default: {
+      py::list items;
+      for (const auto& s : cached.specs) {
+        items.append(s ? make_spec(*s, mesh) : py::none());
+      }
+      spec = cached.shape == CachedSharding::Shape::Tuple
+          ? py::reinterpret_steal<py::object>(PyList_AsTuple(items.ptr()))
+          : py::object(items);
+      break;
+    }
+  }
+  return checked_vectorcall(get_output_sharding_class().ptr(), spec.ptr());
+}
 
 static std::optional<std::pair<NativeOpSchema, /*ComputeMesh*/ py::object>>
 create_native_op_schema(
@@ -1545,15 +1634,16 @@ py::object dispatchDTensorOp(
   // Here, we never materialize OpInfo, we generate a gimped NativeOpSchema
   // object which has exactly the information you need to do a hash lookup.
   auto opt_native_op_schema = create_native_op_schema(op, py_op, stack);
+  const CachedSharding* cache_hit = nullptr;
   if (opt_native_op_schema.has_value()) {
     native_sharding_propagator_cache =
         &get_thread_local_native_sharding_propagator_cache();
-    cached_sharding =
+    cache_hit =
         native_sharding_propagator_cache->find(opt_native_op_schema->first);
   }
 
   py::object py_op_info;
-  if (!cached_sharding) {
+  if (!cache_hit) {
     // OK, the C++ fastpath failed.  Let's use the Python path to generate the
     // OpInfo (which is guaranteed to work), which we will need to either
     // redo the cache lookup or compute the value for real.
@@ -1581,13 +1671,12 @@ py::object dispatchDTensorOp(
     }
     cached_sharding = sharding;
     if (opt_native_op_schema.has_value()) {
-      native_sharding_propagator_cache->insert(
-          std::move(opt_native_op_schema->first), std::move(sharding));
+      if (auto cached = make_cached_sharding(sharding)) {
+        native_sharding_propagator_cache->insert(
+            std::move(opt_native_op_schema->first), std::move(*cached));
+      }
     }
     py_op_info.attr(dtensor_interned_strings.output_sharding) = cached_sharding;
-  } else if (opt_native_op_schema.has_value()) {
-    // Cache hit - log it if debug logging is enabled
-    log_sharding_prop_cache_hit(opt_native_op_schema->first, cached_sharding);
   }
 
   const auto get_py_op_info_if_needed = [&, &args = args, &kwargs = kwargs]() {
@@ -1614,6 +1703,11 @@ py::object dispatchDTensorOp(
   } else {
     get_py_op_info_if_needed();
     compute_mesh = py_op_info.attr(dtensor_interned_strings.compute_mesh);
+  }
+
+  if (cache_hit) {
+    cached_sharding = make_output_sharding(*cache_hit, compute_mesh);
+    log_sharding_prop_cache_hit(opt_native_op_schema->first, cached_sharding);
   }
 
   const bool participating =
