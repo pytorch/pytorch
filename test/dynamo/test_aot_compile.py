@@ -11079,7 +11079,9 @@ from user code:
         )
         here = dataclasses.replace(saved, gpu_name="This GPU", gpu_arch=90)
         with patch.object(torch.cuda, "is_available", return_value=True):
-            saved.check_compatibility(dataclasses.replace(here, gpu_name="Saved GPU"), "cuda")
+            saved.check_compatibility(
+                dataclasses.replace(here, gpu_name="Saved GPU"), "cuda"
+            )
             with self.assertRaisesRegex(RuntimeError, "created with different GPU"):
                 saved.check_compatibility(here, "cuda")
             dataclasses.replace(saved, gpu_name=None).check_compatibility(here, "cuda")
