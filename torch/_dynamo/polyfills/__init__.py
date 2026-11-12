@@ -361,7 +361,7 @@ def list_cmp(
     return op(left_len, right_len)
 
 
-def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
+def dict___eq__(d: dict[T, U], other: dict[T, U], ordered: bool = False) -> bool:
     # dict_equal reads the C struct (ma_used, dk_entries, _Py_dict_lookup), so
     # every access below goes through the unbound dict methods -- a dict
     # subclass overriding __len__ / keys / __getitem__ must not be consulted.
@@ -369,7 +369,9 @@ def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
     if (dict.__len__(d) != dict.__len__(other)) or (dict.keys(d) != dict.keys(other)):
         return False
 
-    if all(isinstance(a, OrderedDict) for a in (d, other)):
+    # dict's own comparison ignores order, so only the OrderedDict slot, which
+    # is what the `==` operator reaches, compares the two orderings.
+    if ordered and all(isinstance(a, OrderedDict) for a in (d, other)):
         return list(dict.items(d)) == list(dict.items(other))
 
     # CPython's dict_equal uses PyObject_RichCompareBool for value
