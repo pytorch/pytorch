@@ -2358,10 +2358,8 @@ class triton:
     # Let Triton contract multiply-adds in Inductor's generated kernels into FMAs.
     # Which multiply-adds become FMAs can depend on the block size, so disable this
     # for results that do not depend on the configs autotuning picks.
-    # Deterministic mode and emulate_precision_casts also disable it. When it is off
-    # (except under emulate_precision_casts), Inductor itself contracts a multiply
-    # feeding an add or sub in the same loop body into an FMA, which does not
-    # depend on the config.
+    # Deterministic mode and emulate_precision_casts also disable it. Explicit FMAs
+    # (tl.fma, e.g. in triton_helpers) are kept either way.
     enable_fp_fusion = os.environ.get("TORCHINDUCTOR_ENABLE_FP_FUSION", "1") == "1"
 
     # max autotune gemm with cublasLt

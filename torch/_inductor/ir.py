@@ -105,7 +105,6 @@ from .dependencies import (
 )
 from .fx_utils import get_node_storage
 from .loop_body import LoopBody
-from .optimize_loop_body import form_explicit_fmas
 from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties, ReductionHint
@@ -121,7 +120,6 @@ from .utils import (
     developer_warning,
     do_bench_using_profiling,
     dtype_from_size,
-    get_current_backend,
     get_dtype_size,
     get_kernel_metadata,
     GPU_ALIGN_BYTES,
@@ -134,7 +132,6 @@ from .utils import (
     sympy_product,
     sympy_subs,
     tensor_is_aligned,
-    triton_fp_fusion_enabled,
     VarRanges,
 )
 from .virtualized import ops, OpsValue, V
@@ -5866,18 +5863,6 @@ class ComputedBuffer(OperationBuffer):
                 var_ranges,
                 *args,
             )
-        # With Triton's FMA contraction off (except for emulate_precision_casts),
-        # contract multiply-adds here instead, independent of the kernel config.
-        device = self.get_device()
-        if (
-            device is not None
-            and is_gpu(device.type)
-            and get_current_backend(device.type) == "triton"
-            and not triton_fp_fusion_enabled()
-            and not config.emulate_precision_casts
-        ):
-            with V.graph.set_current_device(device):
-                form_explicit_fmas(body)
         index_vars = []
         reduce_vars: list[Any] = []
         index_size = []

@@ -157,65 +157,9 @@ class DeterministicTest(TestCase):
         ):
             x = torch.randn(16, device=GPU_TYPE)
             _, (code,) = run_and_get_code(torch.compile(lambda x: x * 2 + 1), x)
-        # Deterministic mode also turns off Triton's contraction; Inductor then
-        # emits the FMA itself.
+        # Deterministic mode also turns off Triton's contraction.
         triton_fusion = fp_fusion and not deterministic
         self.assertIn(f"'enable_fp_fusion': {triton_fusion}", code)
-        self.assertEqual("tl.fma(" in code, not triton_fusion)
-
-    @parametrize("dtype", [torch.float32, torch.bfloat16])
-    @inductor_config.patch(deterministic=True)
-    def test_explicit_fma(self, dtype):
-        from torch._inductor.utils import run_and_get_code
-
-        def fn(x, y, z, i):
-            p = x * y
-            return p + z, p - z, z - p, i * i + i
-
-        x, y, z = (torch.randn(1024, device=GPU_TYPE, dtype=dtype) for _ in range(3))
-        i = torch.randint(-100, 100, (1024,), device=GPU_TYPE)
-        out, (code,) = run_and_get_code(torch.compile(fn), x, y, z, i)
-        # Compiled kernels compute in fp32 even for bf16 inputs.
-        ref = fn(x.float(), y.float(), z.float(), i)
-        self.assertEqual(out, [r.to(o.dtype) for r, o in zip(ref, out)])
-        # One FMA per float add/sub; the integer multiply-add is left alone.
-        self.assertEqual(code.count("tl.fma("), 3)
-
-    @inductor_config.patch(deterministic=True)
-    def test_explicit_fma_welford(self):
-        # A looped var_mean is a welford reduction with several outputs.
-        def fn(x):
-            var, mean = torch.var_mean(x * 2 + 1, dim=1)
-            return var * mean + 1
-
-        x = torch.randn(8, 65536, device=GPU_TYPE)
-        self.assertEqual(torch.compile(fn)(x), fn(x))
-
-    @inductor_config.patch(deterministic=True, force_pointwise_cat=True)
-    def test_explicit_fma_skips(self):
-        from torch._inductor.utils import run_and_get_code
-
-        def fn(x, y, w, a, b):
-            # p - p must stay exactly 0: the two products are separate nodes,
-            # for pad and cat each copy of the masked load is a subblock, and
-            # for a gather each copy of the index is its own indirect symbol.
-            p = x * y
-            q = torch.nn.functional.pad(x, (1, 1)) * w
-            r = torch.cat([x, y]) * w[:-2].repeat(2)
-            g = w[a.abs()] * x[:512]
-            zeros = (p - p.detach(), q - q.detach(), r - r.detach(), g - g.detach())
-            # A pointwise int64 cat fills with 0.0; it is still not a float.
-            c1, c2, c3 = (torch.cat([a + k, b + k]) for k in (1, 2, 3))
-            return *zeros, c1 * c2 + c3
-
-        x, y = (torch.randn(1024, device=GPU_TYPE) for _ in range(2))
-        w = torch.randn(1026, device=GPU_TYPE)
-        a, b = (torch.randint(-100, 100, (512,), device=GPU_TYPE) for _ in range(2))
-        out, (code,) = run_and_get_code(torch.compile(fn), x, y, w, a, b)
-        self.assertEqual(out, fn(x, y, w, a, b), atol=0, rtol=0)
-        for zero in out[:4]:
-            self.assertEqual(zero.count_nonzero().item(), 0)
-        self.assertNotIn("tl.fma(", code)
 
     @parametrize(
         "deterministic,fp_fusion",

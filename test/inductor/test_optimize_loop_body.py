@@ -3,10 +3,7 @@
 import torch
 from torch._inductor import config
 from torch._inductor.loop_body import LoopBody
-from torch._inductor.optimize_loop_body import (
-    eliminate_redundant_lowp_round_trips,
-    form_explicit_fmas,
-)
+from torch._inductor.optimize_loop_body import eliminate_redundant_lowp_round_trips
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -36,72 +33,6 @@ class TestOptimizeLoopBody(TestCase):
         self.assertFalse(eliminate_redundant_lowp_round_trips(loop_body))
         self.assertEqual(len(graph.find_nodes(op="call_method", target="to_dtype")), 2)
         self.assertEqual(loop_body.op_counts["to_dtype"], 2)
-
-    def test_form_explicit_fmas(self):
-        def fn(index):
-            a, b, c = (V.ops.constant(v, torch.float32) for v in (1.5, 2.5, 3.5))
-            p = V.ops.mul(a, b)
-            i = V.ops.constant(3, torch.int32)
-            return (
-                V.ops.add(p, c),
-                V.ops.sub(p, c),
-                V.ops.sub(c, p),
-                V.ops.add(V.ops.mul(i, i), i),
-            )
-
-        with config.patch(constant_and_index_propagation=False):
-            loop_body = LoopBody(fn, ([],), {}, [], [])
-
-        self.assertTrue(form_explicit_fmas(loop_body))
-        graph = loop_body.root_block.graph
-        fmas = graph.find_nodes(op="call_method", target="fma")
-        self.assertEqual(len(fmas), 3)
-        # fma(a, b, c), fma(a, b, neg(c)), fma(neg(a), b, c)
-        self.assertEqual(fmas[0].args[3].target, "constant")
-        self.assertEqual(fmas[1].args[3].target, "neg")
-        self.assertEqual(fmas[2].args[1].target, "neg")
-        # Only the integer multiply-add is left.
-        self.assertEqual(len(graph.find_nodes(op="call_method", target="mul")), 1)
-        self.assertEqual(len(graph.find_nodes(op="call_method", target="add")), 1)
-        self.assertEqual(len(graph.find_nodes(op="call_method", target="sub")), 0)
-        counts = loop_body.op_counts
-        self.assertEqual((counts["fma"], counts["neg"], counts["mul"]), (3, 2, 1))
-        self.assertEqual((counts["add"], counts["sub"]), (1, 0))
-
-    def test_form_explicit_fmas_skips(self):
-        def fn(index):
-            a, b = (V.ops.constant(v, torch.float32) for v in (1.5, 2.5))
-            # p - p must stay 0, also when traced as two identical nodes.
-            p = V.ops.mul(a, b)
-            same = V.ops.sub(p, p)
-            dup = V.ops.sub(V.ops.mul(a, b), V.ops.mul(a, b))
-            # Also with identical masked bodies (each copy is its own subblock).
-
-            def masked_product():
-                mask = V.ops.constant(True, torch.bool)
-                value = V.ops.masked(
-                    mask, lambda: V.ops.constant(0.5, torch.float32), 0.0
-                )
-                return V.ops.mul(value, b)
-
-            masked_dup = V.ops.sub(masked_product(), masked_product())
-            # An integer from a masked subblock with a float fill.
-            mask = V.ops.constant(True, torch.bool)
-            m = V.ops.masked(mask, lambda: V.ops.constant(3, torch.int64), 0.0)
-            return (
-                same,
-                dup,
-                masked_dup,
-                V.ops.add(V.ops.mul(m, m), m),
-            )
-
-        with config.patch(constant_and_index_propagation=False):
-            loop_body = LoopBody(fn, ([],), {}, [], [])
-
-        self.assertFalse(form_explicit_fmas(loop_body))
-        graph = loop_body.root_block.graph
-        self.assertEqual(graph.find_nodes(op="call_method", target="fma"), [])
-        self.assertEqual(loop_body.op_counts["fma"], 0)
 
 
 class TestOptimizeLoopBodyDevice(TestCase):
