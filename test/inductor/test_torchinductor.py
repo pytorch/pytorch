@@ -20795,6 +20795,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             torch._check(v.size(0) > u.size(0))
             return v[: v.size(0) - u.size(0)].exp()
 
+        def guarded_slice_exp(v, u):
+            # v.size(0) - u.size(0) elements, which Dynamo guards to be >= 2
+            return v[u.size(0) :].exp()
+
         def checked_ne_slice_exp(v, u):
             # v.size(0) - u.size(0) elements, nonzero only because of the
             # != check
@@ -20834,6 +20838,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for middle, args, kernel, patches in [
             (nonzero_plus_one_exp, (m,), "def triton_poi_fused__to_copy_cat_exp", {}),
             (guarded_difference_exp, (v, u), "def triton_poi_fused_exp_slice", {}),
+            (guarded_slice_exp, (v, u), "def triton_poi_fused_exp_slice", {}),
             (checked_ne_slice_exp, (v, u), "def triton_poi_fused_exp_slice", {}),
             (
                 checked_unbacked_difference_exp,

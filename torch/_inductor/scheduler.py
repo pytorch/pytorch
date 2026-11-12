@@ -12876,6 +12876,8 @@ class Scheduler:
                 and (
                     sizevars.statically_known_gt(size, 0)
                     or sizevars.statically_known_true(sympy.Ne(size, 0))
+                    # a derived size often carries only a guard that it is >= 2
+                    or sizevars.statically_known_geq(size, 2)
                 )
             )
 
