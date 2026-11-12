@@ -29,9 +29,9 @@ constexpr int CAT_ARRAY_BATCH_SIZE = 128;
 constexpr int CAT_ARRAY_MAX_INPUT_DIMS = 4;
 constexpr int ALIGNED_VEC_LOAD_BYTES_16 = 16;
 constexpr int ALIGNED_VEC_LOAD_BYTES_8 = 8;
-// Max elements of the largest input per dim-0 chunk when cat_out_cuda splits a large
-// non-contiguous cat on dim != 0. Empirical, tuned on transposed fp32/bf16/u8 cats;
-// measurements in #203778.
+// Max elements of the largest non-contiguous input per dim-0 chunk when cat_out_cuda
+// splits a large non-contiguous cat on dim != 0. Empirical; chosen on transposed fp32
+// cats (#203778), checked on fp32/bf16/u8 strided cats on 8 GPUs (#203779).
 constexpr int64_t CAT_SPLIT_ELEMS = int64_t{32} << 20;
 
 namespace {
@@ -693,19 +693,18 @@ TORCH_IMPL_FUNC(cat_out_cuda)
       // fetched line is reused only through L2. When one launch covers a large batch, that
       // reuse no longer fits in L2 and the same lines are fetched many times (#203778).
       // Split such a cat along dim 0 into chunks of at most CAT_SPLIT_ELEMS elements of the
-      // largest input, or a single row when one row is larger.
+      // largest non-contiguous input, or a single row when one row is larger. Contiguous
+      // inputs are read coalesced, so they do not size the chunks.
       if (dim != 0 && result.size(0) > 1 && result.is_contiguous()) {
         // dim != 0, so every non-skipped input has size(0) == nrows.
         const int64_t nrows = result.size(0);
         int64_t row_elems = 0;
-        bool any_noncontig = false;
         for (const Tensor& t : materialized) {
-          if (!cat_should_skip_tensor(t)) {
+          if (!cat_should_skip_tensor(t) && !t.is_contiguous()) {
             row_elems = std::max(row_elems, t.numel() / nrows);
-            any_noncontig |= !t.is_contiguous();
           }
         }
-        if (any_noncontig && row_elems > 0 && row_elems * nrows > CAT_SPLIT_ELEMS) {
+        if (row_elems * nrows > CAT_SPLIT_ELEMS) {
           const int64_t rows = std::max<int64_t>(1, CAT_SPLIT_ELEMS / row_elems);
           std::vector<Tensor> parts;
           parts.reserve(materialized.size());

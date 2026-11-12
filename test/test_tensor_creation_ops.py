@@ -1276,16 +1276,20 @@ class TestTensorCreation(TestCase):
         # launches on CUDA/ROCm (CAT_SPLIT_ELEMS in Shape.cu). 37 rows of 1 Mi
         # elements give a 32-row chunk and a 5-row tail; the 2-row case has rows
         # larger than the threshold and takes one row per launch. A contiguous
-        # input is mixed into each chunked launch.
+        # input is mixed into each chunked launch. Results stay alive and out=
+        # starts from 255 (never drawn by randint(0, 255)), so a skipped chunk
+        # cannot pass on a reused allocator block.
         for nrows, cols, sizes in ((37, 64, (16384, 4096)), (2, 64, ((1 << 19) + 4096, 16))):
             xs = [torch.randint(0, 255, (nrows, n, cols), dtype=dtype, device=device).transpose(1, 2)
                   for n in sizes]
             xs.append(torch.randint(0, 255, (nrows, cols, 8), dtype=dtype, device=device))
             ref = torch.cat([x.contiguous().cpu() for x in xs], dim=2)
-            self.assertEqual(torch.cat(xs, dim=2), ref, atol=0, rtol=0)
+            res = torch.cat(xs, dim=2)
+            self.assertEqual(res, ref, atol=0, rtol=0)
             empty = torch.empty(0, dtype=dtype, device=device)
-            self.assertEqual(torch.cat([*xs, empty], dim=-1), ref, atol=0, rtol=0)
-            out = torch.empty_like(ref, device=device)
+            res_empty = torch.cat([*xs, empty], dim=-1)
+            self.assertEqual(res_empty, ref, atol=0, rtol=0)
+            out = torch.full_like(ref, 255, device=device)
             torch.cat(xs, dim=2, out=out)
             self.assertEqual(out, ref, atol=0, rtol=0)
 
