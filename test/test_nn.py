@@ -7741,7 +7741,7 @@ class TestNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(ValueError, "expected input's size at dim="):
                 inst_norm(t)
         else:
-            msg = r"Set num_features=2 to match the number of channels in the input\."
+            msg = r"Set num_features to match the number of channels in the input\."
             with self.assertWarnsRegex(UserWarning, msg):
                 result = inst_norm(t)
             with warnings.catch_warnings():
