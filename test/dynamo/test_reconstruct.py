@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
+    subtest,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._triton import (
@@ -114,14 +115,14 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
     @parametrize(
         "value",
         [
-            None,
-            True,
-            False,
-            Ellipsis,
-            NotImplemented,
-            torch.float32,
-            torch.strided,
-            torch.contiguous_format,
+            subtest(None, name="none"),
+            subtest(True, name="true"),
+            subtest(False, name="false"),
+            subtest(Ellipsis, name="ellipsis"),
+            subtest(NotImplemented, name="not_implemented"),
+            subtest(torch.float32, name="dtype"),
+            subtest(torch.strided, name="layout"),
+            subtest(torch.contiguous_format, name="memory_format"),
         ],
     )
     def test_sourced_singleton_aggregate_uses_load_const(self, value):
@@ -173,10 +174,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
     @parametrize(
         "factory",
         [
-            lambda: torch.device("cpu"),
-            lambda: float("1.23456789"),
-            lambda: int("1234567890123456"),
-            lambda: b"configuration-value".decode(),
+            subtest(lambda: torch.device("cpu"), name="device"),
+            subtest(lambda: float("1.23456789"), name="float"),
+            subtest(lambda: int("1234567890123456"), name="int"),
+            subtest(lambda: b"configuration-value".decode(), name="str"),
         ],
     )
     def test_sourced_non_singleton_aggregate_identity(self, factory):
