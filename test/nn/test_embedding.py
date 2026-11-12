@@ -1121,6 +1121,20 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 self.assertEqual(grad, grad_check, msg=msg, atol=atol, rtol=rtol)
 
     @onlyAccelerator
+    def test_embedding_renorm_non_contiguous_weight(self, device):
+        # Rows have size(1) elements, not stride(0); compare the whole buffer
+        # to also catch writes outside the weight view.
+        expected = torch.arange(40.0).view(5, 8)
+        actual = expected.to(device)
+        torch.embedding_renorm_(expected[:, :4], torch.arange(5), 1.0, 2.0)
+        torch.embedding_renorm_(actual[:, :4], torch.arange(5, device=device), 1.0, 2.0)
+        self.assertEqual(actual.cpu(), expected)
+        # Zero-width weight (stride(0) == 1)
+        torch.embedding_renorm_(
+            torch.empty(20, 0, device=device), torch.arange(3, device=device), 1.0, 2.0
+        )
+
+    @onlyAccelerator
     @dtypes(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
