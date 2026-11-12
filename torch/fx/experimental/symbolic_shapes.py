@@ -138,6 +138,9 @@ def guarding_hint_or_throw(
     and Python int for integer inputs (SymInt, int).
     """
     if isinstance(a, SymNode):
+        # maybe_set_item_memo relies on this never filling in a SymFloat's hint
+        if a.pytype not in (int, bool):
+            raise AssertionError(f"Expected an int or bool SymNode, got {a.pytype}")
         if a._hint is not None:
             return a._hint  # pyrefly: ignore[bad-return]
         if a.shape_env is None:

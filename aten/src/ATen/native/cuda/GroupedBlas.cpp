@@ -738,7 +738,7 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
 // Inputs group_gemm_ck_tile handles; anything else falls through to the next grouped mm path.
 static bool ck_tile_group_gemm_supported(const Tensor& mat_a, const Tensor& mat_b, const std::optional<at::Tensor>& offs) {
   const auto dtype = mat_a.scalar_type();
-  if (mat_b.scalar_type() != dtype || (dtype != at::kBFloat16 && dtype != at::kHalf)) {
+  if (mat_b.scalar_type() != dtype || (dtype != at::kBFloat16 && dtype != at::kHalf && dtype != at::kFloat)) {
     return false;
   }
   const bool a_is_2d = mat_a.dim() == 2;
@@ -801,15 +801,17 @@ std::optional<c10::ScalarType> out_dtype) {
   // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
   // To enable CK-tile path, use env variable ROCM_ALLOW_GROUP_GEMM_CK_TILE=1.
   // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
+  const bool supported_ck_tile_arch = at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"});
+
   const bool use_ck_tile = at::globalContext().rocmAllowGroupGemmCkTile() &&
-      at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"}) && ck_tile_group_gemm_supported(mat_a, mat_b, offs);
+      supported_ck_tile_arch && ck_tile_group_gemm_supported(mat_a, mat_b, offs);
   // ck_tile zeroes the 2D x 2D groups with K == 0 itself, so it skips the zero-filled allocation the other paths need.
   Tensor out = use_ck_tile
       ? at::empty(compute_grouped_gemm_output_size_stride(mat_a, mat_b, offs, out_dtype_).first, mat_a.options().dtype(out_dtype_))
       : create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   if (use_ck_tile) {
     at::hip::detail::group_gemm_ck_tile(mat_a, mat_b, offs, bias, out);
-  } else if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
+  } else if (at::globalContext().rocmAllowGroupGemmCk() && (supported_ck_tile_arch || at::detail::getCUDAHooks().isGPUArch({"gfx90a"}))) {
     at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
   } else {
     _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
