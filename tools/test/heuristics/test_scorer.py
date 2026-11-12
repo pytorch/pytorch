@@ -8,7 +8,7 @@ import statistics
 import sys
 import tempfile
 import unittest
-from datetime import date, datetime, UTC
+from datetime import date, datetime, timedelta, UTC
 from email.message import Message
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -22,7 +22,12 @@ sys.path.append(str(REPO_ROOT))
 import tools.testing.do_target_determination_for_s3 as td_job
 from tools.stats import import_test_stats
 from tools.testing.discover_tests import TESTS as ALL_TESTS
-from tools.testing.target_determination import gen_artifact, scorer, scorer_model
+from tools.testing.target_determination import (
+    gen_artifact,
+    scorer,
+    scorer_model,
+    scorer_paths,
+)
 from tools.testing.target_determination.heuristics.interface import (
     AggregatedHeuristics,
     HeuristicInterface,
@@ -72,6 +77,10 @@ def make_model(**overrides: Any) -> dict[str, Any]:
     }
     model.update(overrides)
     return model
+
+
+def make_budget(share: float = 0.25, spread: float = 0.0, a: float = 1.0) -> Any:
+    return {"share": share, "spread": spread, "cost_exponent": a}
 
 
 def make_heuristic(name: str) -> HeuristicInterface:
@@ -1013,6 +1022,32 @@ class TestScorerCut(unittest.TestCase):
     def test_unlisted_job_gives_td_cut(self) -> None:
         self.assert_td_cut(make_block(), "no start-up for env9/default", env="env9")
 
+    def test_malformed_budget_gives_td_cut(self) -> None:
+        cases: list[Any] = [
+            make_block(model=make_model(budget={"share": "x"})),
+            make_block(model=make_model(budget=make_budget(share=2.0))),
+            make_block(model=make_model(budget=None)),
+        ]
+        for block in cases:
+            with self.subTest(budget=block["model"]["budget"]):
+                self.assert_td_cut(block, "invalid: ")
+                _, _, info = self.cut(block)
+                self.assertEqual(
+                    {k: info[k] for k in ("share", "risk", "cost_exponent")},
+                    {"share": None, "risk": None, "cost_exponent": None},
+                )
+                self.assertEqual(info["budget_mode"], "error")
+
+    def test_odd_budget_fields_keep_the_scorer(self) -> None:
+        block = make_block(model=make_model(budget=make_budget()))
+        block.update(build_files=[1], risk={"r": 1}, budget_reason=["stale"])
+        include, _, info = self.cut(block)
+        self.assertEqual(info["cut"], "scorer")
+        self.assertEqual(info["budget_mode"], "build_paths")
+        block.update(build_files=0, risk="0.5")
+        _, _, info = self.cut(block)
+        self.assertEqual((info["cut"], info["budget_mode"]), ("scorer", "unknown_risk"))
+
     def test_scorer_cut_with_model(self) -> None:
         include, exclude, info = self.cut(make_block(HeuristicA={"a": 1.0}))
         self.assertEqual(info["cut"], "scorer")
@@ -1041,6 +1076,662 @@ class TestScorerCut(unittest.TestCase):
                 {"included": [{"test_file": "a"}], "excluded": []},
             ],
         )
+
+
+class TestBudgetValidation(unittest.TestCase):
+    def assert_invalid(self, model: Any, message: str) -> None:
+        with self.assertRaisesRegex(ModelError, message):
+            scorer_model.parse_model(encode(model))
+
+    def assert_valid(self, model: Any) -> None:
+        self.assertEqual(scorer_model.parse_model(encode(model)), model)
+
+    def test_contract_constants(self) -> None:
+        self.assertEqual(
+            (
+                scorer_model.MIN_SHARE,
+                scorer_model.MAX_SHARE,
+                scorer.BUDGET_STALE_DAYS,
+                scorer_paths.MAX_CHANGED_FILES,
+            ),
+            (0.10, 1.0, 3, 3000),
+        )
+
+    def test_budget_is_optional(self) -> None:
+        self.assert_valid(make_model())
+        self.assert_valid(make_model(budget=make_budget()))
+        self.assert_invalid(make_model(budget=make_budget(), extra=1), "keys")
+
+    def test_budget_keys_and_types(self) -> None:
+        cases: list[tuple[Any, str]] = [
+            (None, "not an object"),
+            ([0.25, 0.0, 1.0], "not an object"),
+            ({**make_budget(), "floor": 0.1}, "keys"),
+            ({"share": 0.25, "spread": 0.0}, "keys"),
+            ({**make_budget(), "share": True}, "number"),
+            ({**make_budget(), "spread": False}, "number"),
+            ({**make_budget(), "cost_exponent": True}, "number"),
+            ({**make_budget(), "share": "0.25"}, "number"),
+            ({**make_budget(), "share": math.nan}, "not finite"),
+            ({**make_budget(), "cost_exponent": math.inf}, "not finite"),
+        ]
+        for budget, message in cases:
+            with self.subTest(budget=budget):
+                with self.assertRaisesRegex(ModelError, message):
+                    scorer_model.validate_model(make_model(budget=budget))
+        raw = encode(make_model(budget=make_budget())).decode()
+        bad = raw.replace('"share": 0.25', '"share": NaN')
+        with self.assertRaisesRegex(ModelError, "non-finite"):
+            scorer_model.parse_model(bad.encode())
+
+    def test_budget_bounds(self) -> None:
+        valid = [
+            make_budget(share=0.1),
+            make_budget(share=1.0),
+            make_budget(share=0.2, spread=0.5),
+            make_budget(spread=0.0, a=0.0),
+            make_budget(a=1.0),
+            make_budget(share=1.0, spread=0.8),
+            {"share": 1, "spread": 0, "cost_exponent": 1},
+        ]
+        for budget in valid:
+            with self.subTest(budget=budget):
+                self.assert_valid(make_model(budget=budget))
+        invalid = [
+            (make_budget(share=0.0999), "below"),
+            (make_budget(share=0.15, spread=0.5), "below"),
+            (make_budget(share=1.0, spread=0.9), "below"),
+            (make_budget(share=-1.0), "below"),
+            (make_budget(share=1.01), "above"),
+            (make_budget(spread=1.0), "spread"),
+            (make_budget(spread=-0.01), "spread"),
+            (make_budget(a=-0.01), "cost_exponent"),
+            (make_budget(a=1.01), "cost_exponent"),
+        ]
+        for budget, message in invalid:
+            with self.subTest(budget=budget):
+                self.assert_invalid(make_model(budget=budget), message)
+
+    def test_budget_keeps_the_start_up_bounds(self) -> None:
+        for k in (1.0, 600.0):
+            with self.subTest(k=k):
+                start_up = {"env1": {"default": k}}
+                self.assert_valid(
+                    make_model(start_up_seconds=start_up, budget=make_budget())
+                )
+        for k in (0.99, 600.01):
+            with self.subTest(k=k):
+                start_up = {"env1": {"default": k}}
+                self.assert_invalid(
+                    make_model(start_up_seconds=start_up, budget=make_budget()),
+                    "outside",
+                )
+
+
+class TestBudgetShare(unittest.TestCase):
+    def share(self, build_files: Any = 0, risk: Any = 0.0, **budget: float) -> Any:
+        model = make_model(budget=make_budget(**budget))
+        return scorer_model.budget_share(model, build_files, risk)
+
+    def test_no_budget_block(self) -> None:
+        self.assertEqual(
+            scorer_model.budget_share(make_model(), 0, 0.5), (None, "none")
+        )
+
+    def test_share_at_each_risk(self) -> None:
+        for r in (-1, 0, 1, -1.0, 0.0, 1.0, 0.3):
+            with self.subTest(r=r):
+                expected = 0.3 * (1 + 0.5 * r)
+                self.assertEqual(
+                    self.share(risk=r, share=0.3, spread=0.5), (expected, "share")
+                )
+        self.assertEqual(self.share(risk=-1, share=0.3, spread=0.5)[0], 0.15)
+        self.assertEqual(self.share(risk=0, share=0.3, spread=0.5)[0], 0.3)
+        self.assertAlmostEqual(self.share(risk=1, share=0.3, spread=0.5)[0], 0.45)
+
+    def test_unknown_risk_gets_the_top_of_the_window(self) -> None:
+        top = 0.3 * (1 + 0.5)
+        self.assertEqual(self.share(risk=1.0, share=0.3, spread=0.5), (top, "share"))
+        for r in (None, math.nan, math.inf, -math.inf, True, False, "0.5", [0.5]):
+            with self.subTest(r=r):
+                self.assertEqual(
+                    self.share(risk=r, share=0.3, spread=0.5), (top, "unknown_risk")
+                )
+        self.assertEqual(
+            self.share(risk=10**400, share=0.3, spread=0.5), (top, "unknown_risk")
+        )
+
+    def test_build_files_get_the_top_of_the_window(self) -> None:
+        top = 0.3 * (1 + 0.5)
+        for build_files in (None, True, False, 1, 7, 1.0, 0.0, "0", []):
+            with self.subTest(build_files=build_files):
+                self.assertEqual(
+                    self.share(build_files=build_files, share=0.3, spread=0.5),
+                    (top, "build_paths"),
+                )
+        self.assertEqual(self.share(build_files=0), (0.25, "share"))
+        self.assertEqual(
+            self.share(build_files=1, risk=None, share=0.3, spread=0.5),
+            (top, "build_paths"),
+        )
+
+    def test_top_of_the_window_is_clamped(self) -> None:
+        self.assertEqual(
+            self.share(build_files=1, share=1.0, spread=0.5), (1.0, "build_paths")
+        )
+        self.assertEqual(
+            self.share(risk=None, share=0.8, spread=0.5), (1.0, "unknown_risk")
+        )
+
+    def test_clamp(self) -> None:
+        high = 0.4 * (1 + 0.5 * 1.0)
+        self.assertEqual(self.share(risk=5.0, share=0.4, spread=0.5), (high, "share"))
+        self.assertEqual(self.share(risk=-5, share=0.4, spread=0.5), (0.2, "share"))
+        self.assertEqual(self.share(risk=1.0, share=1.0, spread=0.5), (1.0, "share"))
+        unvalidated = make_model(budget=make_budget(share=0.05))
+        self.assertEqual(
+            scorer_model.budget_share(unvalidated, 0, 0.0),
+            (scorer_model.MIN_SHARE, "share"),
+        )
+
+
+class TestBuildPaths(unittest.TestCase):
+    def test_each_list(self) -> None:
+        build = [d + "x/y.py" for d in scorer_paths.BUILD_DIRS]
+        build += list(scorer_paths.BUILD_FILES)
+        for name in scorer_paths.BUILD_BASENAMES:
+            build += [name, f"torch/csrc/{name}"]
+        build += [
+            "requirements.txt",
+            "requirements-ci.txt",
+            "torch/requirements_dev.txt",
+            "a/b.cmake",
+            "x.bzl",
+            "aten/src/ATen/native/native_functions.yaml",
+            "aten/src/ATen/templates/Functions.h",
+            "tools/jit/gen_unboxing.py",
+            "tools/pyi/gen_pyi.py",
+            "tools/amd_build/build_amd.py",
+            "MODULE.bazel",
+            ".bazelrc",
+            ".bazelversion",
+        ]
+        for path in build:
+            with self.subTest(path=path):
+                self.assertTrue(scorer_paths.is_build_path(path))
+        not_build = [
+            "torch/nn/modules/linear.py",
+            "test/test_nn.py",
+            "test/inductor/test_x.py",
+            "docs/source/nn.rst",
+            "README.md",
+            "foo/test/run_test.py",
+            "tools/testing_extra/x.py",
+            "third_party_like/x.c",
+            "my_requirements.txt",
+            "requirements.in",
+            "requirements.txt.bak",
+            "a/b.cmake.in",
+            "setup.py.orig",
+            "x/CMakeLists.txt.in",
+            "torch/testing/_comparison.py",
+            "aten/src/ATen/native/Linear.cpp",
+            "tools/jit_extra/x.py",
+            "MODULE.bazel.lock",
+        ]
+        for path in not_build:
+            with self.subTest(path=path):
+                self.assertFalse(scorer_paths.is_build_path(path))
+
+    def test_count_build_files(self) -> None:
+        paths = ["torch/a.py", "CMakeLists.txt", ".github/x.yml", "test/test_a.py"]
+        self.assertEqual(scorer_paths.count_build_files(paths), 2)
+        for empty in ([], [""], ["", ""]):
+            self.assertIsNone(scorer_paths.count_build_files(empty))
+        self.assertEqual(scorer_paths.count_build_files(["", "setup.py"]), 1)
+        many = [f"torch/f{i}.py" for i in range(2999)]
+        self.assertEqual(scorer_paths.count_build_files(many), 0)
+        self.assertEqual(scorer_paths.count_build_files([*many, "torch/x.py"]), 3000)
+        self.assertEqual(
+            scorer_paths.count_build_files([*many, "torch/x.py", "torch/y.py"]), 3001
+        )
+
+
+class TestBudgetStaleness(unittest.TestCase):
+    def build(
+        self, version: str, today: date | None = TODAY, changed: Any = None
+    ) -> dict[str, Any]:
+        model = make_model(version=version, budget=make_budget())
+        with mock.patch("builtins.print") as printed:
+            block = scorer.build_scorer_block(
+                make_aggregated(),
+                [HEURISTIC_A, HEURISTIC_B],
+                lambda: encode(model),
+                ["test/test_a.py"] if changed is None else changed,
+                today=today,
+            )
+        self.printed = [" ".join(map(str, c.args)) for c in printed.call_args_list]
+        if block is None:
+            self.fail("block omitted")
+        self.assertEqual(block["reason"], "ok")
+        without = make_model(version=version)
+        self.assertEqual(
+            {k: v for k, v in block["model"].items() if k != "budget"}, without
+        )
+        return block
+
+    def assert_dropped(self, block: dict[str, Any], why: str) -> None:
+        self.assertNotIn("budget", block["model"])
+        self.assertTrue(block["budget_reason"].startswith("stale: "))
+        self.assertIn(why, block["budget_reason"])
+        self.assertEqual(
+            self.printed[0], f"TD scorer: budget dropped: {block['budget_reason']!r}"
+        )
+
+    def test_dropped_budgets(self) -> None:
+        for days in (4, 5, 7):
+            version = (TODAY - timedelta(days=days)).isoformat()
+            with self.subTest(version=version):
+                block = self.build(version)
+                self.assert_dropped(block, f"{version} is over 3 days before {TODAY}")
+                self.assertAlmostEqual(block["risk"], -0.5)
+
+    def test_kept_budgets(self) -> None:
+        for days in (-3, -1, 0, 1):
+            version = (TODAY + timedelta(days=days)).isoformat()
+            with self.subTest(version=version):
+                block = self.build(version)
+                self.assertEqual(block["model"]["budget"], make_budget())
+                self.assertIsNone(block["budget_reason"])
+
+    def test_a_stale_model_drops_everything(self) -> None:
+        for version in ("x", (TODAY - timedelta(days=8)).isoformat()):
+            model = make_model(version=version, budget=make_budget())
+            with self.subTest(version=version), mock.patch("builtins.print"):
+                block = scorer.build_scorer_block(
+                    make_aggregated(),
+                    [HEURISTIC_A],
+                    lambda: encode(model),
+                    ["test/test_a.py"],
+                    today=TODAY,
+                )
+                if block is None:
+                    self.fail("block omitted")
+                self.assertIsNone(block["model"])
+                self.assertEqual(block["reason"], f"stale: {version}")
+                self.assertIsNone(block["budget_reason"])
+
+    def test_default_today_is_the_utc_date(self) -> None:
+        today = datetime.now(UTC).date()
+        block = self.build(today.isoformat(), today=None)
+        self.assertIn("budget", block["model"])
+        block = self.build((today - timedelta(days=5)).isoformat(), today=None)
+        self.assert_dropped(block, "is over 3 days before")
+
+    def test_build_files(self) -> None:
+        cases: list[tuple[Any, Any]] = [
+            (["test/test_a.py"], 0),
+            (["CMakeLists.txt", "torch/a.py", "x.bzl"], 2),
+            ([""], None),
+            ([1], None),
+        ]
+        for changed, expected in cases:
+            with self.subTest(changed=changed):
+                block = self.build(TODAY.isoformat(), changed=changed)
+                self.assertEqual(block["build_files"], expected)
+        model = make_model()
+        with mock.patch("builtins.print"):
+            block = scorer.build_scorer_block(
+                make_aggregated(), [HEURISTIC_A], lambda: encode(model), None
+            )
+        if block is None:
+            self.fail("block omitted")
+        self.assertIsNone(block["build_files"])
+        self.assertIsNone(block["budget_reason"])
+
+    def test_td_job_writes_the_budget_fields(self) -> None:
+        job = TestTDJob()
+        today = datetime.now(UTC).date()
+        for version, kept in (
+            ((today - timedelta(days=5)).isoformat(), False),
+            (today.isoformat(), True),
+        ):
+            with self.subTest(version=version):
+                model = make_model(version=version, budget=make_budget())
+                td_results = job.run_main(lambda _: encode(model))
+                block = td_results["scorer"]
+                self.assertEqual(block["reason"], "ok")
+                self.assertEqual("budget" in block["model"], kept)
+                self.assertEqual(block["budget_reason"] is None, kept)
+                self.assertEqual(block["build_files"], 0)
+
+
+def budget_block(
+    model: Any, build_files: Any = 0, risk: Any = 0.0, **scores: dict[str, float]
+) -> dict[str, Any]:
+    block = make_block(model=model, **scores)
+    block.update(build_files=build_files, risk=risk, budget_reason=None)
+    return block
+
+
+def reference_cut(
+    block: dict[str, Any], tests: list[str], include: list[TestRun], times: Any
+) -> tuple[list[str], int, int, int]:
+    """The contract's cut, written from its text: selection, budget_ms, cost_ms and
+    the cost of the top-ranked file that a share forces in (0 when none)."""
+    model = block["model"]
+    td = list(dict.fromkeys(t.test_file for t in include))
+    start_up = model["start_up_seconds"]["env1"]["default"]
+    cost = {f: times[f] + start_up for f in tests}
+    cost_ms = {f: round(c * 1000) for f, c in cost.items()}
+    share, _ = scorer_model.budget_share(model, block["build_files"], block["risk"])
+    if share is None:
+        a = 1.0
+        budget_ms = sum(cost_ms[f] for f in td)
+    else:
+        a = model["budget"]["cost_exponent"]
+        budget_ms = round(share * sum(cost_ms.values()))
+    must = sorted(
+        f for f in tests if block["heuristics"].get("EditedByPR", {}).get(f, 0) != 0
+    )
+
+    def key(f: str) -> tuple[float, str]:
+        scores = {h: s.get(f, 0.0) for h, s in block["heuristics"].items()}
+        p = scorer_model.file_probability(model, scores, cost[f], "env1", "default")
+        return -(p / cost[f] ** a), f
+
+    order = sorted((f for f in tests if f not in must), key=key)
+    selected = list(must)
+    used = sum(cost_ms[f] for f in must)
+    forced = 0
+    for i, f in enumerate(order):
+        if used + cost_ms[f] <= budget_ms:
+            selected.append(f)
+            used += cost_ms[f]
+        elif i == 0 and share is not None:
+            selected.append(f)
+            used += cost_ms[f]
+            forced = cost_ms[f]
+    if not selected and order:
+        selected = [order[0]]
+        used = cost_ms[order[0]]
+    return selected, budget_ms, used, forced
+
+
+class TestJobBudget(unittest.TestCase):
+    def test_modes(self) -> None:
+        model = make_model(budget=make_budget(0.2, 0.5, 0.25))
+        cases: list[tuple[Any, Any, Any, dict[str, Any]]] = [
+            (make_model(), 0, 0.5, {"share": None, "mode": "none"}),
+            (make_model(), 0, 0.5, {"share": None, "mode": "stale"}),
+            (model, 0, 2.0, {"share": 0.2 * 1.5, "mode": "share", "risk": 1.0}),
+            (model, 1, 0.5, {"share": 0.2 * 1.5, "mode": "build_paths", "risk": None}),
+            (
+                model,
+                0,
+                None,
+                {"share": 0.2 * 1.5, "mode": "unknown_risk", "risk": None},
+            ),
+        ]
+        for i, (m, build_files, risk, want) in enumerate(cases):
+            reason = "stale: x" if want["mode"] == "stale" else None
+            got = scorer_model.job_budget(m, build_files, risk, reason, 500, 2000)
+            with self.subTest(case=i):
+                self.assertEqual({k: got[k] for k in want}, want)
+                if want["share"] is None:
+                    self.assertEqual(
+                        (got["risk"], got["cost_exponent"], got["budget_ms"]),
+                        (None, 1.0, 500),
+                    )
+                else:
+                    self.assertEqual(got["cost_exponent"], 0.25)
+                    self.assertEqual(got["budget_ms"], round(want["share"] * 2000))
+        odd = scorer_model.job_budget(make_model(), 0, 0.0, 5, 500, 2000)
+        self.assertEqual(odd["mode"], "none")
+
+
+class TestBudgetSelection(unittest.TestCase):
+    def select(
+        self, block: Any, include: list[TestRun], exclude: list[TestRun], times: Any
+    ) -> tuple[list[TestRun], list[TestRun], dict[str, Any]]:
+        return scorer.select_tests(block, include, exclude, times, "env1", "default")
+
+    def test_matches_the_contract_and_never_overspends(self) -> None:
+        rng = random.Random(7)
+        modes = set()
+        for trial in range(300):
+            tests = [f"t{i:02d}" for i in range(rng.randint(1, 50))]
+            times = {t: rng.choice([0.0, 1.0, rng.uniform(0, 3000)]) for t in tests}
+            scores = {t: rng.random() for t in tests if rng.random() < 0.3}
+            edited = {t: 1.0 for t in tests if rng.random() < 0.05}
+            spread = rng.choice([0.0, 0.5, rng.uniform(0, 0.85)])
+            share = rng.uniform(0.1001 / (1 - spread), 1.0)
+            a = rng.choice([0.0, 0.25, 0.5, 0.75, 1.0, rng.random()])
+            start_up = rng.choice([1.0, START_UP, rng.uniform(1, 600)])
+            model = make_model(
+                start_up_seconds={"env1": {"default": start_up}},
+                budget=make_budget(share, spread, a),
+            )
+            block = budget_block(
+                model,
+                build_files=rng.choice([0, 0, 0, 2, None]),
+                risk=rng.choice([None, rng.uniform(-1.5, 1.5), rng.uniform(-1, 1)]),
+                HeuristicA=scores,
+                EditedByPR=edited,
+            )
+            include, exclude = td_cut(tests, scores)
+            new_include, new_exclude, info = self.select(block, include, exclude, times)
+            expected, budget_ms, cost_ms, forced = reference_cut(
+                block, tests, include, times
+            )
+            modes.add(info["budget_mode"])
+            with self.subTest(trial=trial):
+                self.assertEqual(names(new_include), expected)
+                self.assertEqual(
+                    (info["budget_ms"], info["cost_ms"]), (budget_ms, cost_ms)
+                )
+                self.assertEqual(sorted(names(new_include) + names(new_exclude)), tests)
+                must_ms = sum(
+                    round((times[f] + start_up) * 1000) for f in sorted(edited)
+                )
+                forced_top = not edited and len(new_include) == 1
+                if not forced_top:
+                    self.assertLessEqual(
+                        info["cost_ms"], max(info["budget_ms"], must_ms) + forced
+                    )
+        self.assertEqual(modes, {"share", "build_paths", "unknown_risk"})
+
+    def test_share_of_all_files(self) -> None:
+        tests = [f"t{i}" for i in range(10)]
+        times = dict.fromkeys(tests, 30.0)
+        include, exclude = td_cut(tests, {"t3": 1.0})
+        block = budget_block(
+            make_model(budget=make_budget(0.4, 0.5, 0.5)),
+            risk=0.5,
+            HeuristicA={"t3": 1.0},
+        )
+        new_include, _, info = self.select(block, include, exclude, times)
+        self.assertEqual(info["budget_ms"], round(0.4 * (1 + 0.5 * 0.5) * 400_000))
+        self.assertEqual(info["budget_ms"], 200_000)
+        self.assertEqual(len(new_include), 5)
+        self.assertEqual(names(new_include)[0], "t3")
+        self.assertEqual(
+            {k: info[k] for k in ("share", "risk", "cost_exponent", "budget_mode")},
+            {"share": 0.5, "risk": 0.5, "cost_exponent": 0.5, "budget_mode": "share"},
+        )
+
+    def test_risk_reported_is_the_clamped_float(self) -> None:
+        tests = ["a", "b"]
+        include, exclude = td_cut(tests, {})
+        block = budget_block(make_model(budget=make_budget(0.5, 0.5)), risk=3)
+        _, _, info = self.select(block, include, exclude, dict.fromkeys(tests, 1.0))
+        self.assertEqual((info["risk"], info["share"]), (1.0, 0.75))
+
+    def test_top_file_when_nothing_fits(self) -> None:
+        tests = ["a", "b", "c"]
+        times = {"a": 100.0, "b": 100.0, "c": 100.0}
+        include, exclude = td_cut(tests, {"b": 1.0})
+        block = budget_block(make_model(budget=make_budget(0.1)), HeuristicA={"b": 1.0})
+        new_include, new_exclude, info = self.select(block, include, exclude, times)
+        self.assertEqual(names(new_include), ["b"])
+        self.assertEqual(names(new_exclude), ["a", "c"])
+        self.assertEqual(info["budget_ms"], 33_000)
+        self.assertEqual(info["cost_ms"], 110_000)
+
+        # With a share the top-ranked file runs even past must-run files.
+        block["heuristics"]["EditedByPR"] = {"c": 1.0}
+        new_include, new_exclude, info = self.select(block, include, exclude, times)
+        self.assertEqual(names(new_include), ["c", "b"])
+        self.assertEqual(names(new_exclude), ["a"])
+
+    def test_top_ranked_file_runs_past_the_budget_with_a_share(self) -> None:
+        # "big" ranks first by p / cost but costs more than the whole budget.
+        tests = ["big", "s1", "s2", "s3"]
+        times = {"big": 290.0, "s1": 0.0, "s2": 0.0, "s3": 0.0}
+        scores = {"big": 1.0}
+        include, exclude = td_cut(tests, {"s1": 1.0, "s2": 0.5})
+        model = make_model(budget=make_budget(0.1, 0.0, 0.0))
+        new_include, _, info = self.select(
+            budget_block(model, HeuristicA=scores), include, exclude, times
+        )
+        self.assertEqual(info["budget_ms"], 33_000)
+        self.assertEqual(names(new_include), ["big"])
+        self.assertEqual(info["cost_ms"], 300_000)
+        # Without a share, big is not forced in: it does not fit TD's cost.
+        old_include, _, old = self.select(
+            make_block(HeuristicA=scores), include, exclude, times
+        )
+        self.assertNotIn("big", names(old_include))
+        self.assertLessEqual(old["cost_ms"], old["budget_ms"])
+
+    def test_total_cost_zero(self) -> None:
+        block = budget_block(make_model(budget=make_budget()))
+        new_include, new_exclude, info = self.select(block, [], [], {})
+        self.assertEqual((new_include, new_exclude), ([], []))
+        self.assertEqual((info["budget_ms"], info["cost_ms"], info["n"]), (0, 0, 0))
+
+        model = make_model(
+            start_up_seconds={"env1": {"default": 5.0}}, budget=make_budget()
+        )
+        times = {"a": -4.9999999, "b": -4.9999999}
+        include, exclude = td_cut(["a", "b"], {})
+        new_include, _, info = self.select(budget_block(model), include, exclude, times)
+        self.assertEqual(names(new_include), ["a", "b"])
+        self.assertEqual((info["budget_ms"], info["cost_ms"]), (0, 0))
+
+    def test_no_block_or_stale_gives_the_td_cost_cut(self) -> None:
+        rng = random.Random(11)
+        for trial in range(100):
+            tests = [f"t{i:02d}" for i in range(rng.randint(1, 40))]
+            times = {t: rng.uniform(0, 1000) for t in tests}
+            scores = {t: rng.random() for t in tests if rng.random() < 0.3}
+            include, exclude = td_cut(tests, scores)
+            old = self.select(make_block(HeuristicA=scores), include, exclude, times)
+            stale = budget_block(make_model(), HeuristicA=scores)
+            stale["budget_reason"] = "stale: version 'x' is not a date"
+            cases = [
+                (budget_block(make_model(), HeuristicA=scores), "none"),
+                (budget_block(make_model(), None, None, HeuristicA=scores), "none"),
+                (stale, "stale"),
+            ]
+            for block, mode in cases:
+                with self.subTest(trial=trial, mode=mode):
+                    new = self.select(block, include, exclude, times)
+                    self.assertEqual(new[:2], old[:2])
+                    for key in ("budget_ms", "cost_ms", "n", "seconds", "hash"):
+                        self.assertEqual(new[2][key], old[2][key])
+                    self.assertEqual(
+                        (new[2]["share"], new[2]["risk"], new[2]["cost_exponent"]),
+                        (None, None, 1.0),
+                    )
+                    self.assertEqual(new[2]["budget_mode"], mode)
+        self.assertEqual(old[2]["budget_mode"], "none")
+
+    def test_build_paths_and_unknown_risk_get_the_top_of_the_window(self) -> None:
+        rng = random.Random(13)
+        model = make_model(budget=make_budget(0.3, 0.5, 0.25))
+        top = 0.3 * (1 + 0.5)
+        differs = 0
+        for trial in range(100):
+            tests = [f"t{i:02d}" for i in range(rng.randint(1, 40))]
+            times = {t: rng.uniform(0, 1000) for t in tests}
+            scores = {t: rng.random() for t in tests if rng.random() < 0.3}
+            include, exclude = td_cut(tests, scores)
+            old = self.select(make_block(HeuristicA=scores), include, exclude, times)
+            at_r1 = self.select(
+                budget_block(model, 0, 1.0, HeuristicA=scores), include, exclude, times
+            )
+            self.assertEqual(at_r1[2]["share"], top)
+            differs += at_r1[2]["budget_ms"] != old[2]["budget_ms"]
+            cases = [
+                (budget_block(model, 1, HeuristicA=scores), "build_paths"),
+                (budget_block(model, None, HeuristicA=scores), "build_paths"),
+                (budget_block(model, 0, None, HeuristicA=scores), "unknown_risk"),
+                (budget_block(model, 0, math.nan, HeuristicA=scores), "unknown_risk"),
+            ]
+            for block, mode in cases:
+                with self.subTest(trial=trial, mode=mode):
+                    new = self.select(block, include, exclude, times)
+                    self.assertEqual(new[:2], at_r1[:2])
+                    for key in ("budget_ms", "cost_ms", "n", "seconds", "hash"):
+                        self.assertEqual(new[2][key], at_r1[2][key])
+                    self.assertEqual(
+                        (new[2]["share"], new[2]["risk"], new[2]["cost_exponent"]),
+                        (top, None, 0.25),
+                    )
+                    self.assertEqual(new[2]["budget_mode"], mode)
+        self.assertGreater(differs, 90)
+
+    def test_unlisted_job_keeps_td_cut_with_a_budget(self) -> None:
+        block = budget_block(make_model(budget=make_budget()))
+        include, exclude = td_cut(["a", "b"], {})
+        with self.assertRaisesRegex(scorer.NoModel, "no start-up for env9/default"):
+            scorer.select_tests(block, include, exclude, {}, "env9", "default")
+
+    def test_odd_block_fields_do_not_raise(self) -> None:
+        include, exclude = td_cut(["a", "b"], {})
+        block = budget_block(make_model(budget=make_budget()), "3", "x")
+        block["budget_reason"] = 5
+        _, _, info = self.select(block, include, exclude, {"a": 1.0, "b": 1.0})
+        self.assertEqual(info["budget_mode"], "build_paths")
+        del block["build_files"], block["budget_reason"]
+        _, _, info = self.select(block, include, exclude, {"a": 1.0, "b": 1.0})
+        self.assertEqual(info["budget_mode"], "build_paths")
+
+    def test_cost_exponent_scalar_parity(self) -> None:
+        model = make_model()
+        model["scorer"]["cost_weight"] = 0.0
+        model["scorer"]["intercept"] = 0.0
+        model["scorer"]["build_env"] = {}
+        model["scorer"]["test_config"] = {}
+        model["scorer"]["heuristics"] = {
+            "HeuristicA": {"weight": 1.0, "x": [0.0, 1.0], "y": [0.001, 0.02]}
+        }
+        times = {"big": 390.0, "s1": 0.0, "s2": 0.0}
+        p_big = scorer_model.file_probability(model, {"HeuristicA": 1.0}, 400.0, "", "")
+        p_small = scorer_model.file_probability(model, {}, 10.0, "", "")
+        self.assertAlmostEqual(p_big, 0.02)
+        self.assertAlmostEqual(p_small, 0.001)
+        include, exclude = td_cut(list(times), {"big": 1.0})
+        for a, hand, expected in (
+            (0.5, (0.02 / 20, 0.001 / 3.1622776601683795), ["big"]),
+            (0.75, (0.02 / 89.44271909999159, 0.001 / 5.623413251903491), ["big"]),
+            (1.0, (0.02 / 400, 0.001 / 10), ["s1", "s2"]),
+        ):
+            with self.subTest(a=a):
+                self.assertEqual(
+                    p_big / 400.0**a > p_small / 10.0**a, hand[0] > hand[1]
+                )
+                self.assertAlmostEqual(p_big / 400.0**a, hand[0])
+                self.assertAlmostEqual(p_small / 10.0**a, hand[1])
+                block = budget_block(
+                    make_model(**{**model, "budget": make_budget(405 / 420, 0.0, a)}),
+                    HeuristicA={"big": 1.0},
+                )
+                new_include, _, info = self.select(block, include, exclude, times)
+                self.assertEqual(info["budget_ms"], 405_000)
+                self.assertEqual(sorted(names(new_include)), expected)
+                self.assertEqual(info["cost_exponent"], a)
 
 
 if __name__ == "__main__":
