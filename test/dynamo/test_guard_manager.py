@@ -773,7 +773,8 @@ class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(root.check(values))
         self.assertFalse(root.check({**values, "b": values["a"]}))
 
-    def test_storage_overlap_diff_participant_closure(self):
+    @parametrize("partition", [False, True])
+    def test_storage_overlap_diff_participant_closure(self, partition):
         from torch._dynamo.guards import GuardManagerWrapper
 
         storage = torch.randn(6)
@@ -783,7 +784,12 @@ class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
             root.dict_getitem_manager(name, name, value, default_mgr_enum)
             for name, value in values.items()
         ]
-        install_storage_overlapping_guard(managers[:2], managers[2:], [], None)
+        if partition:
+            guards.install_storage_overlap_partition_guard(
+                managers, ((0, 1),), [], None
+            )
+        else:
+            install_storage_overlapping_guard(managers[:2], managers[2:], [], None)
         wrapper = GuardManagerWrapper(root)
         wrapper.diff_guard_sources.add("a")
         wrapper.prepare_diff_guard_manager()
