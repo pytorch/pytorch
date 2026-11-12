@@ -339,7 +339,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             artifact = os.path.join(directory, "mro.py")
             cache = os.path.join(directory, "mro.cache")
             with self.assertRaisesRegex(
-                PrecompileError, "dropped guard.*__mro__.*MRO bases.*importable"
+                PrecompileError,
+                "dropped guard.*__mro__.*MRO bases and their metaclasses.*nested namedtuple",
             ):
                 with capture(
                     _mro_sum,
@@ -600,7 +601,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # from Python 3.11 on; before that it is a _SpecialForm, guarded by an
         # ID_MATCH that is kept because it pickles as the global typing.Any.
         any_is_class = isinstance(pytree.Any, type)
-        class_matches, id_matches = (2, 2) if any_is_class else (1, 3)
+        # The object entry in TreeSpec's MRO also needs an identity guard.
+        class_matches, id_matches = (2, 3) if any_is_class else (1, 4)
         self.assertEqual(
             counts - control_counts,
             {
@@ -633,16 +635,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertTrue(loaded_control.guard_check(x))
 
     def test_default_guard_filter_keeps_local_type_guards_for_a_loud_refusal(self):
-        # A local-scope class passes the filter (the TYPE_MATCH on L['obj'] is
-        # kept) and serialization refuses it, naming the class. The filter keeps
-        # the guard so the refusal is loud rather than an artifact that never
-        # checks the type. For a plain instance the pickler refuses anyway, so
-        # dropping the TYPE_MATCH only moves the refusal from serialize_guards'
-        # pre-check to reducer_override; for an nn.Module of a local class it
-        # does not (the instance is rebuilt as a plain torch.nn.Module), so
-        # there the kept TYPE_MATCH is the only refusal: drop it and the
-        # artifact ships, and serves the local class's graph to a module of
-        # another class.
+        # The default filter keeps the local class's TYPE_MATCH and MRO guards,
+        # so serialization refuses it. Dropping TYPE_MATCH alone still refuses
+        # a plain instance in reducer_override. The module control also drops
+        # MRO guards: it loads as base Module and would otherwise fail that
+        # snapshot before exposing the deliberately missing type protection.
         def drop_type_match(entries):
             # The control: the pre-check's type tests minus every TYPE_MATCH.
             return [
@@ -650,11 +647,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             ]
 
         def drop_local_type_match(entries):
-            # The narrow control: minus only the TYPE_MATCHes the pre-check
-            # refuses, on a type whose qualname is not its name (guards.py's own
-            # test, in TYPE_MATCH's _unserializable and in reducer_override). It
-            # is narrow so that the only guard the module case below loses is the
-            # one on the module's own type.
+            # Drop the refused local TYPE_MATCHes and MRO lengths: a local module
+            # reloads as base Module, which cannot satisfy its captured MRO length.
             def local_type_match(e):
                 t = type(e.value)
                 return e.guard_type == "TYPE_MATCH" and t.__qualname__ != t.__name__
@@ -2733,8 +2727,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
     def test_precompile_session_snapshot_refuses_behind_the_gates(self):
         from torch._precompile import _parse_artifact_metadata
 
-        def step(model, x):
-            y = model(x)
+        def step(model, x__mro__tag):
+            y = model(x__mro__tag)
             torch._dynamo.graph_break()
             return y.sum(dim=0) + y.shape[0]
 
@@ -2761,13 +2755,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             step,
             backend="eager",
             guard_filter_fn=lambda es: [
-                keep and e.name != "x" for keep, e in zip(default(es), es)
+                keep and e.name != "x__mro__tag" for keep, e in zip(default(es), es)
             ],
         )
         with custom as call:
             call(model, torch.ones(2, 4))
-        with self.assertRaisesRegex(PackageError, "can affect dispatch"):
+        with self.assertRaisesRegex(PackageError, "can affect dispatch") as error:
             custom.snapshot_artifact()
+        self.assertNotIn("MRO bases", str(error.exception))
         custom.snapshot_artifact(require_no_risky_drops=False)
 
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
