@@ -1,12 +1,13 @@
 # Owner(s): ["module: inductor"]
 
 import torch
+import torch.nn.functional as F
 from torch._inductor import config, ir
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.debug import DebugContext
 from torch._inductor.dependencies import extract_read_writes
 from torch._inductor.graph import GraphLowering
-from torch._inductor.utils import JaggedRange
+from torch._inductor.utils import JaggedRange, run_and_get_code
 from torch._inductor.virtualized import ops, V
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -261,6 +262,192 @@ class TestJaggedReductionIR(TestCase):
         )
         self.assertNotIn("ynumel", code)
         self.assertEqual(actual, torch.segment_reduce(values, "sum", offsets=offsets))
+
+    @parametrize("reduce", ["sum", "mean", "max", "min", "prod", "amax", "amin"])
+    @parametrize("shape", [(1030,), (1030, 3)])
+    def test_segment_reduce_offsets(self, reduce, shape):
+        offsets = torch.tensor([0, 2, 2, 1029, 1030], device="cuda")
+        data = 1 + 0.001 * torch.randn(shape, device="cuda")
+
+        def fn(data, offsets):
+            return torch.segment_reduce(data, reduce, offsets=offsets)
+
+        actual, codes = run_and_get_code(torch.compile(fn), data, offsets)
+        self.assertIn("r0_bound", "\n".join(codes))
+        self.assertEqual(actual, fn(data, offsets))
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_segment_reduce_low_precision(self, dtype):
+        offsets = torch.tensor([0, 2, 2, 1029, 1030], device="cuda")
+        data = torch.rand(1030, 3, device="cuda", dtype=dtype) + 0.5
+
+        def fn(data, offsets):
+            return torch.segment_reduce(data, "sum", offsets=offsets)
+
+        actual, codes = run_and_get_code(torch.compile(fn), data, offsets)
+        self.assertIn("r0_bound", "\n".join(codes))
+        # Eager accumulates in the data dtype; compare with an fp64 reference.
+        expected = fn(data.double(), offsets).to(dtype)
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
+
+    def test_segment_reduce_inner_axis(self):
+        offsets = torch.tensor([[0, 3, 3, 7], [0, 0, 5, 7]], device="cuda").int()
+        data = torch.randn(2, 7, 4, device="cuda")
+
+        def fn(data, offsets):
+            return torch.segment_reduce(data, "sum", offsets=offsets, axis=1)
+
+        actual, codes = run_and_get_code(torch.compile(fn), data, offsets)
+        self.assertIn("r0_bound", "\n".join(codes))
+        self.assertEqual(actual, fn(data, offsets))
+
+    @parametrize("unsafe", [True, False])
+    def test_segment_reduce_lengths(self, unsafe):
+        lengths = torch.tensor([2, 0, 1027, 1], device="cuda")
+        data = torch.randn(1030, 3, device="cuda")
+
+        def fn(data, lengths):
+            return torch.segment_reduce(data, "max", lengths=lengths, unsafe=unsafe)
+
+        actual, codes = run_and_get_code(torch.compile(fn), data, lengths)
+        code = "\n".join(codes)
+        self.assertIn("r0_bound", code)
+        # Without unsafe=True, eager's host checks become device asserts.
+        self.assertEqual("lengths contains negative value" in code, not unsafe)
+        self.assertEqual(actual, fn(data, lengths))
+
+    @parametrize("segments", ["offsets", "lengths", "unsafe_lengths"])
+    def test_segment_reduce_negative_axis(self, segments):
+        offsets = torch.tensor([[0, 3, 3, 7], [0, 0, 5, 7]], device="cuda")
+        data = torch.randn(2, 7, 4, device="cuda")
+        if segments != "offsets":
+            offsets = offsets.diff()
+
+        def fn(data, offsets):
+            if segments == "offsets":
+                return torch.segment_reduce(data, "sum", offsets=offsets, axis=-2)
+            return torch.segment_reduce(
+                data,
+                "sum",
+                lengths=offsets,
+                axis=-2,
+                unsafe=segments == "unsafe_lengths",
+            )
+
+        actual, codes = run_and_get_code(torch.compile(fn), data, offsets)
+        self.assertIn("r0_bound", "\n".join(codes))
+        self.assertEqual(actual, fn(data, offsets))
+
+    @parametrize(
+        "reduce,initial,lowered",
+        [
+            ("sum", 0, True),
+            ("mean", 0, True),
+            ("prod", 1, True),
+            ("max", 0, True),
+            ("max", float("-inf"), True),
+            ("min", 0.5, True),
+            ("sum", 1.0, False),
+            ("prod", 2.0, False),
+        ],
+    )
+    def test_segment_reduce_initial(self, reduce, initial, lowered):
+        lengths = torch.tensor([2, 0, 1027, 1], device="cuda")
+        data = torch.randn(1030, 3, device="cuda")
+        if reduce == "prod":
+            data = 1 + 0.001 * data
+
+        def fn(data, lengths):
+            return torch.segment_reduce(
+                data, reduce, lengths=lengths, unsafe=True, initial=initial
+            )
+
+        actual, codes = run_and_get_code(torch.compile(fn), data, lengths)
+        self.assertEqual("r0_bound" in "\n".join(codes), lowered)
+        self.assertEqual(actual, fn(data, lengths))
+
+    def test_segment_reduce_constant_offsets(self):
+        data = torch.randn(1030, 3, device="cuda")
+
+        def fn(data):
+            offsets = F.pad(torch.arange(10, 1031, 10, device=data.device), (1, 0))
+            return torch.segment_reduce(data, "sum", offsets=offsets)
+
+        actual, codes = run_and_get_code(torch.compile(fn), data)
+        self.assertIn("r0_bound", "\n".join(codes))
+        self.assertEqual(actual, fn(data))
+
+    def test_segment_reduce_horizontal_fusion(self):
+        offsets = torch.tensor([0, 2, 2, 1029, 1030], device="cuda")
+        other = torch.tensor([0, 10, 20, 30, 1030], device="cuda")
+        data = torch.randn(1030, 3, device="cuda")
+
+        def same_offsets(data, offsets):
+            return (
+                torch.segment_reduce(data, "sum", offsets=offsets),
+                torch.segment_reduce(data, "max", offsets=offsets),
+            )
+
+        def same_lengths(data, lengths):
+            return (
+                torch.segment_reduce(data, "sum", lengths=lengths, unsafe=True),
+                torch.segment_reduce(data, "max", lengths=lengths, unsafe=True),
+            )
+
+        def different_offsets(data, offsets, other):
+            return (
+                torch.segment_reduce(data, "sum", offsets=offsets),
+                torch.segment_reduce(data, "sum", offsets=other),
+            )
+
+        # One jagged reduction kernel per distinct offsets or lengths, plus
+        # one scan for lengths.
+        for fn, args, launches in [
+            (same_offsets, (data, offsets), 1),
+            (same_lengths, (data, offsets.diff()), 2),
+            (different_offsets, (data, offsets, other), 2),
+        ]:
+            actual, codes = run_and_get_code(torch.compile(fn), *args)
+            self.assertEqual("\n".join(codes).count(".run("), launches)
+            self.assertEqual(actual, fn(*args))
+
+    def test_segment_reduce_vertical_prologue(self):
+        offsets = torch.tensor([0, 2, 2, 1029, 1030], device="cuda")
+        data = torch.randn(1030, 3, device="cuda")
+
+        def pointwise(data, offsets):
+            return torch.segment_reduce((data * 2 + 1).relu(), "sum", offsets=offsets)
+
+        def stored(data, offsets):
+            y = (data * 2 + 1).relu()
+            return y, torch.segment_reduce(y, "sum", offsets=offsets)
+
+        # A pointwise prologue is inlined into the jagged loop. A prologue that
+        # is stored runs as its own kernel.
+        for fn, launches in [(pointwise, 1), (stored, 2)]:
+            actual, codes = run_and_get_code(torch.compile(fn), data, offsets)
+            self.assertEqual("\n".join(codes).count(".run("), launches)
+            self.assertEqual(actual, fn(data, offsets), atol=1e-4, rtol=1e-4)
+
+    def test_segment_reduce_vertical_epilogue(self):
+        offsets = torch.tensor([0, 2, 2, 1029, 1030], device="cuda")
+        data = torch.randn(1030, 3, device="cuda")
+        bias = torch.randn(3, device="cuda")
+
+        def pointwise(data, offsets, bias):
+            out = torch.segment_reduce(data, "sum", offsets=offsets)
+            return torch.relu(out * 2 + bias)
+
+        def across_segments(data, offsets, bias):
+            out = torch.segment_reduce(data, "sum", offsets=offsets)
+            return out / out.sum(0) + bias
+
+        # A pointwise epilogue runs after the jagged loop in the same kernel. An
+        # epilogue that reduces across segments needs every segment first.
+        for fn, launches in [(pointwise, 1), (across_segments, 2)]:
+            actual, codes = run_and_get_code(torch.compile(fn), data, offsets, bias)
+            self.assertEqual("\n".join(codes).count(".run("), launches)
+            self.assertEqual(actual, fn(data, offsets, bias), atol=1e-4, rtol=1e-4)
 
 
 instantiate_parametrized_tests(TestJaggedReductionIR)
