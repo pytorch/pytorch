@@ -1,9 +1,8 @@
 # Owner(s): ["module: rocm"]
 name: linux-binary-test-rocm
 
-# Reusable ROCm manywheel binary test. Docker Hub tags use GHA container:.
-# ECR tags are pulled after ecr-login: ROCm runners have no instance profile,
-# so the container: pull cannot authenticate to ECR.
+# Reusable ROCm manywheel binary test. Every image runs via docker run.
+# ECR images pull after ecr-login: ROCm runners have no instance profile.
 
 on:
   workflow_call:
@@ -39,7 +38,7 @@ on:
         description: |
           Registry host prefix (with trailing slash) prepended to the
           pytorch/<image> path. Empty means Docker Hub. A non-empty host
-          (ECR) is pulled with docker run after ecr-login.
+          (ECR) logs in first.
       DESIRED_PYTHON:
         required: false
         type: string
@@ -60,9 +59,6 @@ jobs:
   test:
     runs-on: ${{ inputs.runs_on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
-    container:
-      image: ${{ inputs.DOCKER_IMAGE_REGISTRY_HOST == '' && format('pytorch/{0}:{1}', inputs.DOCKER_IMAGE, inputs.DOCKER_IMAGE_TAG_PREFIX) || '' }}
-      options: ${{ inputs.DOCKER_IMAGE_REGISTRY_HOST == '' && '--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon' || ' ' }}
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
@@ -127,27 +123,7 @@ jobs:
             echo "SHA1=${SHA1}"
           } >> "${GITHUB_ENV}"
 
-      # Docker Hub: steps already run inside the container: image.
-      - name: Populate binary env
-        if: inputs.DOCKER_IMAGE_REGISTRY_HOST == ''
-        shell: bash
-        run: bash .ci/pytorch/binary_populate_env.sh
-
       - name: Test PyTorch binary
-        if: inputs.DOCKER_IMAGE_REGISTRY_HOST == ''
-        shell: bash
-        env:
-          OUTPUT_SCRIPT: /run.sh
-        run: |
-          ln -sf "${GITHUB_WORKSPACE}" /pytorch
-          ln -sf "${PYTORCH_FINAL_PACKAGE_DIR}" /final_pkgs
-          bash .ci/pytorch/binary_linux_test.sh
-          source "${BINARY_ENV_FILE}"
-          bash -x /run.sh
-
-      # ECR: pull after login, then run the same scripts inside the container.
-      - name: Test PyTorch binary (ECR)
-        if: inputs.DOCKER_IMAGE_REGISTRY_HOST != ''
         shell: bash
         run: |
           set -x
@@ -176,6 +152,8 @@ jobs:
             -w / \
             "${DOCKER_IMAGE}"
           )
+          # Cleanup removes only this container; shared runners may run other jobs.
+          echo "BINARY_CONTAINER=${container_name}" >> "${GITHUB_ENV}"
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .ci/pytorch/binary_populate_env.sh"
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT=/run.sh "${container_name}" bash -c "
             ln -sf '${GITHUB_WORKSPACE}' /pytorch
@@ -185,8 +163,9 @@ jobs:
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
 
       - name: Cleanup docker
-        if: ${{ always() && inputs.DOCKER_IMAGE_REGISTRY_HOST != '' }}
+        if: always()
         shell: bash
         run: |
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
+          if [[ -n "${BINARY_CONTAINER:-}" ]]; then
+            docker rm -f "${BINARY_CONTAINER}" || true
+          fi
