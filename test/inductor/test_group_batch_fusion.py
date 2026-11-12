@@ -1046,13 +1046,67 @@ class TestGroupBatchFusion(TestCase):
             generate_fusion_from_config,
         )
 
-        self.assertEqual(
-            generate_fusion_from_config({"batch_linear_lhs": {}}, pre_grad=True), []
-        )
+        # batch_linear_lhs is registered post grad. The old pre-grad key is
+        # forwarded by group_batch_fusion_passes; the E2E test above covers it.
         self.assertEqual(
             len(generate_fusion_from_config({"batch_linear_lhs": {}}, pre_grad=False)),
             1,
         )
+        # Other cross-stage fusion options still fail loudly.
+        with self.assertRaises(KeyError):
+            generate_fusion_from_config({"group_linear": {}}, pre_grad=True)
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2}
+        },
+    )
+    def test_batch_linear_lhs_pre_grad_option_runs_post_grad(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(64, 16, bias=False)
+                self.b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                return torch.sin(self.a(x)), torch.cos(self.b(x))
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        # Existing configs still enable the fusion through the pre-grad option;
+        # it now runs in the post-grad pass.
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("xpu",), "min_fuse_set_size": 2}
+        },
+    )
+    def test_batch_linear_lhs_pre_grad_option_respects_devices(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(64, 16, bias=False)
+                self.b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                return torch.sin(self.a(x)), torch.cos(self.b(x))
+
+        counters.clear()
+        module = M().eval()
+        x = torch.randn(32, 64)
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        # The forwarded pre-grad option keeps its device restriction; this is a
+        # CPU graph, so the XPU-only option must not fuse.
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
 
     @parametrize("consumer", ["custom_contiguous", "merge_view"])
     @torch._inductor.config.patch(
