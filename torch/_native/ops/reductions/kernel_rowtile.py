@@ -879,17 +879,11 @@ def reduce_row_tile(
     # order="inner_tree" selects the tree here, and it raises rather than use another DAG.
     if order not in (None, "linear", "inner_tree"):
         raise ValueError(f"order must be None, 'linear' or 'inner_tree', got {order!r}")
-    # Empty rows have no defined min, max or arg result.
-    if ragged_vector and N < 1:
-        raise ValueError(f"ragged vectors require nonempty rows, got {N=}")
-    if ragged_vector and order == "inner_tree":
-        raise ValueError("ragged vectors require the linear order")
-    if ragged_vector and use_tma:
-        raise ValueError("ragged vectors cannot use TMA")
     # Rows of whole vectors have no edges; normal path selection folds them with one
     # kernel per vector class rather than one per width.
-    whole = tile.align_bytes(N, x.element_size()) == tile.TRANSFER_ALIGNMENT
-    ragged_vector = ragged_vector and not whole
+    if ragged_vector:
+        vec = tile.ragged_vector_width(N, x.element_size(), order, use_tma)
+        ragged_vector = N % vec != 0
     itree = None
     if order == "inner_tree" and final and threads_per_row is None:
         itree = trait_itree_plan(trait, N, M, x.element_size(), device=x.device)
