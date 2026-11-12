@@ -299,12 +299,14 @@ struct C10_API PyInterpreterVTable {
   virtual bool fake_try_meta(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const = 0;
-  // Needs an active mode. real (nullable, borrowed) is the fake_run_real_op
+  // Takes the fallback's uninstalled mode; run_fake_impl enters it.
+  // real (nullable, borrowed) is the fake_run_real_op
   // result, used if a profile-generated fake kernel has no profile for these
   // inputs.
   virtual bool fake_try_custom_op_impl(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
+      const std::shared_ptr<c10::FakeTensorMode>& mode,
       PyObject* real) const = 0;
   // Takes the fallback's mode, which is uninstalled while handlers run.
   // Non-fake Meta outputs are converted to fakes on common_device.
