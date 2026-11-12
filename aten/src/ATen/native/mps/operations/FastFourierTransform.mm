@@ -7,6 +7,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/FFT.h>
 #include <algorithm>
+#include <list>
 #include <numeric>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -143,12 +144,20 @@ int64_t chirp_fft_size(int64_t n) {
 enum class Table { W, W2, Chirp, ChirpFFT };
 
 Tensor table(Table kind, int64_t n, bool inverse = false) {
+  using Key = std::tuple<Table, int64_t, bool>;
+  constexpr size_t kMaxSize = 4096;
   static std::mutex mutex;
-  static std::map<std::tuple<Table, int64_t, bool>, Tensor> cache;
+  static std::list<std::pair<Key, Tensor>> usage_list;
+  static std::map<Key, decltype(usage_list)::iterator> cache;
   std::lock_guard<std::mutex> guard(mutex);
-  auto& t = cache[{kind, n, inverse}];
-  if (t.defined()) {
-    return t;
+  const Key key{kind, n, inverse};
+  if (const auto it = cache.find(key); it != cache.end()) {
+    usage_list.splice(usage_list.begin(), usage_list, it->second);
+    return it->second->second;
+  }
+  if (usage_list.size() >= kMaxSize) {
+    cache.erase(usage_list.back().first);
+    usage_list.pop_back();
   }
   const auto k = kind == Table::W2
       ? at::cat({at::arange(kFFTTwiddleBlock, at::kDouble), at::arange(0, n, kFFTTwiddleBlock, at::kDouble)})
@@ -161,7 +170,9 @@ Tensor table(Table kind, int64_t n, bool inverse = false) {
   const auto b = kind == Table::ChirpFFT
       ? at::fft_fft(at::cat({c.conj(), at::zeros({M - 2 * n + 1}, c.options()), c.narrow(0, 1, n - 1).conj().flip(0)}))
       : c;
-  return t = b.to(at::device(kMPS).dtype(kComplexFloat));
+  usage_list.emplace_front(key, b.to(at::device(kMPS).dtype(kComplexFloat)));
+  cache[key] = usage_list.begin();
+  return usage_list.front().second;
 }
 
 struct Dim {
@@ -635,7 +646,7 @@ Tensor& _fft_c2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
   if (dim.empty()) {
     return out.copy_(self);
   }
-  if (needs_fp32(self, out, dim, self.size(dim.back()))) {
+  if (out.scalar_type() != self.scalar_type() || needs_fp32(self, out, dim, self.size(dim.back()))) {
     return out.copy_(_fft_c2c_mps(self.to(kComplexFloat), dim, normalization, forward));
   }
   const auto scale = norm_scale(normalization, self, dim);
