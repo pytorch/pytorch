@@ -73,6 +73,7 @@ from ..source import (
     CallFunctionNoArgsSource,
     DictGetItemSource,
     GetItemSource,
+    is_constant_source,
     RandomValueSource,
     TypeMROSource,
     TypeSource,
@@ -970,6 +971,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not is_torch_class(self.value)
             and name not in ("__get__", "__set__", "__delete__")
         ):
+            if self.source is not None:
+                source = self.get_source_by_walking_mro(tx, name)
             return VariableBuilder.create_internal_wrapper_descriptor(
                 cls_attr,
                 owner=self._descriptor_defining_class_vt(tx, cls_attr),
@@ -982,6 +985,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not is_torch_class(self.value)
             and name not in ("__get__", "__set__", "__delete__")
         ):
+            if self.source is not None:
+                source = self.get_source_by_walking_mro(tx, name)
             return VariableBuilder.create_internal_method_descriptor(
                 cls_attr,
                 owner=self._descriptor_defining_class_vt(tx, cls_attr),
@@ -4001,11 +4006,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> None:
         cls = type(self.value)
         if self.cls_source:
-            mro_attr_source(tx, cls, self.cls_source, name, guard_absence=True)
+            mro_attr_source(tx, cls, self.cls_source, name)
             if not config.assume_dunder_attributes_remain_unchanged:
-                mro_attr_source(
-                    tx, cls, self.cls_source, "__getattr__", guard_absence=True
-                )
+                mro_attr_source(tx, cls, self.cls_source, "__getattr__")
         effects = tx.output.side_effects
         if not self.source or any(
             effects.has_pending_mutation_of_attr(self, attr)
@@ -4125,6 +4128,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if result is not None:
             if (
                 self.source
+                and self._object_has_getattribute
                 and isinstance(self, variables.UnspecializedNNModuleVariable)
                 and hasattr(self.value, "__dict__")
                 and name not in self.value.__dict__
@@ -4489,6 +4493,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         getattr_fn = self._check_for_getattr()
         if isinstance(getattr_fn, types.FunctionType):
+            if not self._object_has_getattribute:
+                if self.cls_source is not None and not is_constant_source(
+                    self.cls_source
+                ):
+                    mro_attr_source(tx, self.value_type, self.cls_source, name)
+                # Install before inlining so nested graph breaks preserve the guard.
+                # A traced deletion may leave the name present in the live dict.
+                if (
+                    self.source
+                    and not is_constant_source(self.source)
+                    and hasattr(self.value, "__dict__")
+                    and name not in self.value.__dict__
+                ):
+                    install_not_in_instance_dict_guard(self.source, name)
             if (
                 getattr_fn is unpatched_nn_module_getattr
                 and isinstance(self, variables.UnspecializedNNModuleVariable)

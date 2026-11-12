@@ -166,8 +166,11 @@ if(NOT __AOTRITON_INCLUDED)
       list(APPEND __AOTRITON_ROCM_ARGS "-Dhip_DIR=${ROCM_PATH}/lib/cmake/hip")
     endif()
     # TheRock vendors liblzma; its prefix lets pkg_search_module find liblzma.pc.
+    # The RPATH lets non-wheel builds load it; repair_wheel.py rewrites it for wheels.
     if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib/pkgconfig")
-      list(APPEND __AOTRITON_ROCM_ARGS "-DCMAKE_PREFIX_PATH=${ROCM_PATH}/lib/rocm_sysdeps")
+      list(APPEND __AOTRITON_ROCM_ARGS
+        "-DCMAKE_PREFIX_PATH=${ROCM_PATH}/lib/rocm_sysdeps"
+        "-DCMAKE_INSTALL_RPATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
     endif()
 
     ExternalProject_Add(${project}

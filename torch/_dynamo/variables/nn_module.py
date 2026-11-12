@@ -1638,8 +1638,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     ) -> VariableTracker | None:
         dict_vt = self.tp_getattro_impl(tx, field)
         if isinstance(dict_vt, variables.ConstDictVariable):
-            dict_vt.install_dict_contains_guard(tx, HashableTracker(name_vt))
-            return dict_vt.maybe_getitem_const(name_vt)
+            result = dict_vt.maybe_getitem_const(name_vt)
+            if result is None:
+                # Successful lookups guard the sourced value; misses need a presence guard.
+                dict_vt.install_dict_contains_guard(tx, HashableTracker(name_vt))
+            return result
         return None
 
     def tp_getattro_impl(
@@ -1742,9 +1745,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                         return tx.output.side_effects.track_mutable(hooks_dict, result)
                     return result
 
-        # Hook IDs differ across equivalent module instances (RemovableHandle;
-        # https://github.com/pytorch/pytorch/issues/125836). Track them lazily so
-        # dispatch can reuse graphs while code observing IDs reads or guards them.
+        # Hook IDs vary across modules: https://github.com/pytorch/pytorch/issues/125836.
+        # Keep IDs lazy for dispatch reuse; observations read or guard the runtime value.
         if (
             self.source
             and name
@@ -1816,9 +1818,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         name_vt = SourcelessBuilder.create(tx, name)
         out = self.getattr_helper(tx, "_parameters", name_vt)
         if out is None:
-            out = self.getattr_helper(tx, "_modules", name_vt)
-        if out is None:
             out = self.getattr_helper(tx, "_buffers", name_vt)
+        if out is None:
+            out = self.getattr_helper(tx, "_modules", name_vt)
         if out is None:
             raise_observed_exception(
                 AttributeError,
