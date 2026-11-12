@@ -7,6 +7,7 @@ import contextlib
 import datetime
 import enum
 import functools
+import gc
 import inspect
 import itertools
 import keyword
@@ -21,6 +22,7 @@ import time
 import types
 import typing
 import unittest
+import weakref
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
 from typing_extensions import NamedTuple
@@ -32,10 +34,10 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
-from torch._dynamo import decorators, trace_rules
+from torch._dynamo import decorators, precompile_package, trace_rules
 from torch._dynamo.comptime import comptime
-from torch._dynamo.exc import Unsupported
-from torch._dynamo.source import SkipGuardSource
+from torch._dynamo.exc import PackageError, Unsupported
+from torch._dynamo.source import GetItemSource, SkipGuardSource, TypeMROSource
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
@@ -260,19 +262,18 @@ _RANDOM_KEYS = (random.Random().random, random.Random().random)
 
 
 class FunctionTests(torch._dynamo.test_case.TestCase):
-    def test_prebound_slot_wrapper_metadata(self):
+    @parametrize("capture", ["ordinary", "aot", "cache"])
+    def test_prebound_slot_wrapper_metadata(self, capture):
         def fn(x, method):
             return x + 1, method, method.__qualname__
 
         receiver = collections.OrderedDict()
-        methods = [
-            owner.__get__(receiver)
-            for owner in (
-                dict.__setitem__,
-                collections.OrderedDict.__setitem__,
-                dict.__delitem__,
-            )
-        ]
+        descriptors = (
+            dict.__setitem__,
+            collections.OrderedDict.__setitem__,
+            dict.__delitem__,
+        )
+        methods = [owner.__get__(receiver) for owner in descriptors]
 
         class Spoof(types.SimpleNamespace):
             @property
@@ -285,15 +286,31 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             __objclass__=dict,
             __qualname__="spoof",
         )
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.ones(1)
-        for method in (*methods, spoof, dict.__setitem__.__get__(receiver)):
-            actual = compiled(x, method)
-            self.assertEqual(actual[0], x + 1)
-            self.assertIs(actual[1], method)
-            self.assertEqual(actual[2], method.__qualname__)
-        self.assertEqual(counter.frame_count, 4)
+        counter = torch._dynamo.testing.CompileCounter()
+        with torch._dynamo.config.patch(
+            caching_precompile=capture == "cache", debug_force_nested_calls=False
+        ):
+            compiled = torch.compile(
+                fn, backend="eager" if capture == "aot" else counter, fullgraph=True
+            )
+            if capture == "aot":
+                compiled = compiled.aot_compile(((x, methods[0]), {}))
+                self.assertEqual(compiled(x, methods[0]), fn(x, methods[0]))
+                with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+                    compiled(x, methods[1])
+                return
+            cases = (
+                methods
+                if capture == "cache"
+                else (*methods, spoof, dict.__setitem__.__get__(receiver))
+            )
+            for method in cases:
+                actual = compiled(x, method)
+                self.assertEqual(actual[0], x + 1)
+                self.assertIs(actual[1], method)
+                self.assertEqual(actual[2], method.__qualname__)
+            self.assertEqual(counter.frame_count, 3 if capture == "cache" else 4)
 
     def test_prebound_dict_write_ordered_fallback(self):
         def fn(x, mapping, setter):
@@ -365,17 +382,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         self._check_key_fallback(fn, (dict.__setitem__.__get__({}),), "FakeIdVariable")
 
-    def test_prebound_wrapper_constant_receiver_hash(self):
-        def fn(x, method):
-            return x + 1, hash(method)
-
-        first = "".join(["a long ", "receiver"])
-        second = "".join(["a long ", "receiver"])
-        self.assertIsNot(first, second)
-        self._check_key_reuse(
-            fn, [s.__hash__ for s in (first, second, first)], frames=2
-        )
-
     @parametrize("operation", ["hash", "compare"])
     @parametrize("capture", ["aot", "cache"])
     def test_prebound_wrapper_saved_identity_refusal(self, operation, capture):
@@ -385,41 +391,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + len({methods[0]: 1, methods[1]: 2})
 
         methods = tuple(dict.__setitem__.__get__({}) for _ in range(2))
-        with torch._dynamo.config.patch(
-            caching_precompile=capture == "cache", debug_force_nested_calls=False
+        with self.assertRaisesRegex(
+            Unsupported, "slot-wrapper identity requires receiver guards"
         ):
-            compiled = torch.compile(fn, backend="eager", fullgraph=True)
-            with self.assertRaisesRegex(
-                Unsupported, "slot-wrapper identity requires receiver guards"
-            ):
-                if capture == "aot":
-                    compiled.aot_compile(((torch.ones(1), methods), {}))
-                else:
-                    compiled(torch.ones(1), methods)
-
-    @parametrize("capture", ["aot", "cache"])
-    def test_prebound_wrapper_saved_metadata(self, capture):
-        def fn(x, method):
-            return x + 1, method.__qualname__
-
-        receiver = collections.OrderedDict()
-        methods = [
-            owner.__get__(receiver)
-            for owner in (dict.__setitem__, collections.OrderedDict.__setitem__)
-        ]
-        x = torch.ones(1)
-        with torch._dynamo.config.patch(
-            caching_precompile=capture == "cache", debug_force_nested_calls=False
-        ):
-            compiled = torch.compile(fn, backend="eager", fullgraph=True)
-            if capture == "aot":
-                compiled = compiled.aot_compile(((x, methods[0]), {}))
-                self.assertEqual(compiled(x, methods[0]), fn(x, methods[0]))
-                with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
-                    compiled(x, methods[1])
-            else:
-                for method in methods:
-                    self.assertEqual(compiled(x, method), fn(x, method))
+            self._capture_method(fn, torch.ones(1), methods, capture=capture)
 
     @parametrize("name", ["__getattr__", "__getattribute__"])
     @parametrize("inherited", [False, True])
@@ -524,11 +499,21 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         explanation = torch._dynamo.explain(fn)(x, obj)
         self.assertEqual(explanation.graph_count, 1)
         guards = {
-            (guard.create_fn_name(), guard.name) for guard in explanation.out_guards
+            (guard.create_fn_name(), guard.originating_source)
+            for guard in explanation.out_guards
         }
-        self.assertIn(("SEQUENCE_LENGTH", "type(L['obj']).__mro__"), guards)
-        self.assertIn(("ID_MATCH", "type(L['obj']).__mro__[1]"), guards)
-        self.assertIn(("ID_MATCH", "type(L['obj']).__mro__[2]"), guards)
+        mro_sources = {
+            source
+            for kind, source in guards
+            if kind == "SEQUENCE_LENGTH" and isinstance(source, TypeMROSource)
+        }
+        self.assertEqual(len(mro_sources), 1)
+        for guard in explanation.out_guards:
+            if isinstance(guard.originating_source, TypeMROSource):
+                self.assertNotIn("TYPE_MATCH", guard.guard_types or ())
+        source = mro_sources.pop()
+        self.assertIn(("ID_MATCH", GetItemSource(source, 1)), guards)
+        self.assertIn(("ID_MATCH", GetItemSource(source, 2)), guards)
 
     @parametrize("initial_builtin", [False, True])
     def test_shared_mro_owner_non_object_tail(self, initial_builtin):
@@ -555,10 +540,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         class RightBase(metaclass=Meta):
             pass
 
-        class Left:
+        class InitialBase:
             pass
 
-        class Right:
+        class Left(InitialBase):
+            pass
+
+        class Right(InitialBase):
             pass
 
         left, right = (Left, Right) if initial_builtin else (Left(), Right())
@@ -7639,21 +7627,32 @@ class GraphModule(torch.nn.Module):
         x = torch.ones(1)
         left = receiver_type(2) if receiver_type is range else receiver_type([1, 2])
         right = receiver_type(2) if receiver_type is range else receiver_type([1, 2])
-        for first, second in (
-            (left, right),
-            (left, left),
-            (right, right),
-            (right, left),
-        ):
+        pairs = ((left, right), (left, left), (right, right), (right, left))
+        for first, second in pairs:
             self.assertEqual(compiled(x, first, second), x + (first is second))
         self.assertEqual(counter.frame_count, 2)
 
-    @parametrize("capture", ["aot", "cache"])
-    def test_saved_prebound_classmethod_binding(self, capture):
+    @parametrize(
+        "capture", ["ordinary", "ordinary_instance", "aot", "cache", "session"]
+    )
+    def test_saved_prebound_method_binding(self, capture):
         def fn(x, method):
+            if capture in ("ordinary_instance", "session"):
+                return x + 1, method.__name__, hash(method), method
             return x + 1, method.__name__
 
+        receiver = [] if capture in ("ordinary_instance", "session") else dict
+        names = ("fromkeys", "__class_getitem__")
+        if receiver is not dict:
+            names = ("count", "index")
         x = torch.ones(1)
+        if capture == "session":
+            with self.assertRaisesRegex(
+                PackageError, "Instance methods need receiver identity"
+            ):
+                with precompile_package.precompile_capture(fn, backend="eager") as call:
+                    call(x, receiver.count)
+            return
         counter = torch._dynamo.testing.CompileCounter()
         with torch._dynamo.config.patch(caching_precompile=capture == "cache"):
             compiled = torch.compile(
@@ -7661,27 +7660,105 @@ class GraphModule(torch.nn.Module):
             )
             if capture == "aot":
                 compiled = compiled.aot_compile(((x, dict.fromkeys), {}))
+                self.assertFalse(compiled.guard_check(x, None))
                 self.assertEqual(compiled(x, dict.fromkeys), fn(x, dict.fromkeys))
                 self.assertFalse(compiled.guard_check(x, dict.__class_getitem__))
             else:
-                for method in (dict.fromkeys, dict.__class_getitem__, dict.fromkeys):
-                    self.assertEqual(compiled(x, method), fn(x, method))
+                for name in (names[0], names[0], names[1], names[0]):
+                    method = getattr(receiver, name)
+                    result = compiled(x, method)
+                    self.assertEqual(result, fn(x, method))
+                    if capture == "ordinary_instance":
+                        self.assertIs(result[-1], method)
                 self.assertEqual(counter.frame_count, 2)
+                if capture == "ordinary_instance":
+                    method = [].count
+                    self.assertEqual(compiled(x, method), fn(x, method))
+                    self.assertEqual(counter.frame_count, 3)
 
-    def test_bound_builtin_method_literal_tuple_comparison_fallback(self):
-        descriptor = tuple.__dict__["count"]
+    def test_prebound_method_avoids_portability_callbacks(self):
+        calls = []
 
-        def fn(x, receiver):
-            return x + (
-                descriptor.__get__(receiver, tuple) == descriptor.__get__((1, 2), tuple)
+        class Meta(type):
+            @property
+            def __module__(cls):
+                calls.append(cls)
+                raise ValueError("module descriptor fired")
+
+        class D(dict, metaclass=Meta):
+            pass
+
+        Meta.__qualname__ = "Meta"
+        D.__qualname__ = "D"
+        fn = lambda x, method: (x + 1, method.__name__)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(
+            compiled(torch.ones(1), D.fromkeys), (torch.ones(1) + 1, "fromkeys")
+        )
+        self.assertEqual(calls, [])
+
+    @parametrize("mapping", [False, True])
+    def test_prebound_classmethod_key_hash_and_equality(self, mapping):
+        def fn(x, method):
+            result = {method: 17} if mapping else {method}
+            return (
+                x + len(result),
+                result,
+                hash(method),
+                method == dict.fromkeys,
+                method is None,
             )
 
-        literal = next(value for value in fn.__code__.co_consts if type(value) is tuple)
-        self._check_key_fallback(
-            fn, (literal, tuple(range(1, 3)), literal), "unstable receiver"
-        )
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for method in (
+            dict.fromkeys,
+            dict.fromkeys,
+            dict.__class_getitem__,
+            dict.fromkeys,
+        ):
+            result = compiled(x, method)
+            self.assertEqual(result, fn(x, method))
+            self.assertIs(next(iter(result[1])), method)
+        self.assertEqual(counter.frame_count, 2)
 
-    def test_bound_builtin_method_inlined_literal_fallback(self):
+    @parametrize("operation", ["id", "is", "object_eq", "python_method"])
+    @parametrize("capture", ["ordinary", "ordinary_instance", "saved"])
+    def test_prebound_method_wrapper_identity(self, operation, capture):
+        def method(self):
+            pass
+
+        def fn(x, left, right):
+            if operation == "id":
+                return x + 1, id(right)
+            if operation == "object_eq":
+                return x + (object.__eq__(left, right) is True)
+            if operation == "python_method":
+                return x + (method.__get__(left) == method.__get__(right))
+            return x + (left is right)
+
+        receiver = [] if capture == "ordinary_instance" else dict
+        name = "count" if capture == "ordinary_instance" else "fromkeys"
+        saved, fresh = getattr(receiver, name), getattr(receiver, name)
+        self.assertIsNot(saved, fresh)
+        counter = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(1)
+        with torch._dynamo.config.patch(caching_precompile=capture == "saved"):
+            compiled = torch.compile(fn, backend=counter, fullgraph=True)
+            if capture == "saved":
+                with self.assertRaisesRegex(
+                    Unsupported,
+                    "Prebound builtin method identity requires wrapper guards",
+                ):
+                    compiled(x, saved, saved)
+            else:
+                for left, right in ((saved, saved), (saved, fresh), (saved, saved)):
+                    self.assertEqual(compiled(x, left, right), fn(x, left, right))
+                self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("inline", [False, True])
+    def test_bound_builtin_method_literal_tuple_comparison_fallback(self, inline):
         descriptor = tuple.__dict__["count"]
 
         def helper(receiver):
@@ -7689,11 +7766,14 @@ class GraphModule(torch.nn.Module):
                 (1, 2), tuple
             )
 
-        def fn(x, unused):
-            return x + helper((1, 2))
+        def fn(x, receiver):
+            if inline:
+                return x + helper((1, 2))
+            return x + helper(receiver)
 
-        self.assertEqual(fn(torch.ones(1), None), torch.ones(1) + 1)
-        self._check_key_fallback(fn, (None,), "unstable receiver")
+        literal = next(value for value in fn.__code__.co_consts if type(value) is tuple)
+        receivers = (None,) if inline else (literal, tuple(range(1, 3)), literal)
+        self._check_key_fallback(fn, receivers, "unstable receiver")
 
     @parametrize("operation", ["hash", "metadata", "call", "key"])
     @parametrize("capture", ["aot", "cache"])
@@ -7707,29 +7787,10 @@ class GraphModule(torch.nn.Module):
                 return x + len({method})
             return x + method(1)
 
-        with torch._dynamo.config.patch(caching_precompile=capture == "cache"):
-            compiled = torch.compile(fn, backend="eager", fullgraph=True)
-            with self.assertRaisesRegex(
-                Unsupported, "Prebound builtin method requires identity guards"
-            ):
-                if capture == "aot":
-                    compiled.aot_compile(((torch.ones(1), [1].count), {}))
-                else:
-                    compiled(torch.ones(1), [1].count)
-
-    @parametrize("capture", ["aot", "cache"])
-    @parametrize("aggregate", [False, True])
-    def test_prebound_classmethod_saved_hash_refusal(self, capture, aggregate):
-        def fn(x, method):
-            return x + 1, hash(frozenset((method,)) if aggregate else method)
-
-        with torch._dynamo.config.patch(caching_precompile=capture == "cache"):
-            compiled = torch.compile(fn, backend="eager", fullgraph=True)
-            with self.assertRaisesRegex(Unsupported, "FakeIdVariable"):
-                if capture == "aot":
-                    compiled.aot_compile(((torch.ones(1), MethodKeyDict.fromkeys), {}))
-                else:
-                    compiled(torch.ones(1), MethodKeyDict.fromkeys)
+        with self.assertRaisesRegex(
+            Unsupported, "Prebound builtin method requires identity guards"
+        ):
+            self._capture_method(fn, torch.ones(1), [1].count, capture=capture)
 
     def test_builtin_method_tuple_subclass_key(self):
         class Keys(tuple):
@@ -7777,90 +7838,85 @@ class GraphModule(torch.nn.Module):
             torch.compile(as_key, backend="eager", fullgraph=True)(x), as_key(x)
         )
 
-    @parametrize("direct", [False, True])
-    def test_bound_builtin_method_constant_receiver_hash(self, direct):
+    @parametrize("binding", ["wrapper", "attribute", "descriptor"])
+    def test_bound_method_constant_receiver_hash(self, binding):
         def fn(x, receiver):
-            method = (
-                receiver.upper
-                if direct
-                else str.__dict__["upper"].__get__(receiver, str)
-            )
+            if binding == "wrapper":
+                method = receiver
+            elif binding == "attribute":
+                method = receiver.upper
+            else:
+                method = str.__dict__["upper"].__get__(receiver, str)
             return x + 1, hash(method)
 
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
         first = "".join(("hello", "world"))
         second = first.encode().decode()
         self.assertIsNot(first, second)
-        x = torch.ones(1)
-        for receiver in (first, second, first):
-            self.assertEqual(compiled(x, receiver), fn(x, receiver))
-        self.assertEqual(counter.frame_count, 2)
+        receivers = (first, second, first)
+        if binding == "wrapper":
+            receivers = tuple(s.__hash__ for s in receivers)
+        self._check_key_reuse(fn, receivers, frames=2)
 
     @parametrize("capture", ["aot", "cache"])
-    @parametrize("captured", [False, True])
-    def test_bound_builtin_method_constant_hash_cannot_be_saved(
-        self, capture, captured
-    ):
+    @parametrize("source", ["prebound", "aggregate", "captured", "argument"])
+    def test_bound_builtin_method_hash_cannot_be_saved(self, capture, source):
+        aggregate = source == "aggregate"
+        source = "prebound" if aggregate else source
         saved_receiver = "hello"
 
         def fn(x, receiver):
-            receiver = saved_receiver if captured else receiver
-            return x + 1, hash(receiver.upper)
+            if source != "prebound":
+                receiver = saved_receiver if source == "captured" else receiver
+                receiver = receiver.upper
+            return x + 1, hash(frozenset((receiver,)) if aggregate else receiver)
 
-        # The debug wrapper has a different, unresolvable top-frame package key.
-        with torch._dynamo.config.patch(
-            caching_precompile=capture == "cache", debug_force_nested_calls=False
-        ):
-            compiled = torch.compile(fn, backend="eager", fullgraph=True)
-            with self.assertRaisesRegex(Unsupported, "FakeIdVariable"):
-                if capture == "aot":
-                    compiled.aot_compile(((torch.ones(1), "hello"), {}))
-                else:
-                    compiled(torch.ones(1), "hello")
+        receiver = MethodKeyDict.fromkeys if source == "prebound" else "hello"
+        with self.assertRaisesRegex(Unsupported, "FakeIdVariable"):
+            self._capture_method(fn, torch.ones(1), receiver, capture=capture)
 
-    def test_bound_builtin_method_symbolic_receiver_identity(self):
+    @parametrize("hash_first", [False, True])
+    def test_bound_builtin_method_symbolic_receiver(self, hash_first):
         def fn(x, n):
             descriptor = int.__dict__["conjugate"]
-            return x + 1, descriptor.__get__(10001, int) == descriptor.__get__(n, int)
+            method = descriptor.__get__(n, int)
+            if hash_first:
+                mapping = {method: 1}
+                return x + method.__self__, x + method(), len(mapping)
+            return x + 1, descriptor.__get__(10001, int) == method
 
         literal = next(value for value in fn.__code__.co_consts if value == 10001)
         other = int("10001")
         self.assertIsNot(literal, other)
+        values = (literal, 10002) if hash_first else (literal, other, literal)
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
         x = torch.ones(1)
-        for n in (literal, other, literal):
+        for n in values:
             self.assertEqual(compiled(x, n), fn(x, n))
-        self.assertEqual(counter.frame_count, 2)
-
-    def test_bound_builtin_method_symbolic_receiver_after_hashing(self):
-        def fn(x, n):
-            method = int.__dict__["conjugate"].__get__(n, int)
-            mapping = {method: 1}
-            return x + method.__self__, x + method(), len(mapping)
-
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
-        x = torch.ones(1)
-        for n in (10001, 10002):
-            self.assertEqual(compiled(x, n), fn(x, n))
-        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.frame_count, 1 if hash_first else 2)
 
     def test_prebound_method_key_ignores_receiver_contents(self):
-        def fn(x, method):
-            name = method.__name__
-            return x + len({method}), name
+        class Payload:
+            pass
 
-        receiver = {}
-        method = receiver.get
+        def fn(x, method):
+            return x + len({method}), method.__name__
+
+        payload = Payload()
+        receiver = {"payload": payload}
+        refs = [weakref.ref(payload)]
 
         def inputs():
             for key in range(3):
                 receiver[key] = key
+                method = receiver.get
+                refs.append(weakref.ref(method))
                 yield method
 
         self._check_key_reuse(fn, inputs(), frames=1)
+        payload = receiver = None
+        gc.collect()
+        self.assertTrue(all(ref() is None for ref in refs))
 
     @parametrize("constructed", [False, True])
     def test_builtin_method_inherited_builtin_key_equality(self, constructed):
@@ -8003,9 +8059,7 @@ class GraphModule(torch.nn.Module):
     @parametrize(
         "mutation", ["between_calls", "in_frame", "after_lookup", "suppressed_lookup"]
     )
-    def test_builtin_method_key_equality_mutation(
-        self, wrap, kind, base, prebound, mutation
-    ):
+    def test_method_key_equality_mutation(self, wrap, kind, base, prebound, mutation):
         receiver, other = [], []
         bound = receiver.count
         collision_hash = hash(bound)
@@ -8145,8 +8199,6 @@ class GraphModule(torch.nn.Module):
         ],
     )
     def test_builtin_method_cross_container_collisions(self, op):
-        mutating = op in ("remove", "discard", "pop", "clear")
-
         def fn(x, receiver, key):
             method = list.count.__get__(receiver, list)
             if op in ("insert", "add"):
@@ -8175,7 +8227,7 @@ class GraphModule(torch.nn.Module):
             if op == "dict_compare":
                 return x + ({method: 1} == {key: 1})
             left, right = {method}, {key}
-            if mutating:
+            if op in ("remove", "discard", "pop", "clear"):
                 before = method in right
                 args = (key,) if op in ("remove", "discard") else ()
                 getattr(right, op)(*args)
@@ -8249,7 +8301,7 @@ class GraphModule(torch.nn.Module):
         "wrap, depth",
         [(tuple, 0), (tuple, 1), (tuple, 2), (frozenset, 1), (frozenset, 2)],
     )
-    def test_builtin_method_key_alias_guards(
+    def test_method_key_alias_guards(
         self, kind, name, depth, wrap, independent, nested
     ):
         class Holder:
@@ -8314,7 +8366,7 @@ class GraphModule(torch.nn.Module):
     @parametrize("reverse", [False, True])
     @parametrize("local", [False, True])
     @parametrize("depth", (0, 1, 2))
-    def test_builtin_method_keys_custom_collisions(self, reverse, local, depth):
+    def test_method_key_custom_collisions(self, reverse, local, depth):
         def fn(x, obj, key):
             receiver = {} if local else obj
             method = dict.get.__get__(receiver, dict)
@@ -8330,9 +8382,8 @@ class GraphModule(torch.nn.Module):
         self.assertNotEqual(hash(a.get), hash(b.get))
         key = AlwaysEqualHashKey(hash(a.get))
         if local:
-            self._check_key_fallback(
-                fn, (a,), "Builtin method keys with custom equality", key
-            )
+            error = "Builtin method keys with custom equality"
+            self._check_key_fallback(fn, (a,), error, key)
         else:
             self._check_key_reuse(fn, (a, b), key)
 
@@ -8355,11 +8406,17 @@ class GraphModule(torch.nn.Module):
 
         a, b = [], []
         pairs = []
-        for key in ("key", a.count, a.index, b.index):
-            for _ in range(depth):
-                key = wrap((key,))
-            mapping = {key} if op == "input_set" else {key: 3}
-            pairs.extend((obj, mapping) for obj in (b, a, b))
+        for method in ("key", a.count, a.index, b.index):
+            for obj in (b, a, b):
+                key = (
+                    method
+                    if isinstance(method, str)
+                    else getattr(method.__self__, method.__name__)
+                )
+                for _ in range(depth):
+                    key = wrap((key,))
+                mapping = {key} if op == "input_set" else {key: 3}
+                pairs.append((obj, mapping))
         self._check_key_reuse(fn, pairs, frames=7)
 
     @parametrize("depth", (0, 1, 2))
@@ -8877,6 +8934,17 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(calls, [])
 
+    def _capture_method(self, fn, *args, capture):
+        # Keep debug-wrapper package naming out of method guard refusals.
+        with torch._dynamo.config.patch(
+            caching_precompile=capture == "cache", debug_force_nested_calls=False
+        ):
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            if capture == "aot":
+                compiled.aot_compile((args, {}))
+            else:
+                compiled(*args)
+
     def _check_key_fallback(self, fn, inputs, error, *args, positive_frames=False):
         x = torch.ones(1)
         counter = torch._dynamo.testing.CompileCounter()
@@ -8926,9 +8994,7 @@ class GraphModule(torch.nn.Module):
         self._check_key_fallback(fn, (method,), "FakeIdVariable")
         torch._dynamo.reset()
         with self.assertRaisesRegex(Unsupported, "FakeIdVariable"):
-            torch.compile(fn, backend="eager", fullgraph=True).aot_compile(
-                ((torch.ones(1), method), {})
-            )
+            self._capture_method(fn, torch.ones(1), method, capture="aot")
 
     @parametrize("container", [dict, set])
     def test_skipped_builtin_hash_keys(self, container):
