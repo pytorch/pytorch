@@ -187,6 +187,10 @@ def propagate_requires_no_scaling(out_node: Node) -> bool:
         aten.gather.default,
         aten.scatter_add.default,
         aten.view.default,
+        # S * nll_loss_backward(g, ...) = nll_loss_backward(S*g, ...)
+        aten.nll_loss_backward.default,
+        # S * log_softmax_bwd(g, out) = log_softmax_bwd(S*g, out)
+        aten._log_softmax_backward_data.default,
     ]
 )
 def propagate_general_copy(out_node: Node) -> bool:
@@ -242,11 +246,6 @@ def propagate_add_sub(out_node: Node) -> bool:
     return False
 
 
-@register_propagate_rule(
-    [
-        prims.fma.default,
-    ]
-)
 def propagate_fma(out_node: Node) -> bool:
     mul_lhs, mul_rhs, add_rhs = out_node.args[:3]
     if not isinstance(mul_lhs, Node):
@@ -269,3 +268,7 @@ def propagate_fma(out_node: Node) -> bool:
         update_chunking_meta(out_node, scale_by=add_lhs_scale_by)
         return True
     return False
+
+
+if hasattr(prims, "fma"):
+    register_propagate_rule([prims.fma.default])(propagate_fma)

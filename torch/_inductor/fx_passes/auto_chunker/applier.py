@@ -1,5 +1,6 @@
 import copy
 import logging
+import math
 import operator
 from typing import Any
 
@@ -10,6 +11,7 @@ from torch._inductor.fx_utils import rank_agnostic_device
 from torch.fx import Graph, GraphModule, Node
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
+from .common import CantChunk
 from .core import get_chunking_meta, reorder_nodes
 from .utils import get_args_of_node_type, get_fake_tensor_from_node_arg, is_tangent_node
 
@@ -17,6 +19,32 @@ from .utils import get_args_of_node_type, get_fake_tensor_from_node_arg, is_tang
 log = torch._logging.getArtifactLogger(__name__, "auto_chunker")
 aten = torch.ops.aten
 prims = torch.ops.prims
+
+
+def _view_shape_for_chunked_input(
+    full_out_shape: list[int],
+    chunked_in_numel: int,
+    chunk_dim: int,
+) -> list[int]:
+    """
+    Rewrite a view's output shape for a chunked input.
+
+    Using the global chunk_size along chunk_dim is wrong when reshape splits
+    or merges the batch dim (e.g. [B*T, V] <-> [B, T, V]). Derive the chunked
+    output extent from the chunked input numel instead.
+    """
+    new_shape = list(full_out_shape)
+    if chunk_dim < 0:
+        chunk_dim += len(new_shape)
+    other = math.prod(new_shape[:chunk_dim] + new_shape[chunk_dim + 1 :])
+    if other == 0 or chunked_in_numel % other != 0:
+        raise CantChunk(
+            f"Cannot rewrite view shape {full_out_shape} for chunked input "
+            f"numel={chunked_in_numel} at dim {chunk_dim}"
+        )
+    new_shape[chunk_dim] = chunked_in_numel // other
+    return new_shape
+
 
 
 def _factory_args(graph: Graph, fake_tensor: Tensor) -> dict[str, Any]:
@@ -75,6 +103,11 @@ class ChunkingApplier:
         self._categorize_subgraph_nodes()
 
         self.chunk_sizes: list[int] | None = None
+        # Extent of the tensor dim that produced chunk_sizes. Other chunked
+        # tensors may use a multiple of this extent (e.g. B vs B*T after
+        # promote_amplifier_past_batch_split_views); scale chunk_size by
+        # node_dim // ref_dim_size when slicing or rewriting views.
+        self.ref_dim_size: int | None = None
 
         # First index is node index,
         # Second index is chunk index.
@@ -96,6 +129,35 @@ class ChunkingApplier:
                 self.accumulators[node] = None
 
         self.chunk_size_to_gm_attr: dict[int, str] = {}
+
+    def _effective_chunk_size(self, dim_size: int, chunk_size: int) -> int:
+        """
+        Map a chunk_size measured on ref_dim_size onto another tensor whose
+        chunked dim has extent dim_size (e.g. B vs B*T).
+        """
+        if self.ref_dim_size is None:
+            raise AssertionError("expected ref_dim_size to be set")
+        ref = self.ref_dim_size
+        if dim_size == ref:
+            return chunk_size
+        if dim_size > ref:
+            if dim_size % ref != 0:
+                raise CantChunk(
+                    f"chunked dim size {dim_size} is not a multiple of "
+                    f"ref_dim_size {ref}"
+                )
+            return chunk_size * (dim_size // ref)
+        if ref % dim_size != 0:
+            raise CantChunk(
+                f"ref_dim_size {ref} is not a multiple of chunked dim size {dim_size}"
+            )
+        ratio = ref // dim_size
+        if chunk_size % ratio != 0:
+            raise CantChunk(
+                f"chunk_size {chunk_size} not divisible by {ratio} when "
+                f"mapping ref_dim_size {ref} -> dim_size {dim_size}"
+            )
+        return chunk_size // ratio
 
     def _categorize_subgraph_nodes(self) -> None:
         """
@@ -190,13 +252,25 @@ class ChunkingApplier:
             # let's do a small meta propagation to get the size of each chunk
             if self.chunk_sizes is None:
                 input_tensor = subgraph_input.meta["val"]
-                tensors = torch.chunk(input_tensor, self.num_chunk)
-                self.chunk_sizes = [t.size(0) for t in tensors]
+                tensors = torch.chunk(input_tensor, self.num_chunk, meta.chunk_dim)
+                self.chunk_sizes = [t.size(meta.chunk_dim) for t in tensors]
+                self.ref_dim_size = int(input_tensor.size(meta.chunk_dim))
 
     def create_accumulators(self) -> None:
         for node in self.accumulators:
             # use fp32 for accumulators
             fake_tensor = node.meta["val"]
+            # need_sum of keepdim=True reductions is accumulated without the
+            # unit leading dim; subgraph sums are rewritten to keepdim=False.
+            node_meta = get_chunking_meta(node)
+            if (
+                node_meta is not None
+                and node_meta.need_sum
+                and hasattr(fake_tensor, "ndim")
+                and fake_tensor.ndim >= 1
+                and int(fake_tensor.size(0)) == 1
+            ):
+                fake_tensor = fake_tensor.squeeze(0)
             if fake_tensor.numel() == 1:
                 # TODO(shunting) revisit
                 # This tensor may be fused with mm and becomes a addmm
@@ -232,8 +306,11 @@ class ChunkingApplier:
                 # the node is chunked and we need update the
                 # fake tensor
                 # TODO any better way to do this?
+                eff = self._effective_chunk_size(
+                    int(fake_tensor.size(chunking_meta.chunk_dim)), chunk_size
+                )
                 new_tensor = aten.slice.Tensor(
-                    fake_tensor, chunking_meta.chunk_dim, 0, chunk_size
+                    fake_tensor, chunking_meta.chunk_dim, 0, eff
                 )
                 fake_tensor = new_tensor
             new_node.meta = {"val": fake_tensor}
@@ -268,7 +345,9 @@ class ChunkingApplier:
             ):
                 shape = list(original_node.args[0])  # type: ignore[arg-type]
                 # pyrefly: ignore [unsupported-operation]
-                shape[meta.chunk_dim] = chunk_size
+                shape[meta.chunk_dim] = self._effective_chunk_size(
+                    int(original_node.meta["val"].size(meta.chunk_dim)), chunk_size
+                )
                 env[original_node] = new_graph.call_function(
                     aten.full.default,
                     (shape, original_node.args[1]),
@@ -284,7 +363,9 @@ class ChunkingApplier:
             ):
                 shape = list(original_node.args[1])  # type: ignore[arg-type]
                 # pyrefly: ignore [unsupported-operation]
-                shape[meta.chunk_dim] = chunk_size
+                shape[meta.chunk_dim] = self._effective_chunk_size(
+                    int(original_node.meta["val"].size(meta.chunk_dim)), chunk_size
+                )
                 env[original_node] = new_graph.call_function(
                     aten.expand.default,
                     (env.get(original_node.args[0], original_node.args[0]), shape),  # type: ignore[arg-type]
@@ -292,21 +373,65 @@ class ChunkingApplier:
                 )
                 continue
 
-            # Chunk aten.view: adjust the target shape at the chunk dimension
+            # need_sum + keepdim=True along the reduced batch dim: accumulate
+            # the squeezed tensor instead (pairs with create_accumulators).
+            if (
+                original_node.target == aten.sum.dim_IntList
+                and (meta := get_chunking_meta(original_node)) is not None
+                and meta.need_sum
+                and len(original_node.args) >= 3
+                and original_node.args[2] is True
+            ):
+                inp = original_node.args[0]
+                if not isinstance(inp, torch.fx.Node):
+                    raise AssertionError("expected sum input to be a Node")
+                env[original_node] = new_graph.call_function(
+                    aten.sum.dim_IntList,
+                    (env[inp], original_node.args[1], False),
+                    original_node.kwargs,
+                )
+                continue
+
+            # Chunk aten.view: derive shape from chunked input numel so
+            # split/merge of the batch dim (e.g. [B*T,V] <-> [B,T,V]) works.
             if (
                 original_node.target == aten.view.default
                 and isinstance(original_node.args[0], torch.fx.Node)
                 and (meta := get_chunking_meta(original_node)) is not None
                 and meta.chunk_dim is not None
             ):
-                shape = list(original_node.args[1])  # type: ignore[arg-type]
-                # pyrefly: ignore [unsupported-operation]
-                shape[meta.chunk_dim] = chunk_size
-                env[original_node] = new_graph.call_function(
+                src_orig = original_node.args[0]
+                src = env[src_orig]
+                full_out = list(original_node.args[1])  # type: ignore[arg-type]
+                # Prefer original-graph shapes + chunk_size. env nodes created
+                # by node_copy still carry the full-size meta['val'].
+                src_val = src_orig.meta["val"]
+                src_cmeta = get_chunking_meta(src_orig)
+                if src_cmeta is not None and src_cmeta.chunk_dim is not None:
+                    cd_in = src_cmeta.chunk_dim
+                    eff = self._effective_chunk_size(int(src_val.size(cd_in)), chunk_size)
+                    chunked_in_numel = int(src_val.numel() // src_val.size(cd_in) * eff)
+                elif "val" in src.meta and hasattr(src.meta["val"], "numel"):
+                    chunked_in_numel = int(src.meta["val"].numel())
+                else:
+                    chunked_in_numel = int(src_val.numel())
+                shape = _view_shape_for_chunked_input(
+                    full_out, chunked_in_numel, meta.chunk_dim
+                )
+                new_node = new_graph.call_function(
                     aten.view.default,
-                    (env[original_node.args[0]], shape),  # type: ignore[arg-type]
+                    (src, shape),
                     original_node.kwargs,
                 )
+                new_node.meta = {
+                    "val": aten.slice.Tensor(
+                        original_node.meta["val"],
+                        meta.chunk_dim,
+                        0,
+                        shape[meta.chunk_dim],
+                    )
+                }
+                env[original_node] = new_node
                 continue
 
             # create the node with chunked inputs
@@ -395,7 +520,13 @@ class ChunkingApplier:
                 node_list.append(chunk)
 
             for orig_node in self.accumulators:
-                self.accumulators[orig_node] = output_node_dict[orig_node]
+                out_n = output_node_dict[orig_node]
+                prev = self.accumulators[orig_node]
+                if prev is not None and prev.meta.get("val") is not None:
+                    out_n.meta = {"val": prev.meta["val"]}
+                elif orig_node.meta.get("val") is not None:
+                    out_n.meta = {"val": orig_node.meta["val"]}
+                self.accumulators[orig_node] = out_n
 
     def recover_to_unchunked_nodes(self) -> None:
         """
@@ -418,9 +549,12 @@ class ChunkingApplier:
 
             # do scaling last
             if meta.scale_by is not None:
-                recovered = self.parent_graph.call_function(
+                scaled = self.parent_graph.call_function(
                     aten.mul.Tensor, (recovered, meta.scale_by)
                 )
+                if recovered.meta.get("val") is not None:
+                    scaled.meta = {"val": recovered.meta["val"]}
+                recovered = scaled
 
             # convert back to the original dtype
             if meta.need_sum:
@@ -443,6 +577,55 @@ class ChunkingApplier:
 
             self.parent_graph.erase_node(node)
 
+    def rewrite_unit_leading_dim_views(self) -> None:
+        """
+        Drop view(x, [N]) when x is already rank-1 size N, or rewrite
+        view(x, [N]) -> squeeze(x, 0) when x is [1, N].
+
+        Ascend Inductor can SympifyError on 1-element view size lists after
+        invoke_subgraph fusion; avoid that pattern on the bias-grad path.
+        """
+        for node in list(self.parent_graph.nodes):
+            if node.target != aten.view.default or len(node.args) < 2:
+                continue
+            src, size = node.args[0], node.args[1]
+            if not isinstance(src, Node) or not isinstance(size, (list, tuple)):
+                continue
+            if len(size) != 1:
+                continue
+            src_val = src.meta.get("val")
+            out_val = node.meta.get("val")
+            # Already [N] -> [N]: view is a no-op after keepdim=False recovery.
+            if (
+                src_val is not None
+                and hasattr(src_val, "ndim")
+                and src_val.ndim == 1
+                and int(src_val.size(0)) == int(size[0])
+            ):
+                node.replace_all_uses_with(src)
+                self.parent_graph.erase_node(node)
+                continue
+            if src_val is not None and hasattr(src_val, "ndim"):
+                if src_val.ndim != 2 or int(src_val.size(0)) != 1:
+                    continue
+                if int(src_val.size(1)) != int(size[0]):
+                    continue
+                squeezed_val = src_val.squeeze(0)
+            elif (
+                out_val is not None
+                and hasattr(out_val, "ndim")
+                and out_val.ndim == 1
+                and int(out_val.numel()) == int(size[0])
+            ):
+                squeezed_val = out_val
+            else:
+                continue
+            with self.parent_graph.inserting_before(node):
+                squeezed = self.parent_graph.call_function(aten.squeeze.dim, (src, 0))
+                squeezed.meta = {"val": squeezed_val}
+            node.replace_all_uses_with(squeezed)
+            self.parent_graph.erase_node(node)
+
     def apply(self) -> GraphModule:
         with self.parent_graph.inserting_before(self.subgraph_body[0]):
             self.replace_tangent_to_one()
@@ -452,6 +635,7 @@ class ChunkingApplier:
             self.call_subgraph_for_each_chunk()
             self.recover_to_unchunked_nodes()
             self.erase_original_nodes()
+            self.rewrite_unit_leading_dim_views()
 
         newgm = torch.fx._lazy_graph_module._make_graph_module(
             self.gm,
