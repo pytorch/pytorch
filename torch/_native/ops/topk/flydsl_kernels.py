@@ -3,7 +3,7 @@
 ``TopKSpec`` is the compile-time specialization (dtype and ``largest``). It is
 closed over by the builders; it is not a kernel argument. Ordinals are signed
 int32 so ``maxsi`` can compare them directly. Narrow values sit in the high
-bits, sign at bit 31. ``largest=False`` complements that int32.
+bits, sign at bit 31. ``largest=False`` complements the narrow field.
 
 ``topk_radix`` - one CTA per row, ``max(sort_len, _N_HIST_BINS)``
 threads (``sort_len`` = K rounded up to a power of 2; the bin floor lets
@@ -29,8 +29,9 @@ butterfly partners until lane 0 holds the top-K; only the final K writes
 hit gmem.
 
 ``TopKSpec.to_ord`` collapses NaN where applicable, applies the dtype's narrow
-ordinal transform, left-aligns that field in a signed int32, and complements
-it for ``largest=False``. ``from_ord`` reverses the complement, alignment, and
+ordinal transform, complements that field for ``largest=False``, and
+left-aligns it in a signed int32. ``from_ord`` reverses the alignment,
+complement, and
 dtype transform. NaN collapse is not injective, so the caller recognizes the
 recovered sentinel and re-reads gmem. Phase 1's xor by ``_RADIX_SIGN_BIT`` is
 separate: it puts the top byte in unsigned bin order for the scan.
@@ -92,8 +93,8 @@ class TopKSpec:
     The transform is involutive on bits, so decoding applies it again to
     recover the original bits. For a float, the dtype also selects the
     ``+inf`` bit pattern used to detect NaN and a NaN sentinel. The spec
-    collapses NaNs, applies the transform, left-aligns its result in an int32,
-    then complements it for ``largest=False``. Decoding reverses every step
+    collapses NaNs, applies the transform, reverses the narrow ordinal for
+    ``largest=False``, then left-aligns it in an int32. Decoding reverses every step
     but the collapse; the caller detects the sentinel and reloads.
     """
 
@@ -145,31 +146,33 @@ class TopKSpec:
             raw = is_nan.select(nan_sentinel, raw)
         # 1. Apply the dtype's same-width transform.
         narrow = self.val_to_narrow_ord(raw)
-        # 2. Widen and left-shift the low `width` bits to the top of the
+        # 2. Complement the narrow field when largest=False.
+        if not self.largest:
+            narrow = ~narrow
+        # 3. Widen and left-shift the low `width` bits to the top of the
         #    int32. Their sign lands at bit 31 and the bits below are zero.
         ord32 = fx.Int32(narrow)
         if self.left_shift:
             ord32 = ord32 << fx.Int32(self.left_shift)
-        # 3. Complement when largest=False.
-        if not self.largest:
-            ord32 = ~ord32
         return ord32
 
     def from_ord(self, stored):
         # Inverse of to_ord, last step first. `stored` is that int32.
-        # 3 undone. Complement back when largest=False.
-        ord32 = ~stored if not self.largest else stored
-        # 2 undone. Arithmetic shift fills ones above a negative field.
+        # 3 undone. Arithmetic shift fills ones above a negative field.
         # Truncating to `int_ty` keeps the low `width` bits.
-        bits32 = ord32 if self.left_shift == 0 else ord32 >> fx.Int32(self.left_shift)
-        # 1 undone. The same ordinal, at the field's own width, then bitcast
+        bits32 = stored if self.left_shift == 0 else stored >> fx.Int32(self.left_shift)
+        narrow = self.int_ty(bits32)
+        # 2 undone. Complement back at the field's own width.
+        if not self.largest:
+            narrow = ~narrow
+        # 1 undone. Apply the same transform, then bitcast
         # back to the value type. An integer bitcast to its own type is
         # removed by canonicalize.
-        narrow = self.val_to_narrow_ord(self.int_ty(bits32))
-        val = narrow.bitcast(self.elem_ty)
+        bits = self.val_to_narrow_ord(narrow)
+        val = bits.bitcast(self.elem_ty)
         # 0 cannot be undone: NaN collapse is not injective. The caller
         # detects `nan_sentinel` in `narrow` and reloads the original value.
-        return val, narrow
+        return val, bits
 
 
 def topk_spec(dtype: torch.dtype, largest: bool) -> TopKSpec:
@@ -301,6 +304,7 @@ def _make_topk_storage(sort_len: int, block_threads: int, spec: TopKSpec):
 def _build_radix_select_topk_module(
     n: int, k: int, deterministic: bool, arch: str, spec: TopKSpec
 ):
+    cache_tag = spec.cache_token()
     num_stages = (k - 1).bit_length()
     sort_len = 1 << num_stages
     block_threads = max(sort_len, _N_HIST_BINS)
@@ -325,6 +329,7 @@ def _build_radix_select_topk_module(
         values: fx.Tensor,
         indices: fx.Tensor,
     ):
+        _ = cache_tag  # Scalar closure dependency for FlyDSL's artifact cache.
         row = fx.block_idx.x
         tid = fx.thread_idx.x
 
@@ -657,6 +662,7 @@ def _build_radix_select_topk_module(
 
 
 def _build_register_topk_module(n: int, k: int, arch: str, spec: TopKSpec):
+    cache_tag = spec.cache_token()
     threads_per_row = 32 if is_rdna_arch(arch) else 64
     block_threads = threads_per_row * _REGISTER_ROWS_PER_CTA
     vec = n // threads_per_row
@@ -681,6 +687,7 @@ def _build_register_topk_module(n: int, k: int, arch: str, spec: TopKSpec):
         indices: fx.Tensor,
         rows_m: fx.Int32,
     ):
+        _ = cache_tag  # Scalar closure dependency for FlyDSL's artifact cache.
         tid = fx.thread_idx.x
         bid = fx.block_idx.x
         lane = tid % fx.Int32(threads_per_row)
