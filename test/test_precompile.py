@@ -37,7 +37,7 @@ import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._dynamo.symbolic_convert import UNNAMED_SCOPE_PREFIX
 from torch._inductor.custom_graph_pass import CustomGraphPass
-from torch._precompile import _write_artifact, PrecompileError
+from torch._precompile import _parse_artifact_metadata, _write_artifact, PrecompileError
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.compiler.precompile import (
     capture,
@@ -759,6 +759,7 @@ class TestPrecompile(TestCase):
             "_FRAMES": _b64(frames),
             "_BACKENDS": _b64(backends),
             "_ENTRY_BINDING": _b64(binding),
+            "CUDAGRAPH_CONFIG": {},
             "_DYNAMO_PYTHON_VERSION": tuple(sys.version_info[:2]),
             "TORCH_VERSION": torch.__version__,
         }
@@ -4956,6 +4957,75 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("served", out.stdout)
         return out.stdout
 
+    def _compiles_see(self, key):
+        # Appends what each Dynamo compile reads torch._inductor.config's key as.
+        from torch._dynamo import callback
+
+        seen = []
+
+        def record(args):
+            if args.callback_trigger == callback.CallbackTrigger.DYNAMO:
+                seen.append(operator.attrgetter(key)(torch._inductor.config))
+
+        callback.on_compile_start(record)
+        self.addCleanup(callback.callback_handler.remove_start_callback, record)
+        return seen
+
+    def test_a_capture_compiles_under_the_cudagraph_config_it_records(self):
+        seen = self._compiles_see("triton.cudagraphs")
+        # Read when capture() is called: the options over the ambient config.
+        with torch._inductor.config.patch({"triton.cudagraphs": True}):
+            session = self._capture(
+                self.mod.single, options={"triton.cudagraph_trees": False}
+            )
+        with session as cap:
+            cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            config = _parse_artifact_metadata(f.read())["CUDAGRAPH_CONFIG"]
+        partition = torch._inductor.config.graph_partition
+        expected = {
+            "triton.cudagraphs": True,
+            "triton.cudagraph_trees": False,
+            "graph_partition": partition,
+        }
+        self.assertEqual(config, expected)
+        self.assertEqual(set(seen), {True})
+
+    @parametrize("key", ["graph_partition", "triton.cudagraph_trees"])
+    def test_a_capture_without_cudagraphs_compiles_under_an_inner_patch(self, key):
+        seen = self._compiles_see(key)
+        inner = not operator.attrgetter(key)(torch._inductor.config)
+        with self._capture(self.mod.single) as cap:
+            with torch._inductor.config.patch({key: inner}):
+                y = cap(self.model, self.x2)
+        self.assertEqual(set(seen), {inner})
+        with open(self.artifact) as f:
+            config = _parse_artifact_metadata(f.read())["CUDAGRAPH_CONFIG"]
+        # It records only that CUDA graphs are off.
+        self.assertEqual(config, {"triton.cudagraphs": False})
+        # Under crossref the guards hold only inside the harness's mode.
+        if not TEST_WITH_CROSSREF:
+            self._serve_in_fresh_process([((self.x2,), {}, y)])
+
+    def test_a_cpp_wrapper_capture_records_that_it_compiled_no_cudagraphs(self):
+        # cpp_wrapper compiles no CUDA graphs under graph_partition.
+        options = {
+            "triton.cudagraphs": True,
+            "cpp_wrapper": True,
+            "graph_partition": True,
+        }
+        seen = self._compiles_see("triton.cudagraphs")
+        with self._capture(self.mod.single, options=options) as cap:
+            y = cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            config = _parse_artifact_metadata(f.read())["CUDAGRAPH_CONFIG"]
+        self.assertFalse(config["triton.cudagraphs"])
+        self.assertTrue(config["graph_partition"])
+        self.assertEqual(set(seen), {False})
+        # Under crossref the guards hold only inside the harness's mode.
+        if not TEST_WITH_CROSSREF:
+            self._serve_in_fresh_process([((self.x2,), {}, y)])
+
     def test_capture_takes_pathlike_paths(self):
         import pathlib
 
@@ -4984,16 +5054,11 @@ class TestPrecompileDynamoCapture(TestCase):
         with self.assertRaisesRegex(TypeError, "tracer must be"):
             self._capture(single, tracer=object(), mode="reduce-overhead")
         make_fx = MakeFxTracer()
-        refusals = [
-            (DynamoTracer(), "by the loading process's triton.cudagraphs"),
-            (make_fx, "outside Inductor's CUDA graph wrapper"),
-        ]
-        for tracer, reason in refusals:
-            with self.assertRaisesRegex(PrecompileError, f"{reason}.*Use mode="):
-                self._capture(single, tracer=tracer, mode="reduce-overhead")
-            cudagraphs = {"triton.cudagraphs": True}
-            with self.assertRaisesRegex(PrecompileError, f"{reason}.*Drop triton"):
-                self._capture(single, tracer=tracer, options=cudagraphs)
+        reason = "outside Inductor's CUDA graph wrapper"
+        with self.assertRaisesRegex(PrecompileError, f"{reason}.*or use mode="):
+            self._capture(single, tracer=make_fx, mode="reduce-overhead")
+        with self.assertRaisesRegex(PrecompileError, f"{reason}.*or drop triton"):
+            self._capture(single, tracer=make_fx, options={"triton.cudagraphs": True})
         for key in ("freezing", "force_disable_caches", "fx_wrapper"):
             with self.assertRaisesRegex(PrecompileError, f"'{key}'.*no cache entry"):
                 self._capture(single, options={key: True})
@@ -5007,6 +5072,24 @@ class TestPrecompileDynamoCapture(TestCase):
         wrapper = torch._TorchCompileInductorWrapper(None, remote, None)
         with self.assertRaisesRegex(PackageError, "remote autotune cache miss"):
             precompile_capture(single, backend=wrapper)
+        with self.assertRaisesRegex(PrecompileError, "cannot record"):
+            self._capture(single, options={"cudagraph_policy": None})
+        with self.assertRaisesRegex(PrecompileError, "cannot record"):
+            self._capture(single, options={"cudagraph-policy": None})
+        on = {"triton.cudagraphs": True}
+        with torch._inductor.config.patch(cudagraph_policy=object()):
+            with self.assertRaisesRegex(PrecompileError, "Unset it while capturing"):
+                self._capture(single, options=on)
+            # A capture without CUDA graphs has no wrapping for it to decide.
+            self._capture(single)
+        # It is checked on every call, so one set after capture() began refuses too,
+        # before compiling: a capture that recovers still saves.
+        with self._capture(single, options=on) as cap:
+            with torch._inductor.config.patch(cudagraph_policy=object()):
+                with self.assertRaisesRegex(PrecompileError, "Unset it while"):
+                    cap(self.model, self.x2)
+            cap(self.model, self.x2)
+        self.assertTrue(os.path.exists(self.artifact))
         pinned = {
             "size_asserts": False,
             "scalar_asserts": False,
@@ -6463,6 +6546,402 @@ class TestPrecompileDynamoCapture(TestCase):
             load(self.artifact, other_cache)
         with self.assertRaisesRegex(PrecompileError, "tracer|does not match"):
             load(other_artifact, self.cache)
+
+
+_CUDAGRAPH_MODULE = """
+import torch
+from torch._inductor.cudagraph_utils import CUDAGraphPolicy
+
+
+class Model(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(8, 8)
+        self.register_buffer("calls", torch.zeros(8))
+
+    def forward(self, x):
+        return torch.relu(self.lin(x))
+
+
+def step(model, x):
+    return (model(x).sin() * 2).cos()
+
+
+def breaking_helper(y):
+    y = y.sin()
+    torch._dynamo.graph_break()
+    return y.cos()
+
+
+def calls_breaking_helper(model, x):
+    return breaking_helper(model(x)) + 1
+
+
+def overrides_the_backward(model, x):
+    with torch._dynamo.override_cudagraphs(bwd=False):
+        return step(model, x)
+
+
+def overrides_the_forward(model, x):
+    with torch._dynamo.override_cudagraphs(fwd=False):
+        return step(model, x)
+
+
+def turns_cudagraphs_on(model, x):
+    with torch._dynamo.override_cudagraphs(fwd=True):
+        return step(model, x)
+
+
+def bumps_a_buffer(model, x):
+    model.calls.add_(1)
+    return model(x).sin()
+
+
+def kernelless_backward(model, x):
+    return x.sin().sum() + model.lin.weight.sum()
+
+
+class WrapsNoGraph(CUDAGraphPolicy):
+    def should_wrap(self, compiled_graph):
+        return False
+"""
+
+_CUDAGRAPH_LOADER = """
+import contextlib
+import json
+import sys
+import torch
+from torch._dynamo.utils import counters
+from torch._inductor import cudagraph_trees
+
+tmp, module, artifact, cache, state = sys.argv[1:6]
+sys.path.insert(0, tmp)
+mod = __import__(module)
+saved = torch.load(state)
+model = mod.Model().cuda()
+model.load_state_dict(saved["state_dict"])
+captured = 0
+capture_begin = torch.cuda.CUDAGraph.capture_begin
+
+
+def counting_capture_begin(self, *args, **kwargs):
+    global captured
+    captured += 1
+    return capture_begin(self, *args, **kwargs)
+
+
+def cudagraph_config():
+    c = torch._inductor.config
+    return c.triton.cudagraphs, c.triton.cudagraph_trees, c.graph_partition
+
+
+torch.cuda.CUDAGraph.capture_begin = counting_capture_begin
+if saved["policy"]:
+    torch._inductor.config.cudagraph_policy = getattr(mod, saved["policy"])()
+for key, value in saved["config"].items():
+    setattr(torch._inductor.config, key, value)
+ambient = cudagraph_config()
+allow = saved["serve_time"]
+f = torch.compiler.precompile.load(artifact, cache, allow_serve_time_compiles=allow)
+# load() patches the artifact's config around the post-compile, and sets nothing.
+assert cudagraph_config() == ambient
+training = saved["expected_grad"] is not None
+calls = model.calls.clone()
+with contextlib.nullcontext() if training else torch.no_grad():
+    for _ in range(3):
+        if saved["mark_step"]:
+            torch.compiler.cudagraph_mark_step_begin()
+        model.zero_grad(set_to_none=True)
+        # y stays alive into the next call, as in a loop that uses its output.
+        y = f(model, saved["x"])
+        torch.testing.assert_close(y, saved["expected"])
+        if training:
+            y.sum().backward()
+            torch.testing.assert_close(model.lin.weight.grad, saved["expected_grad"])
+manager = cudagraph_trees.get_manager(0, create_if_none_exists=False)
+nodes = [] if manager is None else [n for ns in manager.roots.values() for n in ns]
+for node in nodes:
+    nodes.extend(child for children in node.children.values() for child in children)
+served = {
+    "recorded": len(nodes),
+    "captured": captured,
+    "trees": manager is not None,
+    "skips": counters["inductor"]["cudagraph_skips"],
+    "compiles": counters["frames"]["ok"],
+    "bumps": int((model.calls - calls).max()),
+}
+print(json.dumps(served))
+"""
+
+
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+@unittest.skipUnless(TEST_CUDA and HAS_TRITON, "needs CUDA + Triton for CUDA graphs")
+@instantiate_parametrized_tests
+class TestPrecompileCudagraphs(TestCase):
+    """A DynamoTracer artifact serves CUDA graphs as its capture compiled them."""
+
+    def setUp(self):
+        super().setUp()
+        self.dir = self.enterContext(tempfile.TemporaryDirectory())
+        self.artifact = os.path.join(self.dir, "m.py")
+        self.cache = os.path.join(self.dir, "m.cache")
+        self.module_name = f"precompile_cudagraph_{uuid.uuid4().hex}"
+        with open(os.path.join(self.dir, self.module_name + ".py"), "w") as f:
+            f.write(_CUDAGRAPH_MODULE)
+        self.enterContext(mock.patch.object(sys, "path", [self.dir, *sys.path]))
+        self.mod = importlib.import_module(self.module_name)
+        self.addCleanup(sys.modules.pop, self.module_name, None)
+        self.model = self.mod.Model().cuda()
+        self.x = torch.randn(4, 8, device="cuda")
+        from torch._inductor.utils import fresh_cache
+
+        # Some CUDA graph decisions (force_disable_cudagraph_TESTING_ONLY) are made
+        # only by a fresh compile and are not in the cache key.
+        self.enterContext(fresh_cache())
+        # Captures with CUDA graphs on leave cudagraph trees, which this clears.
+        torch._dynamo.reset()
+        self.addCleanup(torch._dynamo.reset)
+
+    def _capture_step(self, fn, grad=False, **kwargs):
+        with torch.set_grad_enabled(grad):
+            with capture(
+                fn, artifact_path=self.artifact, cache_path=self.cache, **kwargs
+            ) as cap:
+                y = cap(self.model, self.x).detach().clone()
+        with open(self.artifact) as f:
+            return y, _parse_artifact_metadata(f.read())
+
+    def _eager_grad(self, fn):
+        self.model.zero_grad(set_to_none=True)
+        fn(self.model, self.x).sum().backward()
+        return self.model.lin.weight.grad.clone()
+
+    def _serve_in_fresh_process(
+        self,
+        expected,
+        env=None,
+        mark_step=False,
+        expected_grad=None,
+        policy=None,
+        x=None,
+        serve_time=False,
+        config=None,
+    ):
+        # Calls the loaded artifact three times in a fresh process, whose
+        # triton.cudagraphs is off unless env turns it on, and returns what that
+        # process counted:
+        #   recorded: the nodes in its CUDA graph tree
+        #   captured: every CUDA graph captured, a tree manager's pool graph too
+        #   trees: whether it made a CUDA graph tree manager
+        #   skips: its cudagraph skips
+        #   bumps: how much the calls raised model.calls
+        # With expected_grad, each call also runs the backward.
+        # policy names the module's CUDAGraphPolicy the process sets before load().
+        # serve_time loads with allow_serve_time_compiles, and x replaces self.x.
+        # config is the Inductor config the process sets before load().
+        state = os.path.join(self.dir, "state.pt")
+        saved = {
+            "x": self.x if x is None else x,
+            "expected": expected,
+            "expected_grad": expected_grad,
+            "mark_step": mark_step,
+            "policy": policy,
+            "serve_time": serve_time,
+            "config": config or {},
+        }
+        torch.save({"state_dict": self.model.state_dict(), **saved}, state)
+        argv = [self.dir, self.module_name, self.artifact, self.cache, state]
+        out = subprocess.run(
+            [sys.executable, "-c", _CUDAGRAPH_LOADER, *argv],
+            capture_output=True,
+            text=True,
+            timeout=900,
+            env={**os.environ, **(env or {})},
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        served = json.loads(out.stdout.splitlines()[-1])
+        # The loading process compiles only what it may.
+        self.assertEqual(served.pop("compiles") > 0, serve_time)
+        return served
+
+    @parametrize("serving", ["standalone", "installed"])
+    @parametrize("mark_step", [False, True])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_a_served_artifact_records_its_cudagraphs(self, serving, mark_step):
+        # Each call starts a new CUDA graph tree generation, as under
+        # torch.compile, so warmup ends without cudagraph_mark_step_begin() too.
+        mod = self.mod
+        fn = mod.step if serving == "standalone" else mod.calls_breaking_helper
+        # As under torch.compile, the global flag turns CUDA graphs on too.
+        with torch._inductor.config.patch({"triton.cudagraphs": True}):
+            y, meta = self._capture_step(fn)
+        self.assertEqual(meta["SERVING_MODE"], serving)
+        self.assertTrue(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
+        served = self._serve_in_fresh_process(y, mark_step=mark_step)
+        self.assertGreater(served["recorded"], 0)
+        self.assertEqual(served["skips"], 0)
+
+    @parametrize("how", ["mode", "options"])
+    def test_mode_and_options_turn_cudagraphs_on(self, how):
+        if how == "mode":
+            kwargs = {"mode": "reduce-overhead"}
+        else:
+            kwargs = {"options": {"triton.cudagraphs": True}}
+        y, meta = self._capture_step(self.mod.step, **kwargs)
+        config = meta["CUDAGRAPH_CONFIG"]
+        self.assertTrue(config["triton.cudagraphs"])
+        self.assertTrue(config["triton.cudagraph_trees"])
+        self.assertGreater(self._serve_in_fresh_process(y)["recorded"], 0)
+
+    def test_a_training_artifact_serves_its_forward_and_backward_as_cudagraphs(self):
+        step = self.mod.step
+        y, _ = self._capture_step(step, grad=True, mode="reduce-overhead")
+        grad = self._eager_grad(step)
+        served = self._serve_in_fresh_process(y, expected_grad=grad)
+        # One graph for the forward, one for the backward.
+        self.assertEqual(served["recorded"], 2)
+
+    def test_an_artifact_serves_cudagraphs_without_trees_as_captured(self):
+        config = {"triton.cudagraphs": True, "triton.cudagraph_trees": False}
+        y, meta = self._capture_step(self.mod.step, options=config)
+        self.assertLessEqual(config.items(), meta["CUDAGRAPH_CONFIG"].items())
+        # The loading process leaves triton.cudagraph_trees at its default (on).
+        served = self._serve_in_fresh_process(y)
+        self.assertFalse(served["trees"])
+        self.assertGreater(served["captured"], 0)
+        self.assertEqual(served["skips"], 0)
+
+    def test_an_unpartitioned_artifact_serves_cudagraphs_under_graph_partition(self):
+        # Post-compile would take the partitioned wrapper in a loading process
+        # running graph_partition, find no partition maps and skip CUDA graphs.
+        options = {"triton.cudagraphs": True, "graph_partition": False}
+        y, meta = self._capture_step(self.mod.step, options=options)
+        self.assertFalse(meta["CUDAGRAPH_CONFIG"]["graph_partition"])
+        env = {"TORCHINDUCTOR_GRAPH_PARTITION": "1"}
+        self.assertGreater(self._serve_in_fresh_process(y, env)["recorded"], 0)
+
+    def test_a_graph_options_kept_out_of_cudagraphs_serves_without_one(self):
+        # Whether a graph can run as a CUDA graph is decided when it compiles and
+        # ships with it, though CUDAGRAPH_CONFIG turns CUDA graphs on.
+        force_off = {"force_disable_cudagraph_TESTING_ONLY": True}
+        # Unpartitioned, so the loading process's skip is counted.
+        options = {"triton.cudagraphs": True, "graph_partition": False, **force_off}
+        y, meta = self._capture_step(self.mod.step, options=options)
+        self.assertTrue(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
+        served = self._serve_in_fresh_process(y)
+        self.assertEqual((served["captured"], served["skips"]), (0, 1))
+
+    @parametrize("how", ["ambient", "options"])
+    def test_an_artifact_captured_without_cudagraphs_serves_none(self, how):
+        if how == "ambient":
+            y, meta = self._capture_step(self.mod.step)
+        else:
+            # The options win over the global flag, as under torch.compile.
+            off = {"triton.cudagraphs": False}
+            with torch._inductor.config.patch({"triton.cudagraphs": True}):
+                y, meta = self._capture_step(self.mod.step, options=off)
+        self.assertEqual(meta["CUDAGRAPH_CONFIG"], {"triton.cudagraphs": False})
+        env = {"TORCHINDUCTOR_CUDAGRAPHS": "1"}
+        self.assertEqual(self._serve_in_fresh_process(y, env)["captured"], 0)
+
+    @parametrize(
+        "fn", ["overrides_the_forward", "overrides_the_backward", "turns_cudagraphs_on"]
+    )
+    @parametrize("flag", [False, True])
+    def test_a_capture_overriding_cudagraphs_is_refused_when_they_disagree(
+        self, fn, flag
+    ):
+        fn = getattr(self.mod, fn)
+        options = {"triton.cudagraphs": flag}
+        if flag != (fn is self.mod.turns_cudagraphs_on):
+            with self.assertRaisesRegex(PrecompileError, "Set triton.cudagraphs"):
+                self._capture_step(fn, grad=True, options=options)
+            return
+        y, _ = self._capture_step(fn, grad=True, options=options)
+        served = self._serve_in_fresh_process(y, expected_grad=self._eager_grad(fn))
+        # The forward and backward graphs, as the flag decides them.
+        self.assertEqual(served["recorded"], 2 if flag else 0)
+        self.assertEqual(served["skips"], 0)
+
+    def test_an_inference_capture_keeping_out_a_backward_it_lacks_serves(self):
+        fn = self.mod.overrides_the_backward
+        y, _ = self._capture_step(fn, options={"triton.cudagraphs": True})
+        self.assertGreater(self._serve_in_fresh_process(y)["recorded"], 0)
+
+    def test_an_eager_capture_has_no_cudagraph_config_to_contradict(self):
+        fn = self.mod.turns_cudagraphs_on
+        y, meta = self._capture_step(fn, grad=True, backend="eager")
+        self.assertEqual(meta["CUDAGRAPH_CONFIG"], {})
+        served = self._serve_in_fresh_process(y, expected_grad=self._eager_grad(fn))
+        self.assertEqual(served["captured"], 0)
+
+    def test_a_cudagraph_policy_set_in_the_loading_process_decides_wrapping(self):
+        y, _ = self._capture_step(self.mod.step, mode="reduce-overhead")
+        served = self._serve_in_fresh_process(y, policy="WrapsNoGraph")
+        # The policy declines the one graph, which counts as a skip.
+        self.assertEqual((served["captured"], served["skips"]), (0, 1))
+
+    @parametrize("cudagraphs", [False, True])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_a_serve_time_compile_takes_the_capture_cudagraph_config(self, cudagraphs):
+        fn = self.mod.calls_breaking_helper
+        # The capture takes the flag from the ambient config, so the artifact's
+        # INDUCTOR_OPTIONS do not carry it.
+        with torch._inductor.config.patch({"triton.cudagraphs": cudagraphs}):
+            self._capture_step(fn)
+        # A shape no captured variant covers, so every graph serving it is
+        # compiled in the loading process, whose own flag says the opposite.
+        miss = torch.randn(6, 8, device="cuda")
+        with torch.no_grad():
+            expected = fn(self.model, miss)
+        env = {"TORCHINDUCTOR_CUDAGRAPHS": "0" if cudagraphs else "1"}
+        served = self._serve_in_fresh_process(expected, env, x=miss, serve_time=True)
+        self.assertEqual(served["captured"] > 0, cudagraphs)
+        self.assertEqual(served["skips"], 0)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_an_installed_training_artifact_serves_its_graphs_as_cudagraphs(self):
+        from torch._inductor import cudagraph_trees
+
+        fn = self.mod.calls_breaking_helper
+        y, meta = self._capture_step(fn, grad=True, mode="reduce-overhead")
+        self.assertEqual(meta["SERVING_MODE"], "installed")
+        grad = self._eager_grad(fn)
+        served = self._serve_in_fresh_process(y, mark_step=True, expected_grad=grad)
+        self.assertEqual(served["skips"], 0)
+        # As many as torch.compile(mode="reduce-overhead") records for the step.
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, mode="reduce-overhead")
+        for _ in range(3):
+            torch.compiler.cudagraph_mark_step_begin()
+            self.model.zero_grad(set_to_none=True)
+            compiled(self.model, self.x).sum().backward()
+        manager = cudagraph_trees.get_manager(0, create_if_none_exists=False)
+        todo, baseline = [n for ns in manager.roots.values() for n in ns], 0
+        while todo:
+            baseline += 1
+            todo.extend(c for cs in todo.pop().children.values() for c in cs)
+        self.assertEqual(served["recorded"], baseline)
+
+    def test_a_training_artifact_whose_backward_runs_without_a_cudagraph_serves(self):
+        # The weight's backward is an expand with no kernel, so it runs without a
+        # CUDA graph, and it is lowered before the forward's first call creates the
+        # CUDA graph tree manager.
+        fn = self.mod.kernelless_backward
+        y, _ = self._capture_step(fn, grad=True, mode="reduce-overhead")
+        served = self._serve_in_fresh_process(y, expected_grad=self._eager_grad(fn))
+        self.assertEqual(served["recorded"], 1)
+
+    def test_a_tree_artifact_mutating_a_buffer_serves_cudagraphs_without_trees(self):
+        # A buffer is a static input, whose mutation CUDA graph trees allow; the
+        # tree manager the artifact is served by must not re-read cudagraph_trees.
+        fn = self.mod.bumps_a_buffer
+        y, _ = self._capture_step(fn, mode="reduce-overhead")
+        no_trees = {"triton.cudagraph_trees": False}
+        served = self._serve_in_fresh_process(y, config=no_trees)
+        self.assertEqual(served["bumps"], 3)
+        self.assertGreater(served["recorded"], 0)
+        self.assertEqual(served["skips"], 0)
 
 
 def _exception_chain(exc: BaseException | None) -> str:
