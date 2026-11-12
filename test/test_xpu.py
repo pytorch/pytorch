@@ -590,6 +590,22 @@ print(torch.xpu.is_initialized())
         self.assertEqual(high, s1.priority)
         self.assertEqual(torch.device("xpu:0"), s1.device)
 
+    def test_onednn_on_stream_priority(self):
+        low, high = torch.xpu.Stream.priority_range()
+        x = torch.randn(2, 3, 8, 8)
+        w = torch.randn(4, 3, 3, 3)
+        expected = torch.nn.functional.conv2d(x, w)
+
+        for priority in range(high, low + 1):
+            s = torch.xpu.Stream(priority=priority)
+            self.assertEqual(priority, s.priority)
+            with torch.xpu.stream(s):
+                # conv2d on XPU is backed by oneDNN, which maps the current
+                # stream to a dnnl::stream by priority.
+                out = torch.nn.functional.conv2d(x.to("xpu"), w.to("xpu"))
+            s.synchronize()
+            self.assertEqual(out.cpu(), expected)
+
     def test_stream_event_repr(self):
         s = torch.xpu.current_stream()
         self.assertTrue("torch.xpu.Stream" in str(s))
