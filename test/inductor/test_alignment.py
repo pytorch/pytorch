@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import contextlib
 import sys
 import unittest
 from unittest.mock import patch
@@ -14,7 +13,6 @@ from torch._inductor.utils import (
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    MACOS_VERSION,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_CPU, RUN_GPU
@@ -71,13 +69,7 @@ class CommonTemplate:
             return torch.nn.functional.relu(x)
 
         x = torch.randn(1024 + 16, device=self.device)[1:-15]
-        # TODO (malfet): Investigate failures on MacOS-14
-        with (
-            contextlib.nullcontext()
-            if self.device != "mps" or MACOS_VERSION >= 15.0
-            else self.assertRaises(AssertionError)
-        ):
-            self.common(fn, (x,), check_lowp=False)
+        self.common(fn, (x,), check_lowp=False)
 
     def test_unaligned_input_2d(self):
         def fn(x):
@@ -166,6 +158,10 @@ class CommonTemplate:
         x = torch.randn(1025, device=self.device)
         self.common(f, (x,))
 
+    @test_torchinductor.skip_if_device(
+        lambda device: not torch._inductor.utils.is_gpu(device),
+        "alignment asserts are GPU-only",
+    )
     @config.patch(alignment_asserts_inputs=True)
     @parametrize("misaligned", (False, True))
     def test_input_alignment_asserts(self, misaligned):
@@ -185,6 +181,10 @@ class CommonTemplate:
             ", 16, 'input')", 1 if misaligned else 2, exactly=True
         ).run(code)
 
+    @test_torchinductor.skip_if_device(
+        lambda device: not torch._inductor.utils.is_gpu(device),
+        "alignment asserts are GPU-only",
+    )
     @parametrize("wrapper", ("python", "fx", "custom_partition"))
     def test_input_alignment_assert_fires_instead_of_clone(self, wrapper):
         if not torch._inductor.utils.is_gpu(self.device):
@@ -220,6 +220,10 @@ class CommonTemplate:
         with self.assertRaisesRegex(AssertionError, "bytes aligned"):
             fn_c(y)
 
+    @test_torchinductor.skip_if_device(
+        lambda device: not torch._inductor.utils.is_gpu(device),
+        "runtime alignment cloning is GPU-only",
+    )
     def test_alias_of_misaligned_input(self):
         # chunk on a dynamic dim gives the aliased output a symbolic
         # ViewMeta, so alias regeneration takes the as_strided fallback.
@@ -228,6 +232,10 @@ class CommonTemplate:
 
         check_alias_of_misaligned_input(self, fn)
 
+    @test_torchinductor.skip_if_device(
+        lambda device: not torch._inductor.utils.is_gpu(device),
+        "runtime alignment cloning is GPU-only",
+    )
     @functorch_config.patch(view_replay_for_aliased_outputs=False)
     def test_alias_of_misaligned_input_no_view_replay(self):
         def fn(x):

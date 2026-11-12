@@ -9,17 +9,21 @@ struct AtomicType {};
 template <typename T>
 using AtomicType_t = typename AtomicType<T>::type;
 
+// Compare-and-exchange is done on the bit pattern even for atomic<float>: on
+// some GPUs (e.g. M1) it compares as floats, so once a NaN is stored the
+// exchange never succeeds and the loop spins forever.
 template <typename AT, typename T>
 static inline void atomic_binary_op_helper(
     device ::metal::atomic<AT>* data,
     long offset,
     T value,
     T (*op)(T, T)) {
-  auto ptr = data + offset;
+  static_assert(sizeof(AT) == sizeof(uint), "expected 32-bit atomic type");
+  auto ptr = reinterpret_cast<device ::metal::atomic<uint>*>(data) + offset;
   auto old = ::metal::atomic_load_explicit(ptr, ::metal::memory_order_relaxed);
-  T val;
+  uint val;
   do {
-    val = op(old, value);
+    val = as_type<uint>(op(as_type<T>(old), value));
   } while (!::metal::atomic_compare_exchange_weak_explicit(
       ptr,
       &old,

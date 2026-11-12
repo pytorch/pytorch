@@ -175,8 +175,8 @@ class WorkerServerTest(TestCase):
 
     def test_fr_trace_json_selects_a_backend(self) -> None:
         with local_worker_server() as pool:
-            # No argument reads the default instance, the one ProcessGroupGloo
-            # records into; naming a backend reads that backend's instance.
+            # No argument reads the default instance, gloo's; naming a
+            # backend reads that backend's instance.
             # Both are empty here, so this covers the routing, not the content.
             for path in (
                 "/handler/fr_trace_json",
@@ -186,6 +186,15 @@ class WorkerServerTest(TestCase):
                 resp = pool.request("POST", path)
                 self.assertEqual(resp.status, 200, msg=path)
                 self.assertIn("pg_status", json.loads(resp.data))
+
+    def test_c10d_health_check(self) -> None:
+        with local_worker_server() as pool:
+            resp = pool.request("POST", "/handler/c10d_health_check")
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(
+                json.loads(resp.data),
+                {"healthy": True, "unhealthy_backends": []},
+            )
 
     def test_tcp(self) -> None:
         import requests

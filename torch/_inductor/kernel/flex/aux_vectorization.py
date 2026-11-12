@@ -159,7 +159,7 @@ def select_score_mod_vec_size(
     *,
     has_score_mod: bool,
     has_aux_tensors: bool,
-    is_sm100_or_later: bool,
+    supports_score_mod_vec: bool,
     graph_module: GraphModule | None,
     other_buffers: Sequence[TensorBox],
 ) -> int | None:
@@ -171,7 +171,7 @@ def select_score_mod_vec_size(
     """
     if not has_score_mod or not has_aux_tensors:
         return None
-    if not is_sm100_or_later:
+    if not supports_score_mod_vec:
         return 1
     return select_aux_mod_vec_size(
         graph_module,
