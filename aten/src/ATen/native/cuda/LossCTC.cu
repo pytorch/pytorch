@@ -72,9 +72,7 @@ __device__ static inline int64_t get_target_prime(
 // computed when we start a new block_s. This is why we have our own for loop here.
 template<typename scalar_t, typename target_t>
 __global__ void
-#if defined (USE_ROCM)
 C10_LAUNCH_BOUNDS_2((std::is_same_v<scalar_t, float> ? 1024 : 896), 1)
-#endif
 ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
                                     const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths, int64_t max_input_length,
                                     const target_t* __restrict__ targets_data, const int64_t* __restrict__ target_lengths, int64_t max_target_length,

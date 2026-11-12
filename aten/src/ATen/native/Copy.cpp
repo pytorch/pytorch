@@ -10,6 +10,7 @@
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/vulkan/ops/Copy.h>
+#include <ATen/native/ForeachUtils.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
@@ -65,18 +66,10 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
       self.numel() >= MIN_SZ;
 }
 
-#if !defined(C10_MOBILE)
 #define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)                              \
         AT_DISPATCH_V2(                             \
             TYPE, NAME, AT_WRAP(__VA_ARGS__), kComplexHalf, kBComplex32, kHalf, kBool, kBFloat16, \
             AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
-#else
-#define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)     \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(    \
-            kComplexHalf, kBComplex32, kHalf,      \
-            kBool, kBFloat16, TYPE, NAME,          \
-            __VA_ARGS__)
-#endif
 
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's trickier
@@ -394,6 +387,7 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
 }
 
 ::std::vector<at::Tensor> _foreach_copy(at::TensorList self, at::TensorList src, bool non_blocking) {
+  check_foreach_api_restrictions(self, src);
   std::vector<at::Tensor> outs;
   outs.reserve(self.size());
   // This is a very slow implementation, but needs to directly call the copy() kernel above to handle
