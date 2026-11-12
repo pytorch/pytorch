@@ -1,3 +1,4 @@
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <sstream>
@@ -1100,17 +1101,23 @@ static bool ck_tile_group_gemm_supported(const Tensor& mat_a, const Tensor& mat_
 }
 
 // hipBLASLt runs one GEMM per expert, each with a fixed cost, but beats ck_tile's single persistent kernel once each
-// expert's GEMM is large relative to the GPU's compute (CUs x clock). The constant puts the cutoff at a per-expert
-// M*N*K of 4.5e10 on MI355X (256 CUs, 2.4 GHz), fitted on the Primus-Turbo MoE shapes in bf16 and fp16.
+// expert's GEMM is large. The size is one expert's M*N*K times tokens^0.25, where tokens is the jagged dim, so that
+// forward, dX and dW of one layer (same M*N*K, same tokens) pick the same backend. LDS per CU stands in for the
+// matrix rate, which no device property reports. Fitted on the op benchmark's MoE shapes on MI300X and MI355X.
 static bool should_use_ck_tile_group_gemm(const Tensor& mat_a, const Tensor& mat_b, const std::optional<at::Tensor>& offs) {
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
   // In the 2D cases one of M, N and K is the jagged total over all groups.
-  const int64_t experts = a_is_2d && b_is_2d ? offs->size(0) : (a_is_2d ? mat_b.size(0) : (b_is_2d ? mat_a.size(0) : 1));
-  const double per_expert_mnk = double(mat_a.size(-2)) * mat_b.size(-1) * mat_a.size(-1) / (experts > 0 ? experts : 1);
+  const int64_t groups = a_is_2d && b_is_2d ? offs->size(0) : (a_is_2d ? mat_b.size(0) : (b_is_2d ? mat_a.size(0) : 1));
+  const double experts = groups > 0 ? groups : 1;
+  const double m = mat_a.size(-2) / (a_is_2d && !b_is_2d ? experts : 1);
+  const double n = mat_b.size(-1) / (b_is_2d && !a_is_2d ? experts : 1);
+  const double k = mat_a.size(-1) / (a_is_2d && b_is_2d ? experts : 1);
+  const double tokens = a_is_2d && b_is_2d ? k : (b_is_2d ? n : m);
+  const double es = mat_a.element_size();
   const auto* props = at::cuda::getCurrentDeviceProperties();
-  const double cu_clock_hz = double(props->multiProcessorCount) * props->clockRate * 1e3;
-  return per_expert_mnk <= 0.0733 * cu_clock_hz;
+  const double capacity = double(props->multiProcessorCount) * props->clockRate * 1e3 * props->sharedMemPerMultiprocessor;
+  return m * n * k * std::pow(tokens, 0.25) * es * es * es <= 1.585e-5 * capacity;
 }
 #endif
 
