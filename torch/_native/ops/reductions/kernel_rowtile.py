@@ -418,10 +418,10 @@ class _ItreePlan(NamedTuple):
     # global. Also bit-neutral -- staging moves where the operand is read from, not the chain.
     combine_tile: int = 0
     combine_unroll: int = 0
-    # Staged COMBINE only: the count every partial holds (tile.uniform_combine_ok), or 0. The
+    # Staged COMBINE only: every partial holds split[1] values (tile.uniform_combine_ok). The
     # fold derives counts from it, so the count field is not staged.
-    combine_count: int = 0
-    # With combine_count, a row shared by the block holds the current tile's weights,
+    uniform_count: bool = False
+    # With uniform_count, a row shared by the block holds the current tile's weights,
     # 1 / (index + 1) for each partial's global index, in the count's slot.
     combine_weights: bool = False
 
@@ -443,7 +443,7 @@ class _ItreePlan(NamedTuple):
             self.combine_grp,
             self.combine_tile,
             self.combine_unroll,
-            self.combine_count,
+            self.uniform_count,
             self.combine_weights,
         )
 
@@ -730,7 +730,6 @@ def itree_combine_plan(
     if not tile_n:
         # Narrow blocks pay off only for the staged combine; the global-memory chain keeps 128.
         rpb = _MULTIROW_ROWS_PER_BLOCK
-    count = itree.split[1] if uniform and tile_n else 0
     return _ItreePlan(
         "combine",
         1,
@@ -743,8 +742,8 @@ def itree_combine_plan(
         combine_grp=g,
         combine_tile=tile_n,
         combine_unroll=min(arch.combine_unroll, tile_n),
-        combine_count=count,
-        combine_weights=bool(count and weights),
+        uniform_count=uniform and bool(tile_n),
+        combine_weights=uniform and weights and bool(tile_n),
     )
 
 
@@ -1051,8 +1050,9 @@ def reduce_row_tile(
     x's device must be current. `ragged_vector` asks for aligned wide loads with scalar
     edges (one kernel per N) and rejects empty rows, order="inner_tree" and use_tma=True
     for every N. Rows of whole 16-byte vectors otherwise fall through to normal path
-    selection; ragged rows need a contiguous, 16-byte aligned input. For ragged N, a
-    row's scalar prefix depends on its index, so identical rows can round differently.
+    selection; ragged rows need a contiguous, 16-byte aligned input and raise ValueError
+    on any other rather than fall back. For ragged N, a row's scalar prefix depends on
+    its index, so identical rows can round differently.
     """
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")

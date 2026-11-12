@@ -214,8 +214,9 @@ class LaunchRecord:
 @contextmanager
 def recording(x: torch.Tensor) -> Iterator[LaunchRecord]:
     """Record the launches made from `x` in this context. Recordings must not nest: a
-    nested recording hides its launches from the outer one, so the outer replay can be
-    incomplete or finish() declines."""
+    nested recording would hide its launches from the outer one, so nesting raises."""
+    if _RECORD.get() is not None:
+        raise RuntimeError("launch recordings must not nest")
     record = LaunchRecord(x)
     token = _RECORD.set(record)
     try:

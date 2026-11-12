@@ -50,7 +50,7 @@ def _overrides_inactive():
         return "CuTeDSL runtime unavailable, disabled, or at an unsupported version"
     major = torch.cuda.get_device_capability()[0]
     if torch.version.hip or major not in ov._ARCH_MAJORS:
-        return "the overrides serve SM90 and SM100-family CUDA GPUs only"
+        return "the overrides serve SM100-family CUDA GPUs only"
     return None
 
 
@@ -93,8 +93,8 @@ class TestCuTeDSLReductionWiring(TestCase):
     def test_per_overload_opt_out(self, device):
         """Disable every override by the overload names the overrides document."""
         x = torch.randn(128, 512, device=device)
-        ops = ("sum", "mean", "prod", "amax", "amin")
-        calls = [functools.partial(getattr(torch, op), x, dim=-1) for op in ops]
+        op_names = ("sum", "mean", "prod", "amax", "amin")
+        calls = [functools.partial(getattr(torch, op), x, dim=-1) for op in op_names]
         names = ("sum.dim_IntList", "mean.dim", "prod.dim_int", "amax", "amin")
         with torch.backends.python_native.operations_disabled(*names):
             self.assertEqual([self._run(call)[1] for call in calls], [0] * len(calls))

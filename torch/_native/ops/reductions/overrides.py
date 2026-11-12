@@ -53,8 +53,8 @@ _Dim: TypeAlias = int | Sequence[int] | None
 _Red: TypeAlias = set[int] | None
 
 
-# Compute-capability majors this family's kernels have been run on: Hopper and Blackwell.
-_ARCH_MAJORS = (9, 10)
+# Compute-capability majors served by default: Blackwell.
+_ARCH_MAJORS = (10,)
 
 _SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 

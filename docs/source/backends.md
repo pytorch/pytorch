@@ -491,7 +491,7 @@ enable or disable high-performance implementations from various DSLs like Triton
 .. autofunction:: torch.backends.python_native.disable_operations
 ```
 
-On CUDA GPUs with compute capability 9.x or 10.x and a supported CuTeDSL runtime version
+On CUDA GPUs with compute capability 10.x and a supported CuTeDSL runtime version
 installed, `torch.sum`, `torch.mean`, `torch.amax`, `torch.amin` and `torch.prod` (with
 `dim`) are overridden by default for float16, bfloat16 and float32 inputs. `sum`, `mean`
 and `prod` results can differ bitwise from ATen's, since the kernels accumulate in FP32 in
@@ -499,14 +499,15 @@ a different reduction order; `amax` and `amin` results are equal in value, thoug
 of zero and NaN payloads can differ. By default the dim `out=` overloads, full `prod()`
 and declined inputs (such as 0-d, empty or not 16-byte aligned ones) stay on ATen, so
 `torch.sum(x, 1)` and `torch.sum(x, 1, out=o)` can differ bitwise.
-`PYTORCH_NATIVE_INNER_TREE=1` serves calls in inner-tree order, warning once and running
-unordered where a layout cannot take it; `strict` raises instead. To keep ATen, pass the
-overload names `sum.dim_IntList`, `mean.dim`, `prod.dim_int`, `amax` and `amin` to
-`disable_operations`, or set `torch.backends.python_native.cutedsl.enabled = False`, which
-turns off every CuTeDSL override, not only these reductions. The `cutedsl.disabled()`
-context manager does the same while its block runs (process-wide), along with native AOT
-for every DSL. Setting `TORCH_DISABLE_NATIVE_JIT=1` before `import torch` registers no
-native DSL overrides.
+Setting `PYTORCH_NATIVE_INNER_TREE` to any value but `""` or `0` puts served calls in
+inner-tree order, warning once per reason and running unordered where a layout cannot take
+it (`strict` raises instead); declined calls and the dim `out=` overloads go to ATen and
+ignore it. To keep ATen, pass the overload names `sum.dim_IntList`, `mean.dim`,
+`prod.dim_int`, `amax` and `amin` to `disable_operations`, or set
+`torch.backends.python_native.cutedsl.enabled = False`, which turns off every CuTeDSL
+override, not only these reductions. The `cutedsl.disabled()` context manager does the
+same while its block runs (process-wide), along with native AOT for every DSL. Setting
+`TORCH_DISABLE_NATIVE_JIT=1` before `import torch` registers no native DSL overrides.
 
 ```{eval-rst}
 .. autofunction:: torch.backends.python_native.enable_operations

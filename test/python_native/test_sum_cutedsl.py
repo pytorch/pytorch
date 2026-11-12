@@ -377,7 +377,7 @@ class TestSumCuteDSLOverride(TestCase):
         from torch._native.ops.reductions import kernel_general as kg, overrides as ov
 
         if torch.cuda.get_device_capability()[0] not in ov._ARCH_MAJORS:
-            self.skipTest("the reduction overrides serve SM90 and SM100-family only")
+            self.skipTest("the reduction overrides serve SM100-family only")
         x = self._make_order_sensitive_input(128, 8192, torch.float32)
         self.assertFalse(cutedsl_impl._cond(x, [0, 1]))
         kg._REPLAYS.clear()
