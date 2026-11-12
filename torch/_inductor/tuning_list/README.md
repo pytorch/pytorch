@@ -59,6 +59,34 @@ reduction derives its warp count from the tile. Naming either is an error.
 
 The device-specific key is tried first, then the device-agnostic one. Only one entry applies; they do not merge.
 
+## Choices Handler
+
+The table is the default `InductorChoices.triton_kernel_configs`, which codegen calls as it generates each pointwise and
+reduction kernel, with its heuristic name (`pointwise`, `reduction`, `persistent_reduction` and others), `size_hints`,
+`triton_meta` and `inductor_meta`, and which returns an entry or `None`. Overriding it keys entries on anything those
+carry, such as size buckets or the reduction hint:
+
+```python
+from torch._inductor.choices import InductorChoices, register_inductor_choices
+
+
+class MyChoices(InductorChoices):
+    def triton_kernel_configs(self, heuristic, size_hints, triton_meta, inductor_meta):
+        if heuristic == "reduction" and len(size_hints) == 2 and size_hints["r0_"] >= 8192:
+            return {"configs": [{"XBLOCK": 1, "R0_BLOCK": 4096}]}
+        return super().triton_kernel_configs(heuristic, size_hints, triton_meta, inductor_meta)
+
+    def uuid(self):
+        return ("my_choices", 1)
+
+
+register_inductor_choices("my_choices", MyChoices)
+```
+
+An entry from a handler is validated as a table entry is, and does not apply to the kernels under Not Covered. `uuid()`
+puts the handler in the FX graph cache key, so change it when the entries change; a handler installed with
+`V.set_choices_handler` alone is not in the key.
+
 ## Validation
 
 Keys are checked whenever a kernel is generated, and an entry when a kernel under its key is.
@@ -93,8 +121,10 @@ Three mechanisms can decide a codegen kernel's configuration:
 
 ## Downstream Processing
 
-Supplied candidates go through everything generated ones do:
+Supplied candidates are built by the device's heuristic class, with the constructor it uses for its own, and go through
+everything generated ones do:
 
+- in `append` mode, the heuristic's own post-processing of its list, such as ROCm's `_finalize_configs`
 - filtering for TMA restrictions and for deterministic reductions
 - the mix-order reduction rewrite, which overwrites `XBLOCK` and `NUM_STAGES` on every candidate with values derived
   from the split size, so naming a block size has no effect on those kernels

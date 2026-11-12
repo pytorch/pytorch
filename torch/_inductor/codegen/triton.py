@@ -8367,9 +8367,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             **self.inductor_meta_per_kernel(),
             **self.inductor_meta_common(),
         }
+        heuristic = self._get_heuristic()
+        supplied = V.choices.triton_kernel_configs(
+            heuristic, size_hints, triton_meta, inductor_meta
+        )
         # Carried in the source, so compile workers and source-keyed caches see it.
-        if entry := tuning_list.lookup(
-            self._get_heuristic(), size_hints, triton_meta, inductor_meta
+        if entry := tuning_list.check(
+            supplied, heuristic, size_hints, triton_meta, inductor_meta
         ):
             inductor_meta["tuning_list"] = entry
 
