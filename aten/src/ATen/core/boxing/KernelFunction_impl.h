@@ -172,7 +172,7 @@ C10_ALWAYS_INLINE Return KernelFunction::call(
           unpackSymInt<Args>(args)...);
     }
   } else {
-    if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
+    if (unboxed_kernel_func_ != nullptr) [[likely]] {
       auto* functor = boxed_kernel_func_.getFunctor();
       return callUnboxedKernelFunction<Return, Args...>(
           unboxed_kernel_func_,

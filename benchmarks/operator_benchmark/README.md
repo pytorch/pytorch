@@ -181,7 +181,7 @@ The [operator_microbenchmark.yml](../../.github/workflows/operator_microbenchmar
 **ROCm Devices:**
 - MI350X GPUs (`linux.rocm.gpu.gfx950.1`) - gfx950
 
-**Operators Tracked in CI:** `matmul`, `mm`, `addmm`, `bmm`, `conv` (with tag `long`)
+**Operators Tracked in CI:** `matmul`, `mm`, `addmm`, `bmm`, `conv`, `grouped_mm` (with tag `long`)
 - Other operators in the `pt/` directory can be run ad-hoc using the workflow dispatch
 
 **Schedule:** Daily at 06:00 UTC

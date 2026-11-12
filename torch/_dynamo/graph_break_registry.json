@@ -1301,6 +1301,16 @@
       "Hints": []
     }
   ],
+  "GB0705": [
+    {
+      "Gb_type": "Custom metaclass metadata access",
+      "Context": "metadata={attr}, name={name}",
+      "Explanation": "Dynamo cannot safely construct a class metadata source through custom metaclass accessors.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB6012": [
     {
       "Gb_type": "Cannot trace user-defined __len__",
@@ -1546,16 +1556,6 @@
       "Explanation": "Attempted to read a cell variable that has not been populated yet.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    }
-  ],
-  "GB4777": [
-    {
-      "Gb_type": "dict storage mutation on OrderedDict",
-      "Context": "dict.{name}",
-      "Explanation": "Base dict writes bypass OrderedDict's linked storage.",
-      "Hints": [
-        "Use OrderedDict methods to preserve its linked storage."
       ]
     }
   ],
@@ -1844,6 +1844,34 @@
       "Hints": [
         "Avoid using the `from` keyword.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2688": [
+    {
+      "Gb_type": "slot-wrapper identity requires receiver guards",
+      "Context": "{self}",
+      "Explanation": "Slot-wrapper identity operations require receiver guards that saved capture may filter out.",
+      "Hints": [
+        "Compare or hash slot wrappers outside the compiled region."
+      ]
+    },
+    {
+      "Gb_type": "slot-wrapper identity requires receiver guards",
+      "Context": "{self}",
+      "Explanation": "Saved slot-wrapper hashes require receiver identity guards that may be filtered out.",
+      "Hints": [
+        "Compute the hash or build the container outside the compiled region."
+      ]
+    }
+  ],
+  "GB7711": [
+    {
+      "Gb_type": "slot-wrapper comparison with undecidable identity",
+      "Context": "{self} {op} {other}",
+      "Explanation": "Dynamo cannot determine the receiver identities of these slot wrappers.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
       ]
     }
   ],
@@ -2541,6 +2569,16 @@
       ]
     }
   ],
+  "GB4524": [
+    {
+      "Gb_type": "Unsupported OrderedDict snapshot runtime",
+      "Context": "str(error)",
+      "Explanation": "This Python runtime cannot safely snapshot this OrderedDict's linked nodes.",
+      "Hints": [
+        "Use a supported Python version; free-threaded nonempty snapshots require Python 3.14.1+."
+      ]
+    }
+  ],
   "GB0144": [
     {
       "Gb_type": "Unsupported custom jvp",
@@ -3214,6 +3252,16 @@
       ]
     }
   ],
+  "GB1551": [
+    {
+      "Gb_type": "Prebound builtin method requires identity guards",
+      "Context": "source.name",
+      "Explanation": "Dynamo cannot track this prebound builtin method when its identity guard can be skipped or filtered.",
+      "Hints": [
+        "Bind the builtin method inside the compiled function."
+      ]
+    }
+  ],
   "GB0176": [
     {
       "Gb_type": "call_id() without associated real value",
@@ -3551,6 +3599,17 @@
       "Context": "invalid args to {self_handler}: {args} {kwargs}",
       "Explanation": "Encountered TypeError when trying to handle op {fn.__name__}",
       "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB8644": [
+    {
+      "Gb_type": "builtin method identity with unstable receiver",
+      "Context": "receiver: {obj}",
+      "Explanation": "Dynamo cannot preserve builtin method identity without a stable receiver. Resuming with a reconstructed copy can change its hash or comparisons.",
+      "Hints": [
+        "Bind the method on an input or another stable object.",
         "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
       ]
     }
@@ -4000,6 +4059,16 @@
       "Explanation": "The type {self.python_type_name()} has an sq_inplace_repeat C slot but the corresponding VariableTracker doesn't implement sq_inplace_repeat_impl.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7856": [
+    {
+      "Gb_type": "dict storage mutation on OrderedDict",
+      "Context": "dict.{name}",
+      "Explanation": "Base dict writes bypass OrderedDict's linked storage.",
+      "Hints": [
+        "Use OrderedDict methods to preserve its linked storage."
       ]
     }
   ],
@@ -4551,6 +4620,16 @@
       "Explanation": "torch.get_device_module accepts 1 optional argument `device`",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB3039": [
+    {
+      "Gb_type": "OrderedDict subclass allocation",
+      "Context": "OrderedDict subclass",
+      "Explanation": "Dynamo cannot trace allocating operations on OrderedDict subclasses.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -7254,6 +7333,15 @@
       "Explanation": "Dynamo cannot safely match this OrderedDict's linked order to its dictionary storage.",
       "Hints": [
         "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    },
+    {
+      "Gb_type": "OrderedDict storage differs from linked keys",
+      "Context": "OrderedDict input snapshot: {error}",
+      "Explanation": "Dynamo cannot safely match this OrderedDict's linked order to its dictionary storage.",
+      "Hints": [
+        "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
         "On free-threaded builds, use Python 3.14.1 or newer.",
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
       ]
@@ -7269,6 +7357,15 @@
     }
   ],
   "GB5295": [
+    {
+      "Gb_type": "builtin method hash with unstable receiver",
+      "Context": "receiver: {obj}",
+      "Explanation": "Dynamo cannot compute the hash of a builtin method without a stable receiver identity.",
+      "Hints": [
+        "Bind the method on an input or another stable object.",
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    },
     {
       "Gb_type": "builtin method hash with unstable receiver",
       "Context": "{self}",
