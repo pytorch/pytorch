@@ -70,7 +70,6 @@
 
 namespace torch {
 
-#if defined C10_MOBILE
 /**
  * The NoInferSchemaTag is a type name used to indicate that this call to the
  * CppFunction constructor should not trigger schema inference from functor.
@@ -80,12 +79,11 @@ namespace torch {
  * computation can be done by the compiler at build time, but that isn't
  * necessarily the case.
  *
- * Schema inference is elided only for mobile use-cases where we don't need
- * the additional runtime cost or size overhead on client devices.
+ * The tag can be used when the schema is supplied separately. Mobile
+ * Library::impl registrations use it implicitly to avoid that overhead.
  *
  */
 struct NoInferSchemaTag {};
-#endif
 
 #define HAS_PT2_COMPLIANT_TAG
 
@@ -152,7 +150,6 @@ class TORCH_API CppFunction final {
                 std::decay_t<Lambda>>())
         {}
 
-#if defined C10_MOBILE
   /// This overload accepts function pointers, e.g., `CppFunction(&add_impl,
   /// NoInferSchemaTag())`
   template <typename Func>
@@ -202,7 +199,6 @@ class TORCH_API CppFunction final {
         ,
         schema_(nullptr),
         debug_() {}
-#endif
 
   ~CppFunction();
 
@@ -688,31 +684,18 @@ class TORCH_API Library final {
       _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
     // TODO: need to raise an error when you impl a function that has a
     // catch all def
+    if constexpr (std::is_same_v<std::decay_t<Func>, CppFunction>) {
+      CppFunction f(std::forward<Func>(raw_f));
+      return _impl(name, std::move(f), rv);
+    } else {
 #if defined C10_MOBILE
-    CppFunction f(std::forward<Func>(raw_f), NoInferSchemaTag());
+      CppFunction f(std::forward<Func>(raw_f), NoInferSchemaTag());
 #else
-    CppFunction f(std::forward<Func>(raw_f));
+      CppFunction f(std::forward<Func>(raw_f));
 #endif
-    return _impl(name, std::move(f), rv);
+      return _impl(name, std::move(f), rv);
+    }
   }
-
-#if defined C10_MOBILE
-  // Note: This overload is needed only for C10_MOBILE, since the automatically
-  // defined copy constructor for the CppFunction doesn't have the additional
-  // NoInferSchemaTag argument. We define the overload for the impl() function
-  // to accept a CppFunction&& argument. The already constructed CppFunction
-  // object may or may not have the inferred schema, but it doesn't matter
-  // for our purposes since if it already has the inferred schema, then we
-  // might as well just pass it through directly.
-  //
-  template <typename Name>
-  Library& impl(Name name, CppFunction&& raw_f) & {
-    // TODO: need to raise an error when you impl a function that has a
-    // catch all def
-    CppFunction f(std::forward<CppFunction>(raw_f));
-    return _impl(name, std::move(f));
-  }
-#endif
 
   // Helper for getting an OperatorName for a const char*.  You probably
   // don't need this.
@@ -883,13 +866,13 @@ class TORCH_API Library final {
   at::OperatorName _parseNameForLib(const char* name_str) const;
 };
 
-#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT)
 void initialize_torch_libraries();
 #endif
 
 namespace detail {
 
-#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT)
 // This is an experimental feature to defer TorchLibraryInit cost to run either
 // at model load time, or when a client application explicitly calls
 // torch::initialize_torch_libraries().

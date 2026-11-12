@@ -390,9 +390,9 @@ accumulating the gradient contributions from each use during the backward.
 Passing ``disallow_implicit_grad_accumulation=True`` to {meth}`torch.Tensor.backward`,
 {func}`torch.autograd.backward` or {func}`torch.autograd.grad` makes it so that whenever
 such an accumulation is needed, we raise an error instead. This is useful for finding
-places in your code relies on autograd to accumulate gradients, when you might actually
+places where your code relies on autograd to accumulate gradients, when you might actually
 want to do it explicitly so you can have finer control over it. For example, you may
-want to control what precision the accumulation or how the rounding is performed
+want to control what precision the accumulation is done in, or how the rounding is performed
 when casting to the desired precision.
 
 Note that while a leaf tensor used twice during a forward raises an error during backward

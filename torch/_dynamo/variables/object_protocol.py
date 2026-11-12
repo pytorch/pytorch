@@ -43,6 +43,8 @@ from ..source import (
     AttrSource,
     DictGetItemSource,
     GetItemSource,
+    is_constant_source,
+    is_from_skip_guard_source,
     Source,
     TypeDictSource,
     TypeMROSource,
@@ -50,6 +52,7 @@ from ..source import (
 )
 from ..utils import (
     get_type_mro_no_user_code,
+    has_custom_metaclass_accessor,
     iter_mro_static_attrs,
     iter_mro_static_dicts,
     specialize_symnode,
@@ -797,13 +800,12 @@ def pylong_from_base(
         raise_observed_exception(
             ValueError, tx, args=["int() base must be >= 2 and <= 36, or 0"]
         )
+    if not issubclass(x.python_type(), (str, bytes, bytearray)):
+        raise_type_error(tx, "int() can't convert non-string with explicit base")
     if not x.is_python_constant():
         return None
-    xval = x.as_python_constant()
-    if not isinstance(xval, (str, bytes, bytearray)):
-        raise_type_error(tx, "int() can't convert non-string with explicit base")
     try:
-        return ConstantVariable.create(int(xval, base))
+        return ConstantVariable.create(int(x.as_python_constant(), base))
     except ValueError as e:
         raise_observed_exception(ValueError, tx, args=list(e.args))
 
@@ -1178,11 +1180,11 @@ def generic_getiter(
             raise_type_error(tx, err_str)
         return res
     elif pysequence_check(T):
-        from .functions import UserFunctionVariable
+        from .builder import SourcelessBuilder
 
-        return UserFunctionVariable(polyfills.builtins.sequence_iterator).call_function(
-            tx, [obj], {}
-        )
+        return SourcelessBuilder.create_internal_user_function(
+            polyfills.builtins.sequence_iterator
+        ).call_function(tx, [obj], {})
     else:
         raise_type_error(tx, f"'{obj.python_type_name()}' object is not iterable")
 
@@ -1861,36 +1863,6 @@ def slot_wrapper_iadd(
 is_richcompare_not_implemented = is_nb_not_implemented
 
 
-def object_richcompare(
-    self: VariableTracker,
-    tx: "InstructionTranslatorBase",
-    other: VariableTracker,
-    op: str,
-) -> VariableTracker:
-    """object's tp_richcompare.
-
-    https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6263-L6305
-    - __eq__: identity check, else NotImplemented
-    - __ne__: delegates to tp_richcompare(self, other, Py_EQ) and inverts
-    - ordering
-    """
-    if op == "__eq__":
-        identity = vt_identity_compare(self, other)
-        if identity is not None and identity.as_python_constant():
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(NotImplemented)
-    elif op == "__ne__":
-        # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6279-L6298
-        # Safe to call as_python_constant(): only identity-based types use
-        # object_richcompare, so eq_result is always True or NotImplemented.
-        eq_result = self.tp_richcompare_impl(tx, other, "__eq__")
-        if is_richcompare_not_implemented(eq_result):
-            return eq_result
-        return ConstantVariable.create(not eq_result.as_python_constant())
-    else:
-        return ConstantVariable.create(NotImplemented)
-
-
 def python_constant_richcompare_impl(
     self: VariableTracker,
     tx: "InstructionTranslatorBase",
@@ -1931,6 +1903,22 @@ def python_constant_repr_impl(
         return ConstantVariable.create(fn(value))
     except Exception as e:
         raise_observed_exception(type(e), tx, args=list(e.args))
+
+
+def type_init(
+    tx: "InstructionTranslatorBase",
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    """type_init (a class's tp_init): only validates the arguments.
+
+    https://github.com/python/cpython/blob/v3.13.3/Objects/typeobject.c#L3385-L3405
+    """
+    if len(args) == 1 and kwargs:
+        raise_type_error(tx, "type.__init__() takes no keyword arguments")
+    if len(args) not in (1, 3):
+        raise_type_error(tx, "type.__init__() takes 1 or 3 arguments")
+    return ConstantVariable.create(None)
 
 
 # _Py_SwappedOp: https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L987
@@ -2054,11 +2042,11 @@ def generic_hash_impl(
 ) -> tuple[int, bool]:
     """Internal API: compute hash as (value, is_fake).
 
-    Dispatches to the VT's hash_impl.  Called by generic_hash (which wraps
+    Dispatches to the VT's tp_hash_impl.  Called by generic_hash (which wraps
     the result in a VT), container hash_impls (which propagate is_fake),
     and HashableTracker (which just needs the int).
     """
-    return obj.hash_impl(tx)
+    return obj.tp_hash_impl(tx)
 
 
 def generic_hash(
@@ -2071,11 +2059,12 @@ def generic_hash(
     Wraps the result in ConstantVariable or FakeIdVariable depending on
     whether the hash depends on a sourceless object's identity.
     """
-    from .constant import ConstantVariable, FakeIdVariable, FakeValueKind
+    from .builder import SourcelessBuilder
+    from .constant import ConstantVariable, FakeValueKind
 
     h, is_fake = generic_hash_impl(tx, obj)
     if is_fake:
-        return FakeIdVariable(h, kind=FakeValueKind.HASH)
+        return SourcelessBuilder.create_internal_fake_id(h, kind=FakeValueKind.HASH)
     return ConstantVariable.create(h)
 
 
@@ -2258,15 +2247,39 @@ def mro_lookup(py_type: type, name: str) -> object:
 
 
 def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
-    """Source for ``klass.__mro__[idx]``.
+    r"""Source for ``klass.__mro__[idx]``.
 
     Entry 0 is spelled as the class itself when it is the class, which it is for
     every MRO CPython computes. A metaclass overriding ``mro()`` can put
     something else there, so check rather than assume.
     """
-    if not idx and get_type_mro_no_user_code(klass)[0] is klass:
+    base = get_type_mro_no_user_code(klass)[idx]
+    if not idx and base is klass:
         return klass_source
     return GetItemSource(TypeMROSource(klass_source), idx)
+
+
+def guard_mro_absent(
+    tx: "InstructionTranslatorBase",
+    klass: type,
+    klass_source: Source,
+    name: str,
+    stop: int,
+) -> None:
+    """Guard that *name* stays out of the ``__dict__`` of ``klass.__mro__[:stop]``."""
+    guards_context = tx.output.tracing_context.guards_context
+    if guards_context.skip_install or is_from_skip_guard_source(klass_source):
+        return
+    for idx in range(stop):
+        absent_key = (id(klass), idx, name)
+        if absent_key in tx.output.guarded_mro_absent_keys:
+            continue
+        install_guard(
+            TypeDictSource(_mro_entry_source(klass, klass_source, idx)).make_guard(
+                partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
+            )
+        )
+        tx.output.guarded_mro_absent_keys.add(absent_key)
 
 
 def mro_attr_source(
@@ -2275,34 +2288,38 @@ def mro_attr_source(
     klass_source: Source,
     name: str,
 ) -> "DictGetItemSource | None":
-    """Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
+    r"""Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
 
     Reading the attribute back as ``klass_source.name`` would go through
     ``type.__getattribute__``, where a data descriptor on the metaclass wins over
     the class chain -- a different object than `mro_lookup` returned. Index the
     owning class's ``__dict__`` instead.
 
-    Returns None if *name* is absent from the whole MRO; callers decide whether
-    that is an error.
+    Guards absence in every skipped class, including a complete MRO miss.
+    Returns None on a complete miss; callers decide whether that is an error.
     """
-    entries = tuple(iter_mro_static_dicts(klass))
-    for idx, (base, namespace) in enumerate(entries):
+    for idx, (base, namespace) in enumerate(iter_mro_static_dicts(klass)):
+        if not is_constant_source(klass_source):
+            direct = not idx and base is klass
+            attr = None
+            if has_custom_metaclass_accessor(base, "__dict__"):
+                attr = "__dict__"
+            elif not direct and has_custom_metaclass_accessor(klass, "__mro__"):
+                attr = "__mro__"
+            if attr is not None:
+                unimplemented(
+                    gb_type="Custom metaclass metadata access",
+                    context=f"metadata={attr}, name={name}",
+                    explanation="Dynamo cannot safely construct a class metadata source "
+                    "through custom metaclass accessors.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
         if name not in namespace:
             continue
 
         # Guard the classes we walked past, so the owner stays the owner if one
-        # of them later gains *name*. Deduplicated by (id(klass), name): the
-        # caller's TYPE_MATCH pins the MRO, so an id always means the same class.
-        for absent_idx in range(idx):
-            absent_key = (id(entries[absent_idx][0]), name)
-            if absent_key in tx.output.guarded_mro_absent_keys:
-                continue
-            tx.output.guarded_mro_absent_keys.add(absent_key)
-            install_guard(
-                TypeDictSource(
-                    _mro_entry_source(klass, klass_source, absent_idx)
-                ).make_guard(partial(GuardBuilder.DICT_NOT_CONTAINS, key=name))
-            )
+        # of them later gains *name*.
+        guard_mro_absent(tx, klass, klass_source, name, idx)
 
         # Reuse the source when the same owner is reached again for the same
         # name, even from a differently-sourced object, so it does not collect
@@ -2320,7 +2337,40 @@ def mro_attr_source(
         tx.output.mro_source_cache[cache_key] = source
         return source
 
+    guard_mro_absent(
+        tx, klass, klass_source, name, len(get_type_mro_no_user_code(klass))
+    )
     return None
+
+
+def _is_skipped_constant_property(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: str,
+) -> bool:
+    if type(name) is not str:
+        return False
+    obj = obj.realize()
+    if (
+        type(obj) is not variables.ConstantVariable
+        or tx.output.side_effects.has_pending_mutation_of_attr(obj, name)
+        or obj.lookup_tp_getset_member(name) is not None
+    ):
+        return False
+    type_attr = mro_lookup(obj.python_type(), name)
+    if type(type_attr) is not property:
+        return False
+    # Python getters can have specialized SkipFunctionVariable handlers.
+    if isinstance(type_attr.fget, types.FunctionType):
+        return False
+    prop_source = (
+        mro_attr_source(tx, obj.python_type(), TypeSource(obj.source), name)
+        if obj.source
+        else None
+    )
+    prop_vt = variables.PropertyVariable.create(type_attr, prop_source)
+    fget_vt = prop_vt.tp_getattro_impl(tx, "fget").realize()
+    return isinstance(fget_vt, variables.SkipFunctionVariable)
 
 
 def _resolve_descriptor_get(
@@ -2339,6 +2389,8 @@ def _resolve_descriptor_get(
     """
     import types as _types
 
+    from .builder import VariableBuilder
+
     if isinstance(type_attr, property):
         # The property object lives on the type, not the instance: anchoring it at
         # obj.source would make PropertyVariable's fget source read the *result* of
@@ -2348,17 +2400,17 @@ def _resolve_descriptor_get(
             if obj.source
             else None
         )
-        prop_vt = variables.PropertyVariable(type_attr, source=prop_source)
+        prop_vt = variables.PropertyVariable.create(type_attr, prop_source)
         return prop_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.MemberDescriptorType):
-        md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
+        md_vt = variables.MemberDescriptorVariable.create(type_attr, source)
         return md_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.GetSetDescriptorType):
-        gs_vt = variables.GetSetDescriptorVariable(type_attr, source=source)
+        gs_vt = variables.GetSetDescriptorVariable.create(type_attr, source)
         return gs_vt.tp_descr_get_impl(tx, obj, class_vt)
     _tuplegetter = collections._tuplegetter  # pyrefly: ignore[missing-attribute]
     if isinstance(type_attr, _tuplegetter):
-        tg_vt = variables.TupleGetterVariable(type_attr, source=source)
+        tg_vt = variables.TupleGetterVariable.create(type_attr, source)
         return tg_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, staticmethod):
         sm_vt = variables.StaticMethodVariable.from_descriptor(
@@ -2371,21 +2423,21 @@ def _resolve_descriptor_get(
         )
         return cm_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.ClassMethodDescriptorType):
-        cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
+        cmd_vt = variables.ClassMethodDescriptorVariable.create(type_attr, source)
         return cmd_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.WrapperDescriptorType):
-        wd_vt = variables.WrapperDescriptorVariable(
+        wd_vt = VariableBuilder.create_internal_wrapper_descriptor(
             type_attr, owner=class_vt, source=source
         )
         return wd_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.MethodDescriptorType):
-        md_vt = variables.MethodDescriptorVariable(
+        md_vt = VariableBuilder.create_internal_method_descriptor(
             type_attr, owner=class_vt, source=source
         )
         return md_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.FunctionType):
         return variables.UserMethodVariable(
-            variables.UserFunctionVariable(
+            VariableBuilder.create_internal_user_function(
                 type_attr, source=source and AttrSource(source, "__func__")
             ),
             obj,
