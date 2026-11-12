@@ -289,7 +289,8 @@ class Vectorized<double> {
     auto tmp = blendv(
         Vectorized<double>(0),
         Vectorized<double>(c10::pi<double>),
-        *this < Vectorized<double>(0));
+        Vectorized<double>(c10::pi<double>).copysign(*this) <
+            Vectorized<double>(0));
     return blendv(tmp, *this, isnan());
   }
   Vectorized<double> real() const {

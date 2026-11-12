@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import importlib.metadata
 import itertools
 import logging
 import math
@@ -12,7 +13,9 @@ from typing import Any, cast, TYPE_CHECKING
 import sympy
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.heuristics.registry import register_template_heuristic
+from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
@@ -81,14 +84,22 @@ def _use_template_autows() -> bool:
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
 
-_rocm_version = _rocm_version_tuple()
-# First ROCm version where origami is not supported.
-ORIGAMI_UNSUPPORTED_ROCM_VERSION = (10, 0)
-
 
 def _origami_enabled() -> bool:
     """Check if origami GEMM optimization is enabled."""
-    return config.rocm.origami and _rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
+    return config.rocm.origami
+
+
+def _origami_package_supported(
+    rocm_version: tuple[int, int], package_version: str
+) -> bool:
+    """On ROCm >= 10.0, rocm-origami < 0.0.3 lacks the API used here."""
+    if rocm_version < (10, 0):
+        return True
+    try:
+        return Version(package_version) >= Version("0.0.3")
+    except InvalidVersion:
+        return False
 
 
 def _tdm_descriptor_orientation(kwargs: dict[str, Any]) -> tuple[bool, bool]:
@@ -174,15 +185,25 @@ def _filter_tdm_descriptor_block_configs(
 # both max_autotune and config.rocm.origami are enabled (env-var driven, set once
 # at config import). Cache the import here so the hot path never pays an exception
 # and CUDA/CPU/origami-disabled processes never attempt the import.
-# origami is not supported on ROCm 10.0+.
-if (
-    IS_ROCM
-    and _rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
-    and config.max_autotune
-    and config.rocm.origami
-):
+if IS_ROCM and config.max_autotune and config.rocm.origami:
     try:
         import origami  # type: ignore[import-not-found]
+
+        try:
+            _origami_version = importlib.metadata.version("rocm-origami")
+        except importlib.metadata.PackageNotFoundError:
+            _origami_version = None
+        _rocm_version = _rocm_version_tuple()
+        if _origami_version is not None and not _origami_package_supported(
+            _rocm_version, _origami_version
+        ):
+            log.warning(
+                "rocm-origami %s is not compatible with ROCm %d.%d; upgrade to "
+                "rocm-origami>=0.0.3 or set TORCHINDUCTOR_ORIGAMI=0. Origami disabled.",
+                _origami_version,
+                *_rocm_version,
+            )
+            origami = None
     except ImportError:
         origami = None
         log.info(
@@ -191,17 +212,6 @@ if (
         )
 else:
     origami = None
-    if (
-        IS_ROCM
-        and config.rocm.origami
-        and _rocm_version >= ORIGAMI_UNSUPPORTED_ROCM_VERSION
-    ):
-        log.warning(
-            "ROCm origami GEMM selection is not supported on ROCm %d.%d+ "
-            "(detected %d.%d); origami disabled.",
-            *ORIGAMI_UNSUPPORTED_ROCM_VERSION,
-            *_rocm_version,
-        )
 
 
 # TODO(rocm-origami): replace these wrappers with public accessors when the
@@ -1317,7 +1327,11 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
     # Flex attn helpers
     def get_flex_attn_fwd_configs(
-        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+        self,
+        head_dim: int,
+        seq_len: sympy.Expr,
+        dtype: Any,
+        v_head_dim: int | None = None,
     ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
@@ -1343,7 +1357,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
-        self, head_dim: int, dtype: Any
+        self, head_dim: int, dtype: Any, v_head_dim: int | None = None
     ) -> list[FlexBwDConfig]:
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
 
@@ -1456,6 +1470,16 @@ class CPUConfigHeuristic(BaseConfigHeuristic):
         )
 
 
+def _flex_needs_small_blocks(
+    capability: tuple[int, int], head_dim: int, v_head_dim: int | None
+) -> bool:
+    # Triton miscompiles flex attention on sm_10x when the QK or V head_dim is
+    # > 256 and a block dim is >= 64 (fwd BLOCK_M; bwd BLOCK_N1/BLOCK_M2),
+    # faulting with "misaligned address" or "unspecified launch failure".
+    # https://github.com/triton-lang/triton/issues/10309
+    return capability[0] == 10 and max(head_dim, v_head_dim or 0) > 256
+
+
 class CUDAConfigHeuristic(BaseConfigHeuristic):
     """
     Child class for CUDA device specific gemm/flex attention/conv/ configs.
@@ -1528,17 +1552,29 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         ]
 
     def get_flex_attn_fwd_configs(
-        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+        self,
+        head_dim: int,
+        seq_len: sympy.Expr,
+        dtype: Any,
+        v_head_dim: int | None = None,
     ) -> list[FlexConfig]:
         capability = torch.cuda.get_device_capability()
+        prune_large_blocks = _flex_needs_small_blocks(capability, head_dim, v_head_dim)
         flex_attn_fwd_configs: list[FlexConfig] = []
 
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_attn_fwd_configs
-            flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
+                flex_attn_fwd_configs = self.exhaustive_flex_attn_fwd_configs
+            else:
+                flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
+            if prune_large_blocks:
+                flex_attn_fwd_configs = [
+                    c for c in flex_attn_fwd_configs if c.block_m < 64
+                ]
+            if config.max_autotune_flex_search_space == "EXHAUSTIVE":
+                return flex_attn_fwd_configs
 
-        if head_dim <= 256:
+        if head_dim <= 256 and not prune_large_blocks:
             if dtype == torch.float32:
                 default_config = FlexConfig(64, 64, 3, 4)
             else:
@@ -1560,11 +1596,12 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = self.a100_default_flex_config.get(
                     (dtype, head_dim), default_config
                 )
+        elif dtype == torch.float32:
+            default_config = FlexConfig(32, 16, 3, 4)
+        elif prune_large_blocks:
+            default_config = FlexConfig(32, 32, 2, 4)
         else:
-            if dtype == torch.float32:
-                default_config = FlexConfig(32, 16, 3, 4)
-            else:
-                default_config = FlexConfig(64, 32, 3, 4)
+            default_config = FlexConfig(64, 32, 3, 4)
 
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
@@ -1572,14 +1609,25 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
-        self, head_dim: int, dtype: Any
+        self, head_dim: int, dtype: Any, v_head_dim: int | None = None
     ) -> list[FlexBwDConfig]:
+        """Return flex attention backward configs for the current CUDA device."""
         capability = torch.cuda.get_device_capability()
+        prune_large_blocks = _flex_needs_small_blocks(capability, head_dim, v_head_dim)
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
-                return self.exhaustive_flex_attn_bwd_configs
-            flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
+                flex_attn_bwd_configs = self.exhaustive_flex_attn_bwd_configs
+            else:
+                flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
+            if prune_large_blocks:
+                flex_attn_bwd_configs = [
+                    c
+                    for c in flex_attn_bwd_configs
+                    if max(c.block_m1, c.block_n1, c.block_m2, c.block_n2) < 64
+                ]
+            if config.max_autotune_flex_search_space == "EXHAUSTIVE":
+                return flex_attn_bwd_configs
 
         major, minor = capability
         if dtype == torch.float32:
@@ -1627,16 +1675,15 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 )
             ),
             "sm12x": lambda h: (
-                FlexBwDConfig(32, 128, 128, 32, 3, 4)
-                if h < 64
-                else FlexBwDConfig(
-                    64, 64, 64, 64, 1 if h >= 128 else 2, 4
-                )
+                FlexBwDConfig(32, 128, 128, 32, 3, 4) if h < 64 else
+                FlexBwDConfig(64, 64, 64, 64, 2, 4) if h < 128 else
+                FlexBwDConfig(64, 64, 64, 64, 1, 4) if h == 128 else
+                FlexBwDConfig(32, 32, 32, 32, 2, 4)
             ),
         }
         # fmt: on
 
-        if head_dim <= 256:
+        if head_dim <= 256 and not prune_large_blocks:
             default_config = config_map[capability_class](head_dim)
         else:
             default_config = FlexBwDConfig(16, 16, 16, 16, 1, 4)
@@ -2132,7 +2179,11 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 yield self.triton_config(**kwargs)
 
     def get_flex_attn_fwd_configs(
-        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+        self,
+        head_dim: int,
+        seq_len: sympy.Expr,
+        dtype: Any,
+        v_head_dim: int | None = None,
     ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
@@ -2178,7 +2229,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
-        self, head_dim: int, dtype: Any
+        self, head_dim: int, dtype: Any, v_head_dim: int | None = None
     ) -> list[FlexBwDConfig]:
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
 
@@ -2296,7 +2347,11 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             ]
 
     def get_flex_attn_fwd_configs(
-        self, head_dim: int, seq_len: sympy.Expr, dtype: Any
+        self,
+        head_dim: int,
+        seq_len: sympy.Expr,
+        dtype: Any,
+        v_head_dim: int | None = None,
     ) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
 
@@ -2325,7 +2380,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         return flex_attn_fwd_configs
 
     def get_flex_attn_bwd_configs(
-        self, head_dim: int, dtype: Any
+        self, head_dim: int, dtype: Any, v_head_dim: int | None = None
     ) -> list[FlexBwDConfig]:
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
 
@@ -2378,17 +2433,41 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
 # Template-specific mixin classes
 def mm_allow_tf32(m: Any, n: Any, k: Any, device_type: str | None) -> bool:
     """Whether a Triton GEMM template should use TF32, matching eager matmul."""
-    if device_type == "xpu":
-        # XPU eager matmul takes TF32 from the oneDNN flag, not the CUDA one.
-        return bool(torch.backends.mkldnn.allow_tf32)
+    allow_tf32 = False
+    if isinstance(device_type, str):
+        try:
+            iface = get_interface_for_device(device_type)
+        except NotImplementedError:
+            iface = None
+        else:
+            allow_tf32 = bool(iface.allow_tf32())
     if device_type == "cuda":
-        # allow_tf32 alignment heuristics based on reverse engineering
-        # H100 CUDA 12.8 behavior
+        # CUDA applies a shape threshold on top of the backend flag.
+        # Based on reverse engineering H100 CUDA 12.8 behavior.
         size_threshold = V.graph.sizevars.statically_known_true(
             sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
         )
-        return torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
-    return False
+        return allow_tf32 and size_threshold
+    return allow_tf32
+
+
+def blackwell_tma_mma_layout_supported(
+    dtype: torch.dtype,
+    allow_tf32: bool,
+    a_row_major: bool,
+    block_m: int,
+) -> bool:
+    """Whether the Blackwell TMA GEMM templates can lower this A operand layout.
+
+    tcgen05.mma does not support transposed FP32 operands in shared memory.
+    With the layouts emitted by the Blackwell persistent-TMA mm template and
+    the decompose-K partial-BMM template, the unsupported case is a transposed
+    (column-major) A operand with TF32 enabled and BLOCK_M > 32. BLOCK_M=32
+    and either orientation of B use supported MMA layouts.
+    """
+    return not (
+        dtype == torch.float32 and allow_tf32 and not a_row_major and block_m > 32
+    )
 
 
 class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
@@ -2425,16 +2504,19 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     # kernels are unaffected.
     ascending_k: bool = False
 
+    def _allow_tf32(self, kernel_inputs: KernelInputs) -> bool:
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
+        m, n, k = kernel_inputs.mnk_symbolic()
+        return mm_allow_tf32(m, n, k, kernel_inputs.device_type)
+
     def get_extra_kwargs(
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
     ) -> dict[str, Any]:
-        if not isinstance(kernel_inputs, MMKernelInputs):
-            raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
-        m, n, k = kernel_inputs.mnk_symbolic()
         extra_kwargs = {
-            "ALLOW_TF32": mm_allow_tf32(m, n, k, kernel_inputs.device_type),
+            "ALLOW_TF32": self._allow_tf32(kernel_inputs),
         }
         # Scoped to XPU (self.ascending_k) and to the templates that reference
         # the key. The mm/addmm/... ops via mm_template are excluded because
@@ -2491,14 +2573,18 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         mnk_static = all(not getattr(x, "free_symbols", None) for x in (m, n, k))
         if (
             origami is not None
+            and _origami_enabled()
             and not mnk_static
             and config.max_autotune_gemm_search_space == "DEFAULT"
         ):
             log.debug("Origami skipped: symbolic m/n/k, using regular config generator")
-        # `origami is not None` encodes the module-load gate (see top of file);
-        # only DEFAULT search space is supported here.
+        # `origami is not None` is the module-load gate (set at import time);
+        # `_origami_enabled()` checks config.rocm.origami at call time so that
+        # config.patch({"rocm.origami": False}) disables the origami path even
+        # after the module has been imported.
         if (
             origami is not None
+            and _origami_enabled()
             and config.max_autotune_gemm_search_space == "DEFAULT"
             and mnk_static
         ):
@@ -2720,9 +2806,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
 
         else:
             # Warn if origami was enabled but not used due to EXHAUSTIVE search space.
-            # `origami is not None` already covers IS_ROCM + max_autotune + rocm.origami.
             if (
                 origami is not None
+                and _origami_enabled()
                 and config.max_autotune_gemm_search_space == "EXHAUSTIVE"
             ):
                 log.warning(
@@ -2937,11 +3023,13 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         mat1, mat2 = kernel_inputs.mat1mat2()
 
         def _row_major(node) -> bool:
-            # TMA needs the contiguous dim last. Use the same inner-dim rule as
-            # can_use_tma, which already accepted these operands -- deriving it
-            # separately here is how a [1, K] operand ended up transposed.
-            # Resolve symbols the way can_use_tma does: tma_inner_dim compares
-            # against 1, and an unhinted backed symbol never compares equal.
+            # TMA needs the contiguous dim last. Use tma_inner_dim, as
+            # can_use_tma does -- deriving it separately here is how a [1, K]
+            # operand ended up transposed. Unlike can_use_tma, resolve backed
+            # symbols to hints first: its XPU path only checks the last
+            # stride's hint, so raw strides could fail the assert below. On
+            # CUDA the two can't disagree, since can_use_tma rejects a symbolic
+            # outer stride whose hint is 1 as unaligned.
             stride = [
                 V.graph.sizevars.replace_backed_symbols_with_hints(st)
                 for st in node.layout.stride
@@ -2983,6 +3071,19 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
     combinations the lowering cannot support before they reach codegen.
     """
 
+    @staticmethod
+    def _supports_mma_layout(
+        dtype: torch.dtype,
+        allow_tf32: bool,
+        template_kwargs: dict[str, Any],
+    ) -> bool:
+        return blackwell_tma_mma_layout_supported(
+            dtype,
+            allow_tf32,
+            template_kwargs["A_ROW_MAJOR"],
+            template_kwargs["BLOCK_M"],
+        )
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -2996,6 +3097,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             raise AssertionError("Blackwell GEMM requires MMKernelInputs")
         _, mat2 = kernel_inputs.mat1mat2()
         element_size = mat2.get_dtype().itemsize
+        allow_tf32 = self._allow_tf32(kernel_inputs)
 
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
@@ -3003,6 +3105,10 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             op_name,
             **kwargs,
         ):
+            if not self._supports_mma_layout(
+                kernel_inputs.dtype(), allow_tf32, template_kwargs
+            ):
+                continue
             use_meta_ws = template_kwargs.get("USE_META_WS", False)
             # autoWS configs come from a full sweep; drop combos the lowering
             # does not support so no invalid config reaches codegen.

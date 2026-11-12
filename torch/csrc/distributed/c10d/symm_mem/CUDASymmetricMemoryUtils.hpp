@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
@@ -152,7 +153,7 @@ class StoreExchange {
     const size_t seq_id = next_seq_id(store);
     std::vector<std::string> peer_keys;
     peer_keys.reserve(world_size);
-    for (int r = 0; r < world_size; ++r) {
+    for (const auto r : c10::irange(world_size)) {
       std::ostringstream oss;
       oss << store_prefix_ << '/' << seq_id << '/' << r;
       peer_keys.push_back(std::move(oss).str());
@@ -169,7 +170,7 @@ class StoreExchange {
 
     std::vector<T> peer_vals;
     peer_vals.reserve(world_size);
-    for (int r = 0; r < world_size; ++r) {
+    for (const auto r : c10::irange(world_size)) {
       TORCH_CHECK(payloads[r].size() == sizeof(T));
       T peer_val{};
       std::memcpy(&peer_val, payloads[r].data(), sizeof(T));
