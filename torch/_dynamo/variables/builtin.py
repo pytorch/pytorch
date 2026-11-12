@@ -76,6 +76,7 @@ from ..utils import (
     extract_fake_example_value,
     get_fake_value,
     has_torch_function,
+    is_safe_constant,
     is_tensor_getset_descriptor,
     is_torch_class,
     istype,
@@ -348,6 +349,10 @@ def _try_computed_lazy_constant(
         ):
             any_unrealized = True
         elif not isinstance(arg, ConstantVariable):
+            return None
+        elif arg.source is None and not is_safe_constant(arg.as_python_constant()):
+            # Output bytecode recomputes the op from its operands, so each one
+            # must be loadable from a source or as a LOAD_CONST
             return None
     if not any_unrealized:
         return None
@@ -3638,9 +3643,8 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         if name == "__new__":
             return self.tp_new_impl(tx, args, kwargs)
 
-        if args and name in ("update", "__init__", "__ior__"):
-            if isinstance(args[0], ConstDictVariable):
-                args[0].check_base_dict_mutation(tx, name)
+        if args and isinstance(args[0], ConstDictVariable):
+            args[0].check_base_dict_mutation(tx, name)
         resolved_fn = getattr(dict, name, None)
         if isinstance(resolved_fn, types.WrapperDescriptorType):
             if not args:

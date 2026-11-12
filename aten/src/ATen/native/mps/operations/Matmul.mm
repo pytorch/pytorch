@@ -29,6 +29,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
+#include <c10/util/complex.h>
 #include <c10/util/env.h>
 #include <c10/util/safe_conv.h>
 #include <algorithm>
@@ -355,9 +356,9 @@ Tensor& int_mm_out_mps_impl(const Tensor& self, const Tensor& mat2, Tensor& resu
               func_name,
               ": MPS does not support output of size ",
               result.sizes());
-  const auto m = c10::safe_conv<uint32_t>(self.size(0), "uint32_t");
-  const auto k = c10::safe_conv<uint32_t>(self.size(1), "uint32_t");
-  const auto n = c10::safe_conv<uint32_t>(mat2.size(1), "uint32_t");
+  const auto m = c10::safe_conv<uint32_t>(self.size(0), "self.size(0)");
+  const auto k = c10::safe_conv<uint32_t>(self.size(1), "self.size(1)");
+  const auto n = c10::safe_conv<uint32_t>(mat2.size(1), "mat2.size(1)");
   constexpr const char* mpp_kernel = "int_mm_mpp_64_64_4";
   // MPP integer matmul requires operands with matching signedness, while _int_mm permits uint8 only for self.
   const bool use_mpp = self.scalar_type() == at::kChar && self.stride(1) == 1 && mat2.stride(1) == 1 &&
