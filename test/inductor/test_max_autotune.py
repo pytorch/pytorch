@@ -1981,10 +1981,6 @@ class TestMaxAutotune(TestCase):
         )
 
     def test_template_module_key_matches_precompile_worker(self):
-        # The precompile worker writes the template source keyed by code alone
-        # (async_compile.triton). The parent must load the same module, or the
-        # module-qualified names of @triton.jit helpers differ, Triton misses
-        # the worker's compile, and the parent recompiles at benchmark time.
         from torch._inductor.codecache import PyCodeCache
 
         a = torch.randn(256, 128, device=GPU_TYPE)
