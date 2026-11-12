@@ -27,7 +27,7 @@ static bool needs_nd_workaround(const Tensor& input) {
 // corruption is allocator/session-state dependent and hits contiguous and transposed
 // operands alike. Apple9+ is fine. mm/addmm already divert such shapes to the
 // stride-aware metal kernels, but linear builds its own graph, so it has to test the
-// GEMM it would form and delegate instead. Mirrors use_metal_mm in LinearAlgebra.mm.
+// GEMM it would form and delegate instead. Mirrors use_metal_mm in Matmul.mm.
 static bool needs_mm_overflow_fallback(int64_t m, int64_t k, int64_t n) {
   static const bool is_affected_gpu = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
   constexpr int64_t max_mpsgraph_dim = 32768;
@@ -152,10 +152,11 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   }
 
   const bool is_complex = input.is_complex() || weight.is_complex() || (is_bias_defined && bias.is_complex());
+  const auto rows = c10::multiply_integers(input.sizes().begin(), input.sizes().end() - 1);
 
   // See pytorch/pytorch#177116. Delegating to addmm/mm reaches the metal kernels, which
   // take the weight's real strides, so the transposed (column-major) operand costs nothing.
-  if (!is_complex && needs_mm_overflow_fallback(input.numel() / input.size(-1), input.size(-1), weight.size(0))) {
+  if (!is_complex && (rows == 1 || needs_mm_overflow_fallback(rows, input.size(-1), weight.size(0)))) {
     const auto input_2d = input.dim() != 2 ? input.reshape({-1, input.size(-1)}) : input;
     // addmm fuses the bias and routes rank-1 shapes to the GEMV kernels. A multi-dim bias
     // cannot broadcast against the 2D result, so it is added after the reshape instead.

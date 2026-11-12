@@ -120,24 +120,16 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     std::optional<int64_t> window_size_right) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
-  //  CUDA code assumes that dout is contiguous
-  auto contiguous_grad_out = grad_out.contiguous();
+  //  CUDA code assumes that dout is contiguous and 16-byte aligned. Autograd
+  //  may pass a misaligned grad_out view (e.g. from cat backward).
+  auto contiguous_grad_out =
+      reinterpret_cast<uintptr_t>(grad_out.const_data_ptr()) % 16 == 0
+      ? grad_out.contiguous()
+      : grad_out.clone(at::MemoryFormat::Contiguous);
   auto contiguous_out = out.contiguous();
 
-#ifdef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
-#ifdef DISABLE_AOTRITON  // CK backend, Passing window_size as it is
-  const auto window_left = window_size_left;
-  const auto window_right = window_size_right;
-#else  // AOTriton implements "generalized" SWA and negative size means negative shifting.
-  // aotriton_adapter::parse_window_size tries to match the behavior of CUTLASS backend
-  using sdp::aotriton_adapter::parse_window_size;
-  const auto [window_left, window_right] = parse_window_size(window_size_left,
-                                                             window_size_right);
-#endif
-#else  // USE_ROCM
   const int window_left = window_size_left.value_or(-1);
   const int window_right = window_size_right.value_or(-1);
-#endif  // USE_ROCM
 
   std::optional<at::Tensor> dq{std::nullopt};
   std::optional<at::Tensor> dk{std::nullopt};
@@ -427,14 +419,10 @@ _efficient_attention_backward(
   const int64_t nHkv = key.size(2);
   TORCH_CHECK(nHkv == value.size(2));
   TORCH_CHECK(nH == grad_out_.size(2));
-#ifdef USE_ROCM
-  TORCH_CHECK(nH == nHkv);
-#else
   TORCH_CHECK(
       (nH == 0 && nHkv == 0) ||
           (nH > 0 && nHkv > 0 && nH % nHkv == 0),
       "Number of heads in key/value must divide number of heads in query");
-#endif
 
   // Embedding per head
   TORCH_CHECK(query.size(3) == key.size(3));
@@ -550,18 +538,23 @@ _efficient_attention_backward(
   const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
 
   // See Note [Seed and Offset Device]
+  // Dispatch on where the seed and offset live, not on the current capture
+  // status: a forward captured in a CUDA graph returns device tensors, and
+  // its backward may run outside capture (e.g. after graph replay).
   at::PhiloxCudaState rng_engine_inputs;
   if (use_dropout) {
-    if (at::cuda::currentStreamCaptureStatus() ==
-        at::cuda::CaptureStatus::None) {
-      rng_engine_inputs = at::PhiloxCudaState(
-          *philox_seed.data_ptr<int64_t>(),
-          *philox_offset.data_ptr<int64_t>());
-    } else { // dropout + capture
+    TORCH_CHECK(
+        philox_seed.device() == philox_offset.device(),
+        "philox_seed and philox_offset must be on the same device");
+    if (philox_seed.is_cuda()) {
       rng_engine_inputs = at::PhiloxCudaState(
           philox_seed.data_ptr<int64_t>(),
           philox_offset.data_ptr<int64_t>(),
           0);
+    } else {
+      rng_engine_inputs = at::PhiloxCudaState(
+          *philox_seed.data_ptr<int64_t>(),
+          *philox_offset.data_ptr<int64_t>());
     }
   }
 
@@ -625,8 +618,6 @@ _efficient_attention_backward(
 #ifndef DISABLE_AOTRITON
     TORCH_CHECK(!num_splits_key.has_value(),
               "ROCM does not support num_split_keys in _efficient_attention_forward");
-    TORCH_CHECK(!window_size.has_value(),
-              "ROCM does not support window_size in _efficient_attention_forward");
     auto ret = aotriton::v2::flash::check_gpu(stream);
     if (hipSuccess != ret) {
       TORCH_CHECK(false,
@@ -732,6 +723,12 @@ _efficient_attention_backward(
       params.varlen_type = VarlenType::None;
     }
 #endif
+    sdp::aotriton_adapter::mem_eff_apply_window(params,
+                                                window_size,
+                                                custom_mask_type,
+                                                max_seqlen_q,
+                                                max_seqlen_k,
+                                                cu_seqlens_q.has_value());
     aotriton::v3::flash::attn_options opts;
     opts.deterministic = deterministic;
     AT_CUDA_CHECK(aotriton::v3::flash::attn_bwd(
@@ -867,6 +864,10 @@ _efficient_attention_backward(
     ASSIGN_CHECK_OVERFLOW(p.q_strideM, query.stride(1));
     ASSIGN_CHECK_OVERFLOW(p.k_strideM, key.stride(1));
     ASSIGN_CHECK_OVERFLOW(p.v_strideM, value.stride(1));
+    // The kernel's tile iterators take 32-bit row strides.
+    TORCH_CHECK(p.q_strideM <= std::numeric_limits<int32_t>::max(), "query.stride(1) overflows int32");
+    TORCH_CHECK(p.k_strideM <= std::numeric_limits<int32_t>::max(), "key.stride(1) overflows int32");
+    TORCH_CHECK(p.v_strideM <= std::numeric_limits<int32_t>::max(), "value.stride(1) overflows int32");
     ASSIGN_CHECK_OVERFLOW(p.q_strideH, query.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.k_strideH, key.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.v_strideH, value.stride(2));
@@ -916,8 +917,8 @@ _efficient_attention_backward(
     }
 
     // Heuristic for finding optimal number of splits
-    auto parallelism_without_split_key =
-        p.getBlocksGrid().x * p.getBlocksGrid().y * p.getBlocksGrid().z;
+    const int64_t parallelism_without_split_key =
+        int64_t(p.num_batches) * p.num_heads;
     p.num_splits_key = cutlass::ceil_div(p.num_keys, Kernel::kBlockSizeJ);
     if (num_splits_key.has_value()) {
       p.num_splits_key =
@@ -935,8 +936,8 @@ _efficient_attention_backward(
       // Increasing `split_keys` leads to using more gmem for temporary storage
       // when we need a staging area for gK/gV. let's avoid that
       if (Kernel::kNeedsAccumGradK || Kernel::kNeedsAccumGradV) {
-        p.num_splits_key = std::min(
-            int32_t(p.num_splits_key), 200 / ((int32_t)(p.num_batches * p.num_heads)));
+        p.num_splits_key = std::min<int64_t>(
+            p.num_splits_key, 200 / parallelism_without_split_key);
       }
     }
     if (!Kernel::kEnableSplitKeys || p.num_splits_key < 1) {
@@ -1000,7 +1001,16 @@ _efficient_attention_backward(
         checkBinaryArchMatches(), "Something went wrong in the build process");
 #endif
 
-    kernel_fn<<<p.getBlocksGrid(), p.getThreadsGrid(), smem_bytes, stream>>>(p);
+    auto blocks = p.getBlocksGrid();
+    // Match forward's logical batch/head indices, including workspace and RNG.
+    for (p.batch_offset = 0; p.batch_offset < p.num_batches; p.batch_offset += blocks.z) {
+      blocks.z = std::min(65535, p.num_batches - p.batch_offset);
+      for (p.head_offset = 0; p.head_offset < p.num_heads; p.head_offset += blocks.y) {
+        blocks.y = std::min(65535, p.num_heads - p.head_offset);
+        kernel_fn<<<blocks, p.getThreadsGrid(), smem_bytes, stream>>>(p);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      }
+    }
   };
 
   DISPATCH_TYPES(query, ([&]() {
@@ -1095,6 +1105,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
   }
+#ifdef USE_ROCM
   constexpr int64_t MAX_BATCH_SIZE = (1LL << 16) - 1;
   int64_t batch_size = query.size(0);
 
@@ -1103,6 +1114,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
                 "Efficient attention backward cannot handle dropout when "
                 "the batch size exceeds (", MAX_BATCH_SIZE, ").");
   }
+#endif
   auto grad_out_t = grad_out_.transpose(1, 2);
   auto query_t = query.transpose(1, 2);
   auto key_t = key.transpose(1, 2);
@@ -1156,6 +1168,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
       grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2), std::move(grad_bias));
   };
 
+#ifdef USE_ROCM
   // process in chunks if batch size exceeds maximum
   if (batch_size > MAX_BATCH_SIZE) {
     Tensor final_grad_q, final_grad_k, final_grad_v, final_grad_bias;
@@ -1226,14 +1239,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
         std::move(final_grad_v),
         std::move(final_grad_bias));
   }
-  // when batch size is within allowed size, no chunking needed
-  else {
-    std::optional<Tensor> attn_bias_opt;
-    if (attn_bias.defined()) {
-      attn_bias_opt = attn_bias;
-    }
-    return process_chunk(grad_out_t, query_t, key_t, value_t, attn_bias_opt, out_t, logsumexp);
-  }
+#endif
+  return process_chunk(grad_out_t, query_t, key_t, value_t, attn_bias, out_t, logsumexp);
 }
 
 std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_cuda(

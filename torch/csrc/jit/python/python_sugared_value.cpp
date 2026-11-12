@@ -1204,9 +1204,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return std::make_shared<CUDAPythonModuleValue>(obj);
     }
     return std::make_shared<PythonModuleValue>(obj);
-  } else if (
-      obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr() ||
-      obj.ptr() == py::module::import("torch.jit").attr("fork").ptr()) {
+  } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
     return SpecialFormValue::create(prim::fork);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("_awaitable").ptr()) {

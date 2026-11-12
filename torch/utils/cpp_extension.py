@@ -238,12 +238,13 @@ def _find_rocm_home() -> str | None:
 
 def _find_sycl_home() -> str | None:
     sycl_home = None
-    icpx_path = shutil.which('icpx')
-    # Guess 1: for source code build developer/user, we'll have icpx in PATH,
-    # which will tell us the SYCL_HOME location.
-    if icpx_path is not None:
+    # icpx is shipped with oneAPI, dpclang++ is the open source DPC++ compiler.
+    sycl_compiler_path = shutil.which('icpx') or shutil.which('dpclang++')
+    # Guess 1: for source code build developer/user, we'll have the SYCL compiler
+    # in PATH, which will tell us the SYCL_HOME location.
+    if sycl_compiler_path is not None:
         sycl_home = os.path.dirname(os.path.dirname(
-            os.path.realpath(icpx_path)))
+            os.path.realpath(sycl_compiler_path)))
 
     # Guess 2: for users install Pytorch with XPU support, the sycl runtime is
     # inside intel-sycl-rt, which is automatically installed via pip dependency.
@@ -458,14 +459,25 @@ if IS_WINDOWS:
     COMMON_HIPCC_FLAGS.append('-Wno-ignored-attributes')
 
 
-def _get_icpx_version() -> str:
-    icpx = 'icx' if IS_WINDOWS else 'icpx'
-    compiler_info = subprocess.check_output([icpx, '--version'])
+def _get_sycl_compiler() -> str:
+    if IS_WINDOWS:
+        return 'icx'
+    if shutil.which('icpx') is None and shutil.which('dpclang++') is not None:
+        return 'dpclang++'
+    return 'icpx'
+
+
+def _get_sycl_compiler_version() -> str:
+    sycl = _get_sycl_compiler()
+    compiler_info = subprocess.check_output([sycl, '--version'])
     match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode().strip())
     version = ['0', '0', '0'] if match is None else list(match.groups())
     version = list(map(int, version))
     if len(version) != 3:
         raise AssertionError("Failed to parse DPC++ compiler version")
+    if sycl == 'dpclang++':
+        # Map dpclang version to oneAPI version as in cmake/Modules/FindSYCLToolkit.cmake
+        version[0] += 2019
     # Aligning version format with what torch.version.xpu() returns
     return f"{version[0]}{version[1]:02}{version[2]:02}"
 
@@ -674,6 +686,12 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
     logger.warning(ABI_INCOMPATIBILITY_WARNING, compiler)
 
     return (False, TorchVersion('.'.join(numeric_version)))
+
+
+def _windows_nvcc_host_preprocessor_flags() -> list[str]:
+    # Match CMake's Windows CUDA flags: nvcc forwards /Zc:preprocessor to cl.
+    # Required by CUDA 13.2+ CCCL; safe on older CUDA with VS2019+.
+    return ['-Xcompiler', '/Zc:preprocessor']
 
 
 def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> None:
@@ -1067,8 +1085,8 @@ class BuildExtension(_LazyBuildExt):
                 host_cflags = extra_cc_cflags + common_cflags + post_cflags
                 append_std17_if_no_std_present(host_cflags)
                 # escaping quoted arguments to pass them thru SYCL compiler
-                icpx_version = _get_icpx_version()
-                if int(icpx_version) >= 20250200:
+                sycl_compiler_version = _get_sycl_compiler_version()
+                if int(sycl_compiler_version) >= 20250200:
                     host_cflags = [item.replace('"', '\\"') for item in host_cflags]
                 else:
                     host_cflags = [item.replace('"', '\\\\"') for item in host_cflags]
@@ -1111,8 +1129,8 @@ class BuildExtension(_LazyBuildExt):
             """Filter out MSVC include dirs from pp_opts for oneAPI 2025.3+."""
             # oneAPI 2025.3+ changed include path ordering to match MSVC behavior.
             # Filter out MSVC headers to avoid conflicting declarations with oneAPI's std headers.
-            icpx_version = int(_get_icpx_version())
-            if icpx_version >= 20250300:
+            sycl_compiler_version = int(_get_sycl_compiler_version())
+            if sycl_compiler_version >= 20250300:
                 vc_tools_dir = os.path.normcase(os.environ.get('VCToolsInstallDir', ''))
                 if vc_tools_dir:
                     pp_opts = [
@@ -1174,6 +1192,7 @@ class BuildExtension(_LazyBuildExt):
                             cflags = win_cuda_flags(cflags) + ['-std=c++20', '--use-local-env']
                             for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
                                 cflags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cflags
+                            cflags = _windows_nvcc_host_preprocessor_flags() + cflags
                         for flag in COMMON_MSVC_FLAGS:
                             cflags = ['-Xcompiler', flag] + cflags
                         cmd = _wrap_compiler([nvcc, '-c', src, '-o', obj] + include_list + cflags)
@@ -1265,6 +1284,7 @@ class BuildExtension(_LazyBuildExt):
                     cuda_cflags.append('-Xcompiler')
                     cuda_cflags.append(common_cflag)
                 if not IS_HIP_EXTENSION:
+                    cuda_cflags += _windows_nvcc_host_preprocessor_flags()
                     cuda_cflags.append('--use-local-env')
                     for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
                         cuda_cflags.append('-Xcudafe')
@@ -1502,6 +1522,27 @@ def CppExtension(name, sources, *args, **kwargs):
     return setuptools.Extension(name, sources, *args, **kwargs)
 
 
+def _canonicalize_hip_source(source, build_dir):
+    """Return a canonical absolute path for a hipify source.
+
+    Only canonicalize sources that don't already live under ``build_dir``.
+    Realpath-ing every source would relocate a source that is legitimately
+    symlinked *into* the build dir to its real location outside it, which then
+    pushes the generated ``.hip`` file out of ``build_dir`` and breaks the
+    "paths relative to the setup.py directory" invariant. Restricting realpath
+    to sources outside ``build_dir`` still fixes the Windows ``subst`` drive /
+    symlinked-path case where a source resolves to a different spelling than
+    ``build_dir``. ``build_dir`` must already be resolved (``os.path.realpath``).
+    Only Windows needs this; on POSIX the abspath is returned unchanged, so a
+    file-level symlinked source keeps its generated ``.hip`` (and its quote
+    includes) next to the symlink rather than its target.
+    """
+    s_abs = os.path.abspath(source)
+    if not IS_WINDOWS or s_abs.startswith(build_dir + os.sep):
+        return s_abs
+    return os.path.realpath(source)
+
+
 def CUDAExtension(name, sources, *args, **kwargs):
     """
     Create a :class:`setuptools.Extension` for CUDA/C++.
@@ -1646,13 +1687,21 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     if IS_HIP_EXTENSION:
         from .hipify import hipify_python
-        build_dir = os.getcwd()
+        # Resolve symlinks/junctions and Windows `subst` drive aliases on the
+        # build directory so it and the source paths can be compared in a single
+        # canonical form. On Windows CI the build runs under a `subst` drive
+        # (e.g. B:) while source paths may resolve to the real drive (e.g. C:);
+        # without this the `includes` scope below matches nothing and hipify
+        # silently skips the sources, leaving CUDA headers unhipified. On POSIX
+        # `os.getcwd()` is already fully resolved, so this is a no-op there.
+        build_dir = os.path.realpath(os.getcwd())
+
         hipify_result = hipify_python.hipify(
             project_directory=build_dir,
             output_directory=build_dir,
             header_include_dirs=include_dirs,
             includes=[os.path.join(build_dir, '*')],  # limit scope to build_dir only
-            extra_files=[os.path.abspath(s) for s in sources],
+            extra_files=[_canonicalize_hip_source(s, build_dir) for s in sources],
             show_detailed=True,
             is_pytorch_extension=True,
             hipify_extra_files_only=True,  # don't hipify everything in includes path
@@ -1660,9 +1709,19 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
         hipified_sources = set()
         for source in sources:
-            s_abs = os.path.abspath(source)
-            hipified_s_abs = (hipify_result[s_abs].hipified_path if (s_abs in hipify_result and
-                              hipify_result[s_abs].hipified_path is not None) else s_abs)
+            s_abs = _canonicalize_hip_source(source, build_dir)
+            if s_abs in hipify_result and hipify_result[s_abs].hipified_path is not None:
+                hipified_s_abs = hipify_result[s_abs].hipified_path
+            else:
+                # A CUDA source that hipify didn't process is left as raw CUDA and
+                # fails to compile with hipcc (e.g. missing 'cuda_runtime_api.h').
+                # Warn loudly instead of silently skipping (the historical failure mode).
+                if source.endswith(('.cu', '.cuh')):
+                    logger.warning(
+                        "hipify did not process CUDA source '%s'; it will be built as-is, "
+                        "which typically fails under ROCm. This can happen when the source "
+                        "resolves outside the build directory '%s'.", source, build_dir)
+                hipified_s_abs = s_abs
             # setup() arguments must *always* be /-separated paths relative to the setup.py directory,
             # *never* absolute paths
             try:
@@ -1757,7 +1816,7 @@ def SyclExtension(name, sources, *args, **kwargs):
     Note: Ninja is required to build SyclExtension.
     """
     library_dirs = kwargs.get("library_dirs", [])
-    library_dirs += library_paths()
+    library_dirs += library_paths(device_type="xpu")
     kwargs["library_dirs"] = library_dirs
 
     libraries = kwargs.get("libraries", [])
@@ -1799,7 +1858,10 @@ def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
         ])
     if device_type == "cuda" and IS_HIP_EXTENSION:
         paths.append(os.path.join(lib_include, 'THH'))
-        paths.append(_join_rocm_home('include'))
+        rocm_home_include = _join_rocm_home('include')
+        # Distros that package ROCm under /usr give /usr/include; see the CUDA branch below.
+        if rocm_home_include != '/usr/include':
+            paths.append(rocm_home_include)
     elif device_type == "cuda":
         cuda_home_include = _join_cuda_home('include')
         # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
@@ -2435,11 +2497,18 @@ def _jit_compile(name,
                 if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
                     if hipify_python is None:
                         raise AssertionError("expected hipify_python to be not None")
+                    # Canonicalize sources that don't already live under the build
+                    # directory (same reasoning as `CUDAExtension`): this fixes the
+                    # Windows `subst` drive / symlinked-path case where a caller-supplied
+                    # source resolves to a different spelling than `build_directory`,
+                    # without relocating sources symlinked into the build directory.
+                    build_dir_real = os.path.realpath(build_directory) if IS_WINDOWS else build_directory
+
                     hipify_result = hipify_python.hipify(
-                        project_directory=build_directory,
-                        output_directory=build_directory,
+                        project_directory=build_dir_real,
+                        output_directory=build_dir_real,
                         header_include_dirs=(extra_include_paths if extra_include_paths is not None else []),
-                        extra_files=[os.path.abspath(s) for s in sources],
+                        extra_files=[_canonicalize_hip_source(s, build_dir_real) for s in sources],
                         ignores=[_join_rocm_home('*'), os.path.join(_TORCH_PATH, '*')],  # no need to hipify ROCm or PyTorch headers
                         show_detailed=verbose,
                         show_progress=verbose,
@@ -2449,10 +2518,17 @@ def _jit_compile(name,
 
                     hipified_sources = set()
                     for source in sources:
-                        s_abs = os.path.abspath(source)
+                        s_abs = _canonicalize_hip_source(source, build_dir_real)
                         if s_abs in hipify_result and hipify_result[s_abs].hipified_path is not None:
                             hipified_s_abs = hipify_result[s_abs].hipified_path
                         else:
+                            # A CUDA source that hipify didn't process is left as raw CUDA
+                            # and fails to compile with hipcc. Warn loudly instead of
+                            # silently skipping (the historical failure mode).
+                            if source.endswith(('.cu', '.cuh')):
+                                logger.warning(
+                                    "hipify did not process CUDA source '%s'; it will be built "
+                                    "as-is, which typically fails under ROCm.", source)
                             hipified_s_abs = s_abs
                         hipified_sources.add(hipified_s_abs)
                     sources = list(hipified_sources)
@@ -2530,30 +2606,38 @@ def _write_ninja_file_and_compile_objects(
         # This is like mkdir -p, i.e. will also create parent directories.
         os.makedirs(build_directory, exist_ok=True)
 
-    _write_ninja_file(
-        path=build_file_path,
-        cflags=cflags,
-        post_cflags=post_cflags,
-        cuda_cflags=cuda_cflags,
-        cuda_post_cflags=cuda_post_cflags,
-        cuda_dlink_post_cflags=cuda_dlink_post_cflags,
-        sycl_cflags=sycl_cflags,
-        sycl_post_cflags=sycl_post_cflags,
-        sycl_dlink_post_cflags=sycl_dlink_post_cflags,
-        sources=sources,
-        objects=objects,
-        ldflags=None,
-        library_target=None,
-        with_cuda=with_cuda,
-        with_sycl=with_sycl)
-    if verbose:
-        logger.info('Compiling objects...')
-    _run_ninja_build(
-        build_directory,
-        verbose,
-        # It would be better if we could tell users the name of the extension
-        # that failed to build but there isn't a good way to get it here.
-        error_prefix='Error compiling objects for extension')
+    # `build_ext -j` compiles extensions in threads that all share one
+    # build_temp, so without this two of them write build.ninja and run ninja in
+    # the same directory at once: the second build file replaces the first, and
+    # both processes append to one .ninja_deps, which ninja then reports as
+    # `premature end of file; recovering` and rebuilds from scratch. Ninja is
+    # meant to own its directory, so take the same lock `_jit_compile` takes and
+    # let one extension finish before the next one starts.
+    with FileLock(os.path.join(build_directory, 'lock')):
+        _write_ninja_file(
+            path=build_file_path,
+            cflags=cflags,
+            post_cflags=post_cflags,
+            cuda_cflags=cuda_cflags,
+            cuda_post_cflags=cuda_post_cflags,
+            cuda_dlink_post_cflags=cuda_dlink_post_cflags,
+            sycl_cflags=sycl_cflags,
+            sycl_post_cflags=sycl_post_cflags,
+            sycl_dlink_post_cflags=sycl_dlink_post_cflags,
+            sources=sources,
+            objects=objects,
+            ldflags=None,
+            library_target=None,
+            with_cuda=with_cuda,
+            with_sycl=with_sycl)
+        if verbose:
+            logger.info('Compiling objects...')
+        _run_ninja_build(
+            build_directory,
+            verbose,
+            # It would be better if we could tell users the name of the extension
+            # that failed to build but there isn't a good way to get it here.
+            error_prefix='Error compiling objects for extension')
 
 
 def _write_ninja_file_and_build_library(
@@ -3082,9 +3166,13 @@ def _write_ninja_file_to_build_library(path,
         cflags = common_cflags + ['-fPIC', '-std=c++20'] + extra_cflags
 
     if with_cuda and IS_HIP_EXTENSION:
-        cuda_flags = ['-DWITH_HIP'] + common_cflags + extra_cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
+        # On Windows, extra_cflags may hold MSVC-syntax flags (/O2, /std:c++17)
+        # for cl.exe or clang-cl. hipcc's clang driver reads those as input file
+        # paths, so drop them; dash-style flags (-DFOO, -I..., -O3) still apply.
+        hip_host_cflags = [f for f in extra_cflags if not f.startswith('/')] if IS_WINDOWS else extra_cflags
+        cuda_flags = ['-DWITH_HIP'] + common_cflags + hip_host_cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
         cuda_flags = cuda_flags + ['-std=c++20']
-        cuda_flags += _get_rocm_arch_flags(cuda_flags)
+        cuda_flags += _get_rocm_arch_flags(cuda_flags + extra_cuda_cflags)
         cuda_flags += extra_cuda_cflags
         if IS_WINDOWS:
             cuda_flags = _nt_quote_args(cuda_flags)
@@ -3093,6 +3181,7 @@ def _write_ninja_file_to_build_library(path,
         if IS_WINDOWS:
             for flag in COMMON_MSVC_FLAGS:
                 cuda_flags = ['-Xcompiler', flag] + cuda_flags
+            cuda_flags = _windows_nvcc_host_preprocessor_flags() + cuda_flags
             for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
                 cuda_flags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cuda_flags
             cuda_flags = cuda_flags + ['-std=c++20']
@@ -3116,8 +3205,8 @@ def _write_ninja_file_to_build_library(path,
         _append_sycl_std_if_no_std_present(sycl_cflags)
         host_cflags = cflags
         # escaping quoted arguments to pass them thru SYCL compiler
-        icpx_version = _get_icpx_version()
-        if int(icpx_version) < 20250200:
+        sycl_compiler_version = _get_sycl_compiler_version()
+        if int(sycl_compiler_version) < 20250200:
             host_cflags = [item.replace('\\"', '\\\\"') for item in host_cflags]
 
         sycl_cflags += _wrap_sycl_host_flags(host_cflags)
@@ -3242,8 +3331,7 @@ e.
             nvcc = _shell_join(_wrap_compiler(nvcc))
         config.append(f'nvcc = {nvcc}')
     if with_sycl or sycl_dlink_post_cflags:
-        sycl = 'icx' if IS_WINDOWS else 'icpx'
-        config.append(f'sycl = {sycl}')
+        config.append(f'sycl = {_get_sycl_compiler()}')
 
     if IS_HIP_EXTENSION:
         post_cflags = COMMON_HIP_FLAGS + post_cflags

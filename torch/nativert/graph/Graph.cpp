@@ -729,7 +729,7 @@ void Graph::overrideWeightsDevice(
   for (auto& [weightName, weightMeta] : weightsMeta_) {
     for (auto& [name, device] : submodNameToDevice) {
       if (device.has_value() && weightMeta.device() != device &&
-          c10::starts_with(weightName, name) &&
+          weightName.starts_with(name) &&
           (weightName == name || weightName[name.length()] == '.')) {
         LOG(INFO) << "Overriding " << weightName << " from "
                   << weightMeta.device() << " to device " << device.value();
@@ -742,7 +742,7 @@ void Graph::overrideWeightsDevice(
   for (auto& [tensorName, tensorMeta] : tensorValuesMeta_) {
     for (auto& [name, device] : submodNameToDevice) {
       if (device.has_value() && tensorMeta.device() != device &&
-          c10::starts_with(tensorName, name) &&
+          tensorName.starts_with(name) &&
           (tensorName == name || tensorName[name.length()] == '.')) {
         LOG(INFO) << "Overriding " << tensorName << " from "
                   << tensorMeta.device() << " to device " << device.value();
@@ -1200,7 +1200,7 @@ c10::Device convertDevice(std::string_view symbol) {
 }
 
 Constant convertAtomicConstant(std::string_view symbol) {
-  if (c10::starts_with(symbol, "\"")) {
+  if (symbol.starts_with("\"")) {
     // chop off the outer quotes and return the string
     TORCH_CHECK(symbol.size() >= 2);
     symbol.remove_prefix(1);
@@ -1212,19 +1212,19 @@ Constant convertAtomicConstant(std::string_view symbol) {
     return true;
   } else if (symbol == "false") {
     return false;
-  } else if (c10::starts_with(symbol, kMemoryFormatPrefix)) {
+  } else if (symbol.starts_with(kMemoryFormatPrefix)) {
     torch::_export::MemoryFormat value = torch::_export::MemoryFormat::Unknown;
     symbol.remove_prefix(kMemoryFormatPrefix.length());
     torch::_export::parseEnum(symbol, value);
     return convertJsonMemoryFormat(value);
-  } else if (c10::starts_with(symbol, kLayoutPrefix)) {
+  } else if (symbol.starts_with(kLayoutPrefix)) {
     torch::_export::Layout value = torch::_export::Layout::Unknown;
     symbol.remove_prefix(kLayoutPrefix.length());
     torch::_export::parseEnum(symbol, value);
     return convertJsonLayout(value);
-  } else if (c10::starts_with(symbol, kDevicePrefix)) {
+  } else if (symbol.starts_with(kDevicePrefix)) {
     return convertDevice(symbol);
-  } else if (c10::starts_with(symbol, kScalarTypePrefix)) {
+  } else if (symbol.starts_with(kScalarTypePrefix)) {
     torch::_export::ScalarType value = torch::_export::ScalarType::UNKNOWN;
     symbol.remove_prefix(kScalarTypePrefix.length());
     torch::_export::parseEnum(symbol, value);

@@ -534,6 +534,13 @@ Tensor _weight_int4pack_mm_xpu(
 
   TORCH_CHECK(B.dtype() == kInt, __func__, " : expect B to be int32 tensor.");
   TORCH_CHECK(
+      qScale.dtype() == A.dtype() || qScale.dtype() == kFloat,
+      __func__,
+      " : expect qScale dtype to match A dtype (",
+      A.dtype(),
+      ") or be float32, got ",
+      qScale.dtype());
+  TORCH_CHECK(
       qZeros.dtype() == kChar,
       __func__,
       " : expect qZeros to be int8 tensor currently.");

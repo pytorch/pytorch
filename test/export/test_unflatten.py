@@ -12,6 +12,7 @@ from torch.export import export, FlatArgsAdapter, unflatten
 from torch.export.unflatten import _assign_attr, _AttrKind, _disable_interpreter
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    IS_MACOS,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
@@ -695,6 +696,7 @@ class TestUnflatten(TestCase):
         )
 
     @skipIfTorchDynamo("custom objects not supported in dynamo yet")
+    @unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
     def test_unflatten_constant_obj(self):
         init_torchbind_implementations()
 
@@ -1152,6 +1154,78 @@ def forward(self, x):
         self.assertEqual(unf.type_name().split(".")[-1], "M1")
         self.assertEqual(unf.m.type_name().split(".")[-1], "M")
         self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
+
+    def test_getitem_elimination_in_subgraph_keeps_module_call_signature(self):
+        import operator
+
+        from torch.export.exported_program import (
+            _common_getitem_elimination_pass,
+            ModuleCallEntry,
+            ModuleCallSignature,
+            TensorArgument,
+        )
+        from torch.export.graph_signature import ExportGraphSignature
+        from torch.utils._pytree import tree_structure
+
+        def build(duplicate_second_getitem):
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            split = graph.call_function(torch.ops.aten.split.Tensor, (x, 1))
+            first = graph.call_function(operator.getitem, (split, 0))
+            # A duplicate of `first` in the subgraph, distinct in the root.
+            second = graph.call_function(
+                operator.getitem, (split, 0 if duplicate_second_getitem else 1)
+            )
+            graph.output((first, second))
+            return torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        root = build(duplicate_second_getitem=False)
+        root.subgraph = build(duplicate_second_getitem=True)
+        self.assertEqual(
+            [n.name for n in root.graph.nodes if n.target is operator.getitem],
+            ["getitem", "getitem_1"],
+        )
+
+        spec = tree_structure((None, None))
+        module_call_graph = [
+            ModuleCallEntry(
+                fqn="child",
+                signature=ModuleCallSignature(
+                    inputs=[TensorArgument(name="x")],
+                    outputs=[
+                        TensorArgument(name="getitem"),
+                        TensorArgument(name="getitem_1"),
+                    ],
+                    in_spec=spec,
+                    out_spec=spec,
+                ),
+            )
+        ]
+        _common_getitem_elimination_pass(
+            root,
+            ExportGraphSignature(input_specs=[], output_specs=[]),
+            module_call_graph,
+        )
+
+        # The subgraph dedup must not touch the root-level signature.
+        self.assertEqual(
+            [n.name for n in root.subgraph.graph.nodes if n.target is operator.getitem],
+            ["getitem"],
+        )
+        self.assertEqual(
+            [o.name for o in module_call_graph[0].signature.outputs],
+            ["getitem", "getitem_1"],
+        )
+
+    def test_ivals_read_rejects_non_tensor_first_arg(self):
+        from torch.export.unflatten import _IVals
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        node = graph.call_function(torch.ops.aten._foreach_abs.default, ([x],))
+        node.meta["nn_module_stack"] = {"child": ("child", torch.nn.Module)}
+        with self.assertRaisesRegex(RuntimeError, "single-tensor mutation"):
+            _IVals().read(None, node)
 
 
 if __name__ == "__main__":

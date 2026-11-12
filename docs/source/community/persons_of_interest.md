@@ -13,6 +13,8 @@ orphan: true
 - Maintain public user and development documentation
 - Run meetings and share minutes plus roadmap on a half or quarterly basis
 
+See the [maintainer guide](maintainer_guide.md) for how to triage and review issues and pull requests.
+
 ## Lead Core Maintainer
 
 - Alban Desmaison ([albanD](https://github.com/albanD))
@@ -355,6 +357,13 @@ orphan: true
 - Colin Taylor ([colin2328](https://github.com/colin2328))
 - Paul Zhang ([PaulZhang12](https://github.com/PaulZhang12))
 - (emeritus) Dmytro Ivchenko ([divchenko](https://github.com/divchenko))
+
+### TensorDict
+
+- Peter Sharpe ([peterdsharpe](https://github.com/peterdsharpe))
+- Ben Sprenger ([bsprenger](https://github.com/bsprenger))
+- Achintya Paningapalli ([theap06](https://github.com/theap06))
+- (emeritus) Vincent Moens ([vmoens](https://github.com/vmoens))
 
 ## Sunsetted Modules
 

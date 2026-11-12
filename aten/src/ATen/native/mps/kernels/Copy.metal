@@ -12,7 +12,7 @@ using namespace c10::metal;
 // inner_contiguous_scatter_mps.
 template <typename I>
 kernel void inner_contiguous_scatter(
-    constant uchar* input [[buffer(0)]],
+    device const uchar* input [[buffer(0)]],
     device uchar* output [[buffer(1)]],
     constant StridedBlockParams<I>& params [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
@@ -23,7 +23,7 @@ kernel void inner_contiguous_scatter(
   I g = params.chunk_base + pos;
   I o = g / params.slice_bytes;
   I j = g - o * params.slice_bytes;
-  constant uchar* inp = input + g;
+  device const uchar* inp = input + g;
 
   // A run that crosses a slice boundary (or the dispatch tail) maps to
   // discontiguous output, so copy it byte by byte, recomputing the destination.
@@ -47,9 +47,9 @@ kernel void inner_contiguous_scatter(
 #define REGISTER_INNER_CONTIGUOUS_SCATTER_OP(I, SUFFIX)       \
   template [[host_name("inner_contiguous_scatter_" #SUFFIX)]] \
   kernel void inner_contiguous_scatter<I>(                    \
-      constant uchar * input [[buffer(0)]],                   \
-      device uchar * output [[buffer(1)]],                    \
-      constant StridedBlockParams<I> & params [[buffer(2)]],  \
+      device const uchar* input [[buffer(0)]],                \
+      device uchar* output [[buffer(1)]],                     \
+      constant StridedBlockParams<I>& params [[buffer(2)]],   \
       uint tid [[thread_position_in_grid]]);
 
 REGISTER_INNER_CONTIGUOUS_SCATTER_OP(uint, u32);
@@ -128,7 +128,7 @@ REGISTER_UNARY_OP(copy_conj_neg, half2, half2);
 // of the inner run.
 kernel void inner_contiguous_copy(
     device uchar* output [[buffer(0)]],
-    constant uchar* input [[buffer(1)]],
+    device const uchar* input [[buffer(1)]],
     constant long* outer_sizes [[buffer(2)]],
     constant long* input_outer_strides [[buffer(3)]],
     constant long* output_outer_strides [[buffer(4)]],
@@ -146,7 +146,7 @@ kernel void inner_contiguous_copy(
   const auto out_base =
       offset_from_coord(opos, output_outer_strides, ndim_outer);
   device uchar* o = output + out_base + pos;
-  constant uchar* in = input + in_base + pos;
+  device const uchar* in = input + in_base + pos;
   copy_bytes_aligned(o, in, min(16u, inner_bytes - pos));
 }
 
@@ -155,7 +155,7 @@ kernel void inner_contiguous_copy(
 // byte offset, chunk_bytes its size), matching the blit path's chunking.
 kernel void contiguous_byte_copy(
     device uchar* out [[buffer(0)]],
-    constant uchar* in [[buffer(1)]],
+    device const uchar* in [[buffer(1)]],
     constant uint& chunk_bytes [[buffer(2)]],
     constant ulong& base [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
