@@ -132,23 +132,25 @@ void applyEncryptionPsk(std::optional<std::string> psk) {
     group_constructed.store(true);
     return;
   }
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 32, 3) || defined(USE_ROCM)
+  TORCH_CHECK(
+      false,
+      "encryption_psk/TORCH_NCCL_ENCRYPTION_PSK requires NCCL >= 2.32.3 and "
+      "is not supported on ROCm");
+#endif
   // NCCL reads the key as a C string.
   TORCH_CHECK_VALUE(
       psk->find('\0') == std::string::npos,
       "encryption_psk/TORCH_NCCL_ENCRYPTION_PSK must not contain NUL bytes");
   TORCH_CHECK(
       !applied_psk.has_value(),
-      "encryption_psk differs from the key set by an earlier nccl2 group; "
+      "encryption_psk/TORCH_NCCL_ENCRYPTION_PSK differs from the key set by an "
+      "earlier nccl2 group; "
       "NCCL's key is process-global and can't be changed");
   TORCH_CHECK(
       first_group,
       "encryption_psk/TORCH_NCCL_ENCRYPTION_PSK must be set on the first nccl2 "
       "group created in the process");
-#if NCCL_VERSION_CODE < NCCL_VERSION(2, 32, 3) || defined(USE_ROCM)
-  TORCH_CHECK(
-      false,
-      "NCCL encryption requires NCCL >= 2.32.3 and is not supported on ROCm");
-#endif
   DefaultNcclApi nccl_api;
   NCCL_CHECK(
       &nccl_api,

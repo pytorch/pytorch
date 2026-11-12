@@ -4565,9 +4565,13 @@ Attributes:
             passphrase. Requires NCCL 2.32.3+ built with
             ``TLS_BACKEND=OPENSSL3`` with ``libcrypto.so.3`` and
             ``libssl.so.3`` available at runtime; otherwise group or
-            communicator creation fails. If None and no key has
-            been applied yet, the ``TORCH_NCCL_ENCRYPTION_PSK`` environment
-            variable is used when non-empty. Default is None.
+            communicator creation fails; ROCm is unsupported. Groups must not
+            be constructed concurrently while a key is being set. If None and
+            no key has been applied yet, the ``TORCH_NCCL_ENCRYPTION_PSK``
+            environment variable is used when non-empty, so setting it after
+            a keyless first group makes later group creation fail. The key
+            persists for the life of the process, across
+            ``destroy_process_group``. Default is None.
 
 Example::
     >>> import torch.distributed as dist

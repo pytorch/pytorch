@@ -124,16 +124,11 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
         getSize() - static_cast<int>(excluded.size()),
         childOptions);
   } catch (...) {
-    try {
-      waitForNcclCompletion(
-          *nccl_api_,
-          childComm,
-          nccl_api_->commAbort(childComm),
-          childOptions->timeout,
-          "NCCL abort of shrink child failed");
-    } catch (const std::exception& e) {
-      LOG(ERROR) << e.what();
-    }
+    abortCommIgnoringErrors(
+        *nccl_api_,
+        childComm,
+        childOptions->timeout,
+        "NCCL abort of shrink child failed");
     throw;
   }
   child->initFromComm(childComm, device_, nccl_api_);

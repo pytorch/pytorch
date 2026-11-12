@@ -7107,6 +7107,13 @@ def split_group(
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
         )
+    psk = getattr(pg_options, "encryption_psk", None)
+    if (
+        psk is not None
+        and _use_torchcomms_enabled()
+        and isinstance(parent_backend, _BackendWrapper)
+    ):
+        raise ValueError("encryption_psk is not supported with torchcomms")
 
     device_id = parent_pg.bound_device_id
 

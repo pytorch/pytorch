@@ -91,6 +91,18 @@ void waitForNcclCompletion(
   }
 }
 
+void abortCommIgnoringErrors(
+    NcclApi& api,
+    ncclComm_t comm,
+    std::chrono::milliseconds timeout,
+    std::string_view operation) {
+  try {
+    waitForNcclCompletion(api, comm, api.commAbort(comm), timeout, operation);
+  } catch (const std::exception& e) {
+    LOG(ERROR) << e.what();
+  }
+}
+
 void waitForNcclChildComm(
     NcclApi& nccl_api,
     ncclComm_t parent_comm,
@@ -501,16 +513,11 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
     child = c10::make_intrusive<ProcessGroupNCCL>(
         store, newRank, static_cast<int>(ranks.size()), childOpts);
   } catch (...) {
-    try {
-      waitForNcclCompletion(
-          *nccl_api_,
-          new_comm,
-          nccl_api_->commAbort(new_comm),
-          ncclOpts->timeout,
-          "NCCL abort of split child failed");
-    } catch (const std::exception& e) {
-      LOG(ERROR) << e.what();
-    }
+    abortCommIgnoringErrors(
+        *nccl_api_,
+        new_comm,
+        ncclOpts->timeout,
+        "NCCL abort of split child failed");
     throw;
   }
   child->initFromComm(new_comm, device_, nccl_api_);
