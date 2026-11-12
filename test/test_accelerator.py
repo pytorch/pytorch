@@ -177,6 +177,13 @@ class TestAccelerator(TestCase):
         self.assertEqual(torch.accelerator.current_stream(), src_prev_stream)
         self.assertEqual(torch.accelerator.current_stream(dst_device), dst_prev_stream)
 
+        with dst_prev_stream:
+            self.assertEqual(torch.accelerator.current_device_index(), dst_device)
+            self.assertEqual(torch.accelerator.current_stream(), dst_prev_stream)
+        self.assertEqual(torch.accelerator.current_stream(dst_device), dst_prev_stream)
+        self.assertEqual(torch.accelerator.current_device_index(), src_device)
+        self.assertEqual(torch.accelerator.current_stream(), src_prev_stream)
+
     # Non-blocking MPS=>CPU copies currently return unpinned storage
     @xfailIfMPS
     def test_pin_memory_on_non_blocking_copy(self):
