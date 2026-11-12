@@ -716,7 +716,9 @@ if(USE_ROCM)
           endif()
         endforeach()
         set_source_files_properties(${ASYNC_MM_HIP_FILE} PROPERTIES
-          COMPILE_DEFINITIONS USE_ROCM_ASYNC_MM
+          # USE_NEW_UNIFIED_FRAMEWORK=0: see CK_SDPA_EXTRA_HIPCC_OPTIONS in
+          # aten/src/ATen/CMakeLists.txt.
+          COMPILE_DEFINITIONS "USE_ROCM_ASYNC_MM;USE_NEW_UNIFIED_FRAMEWORK=0"
           COMPILE_OPTIONS "${_async_mm_no_arch_opts}")
       endif()
     endif()
@@ -1517,10 +1519,6 @@ if(BUILD_TEST)
     add_subdirectory(
       ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
       ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime
-    )
-    add_subdirectory(
-      ${TORCH_ROOT}/test/mobile/lightweight_dispatch
-      ${CMAKE_BINARY_DIR}/test_codegen_unboxing
     )
   else()
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)

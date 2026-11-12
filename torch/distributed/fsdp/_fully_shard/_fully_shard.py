@@ -15,13 +15,19 @@ from torch.distributed._composable import contract
 
 from ._fsdp_api import (
     AllGather,
+    AllReduce,
     DataParallelMeshDims,
     MixedPrecisionPolicy,
     OffloadPolicy,
     ReduceScatter,
 )
-from ._fsdp_collectives import _default_reduce_scatter_input_fn
-from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
+from ._fsdp_collectives import _default_reduce_scatter_input_fn, DefaultAllReduce
+from ._fsdp_common import (
+    _dynamo_disable,
+    DDPMeshInfo,
+    FSDPMeshInfo,
+    ShardPlacementFnResult,
+)
 from ._fsdp_init import (
     _apply_to_module,
     _get_device_from_mesh,
@@ -809,6 +815,39 @@ class FSDPModule:
             )
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group._reduce_scatter_comm = comm
+
+    def set_custom_all_reduce(self, comm: AllReduce) -> None:
+        """Override HSDP or ``replicate_with_fsdp`` all-reduce communication.
+
+        See ``AllReduce`` for the in-place reduction and stream contract. The
+        primitive runs on FSDP's internal all-reduce stream, which is distinct
+        from the compute stream. FSDP handles gradient scaling, accumulation,
+        and buffer lifetime, and runs the optional all-reduce hook afterward.
+        ``set_requires_all_reduce(False)`` suppresses this collective.
+
+        This applies to this module's parameter group, not child FSDP modules.
+
+        .. warning::
+            This API is experimental and may change without backward
+            compatibility.
+
+        Args:
+            comm (Optional[AllReduce]): Custom all-reduce communication.
+                ``None`` restores ``DefaultAllReduce``.
+        """
+        state = self._get_fsdp_state()
+        if not state._fsdp_param_groups:
+            return
+        if len(state._fsdp_param_groups) > 1:
+            raise ValueError(
+                "set_custom_all_reduce is not supported with multiple param groups"
+            )
+        for fsdp_param_group in state._fsdp_param_groups:
+            if not isinstance(fsdp_param_group.mesh_info, DDPMeshInfo):
+                raise ValueError("set_custom_all_reduce requires a replication mesh")
+            fsdp_param_group._all_reduce_comm = (
+                DefaultAllReduce() if comm is None else comm
+            )
 
     def set_all_reduce_hook(
         self,
