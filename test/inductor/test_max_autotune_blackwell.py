@@ -327,8 +327,8 @@ class TestMaxAutotuneBlackwell(TestCase):
         "Need Blackwell with device-side TMA support in Triton",
     )
     def test_blackwell_host_side_tma_one_dynamic_operand(self):
-        # Only A has a dynamic dim, so A falls back to a device-side descriptor
-        # while B keeps its host-side one in the same kernel.
+        # Only A has a dynamic dim: the launcher reads it at launch, so both
+        # operands keep host-side descriptors and none is built in-kernel.
         M, N, K = 1024, 256, 512
         a = torch.randn(M, K).to(torch.float16).to(GPU_TYPE)
         b = torch.randn(K, N).to(torch.float16).to(GPU_TYPE)
@@ -344,10 +344,12 @@ class TestMaxAutotuneBlackwell(TestCase):
         ):
             c_actual, code = run_and_get_code(torch.compile(torch.mm), a, b)
         torch.testing.assert_close(c_actual, torch.mm(a, b), atol=1e-2, rtol=1e-2)
-        FileCheck().check("triton_tem_fused_mm").check_count(
-            "tl.make_tensor_descriptor(base=A", 1, exactly=True
-        ).check_not("tl.make_tensor_descriptor(base=B").run(code[0])
-        FileCheck().check("'host_tma_descriptor_args': {'arg_B'").run(code[0])
+        FileCheck().check("triton_tem_fused_mm").check_not(
+            "tl.make_tensor_descriptor(base="
+        ).run(code[0])
+        FileCheck().check("'host_tma_descriptor_args'").check("'arg_A'").check(
+            "'launch_args': ['ks0']"
+        ).run(code[0])
 
     # NOTE: the current Inductor template verifies that the scaling mode is either per-tensor or per-row
     # TODO: support additional scaling modes for Blackwell
@@ -1050,6 +1052,39 @@ class TestBlackwellExhaustiveConfigs(TestCase):
     VALID_NUM_STAGES = {2, 3, 4, 5, 6}
     VALID_NUM_WARPS = {4, 8}
     VALID_EPILOGUE_SUBTILE = {1, 2, 4}
+
+    @parametrize(
+        "dtype,allow_tf32,a_row_major,b_row_major,block_m,expected",
+        (
+            (torch.float32, True, False, True, 64, False),
+            (torch.float32, True, False, False, 128, False),
+            (torch.float32, True, False, True, 256, False),
+            (torch.float32, True, False, True, 32, True),
+            (torch.float32, False, False, True, 128, True),
+            (torch.float32, True, True, False, 128, True),
+            (torch.bfloat16, True, False, True, 128, True),
+        ),
+    )
+    def test_fp32_mma_layout_filter(
+        self,
+        dtype,
+        allow_tf32,
+        a_row_major,
+        b_row_major,
+        block_m,
+        expected,
+    ):
+        kwargs = {
+            "A_ROW_MAJOR": a_row_major,
+            "B_ROW_MAJOR": b_row_major,
+            "BLOCK_M": block_m,
+        }
+        self.assertEqual(
+            CUDABlackwellPersistentTMATemplateConfigHeuristic._supports_mma_layout(
+                dtype, allow_tf32, kwargs
+            ),
+            expected,
+        )
 
     @parametrize(
         "heuristic_cls",
