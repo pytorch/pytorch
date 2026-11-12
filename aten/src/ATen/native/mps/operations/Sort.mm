@@ -13,7 +13,7 @@
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/metal/common.h>
-#include <c10/util/TypeCast.h>
+#include <c10/util/safe_conv.h>
 #include <fmt/format.h>
 #include <utility>
 
@@ -651,7 +651,7 @@ static void median_radix_select(const Tensor& flat, const Tensor& out_val, bool 
               "median: MPS does not support tensors with ",
               flat.numel(),
               " elements");
-  const auto numel = static_cast<uint32_t>(flat.numel());
+  const auto numel = c10::safe_conv<uint32_t>(flat.numel(), "input.numel()");
   auto state = at::zeros({3}, flat.options().dtype(kLong));
   auto hist = at::zeros({257}, flat.options().dtype(kInt));
   const auto n_tgs = std::min<uint32_t>(at::ceil_div(numel, 256u), 256u);
