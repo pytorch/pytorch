@@ -107,11 +107,14 @@ class TestReductionConfig(TestCase):
             rt.select_row_order(
                 cc,
                 torch.float32,
-                "var0",
                 1024,
                 65536,
+                trait_type=T.WelfordOps,
                 nfields=3,
                 nouts=1,
+                welford_outs=1,
+                acc_bits=32,
+                alignment=16,
             ),
             "linear",
         )
@@ -360,6 +363,22 @@ class TestReductionConfig(TestCase):
         args = ((10, 0), dtype, rows, columns, 1, nfields)
         cfg = ct.select_col_config(*args, itemsize=itemsize, acc_bits=32, **contract)
         self.assertEqual(cfg.rule, expected_rule)
+
+    def test_b200_ragged_welford_columns_need_combine_equal(self):
+        """Decline the grouped Welford column rule for a trait without combine_equal."""
+
+        class OwnCombine(T.WelfordOps):
+            def combine(self, a, b):
+                return super().combine(a, b)
+
+        args = ((10, 0), torch.float16, (16 << 20) // (257 * 2), 257, 1, 3)
+        kwargs = dict(itemsize=2, acc_bits=32, nouts=1, welford_outs=1)
+        for trait_type, rule in (
+            (T.WelfordOps, "b200_ragged_welford_c257"),
+            (OwnCombine, "default"),
+        ):
+            cfg = ct.select_col_config(*args, trait_type=trait_type, **kwargs)
+            self.assertEqual(cfg.rule, rule)
 
     @parametrize(
         "dtype,trait,columns,size,expected",
