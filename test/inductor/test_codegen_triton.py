@@ -26,6 +26,7 @@ from torch._inductor.codegen.triton import (
     FixedTritonConfig,
     get_triton_reduction_function,
     IndexingOptions,
+    TensorDescriptorOptions,
     TMACompatibilityChecker,
     TritonCSEVariable,
     TritonKernel,
@@ -61,6 +62,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU_AND_TRITON,
     TRITON_HAS_CPU,
 )
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, TruncToFloat, TruncToInt
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -162,6 +164,46 @@ class TestCodegenTriton(InductorTestCase):
     def tearDown(self):
         self._stack.close()
         super().tearDown()
+
+    def test_lifted_tma_descriptors_with_distinct_offsets(self):
+        xnumel = sympy.Integer(512)
+        kernel = TritonKernel(
+            {"x": xnumel},
+            features=SIMDKernelFeatures([], xnumel, sympy.Integer(1)),
+            override_cooperative_reduction=False,
+        )
+        indexing = TensorDescriptorOptions(
+            params=BlockParameters(
+                shape=[sympy.Integer(512), sympy.Integer(256)],
+                block_shape=[sympy.Integer(16), sympy.Integer(16)],
+                strides=[sympy.Integer(512), sympy.Integer(1)],
+            ),
+            constant_offset=sympy.Integer(0),
+            order=[0, 1],
+            mask_vars=OrderedSet(),
+            broadcast_shape=[],
+            broadcasting_dims=[],
+            final_shape=[],
+            stride_sorter=BlockParameters.IdentityStrideSorter([512, 1], [0, 1]),
+            _boundary_check=[],
+            can_lift=True,
+        )
+
+        with (
+            V.set_kernel_handler(kernel),
+            patch.object(self._graph, "get_dtype", return_value=torch.bfloat16),
+        ):
+            first, _ = kernel.codegen_block_ptr("buf0", "in_ptr2", indexing)
+            second, _ = kernel.codegen_block_ptr(
+                "buf0", "in_ptr2", dataclasses.replace(indexing, constant_offset=256)
+            )
+            reused, _ = kernel.codegen_block_ptr("buf0", "in_ptr2", indexing)
+
+        self.assertNotEqual(first, second)
+        self.assertEqual(first, reused)
+        code = kernel.prologue.getvalue()
+        self.assertEqual(code.count("tl.make_tensor_descriptor("), 2)
+        self.assertIn("in_ptr2 + (256)", code)
 
     def test_tma_store_can_use_descriptor_local_int32_indexing(self):
         layout = SimpleNamespace(offset=0, stride=[512, 1])

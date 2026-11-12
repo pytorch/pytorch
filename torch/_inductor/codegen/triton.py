@@ -4833,12 +4833,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and self.range_trees[-1].is_loop
             and indexing.has_rindex()
         ) or indexing.can_lift:
-            if indexing.can_lift and var in self.prologue_cache:
-                # Check for epilogue subtiling to reuse the same
-                # tensor descriptor.
-                block_descriptor = self.prologue_cache[var]
+            block_ptr_line = indexing.format(var, roffset=False)
+            if indexing.can_lift and block_ptr_line in self.prologue_cache:
+                block_descriptor = self.prologue_cache[block_ptr_line]
             else:
-                block_ptr_line = indexing.format(var, roffset=False)
                 block_var = self.cse.try_get(block_ptr_line)
 
                 # Early return if block descriptor already exists
@@ -4858,8 +4856,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 line_body = DeferredLine(name, f"{block_descriptor} = {block_ptr_line}")
                 if indexing.can_lift:
                     self.prologue.writeline(line_body)
-                    # Cache the descriptor for epilogue subtiling
-                    self.prologue_cache[var] = block_descriptor
+                    self.prologue_cache[block_ptr_line] = block_descriptor
                 else:
                     self.body.writeline(line_body)
 
