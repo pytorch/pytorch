@@ -2,6 +2,7 @@
 
 import os
 
+import torch
 import torch.distributed as dist
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -44,8 +45,18 @@ class TestMiscCollectiveUtils(TestCase):
                     f"Expected xccl, got {dist.get_default_backend_for_device(device)}"
                 )
         else:
-            with self.assertRaises(ValueError):
-                dist.get_default_backend_for_device(device)
+            # Out-of-tree devices (e.g. PrivateUse1 backends) register their
+            # default backend in default_device_backend_map; devices without a
+            # registered backend must raise.
+            device_type = torch.device(device).type
+            expected = dist.Backend.default_device_backend_map.get(device_type)
+            if expected is not None:
+                backend = dist.get_default_backend_for_device(device)
+                if backend != expected:
+                    raise AssertionError(f"Expected {expected}, got {backend}")
+            else:
+                with self.assertRaises(ValueError):
+                    dist.get_default_backend_for_device(device)
 
     def test_create_pg(self, device) -> None:
         """
