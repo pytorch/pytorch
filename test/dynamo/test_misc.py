@@ -13581,45 +13581,58 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
 
-    def test_deterministic_algorithms_sets_inductor_flag(self):
-        # Turning on deterministic algorithms inside a compiled function, or
-        # through set_deterministic_debug_mode, also turns on Inductor's
-        # deterministic mode, as torch.use_deterministic_algorithms does.
+    def _restore_deterministic_state(self):
+        # torch.use_deterministic_algorithms would also overwrite Inductor's
+        # flag, so restore the two separately.
         prior = torch.are_deterministic_algorithms_enabled()
         prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        prior_inductor = torch._inductor.config.deterministic
 
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            torch.use_deterministic_algorithms(True)
-            return x + 1
+        def restore():
+            torch._C._set_deterministic_algorithms(prior, warn_only=prior_warn_only)
+            torch._inductor.config.deterministic = prior_inductor
 
-        try:
-            torch.use_deterministic_algorithms(False)
-            fn(torch.ones(2))
-            self.assertTrue(torch.are_deterministic_algorithms_enabled())
-            self.assertTrue(torch._inductor.config.deterministic)
-
-            torch.set_deterministic_debug_mode("default")
-            self.assertFalse(torch._inductor.config.deterministic)
-            torch.set_deterministic_debug_mode("warn")
-            self.assertTrue(torch._inductor.config.deterministic)
-        finally:
-            torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
+        self.addCleanup(restore)
 
     def test_inductor_deterministic_survives_compile(self):
         # Deterministic mode set through Inductor alone stays on after frames
         # compile, and does not turn on deterministic algorithms.
-        prior = torch.are_deterministic_algorithms_enabled()
-        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
-        try:
-            torch.use_deterministic_algorithms(False)
-            with torch._inductor.config.patch(deterministic=True):
-                for fn in (lambda x: x + 1, lambda x: x * 2):
-                    torch.compile(fn, backend="eager")(torch.randn(4))
-                self.assertTrue(torch._inductor.config.deterministic)
-                self.assertFalse(torch.are_deterministic_algorithms_enabled())
-        finally:
-            torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
+        self._restore_deterministic_state()
+        torch.use_deterministic_algorithms(False)
+        with torch._inductor.config.patch(deterministic=True):
+            for fn in (lambda x: x + 1, lambda x: x * 2):
+                torch.compile(fn, backend="eager")(torch.randn(4))
+            self.assertTrue(torch._inductor.config.deterministic)
+            self.assertFalse(torch.are_deterministic_algorithms_enabled())
+
+    def test_inductor_deterministic_in_backward_compile(self):
+        # The backward is compiled lazily, after the frame's compile finished;
+        # it must still be compiled in deterministic mode.
+        self._restore_deterministic_state()
+        torch.use_deterministic_algorithms(False)
+        seen = []
+
+        def record(graph):
+            seen.append(torch._inductor.config.deterministic)
+
+        with torch._inductor.config.patch(
+            deterministic=True, post_grad_custom_post_pass=record
+        ):
+            x = torch.randn(4, requires_grad=True)
+            torch.compile(lambda x: (x.sin() * 2).sum(), backend="inductor")(
+                x
+            ).backward()
+        self.assertGreaterEqual(len(seen), 2)  # forward and backward
+        self.assertTrue(all(seen), seen)
+
+    def test_set_deterministic_debug_mode_sets_inductor_flag(self):
+        # An alternative interface to torch.use_deterministic_algorithms, which
+        # also sets Inductor's flag.
+        self._restore_deterministic_state()
+        torch.set_deterministic_debug_mode("warn")
+        self.assertTrue(torch._inductor.config.deterministic)
+        torch.set_deterministic_debug_mode("default")
+        self.assertFalse(torch._inductor.config.deterministic)
 
     def test_deterministic_algorithms_warn_only_compile_time_value(self):
         prior = torch.are_deterministic_algorithms_enabled()
@@ -13649,7 +13662,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                     node
                     for node in gm.graph.nodes
                     if node.op == "call_function"
-                    and node.target is torch.use_deterministic_algorithms
+                    and node.target is torch._C._set_deterministic_algorithms
                 ]
                 self.assertEqual(len(set_deterministic_nodes), 1)
                 self.assertEqual(set_deterministic_nodes[0].args, (True,))
