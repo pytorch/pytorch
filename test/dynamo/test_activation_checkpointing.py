@@ -39,6 +39,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
     skipIfHpu,
@@ -191,6 +192,11 @@ def _get_custom_policy(no_recompute_list=None, must_recompute_list=None):
             return CheckpointPolicy.PREFER_RECOMPUTE
 
     return _custom_policy
+
+
+save_mm_context_fn = functools.partial(
+    create_selective_checkpoint_contexts, [torch.ops.aten.mm.default]
+)
 
 
 class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
@@ -3748,6 +3754,168 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 instantiate_device_type_tests(
     ActivationCheckpointingViaTagsTests, globals(), except_for="cpu", allow_xpu=True
 )
+
+
+class DeterministicRecomputeHelperTests(torch._dynamo.test_case.TestCase):
+    """The helpers of torch._functorch._aot_autograd.deterministic_recompute, on
+    their own."""
+
+    def _partitioned(self, fn, *args):
+        """The forward and backward graphs the partitioner makes for fn, and the
+        values the forward saves for the backward."""
+        graphs = []
+
+        def partition(joint, inputs, *, num_fwd_outputs, **kwargs):
+            fw, bw = min_cut_rematerialization_partition(
+                joint, inputs, num_fwd_outputs=num_fwd_outputs, **kwargs
+            )
+            outs = fw.graph.find_nodes(op="output")[0].args[0][num_fwd_outputs:]
+            graphs.append((fw, bw, {n for n in outs if isinstance(n, torch.fx.Node)}))
+            return fw, bw
+
+        backend = aot_autograd(fw_compiler=nop, bw_compiler=nop, partition_fn=partition)
+        torch.compile(fn, backend=backend, fullgraph=True)(*args).sum().backward()
+        return graphs[0]
+
+    def test_recomputed_copies(self):
+        # Each region's recompute is found by name, op and inputs: whatever of
+        # it the backward needs (the first region's cos for the second mm's
+        # gradient), except what a policy saves (the second mm).
+        from torch._functorch._aot_autograd.deterministic_recompute import (
+            _recomputed_copies,
+        )
+
+        def gn(x, w):
+            return torch.sigmoid(x @ w).cos()
+
+        def fn(x, w):
+            y = checkpoint(gn, x, w, use_reentrant=False)
+            return checkpoint(
+                gn, y, w, use_reentrant=False, context_fn=save_mm_context_fn
+            )
+
+        x = torch.randn(4, 4, requires_grad=True)
+        w = torch.randn(4, 4, requires_grad=True)
+        copies, regions = _recomputed_copies(*self._partitioned(fn, x, w))
+        aten = torch.ops.aten
+        targets = [[n.target for n in nodes] for nodes in regions.values()]
+        first = [aten.mm.default, aten.sigmoid.default, aten.cos.default]
+        self.assertEqual(targets, [first, [aten.sigmoid.default]])
+        self.assertEqual(copies, {n for nodes in regions.values() for n in nodes})
+
+    def test_recomputed_copies_outside_regions(self):
+        # The partitioner also recomputes cheap ops outside any region (the
+        # views feeding the checkpoint): copies in no region.
+        from torch._functorch._aot_autograd.deterministic_recompute import (
+            _recomputed_copies,
+        )
+
+        def fn(x, w):
+            y = torch.relu(x).view(16).view(4, 4)
+            return checkpoint(lambda y: (y @ w).sin(), y, use_reentrant=False)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        w = torch.randn(4, 4, requires_grad=True)
+        copies, regions = _recomputed_copies(*self._partitioned(fn, x, w))
+        in_regions = {n for nodes in regions.values() for n in nodes}
+        outside = {n.name for n in copies - in_regions}
+        self.assertEqual(outside, {"view", "view_1"})
+
+    @parametrize("op", ["rand_like", "native_dropout"])
+    def test_recomputed_copies_logs_mismatch(self, op):
+        # On CPU the backward replays a random op from a saved RNG state with a
+        # different op, so neither it nor what is computed from it is a copy.
+        # The log says so once, where that starts, even when the random op has
+        # two readers.
+        from torch._functorch._aot_autograd import deterministic_recompute
+
+        def gn(x, w):
+            h = torch.sigmoid(x @ w)
+            if op == "rand_like":
+                return (h * torch.rand_like(x)).sin()
+            out, mask = torch.ops.aten.native_dropout(h, 0.5, True)
+            return out.sin() * mask
+
+        def fn(x, w):
+            return checkpoint(gn, x, w, use_reentrant=False)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        w = torch.randn(4, 4, requires_grad=True)
+        graphs = self._partitioned(fn, x, w)
+        with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
+            _, regions = deterministic_recompute._recomputed_copies(*graphs)
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn("the backward recomputes it differently", logs.output[0])
+        aten = torch.ops.aten
+        targets = [[n.target for n in nodes] for nodes in regions.values()]
+        self.assertEqual(targets, [[aten.mm.default, aten.sigmoid.default]])
+
+    def test_recomputed_copies_checks_op_and_args(self):
+        # A backward node with a forward node's name is its copy only if it is
+        # the same op on the same inputs (primals, saved values, graph
+        # attributes such as h's subgraph, or other copies). The log says once
+        # where that fails: at a, which the backward recomputes under another
+        # name, rather than at b and c, which read it.
+        from torch._functorch._aot_autograd import deterministic_recompute
+
+        def hop(sub, x):
+            return x
+
+        def graph(ops):
+            g = torch.fx.Graph()
+            env = {"x": g.placeholder("x"), "y": g.placeholder("y")}
+            env["sub"] = g.get_attr("sub")
+            for name, target, args in ops:
+                args = tuple(env[a] for a in args)
+                env[name] = g.create_node("call_function", target, args, name=name)
+            g.output(tuple(env[name] for name, _, _ in ops))
+            root = torch.nn.Module()
+            root.sub = torch.nn.Module()
+            return torch.fx.GraphModule(root, g)
+
+        sin, cos = torch.ops.aten.sin.default, torch.ops.aten.cos.default
+        common = [("b", cos, ("a",)), ("c", sin, ("a",)), ("h", hop, ("sub", "x"))]
+        fw = graph(
+            [("same", sin, ("x",)), ("target", sin, ("x",)), ("args", sin, ("x",))]
+            + [("a", sin, ("x",)), *common]
+        )
+        bw = graph(
+            [("same", sin, ("x",)), ("target", cos, ("x",)), ("args", sin, ("y",))]
+            + [
+                ("a_1", sin, ("x",)),
+                *(o if o[0] == "h" else (o[0], o[1], ("a_1",)) for o in common),
+            ]
+        )
+        with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
+            copies, _ = deterministic_recompute._recomputed_copies(fw, bw, set())
+        self.assertEqual({n.name for n in copies}, {"same", "h"})
+        logged = [re.search(r": (\w+) left", line).group(1) for line in logs.output]
+        self.assertEqual(logged, ["target", "args", "a"])
+
+    @unittest.skipIf(not TEST_CUDA, "graphsafe RNG functionalization is CUDA-only")
+    def test_recomputed_copies_graphsafe_rng(self):
+        # On CUDA the backward replays dropout with graphsafe_run_with_rng_state,
+        # under the forward draw's name but from its own RNG state: same name,
+        # different inputs, so not a copy.
+        from torch._functorch._aot_autograd.deterministic_recompute import (
+            _recomputed_copies,
+        )
+
+        def fn(x, w):
+            return checkpoint(
+                lambda x, w: F.dropout(x @ w, p=0.5).sin(), x, w, use_reentrant=False
+            )
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        w = torch.randn(4, 4, device="cuda", requires_grad=True)
+        copies, regions = _recomputed_copies(*self._partitioned(fn, x, w))
+        draw = torch._prims.rng_prims.graphsafe_run_with_rng_state
+        self.assertFalse([n for n in copies if n.target is draw])
+        targets = [[n.target for n in nodes] for nodes in regions.values()]
+        self.assertEqual(targets, [[torch.ops.aten.mm.default]])
+
+
+instantiate_parametrized_tests(DeterministicRecomputeHelperTests)
 
 
 class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCase):
