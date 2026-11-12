@@ -79,6 +79,7 @@ from .codegen.triton_utils import (
     triton_meta_device_props,
 )
 from .codegen.wrapper import pexpr
+from .compile_worker.subproc_pool import SubprocException
 from .exc import CUDACompileError
 from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
@@ -5773,6 +5774,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 raise AssertionError(  # noqa: B904
                     f"Incorrect result from choice {choice}\n\n{e}"
                 )
+            except SubprocException as e:
+                # Pool-worker compile failure; in process this is the RuntimeError above.
+                log.error(
+                    "Compilation error during autotuning: \n%s. \nIgnoring this choice.",
+                    e,
+                )
+                timing = float("inf")
             except Exception as e:
                 try:
                     from triton.runtime.autotuner import OutOfResources
