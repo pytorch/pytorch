@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import textwrap
 import uuid
 
 import torch
@@ -25,13 +26,16 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
     skipIfTorchDynamo,
+    TEST_WITH_CROSSREF,
     TestCase,
 )
 
 
-# Serving an artifact imports the module its function was captured from, so each
-# test writes its functions into a fresh importable module.
+# export_python serves an artifact by importing the module its function was captured
+# from, so each test writes its functions into a fresh importable module.
 _MODULE = """
+import os
+
 import torch
 
 def scaled(x, *, scale=2.0):
@@ -46,12 +50,40 @@ FACTOR = 3
 
 def factored(x):
     return x * FACTOR
+
+def matmul(x, y):
+    return x @ y
+
+_ARTIFACTS = os.path.join(os.path.dirname(__file__), "decorated")
+
+@torch.compiler.export_python(path=os.path.join(_ARTIFACTS, "scaled.py"))
+def decorated_scaled(x):
+    return (x * 2.0).relu()
+
 """
 
 
 def _graph_code(path):
     with open(path) as f:
         return f.read().partition(_CODE_BEGIN)[2].rpartition(_CODE_END)[0]
+
+
+def _in_a_fresh_process(test, body):
+    if TEST_WITH_CROSSREF:
+        # The crossref harness keeps a dispatch mode active while the capture runs,
+        # and Dynamo guards on it; a fresh process has no such mode, so every call
+        # would miss there.
+        test.skipTest("a fresh process lacks the crossref dispatch mode")
+    script = (
+        f"import sys, torch\nsys.path.insert(0, {test.dir!r})\n"
+        f"import {test.module_name} as m\n{textwrap.dedent(body)}\nprint('served')\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=900
+    )
+    test.assertEqual(out.returncode, 0, out.stderr)
+    test.assertIn("served", out.stdout)
+    return out.stdout
 
 
 class _ExportPythonTestCase(TestCase):
@@ -68,6 +100,11 @@ class _ExportPythonTestCase(TestCase):
         self.addCleanup(sys.path.remove, self.dir)
         self.module = importlib.import_module(self.module_name)
         self.addCleanup(sys.modules.pop, self.module_name, None)
+
+    def _export(self, name, path, **kwargs):
+        return torch.compiler.export_python(path=path, **kwargs)(
+            getattr(self.module, name)
+        )
 
 
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
@@ -180,6 +217,156 @@ class TestExportPythonFile(_ExportPythonTestCase):
             [sys.executable, path], capture_output=True, text=True, timeout=900
         )
         self.assertEqual(out.returncode, 0, out.stderr)
+
+
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+class TestExportPython(_ExportPythonTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_first_call_captures_and_later_calls_serve_the_file(self):
+        path = os.path.join(self.dir, "artifacts", "scaled.py")
+        run = self._export("scaled", path)
+        x = torch.randn(8)
+        self.assertEqual(run(x, scale=3.0), (x * 3.0).relu())
+        self.assertTrue(os.path.exists(path))
+        self.assertTrue(os.path.exists(path + ".cache"))
+        with no_compilation():
+            self.assertEqual(run(x, scale=3.0), (x * 3.0).relu())
+            y = torch.randn(8)
+            self.assertEqual(run(y, scale=3.0), (y * 3.0).relu())
+
+    def test_only_a_file_this_process_did_not_write_gets_the_exec_warning(self):
+        path = os.path.join(self.dir, "scaled.py")
+        with self.assertNoLogs("torch._precompile", "WARNING"):
+            self._export("scaled", path)(torch.randn(8))
+        with self.assertLogs("torch._precompile", "WARNING") as logs:
+            self._export("scaled", path)(torch.randn(8))
+        self.assertIn("about to EXEC", logs.output[0])
+
+    def test_a_graph_break_is_refused(self):
+        path = os.path.join(self.dir, "breaks.py")
+        with self.assertRaisesRegex(PrecompileError, "does not trace as one graph"):
+            self._export("breaks", path)(torch.randn(4))
+        self.assertFalse(os.path.exists(path))
+        self.assertFalse(os.path.exists(path + ".cache"))
+
+    def test_a_call_that_needs_a_backward_graph_is_refused(self):
+        path = os.path.join(self.dir, "scaled.py")
+        run = self._export("scaled", path)
+        x = torch.randn(8, requires_grad=True)
+        with self.assertRaisesRegex(PrecompileError, "backward graph too"):
+            run(x)
+        self.assertFalse(os.path.exists(path))
+        self.assertFalse(os.path.exists(path + ".cache"))
+        with torch.no_grad():
+            self.assertEqual(run(x), (x * 2.0).relu())
+            with no_compilation():
+                self.assertEqual(run(x), (x * 2.0).relu())
+
+    def test_a_new_process_serves_the_file_without_compiling(self):
+        path = os.path.join(self.dir, "scaled.py")
+        self._export("scaled", path)(torch.randn(4))
+        _in_a_fresh_process(
+            self,
+            f"""
+            from torch.compiler.precompile import no_compilation
+            run = torch.compiler.export_python(path={path!r})(m.scaled)
+            x = torch.randn(4)
+            with no_compilation():
+                torch.testing.assert_close(run(x), (x * 2.0).relu())
+            """,
+        )
+
+    def test_the_decorator_serves_here_and_in_a_new_process(self):
+        # The module binds export_python's wrapper under the decorated name.
+        x = torch.randn(4)
+        self.assertEqual(self.module.decorated_scaled(x), (x * 2.0).relu())
+        with no_compilation():
+            self.assertEqual(self.module.decorated_scaled(x), (x * 2.0).relu())
+        _in_a_fresh_process(
+            self,
+            """
+            from torch.compiler.precompile import no_compilation
+            x = torch.randn(4)
+            with no_compilation():
+                torch.testing.assert_close(m.decorated_scaled(x), (x * 2.0).relu())
+            """,
+        )
+
+    def test_a_first_call_that_raises_writes_nothing_and_the_next_call_captures(self):
+        path = os.path.join(self.dir, "matmul.py")
+        run = self._export("matmul", path)
+        x, y = torch.randn(2, 3), torch.randn(3, 2)
+        with self.assertRaises(RuntimeError):
+            run(x, x)
+        self.assertFalse(os.path.exists(path))
+        self.assertFalse(os.path.exists(path + ".cache"))
+        self.assertEqual(run(x, y), x @ y)
+        with no_compilation():
+            self.assertEqual(run(x, y), x @ y)
+
+    def test_the_eager_backend_writes_no_graph_code(self):
+        path = os.path.join(self.dir, "scaled.py")
+        x = torch.randn(8)
+        run = self._export("scaled", path, backend="eager")
+        self.assertEqual(run(x), x.mul(2).relu())
+        with open(path) as f:
+            self.assertNotIn(_CODE_BEGIN, f.read())
+        with no_compilation():
+            self.assertEqual(self._export("scaled", path)(x), x.mul(2).relu())
+
+    def test_dynamic_serves_another_shape(self):
+        path = os.path.join(self.dir, "scaled.py")
+        self._export("scaled", path, dynamic=True)(torch.randn(8))
+        y = torch.randn(16)
+        with no_compilation():
+            self.assertEqual(self._export("scaled", path)(y), (y * 2.0).relu())
+
+    def test_a_file_captured_from_another_function_is_refused(self):
+        path = os.path.join(self.dir, "shared.py")
+        self._export("scaled", path)(torch.randn(8))
+        x, y = torch.randn(2, 3), torch.randn(3, 2)
+        with self.assertRaisesRegex(PrecompileError, r"scaled, not .*\.matmul"):
+            self._export("matmul", path)(x, y)
+
+    def test_a_file_saved_with_crlf_line_endings_serves(self):
+        # As a Windows editor, or git's core.autocrlf, would save it.
+        path = os.path.join(self.dir, "scaled.py")
+        x = torch.randn(8)
+        self._export("scaled", path)(x)
+        with open(path, "rb") as f:
+            text = f.read()
+        with open(path, "wb") as f:
+            f.write(text.replace(b"\n", b"\r\n"))
+        with no_compilation():
+            self.assertEqual(self._export("scaled", path)(x), (x * 2.0).relu())
+
+    def test_deleting_the_file_recaptures(self):
+        path = os.path.join(self.dir, "scaled.py")
+        x = torch.randn(8)
+        self._export("scaled", path)(x)
+        os.remove(path)
+        run = self._export("scaled", path)
+        self.assertEqual(run(x, scale=5.0), (x * 5.0).relu())
+        self.assertTrue(os.path.exists(path))
+
+    def test_an_uncaptured_call_raises_instead_of_compiling(self):
+        path = os.path.join(self.dir, "scaled.py")
+        run = self._export("scaled", path)
+        run(torch.randn(8))
+        with (
+            no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "no captured variant"),
+        ):
+            run(torch.randn(3, 3))
+
+    def test_a_main_module_function_is_refused(self):
+        def fn(x):
+            return x + 1
+
+        fn.__module__ = "__main__"
+        with self.assertRaisesRegex(PrecompileError, "importable module"):
+            torch.compiler.export_python(path=os.path.join(self.dir, "f.py"))(fn)
 
 
 if __name__ == "__main__":
