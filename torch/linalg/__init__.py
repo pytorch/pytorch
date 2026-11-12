@@ -934,7 +934,9 @@ the output has the same batch dimensions.
 
 """
     + rf"""
-.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.ldl_factor_ex")}
+.. note:: {common_notes["sync_note"]}
+          So does :func:`torch.linalg.ldl_factor_ex`: it skips checking ``info`` by default, but the
+          factorization itself synchronizes, as its Bunch-Kaufman pivoting is data-dependent.
 """
     + r"""
 
@@ -984,10 +986,13 @@ Division by 0 will occur if the result is used for solving a system of linear eq
 ``info`` filled with zeros indicates that the factorization was successful.
 If ``check_errors=True`` and ``info`` contains positive integers, then a `RuntimeError` is thrown.
 
+.. note:: When the inputs are on a CUDA device, this function synchronizes that device with the CPU
+          even when :attr:`check_errors`\ `= False`, which only skips checking ``info`` (a check that
+          always synchronizes). The factorization itself synchronizes, as its Bunch-Kaufman pivoting
+          is data-dependent: whether a pivot block is 1x1 or 2x2 depends on the values of :attr:`A`.
+
 """
     + rf"""
-.. note:: {common_notes["sync_note_ex"]}
-
 .. warning:: {common_notes["experimental_warning"]}
 """
     + r"""
@@ -1772,7 +1777,7 @@ The singular values are returned in descending order.
 
 The parameter :attr:`full_matrices` chooses between the full (default) and reduced SVD.
 
-The :attr:`driver` kwarg may be used in CUDA with a cuSOLVER backend to choose the algorithm used to compute the SVD.
+The :attr:`driver` kwarg may be used on NVIDIA CUDA with a cuSOLVER backend to choose the algorithm used to compute the SVD.
 The choice of a driver is a trade-off between accuracy and speed.
 
 - If :attr:`A` is well-conditioned (its `condition number`_ is not too large), or you do not mind some precision loss.
@@ -1783,6 +1788,10 @@ The choice of a driver is a trade-off between accuracy and speed.
 - If :attr:`A` is not well-conditioned or precision is relevant: `'gesvd'` (QR based)
 
 By default (:attr:`driver`\ `= None`), we call `'gesvdj'` and, if it fails, we fallback to `'gesvd'`.
+
+On ROCm, valid non-``None`` driver names are ignored with a once-only warning.
+They do not change the default algorithm or disable its fallback.
+Invalid driver names raise an error, including for empty inputs.
 
 Differences with `numpy.linalg.svd`:
 
@@ -1844,8 +1853,10 @@ Args:
                                     `U` and `Vh`. Default: `True`.
 
 Keyword args:
-    driver (str, optional): name of the cuSOLVER method to be used. This keyword argument only works on CUDA inputs.
+    driver (str, optional): name of the cuSOLVER method to be used on NVIDIA CUDA inputs.
         Available options are: `None`, `gesvd`, `gesvdj`, and `gesvda`.
+        On ROCm, non-``None`` values are ignored with a once-only warning.
+        Non-``None`` values require the cuSOLVER/hipSOLVER backend, even for empty inputs.
         Default: `None`.
     out (tuple, optional): output tuple of three tensors. Ignored if `None`.
 
@@ -1914,8 +1925,10 @@ Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
 
 Keyword args:
-    driver (str, optional): name of the cuSOLVER method to be used. This keyword argument only works on CUDA inputs.
+    driver (str, optional): name of the cuSOLVER method to be used on NVIDIA CUDA inputs.
         Available options are: `None`, `gesvd`, `gesvdj`, and `gesvda`.
+        On ROCm, non-``None`` values are ignored with a once-only warning.
+        Non-``None`` values require the cuSOLVER/hipSOLVER backend, even for empty inputs.
         Check :func:`torch.linalg.svd` for details.
         Default: `None`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
