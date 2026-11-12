@@ -16,7 +16,6 @@ from .qconfig_mapping import *  # noqa: F403
 from .quant_type import *  # noqa: F403
 from .quantization_mappings import *  # noqa: F403 # type: ignore[no-redef]
 from .quantize import *  # noqa: F403
-from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
 
 
@@ -58,8 +57,6 @@ __all__ = [
     "UniformQuantizationObserverBase",
     "add_quant_dequant",
     "convert",
-    "convert_dynamic_jit",
-    "convert_jit",
     "default_affine_fixed_qparams_fake_quant",
     "default_affine_fixed_qparams_observer",
     "default_debug_observer",
@@ -94,7 +91,6 @@ __all__ = [
     "enable_fake_quant",
     "enable_observer",
     "fuse_conv_bn",
-    "fuse_conv_bn_jit",
     "fuse_conv_bn_relu",
     "fuse_convtranspose_bn",
     "fuse_linear_bn",
@@ -132,18 +128,12 @@ __all__ = [
     "no_observer_set",
     "per_channel_weight_observer_range_neg_127_to_127",
     "prepare",
-    "prepare_dynamic_jit",
-    "prepare_jit",
     "prepare_qat",
     "propagate_qconfig_",
     "qconfig_equals",
     "quantize",
     "quantize_dynamic",
-    "quantize_dynamic_jit",
-    "quantize_jit",
     "quantize_qat",
-    "script_qconfig",
-    "script_qconfig_dict",
     "swap_module",
     "weight_observer_range_neg_127_to_127",
     # from torchao, should be merged with torchao

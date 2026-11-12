@@ -955,21 +955,20 @@ void dispatch_fp8_rowwise_kernel_on_sm(
   // Only instantiate a path if some targeted arch gives its kernels a body
   // (see the enable_*_kernel_for_* wrappers and CUTLASS's per-arch guards).
   using at::cuda::detail::cuda_arch_list_has;
-  using at::cuda::detail::cuda_arch_list_has_major;
   if (sm9x) {
-    if constexpr (cuda_arch_list_has_major(9)) {
+    if constexpr (cuda_arch_list_has(900, 1000)) {
       return dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
         /*ArchTag=*/cutlass::arch::Sm90,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
     }
   } else if (sm10x || sm11x) {
-    if constexpr (cuda_arch_list_has_major(10) || cuda_arch_list_has_major(11)) {
+    if constexpr (cuda_arch_list_has(1000, 1200)) {
       return dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
         /*ArchTag=*/cutlass::arch::Sm100,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out);
     }
   } else if (sm12x) {
-    if constexpr (cuda_arch_list_has_major(12)) {
+    if constexpr (cuda_arch_list_has(1200, 1300)) {
       // sm12x doesn't have multicast feature
       return handle_transposition<
         /*ClusterShape=*/cute::Shape<cute::_1, cute::_1, cute::_1>,

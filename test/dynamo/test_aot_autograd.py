@@ -35,6 +35,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    preserves_device_selection,
 )
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -950,8 +951,8 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 10|aten.abs.default|l1_loss|
 11|aten.mean.default|l1_loss|
 11|aten.ones_like.default||l1_loss
-11|aten.expand.default||l1_loss
 11|aten.div.Scalar||l1_loss
+11|aten.expand.default||l1_loss
 10|aten.sgn.default||l1_loss
 10|aten.mul.Tensor||l1_loss
 8|aten.view.default||linear
@@ -1915,6 +1916,13 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
 
 class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):
+    setUp = preserves_device_selection(torch._inductor.test_case.TestCase.setUp)
+    setUpClass = classmethod(
+        preserves_device_selection(
+            torch._inductor.test_case.TestCase.setUpClass.__func__
+        )
+    )
+
     @onlyAccelerator
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     @patch.object(torch._dynamo.config, "capture_dynamic_output_shape_ops", True)

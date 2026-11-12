@@ -8,8 +8,7 @@ import functools
 import io
 import threading
 import warnings
-from typing import Any, cast, TYPE_CHECKING, TypeVar
-from typing_extensions import Self
+from typing import Any, cast, Self, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._utils import _to, _type
@@ -554,6 +553,7 @@ def _new_dtypes():
         torch.float8_e5m2fnuz,
         torch.float8_e4m3fnuz,
         torch.float8_e8m0fnu,
+        torch.float8_e5m3fnu,
         torch.float4_e2m1fn_x2,
         torch.bits8,
         torch.bits16,

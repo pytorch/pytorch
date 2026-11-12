@@ -66,6 +66,10 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
     def kernel_driver(self) -> str:
         """Return C++ host-side helpers (loadKernel, launchKernel, CUDA_DRIVER_CHECK)
         embedded in AOTI-generated wrapper code."""
+        # Like Inductor's static launcher, loadKernel prefers shared memory to
+        # L1 for kernels that use more than 48 KB of it; otherwise the driver
+        # may pick a carveout that fits fewer of their blocks per SM.
+        #
         # NVIDIA devices have a warp size of 32, while AMD devices can have a
         # warp size of 32 or 64 depending on the architecture.
         source_codes = """
@@ -112,6 +116,9 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                         sharedMemBytes
                     ))
                 }
+                if (sharedMemBytes > 49152) {
+                    CUDA_DRIVER_CHECK(cuFuncSetCacheConfig(func, CU_FUNC_CACHE_PREFER_SHARED))
+                }
                 return func;
             }
 
@@ -133,6 +140,9 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                         CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
                         sharedMemBytes
                     ))
+                }
+                if (sharedMemBytes > 49152) {
+                    CUDA_DRIVER_CHECK(cuFuncSetCacheConfig(func, CU_FUNC_CACHE_PREFER_SHARED))
                 }
                 return func;
             }
