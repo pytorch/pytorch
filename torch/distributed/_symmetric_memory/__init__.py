@@ -1972,7 +1972,7 @@ def _check_lc_signal_pad_capacity(symm_mem: _SymmetricMemory) -> None:
             f"{required_bytes} bytes for world_size={symm_mem.world_size}, but "
             f"the pad its barriers use has {symm_mem.group_signal_pad_size} bytes. "
             "Call set_signal_pad_size() with a larger size before the group's "
-            "first rendezvous on this device, or use a new group."
+            "first rendezvous on this device, or before rendezvousing a new group."
         )
 
 

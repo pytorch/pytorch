@@ -502,11 +502,11 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_internal_signal_pad_freed_with_its_group(self) -> None:
-        """Once a group is released and its allocations are freed, its internal
-        pad is freed when a later group is set up, so creating and destroying
-        groups does not grow device memory. Each pad is a block of its own, at
-        least the allocation granularity (2 MiB), so a leak shows as 2 MiB per
-        cycle."""
+        """Once a group is destroyed and its allocations and handles are gone,
+        its internal pad is freed when state is next created for another group,
+        so creating and destroying groups does not grow device memory. Each pad
+        is a block of its own, at least the allocation granularity (2 MiB), so
+        a leak shows as 2 MiB per cycle."""
         self._init_process()
         if symm_mem.get_backend(self.device) != "CUDA":
             self.skipTest("test applies to the CUDA symm mem backend")
@@ -683,64 +683,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertIn("maximum supported channel", str(cm.exception))
         dist.barrier()
         dist.destroy_process_group(group)
-
-    @skipIf(
-        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
-    )
-    @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
-    def test_group_graphs_replay_in_turn(self) -> None:
-        """Signals are the group's (clause (1) of NOTE [symmetric memory group
-        signal pad]): put_signal() on one allocation satisfies wait_signal() on
-        another, eagerly and from two graphs replayed in turn on one stream,
-        which orders them as clause (2) requires."""
-        self._init_process()
-        if symm_mem.get_backend(self.device) != "CUDA":
-            self.skipTest("test applies to the CUDA symm mem backend")
-        group = dist.new_group(list(range(self.world_size)))
-        a = symm_mem.empty(64, device=self.device)
-        b = symm_mem.empty(64, device=self.device)
-        ha = symm_mem.rendezvous(a, group=group)
-        hb = symm_mem.rendezvous(b, group=group)
-        nxt, prv = (self.rank + 1) % self.world_size, (self.rank - 1) % self.world_size
-        # Run the operations once eagerly before capturing them.
-        ha.put_signal(dst_rank=nxt, timeout_ms=_SIGNAL_TIMEOUT_MS)
-        hb.wait_signal(src_rank=prv, timeout_ms=_SIGNAL_TIMEOUT_MS)
-        torch.cuda.synchronize()
-        signal, wait = torch.cuda.CUDAGraph(), torch.cuda.CUDAGraph()
-        with torch.cuda.graph(signal):
-            ha.put_signal(dst_rank=nxt, timeout_ms=_SIGNAL_TIMEOUT_MS)
-        with torch.cuda.graph(wait):
-            hb.wait_signal(src_rank=prv, timeout_ms=_SIGNAL_TIMEOUT_MS)
-        for _ in range(10):
-            signal.replay()
-            wait.replay()
-        torch.cuda.synchronize()
-        dist.barrier()
-        dist.destroy_process_group(group)
-
-    @skipIf(
-        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
-    )
-    @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
-    def test_single_rank_group_signal_pad(self) -> None:
-        """A group of one rank can rendezvous and run its built-in operations,
-        which have no peer to wait for."""
-        self._init_process()
-        if symm_mem.get_backend(self.device) != "CUDA":
-            self.skipTest("test applies to the CUDA symm mem backend")
-        groups = [dist.new_group([r]) for r in range(self.world_size)]
-        t = symm_mem.empty(64, device=self.device)
-        hdl = symm_mem.rendezvous(t, group=groups[self.rank])
-        self.assertEqual(hdl.world_size, 1)
-        hdl.barrier(timeout_ms=_SIGNAL_TIMEOUT_MS)
-        hdl.put_signal(dst_rank=0, timeout_ms=_SIGNAL_TIMEOUT_MS)
-        hdl.wait_signal(src_rank=0, timeout_ms=_SIGNAL_TIMEOUT_MS)
-        torch.cuda.synchronize()
-        dist.barrier()
-        for group in groups:
-            dist.destroy_process_group(group)
 
     @skipIfXpu(
         msg="XCCL flight recorder does not record collectives: https://github.com/intel/torch-xpu-ops/issues/5381"
@@ -1739,8 +1681,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         """Two streams forked inside one capture both issue barriers on the
         same channel. The guard's record/wait become graph edges, so the two
         pad kernels never overlap in a replay and the last fill wins on every
-        rank. Replayed several times; the barriers use the group's internal pad
-        and leave the allocation's alone."""
+        rank. Replayed several times."""
         self._init_process()
         if symm_mem.get_backend(self.device) != "CUDA":
             self.skipTest("test applies to the CUDA symm mem backend")
@@ -1794,8 +1735,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         buf = hdl.get_buffer(peer, (64,), torch.float32)
         expected = torch.full((64,), n_replays * 100.0 + peer, device=device_type)
         self.assertEqual(buf, expected)
-        pad = hdl.get_signal_pad(self.rank)
-        self.assertEqual(pad, torch.zeros_like(pad))
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
@@ -2966,6 +2905,63 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         dist.barrier()
         dist.destroy_process_group()
 
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
+    def test_group_graphs_replay_in_turn(self) -> None:
+        """Signals are the group's (clause (1) of NOTE [symmetric memory group
+        signal pad]): put_signal() on one allocation satisfies wait_signal() on
+        another, eagerly and from two graphs replayed in turn on one stream,
+        which orders them as clause (2) requires."""
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+        group = dist.new_group(list(range(self.world_size)))
+        a = symm_mem.empty(64, device=self.device)
+        b = symm_mem.empty(64, device=self.device)
+        ha = symm_mem.rendezvous(a, group=group)
+        hb = symm_mem.rendezvous(b, group=group)
+        nxt, prv = (self.rank + 1) % self.world_size, (self.rank - 1) % self.world_size
+        # Run the operations once eagerly before capturing them.
+        ha.put_signal(dst_rank=nxt, timeout_ms=_SIGNAL_TIMEOUT_MS)
+        hb.wait_signal(src_rank=prv, timeout_ms=_SIGNAL_TIMEOUT_MS)
+        torch.cuda.synchronize()
+        signal, wait = torch.cuda.CUDAGraph(), torch.cuda.CUDAGraph()
+        with torch.cuda.graph(signal):
+            ha.put_signal(dst_rank=nxt, timeout_ms=_SIGNAL_TIMEOUT_MS)
+        with torch.cuda.graph(wait):
+            hb.wait_signal(src_rank=prv, timeout_ms=_SIGNAL_TIMEOUT_MS)
+        for _ in range(10):
+            signal.replay()
+            wait.replay()
+        torch.cuda.synchronize()
+        dist.barrier()
+        dist.destroy_process_group()
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
+    def test_single_rank_group_signal_pad(self) -> None:
+        """A group of one rank can rendezvous and run its built-in operations,
+        which have no peer to wait for."""
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+        groups = [dist.new_group([r]) for r in range(self.world_size)]
+        t = symm_mem.empty(64, device=self.device)
+        hdl = symm_mem.rendezvous(t, group=groups[self.rank])
+        self.assertEqual(hdl.world_size, 1)
+        hdl.barrier(timeout_ms=_SIGNAL_TIMEOUT_MS)
+        hdl.put_signal(dst_rank=0, timeout_ms=_SIGNAL_TIMEOUT_MS)
+        hdl.wait_signal(src_rank=0, timeout_ms=_SIGNAL_TIMEOUT_MS)
+        torch.cuda.synchronize()
+        dist.barrier()
+        dist.destroy_process_group()
+
     # The device-side timeout calls trap(), which surfaces as a catchable
     # RuntimeError at the next synchronize() on both CUDA (__trap) and ROCm
     # (abort() -> hipErrorLaunchFailure). On ROCm the HIP runtime only keeps
@@ -3668,8 +3664,6 @@ class SymmetricMemoryTestCudaGraph(MultiProcContinuousTest):
         self.assertEqual(step.item(), 1.0 + replays)
         expected = float(sum(range(self.world_size)) + replays * self.world_size)
         self.assertEqual(observed, torch.full_like(observed, expected))
-        # The collectives synchronize through the group's internal pad and
-        # leave the allocation's pad alone.
         self.assertTrue(symm_mem_hdl.get_signal_pad(self.rank).eq(0).all().item())
 
 

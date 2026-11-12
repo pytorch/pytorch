@@ -85,7 +85,7 @@ uint32_t** group_signal_pads(
       " channels of the group's signal pad, which has ",
       num_channels,
       ". Call set_signal_pad_size() with a larger size before the group's "
-      "first rendezvous.");
+      "first rendezvous, or before rendezvousing a new group.");
   auto pads = symm_mem->get_group_signal_pad_ptrs_dev();
   return reinterpret_cast<uint32_t**>(pads);
 }

@@ -127,7 +127,7 @@ inline void check_channel(int channel, int world_size, size_t signal_pad_size) {
       num_channels - 1,
       " (got ",
       channel,
-      ")");
+      "); the handle's group_signal_pad_channels reports the bound");
 }
 
 // All-to-all signal barrier over the symmetric-memory signal pads, shared by

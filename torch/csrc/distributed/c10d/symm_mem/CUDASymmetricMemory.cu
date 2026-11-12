@@ -617,7 +617,7 @@ static std::string import_err_msg(
 uint64_t peer_mapping_id(const std::vector<RendezvousRequest>& reqs) {
   uint64_t id = 14695981039346656037ULL;
   auto mix = [&id](const void* data, size_t n) {
-    for (size_t i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       id = (id ^ static_cast<const unsigned char*>(data)[i]) * 1099511628211ULL;
     }
   };
@@ -633,7 +633,7 @@ void validate_rendezvous_requests(
     int world_size) {
   TORCH_CHECK(reqs.size() == (size_t)world_size);
 
-  for (int r = 1; r < world_size; ++r) {
+  for (const auto r : c10::irange(1, world_size)) {
     TORCH_CHECK(
         reqs[r].creates_signal_pad == reqs[0].creates_signal_pad,
         "CUDASymmetricMemoryAllocator::rendezvous: ranks disagree on whether "
@@ -645,8 +645,8 @@ void validate_rendezvous_requests(
         ": ",
         reqs[r].creates_signal_pad ? "creating it" : "has it",
         "). A group's first rendezvous on a device creates its pad, and every "
-        "rank must reach it: rendezvous the group on the same devices on every "
-        "rank.");
+        "rank must reach it. Use a new group, and rendezvous it on the same "
+        "devices on every rank.");
     if (reqs[0].creates_signal_pad) {
       TORCH_CHECK(
           reqs[r].signal_pad_size == reqs[0].signal_pad_size,
@@ -663,7 +663,7 @@ void validate_rendezvous_requests(
   }
   if (!reqs[0].creates_signal_pad) {
     const uint64_t mapping = peer_mapping_id(reqs);
-    for (int r = 0; r < world_size; ++r) {
+    for (const auto r : c10::irange(world_size)) {
       TORCH_CHECK(
           reqs[r].signal_pad_mapping == mapping,
           "CUDASymmetricMemoryAllocator::rendezvous: rank ",

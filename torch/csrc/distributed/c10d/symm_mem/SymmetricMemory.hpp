@@ -64,11 +64,12 @@ inline void check_rank(int rank, int world_size) {
 // mapping raises), its size (the handle's group_signal_pad_size) and whether it
 // has a multicast mapping. If creating the pad fails on some ranks but not
 // others, or a signal is left set, the group stays that way on the device. In
-// each case a new group starts clean. A pad costs one allocation granule, its
-// peer mappings and, with multicast, a multicast object; it is freed once its
-// group is released and its allocations are freed, when a later group is set
-// up. The NCCL and NVSHMEM backends use the allocation's pad, so the rules hold
-// per allocation there.
+// each case a new group starts clean. A pad costs at least one allocation
+// granule, its peer mappings and, with multicast, a multicast object. It is
+// freed once the group is destroyed and every allocation and handle
+// rendezvoused on it is gone; the group's reference is dropped the next time
+// state is created for another group or device. The NCCL and NVSHMEM backends
+// use the allocation's pad, so the rules hold per allocation there.
 //
 // NOTE [symmetric memory synchronization channel]
 // Synchronization channels allow users to use a single SymmetricMemory object
@@ -149,7 +150,7 @@ class TORCH_API SymmetricMemory : public torch::CustomClassHolder {
 
   // The peer pad pointers PyTorch's own operations synchronize through, and
   // that pad's size: on the CUDA backend, the group's internal pad; otherwise
-  // the allocation's pad.
+  // the allocation's pad, reported with the current get_signal_pad_size().
   virtual void** get_group_signal_pad_ptrs_dev() {
     return get_signal_pad_ptrs_dev();
   }
