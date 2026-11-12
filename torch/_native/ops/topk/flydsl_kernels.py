@@ -28,14 +28,12 @@ phase 1 zero the histogram one bin per thread).
 butterfly partners until lane 0 holds the top-K; only the final K writes
 hit gmem.
 
-``TopKSpec.to_ord`` leaves positive floats alone and flips every non-sign bit
-of a negative float, so the field compares as a signed integer in value
-order. NaN collapses to the maximum code of that field (fp32 ``0x7FFFFFFF``,
-fp16/bf16 ``0x7FFF``), the signed form of ATen ``TopKTypeConfig``'s all-ones
-NaN. Not injective on NaN, so the caller re-reads gmem for that case.
-Signed integers are already in signed order and are only shifted up. Phase
-1's xor by ``_RADIX_SIGN_BIT`` is separate: it puts the top byte in unsigned
-bin order for the scan.
+``TopKSpec.to_ord`` collapses NaN where applicable, applies the dtype's narrow
+ordinal transform, left-aligns that field in a signed int32, and complements
+it for ``largest=False``. ``from_ord`` reverses the complement, alignment, and
+dtype transform. NaN collapse is not injective, so the caller recognizes the
+recovered sentinel and re-reads gmem. Phase 1's xor by ``_RADIX_SIGN_BIT`` is
+separate: it puts the top byte in unsigned bin order for the scan.
 
 ``_make_topk_storage`` unions ``s_hist``, the phase-2 counters, ``s_scan``
 and ``s_keys`` - they alias, each live only within its phase. The phase-2
