@@ -42,7 +42,7 @@ import torch._subclasses.meta_utils
 from torch import Tensor
 from torch._dynamo.testing import rand_strided
 from torch._inductor.cpp_builder import normalize_path_separator
-from torch._logging._internal import warning_once
+from torch._logging import warning_once
 from torch._prims_common import is_float_dtype
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._config_module import ConfigModule
@@ -561,10 +561,13 @@ def _device_system_info_comment(device_type: str) -> str:
 def device_system_info_comment(args: Sequence[Any] = ()) -> str:
     """Device-agnostic counterpart of _cuda_system_info_comment().
 
-    Target device: the most common non-cpu tensor device among ``args`` (real
-    tensors only, matching the repro call sites), else the build-time
-    accelerator. ``cuda`` keeps delegating to the cached legacy collector
-    (byte-identical CUDA repros). Probe failures degrade to a comment line.
+    Target device: the most common tensor device among ``args`` after
+    filtering out ``cpu`` and ``meta`` (real tensors only, matching the repro
+    call sites), else the accelerator resolved by
+    ``torch.accelerator.current_accelerator()`` without ``check_available``
+    (so an unavailable accelerator is still the one chosen). ``cuda`` keeps
+    delegating to the cached legacy collector (byte-identical CUDA repros).
+    Probe failures degrade to a comment line.
     """
     device_types: Counter[str] = Counter(
         arg.device.type

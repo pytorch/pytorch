@@ -424,7 +424,7 @@ class TestDeviceSystemInfoComment(TestCase):
         self.assertEqual(out, expected)
 
     def test_backend_module_missing(self):
-        # Accelerator registered at build time with no torch.<dt> module.
+        # The accelerator channel resolves to a type with no torch.<dt> module.
         with (
             patch.object(
                 torch.accelerator,
@@ -561,15 +561,6 @@ class TestDebugUtilsDevice(TestCase):
         self.assertEqual(recorded, [expected])
         self.assertEqual(out, f"# {expected}\n")
 
-    def test_cuda_header_byte_identical(self, device):
-        if torch.device(device).type != "cuda":
-            self.skipTest("CUDA-specific regression anchor")
-        tensors = [torch.randn(4, device=device), torch.randn(2)]
-        self.assertEqual(
-            debug_utils.device_system_info_comment(tensors),
-            debug_utils._cuda_system_info_comment(),
-        )
-
     def test_aot_graph_parser(self, device):
         def forward(
             self,
@@ -679,6 +670,19 @@ class TestDebugUtilsDevice(TestCase):
         self.assertEqual(kwargs["primals_5"], 5)
 
 
+class TestDebugUtilsCUDAOnly(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_cuda_header_byte_identical(self, device):
+        # Nothing-patched CUDA regression anchor: real CUDA tensors through
+        # the public dispatcher must reproduce the untouched legacy output.
+        tensors = [torch.randn(4, device=device), torch.randn(2)]
+        self.assertEqual(
+            debug_utils.device_system_info_comment(tensors),
+            debug_utils._cuda_system_info_comment(),
+        )
+
+
 class TestNNModuleToStringBufferDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -718,6 +722,8 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestDebugUtilsDevice, globals(), except_for="mps", allow_xpu=True
 )
+
+instantiate_device_type_tests(TestDebugUtilsCUDAOnly, globals(), only_for="cuda")
 
 
 class TestBackendOverrideIntegration(TestCase):
