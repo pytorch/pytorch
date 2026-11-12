@@ -272,10 +272,11 @@ TORCH_API std::optional<std::string> get_backend(c10::Device device);
 TORCH_API size_t get_signal_pad_size();
 
 // Set the signal pad size for future symmetric memory allocations, and on the
-// CUDA backend for process groups' internal pads created from now on.
-// This must be called before any symmetric memory allocations are made.
-// The size should be proportional to the number of blocks the user launches
-// and the world size.
+// CUDA backend for process groups' internal pads created from now on; existing
+// allocations and pads keep their size. The NCCL and NVSHMEM channel checks
+// read the current size, so on those backends set it before allocating. The
+// size should be proportional to the number of blocks the user launches and
+// the world size.
 TORCH_API void set_signal_pad_size(size_t size);
 
 C10_EXPORT void register_mempool_allocator(
