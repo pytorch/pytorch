@@ -928,7 +928,11 @@ class SystemInfo:
                         gpu_sm_count = interface.get_multi_processor_count()
                     break
                 except Exception:
-                    pass
+                    logger.debug(
+                        "Could not read the %s device's info for SystemInfo",
+                        device_type,
+                        exc_info=True,
+                    )
 
         return cls(
             python_version=platform.python_version(),
