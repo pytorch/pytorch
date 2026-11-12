@@ -1087,12 +1087,12 @@ Tensor& index_put_(
       self, indices, value, accumulate, /*unsafe=*/false);
 }
 
-TORCH_IMPL_FUNC(index_copy_out)
-(const Tensor& self,
- int64_t dim,
- const Tensor& index,
- const Tensor& source,
- const Tensor& result) {
+void index_copy_out_impl(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const Tensor& source,
+    const Tensor& result) {
   if (!result.is_same(self))
     result.copy_(self);
 
@@ -1155,6 +1155,15 @@ TORCH_IMPL_FUNC(index_copy_out)
   auto result_dim_stride = result_nonzero.stride(dim);
   index_copy_stub(
       iter.device_type(), iter, dim, result_dim_size, result_dim_stride);
+}
+
+TORCH_IMPL_FUNC(index_copy_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const Tensor& result) {
+  index_copy_out_impl(self, dim, index, source, result);
 }
 
 // Not calling into index_reduce_func_impl because of a different dtype dispatch
@@ -1554,7 +1563,7 @@ static void check_indexarray_range(
   for (const auto i : c10::irange(n)) {
     oob |= !(0 <= indices[i] && indices[i] < indexing_axis_dim);
   }
-  if (C10_UNLIKELY(oob != 0)) {
+  if (oob != 0) [[unlikely]] {
     report_index_out_of_bounds(indices, n, indexing_axis_dim);
   }
 }
@@ -3002,7 +3011,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
                     // Advance current index
                     int64_t k = ndim - 1;
                     ++local_idx[k];
-                    while (C10_UNLIKELY(local_idx[k] == local_sizes[k])) {
+                    while (local_idx[k] == local_sizes[k]) [[unlikely]] {
                       local_idx[k] = 0;
                       --k;
                       ++local_idx[k];
