@@ -10274,7 +10274,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     @decorateIf(
         unittest.skip('Lanczos mode is only supported on CPU'),
-        lambda p: p['mode'] == 'lanczos' and torch.device(p['device']).type == 'cuda',
+        lambda p: p['mode'] == 'lanczos' and torch.device(p['device']).type != 'cpu',
     )
     @decorateIf(
         unittest.skip('Lanczos mode requires antialias=True'),
@@ -10282,7 +10282,7 @@ class TestNNDeviceType(NNTestCase):
     )
     @decorateIf(
         unittest.skip('uint8 is only supported on CPU'),
-        lambda p: torch.device(p['device']).type != 'cpu' and p['dtype'] == torch.uint8,
+        lambda p: p['dtype'] == torch.uint8 and torch.device(p['device']).type != 'cpu',
     )
     def test_upsamplingBiMode2d_singleton_spatial_dim(
         self, device, dtype, memory_format, mode, antialias, num_channels
@@ -10292,14 +10292,6 @@ class TestNNDeviceType(NNTestCase):
         # uint8 on platforms without AVX2) used the indices and weights of the
         # first output row for every output row, so all rows were identical.
         # The same happened in channels_last with num_channels == 1.
-        if mode == "lanczos":
-            if torch.device(device).type != "cpu":
-                raise SkipTest("Lanczos mode is only supported on CPU")
-            if not antialias:
-                raise SkipTest("Lanczos mode requires antialias=True")
-        if dtype == torch.uint8 and torch.device(device).type != "cpu":
-            raise SkipTest("uint8 is only supported on CPU")
-
         kwargs = dict(mode=mode, align_corners=False, antialias=antialias)
 
         def to_mf(t):
