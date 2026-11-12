@@ -750,6 +750,7 @@ op_db: list[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.argmax",
+        result_dtype=torch.int64,
         supports_out=False,
         supports_multiple_dims=False,
         supports_autograd=False,
@@ -777,6 +778,7 @@ op_db: list[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.argmin",
+        result_dtype=torch.int64,
         supports_out=False,
         supports_multiple_dims=False,
         supports_autograd=False,
