@@ -1545,6 +1545,51 @@ default](args = (%x, %b_state), kwargs = {})
     return (b_state, getitem_3, getitem_4)""",
             )
 
+    def test_move_to_device_pass_interpreter_only_graph(self):
+        init_torchbind_implementations()
+        with _scoped_library("test_move_to_device_pass", "DEF") as lib:
+            lib.define("identity_with_obj(Any obj, Tensor x) -> Tensor")
+
+            @impl(lib, "identity_with_obj", "CompositeExplicitAutograd")
+            def identity_with_obj(obj, x):
+                return x
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ones(3, device=x.device) + x
+
+            ep = torch.export.export(M(), (torch.zeros(3),))
+            custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
+            add = next(
+                node
+                for node in ep.graph.nodes
+                if node.op == "call_function"
+                and node.target == torch.ops.aten.add.Tensor
+            )
+            inp = add.args[0]
+            with ep.graph.inserting_before(add):
+                with_obj = ep.graph.call_function(
+                    torch.ops.test_move_to_device_pass.identity_with_obj.default,
+                    (custom_obj, inp),
+                )
+                with_obj.meta = add.meta.copy()
+            add.replace_input_with(inp, with_obj)
+
+            with self.assertWarnsRegex(
+                UserWarning, "graph module will no longer be directly callable"
+            ):
+                ep = ep._update(ep.graph_module, ep.graph_signature)
+
+            self.assertEqual(
+                torch.fx.Interpreter(ep.graph_module).run(torch.ones(3)),
+                (torch.full((3,), 2.0),),
+            )
+            ep = move_to_device_pass(ep, "meta")
+            (out,) = torch.fx.Interpreter(ep.graph_module).run(
+                torch.ones(3, device="meta")
+            )
+            self.assertEqual(out.device, torch.device("meta"))
+
 
 @skipIfTorchDynamo("recursively running dynamo on export is unlikely")
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
@@ -1772,52 +1817,6 @@ class TestMoveToDevicePassCuda(TestCase):
         inp = torch.ones(3, device="cuda:0")
         self.assertEqual(ep.module()(inp).device, torch.device("cuda:0"))
         self.assertEqual(m(torch.ones(3)).device, torch.device("cpu"))
-
-    @unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
-    def test_move_to_device_pass_interpreter_only_graph(self):
-        init_torchbind_implementations()
-        with _scoped_library("test_move_to_device_pass", "DEF") as lib:
-            lib.define("identity_with_obj(Any obj, Tensor x) -> Tensor")
-
-            @impl(lib, "identity_with_obj", "CompositeExplicitAutograd")
-            def identity_with_obj(obj, x):
-                return x
-
-            class M(torch.nn.Module):
-                def forward(self, x):
-                    return torch.ones(3, device=x.device) + x
-
-            ep = torch.export.export(M(), (torch.zeros(3),))
-            custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
-            add = next(
-                node
-                for node in ep.graph.nodes
-                if node.op == "call_function"
-                and node.target == torch.ops.aten.add.Tensor
-            )
-            inp = add.args[0]
-            with ep.graph.inserting_before(add):
-                with_obj = ep.graph.call_function(
-                    torch.ops.test_move_to_device_pass.identity_with_obj.default,
-                    (custom_obj, inp),
-                )
-                with_obj.meta = add.meta.copy()
-            add.replace_input_with(inp, with_obj)
-
-            with self.assertWarnsRegex(
-                UserWarning, "graph module will no longer be directly callable"
-            ):
-                ep = ep._update(ep.graph_module, ep.graph_signature)
-
-            self.assertEqual(
-                torch.fx.Interpreter(ep.graph_module).run(torch.ones(3)),
-                (torch.full((3,), 2.0),),
-            )
-            ep = move_to_device_pass(ep, "meta")
-            (out,) = torch.fx.Interpreter(ep.graph_module).run(
-                torch.ones(3, device="meta")
-            )
-            self.assertEqual(out.device, torch.device("meta"))
 
 
 # except_for="cpu" also instantiates privateuse1; allow_xpu keeps the XPU class.
