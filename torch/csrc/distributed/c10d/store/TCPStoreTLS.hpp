@@ -32,14 +32,14 @@ struct TLSConfig {
   std::string cert;
   std::string key;
   std::string ca;
-  std::string psk;
+  std::string psk; // Secret key value, never a filename or diagnostic argument.
   bool fromEnv = false;
 
   bool enabled() const {
     return !cert.empty() || !key.empty() || !ca.empty() || !psk.empty();
   }
 
-  bool sameFiles(const TLSConfig& other) const {
+  bool sameSettings(const TLSConfig& other) const {
     return cert == other.cert && key == other.key && ca == other.ca &&
         psk == other.psk;
   }

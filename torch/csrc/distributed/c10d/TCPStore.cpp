@@ -78,7 +78,7 @@ std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
         if (server != nullptr) {
           TORCH_CHECK_WITH(
               DistStoreError,
-              server->tls_.sameFiles(tls),
+              server->tls_.sameSettings(tls),
               "multi_tenant TCPStore server on port ",
               opts.port,
               " was started with a different TLS configuration");
@@ -292,7 +292,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
         "libuv is the only backend. Remove the option to silence this warning.");
   }
   // Resolved once for the server and connect retries. clone() reuses the
-  // resolved paths but builds a new context.
+  // resolved certificate paths or PSK value but builds a new context.
   auto tls = detail::tlsConfig(opts);
   // Checks the platform, OpenSSL and files before the backend.
   auto clientTls = detail::TLSContext::fromConfig(tls, /*isServer=*/false);

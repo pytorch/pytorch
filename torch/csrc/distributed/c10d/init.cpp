@@ -2506,7 +2506,7 @@ Arguments:
     tls_cert (str, optional): Path to a PEM certificate (chain). Enables TLS with mutual certificate authentication, which requires ``tls_cert``, ``tls_key`` and ``tls_ca`` and must be enabled on both client and server. If no ``tls_*`` option is set, the ``TORCH_TCPSTORE_TLS_CERT``, ``TORCH_TCPSTORE_TLS_KEY``, ``TORCH_TCPSTORE_TLS_CA`` and ``TORCH_TCPSTORE_TLS_PSK`` environment variables are used instead; empty TLS options or environment values, and paths containing NUL bytes, raise an error instead of disabling TLS. TLS-enabled ``clone()`` reloads the files from the resolved paths; a plaintext store's clone reads the current TLS environment, so prefer absolute paths; replacing the files affects later clones. Reusing a ``multi_tenant`` server with a different TLS configuration raises. Stores created internally, such as by ``init_process_group`` with ``env://`` and by torchrun/the elastic agent, only enable TLS through the environment variables. Linux only; loads OpenSSL >= 1.1.1 (``libssl.so.3``, ``libssl.so.1.1`` or ``libssl.so``) at runtime. Any certificate signed by the CA is accepted; the hostname and subject are not checked, so use a dedicated CA. A certificate may be used for both server and client connections (rank 0 runs both), so it needs both the serverAuth and clientAuth extended key usages, or none; any extended key usage on CA certificates in the chain must also include both. Default is None.
     tls_key (str, optional): Path to the unencrypted PEM private key, which may be the same file as ``tls_cert``. Default is None.
     tls_ca (str, optional): Path to the PEM CA bundle used to verify the peer certificate. Default is None.
-    tls_psk (str, optional): Path to a regular file whose raw bytes, 32 to 256 including any trailing newline, are a pre-shared key. Enables TLS 1.3 with pre-shared key authentication instead of certificates; it cannot be combined with ``tls_cert``, ``tls_key`` or ``tls_ca``. Client and server must use the same key. The key must be random, with at least 128 bits of entropy, not a passphrase: a captured handshake allows offline guessing. A key shared with NCCL must not contain NUL bytes; ``(umask 077; openssl rand -hex 32 > key)`` satisfies both. The environment variable is ``TORCH_TCPSTORE_TLS_PSK``; the other notes for ``tls_cert`` apply except those about certificates. Any holder of the key can act as a server or client, so it can impersonate either side or intercept traffic, and gets full read/write access to every key. Keep the file private (a warning is logged if group or others can access it); distributing it is up to the user. Default is None.
+    tls_psk (str, optional): The pre-shared key value, not a filename. Used verbatim as UTF-8 bytes (32 to 256 bytes, no NUL); no hex or base64 decoding is performed. Enables TLS 1.3 with pre-shared key authentication instead of certificates; it cannot be combined with ``tls_cert``, ``tls_key`` or ``tls_ca``. Client and server must use the same key. The key must be random, with at least 128 bits of entropy, not a passphrase: a captured handshake allows offline guessing. For example, generate a value with ``secrets.token_hex(32)`` without printing it. The environment variable ``TORCH_TCPSTORE_TLS_PSK`` also contains the value directly. ``clone()`` reuses the resolved value, independent of later environment changes. Linux only; the OpenSSL and internal-store notes for ``tls_cert`` apply. Any holder of the key can impersonate either endpoint and gets full read/write access to every key. Keep the value secret; avoid shell tracing and command-line arguments that expose it. Distribution is up to the user. Default is None.
 
 .. note:: The server limits keys (including any prefix) to 8 KiB, values to 8 MiB per request and multi-key requests to 128K keys; it disconnects clients that exceed them.
 
@@ -2611,6 +2611,33 @@ Example::
           &::c10d::TCPStore::repr,
           R"(Returns a string representation of the TCPStore.)",
           py::call_guard<py::gil_scoped_release>());
+
+  // pybind's argument-mismatch errors echo every argument, including secrets.
+  // Forward through the original constructor to retain its conversion rules,
+  // but discard TypeError diagnostics before they can expose a PSK.
+  {
+    auto tcpStore = module.attr("TCPStore");
+    auto init = tcpStore.attr("__init__");
+    auto doc = init.attr("__doc__").cast<std::string>();
+    py::options options;
+    options.disable_function_signatures();
+    tcpStore.attr("__init__") = py::cpp_function(
+        [init](py::args args, py::kwargs kwargs) {
+          try {
+            init(*args, **kwargs);
+          } catch (const py::error_already_set& error) {
+            if (error.matches(PyExc_TypeError)) {
+              // @allow-raw-throw: Preserve TypeError without secret context.
+              throw py::type_error(
+                  "Invalid TCPStore arguments (values omitted to protect TLS secrets)");
+            }
+            throw;
+          }
+        },
+        py::is_method(tcpStore),
+        py::name("__init__"),
+        doc.c_str());
+  }
 
   intrusive_ptr_class_<::c10d::PrefixStore>(
       module,

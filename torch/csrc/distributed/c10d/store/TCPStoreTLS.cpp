@@ -10,18 +10,11 @@
 #include <string_view>
 #include <vector>
 
-#include <c10/util/ScopeExit.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/error.h>
 #include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
-
-#ifdef __linux__
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#endif
 
 namespace c10d::detail {
 namespace {
@@ -66,88 +59,18 @@ int chunk(size_t length) {
   return -1;
 }
 
-#ifdef __linux__
-constexpr int kTls12Version = 0x0303;
-constexpr int kTls13Version = 0x0304;
 // NCCL requires at least 32 bytes and reads the key as a C string, so a key
 // shared with it must not contain NUL bytes. OpenSSL 1.1.1 accepts at most 256
 // (3.x allows 512).
 constexpr size_t kMinPskSize = 32;
 constexpr size_t kMaxPskSize = 256;
+
+#ifdef __linux__
+constexpr int kTls12Version = 0x0303;
+constexpr int kTls13Version = 0x0304;
 // Change the version suffix if the PSK handshake ever becomes incompatible.
 constexpr std::string_view kPskIdentity = "torch.distributed.TCPStore.psk.v1";
 constexpr std::array<unsigned char, 2> kTlsAes128GcmSha256 = {0x13, 0x01};
-
-std::string readPsk(const std::string& path, bool checkMode) {
-  // O_NONBLOCK so a FIFO cannot block open().
-  int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK);
-  TORCH_CHECK_WITH(
-      DistStoreError,
-      fd >= 0,
-      "TCPStore TLS: failed to open PSK file ",
-      path,
-      ": ",
-      c10::utils::str_error(errno));
-  auto closeFd = c10::make_scope_exit([fd] { ::close(fd); });
-  struct stat st{};
-  TORCH_CHECK_WITH(
-      DistStoreError,
-      ::fstat(fd, &st) == 0,
-      "TCPStore TLS: failed to stat PSK file ",
-      path,
-      ": ",
-      c10::utils::str_error(errno));
-  TORCH_CHECK_WITH(
-      DistStoreError,
-      S_ISREG(st.st_mode),
-      "TCPStore TLS: PSK file ",
-      path,
-      " is not a regular file");
-  if (checkMode && (st.st_mode & (S_IRWXG | S_IRWXO))) {
-    C10D_WARNING(
-        "TCPStore TLS: PSK file {} is accessible by group or others; run chmod 600 on it",
-        path);
-  }
-  std::string key(kMaxPskSize + 1, '\0');
-  size_t size = 0;
-  while (size < key.size()) {
-    auto n = ::read(fd, key.data() + size, key.size() - size);
-    if (n < 0 && errno == EINTR) {
-      continue;
-    }
-    TORCH_CHECK_WITH(
-        DistStoreError,
-        n >= 0,
-        "TCPStore TLS: failed to read PSK file ",
-        path,
-        ": ",
-        c10::utils::str_error(errno));
-    if (n == 0) {
-      break;
-    }
-    size += n;
-  }
-  key.resize(size);
-  TORCH_CHECK_WITH(
-      DistStoreError,
-      size <= kMaxPskSize,
-      "TCPStore TLS: PSK file ",
-      path,
-      " has more than ",
-      kMaxPskSize,
-      " bytes, the maximum supported (the OpenSSL 1.1.1 limit)");
-  TORCH_CHECK_WITH(
-      DistStoreError,
-      size >= kMinPskSize,
-      "TCPStore TLS: PSK file ",
-      path,
-      " has ",
-      size,
-      " bytes; at least ",
-      kMinPskSize,
-      " are required");
-  return key;
-}
 
 int rejectCertificate(int /*preverifyOk*/, void* /*storeCtx*/) {
   return 0;
@@ -254,6 +177,10 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
               "TORCH_TCPSTORE_TLS_CA"
             : "TCPStore TLS: tls_psk cannot be combined with tls_cert, "
               "tls_key or tls_ca");
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        config.psk.size() >= kMinPskSize && config.psk.size() <= kMaxPskSize,
+        "TCPStore TLS: PSK must contain 32 to 256 bytes");
     return config;
   }
   std::vector<std::string> missing;
@@ -322,8 +249,7 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
   }
   ssl.SSL_CTX_set_options(ctx, kSslOpNoRenegotiation);
   if (!config.psk.empty()) {
-    // The server runs in the same process as a client, which checks the mode.
-    res->psk_ = readPsk(config.psk, /*checkMode=*/!isServer);
+    res->psk_ = config.psk;
     // External PSKs require TLS 1.3. The cipher suite must match the PSK
     // session's hash. The key exchange still uses (EC)DHE.
     check(
@@ -340,7 +266,11 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
     // Keep (EC)DHE, and so forward secrecy, even if openssl.cnf allows
     // PSK-only key exchange.
     ssl.SSL_CTX_clear_options(ctx, kSslOpAllowNoDheKex | kSslOpPreferNoDheKex);
-    check(ssl.SSL_CTX_set_ex_data(ctx, 0, res.get()) == 1, "PSK", config.psk);
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        ssl.SSL_CTX_set_ex_data(ctx, 0, res.get()) == 1,
+        "TCPStore TLS: failed to initialize PSK context: ",
+        errorString());
     if (isServer) {
       // Without a certificate, only PSK handshakes can succeed.
       ssl.SSL_CTX_set_psk_find_session_callback(ctx, findPskSession);

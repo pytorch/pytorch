@@ -4,7 +4,6 @@ import ctypes
 import datetime
 import hashlib
 import os
-import re
 import shutil
 import socket
 import ssl
@@ -14,6 +13,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -765,16 +765,8 @@ class TCPStoreTLSTest(TestCase):
             "pkey", "-in", cls.client[1], "-aes256", "-passout", "pass:secret",
             "-out", cls.encrypted_key,
         )  # fmt: skip
-        cls.psk = cls._write_psk("psk", 32)
-        cls.other_psk = cls._write_psk("other_psk", 64)
-        cls.short_psk = cls._write_psk("short_psk", 31)
-
-    @classmethod
-    def _write_psk(cls, name, size):
-        path = os.path.join(cls._tmpdir.name, name)
-        with open(os.open(path, os.O_WRONLY | os.O_CREAT, 0o600), "wb") as f:
-            f.write(os.urandom(size))
-        return path
+        cls.psk = os.urandom(16).hex()
+        cls.other_psk = os.urandom(32).hex()
 
     def setUp(self):
         super().setUp()
@@ -1121,8 +1113,7 @@ class TCPStoreTLSTest(TestCase):
     )
     def test_tls_psk_unknown_identity(self):
         server = self._store(tls={"tls_psk": self.psk})
-        with open(self.psk, "rb") as f:
-            key = f.read()
+        key = self.psk.encode("utf-8")
 
         def handshake(identity):
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -1158,39 +1149,119 @@ class TCPStoreTLSTest(TestCase):
         )
         self.assertEqual(server.add("alive", 1), 1)
 
-    def test_tls_psk_bad_key(self):
-        def check(regex, path):
-            with self.assertRaisesRegex(DistStoreError, regex):
-                self._store(tls={"tls_psk": path})
+    @parametrize("size", [1, 31, 257])
+    @parametrize("from_env", [False, True])
+    def test_tls_psk_bad_key(self, size, from_env):
+        key = "~" * size
+        env = {"TORCH_TCPSTORE_TLS_PSK": key} if from_env else {}
+        tls = {} if from_env else {"tls_psk": key}
+        with mock.patch.dict(os.environ, env):
+            with self.assertRaisesRegex(
+                DistStoreError, "PSK must contain 32 to 256 bytes"
+            ) as caught:
+                self._store(tls=tls)
+        # Do not include the key in assertion diagnostics, even on failure.
+        self.assertFalse(key in str(caught.exception), "PSK leaked in error")
 
-        check("short_psk has 31 bytes; at least 32", self.short_psk)
-        check(
-            "has more than 256 bytes, the maximum supported",
-            self._write_psk("long_psk", 257),
-        )
-        missing = os.path.join(self._tmpdir.name, "missing_psk")
-        check(f"failed to open PSK file {re.escape(missing)}", missing)
-        check("PSK file .* is not a regular file", self._tmpdir.name)
-        check("PSK file /dev/zero is not a regular file", "/dev/zero")
-        r, w = os.pipe()
-        self.addCleanup(os.close, r)
-        self.addCleanup(os.close, w)
-        check(f"PSK file /dev/fd/{r} is not a regular file", f"/dev/fd/{r}")
-        fifo_dir = tempfile.mkdtemp(dir=self._tmpdir.name)
-        fifo = os.path.join(fifo_dir, "fifo")
-        os.mkfifo(fifo)
-        check(f"{re.escape(fifo)} is not a regular file", fifo)
-
-    def test_tls_psk_key_sizes(self):
-        # The largest key, read through /dev/fd/N on both ends and in clones.
-        path = self._write_psk("max_psk", 256)
-        fd = os.open(path, os.O_RDONLY)
-        self.addCleanup(os.close, fd)
-        psk = {"tls_psk": f"/dev/fd/{fd}"}
+    @parametrize("size", [32, 256])
+    def test_tls_psk_key_sizes(self, size):
+        psk = {"tls_psk": os.urandom(size // 2).hex()}
         server = self._store(tls=psk)
         client = self._store(server.port, False, tls=psk)
         self.assertEqual(client.add("counter", 1), 1)
         self.assertEqual(client.clone().add("counter", 1), 2)
+
+    @parametrize(
+        "invalid", ["port", "is_master", "unknown", "missing", "duplicate", "psk_type"]
+    )
+    def test_tls_psk_argument_errors_redacted(self, invalid):
+        args = ["localhost", 0]
+        kwargs = {"tls_psk": self.psk}
+        if invalid == "port":
+            args[1] = "bad port"
+        elif invalid == "is_master":
+            kwargs["is_master"] = "bad bool"
+        elif invalid == "unknown":
+            kwargs["unknown"] = True
+        elif invalid == "missing":
+            args = []
+        elif invalid == "duplicate":
+            kwargs["port"] = 0
+        else:
+            kwargs["tls_psk"] = [self.psk]
+        try:
+            dist.TCPStore(*args, **kwargs)
+        except TypeError as error:
+            self.assertFalse(
+                self.psk in "".join(traceback.format_exception(error)),
+                "PSK leaked in traceback",
+            )
+            self.assertTrue(error.__cause__ is None, "Unexpected exception cause")
+            self.assertTrue(error.__context__ is None, "Unexpected exception context")
+        else:
+            self.fail("Invalid arguments accepted")
+
+    def test_tls_psk_constructor_wrapper(self):
+        class IndexValue:
+            def __index__(self):
+                return 0
+
+        class DerivedStore(dist.TCPStore):
+            pass
+
+        # Keep conversion retries and Python subclass initialization working.
+        server = DerivedStore(
+            "localhost",
+            IndexValue(),
+            is_master=True,
+            wait_for_workers=False,
+            tls_psk=self.psk,
+        )
+        self.assertEqual(server.clone().add("counter", 1), 1)
+        self.assertIn("tls_psk", dist.TCPStore.__init__.__doc__)
+
+    def test_tls_psk_diagnostics_redacted(self):
+        # Capture native stdout/stderr too; never include either in failures.
+        code = """
+import os
+import torch.distributed as dist
+key = os.environ.pop("TCPSTORE_TEST_SECRET")
+def store(**kwargs):
+    return dist.TCPStore("localhost", 0, is_master=True, wait_for_workers=False, **kwargs)
+for kwargs in ({"tls_psk": key[:31]}, {"tls_psk": key + "\\0suffix"},
+               {"tls_psk": key, "tls_ca": "unused"}):
+    try:
+        store(**kwargs)
+    except dist.DistStoreError as error:
+        print(error)
+    else:
+        raise AssertionError("Invalid TLS configuration accepted")
+server = store(tls_psk=key)
+print(server)
+try:
+    dist.TCPStore("localhost", server.port, tls_psk=key[::-1])
+except dist.DistStoreError as error:
+    print(error)
+else:
+    raise AssertionError("Wrong PSK accepted")
+os.environ["TORCH_TCPSTORE_TLS_PSK"] = key[:31]
+try:
+    store()
+except dist.DistStoreError as error:
+    print(error)
+else:
+    raise AssertionError("Invalid environment PSK accepted")
+"""
+        env = {**os.environ, "TCPSTORE_TEST_SECRET": self.psk}
+        result = subprocess.run(
+            [sys.executable, "-c", code], env=env, capture_output=True, timeout=60
+        )
+        output = result.stdout + result.stderr
+        for secret in (self.psk, self.psk[:31], self.psk[::-1]):
+            self.assertFalse(
+                secret.encode() in output, "PSK leaked in native diagnostics"
+            )
+        self.assertEqual(result.returncode, 0, "PSK diagnostic subprocess failed")
 
     def test_tls_psk_config(self):
         with self.assertRaisesRegex(DistStoreError, "tls_psk cannot be combined"):
