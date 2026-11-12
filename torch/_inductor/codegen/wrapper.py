@@ -5186,10 +5186,12 @@ class PythonWrapperCodegen(CodeGen):
                 return arg.codegen_reference()
             if isinstance(arg, (int, float, bool)):
                 return str(arg)
-            raise NotImplementedError(
-                f"CuTeDSL kernel {kernel.name}: cannot pass a "
-                f"{type(arg).__name__} as a runtime scalar"
-            )
+            if not isinstance(arg, sympy.Basic):
+                raise NotImplementedError(
+                    f"CuTeDSL kernel {kernel.name}: cannot pass a "
+                    f"{type(arg).__name__} as a runtime scalar"
+                )
+            return pexpr(V.graph.sizevars.simplify(arg))
 
         stream_name = self._get_kernel_call_stream_name(
             device, V.graph.name, V.graph.scheduler.current_stream_idx
