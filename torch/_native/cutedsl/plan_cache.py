@@ -47,6 +47,8 @@ class LRUCache:
         self._lock = threading.Lock()
 
     def get(self, key: Any, default: Any = None) -> Any:
+        # Unlike flydsl_jit_cache's lock-free hits, a hit here mutates the OrderedDict
+        # (move_to_end updates recency), so it takes the lock too.
         with self._lock:
             try:
                 value = self._d[key]
