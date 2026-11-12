@@ -338,7 +338,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             artifact = os.path.join(directory, "mro.py")
             cache = os.path.join(directory, "mro.cache")
-            with self.assertRaisesRegex(PrecompileError, "dropped guard.*__mro__"):
+            with self.assertRaisesRegex(
+                PrecompileError, "dropped guard.*__mro__.*MRO bases.*importable"
+            ):
                 with capture(
                     _mro_sum,
                     artifact_path=artifact,

@@ -17,9 +17,9 @@ LayoutManager::LayoutManager(
 
 void ContiguousLayoutBuffer::allocate(size_t size) {
   VLOG(1) << "allocating " << size << " bytes";
-  if (C10_LIKELY(size_ > 0)) {
-    if (C10_LIKELY(
-            size <= size_) /* NOTE: size will be monotonically increasing */) {
+  if (size_ > 0) [[likely]] {
+    if (size <= size_ /* NOTE: size will be monotonically increasing */)
+        [[likely]] {
       clear(size_);
       return;
     } else {
@@ -31,7 +31,7 @@ void ContiguousLayoutBuffer::allocate(size_t size) {
 }
 
 void LayoutManager::allocate() {
-  if (C10_UNLIKELY(state_ == LayoutManagerState::WaitingForValues)) {
+  if (state_ == LayoutManagerState::WaitingForValues) [[unlikely]] {
     return;
   }
 
@@ -48,7 +48,7 @@ void LayoutManager::allocate() {
 }
 
 void LayoutManager::allocate_plan(const LayoutPlan& plan) {
-  if (C10_UNLIKELY(storage_impl_buffer_.size() == 0 || plan.total_size == 0)) {
+  if (storage_impl_buffer_.size() == 0 || plan.total_size == 0) [[unlikely]] {
     return;
   }
 
@@ -76,9 +76,8 @@ void LayoutManager::allocate_plan(const LayoutPlan& plan) {
     // allocator-created dataptr (https://fburl.com/code/u7dsspjm) whose
     // deleter is non-null (https://fburl.com/code/7hiwo5zo), this should
     // always be true
-    if (C10_LIKELY(
-            storage._mutable_data_ptr_no_checks().unsafe_reset_data_and_ctx(
-                offset_ptr))) {
+    if (storage._mutable_data_ptr_no_checks().unsafe_reset_data_and_ctx(
+            offset_ptr)) [[likely]] {
       storage.unsafe_set_nbytes(planned_allocation.size);
     } else {
       storage.set_data_ptr_noswap(at::DataPtr(
@@ -89,11 +88,11 @@ void LayoutManager::allocate_plan(const LayoutPlan& plan) {
 }
 
 void LayoutManager::ensure_managed_storages(bool allocate) {
-  if (C10_UNLIKELY(planned_tensors_.empty())) {
+  if (planned_tensors_.empty()) [[unlikely]] {
     return;
   }
 
-  if (C10_UNLIKELY(allocate)) {
+  if (allocate) [[unlikely]] {
     storage_impl_buffer_.allocate(planned_tensors_.size());
     VLOG(1) << "allocated " << planned_tensors_.size() * sizeof(at::StorageImpl)
             << " bytes for contiguous storages";
@@ -107,7 +106,7 @@ void LayoutManager::ensure_managed_storages(bool allocate) {
     at::StorageImpl& storage = *tensor->storage().unsafeGetStorageImpl();
     at::TensorImpl& tensor_impl = *tensor->unsafeGetTensorImpl();
 
-    if (C10_UNLIKELY(allocate)) {
+    if (allocate) [[unlikely]] {
       // from: https://fburl.com/code/4it00yph
       //
       // We want to manage StorageImpls' lifetimes ourselves, but TensorImpl
@@ -125,11 +124,10 @@ void LayoutManager::ensure_managed_storages(bool allocate) {
           c10::intrusive_ptr<at::StorageImpl>::unsafe_adapt_non_heap_allocated(
               &storage_impl_buffer_.to_managed(storage), 1)));
     } else if (
-        C10_UNLIKELY(
-            &storage !=
-            // NOLINTNEXTLINE(bugprone-pointer-arithmetic-on-polymorphic-object)
-            &storage_buf
-                [i]) /* managed storage was replaced for some reason */) {
+        &storage !=
+        // NOLINTNEXTLINE(bugprone-pointer-arithmetic-on-polymorphic-object)
+        &storage_buf[i] /* managed storage was replaced for some reason */)
+        [[unlikely]] {
       storage.reset();
       tensor_impl.set_storage_keep_dtype(at::Storage(
           c10::intrusive_ptr<at::StorageImpl>::unsafe_adapt_non_heap_allocated(
@@ -263,7 +261,7 @@ void LayoutManager::assert_no_overlapping_storages(
       TORCH_CHECK(graph_node_idx <= lt.end);
 
       const auto interval = try_get_interval(v->id());
-      if (C10_UNLIKELY(!interval.has_value())) {
+      if (!interval.has_value()) [[unlikely]] {
         continue;
       }
 
@@ -286,7 +284,7 @@ void LayoutManager::assert_no_overlapping_storages(
 
         for (const auto* src_of_v : *srcs_of_v) {
           const auto src_interval = try_get_interval(src_of_v->id());
-          if (C10_UNLIKELY(!src_interval.has_value())) {
+          if (!src_interval.has_value()) [[unlikely]] {
             continue;
           }
 
@@ -339,17 +337,17 @@ void LayoutManager::try_update_historical_max_nbytes() {
 void LayoutManager::deallocate_and_plan() {
   const auto uninitialized = state_ == LayoutManagerState::WaitingForValues;
 
-  if (C10_UNLIKELY(uninitialized)) {
+  if (uninitialized) [[unlikely]] {
     populate_tensor_values();
   }
 
   try_update_historical_max_nbytes();
 
-  if (C10_UNLIKELY(uninitialized)) {
+  if (uninitialized) [[unlikely]] {
     planner_.start_worker_if_not_started();
   }
 
-  if (C10_UNLIKELY(uninitialized)) {
+  if (uninitialized) [[unlikely]] {
     state_ = LayoutManagerState::AllocatingStorages;
   } else if (settings_.deallocateBetweenRequests()) {
     layout_buffer_.deallocate();
