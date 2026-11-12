@@ -188,4 +188,130 @@ TEST_F(MemoryTest, DoubleFreeFails) {
   EXPECT_EQ(orFree(dev_ptr), orErrorUnknown);
 }
 
+// ---------------------------------------------------------------------------
+// IPC tests
+// ---------------------------------------------------------------------------
+#ifndef _WIN32
+
+TEST_F(MemoryTest, IpcRoundTripSameProcess) {
+  // Allocate, write a pattern, get an IPC handle, open it, verify the data
+  // matches, then clean up.  All within a single process — fork-based tests
+  // are in test_ipc.py.
+  void* dev_ptr = nullptr;
+  ASSERT_EQ(orMalloc(&dev_ptr, 16), orSuccess);
+
+  const char src[16] = "ipc_test_data!!";
+  ASSERT_EQ(orMemcpy(dev_ptr, src, 16, orMemcpyHostToDevice), orSuccess);
+
+  char name[OR_IPC_HANDLE_MAX_LEN];
+  ptrdiff_t offset = 0;
+  ASSERT_EQ(
+      orGetIpcMemHandle(dev_ptr, name, sizeof(name), &offset), orSuccess);
+  EXPECT_EQ(offset, ptrdiff_t{0}); // dev_ptr is the allocation base
+  EXPECT_GT(strlen(name), 0u);
+
+  void* mapped = nullptr;
+  size_t size = 0;
+  ASSERT_EQ(orOpenIpcMemHandle(&mapped, name, &size), orSuccess);
+  // orMalloc page-aligns: actual block size >= requested size.
+  EXPECT_GE(size, 16u);
+  EXPECT_EQ(memcmp(mapped, src, 16), 0);
+
+  EXPECT_EQ(orCloseIpcMemHandle(mapped, size), orSuccess);
+  EXPECT_EQ(orFree(dev_ptr), orSuccess);
+}
+
+TEST_F(MemoryTest, IpcHandleNullDevPtr) {
+  // A null pointer is not a registered device allocation.
+  char name[OR_IPC_HANDLE_MAX_LEN];
+  ptrdiff_t offset = 0;
+  EXPECT_EQ(
+      orGetIpcMemHandle(nullptr, name, sizeof(name), &offset),
+      orErrorUnknown);
+}
+
+TEST_F(MemoryTest, IpcHandleNameBufferTooSmall) {
+  void* dev_ptr = nullptr;
+  ASSERT_EQ(orMalloc(&dev_ptr, 8), orSuccess);
+
+  char tiny[4]; // deliberately undersized
+  ptrdiff_t offset = 0;
+  EXPECT_EQ(
+      orGetIpcMemHandle(dev_ptr, tiny, sizeof(tiny), &offset),
+      orErrorUnknown);
+
+  EXPECT_EQ(orFree(dev_ptr), orSuccess);
+}
+
+TEST_F(MemoryTest, IpcOpenNonExistentHandle) {
+  // Opening a name that was never created must fail.
+  void* mapped = nullptr;
+  size_t size = 0;
+  EXPECT_EQ(
+      orOpenIpcMemHandle(&mapped, "/or_no_such_shm", &size),
+      orErrorUnknown);
+}
+
+TEST_F(MemoryTest, IpcSequenceNumberProducesUniqueNames) {
+  // Two consecutive handles for the same allocation must have different
+  // names so a re-share never collides with the previous shm object.
+  void* dev_ptr = nullptr;
+  ASSERT_EQ(orMalloc(&dev_ptr, 8), orSuccess);
+
+  char name1[OR_IPC_HANDLE_MAX_LEN];
+  char name2[OR_IPC_HANDLE_MAX_LEN];
+  ptrdiff_t off = 0;
+
+  ASSERT_EQ(
+      orGetIpcMemHandle(dev_ptr, name1, sizeof(name1), &off), orSuccess);
+  void* m1 = nullptr;
+  size_t sz1 = 0;
+  ASSERT_EQ(orOpenIpcMemHandle(&m1, name1, &sz1), orSuccess); // also unlinks
+  ASSERT_EQ(orCloseIpcMemHandle(m1, sz1), orSuccess);
+
+  ASSERT_EQ(
+      orGetIpcMemHandle(dev_ptr, name2, sizeof(name2), &off), orSuccess);
+  EXPECT_STRNE(name1, name2);
+
+  void* m2 = nullptr;
+  size_t sz2 = 0;
+  ASSERT_EQ(orOpenIpcMemHandle(&m2, name2, &sz2), orSuccess);
+  ASSERT_EQ(orCloseIpcMemHandle(m2, sz2), orSuccess);
+
+  EXPECT_EQ(orFree(dev_ptr), orSuccess);
+}
+
+TEST_F(MemoryTest, IpcOffsetForSuballocatedPointer) {
+  // When ptr points into the interior of an allocation the returned offset
+  // must equal the byte delta from the block base to ptr.
+  void* dev_ptr = nullptr;
+  ASSERT_EQ(orMalloc(&dev_ptr, 64), orSuccess);
+
+  // Write a recognisable pattern at byte 16 via a full-block host copy.
+  char host_src[64] = {};
+  const char pattern[4] = {0x11, 0x22, 0x33, 0x44};
+  memcpy(host_src + 16, pattern, 4);
+  ASSERT_EQ(
+      orMemcpy(dev_ptr, host_src, 64, orMemcpyHostToDevice), orSuccess);
+
+  char* inner_ptr = static_cast<char*>(dev_ptr) + 16;
+  char name[OR_IPC_HANDLE_MAX_LEN];
+  ptrdiff_t offset = 0;
+  ASSERT_EQ(
+      orGetIpcMemHandle(inner_ptr, name, sizeof(name), &offset), orSuccess);
+  EXPECT_EQ(offset, ptrdiff_t{16});
+
+  void* mapped = nullptr;
+  size_t size = 0;
+  ASSERT_EQ(orOpenIpcMemHandle(&mapped, name, &size), orSuccess);
+  // Apply the reported offset to reach the inner data.
+  const char* consumer_ptr = static_cast<const char*>(mapped) + offset;
+  EXPECT_EQ(memcmp(consumer_ptr, pattern, 4), 0);
+
+  EXPECT_EQ(orCloseIpcMemHandle(mapped, size), orSuccess);
+  EXPECT_EQ(orFree(dev_ptr), orSuccess);
+}
+
+#endif // !_WIN32
+
 } // namespace
