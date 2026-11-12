@@ -40,7 +40,6 @@ Export runs in stage 2, after torch is built, so a builder module may import tor
 from __future__ import annotations
 
 import os
-import platform
 import re
 import shlex
 from typing import Any
@@ -167,36 +166,6 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
 }}
 """
 
-    _warmed_up = False
-
-    @classmethod
-    def _warm_up_exporter(cls) -> None:
-        """Build one JIT engine in this process so export_to_c works for any
-        --gpu-arch.
-
-        export_to_c needs LLVM machinery that the DSL initializes only when it
-        creates a JIT engine, which it does for a compile matching the ambient arch.
-        Without this, a cross-arch export as the first compile in a process fails
-        with "Failed to dump object file with PIC relocation". A kernel-free
-        @cute.jit initializes the engine for any target in ~0.12s, once per process,
-        with no CUDA device needed."""
-        if cls._warmed_up:
-            return
-        # A helper module, because this file's `from __future__ import annotations`
-        # would stringify the jit function's annotation past the DSL's reach.
-        from tools.native_aot.cutedsl_warmup import warm_up
-
-        warm_up()
-        cls._warmed_up = True
-
-    # Unpinned, the DSL compiles the host stubs for the BUILD machine's CPU, so an
-    # AVX512 builder's module loaders SIGILL elsewhere. Host half only, not the SASS.
-    _HOST_TARGETS = {
-        "x86_64": "llvm -mtriple=x86_64-unknown-linux-gnu -mcpu=x86-64",
-        # No -mcpu: an explicit triple alone is that triple's generic CPU.
-        "aarch64": "llvm -mtriple=aarch64-unknown-linux-gnu",
-    }
-
     @staticmethod
     def _declared_host_target(opts: str | None) -> str | None:
         """The --host-target an op's builder asked for, or None if it asked for none.
@@ -214,6 +183,9 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
     def export(self, b: dict, out_dir: str, arch: str | None = None) -> dict:
         import cutlass.cute as cute
 
+        # Shared with Inductor's export of user-defined CuTeDSL kernels.
+        from torch._native.cutedsl.export import host_target, warm_up_exporter
+
         # Optional compile options (e.g. --enable-assertions). These must match what
         # the op's JIT wrapper passes, minus --enable-tvm-ffi, which would change
         # the exported ABI; otherwise the two routes' SASS diverges.
@@ -226,20 +198,13 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                 "like the builder's. Name a target or leave the option out."
             )
         if declared is None:
-            machine = platform.machine()
-            if machine not in self._HOST_TARGETS:
-                raise RuntimeError(
-                    f"native-AOT export: no pinned host target for {machine!r}. "
-                    "Falling back would target this builder's CPU; add an entry to "
-                    "CuteDslToolchain._HOST_TARGETS."
-                )
-            host_opt = f"--host-target '{self._HOST_TARGETS[machine]}'"
+            host_opt = f"--host-target '{host_target()}'"
             opts = f"{opts} {host_opt}" if opts else host_opt
         if arch:
             # --gpu-arch outranks the CUTE_DSL_ARCH env var, so one process can
             # export for several arches.
             opts = f"{opts} --gpu-arch {arch}" if opts else f"--gpu-arch {arch}"
-            self._warm_up_exporter()
+            warm_up_exporter()
         compiled = cute.compile(
             b["fn"], *b["fake_args"], **({"options": opts} if opts else {})
         )

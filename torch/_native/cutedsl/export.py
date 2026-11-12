@@ -10,17 +10,41 @@ Nothing from torch is imported at module level: tools/native_aot/build_stage2.py
 loads this file by path, without importing torch.
 """
 
+import platform
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
 
 __all__ = [
+    "HOST_TARGETS",
     "RUNTIME_ARCHIVE",
+    "host_target",
     "runtime_archive",
     "warm_up_exporter",
 ]
 
+# --host-target values. Unpinned, the DSL compiles the host code for the build
+# machine's CPU, so what an AVX-512 machine exports fails with SIGILL on CPUs
+# without AVX-512.
+HOST_TARGETS = {
+    "x86_64": "llvm -mtriple=x86_64-unknown-linux-gnu -mcpu=x86-64",
+    # No -mcpu: an explicit triple alone is that triple's generic CPU.
+    "aarch64": "llvm -mtriple=aarch64-unknown-linux-gnu",
+}
+
 RUNTIME_ARCHIVE = "libcuda_dialect_runtime_static.a"
+
+
+def host_target() -> str:
+    """The --host-target for this machine's architecture: its generic CPU."""
+    machine = platform.machine()
+    if machine not in HOST_TARGETS:
+        raise RuntimeError(
+            f"CuTeDSL export: no pinned host target for {machine!r}. Falling back "
+            "would target this machine's CPU; add an entry to "
+            "torch._native.cutedsl.export.HOST_TARGETS."
+        )
+    return HOST_TARGETS[machine]
 
 
 def runtime_archive(
