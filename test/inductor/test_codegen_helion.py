@@ -347,6 +347,20 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
         self.assertNotIn("//", source)
         self.assertNotIn("%", source)
 
+    @parametrize("case", ["rhs", "rhs_m_equals_k", "lhs"])
+    def test_broadcast_operand(self, case):
+        # A stride-0 operand: v.expand(72, 136) is copied and read by tile like
+        # any mat2; v.expand(40, 72) is read through its stride-0 view.
+        if case == "rhs":
+            fn, args = lambda a, v: a @ v.expand(72, 136), [randn(40, 72), randn(72, 1)]
+        elif case == "rhs_m_equals_k":
+            fn, args = lambda a, v: a @ v.expand(72, 136), [randn(72, 72), randn(72, 1)]
+        else:
+            fn, args = lambda v, b: v.expand(40, 72) @ b, [randn(1, 72), randn(72, 136)]
+        (source,) = self.compile(fn, *args)
+        self.assertIn("in0[tile_y, tile_r]", source)
+        self.assertIn("in1[tile_r, tile_x]", source)
+
     def test_operand_shared_with_epilogue(self):
         # x is both the lhs and the epilogue input; the same view of it is one
         # kernel parameter.

@@ -89,6 +89,7 @@ from .mm_common import (
     mm_grid,
     native_matmul_scaled_add,
     persistent_mm_grid,
+    realize_helion_operands,
     use_helion_mm,
     use_native_matmul,
     zero_addmm_input,
@@ -589,7 +590,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             #   NotImplementedError: Cannot read a Helion dot operand at
             #   8*yindex + 320*((r0_index//8)) + (ModularIndexing(r0_index, 1, 8))
             # and (a + 1) @ b recomputes a + 1 in the K loop of every N tile.
-            mat1, mat2 = realize_inputs(mat1, mat2)
+            mat1, mat2 = realize_helion_operands(mat1, mat2)
         mat1 = lowerings[aten.unsqueeze](mat1, -1)
         mat2 = lowerings[aten.unsqueeze](mat2, 0)
         args, kwargs = transform_args(
