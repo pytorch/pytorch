@@ -1,6 +1,7 @@
 # Owner(s): ["module: tests"]
 
 import sys
+import time
 
 import torch
 from torch.testing._internal.common_device_type import (
@@ -108,12 +109,24 @@ class TestStream(TestCase):
         self.assertTrue(current_stream.query())
         del tensor1
 
-        # Sleep for 200 ms, which should be enough time to query the stream
-        # before the sleep is finished.
+        # Check that `query` is False when the device is busy. A device-side
+        # sleep for 200 ms should give the host plenty of time to query.
         m._sleep(int(200 * get_cycles_per_ms(device)))
         self.assertFalse(current_stream.query())
         current_stream.synchronize()
         self.assertTrue(current_stream.query())
+
+        # Check that `query` is True when the device finishes work, even if
+        # `synchronize` has not been called yet. Sleeping for 200 ms on host
+        # should give the device plenty of time to finish.
+        x = torch.randn(1, device=device)
+        current_stream.synchronize()
+        y = x + 1
+        done = current_stream.query()
+        time.sleep(0.2)
+        done = done or current_stream.query()
+        self.assertTrue(done)
+        del y
 
     # Check that the stream is reset correctly if an exception is raised within
     # another stream's context.

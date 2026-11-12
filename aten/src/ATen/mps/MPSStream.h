@@ -140,6 +140,8 @@ class TORCH_API MPSStream {
   // Event and signal counter used for `query`ing the stream
   MTLSharedEvent_t _queryEvent = nullptr;
   uint64_t _querySignalCounter = 0;
+  // Whether work may have been encoded since the last query signal or full sync
+  bool _hasWorkSinceQuerySignal = false;
 
   // CommitAndContinue is enabled by default
   bool _enableCommitAndContinue = true;

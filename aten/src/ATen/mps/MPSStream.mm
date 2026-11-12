@@ -87,6 +87,8 @@ MPSCommandBuffer* MPSStream::commandBuffer() {
     cb.willCommitAndContinue = [this] { addErrorHandler(); };
     _commandBuffer = cb;
   }
+  // Assume that work will be enqueued by the caller
+  _hasWorkSinceQuerySignal = true;
 
   return _commandBuffer;
 }
@@ -179,6 +181,7 @@ void MPSStream::commitAndWait() {
     _commandBuffer = nil;
     checkLastError();
   }
+  _hasWorkSinceQuerySignal = false;
 }
 
 void MPSStream::commitAndContinue() {
@@ -246,10 +249,14 @@ bool MPSStream::query() {
   __block bool done;
   dispatch_sync(_serialQueue, ^() {
     @autoreleasepool {
-      if (_commandBuffer) {
+      // Only signal if there is new work, otherwise every call would commit a
+      // new command buffer and report busy, so polling would never finish
+      if (_hasWorkSinceQuerySignal) {
         endKernelCoalescing();
-        [_commandBuffer encodeSignalEvent:_queryEvent value:++_querySignalCounter];
+        [commandBuffer() encodeSignalEvent:_queryEvent value:++_querySignalCounter];
         synchronize(SyncType::COMMIT);
+        // committing calls commandBuffer() again via addErrorHandler, so reset the flag afterwards
+        _hasWorkSinceQuerySignal = false;
       }
       done = _queryEvent.signaledValue >= _querySignalCounter;
     }
