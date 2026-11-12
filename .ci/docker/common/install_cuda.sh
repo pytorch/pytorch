@@ -24,7 +24,17 @@ function install_cuda {
   runfile="${runfile}.run"
   wget -q https://developer.download.nvidia.com/compute/cuda/${version}/local_installers/${runfile} -O ${runfile}
   chmod +x ${runfile}
-  ./${runfile} --toolkit --silent
+  # The CUDA 13.5+ installer refuses to symlink /usr/local/cuda while /usr/local is writable
+  # by non-root users, which install_user.sh makes it (chown jenkins). Hand it back to root
+  # for the install, then restore its owner and mode.
+  usr_local_owner=$(stat -c '%u:%g' /usr/local)
+  usr_local_mode=$(stat -c '%a' /usr/local)
+  chown root:root /usr/local
+  chmod go-w /usr/local
+  # --silent prints nothing on failure; surface the installer's own log.
+  ./${runfile} --toolkit --silent || { tail -n 100 /var/log/cuda-installer.log; exit 1; }
+  chown "${usr_local_owner}" /usr/local
+  chmod "${usr_local_mode}" /usr/local
   rm -f ${runfile}
   rm -f /usr/local/cuda && ln -s /usr/local/cuda-${major_minor} /usr/local/cuda
 }
@@ -198,11 +208,14 @@ function install_130 {
 }
 
 function install_132 {
+  CUBLAS_VERSION=13.4.3.11
   CUDNN_VERSION=9.26.0.51
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.2 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.2 in the same container
   install_cuda 13.2.2 cuda_13.2.2_595.71.05_linux
+
+  install_cublas $CUBLAS_VERSION
 
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
   install_cudnn 13 $CUDNN_VERSION
@@ -222,7 +235,7 @@ function install_134 {
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.4 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.4 in the same container
-  install_cuda 13.4.1 cuda_13.4.1_linux
+  install_cuda 13.4.3 cuda_13.4.3_linux
 
   install_cublas $CUBLAS_VERSION
 
