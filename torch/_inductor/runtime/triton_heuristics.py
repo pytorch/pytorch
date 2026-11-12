@@ -285,12 +285,17 @@ def _warn_host_tma_clone(name: str) -> None:
     )
 
 
-def _host_tma_aligned(tensor, name):
+def _host_tma_aligned(tensor, name, is_output=False):
     """Return a TMA_ALIGNMENT-aligned view of `tensor`, cloning (with a one-time
     warning) only if its base address is not aligned. Used by the host-side TMA
-    launcher to build TensorDescriptors from aligned storage."""
+    launcher to build TensorDescriptors from aligned storage. An output can't be
+    cloned, since the kernel's writes would land in the copy."""
     if tensor.data_ptr() % TMA_ALIGNMENT == 0:
         return tensor
+    if is_output:
+        raise RuntimeError(
+            f"host-side TMA: output {name} is not {TMA_ALIGNMENT}-byte aligned"
+        )
     _warn_host_tma_clone(name)
     return tensor.clone()
 
@@ -1452,7 +1457,7 @@ class CachingAutotuner(KernelInterface):
             all_constants = compile_meta["constants"]
             # The launchers build exactly these descriptors, with these dims, so
             # whether an arg is compiled as tensordesc<> is decided once, here.
-            resolved_descs: dict[str, dict[str, list[int | str]]] = {}
+            resolved_descs: dict[str, dict[str, Any]] = {}
             for key in list(compile_meta["signature"]):
                 desc_info = host_tma_args.get(key)
                 if desc_info is None or not isinstance(desc_info, dict):
@@ -1496,6 +1501,8 @@ class CachingAutotuner(KernelInterface):
                     "strides": stride_vals,
                     "launch_args": launch_args,
                 }
+                if desc_info.get("is_output"):
+                    resolved_descs[key]["is_output"] = True
             compile_meta["host_tma_descriptors"] = resolved_descs
 
         compile_meta["debug"] = _should_enable_triton_debug_asserts(self.inductor_meta)
@@ -3051,9 +3058,7 @@ class CompileResult(Generic[_T]):
 
     def make_launcher(self) -> LauncherType: ...
 
-    def _host_tma_descriptors(
-        self, call_args: list[str]
-    ) -> dict[str, dict[str, list[int | str]]]:
+    def _host_tma_descriptors(self, call_args: list[str]) -> dict[str, dict[str, Any]]:
         """The host-side TMA descriptors to build at launch, keyed by arg.
 
         _create_compile_meta decided which args were compiled as tensordesc<> and
@@ -3094,9 +3099,11 @@ class CompileResult(Generic[_T]):
             stride_vals = dims["strides"]
             desc_var = f"{inner_name}_host_tma_desc"
             aligned_var = f"{inner_name}_aligned"
-            # _host_tma_aligned clones (warning once) only if misaligned.
+            # _host_tma_aligned clones a misaligned input (warning once) and
+            # raises for a misaligned output.
             pre_runner_lines.append(
-                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
+                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}"'
+                + (", is_output=True)" if dims.get("is_output") else ")")
             )
             pre_runner_lines.append(
                 f"{desc_var} = TensorDescriptor({aligned_var}, {_launcher_dims(shape_vals)},"
@@ -3147,7 +3154,8 @@ class CompileResult(Generic[_T]):
             desc_var = f"{inner_name}_host_tma_desc"
             aligned_var = f"{inner_name}_aligned"
             pre_runner_lines.append(
-                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
+                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}"'
+                + (", is_output=True)" if dims.get("is_output") else ")")
             )
             pre_runner_lines.append(
                 f"{desc_var} = expand_host_tma_descriptor(_tma_cache, {idx}, "
