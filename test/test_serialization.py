@@ -24,6 +24,7 @@ import zipfile
 from collections import namedtuple, OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass
+from multiprocessing.reduction import ForkingPickler
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1081,7 +1082,10 @@ class TestSerialization(TestCase, SerializationMixin):
     def test_load_preserves_storage_sharing(self, load_mode):
         self._test_load_preserves_storage_sharing(load_mode)
 
+    # tempfile wrapper __getattr__ mutates state while guards are built.
+    # TODO: Re-enable NGB when gh-197322 lands.
     @parametrize('weights_only', (True, False))
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_serialization_zipfile(self, weights_only):
         data = self._test_serialization_data()
 
@@ -5429,6 +5433,17 @@ class TestEmptySubclass(torch.Tensor):
     ...
 
 
+class TestMakeSubclassWithDispatch(torch.Tensor):
+    @staticmethod
+    def __new__(cls, elem):
+        return torch.Tensor._make_subclass(cls, elem)
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        with torch._C._DisableTorchDispatch():
+            return func(*args, **(kwargs or {}))
+
+
 class TestSubclassSerialization(TestCase):
     def test_tensor_subclass_wrapper_serialization(self):
         wrapped_tensor = torch.rand(2)
@@ -5510,6 +5525,55 @@ class TestSubclassSerialization(TestCase):
             f.seek(0)
             with safe_globals([TestEmptySubclass]):
                 tensor2 = torch.load(f)
+
+    @parametrize("roundtrip", ["deepcopy", "torch_save", "pickle", "forking_pickler"])
+    def test_wrapper_subclass_with_storage_offset_roundtrip(self, roundtrip):
+        a, b = torch.arange(12.0), torch.arange(12.0) + 100
+        t = TwoTensor(a[4:8], b[4:8])
+        self.assertEqual(t.storage_offset(), 4)
+        if roundtrip == "deepcopy":
+            new = deepcopy(t)
+        elif roundtrip == "torch_save":
+            with BytesIOContext() as f:
+                torch.save(t, f)
+                f.seek(0)
+                with safe_globals([TwoTensor]):
+                    new = torch.load(f)
+        elif roundtrip == "pickle":
+            new = pickle.loads(pickle.dumps(t))
+        else:
+            new = ForkingPickler.loads(ForkingPickler.dumps(t))
+        self.assertIs(type(new), TwoTensor)
+        self.assertFalse(torch._C._has_storage_data(new))
+        # deepcopy clones, which resets the offset of the inner tensors.
+        if roundtrip != "deepcopy":
+            self.assertEqual(new.storage_offset(), t.storage_offset())
+        self.assertEqual(new.a, t.a)
+        self.assertEqual(new.b, t.b)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
+    def test_storageless_subclass_is_not_saved_as_wrapper(self):
+        # An MKLDNN tensor has no storage, unlike the placeholder storage of a
+        # wrapper subclass. Saving it must fail rather than silently drop its data.
+        t = TestMakeSubclassWithDispatch(torch.randn(4).to_mkldnn())
+        self.assertFalse(torch._C._has_storage(t))
+        with BytesIOContext() as f:
+            with self.assertRaisesRegex(NotImplementedError, "Cannot access storage"):
+                torch.save(t, f)
+
+    def test_empty_view_of_real_storage_subclass_keeps_storage(self):
+        base = torch.arange(8.0)
+        t = TestMakeSubclassWithDispatch(base[2:2])
+        self.assertEqual(t.data_ptr(), 0)
+        with BytesIOContext() as f:
+            torch.save(t, f)
+            f.seek(0)
+            with safe_globals([TestMakeSubclassWithDispatch]):
+                loaded = torch.load(f)
+        self.assertIs(type(loaded), TestMakeSubclassWithDispatch)
+        self.assertTrue(torch._C._has_storage_data(loaded))
+        self.assertEqual(loaded.storage_offset(), 2)
+        self.assertEqual(loaded.untyped_storage().nbytes(), base.untyped_storage().nbytes())
 
     @skipIfTorchDynamo("name 'SYNTHETIC_LOCAL' is not defined")
     def test_safe_globals_for_weights_only(self):
