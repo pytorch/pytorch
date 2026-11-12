@@ -29,6 +29,7 @@ from ...kernel.mm import (
     persistent_mm_template,
     persistent_tdm_mm_template,
     persistent_tma_mm_template,
+    persistent_xcd_mm_template,
     scaled_mm_device_tma_epilogue_scaling_template,
     scaled_mm_device_tma_main_loop_scaling_template,
 )
@@ -1721,6 +1722,25 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             flex_decode_configs.append(default_config)
 
         return flex_decode_configs
+
+
+# Archs whose persistent mm grid, config pool and XCD count were measured. Other
+# ROCm archs keep the original behavior (one workgroup per CU, shared pool). The
+# XCD count assumes the GPU is not partitioned into several devices.
+_ROCM_PERSISTENT_MM_NUM_XCDS = {"gfx950": 8}
+
+
+def _rocm_lds_bytes_per_cu() -> int:
+    """LDS available to the workgroups resident on one CU.
+
+    HIP reports the per-CU LDS as shared_memory_per_block (64 KB on gfx942,
+    160 KB on gfx950); shared_memory_per_multiprocessor is not meaningful there.
+    """
+    try:
+        props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        return int(props.shared_memory_per_block)
+    except Exception:
+        return 64 * 1024
 
 
 class ROCmConfigHeuristic(BaseConfigHeuristic):
@@ -3497,11 +3517,6 @@ class CUDAPersistentTMATemplateConfigHeuristic(
         self.mm_configs = self.persistent_mm_configs
 
 
-@register_template_heuristic(
-    persistent_mm_template.uid,
-    "cuda",
-    register=IS_ROCM,
-)
 class PersistentMMTemplateConfigHeuristic(
     MMTemplateConfigMixin,
     ROCmConfigHeuristic,  # type: ignore[misc]
@@ -3522,6 +3537,165 @@ class PersistentMMTemplateConfigHeuristic(
             kernel_inputs, op_name, **kwargs
         ):
             yield {**template_kwargs, "NUM_SMS": get_num_sms()}
+
+
+@register_template_heuristic(
+    persistent_mm_template.uid,
+    "cuda",
+    register=IS_ROCM,
+)
+class ROCmPersistentMMTemplateConfigHeuristic(PersistentMMTemplateConfigHeuristic):
+    """
+    Persistent MM template heuristic for ROCm. On archs in
+    _ROCM_PERSISTENT_MM_NUM_XCDS the launch is configured per device: the grid
+    is sized by occupancy, an arch-specific pool is used, and some configs are
+    also offered with the XCD-local program order (mm_persistent_xcd). Other
+    ROCm archs keep the base behavior.
+    """
+
+    # A persistent kernel only hides load/store latency across workgroups that
+    # are resident on a CU at the same time, so the grid is sized to the number
+    # of workgroups that fit, not to the CU count. LDS is the binding limit for
+    # these tiles; more than two resident workgroups did not help on gfx950.
+    max_workgroups_per_cu = 2
+    # XCD-local tile order pays off once a row of A is shared by enough N tiles;
+    # with fewer (tall-M, small N) it only costs HBM locality, so it is not tried.
+    min_n_tiles_for_xcd_remap = 8
+    # (BLOCK_M, BLOCK_N, BLOCK_K, num_warps) that mm_persistent_xcd also offers.
+    xcd_remap_tiles = OrderedSet([(128, 128, 64, 4), (128, 256, 32, 4)])
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Most of the shared persistent_mm_configs pool (BLOCK_K=128, or
+        # 128x256x64) needs >= 96 KB of LDS, so only one workgroup fits per CU.
+        # This pool includes BLOCK_K=32 tiles that leave room for two.
+        self.rocm_persistent_mm_configs: list[BaseConfig] = [
+            ROCmGemmConfig(128, 128, 64, self.default_num_stages, 4, group_m=16),
+            ROCmGemmConfig(128, 128, 64, self.default_num_stages, 8, group_m=8),
+            ROCmGemmConfig(128, 256, 32, self.default_num_stages, 4, group_m=16),
+            ROCmGemmConfig(256, 128, 32, self.default_num_stages, 4, group_m=4),
+            ROCmGemmConfig(256, 128, 64, self.default_num_stages, 8, group_m=4),
+            ROCmGemmConfig(256, 256, 64, self.default_num_stages, 8, group_m=4),
+        ]
+
+    def get_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
+        if (
+            rocm_gfx_arch() in _ROCM_PERSISTENT_MM_NUM_XCDS
+            and self.mm_configs is self.persistent_mm_configs
+        ):
+            return partial(
+                self.preprocess_mm_configs, configs=self.rocm_persistent_mm_configs
+            )
+        return super().get_mm_configs()
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        if rocm_gfx_arch() not in _ROCM_PERSISTENT_MM_NUM_XCDS:
+            yield from super()._get_template_configs_impl(
+                kernel_inputs, op_name, **kwargs
+            )
+            return
+        for template_kwargs, _ in self._occupancy_template_configs(
+            kernel_inputs, op_name, **kwargs
+        ):
+            yield template_kwargs
+
+    def _occupancy_template_configs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[tuple[dict[str, Any], bool], None, None]:
+        """Configs with the grid sized by occupancy, each paired with whether
+        mm_persistent_xcd also offers it."""
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(
+                "ROCmPersistentMMTemplateConfigHeuristic requires MMKernelInputs"
+            )
+        # A pool set by a caller (e.g. a pinned config) is compiled as given; the
+        # tile-count skip and mm_persistent_xcd only apply to the default pool.
+        default_pool = self.mm_configs is self.persistent_mm_configs
+        num_cus = get_num_sms()
+        lds_per_cu = _rocm_lds_bytes_per_cu()
+        dtype_size = kernel_inputs.dtype().itemsize
+        m, n, _ = kernel_inputs.mnk_symbolic()
+        static_mn = not (
+            getattr(m, "free_symbols", None) or getattr(n, "free_symbols", None)
+        )
+        fallback: tuple[int, dict[str, Any]] | None = None
+        kept_any = False
+        m_hint, n_hint, _ = kernel_inputs.mnk_hinted()
+        # NUM_SMS from the base class (one program per CU) is replaced per config.
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            block_m = template_kwargs["BLOCK_M"]
+            block_n = template_kwargs["BLOCK_N"]
+            block_k = template_kwargs["BLOCK_K"]
+            lds = (
+                template_kwargs["num_stages"]
+                * (block_m + block_n)
+                * block_k
+                * dtype_size
+            )
+            workgroups_per_cu = max(
+                1, min(lds_per_cu // max(lds, 1), self.max_workgroups_per_cu)
+            )
+            num_programs = num_cus * workgroups_per_cu
+            tiles = math.ceil(m_hint / block_m) * math.ceil(n_hint / block_n)
+            if default_pool and static_mn and tiles < 2 * num_programs:
+                # With fewer than two tiles per program this is the regular mm
+                # template plus loop overhead and a ragged last wave, so don't
+                # spend a compile on it.
+                if fallback is None or tiles > fallback[0]:
+                    fallback = (tiles, {**template_kwargs, "NUM_SMS": num_programs})
+                continue
+            kept_any = True
+            tile = (block_m, block_n, block_k, template_kwargs["num_warps"])
+            xcd_remap = (
+                default_pool
+                and tile in self.xcd_remap_tiles
+                and math.ceil(n_hint / block_n) >= self.min_n_tiles_for_xcd_remap
+            )
+            yield {**template_kwargs, "NUM_SMS": num_programs}, xcd_remap
+        if not kept_any and fallback is not None:
+            # Keep the template selectable (e.g. by autotune_choice_name_regex)
+            # with its finest tile when every config was skipped.
+            yield fallback[1], False
+
+
+@register_template_heuristic(
+    persistent_xcd_mm_template.uid,
+    "cuda",
+    register=IS_ROCM,
+)
+class ROCmPersistentXCDMMTemplateConfigHeuristic(
+    ROCmPersistentMMTemplateConfigHeuristic
+):
+    """
+    Heuristic for the XCD-local persistent MM template. On archs in
+    _ROCM_PERSISTENT_MM_NUM_XCDS it offers the occupancy-sized configs that
+    benefit from the XCD remap; on other archs it offers nothing.
+    """
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        num_xcds = _ROCM_PERSISTENT_MM_NUM_XCDS.get(rocm_gfx_arch())
+        if num_xcds is None:
+            return
+        for template_kwargs, xcd_remap in self._occupancy_template_configs(
+            kernel_inputs, op_name, **kwargs
+        ):
+            if xcd_remap:
+                yield {**template_kwargs, "NUM_XCDS": num_xcds}
 
 
 @register_template_heuristic(
@@ -3945,9 +4119,21 @@ class ROCmAddMMTemplateConfigHeuristic(AddMMConfigMixin, ROCmMMTemplateConfigHeu
     op_name="addmm",
 )
 class ROCmAddMMPersistentTemplateConfigHeuristic(
-    AddMMConfigMixin, PersistentMMTemplateConfigHeuristic
+    AddMMConfigMixin, ROCmPersistentMMTemplateConfigHeuristic
 ):
     """Addmm specific mixin for persistent MM on ROCm"""
+
+
+@register_template_heuristic(
+    persistent_xcd_mm_template.uid,
+    "cuda",
+    register=IS_ROCM,
+    op_name="addmm",
+)
+class ROCmAddMMPersistentXCDTemplateConfigHeuristic(
+    AddMMConfigMixin, ROCmPersistentXCDMMTemplateConfigHeuristic
+):
+    """Addmm specific mixin for the XCD-local persistent MM on ROCm"""
 
 
 # TODO(coconutruben): deprecate once autoheuristic is deprecated
