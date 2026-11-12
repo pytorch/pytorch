@@ -50,12 +50,14 @@ if TYPE_CHECKING:
     # artifacts instead of _FRAMES/_BACKENDS/_ENTRY_BINDING.
     _PACKAGE: str = ""
     # Each Inductor graph's output code, as editable text, keyed f"{backend_id}.fw" or
-    # ".bw", and the sha256 of the text as captured. Artifacts predating these keep the
-    # code inside _BACKENDS.
+    # ".bw", and the sha256 of the text as captured.
     GRAPH_SOURCES: dict[str, str] = {}
     _GRAPH_SOURCE_SHA256: dict[str, str] = {}
     # False as emitted; load(allow_serve_time_compiles=True) flips it to True.
     _ALLOW_SERVE_TIME_COMPILES: bool = False
+    # The capture's normalized mode/options, which a serve-time compile uses;
+    # None when they have no literal form.
+    INDUCTOR_OPTIONS: dict[str, object] | None = {}
     BACKEND: str = ""
     FN_NAME: str = ""
     ENTRY_MODULE: str = ""
@@ -137,8 +139,7 @@ def _import_custom_op_modules(served=(), import_served=None):
             continue
         try:
             importlib.import_module(module)
-        # Not just ImportError: e.g. importing torch.distributed.device_mesh before
-        # torch.distributed.tensor raises ValueError.
+        # Not just ImportError: a module can raise anything while it registers ops.
         except Exception as e:
             import_errors[module] = e
     # A served module that does not import fails the load here, not at the op
@@ -160,19 +161,25 @@ def _import_custom_op_modules(served=(), import_served=None):
             if not has_kernel(qualname, key):
                 missing.append(f"{qualname} ({key} kernel)")
     # Another module's kernel under the same key would pass the check above, so
-    # the active kernel must be registered from the overriding module's file.
+    # the active kernel must be registered from the overriding module's file, or
+    # by a register_kernel or torch.library.impl call from its body.
+    from torch._library.utils import kernel_callers
+
     overridden = []
     real = os.path.realpath
     override_errors = set()
     for qualname, owners in CUSTOM_OP_OVERRIDE_MODULES.items():
         dump = torch._C._dispatch_dump(qualname)
+        callers = kernel_callers(qualname)
         for key, module in owners.items():
             pattern = rf"^{key}(?:\[alias\])?: registered at (.+):\d+ ::"
             active = re.search(pattern, dump, re.MULTILINE)
             path = getattr(sys.modules.get(module), "__file__", None)
             if module in import_errors:
                 override_errors.add(module)
-            elif not (active and path and real(active[1]) == real(path)):
+            elif callers.get(key) != module and not (
+                active and path and real(active[1]) == real(path)
+            ):
                 overridden.append(f"{qualname} ({key} kernel of {module})")
     if missing or override_errors or overridden:
         # Lazily, as _fail does; _fail is emitted after section 0 and cannot chain.
@@ -635,20 +642,19 @@ def _build_multigraph_forward():
     # The graph code runs from GRAPH_SOURCES, edits included. An edited graph gets
     # its own PyCodeCache key and compiles the kernels its text defines, instead of
     # binding the ones precompiled from the captured text.
-    _sha256 = globals().get("_GRAPH_SOURCE_SHA256", {})
-    graph_sources = globals().get("GRAPH_SOURCES", {})
-    if graph_sources.keys() != _sha256.keys():
+    if GRAPH_SOURCES.keys() != _GRAPH_SOURCE_SHA256.keys():
+        missing = sorted(_GRAPH_SOURCE_SHA256.keys() - GRAPH_SOURCES.keys())
+        unexpected = sorted(GRAPH_SOURCES.keys() - _GRAPH_SOURCE_SHA256.keys())
         raise _PrecompileError(
             f"precompile: GRAPH_SOURCES must hold every captured graph's code under "
-            f"its own key; missing {sorted(_sha256.keys() - graph_sources.keys())}, "
-            f"unexpected {sorted(graph_sources.keys() - _sha256.keys())}. Edit the "
-            f"code of an entry, not its key."
+            f"its own key; missing {missing}, unexpected {unexpected}. Edit the code "
+            f"of an entry, not its key."
         )
-    for _key, _source in graph_sources.items():
+    for _key, _source in GRAPH_SOURCES.items():
         _backend_id, _, _part = _key.rpartition(".")
         _graph = getattr(backends[_backend_id].content, f"compiled_{_part}").result
         _digest = hashlib.sha256(_source.encode()).hexdigest()
-        if _digest != _sha256.get(_key):
+        if _digest != _GRAPH_SOURCE_SHA256[_key]:
             _graph.cache_key = f"e{_digest}"
             _graph.kernel_sources = {}
             # Maps the captured text's lines to FX nodes, not the edited text's.
@@ -662,14 +668,14 @@ def _build_multigraph_forward():
     # another artifact or a live compile can hold one this artifact mints; the
     # tag hashes both channels so two artifacts of one capture differ, and the
     # graph code, so an edited copy of an artifact is another version of it.
-    graph_code = "".join(f"{k}\0{v}\0" for k, v in sorted(graph_sources.items()))
+    graph_code = "".join(f"{k}\0{v}\0" for k, v in sorted(GRAPH_SOURCES.items()))
     tag = hashlib.sha256((_FRAMES + _BACKENDS + graph_code).encode()).hexdigest()[:16]
     # Each compiled graph is marked with a digest of its own code, so the same
     # graph from another artifact of the capture binds again, and an edited one
     # cannot repoint the graph another runnable already serves.
     for _backend_id, _fn in compiled.items():
         _code = "".join(
-            graph_sources.get(f"{_backend_id}.{_p}", "") for _p in ("fw", "bw")
+            GRAPH_SOURCES.get(f"{_backend_id}.{_p}", "") for _p in ("fw", "bw")
         )
         _fn.__precompile_graph__ = hashlib.sha256(_code.encode()).hexdigest()[:16]
 
@@ -1019,9 +1025,12 @@ def _build_installed_forward():
         # A serve-time compile is not part of the artifact: record it nowhere.
         # caching_precompile would make optimize(package=None) create its own
         # package, which context(fn) fills from the on-disk Dynamo cache.
+        backend: object = BACKEND
+        if _ALLOW_SERVE_TIME_COMPILES and INDUCTOR_OPTIONS:
+            backend = torch._TorchCompileInductorWrapper(None, INDUCTOR_OPTIONS, None)
         with torch._dynamo.config.patch(caching_precompile=False):
             context = torch._dynamo.optimize(
-                BACKEND, package=None if _ALLOW_SERVE_TIME_COMPILES else package
+                backend, package=None if _ALLOW_SERVE_TIME_COMPILES else package
             )
             if not isinstance(context, OptimizeContext):
                 raise _PrecompileError(

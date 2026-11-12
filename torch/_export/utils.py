@@ -9,7 +9,7 @@ import operator
 import re
 from collections import defaultdict
 from collections.abc import Callable, Collection, Generator, Iterable, Sequence
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from inspect import ismethod, Parameter
 from typing import Any, TYPE_CHECKING
 
@@ -19,6 +19,7 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_te
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import PreDispatchTorchFunctionMode
+from torch.fx.graph_module import _get_attr, _has_attr
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
@@ -658,9 +659,10 @@ def sequential_split(
     """
     sequential_split creates a new graph module that splits the input graph module into multiple submodules
     based on the node_call_back. It doesn't mutate the input graph module. The node_call_back should return
-    True if the node is a delimiter.  Delimiter will be the first node in the next submodule.
+    True if the node is a delimiter. A delimiter starts the next submodule: it is the first node
+    copied from the graph, after the placeholders and the ``get_attr`` nodes that the submodule reads.
     """
-    from torch.fx.passes.split_module import split_module
+    from torch.fx.passes.split_module import _split_module
 
     split_map = {}
     split_id = 0
@@ -669,12 +671,13 @@ def sequential_split(
             split_id += 1
         split_map[node] = split_id
 
-    new_gm = split_module(
+    new_gm = _split_module(
         gm,
         gm,
         lambda node: split_map[node],
         keep_original_order=True,
         keep_original_node_name=True,
+        read_pytree_specs_in_partition=True,
     )
     # Keep the codegen from original graph module to preserve e.g. pytree info.
     new_gm.graph._codegen = gm.graph._codegen
@@ -786,20 +789,6 @@ def apply_runtime_assertion_pass(
     return gm, graph_signature
 
 
-def nodes_first(
-    nodes: list[torch.fx.Node],
-    node_call_back: Callable[[torch.fx.Node], object] | None = None,
-) -> torch.fx.Node | None:
-    """
-    Returns the first node that matches the node_call_back. If no node matches, returns None.
-    When node_call_back is None, returns the first node in the node list.
-    """
-    ret = nodes_filter(nodes, node_call_back if node_call_back else lambda node: True)
-    if len(ret) > 0:
-        return ret[0]
-    return None
-
-
 def nodes_count(
     nodes: list[torch.fx.Node], node_call_back: Callable[[torch.fx.Node], object]
 ) -> int:
@@ -835,6 +824,20 @@ def _update_gm_meta_if_possible(gm: torch.fx.GraphModule, mod: torch.nn.Module) 
         and "custom" in mod.meta
     ):
         gm.meta.update({"custom": mod.meta["custom"]})
+
+
+def _is_free_attr_name(model: torch.nn.Module, name: str) -> bool:
+    # A dotted name can only be added under Modules, so a prefix that holds
+    # another object, such as a tensor, makes the name taken.
+    *prefix, field = name.split(".")
+    owner = model
+    for item in prefix:
+        owner = getattr(owner, item, None)
+        if owner is None:
+            return True
+        if not isinstance(owner, torch.nn.Module):
+            return False
+    return not hasattr(owner, field)
 
 
 def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
@@ -877,16 +880,33 @@ def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
                     raise AssertionError(
                         f"Expected str target for get_attr, got {type(node.target)}"
                     )
+                attr = _get_attr(sub_gm, node.target)
                 new_target_name = new_node.target
-                if hasattr(gm, new_target_name):
+                # Several get_attr nodes can read one attribute, such as a pytree
+                # spec, so reuse it and rename only when the name is taken.
+                is_free = _is_free_attr_name(gm, new_target_name)
+                if not is_free and not (
+                    _has_attr(gm, new_target_name)
+                    and _get_attr(gm, new_target_name) is attr
+                ):
                     # Loop through and find the "submod_{i}" that have no name collision
                     i = 1
                     new_target_name = f"submod_{i}"
-                    while hasattr(gm, new_target_name):
+                    while _has_attr(gm, new_target_name):
                         i += 1
                         new_target_name = f"submod_{i}"
+                    is_free = True
+                if is_free:
+                    *prefix, field = new_target_name.split(".")
+                    owner = gm
+                    for item in prefix:
+                        if getattr(owner, item, None) is None:
+                            setattr(owner, item, torch.nn.Module())
+                        owner = getattr(owner, item)
+                    # setattr keeps a tensor a plain attribute, while
+                    # _assign_attr would add it to state_dict as a buffer.
+                    setattr(owner, field, attr)
                 new_node.target = new_target_name
-                setattr(gm, new_node.target, getattr(sub_gm, node.target))
             node_replace_(node, new_node)
 
         if len(output) > 0:
@@ -1472,17 +1492,13 @@ def _get_decomp_for_cia(op: "OperatorBase") -> Callable[..., object]:
     return functools.partial(_special_op_to_decompose_cia, kernel=op)
 
 
-@contextmanager
-def _compiling_state_context() -> Generator[None, None, None]:
-    old_compiling_flag = torch.compiler._is_compiling_flag
-    old_exporting_flag = torch.compiler._is_exporting_flag
-    try:
-        torch.compiler._is_compiling_flag = True
-        torch.compiler._is_exporting_flag = True
-        yield
-    finally:
-        torch.compiler._is_compiling_flag = old_compiling_flag
-        torch.compiler._is_exporting_flag = old_exporting_flag
+def _compiling_state_context() -> AbstractContextManager[None]:
+    # Sets both flags in the per-thread TLS, so autograd worker threads
+    # observe them too and export sessions in different threads cannot
+    # clobber each other's save/restore (#202042).
+    return torch.compiler._session_flags(
+        torch.compiler._IS_COMPILING, torch.compiler._IS_EXPORTING
+    )
 
 
 def _fakify_params_buffers(
