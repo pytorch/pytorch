@@ -26,6 +26,7 @@ import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
+from torch._library.custom_ops import OPDEFS
 from torch._library.fake_profile import (
     generate_yaml_from_profiles,
     load_op_profiles,
@@ -6290,6 +6291,62 @@ except RuntimeError as e:
         # lib1 = torch.library.Library(...) is on line 2 of the script.
         self.assertIn("<string>:2", result.stdout)
 
+    def test_kernel_registration_records_the_calling_module(self):
+        ns = "_test_kernel_callers"
+        ops_source = f"""\
+import torch
+@torch.library.custom_op("{ns}::f", mutates_args=())
+def f(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+@torch.library.custom_op("{ns}::g", mutates_args=(), device_types="cpu")
+def g(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+torch.library.define("{ns}::h", "(Tensor x) -> Tensor", lib=lib)
+"""
+        kernels_source = f"""\
+import torch
+@f.register_kernel("cpu")
+def _(x):
+    return x.clone()
+@torch.library.impl("{ns}::h", "cpu")
+def _(x):
+    return x.clone()
+"""
+        keep_alive = len(torch.library._keep_alive)
+        ops = {"__name__": "kernel_callers_ops"}
+        try:
+            with torch.library._scoped_library(ns, "FRAGMENT") as ops["lib"]:
+                exec(compile(ops_source, "/callers/ops.py", "exec"), ops)
+                kernels = {"__name__": "kernel_callers_kernels", "f": ops["f"]}
+                exec(compile(kernels_source, "/callers/kernels.py", "exec"), kernels)
+                self.assertEqual(
+                    ops["f"]._backend_fn_callers,
+                    {
+                        "CompositeExplicitAutograd": "kernel_callers_ops",
+                        "CPU": "kernel_callers_kernels",
+                    },
+                )
+                self.assertEqual(
+                    ops["g"]._backend_fn_callers, {"CPU": "kernel_callers_ops"}
+                )
+                self.assertEqual(
+                    torch._library.utils.kernel_callers(f"{ns}::h"),
+                    {"CPU": "kernel_callers_kernels"},
+                )
+                # The dispatcher still records torch.library.impl's own Library.
+                dump = torch._C._dispatch_dump(f"{ns}::h")
+                self.assertRegex(
+                    dump, r"CPU: registered at .*torch[/\\]library\.py:\d+ ::"
+                )
+        finally:
+            while len(torch.library._keep_alive) > keep_alive:
+                torch.library._keep_alive.pop()._destroy()
+            for n in ("f", "g"):
+                if n in ops:
+                    ops[n]._lib._destroy()
+                OPDEFS.pop(f"{ns}::{n}", None)
+            torch._library.utils.REGISTRATION_CALLERS.pop((f"{ns}::h", "CPU"), None)
+
 
 class MiniOpTestOther(CustomOpTestCaseBase):
     test_ns = "mini_op_test"
@@ -6561,6 +6618,8 @@ opcheck(op, args, kwargs, test_utils="test_schema")
 
         self.assertEqual(len(gradient_asserts), 1)
 
+    # Nested breaks expose a Dynamo wrapper-protocol hasattr bug here (#201908).
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_aot_autograd_copy_does_not_check_pinned_memory_for_wrapper_subclass(
         self,
     ):
