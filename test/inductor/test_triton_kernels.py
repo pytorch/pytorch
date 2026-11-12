@@ -6708,6 +6708,89 @@ else:
         self.assertEqual(y + increment, x)
 
     @requires_gpu
+    @common_utils.parametrize(
+        "rewrap",
+        ["heuristics", "launch_num_warps", "special_param", "prune_configs_by"],
+    )
+    def test_triton_kernel_rewrap_keeps_autotune_hooks(self, rewrap):
+        # Dynamo rebuilds the autotuner here; without restore_value, benchmarking
+        # accumulates into `acc` more than once.
+        if rewrap == "special_param":
+
+            @triton.jit
+            def acc_kernel(
+                in_ptr,
+                acc_ptr,
+                n_elements,
+                BLOCK_SIZE: tl.constexpr,
+                num_warps: tl.constexpr,
+            ):
+                offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < n_elements
+                acc = tl.load(acc_ptr + offsets, mask=mask)
+                tl.store(
+                    acc_ptr + offsets,
+                    acc + tl.load(in_ptr + offsets, mask=mask),
+                    mask=mask,
+                )
+
+        else:
+
+            @triton.jit
+            def acc_kernel(
+                in_ptr,
+                acc_ptr,
+                n_elements,
+                BLOCK_SIZE: tl.constexpr,
+                EVEN: tl.constexpr,
+            ):
+                offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < n_elements
+                acc = tl.load(acc_ptr + offsets, mask=mask)
+                tl.store(
+                    acc_ptr + offsets,
+                    acc + tl.load(in_ptr + offsets, mask=mask),
+                    mask=mask,
+                )
+
+        autotune_kwargs = {"restore_value": ["acc_ptr"]}
+        launch_kwargs = {}
+        if rewrap == "heuristics":
+            acc_kernel = triton.heuristics(
+                {"EVEN": lambda args: args["n_elements"] % 64 == 0}
+            )(acc_kernel)
+        elif rewrap != "special_param":
+            launch_kwargs["EVEN"] = False
+        if rewrap == "launch_num_warps":
+            launch_kwargs["num_warps"] = 4
+        elif rewrap == "prune_configs_by":
+            autotune_kwargs["prune_configs_by"] = {
+                "early_config_prune": lambda configs, named_args, **kw: configs
+            }
+        acc_kernel = triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 64}, num_warps=4),
+                triton.Config({"BLOCK_SIZE": 128}, num_warps=4),
+                triton.Config({"BLOCK_SIZE": 256}, num_warps=4),
+            ],
+            key=["n_elements"],
+            **autotune_kwargs,
+        )(acc_kernel)
+
+        def f(x, acc):
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            acc_kernel[grid](x, acc, n_elements, **launch_kwargs)
+            return acc
+
+        compiled = torch.compile(f, backend="aot_eager", fullgraph=True, dynamic=False)
+        for n in (1024, 1000):
+            x = torch.ones(n, device=GPU_TYPE)
+            acc = torch.zeros(n, device=GPU_TYPE)
+            compiled(x, acc)
+            self.assertEqual(acc, x, atol=0, rtol=0)
+
+    @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_single_autotune(self, backend):
         @triton.autotune(
