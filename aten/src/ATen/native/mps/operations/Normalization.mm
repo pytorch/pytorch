@@ -108,7 +108,7 @@ static Tensor batch_norm_stats(const Tensor& x,
                                double eps,
                                double momentum,
                                std::optional<bool> backward_train = std::nullopt) {
-  const auto C = c10::safe_conv<uint32_t>(x.size(1), "batch_norm channels");
+  const auto C = c10::safe_conv<uint32_t>(x.size(1), "uint32_t");
   const auto dtype =
       (backward_train ? tensors[bn_idx(BNBackwardParam::Mean)] : tensors[bn_idx(BNParam::SaveMean)])->scalar_type();
   for (auto& t : tensors) {

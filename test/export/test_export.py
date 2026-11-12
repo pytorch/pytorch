@@ -1198,7 +1198,6 @@ class TestExport(TestCase):
                     )
                 self.assertEqual(export(m, (x,)).module()(x), m(x))
 
-    @testing.expectedFailureStrictV2
     @skipIfCrossRef
     def test_custom_tag_metadata_re_export(self):
         class Foo(torch.nn.Module):

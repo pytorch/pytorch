@@ -96,7 +96,11 @@ def _graph_node_names(grad_fn):
 # CI.
 
 class TestNN(NNTestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: add_test() generates the module tests' *_cuda and
+    # *_xpu variants into this class, and several tests compare against CUDA
+    # when it's available, so it can't be GENERIC until those are split out.
+    # Its tests take no device parameter and the class doesn't use
+    # instantiate_device_type_tests, so it isn't ACCELERATOR either.
 
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -7427,7 +7431,7 @@ class TestNNDeviceType(NNTestCase):
         # Extremely large kernel_size (would overflow int)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"value cannot be safely converted without overflow: kernel_size",
+            r"value cannot be converted to type int without overflow",
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -7456,7 +7460,7 @@ class TestNNDeviceType(NNTestCase):
 
         # Extremely large stride (would overflow int)
         with self.assertRaisesRegex(
-            RuntimeError, r"value cannot be safely converted without overflow: stride"
+            RuntimeError, r"value cannot be converted to type int without overflow"
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -7476,7 +7480,7 @@ class TestNNDeviceType(NNTestCase):
 
         # Extremely large padding (would overflow int)
         with self.assertRaisesRegex(
-            RuntimeError, r"value cannot be safely converted without overflow: padding"
+            RuntimeError, r"value cannot be converted to type int without overflow"
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -7488,7 +7492,7 @@ class TestNNDeviceType(NNTestCase):
         # Combined invalid parameters
         with self.assertRaisesRegex(
             RuntimeError,
-            r"value cannot be safely converted without overflow: kernel_size",
+            r"value cannot be converted to type int without overflow",
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -17397,8 +17401,8 @@ class TestNNCUDA(NNTestCase):
     def test_linear_cross_entropy_options_auto_defaults_acc_dtype_cuda(self, device):
         """acc_dtype auto resolution on real CUDA hardware: fp32 once the SM
         generation supports it, the input dtype otherwise. Needs actual
-        hardware to query ``get_device_capability``, so this piece can't be
-        GENERIC like the rest of ``test_..._auto_defaults`` (see TestNN).
+        hardware to query ``get_device_capability``, so this piece lives here
+        rather than with the rest of ``test_..._auto_defaults`` in TestNN.
         """
         opts = nn.LinearCrossEntropyOptions()
         major = torch.cuda.get_device_capability(device)[0]

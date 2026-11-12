@@ -2,6 +2,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/ceil_div.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -65,8 +66,8 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
     grad_g.zero_();
     return {std::move(grad_v), std::move(grad_g)};
   }
-  const auto slices = c10::checked_convert<uint32_t>(saved_v.size(dim), "uint32_t");
-  const auto len = c10::checked_convert<uint32_t>(saved_v.numel() / saved_v.size(dim), "uint32_t");
+  const auto slices = c10::safe_conv<uint32_t>(saved_v.size(dim), "uint32_t");
+  const auto len = c10::safe_conv<uint32_t>(saved_v.numel() / saved_v.size(dim), "uint32_t");
   const auto dtype = scalarToMetalTypeString(saved_v);
   constexpr auto simd = c10::metal::simdgroup_size;
   const auto col_groups = at::ceil_div(slices, simd);

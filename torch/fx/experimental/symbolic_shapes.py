@@ -161,7 +161,9 @@ def guarding_hint_or_throw(
         if a.shape_env is None:
             raise AssertionError("shape_env is required for guarding_hint_or_throw")
         hint = a.shape_env.guarding_hint_or_throw(a.expr)
-        a._hint = hint
+        # maybe_set_item_memo relies on this never filling in a SymFloat's hint
+        if a.pytype is not float:
+            a._hint = hint
         return hint
     if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         return guarding_hint_or_throw(a.node)

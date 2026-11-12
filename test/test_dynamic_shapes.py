@@ -662,6 +662,19 @@ class TestPySymInt(TestCase):
         self.assertEqual(guarding_hint_or_throw(value.node), 0.125)
         self.assertEqual(guarding_hint_or_throw(0.125), 0.125)
 
+    @parametrize("numerator", (1.0, 64.0))
+    def test_guarding_hint_or_throw_float_does_not_cache_hint(self, numerator):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 64).node.expr
+        expr = FloatTrueDiv(numerator, OpaqueUnaryFn_sqrt(ToFloat(s0)))
+        node = SymNode(expr, shape_env, float, hint=sym_node._NO_HINT)
+        self.assertIsNone(node.hint)
+        for value in (SymFloat(node), node):
+            hint = guarding_hint_or_throw(value)
+            self.assertEqual(hint, numerator / 8.0)
+            self.assertIsInstance(hint, float)
+            self.assertIsNone(node.hint)
+
     def test_sym_floor(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
@@ -5936,19 +5949,6 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         """Test narrow with unbacked start with cpp_wrapper"""
         self.test_narrow_unbacked_start()
 
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_narrow_with_tensor_start(self):
-        @torch.compile(backend="inductor", fullgraph=True)
-        def f(x, start, end):
-            return torch.narrow(x, 0, start, end)
-
-        x = torch.tensor(
-            [False], device="cuda:0" if torch.cuda.is_available() else "cpu"
-        )
-        start = torch.tensor(0)
-        res = f(x, start, 0)
-        self.assertEqual(res.shape, torch.Size([0]))
-
     @skipIfTorchDynamo("mark_unbacked not supported")
     def test_unbacked_norm_no_dde(self):
         def vector_norm(x):
@@ -7211,6 +7211,24 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         y = x[0:1, 0:1]  # y is a view, y._base is x
         result = fn(y)
         self.assertEqual(result.shape, (1, 1))
+
+
+class TestUnbackedOpsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_narrow_with_tensor_start(self, device):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def f(x, start, end):
+            return torch.narrow(x, 0, start, end)
+
+        x = torch.tensor([False], device=device)
+        start = torch.tensor(0)
+        res = f(x, start, 0)
+        self.assertEqual(res.shape, torch.Size([0]))
+
+
+instantiate_device_type_tests(TestUnbackedOpsDevice, globals())
 
 
 instantiate_parametrized_tests(TestUnbacked)
