@@ -3853,6 +3853,150 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(called, 1)
         self.assertEqual(y, x + 2.0)
 
+    @parametrize("registration", ("method", "function", "qualname", "opoverload"))
+    @parametrize("requires_grad", (False, True))
+    def test_register_autograd_non_differentiable(self, registration, requires_grad):
+        @torch.library.custom_op("_torch_testing::nondiff_clone", mutates_args=())
+        def clone(x: Tensor) -> Tensor:
+            return x.clone()
+
+        if registration == "method":
+            clone.register_autograd("non-differentiable")
+        else:
+            op: torch.library._op_identifier = clone
+            if registration == "qualname":
+                op = clone._qualname
+            elif registration == "opoverload":
+                op = clone._opoverload
+            torch.library.register_autograd(op, "non-differentiable")
+
+        x = torch.randn(3, requires_grad=requires_grad)
+        result = clone(x)
+        self.assertFalse(result.requires_grad)
+        self.assertIsNone(result.grad_fn)
+        self.assertEqual(x.requires_grad, requires_grad)
+        self.assertTrue(
+            torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(
+                clone._qualname, "Autograd"
+            )
+        )
+
+    @parametrize("requires_grad", (False, True))
+    @parametrize("explicit_grad", (False, True))
+    def test_non_differentiable_low_level(self, requires_grad, explicit_grad):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("nondiff_low_level(Tensor x) -> Tensor")
+
+            def kernel(x):
+                if explicit_grad:
+                    return torch.ones_like(x, requires_grad=True)
+                return x.clone()
+
+            lib.impl("nondiff_low_level", kernel, "CPU")
+            torch.library.register_autograd(
+                "_torch_testing::nondiff_low_level",
+                "non-differentiable",
+                lib=lib,
+            )
+            x = torch.randn(3, requires_grad=requires_grad)
+            result = torch.ops._torch_testing.nondiff_low_level(x)
+            self.assertFalse(result.requires_grad)
+            self.assertIsNone(result.grad_fn)
+
+    @parametrize("tensorlist", (False, True))
+    def test_register_autograd_non_differentiable_factory(self, tensorlist):
+        annotation = list[Tensor] if tensorlist else Tensor
+
+        @torch.library.custom_op("_torch_testing::nondiff_factory", mutates_args=())
+        def fn(x: Tensor) -> annotation:
+            result = torch.ones_like(x, requires_grad=True)
+            return [result, result.clone()] if tensorlist else result
+
+        fn.register_autograd("non-differentiable")
+        x = torch.randn(3, requires_grad=True)
+        result = fn(x)
+        outputs = result if tensorlist else [result]
+        for output in outputs:
+            self.assertFalse(output.requires_grad)
+            self.assertIsNone(output.grad_fn)
+        self.assertTrue(x.requires_grad)
+
+    def test_register_autograd_non_differentiable_switching(self):
+        @torch.library.custom_op("_torch_testing::nondiff_switch", mutates_args=())
+        def clone(x: Tensor) -> Tensor:
+            return x.clone()
+
+        called = 0
+
+        def backward(ctx, grad):
+            nonlocal called
+            called += 1
+            return grad
+
+        x = torch.randn(3, requires_grad=True)
+        clone.register_autograd(backward)
+        torch.autograd.grad(clone(x).sum(), x)
+        self.assertEqual(called, 1)
+
+        clone.register_autograd("non-differentiable")
+        clone.register_autograd("non-differentiable")
+        self.assertFalse(clone(x).requires_grad)
+
+        clone.register_autograd(backward)
+        torch.autograd.grad(clone(x).sum(), x)
+        self.assertEqual(called, 2)
+
+    @parametrize("mode", ("fake", "compile"))
+    def test_register_autograd_non_differentiable_tensorlist(self, mode):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        @torch.library.custom_op("_torch_testing::nondiff_list", mutates_args=())
+        def clone(x: Tensor) -> list[Tensor]:
+            return [x.clone(), x.sin()]
+
+        @clone.register_fake
+        def _(x):
+            return [x.clone(), x.sin()]
+
+        clone.register_autograd("non-differentiable")
+        x = torch.randn(3, requires_grad=True)
+        if mode == "fake":
+            with FakeTensorMode() as fake_mode:
+                result = clone(fake_mode.from_tensor(x))
+        else:
+            result = torch.compile(clone, backend="aot_eager", fullgraph=True)(x)
+        for output in result:
+            self.assertFalse(output.requires_grad)
+            self.assertIsNone(output.grad_fn)
+
+    @parametrize("registration", ("method", "function"))
+    def test_register_autograd_non_differentiable_errors(self, registration):
+        @torch.library.custom_op("_torch_testing::nondiff_errors", mutates_args=())
+        def clone(x: Tensor) -> Tensor:
+            return x.clone()
+
+        register = clone.register_autograd
+        if registration == "function":
+            register = partial(torch.library.register_autograd, clone)
+        with self.assertRaisesRegex(ValueError, "backward callable"):
+            register("unsupported-mode")
+        with self.assertRaisesRegex(ValueError, "setup_context"):
+            register("non-differentiable", setup_context=lambda **kwargs: None)
+
+    @parametrize("error", ("mode", "setup_context"))
+    def test_non_differentiable_low_level_errors(self, error):
+        with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+            lib.define("nondiff_raw_bad_args(Tensor x) -> Tensor")
+            mode = "unsupported-mode" if error == "mode" else "non-differentiable"
+            kwargs = {} if error == "mode" else {"setup_context": lambda **kw: None}
+            match = "backward callable" if error == "mode" else "setup_context"
+            with patch("torch.library._library_for_registration") as make_lib:
+                with self.assertRaisesRegex(ValueError, match):
+                    torch.library.register_autograd(
+                        "_torch_testing::nondiff_raw_bad_args", mode, lib=lib, **kwargs
+                    )
+                make_lib.assert_not_called()
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @parametrize(
         "op_factory, opname",

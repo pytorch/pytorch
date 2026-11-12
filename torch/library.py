@@ -6,7 +6,7 @@ import re
 import sys
 import weakref
 from collections.abc import Callable, Sequence
-from typing import Any, overload, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Literal, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -1330,13 +1330,15 @@ def _register_effectful_op(
 
 def register_autograd(
     op: _op_identifier,
-    backward: Callable,
+    backward: Callable | Literal["non-differentiable"],
     /,
     *,
     setup_context: Callable | None = None,
     lib=None,
 ) -> None:
-    r"""Register a backward formula for this custom op.
+    r"""register_autograd(op, backward, /, *, setup_context=None, lib=None) -> None
+
+    Register a backward formula or declare this custom op non-differentiable.
 
     In order for an operator to work with autograd, you need to register
     a backward formula:
@@ -1378,6 +1380,14 @@ def register_autograd(
     If you need different autograd behavior on different devices, then we
     recommend creating two different custom operators, one for each device
     that needs different behavior, and switching between them at runtime.
+
+    Pass ``"non-differentiable"`` instead of a backward callable to prevent
+    the outputs from requiring gradients, even when the inputs do, without
+    invoking a generated :class:`torch.autograd.Function`.
+    Operators created with :func:`torch.library.custom_op` use an Autograd
+    fallthrough; other operators use a no-grad redispatch kernel.
+    ``setup_context`` must be ``None``.
+    This mode requires a functional operator without aliased outputs.
 
     Examples:
         >>> import torch
@@ -1456,8 +1466,19 @@ def register_autograd(
             f"Got: {schema}"
         )
 
-    info = _library.autograd.Info(backward, setup_context)
-    autograd_kernel = _library.autograd.make_autograd_impl(op, info)
+    if isinstance(backward, str):
+        _library.autograd._validate_non_differentiable(backward, setup_context)
+
+        def non_differentiable_kernel(keyset, *args, **kwargs):
+            redispatch_keyset = keyset & torch._C._after_autograd_keyset
+            return _library.autograd._call_non_differentiable(
+                op.redispatch, redispatch_keyset, *args, **kwargs
+            )
+
+        autograd_kernel = non_differentiable_kernel
+    else:
+        info = _library.autograd.Info(backward, setup_context)
+        autograd_kernel = _library.autograd.make_autograd_impl(op, info)
     namespace, opname = torch._library.utils.parse_namespace(qualname)
     use_lib = _library_for_registration(namespace, lib)
     use_lib.impl(opname, autograd_kernel, "Autograd", with_keyset=True)

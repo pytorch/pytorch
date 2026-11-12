@@ -21,6 +21,34 @@ class Info:
     _setup_context_fn: Callable | None
 
 
+def _validate_non_differentiable(
+    backward: str, setup_context: Callable | None
+) -> None:
+    if backward != "non-differentiable":
+        raise ValueError(
+            "Expected a backward callable or 'non-differentiable', "
+            f"but got {backward!r}."
+        )
+    if setup_context is not None:
+        raise ValueError(
+            "setup_context cannot be provided for a non-differentiable operator."
+        )
+
+
+def _call_non_differentiable(
+    fn: Callable[..., Any], /, *args: Any, **kwargs: Any
+) -> Any:
+    with _C._AutoDispatchBelowAutograd():
+        result = fn(*args, **kwargs)
+    if isinstance(result, Tensor):
+        return result.detach() if result.requires_grad else result
+    return _pytree.tree_map_only(
+        Tensor,
+        lambda tensor: tensor.detach() if tensor.requires_grad else tensor,
+        result,
+    )
+
+
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
