@@ -157,6 +157,26 @@ class TestInnerTreeCombineUnroll(TestCase):
         trait = T.VarMeanOps(correction=1, acc=cutlass.Float32)
         self.assertTrue(tile.uniform_combine_ok(trait, split))
 
+    def test_uniform_combine_flag_is_per_class(self):
+        """Accept combine_uniform only for subclasses that declare has_combine_uniform."""
+        import cutlass
+
+        from torch._native.ops.reductions import tile, traits as T
+
+        class OwnCombine(T.WelfordOps):
+            def combine(self, a, b):
+                return super().combine(a, b)
+
+        class OptedIn(OwnCombine):
+            has_combine_uniform = True
+
+        split, acc = (1024, 8192, 8192, 512, 512), cutlass.Float32
+        self.assertFalse(OwnCombine.has_combine_uniform)
+        self.assertTrue(OptedIn.has_combine_uniform)
+        self.assertFalse(OptedIn.has_combine_equal)
+        self.assertFalse(tile.uniform_combine_ok(OwnCombine(acc=acc), split))
+        self.assertTrue(tile.uniform_combine_ok(OptedIn(acc=acc), split))
+
     @parametrize(
         "updates,msg",
         [

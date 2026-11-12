@@ -388,6 +388,7 @@ class TestReductionConfig(TestCase):
             {"field_bits": (64,) * 3},
             {"dtype": torch.float16, "N": 128 << 20, "out_dtypes": (torch.float16,)},
             {"welford_outs": 0},
+            {"welford_outs": 0, "out_dtypes": ()},
             {"out_dtypes": (torch.bfloat16,)},
             {"out_dtypes": (torch.float32,) * 2},
         ],
@@ -618,7 +619,12 @@ class TestReductionConfig(TestCase):
     @parametrize("trait", ["sum", "argmax", "var"])
     def test_b200_wide_strided_rules_need_many_outputs(self, trait):
         """Below 2048 outputs only the c256 rule beats the default config."""
-        for count, num_o, rule in ((256, 512, "b200_strided_c256"), (1024, 512, None)):
+        wide = {"sum": "one_field", "argmax": "index", "var": "welford"}[trait]
+        for count, num_o, rule in (
+            (256, 512, "b200_strided_c256"),
+            (1024, 2047, None),
+            (1024, 2048, f"b200_strided_{wide}"),
+        ):
             cfg = self.general(
                 cc=(10, 0),
                 **_contract(_TRAITS[trait]),
@@ -664,15 +670,17 @@ class TestReductionConfig(TestCase):
             def combine(self, a, b):
                 return super().combine(a, b)
 
-        args = ((10, 0), torch.float16, (16 << 20) // (257 * 2), 257, 1, 3)
         kwargs = dict(itemsize=2, acc_bits=32, nouts=1, welford_outs=1, alignment=16)
         kwargs |= dict(out_dtypes=(torch.float16,))
-        for trait_type, rule in (
-            (T.WelfordOps, "b200_ragged_welford_c257"),
-            (OwnCombine, "default"),
-        ):
-            cfg = ct.select_col_config(*args, trait_type=trait_type, **kwargs)
-            self.assertEqual(cfg.rule, rule)
+        # At 16 MiB, 4095 columns take b200_ragged_c4095_ordered first.
+        for columns, anchor in ((257, 16 << 20), (4095, 64 << 20)):
+            args = ((10, 0), torch.float16, anchor // (columns * 2), columns, 1, 3)
+            for kind, rule in (
+                (T.WelfordOps, f"b200_ragged_welford_c{columns}"),
+                (OwnCombine, "default"),
+            ):
+                cfg = ct.select_col_config(*args, trait_type=kind, **kwargs)
+                self.assertEqual(cfg.rule, rule, msg=f"{kind.__name__} at C={columns}")
 
     @parametrize(
         "dtype,trait,columns,size,expected",
@@ -868,13 +876,14 @@ class TestReductionConfig(TestCase):
 
     def test_b200_ragged_rows_start_late_traits_later(self):
         """Keep absmax, absmin and general-p norms off ragged rows at N = 255, and every
-        Welford trait until N = 1025."""
+        variance-returning Welford trait until N = 1025."""
         late = (T.AbsMaxOps(), T.AbsMinOps(), T.NormOps(3), T.NormOps(0.5))
         early = (T.AMaxOps(), T.NormOps(1), T.NormOps(2), T.SumOps())
         self.assertEqual({kg._ragged_row_min_n(t) for t in late}, {1023})
         self.assertEqual({kg._ragged_row_min_n(t) for t in early}, {255})
         self.assertEqual(kg._ragged_row_min_n(T.VarMeanOps(take_sqrt=True)), 1025)
         self.assertEqual(kg._ragged_row_min_n(T.WelfordOps(take_sqrt=True)), 1025)
+        self.assertEqual(kg._ragged_row_min_n(T.WelfordOps(return_mean=True)), 255)
         for N, routed in ((255, False), (1023, True)):
             ok = kg._ragged_rows_ok((10, 0), torch.float16, N, 16, T.AbsMaxOps())
             self.assertEqual(ok, routed)
