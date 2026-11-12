@@ -8,6 +8,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     expectedFailureXPU,
     instantiate_device_type_tests,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
@@ -19,6 +20,7 @@ from torch.testing._internal.common_utils import (
     TEST_ACCELERATOR,
     TestCase,
 )
+from torch.testing._internal.common_xpu import Xe2_Or_Later
 
 
 if not TEST_ACCELERATOR:
@@ -109,22 +111,29 @@ class TestStream(TestCase):
         self.assertTrue(current_stream.query())
         del tensor1
 
-        # Check that `query` is False when the device is busy. A device-side
-        # sleep for 200 ms should give the host plenty of time to query.
+    # Check that `query` is False when the device is busy. A device-side sleep
+    # for 200 ms should give the host plenty of time to query.
+    @skipCUDANonDefaultStreamIf(True)
+    @skipXPUIf(not Xe2_Or_Later, "torch.xpu._sleep is not supported")
+    def test_stream_query_device_busy(self, device):
+        m = torch.get_device_module(device)
         m._sleep(int(200 * get_cycles_per_ms(device)))
-        self.assertFalse(current_stream.query())
-        current_stream.synchronize()
-        self.assertTrue(current_stream.query())
+        self.assertFalse(m.current_stream().query())
+        m.current_stream().synchronize()
+        self.assertTrue(m.current_stream().query())
 
-        # Check that `query` is True when the device finishes work, even if
-        # `synchronize` has not been called yet. Sleeping for 200 ms on host
-        # should give the device plenty of time to finish.
+    # Check that `query` is True when the device finishes work, even if
+    # `synchronize` has not been called yet. Sleeping for 200 ms on host should
+    # give the device plenty of time to finish.
+    @skipCUDANonDefaultStreamIf(True)
+    def test_stream_query_no_sync(self, device):
+        m = torch.get_device_module(device)
         x = torch.randn(1, device=device)
-        current_stream.synchronize()
+        m.current_stream().synchronize()
         y = x + 1
-        done = current_stream.query()
+        done = m.current_stream().query()
         time.sleep(0.2)
-        done = done or current_stream.query()
+        done = done or m.current_stream().query()
         self.assertTrue(done)
         del y
 
