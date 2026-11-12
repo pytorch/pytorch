@@ -143,7 +143,11 @@ class TestCudaPrimaryCtx(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_event_destroy(self):
         event = torch.Event(device="cuda:1")
-        event.record(torch.cuda.current_stream(1))
+        # Init CUDA streams with cuda:1 as the current device, otherwise the
+        # stream priority query initializes a context on cuda:0.
+        with torch.cuda.device(1):
+            stream = torch.cuda.current_stream()
+            event.record(stream)
 
         # We should have only created context on 'cuda:1'
         self.assertFalse(torch._C._cuda_hasPrimaryContext(0))
