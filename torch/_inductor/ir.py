@@ -9142,8 +9142,9 @@ class UserDefinedCuteDSLKernel(UserDefinedKernel):
     Unlike a user Triton kernel, Inductor does not compile or fuse into it: the
     Python wrapper launches the host function on the current stream of the kernel's
     device; the C++ wrapper (AOTInductor or cpp_wrapper) calls the C entry point
-    export_to_c exported for it on the stream it launches Triton kernels on. The FX
-    wrapper refuses it.
+    export_to_c exported for it on the stream it launches Triton kernels on: the
+    wrapper's, or inside a user stream region of an AOTInductor model, the region's.
+    The FX wrapper refuses it.
     """
 
     def __init__(

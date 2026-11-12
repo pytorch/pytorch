@@ -569,6 +569,48 @@ if HAS_CUTEDSL:
 
         return affine_kernel
 
+    # A runtime scalar of each integer type export_to_c takes, and a Float64:
+    # out = [a, b, c, d, e, f, g] (g's bits), outf = [h].
+    @cute.kernel
+    def _store_scalars_k(
+        gOut: cute.Tensor,
+        gOutF: cute.Tensor,
+        a: cutlass.Int8,
+        b: cutlass.Int16,
+        c: cutlass.Uint8,
+        d: cutlass.Uint16,
+        e: cutlass.Uint32,
+        f: cutlass.Int64,
+        g: cutlass.Uint64,
+        h: cutlass.Float64,
+    ):
+        gOut[0] = cutlass.Int64(a)
+        gOut[1] = cutlass.Int64(b)
+        gOut[2] = cutlass.Int64(c)
+        gOut[3] = cutlass.Int64(d)
+        gOut[4] = cutlass.Int64(e)
+        gOut[5] = f
+        gOut[6] = cutlass.Int64(g)
+        gOutF[0] = h
+
+    @cute.jit
+    def store_scalars_kernel(
+        mOut: cute.Tensor,
+        mOutF: cute.Tensor,
+        a: cutlass.Int8,
+        b: cutlass.Int16,
+        c: cutlass.Uint8,
+        d: cutlass.Uint16,
+        e: cutlass.Uint32,
+        f: cutlass.Int64,
+        g: cutlass.Uint64,
+        h: cutlass.Float64,
+        stream: cuda.CUstream,
+    ):
+        _store_scalars_k(mOut, mOutF, a, b, c, d, e, f, g, h).launch(
+            grid=[1, 1, 1], block=[1, 1, 1], stream=stream
+        )
+
     # Reads one element, so mX can be a huge expanded tensor: out[0] = x[0].
     @cute.kernel
     def _copy_first_k(gX: cute.Tensor, gOut: cute.Tensor):
@@ -8529,6 +8571,55 @@ class CuteDSLAOTITests(TestCase):
         self.assertEqual(run_a(x), 2 * x)
         self.assertEqual(run_b(x), 5 * x + 1)
 
+    def test_aoti_user_stream_region_uses_region_stream(self):
+        # In a user stream region every launch uses the region's stream, which its
+        # aten fallbacks run on (as in torch.compile's wrapper), so the kernel stays
+        # ordered with the aten mm and the Triton kernels around it. Outside the
+        # region, the model's stream.
+        class M(torch.nn.Module):
+            def forward(self, x, w):
+                s = torch.cuda.Stream()
+                e = torch.cuda.Event()
+                with torch.cuda.stream(s):
+                    a = torch.mm(x, w)
+                    b = torch.empty_like(a)
+                    add_one_2d_w(a, b)
+                    c = torch.empty_like(a)
+                    add_one_2d_w(b * 3, c)
+                    z = c * 2
+                    e.record()
+                torch.cuda.current_stream().wait_event(e)
+                out = torch.empty_like(z)
+                add_one_2d_w(z, out)
+                return out
+
+        x, w = _rand(2048, 2048), _rand(2048, 2048)
+        pkg, code = self._package_and_code(M(), (x, w), strict=True)
+        code = _strip_comments(code)
+        # The region's stream, named as the region's entry names it (not by a local
+        # variable, which a later block could not see).
+        (aux,) = set(
+            re.findall(
+                r"_aoti_current_stream_guard = std::make_unique<[\w:]+>\((.*), "
+                r"this->device_idx_\);",
+                code,
+            )
+        )
+        calls = re.findall(r"\bcall_cutedsl_add_one_2d_kernel\w*\((.*)\);", code)
+        streams = [
+            "aux" if call.endswith(f", {aux}") else call.rsplit(", ", 1)[-1]
+            for call in calls
+        ]
+        self.assertEqual(streams, ["aux", "aux", "stream"])
+        # A Triton launch ends with the device index, stream, kernels and cubin dir.
+        calls = re.findall(r"\bcall_triton_\w+\((.*)\);", code)
+        self.assertGreaterEqual(len(calls), 2)
+        tail = f", this->device_idx_, {aux}, kernels, this->cubin_dir_"
+        self.assertTrue(all(call.endswith(tail) for call in calls), calls)
+        run = torch._inductor.aoti_load_package(pkg)
+        expected = ((x @ w + 1) * 3 + 1) * 2 + 1
+        self.assertEqual(run(x, w), expected, atol=1e-2, rtol=1e-3)
+
     def test_aoti_boolean_and_half_scalars(self):
         # A Boolean takes the truthiness of its value (x.shape[0] % 3 can be 2), as
         # in eager; a Float16 scalar compiles and is converted from double.
@@ -8550,6 +8641,145 @@ class CuteDSLAOTITests(TestCase):
             a, b = run(x)
             self.assertEqual(a, (3 if size % 3 else 5) * x)
             self.assertEqual(b, x + 0.5)
+
+    def test_aoti_integer_and_float64_scalars(self):
+        # Every integer type export_to_c takes, at the ends of its range (Uint64
+        # past 2**63), and a Float64 that a float would round. The launch refuses a
+        # symbolic Int8 outside int8_t instead of truncating it.
+        w = wrap_cutedsl(store_scalars_kernel, mutates_args=["mOut", "mOutF"])
+        h = 1 + 2**-30
+        static = [-(2**15), 2**8 - 1, 2**16 - 1, 2**32 - 1, -(2**63), 2**63 + 5]
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                out = torch.empty(7, dtype=torch.int64, device=x.device)
+                outf = torch.empty(1, dtype=torch.float64, device=x.device)
+                w(out, outf, x.shape[0] - 1129, *static, h)
+                return out, outf
+
+        dims = {"x": {0: torch.export.Dim("n", min=2, max=4096)}}
+        pkg, code = self._package_and_code(M(), (_rand(1001),), dynamic_shapes=dims)
+        c_types = ("int8_t", "int16_t", "uint8_t", "uint16_t", "uint32_t")
+        for name, ctype in zip("abcde", c_types):
+            FileCheck().check(f"scalar {name} does not fit in {ctype}").run(code)
+        self.assertNotIn("scalar f does not fit", code)
+        self.assertNotIn("scalar g does not fit", code)
+        run = torch._inductor.aoti_load_package(pkg)
+        for size in (1001, 1256):  # a = -128, 127
+            out, outf = run(_rand(size))
+            self.assertEqual(out.tolist(), [size - 1129, *static[:5], -(2**63) + 5])
+            self.assertEqual(outf.item(), h, atol=0, rtol=0)
+        for size in (1000, 1257):  # a = -129, 128
+            with self.assertRaisesRegex(RuntimeError, "a does not fit in int8_t"):
+                run(_rand(size))
+
+    def test_aoti_float_for_integer_and_boolean_scalars(self):
+        # A float for an integer or Boolean parameter is converted as the DSL
+        # converts it in eager: truncated toward zero, or its truthiness (0.5 is
+        # true). A static one when compiling; a symbolic one at launch, by its C++
+        # type, which passes SymInt bitwise ops and a symbolic bool as they are. A
+        # symbolic float that int64_t (uint64_t for a Uint64) cannot hold is refused
+        # at launch. AOTInductor and the JIT cpp_wrapper alike.
+        sel = wrap_cutedsl(select_bool_kernel, mutates_args=["mOut"])
+        store = wrap_cutedsl(store_scalars_kernel, mutates_args=["mOut", "mOutF"])
+
+        def fn(x):
+            n = x.shape[0]
+            flags = [torch.empty_like(x) for _ in range(3)]
+            for out, flag in zip(flags, (0.5, n > 1000, (n - 1000) / 2000)):
+                sel(x, out, x.numel(), flag)
+            ints = [x.new_empty(7, dtype=torch.int64) for _ in range(2)]
+            floats = [x.new_empty(1, dtype=torch.float64) for _ in range(2)]
+            store(ints[0], floats[0], -2.5, 2.9, 3.5, 4.5, 5.5, -6.5, 7.5, 0.25)
+            # Parameter f is beyond int64 from n = 1100, g is negative below n = 500.
+            symbolic = (-n / 8, n & 7, n / 400, n | 1, n * 1.5, n // 1100 * 1e19)
+            store(ints[1], floats[1], *symbolic, (n - 500) / 3, n / 3)
+            return *flags, *ints, *floats
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return fn(x)
+
+        dims = {"x": {0: torch.export.Dim("n", min=2, max=4096)}}
+        aoti = torch._inductor.aoti_load_package(
+            self._package(M(), (_rand(1000),), dynamic_shapes=dims)
+        )
+        torch._dynamo.reset()
+        jit = torch.compile(fn, dynamic=True, fullgraph=True)
+        with inductor_config.patch(cpp_wrapper=True):
+            for run in (aoti, jit):
+                for size, ints in (
+                    (1000, [-125, 0, 2, 1001, 1500, 0, 166]),
+                    (1001, [-125, 1, 2, 1001, 1501, 0, 167]),
+                ):
+                    x = _rand(size)
+                    result = tuple(run(x))
+                    self.assertEqual(result, fn(x))
+                    k = 3 if size > 1000 else 5
+                    self.assertEqual(result[:3], (3 * x, k * x, k * x))
+                    self.assertEqual(result[3].tolist(), [-2, 2, 3, 4, 5, -6, 7])
+                    self.assertEqual(result[4].tolist(), ints)
+                for size, msg in (
+                    (400, "scalar g does not fit in uint64_t"),
+                    (1100, "scalar f does not fit in int64_t"),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, msg):
+                        run(_rand(size))
+
+    def test_aoti_static_scalar_out_of_range(self):
+        # A static value its integer parameter cannot hold is refused when
+        # compiling, naming the kernel and the parameter, where eager wraps it (or
+        # raises, for NaN and infinity).
+        store = wrap_cutedsl(store_scalars_kernel, mutates_args=["mOut", "mOutF"])
+
+        class M(torch.nn.Module):
+            def __init__(self, scalars):
+                super().__init__()
+                self.scalars = scalars
+
+            def forward(self, x):
+                out = torch.empty(7, dtype=torch.int64, device=x.device)
+                outf = torch.empty(1, dtype=torch.float64, device=x.device)
+                store(out, outf, *self.scalars)
+                return out
+
+        for name, value, ctype in (
+            ("a", float("inf"), "int8_t"),
+            ("b", float("nan"), "int16_t"),
+            ("c", 256.5, "uint8_t"),
+            ("f", 1e20, "int64_t"),
+            ("g", -1.5, "uint64_t"),
+            ("g", 2**64, "uint64_t"),
+        ):
+            scalars = [1, 2, 3, 4, 5, 6, 7, 0.5]
+            scalars["abcdefg".index(name)] = value
+            msg = f"store_scalars_kernel: {value} for '{name}' does not fit in {ctype}"
+            with self.subTest(name=name, value=value):
+                with self.assertRaisesRegex(Exception, re.escape(msg)):
+                    self._package(M(scalars), (_rand(8),))
+
+    def test_aoti_static_int_for_float_scalar(self):
+        # A static int for a float parameter is converted to a float when compiling,
+        # as eager converts it, even one that int64 cannot hold. AOTInductor and the
+        # JIT cpp_wrapper alike.
+        def fn(x, y):
+            s, d = torch.empty_like(x), torch.empty_like(x)
+            add_sub_w(x, y, s, d, x.numel(), scale=2**64)
+            return s, d
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return fn(x, y)
+
+        x, y = _rand(1000), _rand(1000)
+        expected = fn(x, y)
+        self.assertEqual(expected, ((x + y) * 2.0**64, (x - y) * 2.0**64))
+        aoti = torch._inductor.aoti_load_package(self._package(M(), (x, y)))
+        torch._dynamo.reset()
+        jit = torch.compile(fn, fullgraph=True)
+        with inductor_config.patch(cpp_wrapper=True):
+            for run in (aoti, jit):
+                self.assertEqual(tuple(run(x, y)), expected)
 
     def test_aoti_dynamic_size_beyond_int32(self):
         # A dynamic size fills an int32 slot of the exported tensor struct: a larger
@@ -8932,6 +9162,31 @@ class CuteDSLAOTITests(TestCase):
         o1, o2 = runner(x, y)
         self.assertEqual(o1, x + y)
         self.assertEqual(o2, x - y)
+
+    def test_aoti_debug_printer_and_kernel_profile(self):
+        # The launch is wrapped like a Triton launch for the intermediate value
+        # printer (its tensors before and after) and like a CUDA C++ kernel's for
+        # kernel profiling (a record in a block of its own).
+        x, y = _rand(1000), _rand(1000)
+        patches = {
+            "aot_inductor.debug_intermediate_value_printer": "2",
+            "cpp.enable_kernel_profile": True,
+        }
+        with inductor_config.patch(patches):
+            pkg, code = self._package_and_code(_AddModule(), (x, y))
+        p = re.search(r"\bcall_(cutedsl_add_kernel\w*)\(", code).group(1)
+        record = f'RAIIAtenRecordFunctionHandle record_{p}_("{p}", nullptr);'
+        (
+            FileCheck()
+            .check_count(f'"before_launch - {p} - ', 3)
+            .check("{")
+            .check_next(record)
+            .check(f"call_{p}(")
+            .check_next("}")
+            .check_count(f'"after_launch - {p} - ', 3)
+            .run(code)
+        )
+        self.assertEqual(torch._inductor.aoti_load_package(pkg)(x, y), x + y)
 
     def test_aoti_launcher_parameter_names(self):
         # Parameters named like the launcher's own identifiers would be if it named
