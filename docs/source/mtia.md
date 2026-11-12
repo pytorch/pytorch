@@ -59,3 +59,13 @@ here.
     Event
     Stream
 ```
+
+## Read More
+
+```{toctree}
+:caption: torch.mtia submodules
+:maxdepth: 1
+
+torch.mtia.memory <mtia/memory>
+torch.mtia.mtia_graph <mtia/mtia_graph>
+```
