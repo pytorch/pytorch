@@ -14,10 +14,15 @@ import dataclasses
 import enum
 import functools
 import gc
+import importlib.util
 import inspect
+import io
 import logging
+import os
 import re
+import runpy
 import sys
+import tempfile
 import types
 import unittest
 import weakref
@@ -6380,6 +6385,84 @@ def _cutedsl_launches(code, host_name):
     return re.findall(pattern, _strip_comments(code))
 
 
+# A module of its own with a host function, out = x * cfg[0], and classes of objects
+# for cfg to hold.
+_SCALE_MODULE_SOURCE = """\
+import cuda.bindings.driver as cuda
+import cutlass
+import cutlass.cute as cute
+
+PICKLED = []  # the Cfg objects pickled
+
+
+class Cfg:
+    def __init__(self, alpha):
+        self.alpha = alpha
+
+    def __copy__(self):  # else copy.copy, as in snapshots, calls __reduce__
+        return type(self)(self.alpha)
+
+    def __reduce__(self):
+        PICKLED.append(self)
+        return type(self), (self.alpha,)
+
+
+class _FalseClass(type):
+    def __len__(cls):
+        return 0
+
+
+class FalseCfg(Cfg, metaclass=_FalseClass):  # bool(FalseCfg) is False
+    pass
+
+
+@cute.kernel
+def _scale_k(
+    gX: cute.Tensor, gOut: cute.Tensor, n: cutlass.Int32, alpha: cutlass.Constexpr
+):
+    tidx, _, _ = cute.arch.thread_idx()
+    bidx, _, _ = cute.arch.block_idx()
+    i = bidx * 128 + tidx
+    if i < n:
+        gOut[i] = gX[i] * alpha
+
+
+@cute.jit
+def scale_kernel(
+    mX: cute.Tensor,
+    mOut: cute.Tensor,
+    n: cutlass.Int32,
+    cfg: cutlass.Constexpr,
+    stream: cuda.CUstream,
+):
+    _scale_k(mX, mOut, n, cfg[0]).launch(
+        grid=[(n + 127) // 128, 1, 1], block=[128, 1, 1], stream=stream
+    )
+"""
+
+
+def _scale_module(d, name):
+    """_SCALE_MODULE_SOURCE, written to a file in directory ``d`` and executed as the
+    module ``name``."""
+    path = os.path.join(d, "scale_module.py")
+    with open(path, "w") as fh:
+        fh.write(_SCALE_MODULE_SOURCE)
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_as_script(path, code):
+    """Write ``code`` to ``path`` and run it as `python <path>` would, but as a module
+    not named __main__, so that its benchmark harness, which times 100 calls, sets
+    the global seed and resets the CUDA memory stats, stays out of the test process:
+    the caller calls its get_args() and call(). Returns its globals."""
+    with open(path, "w") as fh:
+        fh.write(code)
+    return runpy.run_path(path, run_name="cutedsl_output_code")
+
+
 @requires_cuda_and_triton
 @requires_cutedsl
 class CuteDSLInductorTests(TestCase):
@@ -6737,6 +6820,32 @@ class CuteDSLInductorTests(TestCase):
             add_sub_args,
             rf"^{tensor}, {tensor}, {buf}, {buf}, 1000, 0\.5, stream=\w+$",
         )
+
+    @inductor_config.patch({"aot_inductor.debug_intermediate_value_printer": "2"})
+    def test_cutedsl_kernel_debug_printer(self):
+        # As around a user Triton kernel's launch, the intermediate value printer
+        # prints each tensor the launch takes, before and after it.
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out.relu()
+
+        x, y = _rand(1000), _rand(1000)
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            res, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x, y)
+        self.assertEqual(res, (x + y).relu())
+        ((name, args),) = _cutedsl_launches(code, "add_kernel")
+        tensors = args.split(", ")[:3]  # mX, mY and mOut
+        check = FileCheck()
+        for line in [
+            *(f'"inductor: before_launch - {name} - {t}", {t})' for t in tensors),
+            f"{name}.run(",
+            *(f'"inductor: after_launch - {name} - {t}", {t})' for t in tensors),
+        ]:
+            check.check(line)
+        check.run(code)
+        printed = stdout.getvalue()
+        self.assertIn(f"inductor: after_launch - {name} - {tensors[2]}\n", printed)
 
     def test_cutedsl_kernel_toy_raw_call(self):
         # The toy through Inductor: one launch of the captured raw call, from the
@@ -7251,6 +7360,78 @@ class CuteDSLInductorTests(TestCase):
         self.assertEqual(len(messages), 1, messages)
         self.assertRegex(messages[0], r"^add_kernel \[cutedsl\] compiled in ")
 
+    def test_cutedsl_kernel_launch_profiler_record(self):
+        # While the profiler runs, a launch is a record function named after its
+        # launcher, as a user Triton kernel's launch is named after the kernel; an
+        # eager launch's is named after the host function. Otherwise, no record.
+        from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out.relu()
+
+        x, y = _rand(1000), _rand(1000)
+        cf = torch.compile(f, fullgraph=True)
+        _, (code,) = run_and_get_code(cf, x, y)
+        ((name, _),) = _cutedsl_launches(code, "add_kernel")
+        out = torch.empty_like(x)
+        with mock.patch.object(torch._C._profiler, "_RecordFunctionFast") as record:
+            cf(x, y)
+            launch_cutedsl_kernel(add_kernel, _add_kwargs(x, y, out))
+        record.assert_not_called()
+        with torch.profiler.profile() as prof:
+            self.assertEqual(cf(x, y), (x + y).relu())
+            launch_cutedsl_kernel(add_kernel, _add_kwargs(x, y, out))
+        self.assertEqual(out, x + y)
+        names = [event.name for event in prof.events()]
+        self.assertEqual((names.count(name), names.count("add_kernel")), (1, 1))
+
+    def test_cutedsl_kernel_launch_profiler_kwargs(self):
+        # As CachingAutotuner.get_profiler_kwargs does for a Triton launch, a launch's
+        # record carries the backend, the kernel's name and its raw stream, which
+        # the trace exported with record_shapes shows (as test_pt2_triton_attributes
+        # checks for Inductor's Triton kernels), for the generated code's launch and
+        # an eager one. On a side stream: the default stream's raw stream is 0.
+        import json
+
+        from torch._native.cutedsl.user_kernel import launch_cutedsl_kernel
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out.relu()
+
+        x, y = _rand(1000), _rand(1000)
+        cf = torch.compile(f, fullgraph=True)
+        _, (code,) = run_and_get_code(cf, x, y)
+        ((name, _),) = _cutedsl_launches(code, "add_kernel")
+        out = torch.empty_like(x)
+        side = torch.cuda.Stream()
+        side.wait_stream(torch.cuda.current_stream())
+        with (
+            torch.profiler.profile(record_shapes=True) as prof,
+            torch.cuda.stream(side),
+        ):
+            res = cf(x, y)
+            launch_cutedsl_kernel(add_kernel, _add_kwargs(x, y, out))
+        torch.cuda.synchronize()
+        self.assertEqual((res, out), ((x + y).relu(), x + y))
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "trace.json")
+            prof.export_chrome_trace(path)
+            with open(path) as fh:
+                events = json.load(fh)["traceEvents"]
+        launches = {
+            e["name"]: e["args"]
+            for e in events
+            if e.get("args", {}).get("kernel_backend") == "cutedsl"
+        }
+        self.assertEqual(sorted(launches), sorted([name, "add_kernel"]))
+        expected = {"kernel_name": "add_kernel", "stream": side.cuda_stream}
+        for args in launches.values():
+            self.assertEqual({k: args.get(k) for k in expected}, expected)
+
     @parametrize("device", ["current", "other"])
     def test_cutedsl_kernel_launch_enters_the_device_only_if_not_current(self, device):
         # A launch makes the tensors' device current, for DLPack export and the
@@ -7342,6 +7523,36 @@ class CuteDSLInductorTests(TestCase):
         run = r"\b(cutedsl_add_kernel_\d+)\.run\("
         launched = set(re.findall(run, _strip_comments(code)))
         self.assertEqual(launched, {"cutedsl_add_kernel_0", "cutedsl_add_kernel_1"})
+
+    def test_cutedsl_kernel_module_attributes_bound_once(self):
+        # Loading the generated module binds its launchers, constants and the classes
+        # of opaque values as globals, by name: a launcher named as one of those
+        # classes is refused instead of replacing it.
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+        from torch._inductor.virtualized import V
+
+        define = PythonWrapperCodegen.define_user_defined_cutedsl_kernel
+
+        def define_as_a_class(self, *args, **kwargs):
+            name = define(self, *args, **kwargs)
+            V.graph.opaque_value_type_classes[name] = type(name, (), {})
+            return name
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            add_w(x, y, out, x.numel())
+            return out
+
+        x, y = _rand(1000), _rand(1000)
+        name = "define_user_defined_cutedsl_kernel"
+        with (
+            mock.patch.object(PythonWrapperCodegen, name, define_as_a_class),
+            self.assertRaisesRegex(
+                Exception,
+                r"module attributes bound twice: \['cutedsl_add_kernel_\d+'\]",
+            ),
+        ):
+            torch.compile(f, fullgraph=True)(x, y)
 
     def test_cutedsl_kernel_object_that_sets_attributes(self):
         # Generated code binds the side table's own snapshots, and compiling a kernel
@@ -7466,6 +7677,100 @@ class CuteDSLInductorTests(TestCase):
         self.assertIn(".cfg_scale_kernel, ", header)
         self.assertIn("with constants {cfg: Cfg}", header)
         self.assertNotIn("alpha=", code)
+
+    @parametrize("constant", ["plain_data", "object", "object_of_false_class"])
+    def test_cutedsl_kernel_output_code_as_script(self, constant):
+        # Run as a script (`python <output_code>.py`, e.g. a TORCH_COMPILE_DEBUG or
+        # tlparse artifact), the generated module is not loaded with its launchers:
+        # get_args() rebuilds each one whose constants are plain data, importing the
+        # host function by module and qualname and unpickling the constants.
+        # Pickling an object could run user code (Cfg.__reduce__ records each call)
+        # and would write the object, and any tensor it holds, into the module: with
+        # one, of a class that is false or not, compiling pickles nothing and the run
+        # fails instead, naming the launcher and the constant.
+        with tempfile.TemporaryDirectory() as d:
+            module = _scale_module(d, "cutedsl_test_scale_module")
+            sys.modules[module.__name__] = module
+            self.addCleanup(sys.modules.pop, module.__name__)
+            w = wrap_cutedsl(module.scale_kernel, mutates_args=["mOut"])
+            if constant == "plain_data":
+                extra = {"tile": (128, None), "tags": frozenset("ab"), "raw": b"x"}
+                cfg = (cutlass.Float32(3.0), extra)
+            elif constant == "object":
+                cfg = (3.0, module.Cfg(5.0))
+            else:
+                cfg = (3.0, module.FalseCfg(5.0))
+
+            def f(x):
+                out = torch.empty_like(x)
+                w(x, out, x.numel(), cfg)
+                return out
+
+            x = _rand(1000)
+            res, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), x)
+            self.assertEqual(res, 3 * x)
+            path = os.path.join(d, "output_code.py")
+            if constant == "plain_data":
+                ((name, _),) = _cutedsl_launches(code, "scale_kernel")
+                script = _load_as_script(path, code)
+                (x,) = script["get_args"]()
+                # Rebuilt among the globals call() reads, the launcher keeps its name,
+                # which names its profiler record.
+                self.assertEqual(script["call"].__globals__[name].name, name)
+                (out,) = script["call"]([x])
+                self.assertEqual(out, 3 * x)
+            else:
+                self.assertEqual(module.PICKLED, [])
+                self.assertNotIn("pickle.loads", code)
+                held = type(cfg[1]).__name__
+                msg = (
+                    "a run of this module as a script cannot rebuild the launcher of "
+                    f"this CuTeDSL kernel (its constant 'cfg' is or holds a {held}); "
+                    "its host function must be importable by module and qualname, not "
+                    "defined in __main__ or inside a function, and its constants plain "
+                    "data: None, bool, int, float, str, bytes, cutlass Numeric values, "
+                    "and tuples, lists, dicts and frozensets of these"
+                )
+                pattern = rf"^cutedsl_scale_kernel_\d+: {re.escape(msg)}$"
+                script = _load_as_script(path, code)
+                with self.assertRaisesRegex(RuntimeError, pattern):
+                    script["get_args"]()
+
+    def test_cutedsl_kernel_output_code_as_script_host_fn_in_main(self):
+        # A host function of the compiling script cannot be imported by a run of the
+        # generated module as a script, whose __main__ is that module: the run fails,
+        # naming the launcher. The compiling process, which calls get_args() itself
+        # under profile_bandwidth_output, keeps the launcher it loaded the module with.
+        with tempfile.TemporaryDirectory() as d:
+            main = _scale_module(d, "__main__")
+            w = wrap_cutedsl(main.scale_kernel, mutates_args=["mOut"])
+            cfg = (3.0,)
+
+            def f(x):
+                out = torch.empty_like(x)
+                w(x, out, x.numel(), cfg)
+                return out
+
+            x = _rand(1000)
+            cf = torch.compile(f, fullgraph=True)
+            bandwidth_output = os.path.join(d, "bandwidth.txt")
+            real_main = sys.modules["__main__"]
+            sys.modules["__main__"] = main  # as when the script itself runs
+            try:
+                with inductor_config.patch(profile_bandwidth_output=bandwidth_output):
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        res, (code,) = run_and_get_code(cf, x)
+            finally:
+                sys.modules["__main__"] = real_main
+            self.assertEqual(res, 3 * x)
+            script = _load_as_script(os.path.join(d, "output_code.py"), code)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"cutedsl_scale_kernel_\d+: a run of this module as a script cannot "
+                r"rebuild the launcher of this CuTeDSL kernel \(PicklingError: "
+                r"scale_kernel is defined in __main__\)",
+            ):
+                script["get_args"]()
 
     def test_cutedsl_kernel_dynamic_shapes(self):
         # One dynamic graph serves every size, but each launcher compiles its host
