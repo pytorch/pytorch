@@ -30,7 +30,7 @@ namespace {
 
     // Only 8.x devices are supported at runtime (is_sm8x), so only 8.x code
     // is reachable.
-    constexpr bool kBuiltForSm8x = at::cuda::detail::cuda_arch_list_has_major(8);
+    constexpr bool kBuiltForSm8x = at::cuda::detail::cuda_arch_list_has(800, 900);
 }
 #endif
 

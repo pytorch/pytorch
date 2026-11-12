@@ -12,6 +12,7 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 
+#include <c10/util/irange.h>
 #include <algorithm>
 #include <string>
 
@@ -1063,7 +1064,7 @@ DEFINE_CACHED_PYTHON_IMPORT(
 std::function<py::object(py::object)> make_fake_device_stamp(
     const c10::OperatorHandle& op,
     c10::Device common_device,
-    std::shared_ptr<c10::FakeTensorMode> mode) {
+    std::shared_ptr<c10::FakeTensorModeHandle> mode) {
   return [&op, common_device, mode = std::move(mode)](
              py::object obj) -> py::object {
     if (!THPVariable_Check(obj.ptr())) {
@@ -1081,8 +1082,7 @@ std::function<py::object(py::object)> make_fake_device_stamp(
         t.device(),
         " tensor; handlers must return Meta or fake tensors, see "
         "Note [C++ fake op_impl outputs]");
-    at::set_and_normalize_fake_device(t.unsafeGetTensorImpl(), common_device);
-    t.unsafeGetTensorImpl()->set_fake_tensor_mode(mode);
+    at::init_cpp_fake(t.unsafeGetTensorImpl(), common_device, mode);
     return obj;
   };
 }
@@ -1099,7 +1099,7 @@ py::object apply_output_convert(
   if (py::isinstance<py::tuple>(result)) {
     py::tuple tup = result.cast<py::tuple>();
     py::tuple converted(tup.size());
-    for (size_t i = 0; i < tup.size(); i++) {
+    for (const auto i : c10::irange(tup.size())) {
       converted[i] = convert(py::reinterpret_borrow<py::object>(tup[i]));
     }
     return converted;
@@ -1182,7 +1182,7 @@ bool run_fake_python_callback(
 // The active FakeTensorMode and the CppFakeTensorMode Python object that
 // op-impl callbacks are invoked against.
 struct ActiveFakeMode {
-  std::shared_ptr<c10::FakeTensorMode> mode;
+  std::shared_ptr<c10::FakeTensorModeHandle> mode;
   py::object py_fake_mode;
 };
 
@@ -1422,12 +1422,17 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
   at::Tensor real(real_impl);
   auto active = get_active_fake_mode();
   auto converter = py::reinterpret_borrow<py::object>(
-      active.mode->fake_tensor_converter_->ptr(getPyInterpreter()));
+      active.mode->mode->fake_tensor_converter_->ptr(getPyInterpreter()));
 
   at::Tensor fake_tensor;
   {
     // Exclude Fake so from_real_tensor's meta conversion doesn't re-enter the
-    // fake fallback (the meta factory ops it runs are otherwise plain).
+    // fake fallback (the meta factory ops it runs are otherwise plain). With
+    // allow_non_fake_inputs this also re-fakeifies fakes from another mode; the
+    // describer then reads the source's fake device, which Fake exclusion no
+    // longer hides (see Note [C++ in_kernel_invocation]). from_real_tensor
+    // must only query the source's metadata and build outputs with an explicit
+    // meta device.
     c10::impl::ExcludeDispatchKeyGuard exclude_fake(
         {c10::DispatchKeySet(c10::DispatchKey::Fake)});
     auto obj = converter.attr("from_real_tensor")(active.py_fake_mode, real);
@@ -1443,9 +1448,9 @@ bool ConcretePyInterpreterVTable::allow_non_fake_inputs() const {
   if (!override_val.is_none()) {
     return override_val.cast<bool>();
   }
-  auto mode = c10::impl::FakeTensorModeTLS::get_state();
-  TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
-  return mode->allow_non_fake_inputs_;
+  auto handle = c10::impl::FakeTensorModeTLS::get_state();
+  TORCH_CHECK(handle != nullptr, "FakeTensorMode must be active");
+  return handle->mode->allow_non_fake_inputs_;
 }
 
 PyObject* ConcretePyInterpreterVTable::fake_run_real_op(
