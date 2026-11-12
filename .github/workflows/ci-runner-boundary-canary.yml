@@ -1,6 +1,6 @@
 # Owner(s): ["module: ci"]
-# AI-assisted, temporary contributor-boundary validation. No persistent changes.
-name: CI runner boundary canary
+# AI-assisted temporary diagnostic. Kubernetes Pod requests are server-side dry-run only.
+name: CI runner admission canary
 
 on:
   pull_request:
@@ -12,14 +12,18 @@ permissions: {}
 jobs:
   probe:
     if: github.repository == 'pytorch/pytorch'
-    runs-on: mt-l-x86iavx512-8-64
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [mt-l-x86iavx512-8-64, lf-l-x86iavx512-8-64]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 5
     container:
       image: python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
       volumes:
         - /var/run/secrets/kubernetes.io/serviceaccount:/audit-source:ro
     steps:
-      - name: Check boundary without disclosing credentials
+      - name: Check authorization and dry-run admission without disclosing credentials
         env:
           CANARY_CHECK_API: "true"
         shell: sh
@@ -33,6 +37,7 @@ jobs:
           from pathlib import Path
           import ssl
           import urllib.error
+          import urllib.parse
           import urllib.request
 
 
@@ -41,11 +46,79 @@ jobs:
           EXPECTED_SUBJECT = "system:serviceaccount:arc-runners:arc-runner"
           API = "https://kubernetes.default.svc/apis/authorization.k8s.io/v1/selfsubjectaccessreviews"
           MAX_RESPONSE = 65536
+          POD_API = "https://kubernetes.default.svc/api/v1/namespaces/arc-runners/pods?dryRun=All"
+          POD_IMAGE = "python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b"
 
 
           class NoRedirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self, req, fp, code, msg, headers, newurl):
                   return None
+
+
+          def validate_dry_run_url(url):
+              parsed = urllib.parse.urlsplit(url)
+              if not (
+                  parsed.scheme == "https"
+                  and parsed.netloc == "kubernetes.default.svc"
+                  and parsed.path == "/api/v1/namespaces/arc-runners/pods"
+                  and urllib.parse.parse_qsl(parsed.query, keep_blank_values=True) == [("dryRun", "All")]
+                  and not parsed.fragment
+              ):
+                  raise ValueError("refusing non-dry-run or out-of-scope request")
+
+
+          def proposed_pod():
+              return {
+                  "apiVersion": "v1",
+                  "kind": "Pod",
+                  "metadata": {
+                      "generateName": "ci-security-admission-canary-",
+                      "namespace": "arc-runners",
+                  },
+                  "spec": {
+                      "serviceAccountName": "arc-workflow",
+                      "automountServiceAccountToken": False,
+                      "restartPolicy": "Never",
+                      "activeDeadlineSeconds": 30,
+                      "terminationGracePeriodSeconds": 0,
+                      "hostPID": True,
+                      "containers": [{
+                          "name": "probe",
+                          "image": POD_IMAGE,
+                          "imagePullPolicy": "IfNotPresent",
+                          "command": ["/bin/true"],
+                          "securityContext": {"privileged": True, "readOnlyRootFilesystem": True},
+                          "resources": {
+                              "requests": {"cpu": "10m", "memory": "32Mi"},
+                              "limits": {"cpu": "100m", "memory": "64Mi"},
+                          },
+                          "volumeMounts": [{"name": "host-root", "mountPath": "/audit-host", "readOnly": True}],
+                      }],
+                      "volumes": [{"name": "host-root", "hostPath": {"path": "/", "type": "Directory"}}],
+                  },
+              }
+
+
+          def admitted_spec_preserved(pod):
+              spec = pod.get("spec", {})
+              containers = spec.get("containers", [])
+              probe = next((c for c in containers if c.get("name") == "probe"), {})
+              mount = next((m for m in probe.get("volumeMounts", []) if m.get("name") == "host-root"), {})
+              volume = next((v for v in spec.get("volumes", []) if v.get("name") == "host-root"), {})
+              return (
+                  pod.get("kind") == "Pod"
+                  and pod.get("metadata", {}).get("namespace") == "arc-runners"
+                  and spec.get("serviceAccountName") == "arc-workflow"
+                  and spec.get("automountServiceAccountToken") is False
+                  and spec.get("hostPID") is True
+                  and probe.get("image") == POD_IMAGE
+                  and probe.get("command") == ["/bin/true"]
+                  and probe.get("securityContext", {}).get("privileged") is True
+                  and mount.get("mountPath") == "/audit-host"
+                  and mount.get("readOnly") is True
+                  and volume.get("hostPath", {}).get("path") == "/"
+                  and volume.get("hostPath", {}).get("type") == "Directory"
+              )
 
 
           def main():
@@ -64,6 +137,9 @@ jobs:
                   "pods_exec_allowed": False,
                   "pods_create_decision_received": False,
                   "pods_create_allowed": False,
+                  "pod_dry_run_response_received": False,
+                  "pod_dry_run_create_succeeded": False,
+                  "privileged_host_pod_dry_run_allowed": False,
                   "probe_error": False,
               }
               try:
@@ -131,6 +207,29 @@ jobs:
                           result["api_reachable"] = True
                       except (urllib.error.URLError, TimeoutError, ValueError, OSError):
                           pass
+
+                  # dryRun=All performs the real create authorization/admission path without
+                  # storing or scheduling a Pod. Never retry this through a non-dry-run URL.
+                  validate_dry_run_url(POD_API)
+                  request = urllib.request.Request(
+                      POD_API,
+                      data=json.dumps(proposed_pod()).encode(),
+                      method="POST",
+                      headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+                  )
+                  try:
+                      with opener.open(request, timeout=10) as response:
+                          result["api_reachable"] = True
+                          result["pod_dry_run_response_received"] = True
+                          raw = response.read(MAX_RESPONSE + 1)
+                          if response.status == 201 and len(raw) <= MAX_RESPONSE:
+                              result["pod_dry_run_create_succeeded"] = True
+                              result["privileged_host_pod_dry_run_allowed"] = admitted_spec_preserved(json.loads(raw))
+                  except urllib.error.HTTPError:
+                      result["api_reachable"] = True
+                      result["pod_dry_run_response_received"] = True
+                  except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+                      pass
               except Exception:
                   # Do not turn malformed data or an unexpected runtime error into a
                   # traceback that could expose input or response content in public logs.
