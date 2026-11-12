@@ -340,7 +340,7 @@ jobs:
         run: |
           bash .github/scripts/rocm_gpu_partition.sh --with-monitor || true
           free -m || true
-          docker exec "${CONTAINER_NAME}" ps -eo pid,etime,rss,comm --sort=-rss | head -30 || true
+          [[ -z "${CONTAINER_NAME:-}" ]] || docker exec "${CONTAINER_NAME}" ps -eo pid,etime,rss,comm --sort=-rss | head -30 || true
 
       - name: Stop monitoring script
         if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}

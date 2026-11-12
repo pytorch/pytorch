@@ -52,11 +52,20 @@ for name in "${devs[@]}"; do
   done
 
   holders=""
-  smi_note="amd-smi: unavailable"
-  smi_unknown="amd-smi unavailable"
+  smi_note="amd-smi: not installed"
+  smi_unknown="amd-smi not installed"
   idx=""
   if [[ -n "${gpu_id}" && "${gpu_id}" != 0 ]]; then
     idx=$(awk -v id="${gpu_id}" '/^GPU:/ {gpu = $2} $1 == "KFD_ID:" && $2 == id {print gpu; exit}' <<<"${smi_list}")
+  fi
+  if command -v amd-smi >/dev/null; then
+    if [[ -z "${idx}" ]]; then
+      smi_note="amd-smi: no GPU index found for this node"
+      smi_unknown="${smi_note}"
+    elif [[ -z "${proc_ok}" ]]; then
+      smi_note="amd-smi: process query failed or timed out"
+      smi_unknown="${smi_note}"
+    fi
   fi
   if [[ -n "${idx}" && -n "${proc_ok}" ]]; then
     smi_note="amd-smi: no process listed in this pod"

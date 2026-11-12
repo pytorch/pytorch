@@ -152,6 +152,7 @@ jobs:
       - name: Job pod GPU diagnostics
         if: always()
         shell: bash
+        timeout-minutes: 5
         env:
           MATRIX_RUNNER: ${{ matrix.runner }}
         run: |
