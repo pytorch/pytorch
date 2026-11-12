@@ -4,7 +4,7 @@
 
 import itertools
 from contextlib import contextmanager
-from unittest import skipIf as skipif, SkipTest
+from unittest import skip, skipIf as skipif, SkipTest
 
 
 try:
@@ -31,6 +31,7 @@ from torch._numpy import (  # noqa: F401
 )
 from torch._numpy.testing import assert_allclose
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -202,6 +203,14 @@ class TestCompareToNumpy(TestCase):
 
     @parametrize("name", tnp._ufuncs._binary)
     @parametrize("scalar, array", itertools.product(weaks, non_weaks))
+    @decorateIf(
+        skip("ufunc(..., dtype=array.dtype)"),
+        lambda p: p["name"] in corners
+        and (
+            p["array"].dtype.name in corners[p["name"]]
+            or tnp.asarray(p["scalar"]).dtype.name in corners[p["name"]]
+        ),
+    )
     def test_compare_ufuncs(self, name, scalar, array):
         if name in corners and (
             array.dtype.name in corners[name]

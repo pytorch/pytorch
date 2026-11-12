@@ -4,7 +4,7 @@ name: Check mergeability of ghstack PR
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [gh/**/base]
+    branches-ignore: [main, 'release/**']
 
 jobs:
   ghstack-mergeability-check:
@@ -23,9 +23,12 @@ jobs:
           git fetch origin main:main
 
       - name: Wait for orig branch
+        if: startsWith(github.base_ref, 'gh/') && endsWith(github.base_ref, '/base')
         shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          BRANCH="${{ github.base_ref }}"
+          BRANCH="${BASE_REF}"
           echo "$BRANCH"
           BRANCH="${BRANCH%/base}/orig"
           echo "$BRANCH"
