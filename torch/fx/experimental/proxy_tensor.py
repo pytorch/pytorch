@@ -18,7 +18,7 @@ import typing_extensions
 from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager, ExitStack, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     Any,
     cast,
@@ -26,12 +26,13 @@ from typing import (
     Literal,
     overload,
     Protocol,
+    Self,
     TYPE_CHECKING,
     TypeAlias,
     TypeVar,
     Union,
 )
-from typing_extensions import ParamSpec, Self, TypeVarTuple, Unpack
+from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 from weakref import WeakKeyDictionary
 
 import torch
@@ -41,7 +42,11 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
 from torch._custom_class_base import CustomClassBase
-from torch._dispatch.python import enable_python_dispatcher
+from torch._dispatch.python import enable_python_dispatcher, no_python_dispatcher
+from torch._functorch.predispatch import (
+    _functorch_predispatch_functions,
+    _jvp_predispatch_functions,
+)
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     get_reconstruct_fn,
@@ -57,6 +62,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
     get_plain_tensors,
+    in_kernel_invocation_manager,
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
@@ -365,7 +371,7 @@ def set_proxy_slot(
 
             if isinstance(obj.node.expr, sympy.Symbol):
                 tracer.sympy_expr_tracker[obj.node.expr] = _SympyExprTrackerValue(
-                    proxy, obj
+                    proxy, obj, tracer.sympy_expr_tracker.get(obj.node.expr)
                 )
 
 
@@ -490,7 +496,7 @@ def get_proxy_slot(
         if obj.node.is_symbolic():
             # Last ditch - we found a SymInt (SymBool, etc) we don't know
             # about.
-            if (tmp := tracer.sympy_expr_tracker.get(obj.node.expr)) is not None:
+            if (tmp := _lookup_sympy_expr(tracer, obj.node.expr)) is not None:
                 value = tmp.proxy
 
             else:
@@ -541,19 +547,6 @@ def _get_proxies(t: torch.Tensor | TraceableWrapperSubclass) -> list[Proxy]:
     return proxies
 
 
-# sympy Max/Min are n-ary (they flatten, e.g. Max(a, Max(b, c)) -> Max(a, b, c)),
-# but torch.sym_max/sym_min are binary. Reduce so _build_proxy_for_sym_expr can
-# rebuild flattened expressions as nested binary ops. These are module-level
-# (not lambdas) so they have a qualified name and survive FX codegen/pickling
-# when used as a graph node target.
-def _nary_sym_max(*args: Any) -> Any:
-    return functools.reduce(torch.sym_max, args)
-
-
-def _nary_sym_min(*args: Any) -> Any:
-    return functools.reduce(torch.sym_min, args)
-
-
 @functools.cache
 def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     """
@@ -569,15 +562,14 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
         op = getattr(operator, v, None)
         if op is not None:
             handlers[k] = op
-        # sympy Max/Min have no operator.* equivalent. Map them to n-ary-safe
-        # wrappers over torch.sym_max/sym_min. Without this,
+        # sympy Max/Min have no operator.* equivalent. Without these,
         # _build_proxy_for_sym_expr cannot rebuild expressions like Max(1, u2)
         # that escape a disable_proxy_modes_tracing region (e.g. DTensor shard
         # propagation size inference).
         elif v == "maximum":
-            handlers[k] = _nary_sym_max
+            handlers[k] = torch.sym_max
         elif v == "minimum":
-            handlers[k] = _nary_sym_min
+            handlers[k] = torch.sym_min
         # sympy.Pow / PowByNatural map to the interp name "pow_by_natural",
         # which has no operator.* equivalent. sympy canonicalizes x * x into
         # Pow(x, 2), so without this _build_proxy_for_sym_expr cannot rebuild
@@ -665,7 +657,7 @@ def _build_proxy_for_sym_expr(
       having the inputs available at all - which isn't a guarantee.
     """
 
-    if (value := tracer.sympy_expr_tracker.get(expr)) is not None:
+    if (value := _lookup_sympy_expr(tracer, expr)) is not None:
         if out:
             raise AssertionError(
                 "out should be empty when expr is in sympy_expr_tracker"
@@ -689,11 +681,12 @@ def _build_proxy_for_sym_expr(
     if not func:
         return None
 
-    # sympy Mul and Add are n-ary, but the handlers they map to (operator.mul,
-    # operator.add) take exactly two arguments, so an expression like s0*s1*s2
-    # has to be folded into a chain of binary ops. Fold rather than passing a
-    # variadic wrapper: the handler becomes the fx node's target, and that has
-    # to stay a real operator for downstream consumers.
+    # sympy Mul, Max and Min are n-ary, but the handlers they map to
+    # (operator.mul, torch.sym_max, torch.sym_min) take exactly two arguments,
+    # so an expression like s0*s1*s2 has to be folded into a chain of binary
+    # ops. Fold rather than passing a variadic wrapper: the handler becomes the
+    # fx node's target, and that has to stay a real operator for downstream
+    # consumers.
     if out is None:
         if len(args) > 2:
             return functools.reduce(func, args)
@@ -705,14 +698,49 @@ def _build_proxy_for_sym_expr(
     return out
 
 
+def _unwrap_functorch(t: Tensor) -> Tensor:
+    functorch = torch._C._functorch
+    while functorch.is_batchedtensor(t) or functorch.is_gradtrackingtensor(t):
+        t = functorch.get_unwrapped(t)
+    return t
+
+
 def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     # val.detach() will also eventually call fast_detach(),
     # but this saves us a full trip into __torch_dispatch__
     # (snapshot_fake is called a lot)
     if is_fake_tensor(val):
         return fast_detach(maybe_get_fake_mode(val), val, include_real)
-    else:
-        return val.detach()
+    # Pre-dispatch tracing inside vmap or jvp sees functorch wrappers, which
+    # have no storage and outlive their level. Record a view of the fake tensor
+    # they wrap, with the sizes, strides and storage offset the wrapper reports,
+    # so passes still see which storage it aliases. Functorch is disabled so
+    # that an outer jvp does not wrap the view again. A wrapped tensor subclass,
+    # such as DTensor, may not support that view, so it keeps its wrapper.
+    inner = _unwrap_functorch(val)
+    # The view below is built from a Python FakeTensor's fields, as fast_detach
+    # does, so a C++ fake keeps its wrapper.
+    fake = inner if isinstance(inner, FakeTensor) else None  # noqa: ISINSTANCE_FAKE_TENSOR
+    # A value whose real tensor is kept, such as a placeholder of a cond branch
+    # inside vmap under real tensor propagation, keeps its wrapper as before,
+    # which carries the real tensor. Its real view would need the real layout
+    # at each functorch level, while the view below uses the fake one.
+    if fake is not None and not (include_real and fake.real_tensor is not None):
+        # The view is made on the meta tensor inside the fake tensor, as
+        # fast_detach does, so real tensor propagation does not also run it on
+        # the real tensor, which has no storage for it when the batch is empty.
+        with torch._C._DisableFuncTorch():
+            with no_python_dispatcher(), in_kernel_invocation_manager(fake.fake_mode):
+                view = torch.ops.aten.as_strided.default(
+                    torch.ops.aten.detach.default(fake),
+                    val.shape,
+                    val.stride(),
+                    val.storage_offset(),
+                )
+            return FakeTensor(
+                fake.fake_mode, view, fake.device, dispatch_keys=fake.dispatch_keys
+            )
+    return val.detach()
 
 
 _ExtractValType: TypeAlias = (
@@ -1017,13 +1045,14 @@ def track_tensor_tree(
                 wrap_with_proxy(ee, proxy[idx], get_constant(constant, idx))  # type: ignore[index]
 
         elif isinstance(e, dict):
-            # example use case: triton_kernel_wrapper takes arguments as kwargs
+            # example use case: a user-kernel functional HOP (e.g.
+            # triton_kernel_wrapper_functional) returns its written tensors by name
 
             # In theory we could support const-prop when proxy-tensor-tracing
             # operators that returns dicts of tensors, but we have no use case
-            # for it today (since the only op we currently trace that can
-            # return a dict is triton_kernel_wrapper_functional/mutation,
-            # which does not participate in const-prop)
+            # for it today (since the only ops we currently trace that can
+            # return a dict are the user-kernel functional HOPs, which do not
+            # participate in const-prop)
             if constant is not None:
                 raise AssertionError("Expected constant to be None")
 
@@ -1618,6 +1647,23 @@ class _SymNodeDict:
 class _SympyExprTrackerValue:
     proxy: _PySymProxyType
     value: PySymType
+    prev: _SympyExprTrackerValue | None = field(default=None, repr=False, compare=False)
+
+
+def _lookup_sympy_expr(
+    tracer: _ProxyTracer, expr: sympy.Expr
+) -> _SympyExprTrackerValue | None:
+    """
+    Look up the SymNode that provides ``expr`` in ``sympy_expr_tracker``,
+    skipping SymNodes whose lazy proxy is being computed: resolving through one
+    of them would recurse back into it (e.g. sym_max(s0, 1) == s0 computed from
+    an untracked s0 on DTensor's global sizes), so fall back to the provider it
+    replaced.
+    """
+    entry = tracer.sympy_expr_tracker.get(expr)
+    while entry is not None and entry.value.node in tracer.symnodes_being_forced:
+        entry = entry.prev
+    return entry
 
 
 def _init_proxy_trackers(tracer: PythonKeyTracer | _GraphAppendingTracerEx) -> None:
@@ -1628,6 +1674,7 @@ def _init_proxy_trackers(tracer: PythonKeyTracer | _GraphAppendingTracerEx) -> N
     tracer.opaque_tracker = WeakIdKeyDictionary()
     tracer._opaque_real_obj_proxy = {}
     tracer.sympy_expr_tracker = {}
+    tracer.symnodes_being_forced = set()
     tracer._current_device_node = None
     tracer._coor_current_accelerator = None
     # Stores the torch function that was called during tracing
@@ -1650,6 +1697,7 @@ class PythonKeyTracer(Tracer):
     _opaque_real_obj_proxy: dict[int, Proxy]
     symnode_tracker: _SymNodeDict
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
+    symnodes_being_forced: set[SymNode]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     # [device-as-parameter] the single current_device() node for this graph (CooR)
     _current_device_node: Proxy | None
@@ -1833,16 +1881,13 @@ def _should_save_eager_input_vals(
     args_kwargs: tuple[tuple[Argument, ...], dict[str, Argument]] | None = None,
 ) -> bool:
     from torch._higher_order_ops.invoke_subgraph import InvokeSubgraphHOP
+    from torch._higher_order_ops.user_kernel_hop import get_user_kernel_hop_info
 
     if not callable(target):
         return False
-    if isinstance(
-        target,
-        (
-            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperFunctional,
-            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
-            InvokeSubgraphHOP,
-        ),
+    if (
+        isinstance(target, InvokeSubgraphHOP)
+        or get_user_kernel_hop_info(target) is not None
     ):
         return True
     if args_kwargs is not None and (
@@ -1961,7 +2006,7 @@ def dispatch_trace(
 
 def wrap_key(
     f: Callable[[Unpack[_Ts]], R],
-    tensors: tuple[Unpack[_Ts]],
+    tensors: tuple[*_Ts],
     tracer: _ProxyTracer,
     pre_dispatch: bool,
 ) -> Callable[_P, R]:
@@ -2124,20 +2169,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         # We need more complicated handling here because the inputs
         # to these functions are sometimes tensors or symints where
         # we need to fetch the proxies properly.
-        if func in [
-            torch._functorch.predispatch._add_batch_dim,
-            torch._functorch.predispatch._remove_batch_dim,
-            torch._functorch.predispatch._vmap_increment_nesting,
-            torch._functorch.predispatch._vmap_decrement_nesting,
-            torch._functorch.vmap.lazy_load_decompositions,
-            torch._functorch.predispatch._make_dual,
-            torch._functorch.predispatch._unpack_dual,
-            torch._functorch.predispatch._jvp_increment_nesting,
-            torch._functorch.predispatch._jvp_decrement_nesting,
-            torch._functorch.predispatch._unwrap_for_grad,
-            torch._functorch.predispatch._enter_dual_level,
-            torch._functorch.predispatch._exit_dual_level,
-        ]:
+        if func in _functorch_predispatch_functions:
             _, proxies, _ = _fetch_proxies_and_all_constant_flag(args, self.tracer)
             out_proxy = self.tracer.create_proxy(
                 "call_function",
@@ -2146,11 +2178,12 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
                 kwargs,
             )
             res = func(*args, **kwargs)
-            # When JVP transforms are active, snapshot_fake calls detach
-            # which goes through C++ functorch dispatch keys, potentially
-            # re-wrapping the result as a grad tracking tensor.
-            # Temporarily disable functorch transforms during tracking to
-            # prevent this corruption of meta["val"].
+            # Inside jvp, the detach that snapshot_fake calls on a wrapped
+            # tensor subclass goes through C++ functorch dispatch keys, which
+            # could wrap the result as a grad tracking tensor again, so the jvp
+            # calls track their results with functorch disabled. The vmap calls
+            # do not need that, and nested vmap over a wrapped subclass fails
+            # with it.
             if func in _jvp_predispatch_functions:
                 with torch._C._DisableFuncTorch():
                     track_tensor_tree(res, out_proxy, constant=None, tracer=self.tracer)
@@ -2162,37 +2195,6 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
 
 _temp_remove_pre_dispatch_torch_function_mode = _make_temp_remove_mode_context_manager(
     PreDispatchTorchFunctionMode
-)
-
-
-# JVP predispatch functions need special handling during tracing:
-# _DisableFuncTorch prevents grad tracking tensor corruption in snapshot_fake.
-_jvp_predispatch_functions = frozenset(
-    {
-        torch._functorch.predispatch._make_dual,
-        torch._functorch.predispatch._unpack_dual,
-        torch._functorch.predispatch._jvp_increment_nesting,
-        torch._functorch.predispatch._jvp_decrement_nesting,
-        torch._functorch.predispatch._unwrap_for_grad,
-        torch._functorch.predispatch._enter_dual_level,
-        torch._functorch.predispatch._exit_dual_level,
-    }
-)
-
-# These JVP predispatch wrappers manage transform nesting/level state
-# and must survive FX dead code elimination even with zero output users.
-# Registered here rather than in predispatch.py to avoid circular imports
-# (predispatch.py loads before torch.fx during torch.autograd init).
-from torch.fx.node import _side_effectful_functions
-
-
-_side_effectful_functions.update(
-    {
-        torch._functorch.predispatch._jvp_increment_nesting,
-        torch._functorch.predispatch._jvp_decrement_nesting,
-        torch._functorch.predispatch._enter_dual_level,
-        torch._functorch.predispatch._exit_dual_level,
-    }
 )
 
 
@@ -2337,28 +2339,37 @@ def _sym_register(
 def _compute_proxy(
     tracer: _ProxyTracer, func: OpOverload, args: tuple[object, ...], out: PySymType
 ) -> Proxy:
-    # Handle torch.sym_sum
-    n_args: tuple[object, ...]
-    if len(args) == 1 and isinstance(args[0], (list, tuple)):
-        n_args = (
-            tuple(
+    if out.node in tracer.symnodes_being_forced:
+        raise RuntimeError(
+            f"Cycle while computing the proxy for {out}: an untracked SymInt it "
+            "depends on was resolved to a value computed from it"
+        )
+    tracer.symnodes_being_forced.add(out.node)
+    try:
+        # Handle torch.sym_sum
+        n_args: tuple[object, ...]
+        if len(args) == 1 and isinstance(args[0], (list, tuple)):
+            n_args = (
+                tuple(
+                    (
+                        get_proxy_slot(a, tracer).force().node
+                        if isinstance(a, py_sym_types)
+                        else a
+                    )
+                    for a in args[0]
+                ),
+            )
+        else:
+            n_args = tuple(
                 (
                     get_proxy_slot(a, tracer).force().node
                     if isinstance(a, py_sym_types)
                     else a
                 )
-                for a in args[0]
-            ),
-        )
-    else:
-        n_args = tuple(
-            (
-                get_proxy_slot(a, tracer).force().node
-                if isinstance(a, py_sym_types)
-                else a
+                for a in args
             )
-            for a in args
-        )
+    finally:
+        tracer.symnodes_being_forced.discard(out.node)
 
     # func doesn't have a __torch_function__ that Proxy can interpose, so
     # we gotta do it manually
@@ -2377,6 +2388,7 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     symnode_tracker: _SymNodeDict
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
+    symnodes_being_forced: set[SymNode]
     # [device-as-parameter] the single current_device() node for this graph (CooR)
     _current_device_node: Proxy | None
     # [device-as-parameter] current accelerator for this graph, read once (None = not yet)
