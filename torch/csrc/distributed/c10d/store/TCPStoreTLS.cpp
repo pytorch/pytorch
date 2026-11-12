@@ -261,17 +261,30 @@ bool TLSSession::handshake() {
   throwError(ret, "handshake");
 }
 
-size_t TLSSession::read(void* data, size_t length) {
+std::optional<size_t> TLSSession::read(void* data, size_t length) {
   const auto& ssl = openssl();
   ssl.ERR_clear_error();
   int ret = ssl.SSL_read(ssl_, data, chunk(length));
   if (ret > 0) {
     return ret;
   }
-  if (ssl.SSL_get_error(ssl_, ret) == kSslErrorWantRead) {
+  auto error = ssl.SSL_get_error(ssl_, ret);
+  if (error == kSslErrorWantRead) {
     return 0;
   }
+  if (error == kSslErrorZeroReturn) {
+    return std::nullopt;
+  }
   throwError(ret, "read");
+}
+
+void TLSSession::shutdown() {
+  const auto& ssl = openssl();
+  ssl.ERR_clear_error();
+  int ret = ssl.SSL_shutdown(ssl_);
+  if (ret < 0) {
+    throwError(ret, "shutdown");
+  }
 }
 
 void TLSSession::write(
@@ -316,6 +329,9 @@ bool TLSSession::recvSome(int socket, std::optional<Deadline> deadline) {
   while (deadline) {
     auto remaining = std::chrono::ceil<std::chrono::milliseconds>(
         *deadline - std::chrono::steady_clock::now());
+    if (remaining <= std::chrono::milliseconds::zero()) {
+      return false;
+    }
     ::pollfd pfd{};
     pfd.fd = static_cast<decltype(pfd.fd)>(socket);
     pfd.events = POLLIN;
@@ -427,13 +443,15 @@ void TLSSession::recvBytes(int socket, void* data, size_t length) {
   auto bytes = static_cast<uint8_t*>(data);
   while (length > 0) {
     auto n = read(bytes, length);
-    if (n == 0) {
+    TORCH_CHECK_WITH(
+        DistNetworkError, n.has_value(), "TLS connection closed by peer");
+    if (*n == 0) {
       flush(socket);
       recvSome(socket);
       continue;
     }
-    bytes += n;
-    length -= n;
+    bytes += *n;
+    length -= *n;
   }
 }
 
