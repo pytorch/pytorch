@@ -111,6 +111,8 @@ class UvHandle : public c10::intrusive_ptr_target {
 
 class UvTcpSocket : public UvHandle {
   uv_tcp_t client{};
+  uv_shutdown_t shutdown_{};
+  bool shuttingDown_ = false;
   std::string address_{"unknown"};
 
   c10::intrusive_ptr<UvTcpSocket> iptr() {
@@ -203,11 +205,31 @@ class UvTcpSocket : public UvHandle {
     }
   }
 
+  // Drain queued writes before closing, and stop accepting more commands.
+  void closeAfterWrites() {
+    if (shuttingDown_ || uv_is_closing(unsafeGetHandle())) {
+      return;
+    }
+    shuttingDown_ = true;
+    uv_read_stop(unsafeGetStream());
+    int res = uv_shutdown(
+        &shutdown_, unsafeGetStream(), [](uv_shutdown_t* req, int /*status*/) {
+          borrow(req->handle)->close();
+        });
+    if (res != 0) {
+      close();
+    }
+  }
+
   uv_handle_t* unsafeGetHandle() override {
     return reinterpret_cast<uv_handle_t*>(&client);
   }
 
  protected:
+  bool isShuttingDown() const {
+    return shuttingDown_;
+  }
+
   uv_stream_t* unsafeGetStream() {
     return reinterpret_cast<uv_stream_t*>(&client);
   }
@@ -814,7 +836,7 @@ class UvClient : public UvTcpSocket {
     if (clientTLS == serverTLS) {
       return true;
     }
-    C10D_WARNING(
+    C10D_DEBUG(
         "Rejected {} client {}", clientTLS ? "TLS" : "non-TLS", address());
     std::vector<uint8_t> reply(
         kTLSProtocolVersionAlert.begin(), kTLSProtocolVersionAlert.end());
@@ -824,7 +846,7 @@ class UvClient : public UvTcpSocket {
     }
     auto wd = c10::make_intrusive<WriterPayload>(std::move(reply), iptr());
     wd->send();
-    close();
+    closeAfterWrites();
     return false;
   }
 
@@ -834,21 +856,29 @@ class UvClient : public UvTcpSocket {
     free(buf->base);
     // buf is freed, so errors must not propagate to read_callback.
     try {
+      bool eof = false;
       while (true) {
         std::unique_ptr<char, decltype(&free)> chunk(
             // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
             static_cast<char*>(malloc(ALLOC_BUFFER_SIZE)),
             &free);
         auto n = tls->read(chunk.get(), ALLOC_BUFFER_SIZE);
-        if (n == 0) {
+        if (!n || *n == 0) {
+          eof = !n;
           break;
         }
-        stream.append(uv_buf_init(chunk.release(), n));
+        stream.append(uv_buf_init(chunk.release(), *n));
       }
       flushTLS();
       parseCommands();
+      if (eof) {
+        store->clearClientWaitState(iptr());
+        tls->shutdown();
+        flushTLS();
+        closeAfterWrites();
+      }
     } catch (std::exception& ex) {
-      C10D_WARNING(
+      C10D_DEBUG(
           "Error processing TLS client {}: {}", address(), errorMessage(ex));
       try {
         // Send the alert so the client fails promptly.
@@ -856,7 +886,8 @@ class UvClient : public UvTcpSocket {
       } catch (std::exception& flushEx) {
         C10D_DEBUG("Failed to send TLS alert: {}", errorMessage(flushEx));
       }
-      close();
+      store->clearClientWaitState(iptr());
+      closeAfterWrites();
     }
   }
 
@@ -1351,6 +1382,9 @@ class UvClient : public UvTcpSocket {
   }
 
   std::vector<uint8_t> encode(std::vector<uint8_t>&& data) override {
+    if (isShuttingDown()) {
+      return {};
+    }
     if (!tls) {
       return std::move(data);
     }
@@ -1359,7 +1393,7 @@ class UvClient : public UvTcpSocket {
       tls->write(data.data(), data.size(), out);
       return out;
     } catch (std::exception& ex) {
-      C10D_WARNING(
+      C10D_DEBUG(
           "Error writing to TLS client {}: {}", address(), errorMessage(ex));
       close();
       return {};
