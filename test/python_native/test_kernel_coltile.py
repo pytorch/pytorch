@@ -645,6 +645,7 @@ class TestOrderedColRoute(TestCase):
                     self.assertIsInstance(cfg.full_tiles, bool)
                     outs = cfg.out_dtypes
                     if outs is not None:
+                        self.assertIsInstance(outs, tuple)
                         self.assertTrue(outs)
                         self.assertTrue(all(isinstance(d, torch.dtype) for d in outs))
 
@@ -1159,7 +1160,8 @@ class TestOrderedColDevice(TestCase):
 
     @parametrize(
         "op,dtype,rows,cols,warps,width,off,split,full,used,tiles",
-        # tiles is the compiled full_tiles: ragged R (129, 32769) keeps its clamps.
+        # tiles is the compiled full_tiles: False where full is off, the looped plan is
+        # inexact (R = 129), or the split is ragged (R = 32769).
         [
             ("sum", torch.float32, 128, 132, 8, 16, 4, False, True, 1, True),
             ("argmax", torch.float32, 32769, 33, 8, 8, 4, True, True, 8, False),
