@@ -911,6 +911,83 @@ def virtualize_exception_table(
         pass
 
 
+# Opcodes, other than conditional jumps, that CPython may leave without an
+# exception table entry even though they sit inside a protected region, so
+# being uncovered does not mean the region was exited. Used for two decisions:
+# InstructionTranslatorBase.update_block_stack does not pop the block stack at
+# them, and restore_conditional_jump_exception_entries allows them in the gaps
+# whose conditional jumps it covers. Adding an opcode here affects both.
+UNCOVERED_IN_BLOCK_OPNAMES = frozenset({"NOP", "NOT_TAKEN", "JUMP_BACKWARD"})
+
+_RESTORABLE_JUMP_OPNAMES = frozenset(
+    {
+        "POP_JUMP_IF_TRUE",
+        "POP_JUMP_IF_FALSE",
+        "POP_JUMP_IF_NONE",
+        "POP_JUMP_IF_NOT_NONE",
+    }
+)
+_RESTORABLE_GAP_OPNAMES = _RESTORABLE_JUMP_OPNAMES | UNCOVERED_IN_BLOCK_OPNAMES
+
+
+def restore_conditional_jump_exception_entries(
+    instructions: list[Instruction],
+) -> None:
+    """
+    Python 3.13+ can emit a conditional jump with no exception table entry even
+    when the instructions around it are covered by the same entry (seen with
+    comprehension filters inside a `with` block). Dynamo's block stack tracking
+    treats an uncovered instruction as leaving the block. With one block on
+    the stack, it drops the live `with` and resumes after a graph break
+    without re-entering it; with nested blocks, update_block_stack raises an
+    AssertionError instead.
+
+    For each run of uncovered instructions that contains only conditional
+    jumps and UNCOVERED_IN_BLOCK_OPNAMES, and whose covered neighbors share a
+    handler target, depth, and lasti, give each conditional jump a singleton
+    entry for that handler. Must run before remove_jump_if_none, whose
+    LOAD_CONST/IS_OP/POP_JUMP_IF_TRUE replacement inherits the entry.
+
+    The entries are written into the emitted exception table by
+    compute_exception_table. Without instrumentation, none of the newly covered
+    jumps can raise: on 3.13+ POP_JUMP_IF_TRUE/FALSE consume an
+    exact bool, and the None tests and their lowering only compare identity.
+    JUMP_BACKWARD may appear in the run but stays uncovered: it can raise via
+    the eval breaker, and a `continue` in a `try` body really leaves the block.
+
+    The entries also change how Dynamo traces these jumps. Dynamo treats
+    TO_BOOL as a no-op and evaluates truthiness, including a user `__bool__`,
+    at the POP_JUMP_IF_* itself. With an entry on the jump, an exception raised
+    there is routed to the handler by exception_handler, and a graph break at
+    the jump goes through the same path as at its covered neighbors (e.g.
+    should_compile_partial_graph returns False when the handler is not the
+    innermost `with` block's). This is intended: it matches CPython, where the
+    covered TO_BOOL is what raises.
+    """
+    previous: InstructionExnTabEntry | None = None
+    gap: list[Instruction] = []
+    for inst in instructions:
+        entry = inst.exn_tab_entry
+        if entry is None:
+            gap.append(inst)
+            continue
+        if (
+            gap
+            and previous is not None
+            and previous.target is entry.target
+            and previous.depth == entry.depth
+            and previous.lasti == entry.lasti
+            and all(item.opname in _RESTORABLE_GAP_OPNAMES for item in gap)
+        ):
+            for item in gap:
+                if item.opname in _RESTORABLE_JUMP_OPNAMES:
+                    item.exn_tab_entry = InstructionExnTabEntry(
+                        item, item, entry.target, entry.depth, entry.lasti
+                    )
+        previous = entry
+        gap.clear()
+
+
 def compute_exception_table(
     instructions: list[Instruction],
 ) -> list[ExceptionTableEntry]:
@@ -1736,6 +1813,8 @@ def _cached_cleaned_instructions(
     if not safe:
         if sys.version_info < (3, 12):
             explicit_super(code, instructions)
+        if sys.version_info >= (3, 13):
+            restore_conditional_jump_exception_entries(instructions)
         remove_jump_if_none(instructions)
         if sys.version_info >= (3, 12):
             remove_binary_store_slice(instructions)
