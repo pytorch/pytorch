@@ -69,7 +69,7 @@ def pyset_check(obj: VariableTracker) -> TypeIs["SetVariable"]:
     return issubclass(obj.python_type(), set)
 
 
-def set_copy(obj: VariableTracker) -> VariableTracker:
+def set_copy(obj: "BaseSetVariable") -> "BaseSetVariable":
     """Mirrors CPython's internal `set_copy` (Objects/setobject.c).
 
     Always allocates a fresh set/frozenset with a shallow-copied items dict.
@@ -336,7 +336,7 @@ class BaseSetVariable(VariableTracker):
         # is no C fast path to mirror.
         if (
             not any(isinstance(a, (BaseSetVariable, ConstDictVariable)) for a in args)
-            and check_constant_args(args, kwargs)
+            and check_constant_args([self, *args], kwargs)
             and self.python_type() in (set, frozenset)
         ):
             py_type = self.python_type()
@@ -368,8 +368,16 @@ class BaseSetVariable(VariableTracker):
             return fast
         out_items = dict(self.items)
         for other in args:
-            other_keys = set(self._operand_keys(tx, other))
-            out_items = {k: v for k, v in out_items.items() if k in other_keys}
+            other_keys = self._operand_keys(tx, other)
+            # CPython uses the smaller set (ties: other); OrderedSet keeps self order.
+            if not pyanyset_check(self) or (
+                pyanyset_check(other) and len(other_keys) > len(out_items)
+            ):
+                other_keys, out_items = (
+                    list(out_items),
+                    dict.fromkeys(other_keys, self._default_value()),
+                )
+            out_items = {k: self._default_value() for k in other_keys if k in out_items}
         return self._new_set(out_items)
 
     def union(

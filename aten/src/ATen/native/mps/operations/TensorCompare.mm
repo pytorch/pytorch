@@ -50,7 +50,8 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
   const auto& lookup_c = test_parallel ? elements_c : test_c;
   const auto sorted = lookup_c.numel() > (test_parallel ? max_linear_scan_elements : max_linear_scan_test_elements);
   const auto lookup = sorted ? std::get<0>(lookup_c.view(-1).sort()) : lookup_c;
-  const auto lookup_size = c10::safe_conv<uint32_t>(lookup.numel(), "uint32_t");
+  const auto lookup_size =
+      c10::safe_conv<uint32_t>(lookup.numel(), test_parallel ? "elements.numel()" : "test_elements.numel()");
   const auto found = test_parallel ? elements_c.new_zeros({elements_c.numel()}, kInt) : Tensor();
   const auto suffix = (sorted ? "sorted_" : "") + scalarToMetalTypeString(common_type);
   const auto out_c = out.contiguous();
