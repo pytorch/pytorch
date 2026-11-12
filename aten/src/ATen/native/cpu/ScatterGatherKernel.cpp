@@ -906,9 +906,9 @@ std::pair<K*, V*> radix_sort_parallel(
 //   step 2: spmm reduce, parallel on M and vectorize on K
 //
 
-template <typename scalar_t, ReductionType reduce>
+template <typename scalar_t, typename index_t, ReductionType reduce>
 void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, const Tensor& src, bool include_self) {
-  const int64_t* index_data = index.const_data_ptr<int64_t>();
+  const index_t* index_data = index.const_data_ptr<index_t>();
   scalar_t* self_data = self.data_ptr<scalar_t>();
   const scalar_t* src_data = src.const_data_ptr<scalar_t>();
 
@@ -1046,10 +1046,9 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
   });
 }
 
-template <typename scalar_t>
-void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& _index, const Tensor& self) {
-  Tensor index = _index.to(ScalarType::Long);
-  const int64_t* index_data = index.const_data_ptr<int64_t>();
+template <typename scalar_t, typename index_t>
+void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& index, const Tensor& self) {
+  const index_t* index_data = index.const_data_ptr<index_t>();
   scalar_t* result_data = result.data_ptr<scalar_t>();
   const scalar_t* self_data = self.const_data_ptr<scalar_t>();
 
@@ -1088,7 +1087,9 @@ void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& _index
 void scatter_add_expanded_index_kernel(const Tensor& self, const Tensor& index, const Tensor& src) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
     ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "scatter_add_expanded_index", [&] {
-      cpu_scatter_reduce_expanded_index<scalar_t, ReductionType::SUM>(self, index, src, /*include_self*/true);
+      AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "scatter_add_expanded_index_index", [&] {
+        cpu_scatter_reduce_expanded_index<scalar_t, index_t, ReductionType::SUM>(self, index, src, /*include_self*/true);
+      });
   });
 }
 
@@ -1097,8 +1098,10 @@ void scatter_reduce_expanded_index_kernel(
     const ReductionType& reduction, bool include_self) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
     ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "scatter_reduce_expanded_index", [&] {
-    AT_DISPATCH_REDUCTION_TYPES(reduction, [&]() {
-      cpu_scatter_reduce_expanded_index<scalar_t, reduce>(self, index, src, include_self);
+    AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "scatter_reduce_expanded_index_index", [&] {
+      AT_DISPATCH_REDUCTION_TYPES(reduction, [&]() {
+        cpu_scatter_reduce_expanded_index<scalar_t, index_t, reduce>(self, index, src, include_self);
+      });
     });
   });
 }
@@ -1106,7 +1109,9 @@ void scatter_reduce_expanded_index_kernel(
 void gather_expanded_index_kernel(const Tensor& result, const Tensor& self, const Tensor& index) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
     ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "gather_expanded_index", [&] {
-      cpu_gather_expanded_index_kernel<scalar_t>(result, index, self);
+      AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "gather_expanded_index_index", [&] {
+        cpu_gather_expanded_index_kernel<scalar_t, index_t>(result, index, self);
+      });
   });
 }
 
