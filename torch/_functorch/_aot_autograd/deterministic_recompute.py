@@ -32,6 +32,7 @@ import torch
 from torch._functorch import config
 from torch._inductor.fx_utils import get_mutated_input_nodes, get_node_storage
 from torch.fx.experimental.symbolic_shapes import free_symbols, free_unbacked_symbols
+from torch.fx.passes.reinplace import _is_view_op
 
 
 log = logging.getLogger(__name__)
@@ -162,10 +163,16 @@ def _recomputed_copies(
 def _waits() -> tuple[Any, ...]:
     if not torch.distributed.is_available():
         return ()
-    return (
-        torch.ops._c10d_functional.wait_tensor.default,
-        torch.ops._c10d_functional.wait_tensors.default,
-    )
+    return (torch.ops._c10d_functional.wait_tensor.default,)
+
+
+def _is_view(target: Any) -> bool:
+    # _unsafe_view is a view whose schema doesn't say so. A collective's wait
+    # counts as a view too: it has no kernel, and Inductor lowers it to return
+    # its input's buffer (although wait_tensor's fake output has fresh storage),
+    # so a piece returning it would return its own input.
+    unsafe_view = torch.ops.aten._unsafe_view.default
+    return _is_view_op(target) or target in (unsafe_view, *_waits())
 
 
 # Ops that end the use of their tensors' storage without a write in their
@@ -286,13 +293,12 @@ def _share_region(
 
     # Slice inputs: values the slice reads from outside it, in first-seen order
     # for a stable signature.
-    s_inputs: list[torch.fx.Node] = []
-    seen: set[torch.fx.Node] = set()
-    for n in s_nodes:
-        for inp in n.all_input_nodes:
-            if inp not in s_set and inp not in seen:
-                seen.add(inp)
-                s_inputs.append(inp)
+    def _inputs(nodes: list[torch.fx.Node]) -> list[torch.fx.Node]:
+        inside = set(nodes)
+        inputs = (a for n in nodes for a in n.all_input_nodes if a not in inside)
+        return list(dict.fromkeys(inputs))
+
+    s_inputs = _inputs(s_nodes)
 
     # Left as partitioned for now: a multi-output op; a scalar (e.g. a SymInt
     # size) or a graph attribute (e.g. a tensor constant), which can't be an
@@ -306,25 +312,53 @@ def _share_region(
             return _skip(f"{n.name} is a scalar or a graph attribute")
         if free_unbacked_symbols(val):
             return _skip(f"{n.name} carries an unbacked symbol")
-    if unbound := _unbound_symbols(s_inputs, s_nodes):
-        names = ", ".join(sorted(map(str, unbound)))
-        return _skip(f"no input binds the symbols its sizes use ({names})")
 
     # Inductor treats invoke_subgraph outputs as fresh buffers and may reuse one
     # in place, so the slice must not return a view of one of its inputs (e.g.
     # w.t() of a weight, which would be overwritten with a gradient) or of
-    # another of its outputs. Views aren't handled yet: a piece with one is left
-    # as partitioned.
+    # another of its outputs. Views are free, so they stay inline in both graphs
+    # (and are copied into the slice for its own consumers) instead of being
+    # returned. A view of values from outside the slice stays inline even when
+    # its storage doesn't show it (e.g. a collective's wait, see _is_view).
     seen_storages = {get_node_storage(n) for n in s_inputs} - {None}
+    inline: set[torch.fx.Node] = set()
     for n in s_nodes:
         storage = get_node_storage(n)
-        # (A collective's wait has no kernel: Inductor lowers it to return its
-        # input's buffer, although wait_tensor's fake output has fresh storage.)
-        if storage in seen_storages or n.target in _waits():
-            return _skip(f"{n.name} aliases a value")
+        of_outside = all(a not in s_set or a in inline for a in n.all_input_nodes)
+        if storage in seen_storages or (_is_view(n.target) and of_outside):
+            if not _is_view(n.target):
+                return _skip(f"{n.name} aliases a value but isn't a view op")
+            inline.add(n)
         if storage is not None:
             seen_storages.add(storage)
-    contracted_names = {n.name for n in s_nodes}
+    if len(inline) == len(s_nodes):
+        # Only views are recomputed: no kernels, nothing to drift.
+        return _skip("it recomputes only views, so there is nothing to share")
+    contracted_names = {n.name for n in s_nodes if n not in inline}
+
+    # A node is used outside the slice if a node outside it reads it, in either
+    # graph, or a live inline node does. An inline node that isn't live is dead
+    # once the slice is outlined. The slice copies only the inline nodes it
+    # reads.
+    s_names = {n.name for n in s_nodes}
+    live: set[str] = set()
+
+    def _used_outside(n: torch.fx.Node) -> bool:
+        readers = (*n.users, *bw_by_name[n.name].users)
+        return any(u.name not in s_names or u.name in live for u in readers)
+
+    needed: set[torch.fx.Node] = set()
+    for n in reversed(s_nodes):
+        if n in inline and _used_outside(n):
+            live.add(n.name)
+        if n not in inline or n in needed:
+            needed.update(a for a in n.all_input_nodes if a in inline)
+    erase_names = contracted_names | ({n.name for n in inline} - live)
+    s_nodes = [n for n in s_nodes if n not in inline or n in needed]
+    s_inputs = _inputs(s_nodes)
+    if unbound := _unbound_symbols(s_inputs, s_nodes):
+        names = ", ".join(sorted(map(str, unbound)))
+        return _skip(f"no input binds the symbols its sizes use ({names})")
 
     # The backward must supply every input: primals and saved values (its
     # placeholders), or outputs of pieces shared earlier.
@@ -342,11 +376,9 @@ def _share_region(
         bw_operands.append(m)
 
     # Return only values read outside the slice, in either graph.
-    def _used_outside(n: torch.fx.Node) -> bool:
-        users = (*n.users, *bw_by_name[n.name].users)
-        return any(u.name not in contracted_names for u in users)
-
-    s_out_nodes = [n for n in s_nodes if _used_outside(n)]
+    s_out_nodes = [
+        n for n in s_nodes if n.name in contracted_names and _used_outside(n)
+    ]
 
     # Each call goes right before the first node that reads the piece (see
     # _place). The forward otherwise falls back to right after the last slice
@@ -355,7 +387,10 @@ def _share_region(
     if not s_inputs:
         return _skip("it reads no tensor input")
     last_input = max(s_inputs, key=node_index.__getitem__)
-    insert_after, fw_moved, reason = _place(s_set, s_inputs, last_input, node_index)
+    fw_replaced = {n for n in s_nodes if n not in inline}
+    insert_after, fw_moved, reason = _place(
+        fw_replaced, s_inputs, last_input, node_index
+    )
     if reason is not None:
         return _skip(reason)
 
@@ -386,7 +421,7 @@ def _share_region(
         operands=s_inputs,
         replace={n.name: n for n in s_out_nodes},
         slice_index=slice_index,
-        erase_names=contracted_names,
+        erase_names=erase_names,
         insert_after=insert_after,
         move_below=fw_moved,
     )
@@ -398,7 +433,7 @@ def _share_region(
         operands=bw_operands,
         replace={n.name: bw_by_name[n.name] for n in s_out_nodes},
         slice_index=slice_index,
-        erase_names=contracted_names,
+        erase_names=erase_names,
         insert_after=bw_insert_after,
         move_below=bw_moved,
     )
