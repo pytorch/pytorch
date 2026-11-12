@@ -186,12 +186,9 @@ class _CuteDSLConstantRules(ConstantRules):
 
 CUTEDSL_CONSTANT_RULES = _CuteDSLConstantRules()
 
-# Unlike Triton's table, torch._dynamo.reset() leaves this one alone: graphs and
-# exported programs captured before a reset keep resolving their indices. So every
-# host function recorded here stays alive for the life of the process, and with it
-# its eager compiles (see _compiled in torch/_native/cutedsl/user_kernel.py): a
-# @cute.jit function built anew for each call adds a record and a compile per call.
-# TODO: release the records that no captured graph or exported program refers to.
+# torch._dynamo.reset() clears this table, as it does Triton's (see the TODO there).
+# Until then its records keep their host functions alive; their eager compiles stay
+# in _compiled (torch/_native/cutedsl/user_kernel.py), which evicts nothing.
 cutedsl_kernel_side_table: KernelSideTable[CuteDSLKernel] = KernelSideTable(
     constant_rules=CUTEDSL_CONSTANT_RULES
 )
@@ -1214,6 +1211,10 @@ class TracingCuteDSLHOPifier(CuteDSLHOPifier):
         graphable_args, constant_args_idx = store_non_graphable_args(
             cutedsl_kernel_side_table, hop_args
         )
+        # Added again at each call (add_kernel finds the record if it is there):
+        # torch._dynamo.reset() clears the table, and a wrapper, often a module
+        # global, outlives it.
+        variable.kernel_idx = cutedsl_kernel_side_table.add_kernel(variable.record)
         return cutedsl_kernel_wrapper_mutation(
             kernel_idx=variable.kernel_idx,
             constant_args_idx=constant_args_idx,
@@ -1235,9 +1236,12 @@ class TraceableCuteDSLKernelWrapper:
     kernel: Callable[..., Any]
     mutates_args: MutatesArgs
     kernel_idx: int
+    # The record call_HOP adds to the side table again at each call (see there).
+    record: CuteDSLKernel
 
     def __init__(self, kernel: Callable[..., Any], mutates_args: object) -> None:
         tracing_cutedsl_hopifier_singleton.init_variable(self, kernel, mutates_args)
+        self.record = cutedsl_kernel_side_table.get_kernel(self.kernel_idx)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         from torch._library.triton import is_wrap_triton_enabled
