@@ -10,6 +10,7 @@ from unittest import expectedFailure
 
 import torch
 import torch.distributed as dist
+import torch.utils._pytree as pytree
 from torch.distributed._local_tensor import (
     local_tensor_mode,
     LocalTensor,
@@ -24,9 +25,11 @@ from torch.distributed.tensor._ops.utils import (
     is_tensor_shardable,
 )
 from torch.distributed.tensor._utils import (
+    _compute_local_shape_and_chunks,
     _compute_local_shape_and_global_offset,
     compute_global_tensor_info,
     compute_global_tensor_shape,
+    compute_local_shape_and_chunks,
     compute_local_shape_and_global_offset,
     compute_local_tensor_info,
     ExplicitRedistributionContext,
@@ -39,6 +42,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -53,6 +57,29 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 c10d_functional = torch.ops.c10d_functional
+
+
+@maybe_run_for_local_tensor
+def _gather_chunks(
+    full: torch.Tensor,
+    like: torch.Tensor,
+    global_offsets: Sequence[Sequence[int]],
+    local_offsets: Sequence[Sequence[int]],
+    local_sizes: Sequence[Sequence[int]],
+) -> torch.Tensor:
+    """A tensor like ``like`` filled from ``full`` chunk by chunk, -1 where no chunk lands."""
+    if sum(math.prod(size) for size in local_sizes) != like.numel():
+        raise AssertionError(
+            f"Chunks of sizes {local_sizes} don't tile shape {like.shape}"
+        )
+    out = torch.full_like(like, -1)
+    for global_offset, local_offset, size in zip(
+        global_offsets, local_offsets, local_sizes, strict=True
+    ):
+        out[tuple(slice(o, o + n) for o, n in zip(local_offset, size))] = full[
+            tuple(slice(o, o + n) for o, n in zip(global_offset, size))
+        ]
+    return out
 
 
 def SS(td, sf):
@@ -389,6 +416,202 @@ class LocalTest(TestCase):
             self.assertEqual(local_shape, (expected_shard_size, 2))
             self.assertEqual(global_offset, (expected_shard_offset, 0))
 
+    def test_compute_local_shape_and_chunks_strided_shard(self):
+        # The docstring examples: 8 rows with [_StridedShard(0, split_factor=2),
+        # Replicate()] on a 2 x 2 mesh. Rank 0 holds global rows 0, 1 at local rows
+        # 0, 1 and global rows 4, 5 at local rows 2, 3.
+        self.assertEqual(
+            _compute_local_shape_and_chunks((8, 2), (2, 2), [0, 0], [SS(0, 2), R]),
+            ((4, 2), ((0, 0), (4, 0)), ((0, 0), (2, 0)), ((2, 2), (2, 2))),
+        )
+        # With Shard(0) in place of Replicate(), rank 0 holds rows 0, 1, and its
+        # second chunk is empty.
+        self.assertEqual(
+            _compute_local_shape_and_chunks((8, 2), (2, 2), [0, 0], [SS(0, 2), S(0)]),
+            ((2, 2), ((0, 0), (4, 0)), ((0, 0), (2, 0)), ((2, 2), (0, 2))),
+        )
+        # Rank 1 holds rows 4, 5, and its first chunk is empty.
+        self.assertEqual(
+            _compute_local_shape_and_chunks((8, 2), (2, 2), [0, 1], [SS(0, 2), S(0)]),
+            ((2, 2), ((2, 0), (4, 0)), ((0, 0), (0, 0)), ((0, 2), (2, 2))),
+        )
+        # With 13 rows, the same placements on a 3 x 2 mesh leave the rank at
+        # (2, 0) holding rows 6 and 11.
+        self.assertEqual(
+            _compute_local_shape_and_chunks((13, 2), (3, 2), [2, 0], [SS(0, 2), S(0)]),
+            ((2, 2), ((6, 0), (11, 0)), ((0, 0), (1, 0)), ((1, 2), (1, 2))),
+        )
+        # 3 rows on 4 ranks leaves rank 3 with no rows, in one empty chunk.
+        self.assertEqual(
+            _compute_local_shape_and_chunks((3, 2), (4,), [3], [S(0)]),
+            ((0, 2), ((3, 0),), ((0, 0),), ((0, 2),)),
+        )
+        # A 0-dim tensor is one chunk.
+        self.assertEqual(
+            _compute_local_shape_and_chunks((), (2,), [1], [R]),
+            ((), ((),), ((),), ((),)),
+        )
+        # Along each dim, the number of chunks is the product of the split factors
+        # of the _StridedShard placements on it.
+        for global_shape, mesh_shape, placements, num_chunks in [
+            ((32, 4), (2, 2, 2), [SS(0, 4), SS(0, 2), S(0)], 8),
+            ((12, 12), (2, 2), [SS(0, 3), SS(1, 2)], 6),
+            ((24, 6), (2, 3), [S(0), SS(0, 2)], 2),
+        ]:
+            with self.subTest(placements=placements):
+                _, global_offsets, _, _ = _compute_local_shape_and_chunks(
+                    global_shape, mesh_shape, [0] * len(mesh_shape), placements
+                )
+                self.assertEqual(len(global_offsets), num_chunks)
+
+    def test_compute_local_shape_and_chunks_not_in_mesh(self):
+        class MockDeviceMesh:
+            def _is_current_rank_part_of_mesh(self):
+                return False
+
+        mesh: Any = MockDeviceMesh()
+        self.assertEqual(
+            compute_local_shape_and_chunks((8, 2), mesh, [S(0)]), ((0,), (), (), ())
+        )
+
+    def test_compute_local_shape_and_chunks_errors(self):
+        with self.assertRaisesRegex(ValueError, "greater than tensor ndim"):
+            _compute_local_shape_and_chunks((4,), (2,), [0], [S(1)])
+        # Only mesh dims that shard need a coordinate.
+        with self.assertRaisesRegex(AssertionError, "No mesh coordinate"):
+            _compute_local_shape_and_chunks((4,), (2,), [None], [S(0)])
+
+    def test_compute_local_shape_and_chunks_matches_local_data(self):
+        cases = [
+            ((6, 4), (2,), [SS(0, 3)]),
+            ((12, 5), (2,), [SS(0, 3)]),
+            ((7, 3), (2,), [SS(0, 2)]),
+            ((5, 2), (4,), [SS(0, 2)]),
+            ((3, 2), (4,), [S(0)]),
+            ((8, 2), (2, 2), [SS(0, 2), R]),
+            ((16, 2), (2, 2), [SS(0, 2), S(0)]),
+            ((10, 3), (2, 2), [SS(0, 2), S(0)]),
+            ((13, 2), (3, 2), [SS(0, 2), S(0)]),
+            ((24, 6), (2, 3), [S(0), SS(0, 2)]),
+            ((12, 12), (2, 2), [SS(0, 3), SS(1, 2)]),
+            ((8, 9), (2, 3), [S(1), SS(0, 2)]),
+            ((4, 18), (2, 3), [R, SS(1, 3)]),
+            ((32, 4), (2, 2, 2), [SS(0, 4), SS(0, 2), S(0)]),
+            ((39, 2), (4, 2), [SS(0, 3), SS(0, 4)]),
+            ((18, 2), (4, 2), [S(0), SS(0, 2)]),
+            ((13,), (3, 2), [SS(0, 2), S(0)]),
+            ((6, 5, 4), (2, 2), [SS(0, 3), SS(2, 2)]),
+        ]
+        for global_shape, mesh_shape, placements in cases:
+            with self.subTest(
+                global_shape=global_shape, mesh_shape=mesh_shape, placements=placements
+            ):
+                full = torch.arange(math.prod(global_shape)).view(global_shape)
+                num_chunks = set()
+                for coordinate in itertools.product(*(range(n) for n in mesh_shape)):
+                    with self.subTest(coordinate=coordinate):
+                        expected = full
+                        for mesh_dim, placement in enumerate(placements):
+                            if placement.is_replicate():
+                                continue
+                            shards, _ = placement._split_tensor(
+                                expected, mesh_shape[mesh_dim], with_padding=False
+                            )
+                            expected = shards[coordinate[mesh_dim]]
+                        local_shape, global_offsets, local_offsets, local_sizes = (
+                            _compute_local_shape_and_chunks(
+                                global_shape, mesh_shape, list(coordinate), placements
+                            )
+                        )
+                        num_chunks.add(len(global_offsets))
+                        self.assertEqual(local_shape, expected.shape)
+                        self.assertEqual(
+                            _gather_chunks(
+                                full,
+                                expected,
+                                global_offsets,
+                                local_offsets,
+                                local_sizes,
+                            ),
+                            expected,
+                        )
+                # Every rank has the same number of chunks.
+                self.assertEqual(len(num_chunks), 1)
+
+    def test_compute_local_shape_and_chunks_matches_global_offset(self):
+        # When the local tensor is one chunk, the non-empty chunk is the one that
+        # compute_local_shape_and_global_offset describes.
+        cases = [
+            ((7, 5), (3,), [S(0)]),
+            ((7, 5), (2, 3), [S(1), S(0)]),
+            ((13, 5), (2, 3), [S(0), S(0)]),
+            ((8, 4), (2, 2), [R, S(1)]),
+            ((8, 4), (2, 2), [SS(0, 2), S(0)]),
+            ((12, 6), (2, 3), [SS(0, 3), S(0)]),
+        ]
+        for global_shape, mesh_shape, placements in cases:
+            with self.subTest(
+                global_shape=global_shape, mesh_shape=mesh_shape, placements=placements
+            ):
+                for coordinate in itertools.product(*(range(n) for n in mesh_shape)):
+                    with self.subTest(coordinate=coordinate):
+                        local_shape, global_offsets, _, local_sizes = (
+                            _compute_local_shape_and_chunks(
+                                global_shape, mesh_shape, list(coordinate), placements
+                            )
+                        )
+                        non_empty = [
+                            offset
+                            for offset, size in zip(global_offsets, local_sizes)
+                            if 0 not in size
+                        ]
+                        expected_shape, expected_offset = (
+                            _compute_local_shape_and_global_offset(
+                                global_shape, mesh_shape, list(coordinate), placements
+                            )
+                        )
+                        self.assertEqual(
+                            (local_shape, non_empty),
+                            (expected_shape, [expected_offset]),
+                        )
+
+    def test_compute_local_shape_and_chunks_traced_coordinate(self):
+        # Under compile_on_one_rank, the mesh coordinate is a SymInt known only when
+        # the graph runs. Trace with the coordinate read from a tensor, which fails
+        # on any unguarded branch on it, then run the graph for every coordinate.
+        cases = [
+            ((13, 4), (3, 2), [SS(0, 2), S(0)]),
+            ((8, 6), (2, 2), [SS(0, 2), SS(1, 3)]),
+            ((7, 5), (2, 3), [S(1), SS(0, 3)]),
+            ((5, 2), (4,), [S(0)]),
+            ((24, 6), (2, 3), [S(0), SS(0, 2)]),
+            ((32, 4), (2, 2, 2), [SS(0, 4), SS(0, 2), S(0)]),
+        ]
+        for global_shape, mesh_shape, placements in cases:
+            with self.subTest(
+                global_shape=global_shape, mesh_shape=mesh_shape, placements=placements
+            ):
+
+                def chunk_values(coordinate: torch.Tensor) -> list[Any]:
+                    return pytree.tree_leaves(
+                        _compute_local_shape_and_chunks(
+                            global_shape,
+                            mesh_shape,
+                            [coordinate[i].item() for i in range(len(mesh_shape))],
+                            placements,
+                        )
+                    )
+
+                graph = make_fx(chunk_values, tracing_mode="symbolic")(
+                    torch.zeros(len(mesh_shape), dtype=torch.int64)
+                )
+                for coordinate in itertools.product(*(range(n) for n in mesh_shape)):
+                    with self.subTest(coordinate=coordinate):
+                        self.assertEqual(
+                            [int(v) for v in graph(torch.tensor(coordinate))],
+                            chunk_values(torch.tensor(coordinate)),
+                        )
+
 
 class UtilTest(DTensorContinuousTestBase):
     world_size = 8
@@ -680,6 +903,40 @@ class UtilTest(DTensorContinuousTestBase):
             self.assertEqual(global_offset[0], expected_offsets[rank])
 
         maybe_compute_rankwise(rank, local_shape, global_offset)
+
+    @with_comms
+    def test_compute_local_shape_and_chunks(self):
+        # Uneven cases leave some chunks, and some ranks, empty. The scatter path of
+        # distribute_tensor asserts on uneven _StridedShard splits, so those cases
+        # use src_data_rank=None.
+        cases = [
+            ((13, 3), (self.world_size,), [SS(0, 3)], None),
+            ((8, 2), (2, 4), [SS(0, 2), R], 0),
+            ((15, 5), (4, 2), [SS(0, 2), S(0)], None),
+            ((13, 2), (4, 2), [SS(0, 2), S(0)], None),
+            ((12, 12), (2, 4), [SS(0, 3), SS(1, 2)], None),
+            ((5, 7), (2, 2, 2), [SS(0, 2), SS(1, 3), S(0)], None),
+            ((3, 2), (self.world_size,), [S(0)], 0),
+        ]
+        for global_shape, mesh_shape, placements, src_data_rank in cases:
+            with self.subTest(
+                global_shape=global_shape, mesh_shape=mesh_shape, placements=placements
+            ):
+                mesh = init_device_mesh(self.device_type, mesh_shape)
+                full = torch.arange(math.prod(global_shape)).view(global_shape)
+                expected = distribute_tensor(
+                    full, mesh, placements, src_data_rank=src_data_rank
+                ).to_local()
+                local_shape, global_offsets, local_offsets, local_sizes = (
+                    compute_local_shape_and_chunks(global_shape, mesh, placements)
+                )
+                self.assertEqual(local_shape, expected.shape)
+                self.assertEqual(
+                    _gather_chunks(
+                        full, expected, global_offsets, local_offsets, local_sizes
+                    ),
+                    expected,
+                )
 
     @with_comms
     def test_hsdp_tp_meta_compute(self):
