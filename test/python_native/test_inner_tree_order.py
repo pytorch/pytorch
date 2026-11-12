@@ -260,7 +260,8 @@ class TestInnerTreeOrder(TestCase):
         x = torch.randn(m, n, device="cuda")
         with mock.patch.object(rt, "_itree_arch", return_value=rt._ITREE_ARCH[(10, 0)]):
             plan = rt.itree_plan(n, m, 4, device=x.device)
-            combine = rt.itree_combine_plan(plan, 4, x.device, nrows=m)
+            trait = T.SumOps(acc=cutlass.Float32)
+            combine = rt.itree_combine_plan(plan, 4, x.device, nrows=m, trait=trait)
             self.assertGreater(combine.combine_tile, 0)
             got = self._run(T.SumOps, x)
         with mock.patch.object(

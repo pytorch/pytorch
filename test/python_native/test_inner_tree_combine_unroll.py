@@ -30,7 +30,9 @@ class TestInnerTreeCombineUnroll(TestCase):
     )
     def test_unroll_preserves_staging_geometry(self, unroll, rows):
         """Apply combine unroll without changing the selected staging geometry."""
-        from torch._native.ops.reductions import kernel_rowtile as rt
+        import cutlass
+
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
         policy = rt._ITREE_ARCH[(10, 0)]._replace(combine_unroll=0)
         split = rt._ItreePlan(
@@ -38,7 +40,7 @@ class TestInnerTreeCombineUnroll(TestCase):
         )
         caps = SimpleNamespace(smem_per_block_optin=232448)
         unrolled = policy._replace(combine_unroll=unroll)
-        kwargs = dict(nfields=3, nrows=rows)
+        kwargs = dict(trait=T.WelfordOps(acc=cutlass.Float32), nrows=rows)
         with mock.patch.object(rt._hw, "caps", return_value=caps):
             baseline = rt.itree_combine_plan(split, 4, arch=policy, **kwargs)
             plan = rt.itree_combine_plan(split, 4, arch=unrolled, **kwargs)
@@ -54,20 +56,14 @@ class TestInnerTreeCombineUnroll(TestCase):
     def test_invalid_policy(self, updates):
         """Reject a negative unroll, async staging with more rows than copying lanes, and
         weights without uniform counts."""
-        from torch._native.ops.reductions import kernel_rowtile as rt
-
-        policy = rt._ITREE_ARCH[(10, 0)]._replace(**updates)
-        with self.assertRaisesRegex(ValueError, next(iter(updates))):
-            rt.itree_combine_plan(None, 4, arch=policy)
-
-    def test_nfields_must_match_trait(self):
         import cutlass
 
         from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
-        trait = T.VarMeanOps(correction=1, acc=cutlass.Float32)
-        with self.assertRaisesRegex(ValueError, "disagrees with trait.nfields"):
-            rt.itree_combine_plan(None, 4, nfields=2, trait=trait)
+        policy = rt._ITREE_ARCH[(10, 0)]._replace(**updates)
+        trait = T.SumOps(acc=cutlass.Float32)
+        with self.assertRaisesRegex(ValueError, next(iter(updates))):
+            rt.itree_combine_plan(None, 4, arch=policy, trait=trait)
 
     @parametrize(
         "count,last,key,weights,staged",
