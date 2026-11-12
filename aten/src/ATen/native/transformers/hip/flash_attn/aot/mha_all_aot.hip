@@ -97,8 +97,16 @@ calculate_swa(std::optional<int64_t> window_size_left,
   }
   if (window_size_left.has_value() || window_size_right.has_value()) {
     needs_swa = true;
-    window_left = window_size_left.value_or(window_left);
-    window_right = window_size_right.value_or(window_right);
+    // An unbounded left window with right == 0 is plain causal. AOTriton aligns
+    // numeric windows to the top left, so use the sentinels to get the
+    // bottom-right alignment of the is_causal path and FlashAttention.
+    if (!window_size_left.has_value() && window_size_right == 0) {
+      window_left = WindowValue::BottomRightAligned;
+      window_right = WindowValue::BottomRightAligned;
+    } else {
+      window_left = window_size_left.value_or(window_left);
+      window_right = window_size_right.value_or(window_right);
+    }
   }
   return std::make_tuple(needs_swa, window_left, window_right);
 #else
