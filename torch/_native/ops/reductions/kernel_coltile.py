@@ -28,10 +28,10 @@ from .kernel_general import (
     _flat,
     _INT32_LIMIT,
     _launch,
+    _SM107_256MIB,
     _SM107_CCS,
     _SM107_DTYPES,
-    _SM107_LARGE_SIZE,
-    _SM107_LARGE_SIZES,
+    _SM107_FULL_SIZES,
     _SM107_MAX_SIZE,
     _SM107_MID_SIZE,
     _SM107_MIN_SIZE,
@@ -169,7 +169,7 @@ def _sm107_mean_columns(bf16: bool, size: int, columns: int) -> bool:
     traits share."""
     if bf16:
         return size == _SM107_MID_SIZE and columns in (256, 1024)
-    return size in _SM107_LARGE_SIZES and columns == 256
+    return size in _SM107_FULL_SIZES and columns == 256
 
 
 def select_ordered_col_config(
@@ -232,7 +232,7 @@ def select_ordered_col_config(
         cfg = OrderedColConfig(0, tile_columns=WARP, full_tiles=full_tiles)
     bf16 = dtype == torch.bfloat16
     size = rows * columns * dtype.itemsize if rows else 0
-    column_anchor = sm107 and columns in (1024, 4096) and size in _SM107_LARGE_SIZES
+    column_anchor = sm107 and columns in (1024, 4096) and size in _SM107_FULL_SIZES
     mean_amax = sm107 and trait_type in _SM107_MEAN_AMAX
     mean_anchor = mean_amax and full_tiles and _sm107_mean_columns(bf16, size, columns)
     if cfg is None and mean_amax and (mean_anchor or column_anchor and columns == 1024):
@@ -246,7 +246,7 @@ def select_ordered_col_config(
         return None
     if mean_anchor:
         cfg = cfg._replace(
-            tile_columns=16 if size == _SM107_LARGE_SIZE else WARP, full_tiles=True
+            tile_columns=16 if size == _SM107_256MIB else WARP, full_tiles=True
         )
     elif sm107 and full_tiles and rows is not None:
         # select_col_config hands SM107 views off at 256, 1024 or 4096 columns only.
@@ -259,7 +259,7 @@ def select_ordered_col_config(
             # 16, or 8 for bf16, which never rejects 256 columns (partials * 256 >= 32 * 8).
             # bf16 hand-offs here are 16 MiB WelfordOps or 64 MiB views with 16 partials;
             # 64 MiB mean and amax views are mean anchors, handled above.
-            minimum = 0 if nfields == 3 else 16
+            minimum = 0 if welford else 16
             if bf16:
                 minimum //= 2
             cfg = OrderedColConfig(minimum, tile_columns=16, full_tiles=True)
@@ -362,8 +362,8 @@ def select_col_config(
         narrow = dtype in (torch.float16, torch.bfloat16)
         # Two-output Welford views never reach these anchors through kg._col_route_ok.
         welford = welford_outs == nouts == 1
-        # Column groups need combine_equal; TileReduce rejects traits without it.
-        grouped = welford and getattr(trait_type, "has_combine_equal", False)
+        # The grouped rules below launch vec=1 tiles.
+        grouped = welford and tile.col_group_ok(trait_type, vec=1)
         # Only argmax with int32 indices (32-bit accumulators) was measured.
         index = trait_type is ArgMaxOps
         one_field = trait_type in kg._B200_RAGGED_COL_ONE_FIELD
@@ -465,7 +465,7 @@ def select_col_config(
             size == _SM107_MID_SIZE and trait_type not in _SM107_MEAN_AMAX
         )
     elif columns == 1024:
-        if size in _SM107_LARGE_SIZES:
+        if size in _SM107_FULL_SIZES:
             inner = nfields > 1 or (not bf16 and size == _SM107_MAX_SIZE)
     elif columns == 4096:
         if size == _SM107_MIN_SIZE:
@@ -478,7 +478,7 @@ def select_col_config(
         inner = True
     if inner and ordered:
         cfg = cfg._replace(rule=f"rubin_c{columns}_ordered", kernel_order="inner_tree")
-    if size not in _SM107_LARGE_SIZES:
+    if size not in _SM107_FULL_SIZES:
         return cfg
     # Measured anchors only: interpolate after crossover sweeps, not from byte size alone.
     large = size == _SM107_MAX_SIZE

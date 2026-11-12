@@ -170,22 +170,16 @@ class WelfordOps:
     # has_combine_uniform enables uniform-count staged inner-tree combines
     # (tile.uniform_combine_ok), which rely on combine_uniform, uniform_weight, an FP32
     # accumulator and the count as the last field: they skip staging it and may stage
-    # the weight in its slot. Both assume these leaf and combine methods, so a subclass
-    # that replaces either must opt back in; its subclasses inherit that choice.
+    # the weight in its slot. The flags are not inherited: a subclass that keeps leaf,
+    # combine and their helpers must set each flag it supports.
     nfields = 3
     has_combine_equal = True
     has_combine_uniform = True
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        own = cls.__mro__[: cls.__mro__.index(WelfordOps)]
-        for flag in ("has_combine_equal", "has_combine_uniform"):
-            for c in own:
-                if flag in vars(c):
-                    break
-                if "leaf" in vars(c) or "combine" in vars(c):
-                    setattr(cls, flag, False)
-                    break
+        cls.has_combine_equal = vars(cls).get("has_combine_equal", False)
+        cls.has_combine_uniform = vars(cls).get("has_combine_uniform", False)
 
     def __init__(self, correction=1, take_sqrt=False, return_mean=False, acc=Float32):
         self.correction = float(correction)
@@ -201,7 +195,11 @@ class WelfordOps:
 
     @cute.jit
     def leaf(self, val, idx):
-        return (self.acc(val), self.acc(0.0), self.acc(1.0))
+        # The online update makes m2 NaN for +-inf (inf * (inf - inf)), and the leaf must
+        # agree: (v - v) ** 2 is +0.0 for finite v and NaN otherwise.
+        v = self.acc(val)
+        d = v - v
+        return (v, d * d, self.acc(1.0))
 
     @cute.jit
     def reduce(self, acc, val, idx, valid):
@@ -819,6 +817,8 @@ def block_reduce(
 class VarMeanOps(WelfordOps):
     # Reuse Welford and project variance/std plus mean; correction and take_sqrt are unchanged.
     nouts = 2
+    has_combine_equal = True
+    has_combine_uniform = True
 
     def __init__(self, correction=1, take_sqrt=False, acc=Float32):
         super().__init__(correction=correction, take_sqrt=take_sqrt, acc=acc)
