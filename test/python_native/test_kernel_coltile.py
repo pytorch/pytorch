@@ -203,11 +203,13 @@ class TestKernelColTile(TestCase):
         trait = welford(correction=1, acc=cutlass.Float32)
         dims = "x".join(map(str, shape))
         key = f"grouped_welford_{dtype}_{group}_{npar}_{nouts}_{dims}"
+        # The online baseline's key omits group, so every group size shares its plan.
+        online_key = f"grouped_welford_{dtype}_{npar}_{nouts}_{dims}_online"
         # fp32 outputs keep the tolerance tight enough to catch dropped tail rows.
         out = [torch.float32] * nouts
         results = []
         # col_group=1 folds every row online, which rounds differently.
-        for g, k in ((group, key), (1, f"{key}_online")):
+        for g, k in ((group, key), (1, online_key)):
             cfg = ct.ColConfig("test_grouped", 64, npar, 1, "column", col_group=g)
             with mock.patch.object(ct, "select_col_config", return_value=cfg):
                 if x.dim() == 3:
@@ -726,6 +728,7 @@ class TestOrderedColRoute(TestCase):
                     self.assertIsInstance(cfg.full_tiles, bool)
                     outs = cfg.out_dtypes
                     if outs is not None:
+                        self.assertIsInstance(outs, tuple)
                         self.assertTrue(outs)
                         self.assertTrue(all(isinstance(d, torch.dtype) for d in outs))
 
@@ -1240,7 +1243,8 @@ class TestOrderedColDevice(TestCase):
 
     @parametrize(
         "op,dtype,rows,cols,warps,width,off,split,full,used,tiles",
-        # tiles is the compiled full_tiles: ragged R (129, 32769) keeps its clamps.
+        # tiles is the compiled full_tiles: False where full is off, the looped plan is
+        # inexact (R = 129), or the split is ragged (R = 32769).
         [
             ("sum", torch.float32, 128, 132, 8, 16, 4, False, True, 1, True),
             ("argmax", torch.float32, 32769, 33, 8, 8, 4, True, True, 8, False),

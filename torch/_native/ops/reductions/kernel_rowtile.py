@@ -865,8 +865,9 @@ def reduce_row_tile(
     x's device must be current. `ragged_vector` asks for aligned wide loads with scalar
     edges (one kernel per N) and rejects empty rows, order="inner_tree" and use_tma=True
     for every N. Rows of whole 16-byte vectors otherwise fall through to normal path
-    selection; ragged rows need a contiguous, 16-byte aligned input. For ragged N, a
-    row's scalar prefix depends on its index, so identical rows can round differently.
+    selection; ragged rows need a contiguous, 16-byte aligned input and raise ValueError
+    on any other rather than fall back. For ragged N, a row's scalar prefix depends on
+    its index, so identical rows can round differently.
     """
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
