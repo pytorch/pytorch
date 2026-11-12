@@ -559,8 +559,11 @@ class _LocalizedTensor(torch.Tensor):
             # Stream contexts supply Dynamo's per-branch stream metadata to Inductor.
             with torch.cuda.stream(stream):
                 stream.wait_event(primary._default_event)
-                with torch.cuda.use_mem_pool(
-                    primary._ctx.mempools[b], device=primary._ctx.device
+                with (
+                    torch.fx.traceback.annotate({"localization": True}),
+                    torch.cuda.use_mem_pool(
+                        primary._ctx.mempools[b], device=primary._ctx.device
+                    ),
                 ):
                     h = func(*per_branch_args, **per_branch_kwargs)
                 evt.record(stream)

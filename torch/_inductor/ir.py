@@ -7238,46 +7238,13 @@ class ConcatKernel(NopKernel):
         return NopKernel.get_free_symbol_uses(self, unbacked_only)
 
     @classmethod
-    def _src_has_localized_mempool(cls, src: StorageBox) -> bool:
-        """True if any FX origin of ``src``'s buffer carries
-        ``meta['custom']['mempool']``, i.e. the source is one branch
-        of a localized fork-join cat -- AND the source is not itself
-        a ``Pointwise`` copy that ``realize_into`` already inserted.
-
-        When True, ``realize_into`` refuses to alias ``src``'s storage
-        into the cat output via ``NonOwningLayout``: the cat output
-        carries no ``mempool`` tag (origins span every branch -> default
-        pool), so aliasing would put the per-branch matmul output's
-        writes into the default pool, defeating the whole point of the
-        mempool tag.  Falling through to the explicit pointwise-copy
-        path emits a separate ``empty_strided_cuda`` for the branch
-        output, which the scheduler-node ``use_mem_pool`` wrap (emitted
-        from the propagated mempool metadata) then routes into the
-        branch's pool -- keeping the matmul write in the locality-domain
-        memory the kernel is pinned to, so both compute and memory live
-        in the same locality domain (rather than compute on the green
-        stream but memory in the default pool).
-
-        We exclude ``Pointwise``-backed sources because
-        ``realize_into`` ALREADY recurses on a ``Pointwise.create(...)``
-        when it needs to introduce a copy: if our predicate fired for
-        the copy too (which inherits mempool meta from its origins),
-        the recursion would refuse to alias the copy and keep
-        introducing further copies, never terminating.  We only want
-        to opt-out at the top level -- for the actual mm/extern-kernel
-        source -- not at the Pointwise wrapper inserted to do the
-        copy.
-        """
+    def _src_is_localized(cls, src: StorageBox) -> bool:
+        r"""Require a copy for localized producers instead of aliasing cat storage."""
         data = getattr(src, "data", None)
         if data is None:
             return False
-        # Only fire the opt-out at the original mm/extern source --
-        # i.e. when the buffer's single ``origin_node`` is the FX node
-        # carrying a mempool tag, NOT when ``realize_into`` has
-        # already wrapped it in a Pointwise copy (which would still
-        # show the mm in ``get_origins()`` via the loader chain and
-        # then loop forever, never letting the copy alias into the
-        # cat slot).
+        # Inspect the producer's origin, not inherited origins of the inserted
+        # Pointwise copy, so recursive realize_into can place the copy in dst.
         origin_node = (
             data.get_origin_node() if hasattr(data, "get_origin_node") else None
         )
@@ -7287,7 +7254,7 @@ class ConcatKernel(NopKernel):
         if not meta:
             return False
         custom = meta.get("custom") or {}
-        return custom.get("mempool") is not None
+        return custom.get("localization") is True
 
     @classmethod
     def realize_into(cls, src: IRNode, dst: IRNode, allow_alias: bool = True) -> IRNode:
@@ -7311,7 +7278,7 @@ class ConcatKernel(NopKernel):
                 raise AssertionError('Expected hasattr(src.data, "layout")')
             if cls.can_realize_into_without_copy(
                 src, dst
-            ) and not cls._src_has_localized_mempool(src):
+            ) and not cls._src_is_localized(src):
                 # pyrefly: ignore [missing-attribute]
                 src.data.layout = NonOwningLayout(dst)
                 return src.data
