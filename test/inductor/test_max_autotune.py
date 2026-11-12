@@ -2537,8 +2537,7 @@ class TestMaxAutotune(TestCase):
         #   is replayed on the new kernel, which rebuilds the store-output allowed
         #   inputs from its own indices, and the scheduling-time render receives
         #   the indices through kernel_options.
-        # make_key additionally takes index_dtype, which generate_and_load derives
-        # from size hints rather than receiving as a parameter.
+        # make_key also takes index_dtype, which generate_and_load derives itself.
         self.assertEqual(
             generate_and_load_args
             - {"generate_with_caching", "prefix_inputs_fusion_indices"}
@@ -2931,15 +2930,8 @@ class TestMaxAutotune(TestCase):
         }
     )
     def test_template_cache_keyed_on_index_dtype(self):
-        """A dynamic-shape recompile whose size hint needs int64 indexing must not
-        reuse template code generated for an earlier, smaller hint with int32.
-
-        The cache key holds symbolic layouts, so both compiles produce the same
-        key unless the index dtype is part of it; reusing the int32 code
-        overflows its indexing once the tensors pass 2**31 elements. The
-        class-level TritonTemplate.test_cache patch turns that reuse into a
-        hard error.
-        """
+        # Symbolic layouts give an int32 and an int64 compile the same key; the
+        # class-level TritonTemplate.test_cache patch turns that reuse into an error.
 
         def f(a, b):
             return a @ b
@@ -2951,9 +2943,7 @@ class TestMaxAutotune(TestCase):
             compiled = torch.compile(f, mode="max-autotune-no-cudagraphs")
             self.assertEqual(compiled(a, b), a @ b, atol=0.05, rtol=0.05)
 
-            # Stand-in for a recompile at a size hint past the int32 limit. The
-            # template code cache outlives dynamo reset, as it does across
-            # recompiles in one process.
+            # Recompile as if the size hint needed int64 indexing.
             reset()
             with (
                 config.patch(fx_graph_cache=False),
