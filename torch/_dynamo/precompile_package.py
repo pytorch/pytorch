@@ -2150,7 +2150,7 @@ class PrecompileSession(Generic[_P, _R]):
         flag = self._cudagraph_config["triton.cudagraphs"]
         for backend_id, (fwd, bwd) in self._package.cudagraph_overrides.items():
             artifact = backends.get(backend_id)
-            # A graph pruned to a no-op never reaches Inductor: no CUDA graph.
+            # Only a graph Inductor compiled carries a CUDA graph decision.
             if not isinstance(artifact, BundledAOTAutogradCacheArtifact):
                 continue
             # As compile_fx applies an override: fwd decides the forward, and
@@ -2161,9 +2161,9 @@ class PrecompileSession(Generic[_P, _R]):
             backward = artifact.content.compiled_bw is not None
             if forward != flag or (forward and backward and bwd is False):
                 raise PackageError(
-                    f"a DynamoTracer capture cannot serve torch._dynamo."
-                    f"override_cudagraphs(fwd={fwd}, bwd={bwd}) under "
-                    f"triton.cudagraphs={flag}: the artifact records the capture's "
+                    f"a DynamoTracer capture cannot serve graph {backend_id}, compiled "
+                    f"under torch._dynamo.override_cudagraphs(fwd={fwd}, bwd={bwd}), "
+                    f"with triton.cudagraphs={flag}: the artifact records the capture's "
                     "CUDA graph config (CUDAGRAPH_CONFIG), not each graph's. Set "
                     "triton.cudagraphs to match, or remove the override."
                 )
