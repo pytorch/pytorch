@@ -10269,7 +10269,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("mode", ["bilinear", "bicubic", "lanczos"])
     @parametrize_test("antialias", [True, False])
-    @parametrize_test("num_channels", [1, 3])
+    @parametrize_test("num_channels", [1, 3, 5])
     @dtypes(torch.float32, torch.uint8)
     @onlyNativeDeviceTypes
     @decorateIf(
@@ -10288,10 +10288,13 @@ class TestNNDeviceType(NNTestCase):
         self, device, dtype, memory_format, mode, antialias, num_channels
     ):
         # Regression test for https://github.com/pytorch/pytorch/issues/200568
-        # When the output width is 1 the CPU separable kernel (antialias=True, or
-        # uint8 on platforms without AVX2) used the indices and weights of the
-        # first output row for every output row, so all rows were identical.
-        # The same happened in channels_last with num_channels == 1.
+        # When the output width is 1 the CPU separable kernel used the indices
+        # and weights of the first output row for every output row, so all rows
+        # were identical. The same happened in channels_last with
+        # num_channels == 1. The separable kernel is used for antialias=True,
+        # and for uint8 whenever the AVX2/NEON uint8 kernels do not apply
+        # (e.g. num_channels > 4 on AVX2, so num_channels == 5 reaches it on
+        # x86 CI). The other configurations check the non-separable kernels.
         kwargs = dict(mode=mode, align_corners=False, antialias=antialias)
 
         def to_mf(t):
