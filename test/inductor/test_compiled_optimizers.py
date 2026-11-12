@@ -1107,6 +1107,25 @@ class CompiledOptimizerTests(TestCase):
         )
         self.assertEqual(opt.param_groups[0]["capturable"], original_capturable)
 
+    @requires_gpu_and_triton
+    @parametrize("optim_cls", [Adam, AdamW])
+    def test_tensor_betas_on_other_device(self, optim_cls):
+        # A compiled foreach step keeps Tensor betas as tensors, so both have to
+        # follow each group of params to its device.
+        betas = tuple(torch.tensor(b, device=GPU_TYPE) for b in (0.9, 0.99))
+        params = [torch.randn(4, 3), torch.randn(4, 3, device=GPU_TYPE)]
+        params_ref = [p.clone() for p in params]
+        for p, p_ref in zip(params, params_ref):
+            p.grad = torch.randn_like(p)
+            p_ref.grad = p.grad.clone()
+        opt = optim_cls(params, betas=betas, foreach=True)
+        opt_ref = optim_cls(params_ref, betas=(0.9, 0.99), foreach=True)
+
+        with torch.set_grad_enabled(False):
+            compile_opt(opt)()
+        opt_ref.step()
+        self.assertEqual(params, params_ref)
+
 
 @skipIfRocm(msg="ROCm may have different numerical behavior")
 @requires_gpu_and_triton

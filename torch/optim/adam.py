@@ -619,6 +619,11 @@ def _multi_tensor_adam(
         if isinstance(beta1, Tensor) and str(beta1.device) != "cpu"
         else None
     )
+    beta2_dict: DeviceDict | None = (  # type: ignore[attr-defined]
+        {beta2.device: beta2}
+        if isinstance(beta2, Tensor) and str(beta2.device) != "cpu"
+        else None
+    )
 
     for (
         device_params_,
@@ -639,6 +644,9 @@ def _multi_tensor_adam(
             beta1_dict[device] = beta1.to(device=device, non_blocking=True)  # type: ignore[union-attr, attr-defined]
 
         device_beta1 = beta1_dict[device] if beta1_dict else beta1
+        if beta2_dict is not None and device not in beta2_dict:
+            beta2_dict[device] = beta2.to(device=device, non_blocking=True)  # type: ignore[union-attr, attr-defined]
+        device_beta2 = beta2_dict[device] if beta2_dict else beta2
 
         # Handle complex parameters
         if has_complex:
@@ -690,18 +698,18 @@ def _multi_tensor_adam(
             device_exp_avgs, device_grads, cast(float, 1 - device_beta1)
         )
 
-        torch._foreach_mul_(device_exp_avg_sqs, beta2)
+        torch._foreach_mul_(device_exp_avg_sqs, device_beta2)
 
         # Due to the strictness of the _foreach_addcmul API, we can't have a single
         # tensor scalar as the scalar arg (only python number is supported there)
         # as a result, separate out the value mul
         # Filed https://github.com/pytorch/pytorch/issues/139795
-        if isinstance(beta2, torch.Tensor):
-            scaled_device_grads = torch._foreach_mul(device_grads, 1 - beta2)  # type: ignore[assignment]
+        if isinstance(device_beta2, torch.Tensor):
+            scaled_device_grads = torch._foreach_mul(device_grads, 1 - device_beta2)  # type: ignore[assignment]
             value = 1.0
         else:
             scaled_device_grads = device_grads  # type: ignore[assignment]
-            value = 1 - beta2
+            value = 1 - device_beta2
 
         torch._foreach_addcmul_(
             device_exp_avg_sqs, scaled_device_grads, device_grads, value
@@ -716,8 +724,8 @@ def _multi_tensor_adam(
         bias_correction2_sqrt: tuple[Tensor, ...] | list[Tensor]
 
         if capturable:
-            bias_correction1 = torch._foreach_pow(beta1, device_state_steps)  # type: ignore[arg-type]
-            bias_correction2 = torch._foreach_pow(beta2, device_state_steps)  # type: ignore[arg-type]
+            bias_correction1 = torch._foreach_pow(device_beta1, device_state_steps)  # type: ignore[arg-type]
+            bias_correction2 = torch._foreach_pow(device_beta2, device_state_steps)  # type: ignore[arg-type]
             # foreach_sub doesn't allow a scalar as the first arg
             torch._foreach_sub_(bias_correction1, 1)
             torch._foreach_sub_(bias_correction2, 1)
@@ -754,10 +762,10 @@ def _multi_tensor_adam(
             torch._foreach_addcdiv_(device_params, device_exp_avgs, exp_avg_sq_sqrt)
         else:
             bias_correction1 = [
-                1 - beta1 ** _get_value(step) for step in device_state_steps
+                1 - device_beta1 ** _get_value(step) for step in device_state_steps
             ]
             bias_correction2 = [
-                1 - beta2 ** _get_value(step) for step in device_state_steps
+                1 - device_beta2 ** _get_value(step) for step in device_state_steps
             ]
 
             step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
