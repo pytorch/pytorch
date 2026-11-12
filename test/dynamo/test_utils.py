@@ -79,7 +79,9 @@ class TestUtils(TestCase):
         self.assertEqual(dict.__len__(mapping), 0)
         self.assertEqual(list(mapping), ["a"])
         with mock.patch.object(utils, "_ORDERED_DICT_MUTATIONS_LOCKED", False):
-            with self.assertRaises(utils.UnsupportedOrderedDictRuntime):
+            with self.assertRaisesRegex(
+                utils.UnsupportedOrderedDictRuntime, "Nonempty"
+            ):
                 list(utils.enumerate_items_with_dict_position(mapping))
             self.assertIsNone(torch._dynamo.guards._ordered_dict_order(mapping))
 
@@ -96,6 +98,7 @@ class TestUtils(TestCase):
             self.assertEqual(
                 torch._dynamo.guards._ordered_dict_order(OrderedDict()), ()
             )
+            native.reset_mock()
             counter = CompileCounter()
             compiled = torch.compile(
                 lambda x, module: module(x) + 1, backend=counter, fullgraph=True
