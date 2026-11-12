@@ -111,7 +111,7 @@ struct BaseSampler {
 */
 
 template<typename scalar_t, typename accscalar_t, typename uniform_sampler_t, typename normal_sampler_t>
-C10_DEVICE scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform, BaseSampler<accscalar_t, normal_sampler_t>& standard_normal) {
+inline C10_DEVICE scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform, BaseSampler<accscalar_t, normal_sampler_t>& standard_normal) {
   accscalar_t scale = 1.0f;
 
   // Boost alpha for higher acceptance probability.
@@ -152,7 +152,7 @@ C10_DEVICE scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t, unifor
  */
 
 template<typename scalar_t>
-C10_DEVICE scalar_t stirling_approx_tail(scalar_t k) {
+inline C10_DEVICE scalar_t stirling_approx_tail(scalar_t k) {
   constexpr STATIC_IF_NOT_METAL scalar_t kTailValues[] = {
     0.0810614667953272,
     0.0413406959554092,
@@ -173,7 +173,7 @@ C10_DEVICE scalar_t stirling_approx_tail(scalar_t k) {
 }
 
 template<typename scalar_t, typename accscalar_t, typename uniform_sampler_t>
-C10_DEVICE scalar_t binomial_inversion(scalar_t count, scalar_t prob, METAL_THREAD BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
+inline C10_DEVICE scalar_t binomial_inversion(scalar_t count, scalar_t prob, METAL_THREAD BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
   accscalar_t U;
   accscalar_t geom_sum = 0;
   scalar_t num_geom = 0;
@@ -193,7 +193,7 @@ C10_DEVICE scalar_t binomial_inversion(scalar_t count, scalar_t prob, METAL_THRE
 }
 
 template<typename scalar_t, typename accscalar_t, typename uniform_sampler_t>
-C10_DEVICE scalar_t btrs(scalar_t count, scalar_t prob, METAL_THREAD BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
+inline C10_DEVICE scalar_t btrs(scalar_t count, scalar_t prob, METAL_THREAD BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
   scalar_t k;
   accscalar_t U, V, us;
 
@@ -246,7 +246,7 @@ C10_DEVICE scalar_t btrs(scalar_t count, scalar_t prob, METAL_THREAD BaseSampler
 }
 
 template<typename scalar_t, typename accscalar_t, typename uniform_sampler_t>
-C10_DEVICE scalar_t sample_binomial(scalar_t count, scalar_t prob, METAL_THREAD BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
+inline C10_DEVICE scalar_t sample_binomial(scalar_t count, scalar_t prob, METAL_THREAD BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
   if (count <= 0.0 || prob <= 0.0) {
     return 0;
   } else if (prob >= 1.0) {
@@ -344,7 +344,7 @@ C10_DEVICE inline scalar_t digamma_one(scalar_t x) {
 // Computes the reparameterized gradient -(d/dalpha cdf(x;alpha)) / pdf(x;alpha)
 // for random number x drawn from a standard Gamma distribution Gamma(alpha).
 template <typename scalar_t, typename accscalar_t>
-C10_HOST_DEVICE scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
+inline C10_HOST_DEVICE scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
   // Use a Taylor series expansion for small x.
   accscalar_t x = static_cast<accscalar_t>(x_);
   accscalar_t alpha = static_cast<accscalar_t>(alpha_);

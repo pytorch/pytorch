@@ -1419,17 +1419,17 @@ static Tensor& comparison_op_(Tensor& self, const Tensor& other, OutImpl& out_im
 }
 
 template <typename OutImpl>
-static Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Scalar& other, OutImpl& out_impl) {
+[[maybe_unused]] static Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Scalar& other, OutImpl& out_impl) {
   return out_impl(result, self, wrapped_scalar_tensor(other));
 }
 
 template <typename OutImpl>
-static Tensor comparison_op(const Tensor& self, const Scalar& other, OutImpl& out_impl) {
+[[maybe_unused]] static Tensor comparison_op(const Tensor& self, const Scalar& other, OutImpl& out_impl) {
   return comparison_op(self, wrapped_scalar_tensor(other), out_impl);
 }
 
 template <typename OutImpl>
-static Tensor& comparison_op_(Tensor& self, const Scalar& other, OutImpl& out_impl) {
+[[maybe_unused]] static Tensor& comparison_op_(Tensor& self, const Scalar& other, OutImpl& out_impl) {
   return out_impl(self, self, wrapped_scalar_tensor(other));
 }
 

@@ -162,7 +162,7 @@ void cpu_max_unpool_channels_last(
 }
 
 template <typename scalar_t, bool is_3d = false>
-void cpu_max_unpool_backward(
+[[maybe_unused]] void cpu_max_unpool_backward(
     Tensor& grad_input_,
     const Tensor& grad_output,
     const Tensor& indices) {

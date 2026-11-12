@@ -37,7 +37,7 @@ template <
     typename OffsetType,
     int BIT_RATE,
     int NUM_ELEM_PER_BYTE>
-at::Tensor& embedding_lookup_fallback_impl(
+[[maybe_unused]] at::Tensor& embedding_lookup_fallback_impl(
     const at::Tensor& weight,
     const at::Tensor& indices,
     const at::Tensor& offsets,

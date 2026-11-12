@@ -620,7 +620,7 @@ static void gemm_batched_generic(
 }
 
 template <typename scalar_t>
-static void gemm_batched(
+[[maybe_unused]] static void gemm_batched(
     TransposeType transa, TransposeType transb,
     int64_t batch_size, int64_t m, int64_t n, int64_t k,
     scalar_t alpha,

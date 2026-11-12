@@ -91,7 +91,7 @@ static constinit std::atomic<bool> conv_benchmark_empty_cache{true};
 
 // Check workload to activate fast depthwise FP16 cudnn conv kernels
 template <typename T>
-static bool check_cudnn_depthwise_workload(const at::Tensor& input, T stride) {
+[[maybe_unused]] static bool check_cudnn_depthwise_workload(const at::Tensor& input, T stride) {
   auto w = at::symint::size<T>(input, 3);  // same as h
   auto ch = at::symint::size<T>(input, 1);
   auto bs = at::symint::size<T>(input, 0);
@@ -657,7 +657,7 @@ REGISTER_NO_CPU_DISPATCH(miopen_convolution_transpose_backward_stub)
 REGISTER_NO_CPU_DISPATCH(miopen_depthwise_convolution_backward_stub)
 
 template <typename T>
-static std::ostream& operator<<(std::ostream & out, const ConvParams<T>& params) {
+[[maybe_unused]] static std::ostream& operator<<(std::ostream & out, const ConvParams<T>& params) {
   out << "ConvParams {"
       << "  stride = " << IntArrayRef{params.stride}
       << "  padding = " << ArrayRef<T>{params.padding}

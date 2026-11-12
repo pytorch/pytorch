@@ -733,7 +733,7 @@ static inline void combine_prefix_sum_for_msb(
 }
 
 template <typename K, typename V>
-void radix_sort_kernel(
+[[maybe_unused]] void radix_sort_kernel(
     const K* const input_keys,
     const V* const input_values,
     K* const output_keys,
@@ -823,7 +823,7 @@ void radix_sort_kernel(
 }
 
 template <typename K, typename V>
-std::pair<K*, V*> radix_sort_parallel(
+[[maybe_unused]] std::pair<K*, V*> radix_sort_parallel(
     K* const inp_key_buf,
     V* const inp_value_buf,
     K* const tmp_key_buf,
