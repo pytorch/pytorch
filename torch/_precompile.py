@@ -4123,6 +4123,8 @@ def capture(
     is refused in ``options``, and a capture with CUDA graphs on refuses one
     set in ``torch._inductor.config``: unset it while capturing and set it in
     the loading process.
+    Under ``cpp_wrapper`` with ``graph_partition`` a capture compiles without
+    CUDA graphs, as :func:`torch.compile` does, and records them off.
 
     Unlike under :func:`torch.compile`, whose options reach only Inductor, the
     capture's calls are traced under ``CUDAGRAPH_CONFIG`` too, so with CUDA
