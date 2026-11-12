@@ -1174,13 +1174,27 @@ def diff_tensor_meta(
 #      to support int arguments. In the eager run case, we re-trace the subgraph in AutogradKey, so inner
 #      hops may receive int inputs from the shape of outer tensor inputs.
 #      However, CompositeExplicitAutograd won't receive SymInt inputs because it only accepts real tensor inputs.
-def validate_subgraph_args_types(lifted_args: tuple[Any, ...] | list[Any]):
-    allowed_types = (torch.Tensor, int, torch.SymInt)
+def validate_subgraph_args_types(
+    lifted_args: tuple[Any, ...] | list[Any],
+    extra_allowed_types: tuple[type, ...] = (),
+    *,
+    is_allowed: Callable[[Any], bool] | None = None,
+    hop_name: str | None = None,
+):
+    """Check that ``lifted_args`` are of ``allowed_types`` below, or of
+    ``extra_allowed_types``, or pass ``is_allowed``. ``hop_name`` names the HOP
+    in the error."""
+    # Proxy: symbolic re-tracing replays calls with proxies, e.g. when a
+    # cached GraphModule is unpickled (_deserialize_graph_module).
+    allowed_types = (torch.Tensor, int, torch.SymInt, torch.fx.Proxy)
+    allowed_types += extra_allowed_types
     if not all(
-        isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in lifted_args
+        isinstance(arg, allowed_types) or (is_allowed is not None and is_allowed(arg))
+        for arg in lifted_args
     ):
+        prefix = f"{hop_name} operands " if hop_name else ""
         raise AssertionError(
-            f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
+            f"{prefix}{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
         )
 
 
