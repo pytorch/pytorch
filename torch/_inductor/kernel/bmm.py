@@ -16,7 +16,6 @@ from ..runtime.runtime_utils import get_max_y_grid
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
-    realize_inputs,
     SymbolicGridFn,
     TritonTemplate,
 )
@@ -37,6 +36,7 @@ from .mm_common import (
     is_batch_stride_largest_or_zero,
     mm_args,
     native_matmul_scaled_add,
+    realize_helion_operands,
     use_helion_mm,
     use_native_matmul,
     zero_addmm_input,
@@ -313,7 +313,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     if use_native_matmul(mat1, mat2):
         if use_helion_mm(mat1, mat2):
             # The Helion kernel reads the operands from memory; see tuned_mm.
-            mat1, mat2 = realize_inputs(mat1, mat2)
+            mat1, mat2 = realize_helion_operands(mat1, mat2)
         mat1 = lowerings[aten.unsqueeze](mat1, -1)
         mat2 = lowerings[aten.unsqueeze](mat2, 1)
         args, kwargs = transform_args(

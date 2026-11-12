@@ -19,7 +19,7 @@ from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 from .. import config
 from ..codegen.triton_utils import use_block_ptr_enabled
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import _IntLike, Layout, TensorBox
+from ..ir import _IntLike, ExternKernel, Layout, TensorBox
 from ..utils import load_template, triton_type
 
 
@@ -185,6 +185,22 @@ def use_helion_mm(mat1, mat2) -> bool:
     return use_helion_native_matmul(
         mat1.get_device(), mat1.get_dtype(), [*size, mat2.get_size()[-1]], k
     )
+
+
+def realize_helion_operands(mat1, mat2):
+    """realize_inputs() for a Helion matmul, copying a mat2 broadcast along N.
+
+    HelionKernel takes a dot operand whose index has no tile_x for mat1. A mat2
+    with stride 0 along N, as in x @ v.expand(72, 136), is read at r0_index
+    alone, so it would be read as in1[tile_y, tile_r] and the dot fails:
+        CompilationError: input and other must have equal reduction dimensions
+    Its copy is read as in1[tile_r, tile_x]. A mat1 broadcast along M is read
+    as mat1 and needs no copy.
+    """
+    mat1, mat2 = realize_inputs(mat1, mat2)
+    if mat2.get_stride()[-1] == 0:
+        mat2 = ExternKernel.copy_input(mat2)
+    return mat1, mat2
 
 
 def native_matmul_scaled_add(inp, alpha, beta, matmul):
