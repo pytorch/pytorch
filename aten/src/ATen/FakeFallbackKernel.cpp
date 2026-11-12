@@ -12,7 +12,6 @@
 #include <algorithm>
 #include <optional>
 #include <string_view>
-#include <unordered_map>
 #include <unordered_set>
 
 // Note [C++ fake fallback]
@@ -231,6 +230,9 @@ void fakeFallback(
   // (decompositions, say), so a Python Meta kernel calling active_fake_mode()
   // sees no fake mode; so here
   UnsetFakeTensorModeGuard unset_mode;
+  // Python dispatch disables autocast before running fake implementations.
+  c10::impl::ExcludeDispatchKeyGuard exclude_autocast(
+      c10::autocast_dispatch_keyset);
 
   bool has_device_arguments = false;
   for (const auto idx : c10::irange(num_arguments)) {
@@ -430,39 +432,31 @@ void fakeFallback(
     }
   }
 
-  // The fakes that replaced outputs, so that a tensor returned twice gets the
-  // same fake, as Python's memo of the fakes it makes of meta outputs gives
-  std::unordered_map<const c10::TensorImpl*, at::Tensor> replaced;
-  // Returns the fake that replaces t on the stack, if t is not itself made one
-  auto wrap_output = [&](const at::Tensor& t,
-                         bool is_alias) -> std::optional<at::Tensor> {
+  // Mark the original outputs fake, including tensors retained by a Meta
+  // kernel. Unlike Python's wrapping, this also changes those retained tensors.
+  auto wrap_output = [&](const at::Tensor& t, bool is_alias) {
     if (!t.defined()) {
-      return std::nullopt;
+      return;
     }
     auto* impl = t.unsafeGetTensorImpl();
-    if (const auto it = replaced.find(impl); it != replaced.end()) {
-      return it->second;
+    if (t.is_fake() && impl->fake_tensor_mode() == mode) {
+      // device() reports meta inside the kernel invocation scope.
+      const auto fake_device = impl->fake_device();
+      TORCH_CHECK(
+          fake_device == device,
+          "FakeTensor is wrapped to wrong device, found ",
+          *fake_device,
+          ", expected ",
+          *device);
     }
     // An input returned as an output (by in-place and out= ops, or an op that
     // returns its input without an alias annotation) is kept as is, as Python
     // does. Its stored fake device is read, as device() reports meta here.
     if (input_impls.contains(impl)) {
       TORCH_INTERNAL_ASSERT(impl->fake_device() == device);
-      return std::nullopt;
+      return;
     }
-    std::optional<at::Tensor> out;
-    if (c10::raw::intrusive_ptr::use_count(impl) > 1) {
-      // A tensor held elsewhere, such as a Python Meta kernel's output, which
-      // its Python object refers to, or a tensor a sparse input holds (as
-      // _values/_indices return), is not changed: a shallow copy becomes the
-      // fake. Python memoizes its wraps; ADInplaceOrView makes its sparse
-      // member views fresh. Here they are fresh even below ADInplaceOrView,
-      // where Python can return the same fake on successive calls.
-      out = at::Tensor(impl->shallow_copy_and_detach(
-          impl->version_counter(), impl->allow_tensor_metadata_change()));
-      replaced.emplace(impl, *out);
-      impl = out->unsafeGetTensorImpl();
-    } else if (!is_alias && t.requires_grad()) {
+    if (!is_alias && t.requires_grad()) {
       // Backend kernels run below autograd, but a Meta kernel can copy
       // requires_grad from an input
       t.set_requires_grad(false);
@@ -472,30 +466,14 @@ void fakeFallback(
     at::init_cpp_fake(impl, *device, mode);
     impl->set_real_tensor(nullptr);
     impl->set_fake_dispatch_keys(output_dispatch_keys);
-    return out;
   };
   const auto num_returns = schema.returns().size();
   const auto returns_begin = stack->size() - num_returns;
   for (const auto i : c10::irange(num_returns)) {
     const bool is_alias = schema.returns()[i].alias_info() != nullptr;
-    auto& ivalue = (*stack)[returns_begin + i];
-    if (ivalue.isTensor()) {
-      if (auto out = wrap_output(ivalue.toTensor(), is_alias)) {
-        ivalue = std::move(*out);
-      }
-    } else if (ivalue.isList()) {
-      auto list = ivalue.toList();
-      // Read through toListRef, as reading the list copies its elements
-      const auto elements = ivalue.toListRef();
-      for (const auto j : c10::irange(elements.size())) {
-        if (!elements[j].isTensor()) {
-          continue;
-        }
-        if (auto out = wrap_output(elements[j].toTensor(), is_alias)) {
-          list.set(j, std::move(*out));
-        }
-      }
-    }
+    for_each_tensor(stack, returns_begin + i, 1, [&](const at::Tensor& t) {
+      wrap_output(t, is_alias);
+    });
   }
 }
 
