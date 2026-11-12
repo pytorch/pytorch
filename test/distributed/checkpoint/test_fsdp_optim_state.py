@@ -30,7 +30,8 @@ class FsdpOptimStateCheckpoint(DTensorContinuousTestBase):
 
     world_size = NUM_DEVICES
 
-    def _create_model(self):
+    def _create_model(self, device):
+        device_type = torch.device(device).type
         # make weight tensor dim_0 as large as the world size for scaling test
         layer1_weight_dim = self.world_size
         layer2_weight_dim = self.world_size * 2
@@ -54,7 +55,7 @@ class FsdpOptimStateCheckpoint(DTensorContinuousTestBase):
             def get_input(self):
                 return torch.rand(8, 8, device=self.device_type)
 
-        model = TestDummyModel(self.device_type).to(self.device_type)
+        model = TestDummyModel(device_type).to(device_type)
         return model
 
     @classmethod
@@ -70,7 +71,7 @@ class FsdpOptimStateCheckpoint(DTensorContinuousTestBase):
     def test_get_set_state_dict_forwards_fsdp_process_group(self, device):
         custom_pg = dist.new_group(ranks=list(range(self.world_size)))
 
-        model = self._create_model()
+        model = self._create_model(device)
         model = FSDP(model, process_group=custom_pg)
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
 
@@ -96,7 +97,7 @@ class FsdpOptimStateCheckpoint(DTensorContinuousTestBase):
         try:
             model_state_dict, optim_state_dict = get_state_dict(model, optim)
 
-            model_2 = self._create_model()
+            model_2 = self._create_model(device)
             model_2 = FSDP(model_2, process_group=custom_pg)
             optim_2 = torch.optim.Adam(model_2.parameters(), lr=0.1)
 
@@ -124,7 +125,7 @@ class FsdpOptimStateCheckpoint(DTensorContinuousTestBase):
         CHECKPOINT_DIR = self.temp_dir
         planner = dcp.DefaultLoadPlanner() if pass_planner else None
 
-        model = self._create_model()
+        model = self._create_model(device)
         model = FSDP(model)
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
 
@@ -148,7 +149,7 @@ class FsdpOptimStateCheckpoint(DTensorContinuousTestBase):
         )
 
         # now load the model and ensure the values are the same
-        model_2 = self._create_model()
+        model_2 = self._create_model(device)
         model_2 = FSDP(model_2)
         optim_2 = torch.optim.Adam(model_2.parameters(), lr=0.1)
 
