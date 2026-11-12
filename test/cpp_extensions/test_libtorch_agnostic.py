@@ -1401,7 +1401,14 @@ for warning in w:
     @skipIfTorchVersionLessThan(2, 16)
     @onlyCPU
     @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
-    def test_cpublas_gemm_no_downcast_default_real(self, device):
+    @parametrize(
+        "op_name",
+        [
+            "my_cpublas_gemm_no_downcast_stub_default",
+            "my_cpublas_gemm_no_downcast_stub_cpu",
+        ],
+    )
+    def test_cpublas_gemm_no_downcast_stub(self, device, op_name):
         import libtorch_agn_2_16 as libtorch_agnostic
 
         a = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.float32)
@@ -1411,9 +1418,7 @@ for warning in w:
         )
         c = torch.ones(2, 4, dtype=torch.float32)
         expected = 1.5 * (a @ b) + 2.0 * c
-        result = libtorch_agnostic.ops.my_cpublas_gemm_no_downcast_default_real(
-            a, b, c, alpha=1.5, beta=2.0
-        )
+        result = getattr(libtorch_agnostic.ops, op_name)(a, b, c, alpha=1.5, beta=2.0)
         self.assertEqual(result, expected)
         self.assertEqual(c, expected)
         self.assertEqual(result.data_ptr(), c.data_ptr())

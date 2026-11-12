@@ -3,9 +3,14 @@
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/macros.h>
 #include <torch/csrc/stable/version.h>
+#include <torch/headeronly/core/DeviceType.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/core/TransposeType.h>
 #include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Float8_e4m3fn.h>
+#include <torch/headeronly/util/Float8_e5m2.h>
+#include <torch/headeronly/util/Half.h>
 #include <torch/headeronly/util/shim_utils.h>
 
 #include <cstdint>
@@ -64,8 +69,8 @@ inline void brgemm(
     int64_t ld_b,
     int64_t ld_c,
     const bool add_C,
-    const at::Half* A,
-    const at::Half* B,
+    const torch::headeronly::Half* A,
+    const torch::headeronly::Half* B,
     float* C,
     bool is_vnni = true) {
   detail::brgemm(
@@ -93,8 +98,8 @@ inline void brgemm(
     int64_t ld_b,
     int64_t ld_c,
     const bool add_C,
-    const at::BFloat16* A,
-    const at::BFloat16* B,
+    const torch::headeronly::BFloat16* A,
+    const torch::headeronly::BFloat16* B,
     float* C,
     bool is_vnni = true) {
   detail::brgemm(
@@ -238,8 +243,8 @@ inline void brgemm(
     int64_t ld_b,
     int64_t ld_c,
     const bool add_C,
-    const at::Float8_e4m3fn* A,
-    const at::Float8_e4m3fn* B,
+    const torch::headeronly::Float8_e4m3fn* A,
+    const torch::headeronly::Float8_e4m3fn* B,
     float* C,
     bool is_vnni = true) {
   detail::brgemm(
@@ -267,8 +272,8 @@ inline void brgemm(
     int64_t ld_b,
     int64_t ld_c,
     const bool add_C,
-    const at::Float8_e5m2* A,
-    const at::Float8_e5m2* B,
+    const torch::headeronly::Float8_e5m2* A,
+    const torch::headeronly::Float8_e5m2* B,
     float* C,
     bool is_vnni = true) {
   detail::brgemm(
@@ -297,43 +302,84 @@ inline void brgemm_release(bool is_vnni = true) {
       torch_cpublas_brgemm_release(static_cast<int32_t>(is_vnni)));
 }
 
-/// Stable ABI wrapper for at::native::cpublas::gemm_no_downcast_stub.DEFAULT.
+/// Stable C++ interface for the CPU GEMM dispatch stub.
 ///
-/// Passes real-valued alpha and beta Scalars to the native GEMM stub.
+/// DEFAULT calls the baseline kernel; operator() uses device dispatch.
+/// Both call forms accept double alpha and beta only.
 ///
 /// Minimum compatible version: PyTorch 2.16.
 /// Build time minimum version: PyTorch 2.16.
-inline void gemm_no_downcast_default_real(
-    torch::headeronly::ScalarType dtype,
-    torch::headeronly::TransposeType transa,
-    torch::headeronly::TransposeType transb,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    double alpha,
-    const void* a,
-    int64_t lda,
-    const void* b,
-    int64_t ldb,
-    double beta,
-    void* c,
-    int64_t ldc) {
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_cpublas_gemm_no_downcast_default_real(
-      static_cast<int32_t>(dtype),
-      static_cast<int32_t>(transa),
-      static_cast<int32_t>(transb),
-      m,
-      n,
-      k,
-      alpha,
-      a,
-      lda,
-      b,
-      ldb,
-      beta,
-      c,
-      ldc));
-}
+struct GemmNoDowncastStub {
+  /// Function pointer to the default CPU kernel's stable shim wrapper.
+  static constexpr auto DEFAULT = +[](torch::headeronly::ScalarType dtype,
+                                      torch::headeronly::TransposeType transa,
+                                      torch::headeronly::TransposeType transb,
+                                      int64_t m,
+                                      int64_t n,
+                                      int64_t k,
+                                      double alpha,
+                                      const void* a,
+                                      int64_t lda,
+                                      const void* b,
+                                      int64_t ldb,
+                                      double beta,
+                                      void* c,
+                                      int64_t ldc) {
+    STABLE_TORCH_ERROR_CODE_CHECK(
+        torch_cpublas_gemm_no_downcast_default_alpha_beta_double(
+            static_cast<int32_t>(dtype),
+            static_cast<int32_t>(transa),
+            static_cast<int32_t>(transb),
+            m,
+            n,
+            k,
+            alpha,
+            a,
+            lda,
+            b,
+            ldb,
+            beta,
+            c,
+            ldc));
+  };
+
+  void operator()(
+      torch::headeronly::DeviceType device_type,
+      torch::headeronly::ScalarType dtype,
+      torch::headeronly::TransposeType transa,
+      torch::headeronly::TransposeType transb,
+      int64_t m,
+      int64_t n,
+      int64_t k,
+      double alpha,
+      const void* a,
+      int64_t lda,
+      const void* b,
+      int64_t ldb,
+      double beta,
+      void* c,
+      int64_t ldc) const {
+    STABLE_TORCH_ERROR_CODE_CHECK(
+        torch_cpublas_gemm_no_downcast_alpha_beta_double(
+            static_cast<int32_t>(device_type),
+            static_cast<int32_t>(dtype),
+            static_cast<int32_t>(transa),
+            static_cast<int32_t>(transb),
+            m,
+            n,
+            k,
+            alpha,
+            a,
+            lda,
+            b,
+            ldb,
+            beta,
+            c,
+            ldc));
+  }
+};
+
+inline constexpr GemmNoDowncastStub gemm_no_downcast_stub{};
 
 /// Stable ABI wrapper for at::native::cpublas::could_pack.
 ///

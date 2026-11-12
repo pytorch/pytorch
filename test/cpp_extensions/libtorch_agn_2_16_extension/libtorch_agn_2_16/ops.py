@@ -79,11 +79,18 @@ def my_cpublas_brgemm_f8e5m2(a, b, c, add_c=False) -> torch.Tensor:
     return torch.ops.libtorch_agn_2_16.my_cpublas_brgemm_f8e5m2.default(a, b, c, add_c)
 
 
-def my_cpublas_gemm_no_downcast_default_real(
+def my_cpublas_gemm_no_downcast_stub_default(
     a, b, c, alpha=1.0, beta=0.0
 ) -> torch.Tensor:
     """Write float32 CPU GEMM into c through the stable default kernel (2.16+)."""
-    return torch.ops.libtorch_agn_2_16.my_cpublas_gemm_no_downcast_default_real.default(
+    return torch.ops.libtorch_agn_2_16.my_cpublas_gemm_no_downcast_stub_default.default(
+        a, b, c, alpha, beta
+    )
+
+
+def my_cpublas_gemm_no_downcast_stub_cpu(a, b, c, alpha=1.0, beta=0.0) -> torch.Tensor:
+    """Write float32 CPU GEMM into c through CPU capability dispatch (2.16+)."""
+    return torch.ops.libtorch_agn_2_16.my_cpublas_gemm_no_downcast_stub_cpu.default(
         a, b, c, alpha, beta
     )
 

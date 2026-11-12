@@ -1117,7 +1117,8 @@ AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm_release(int32_t is_vnni) {
       { at::native::cpublas::brgemm_release(static_cast<bool>(is_vnni)); });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_default_real(
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cpublas_gemm_no_downcast_default_alpha_beta_double(
     int32_t dtype,
     int32_t transa,
     int32_t transb,
@@ -1139,6 +1140,45 @@ AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_default_real(
     const c10::Scalar beta_scalar(beta);
     at::native::cpublas::gemm_no_downcast_default(
         scalar_type,
+        static_cast<at::native::TransposeType>(transa),
+        static_cast<at::native::TransposeType>(transb),
+        m,
+        n,
+        k,
+        alpha_scalar,
+        a,
+        lda,
+        b,
+        ldb,
+        beta_scalar,
+        c,
+        ldc);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cpublas_gemm_no_downcast_alpha_beta_double(
+    int32_t device_type,
+    int32_t dtype,
+    int32_t transa,
+    int32_t transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    double alpha,
+    const void* a,
+    int64_t lda,
+    const void* b,
+    int64_t ldb,
+    double beta,
+    void* c,
+    int64_t ldc) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    const c10::Scalar alpha_scalar(alpha);
+    const c10::Scalar beta_scalar(beta);
+    at::native::cpublas::gemm_no_downcast_stub(
+        static_cast<c10::DeviceType>(device_type),
+        static_cast<c10::ScalarType>(dtype),
         static_cast<at::native::TransposeType>(transa),
         static_cast<at::native::TransposeType>(transb),
         m,
