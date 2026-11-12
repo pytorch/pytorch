@@ -42,7 +42,6 @@ COMMON_BUILD_ENV: dict[str, str] = {
     "TH_BINARY_BUILD": "1",
     "BUILD_TEST": "0",
     "INSTALL_TEST": "0",
-    "MSSdk": "1",
     "DISTUTILS_USE_SDK": "1",
     # Ninja is forced for Windows builds via cmake.define.CMAKE_GENERATOR in
     # pyproject.toml (single source of truth), so it is not set here.
