@@ -782,6 +782,29 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_user_visible_aliases_in_cache_key(self):
+        # Both graphs are `return (sin, sin)` after joint graph passes, but only
+        # the first one's outputs alias in eager.
+        def aliased(x):
+            y = x.sin()
+            return y, y[:]
+
+        def not_aliased(x):
+            y = x.sin()
+            return y, y + 0
+
+        x = torch.randn(8)
+        for fn in (aliased, not_aliased):
+            self.reset()
+            outputs = torch.compile(fn, fullgraph=True)(x)
+            self.assertEqual(
+                torch._C._is_alias_of(*outputs), torch._C._is_alias_of(*fn(x))
+            )
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
     def _check_cpu_thread_count_cache_key_no_input(self, return_expr):
         script = textwrap.dedent(
             f"""

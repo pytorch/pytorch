@@ -1613,6 +1613,13 @@ class FxGraphHashDetails:
             if gm is not None
             else ()
         )
+        # Lives in node meta and can't be recovered from the graph: `return y, y[:]`
+        # and `return y, y + 0` look the same after joint graph passes.
+        self.original_user_visible_aliases = (
+            gm.graph.output_node().meta.get("original_user_visible_aliases")
+            if gm is not None
+            else None
+        )
 
         # Order kwargs so hashing is stable to changes in kwarg order. Although
         # it's technically a _CompileFxKwargs we don't actually need it typed as

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import functools
 import itertools
 import logging
@@ -199,6 +200,17 @@ def getattr_recursive(
             )
         attr_itr = getattr(attr_itr, atom)
     return attr_itr
+
+
+@dataclasses.dataclass(frozen=True)
+class UserVisibleAliases:
+    """Storage aliasing among user-visible graph inputs and outputs, as in eager."""
+
+    # (input_idx, output_idx) pairs that share a storage
+    input_output: tuple[tuple[int, int], ...]
+    # (i, j) output pairs, i < j, that share a storage
+    output_output: tuple[tuple[int, int], ...]
+    visible_outputs: tuple[int, ...] = ()
 
 
 def get_user_visible_output_strides(g: Graph) -> dict[Node, tuple[int, ...]]:
@@ -1999,97 +2011,57 @@ class GraphLowering(torch.fx.Interpreter):
             if isinstance(ir_value, ir.TensorBox):
                 ir_value.realize()
 
-    def _get_new_user_visible_output_aliases(
-        self, output_node: torch.fx.Node
-    ) -> tuple[OrderedSet[tuple[int, int]], OrderedSet[tuple[int, int]]]:
-        original_aliases = output_node.meta.get("original_output_aliases")
-        visible_outputs = tuple(output_node.meta.get("user_visible_output_idxs", ()))
-        if original_aliases is None or not visible_outputs:
-            return OrderedSet(), OrderedSet()
+    def _fix_user_visible_aliases(self, output_node: torch.fx.Node) -> None:
+        """Copy user-visible outputs that alias an input or another output after
+        lowering (e.g. `x + 0` was removed) but did not alias it in eager."""
+        old_aliases = output_node.meta.get("original_user_visible_aliases")
+        if old_aliases is None or not old_aliases.visible_outputs:
+            return
+        old_input_output = OrderedSet(old_aliases.input_output)
+        old_output_output = OrderedSet(old_aliases.output_output)
 
-        visible_set = frozenset(visible_outputs)
-        original_input_output = OrderedSet(
-            pair for pair in original_aliases["input_output"] if pair[1] in visible_set
-        )
-        original_output_output = OrderedSet(
-            pair
-            for pair in original_aliases["output_output"]
-            if pair[0] in visible_set and pair[1] in visible_set
-        )
-        input_names = [
-            (
-                self.graph_inputs_original[name].get_name()
-                if name in self.graph_inputs_original
-                else None
-            )
-            for name in self.graph_input_names
-        ]
+        # Tensors alias after lowering iff they share a buffer, so group by name.
+        new_inputs_by_buffer: dict[str, list[int]] = defaultdict(list)
+        for input_idx, name in enumerate(self.graph_input_names):
+            if name in self.graph_inputs_original:
+                buffer = self.graph_inputs_original[name].get_name()
+                new_inputs_by_buffer[buffer].append(input_idx)
+        new_outputs_by_buffer: dict[str, list[int]] = defaultdict(list)
+        for output_idx in old_aliases.visible_outputs:
+            output = self.graph_outputs[output_idx]
+            if isinstance(output, ir.IRNode) and output.has_tensor_output():
+                if (buffer := output.maybe_get_name()) is not None:
+                    new_outputs_by_buffer[buffer].append(output_idx)
 
-        def matching_pairs(
-            left_names: Sequence[str | None],
-            right_names: Sequence[str | None],
-            pairs: Iterable[tuple[int, int]],
-        ) -> OrderedSet[tuple[int, int]]:
-            return OrderedSet(
-                (left_idx, right_idx)
-                for left_idx, right_idx in pairs
-                if left_names[left_idx] is not None
-                and left_names[left_idx] == right_names[right_idx]
-            )
-
-        output_names = [
-            output.maybe_get_name()
-            if isinstance(output, ir.IRNode) and output.has_tensor_output()
-            else None
-            for output in self.graph_outputs
-        ]
-        current_input_output = matching_pairs(
-            input_names,
-            output_names,
-            itertools.product(range(len(input_names)), visible_outputs),
-        )
-        current_output_output = matching_pairs(
-            output_names,
-            output_names,
-            itertools.combinations(visible_outputs, 2),
-        )
-        return (
-            current_input_output - original_input_output,
-            current_output_output - original_output_output,
-        )
-
-    def _is_user_visible_output_alias_changed(self, output_node: torch.fx.Node) -> bool:
-        return any(self._get_new_user_visible_output_aliases(output_node))
-
-    def _fix_user_visible_output_aliases(self, output_node: torch.fx.Node) -> None:
         fx_outputs = output_node.args[0]
         if not isinstance(fx_outputs, (tuple, list)):
             fx_outputs = (fx_outputs,)
-        while True:
-            added_input_output, added_output_output = (
-                self._get_new_user_visible_output_aliases(output_node)
-            )
-            if not added_input_output and not added_output_output:
-                return
-            _, output_idx = next(iter(added_input_output or added_output_output))
-            output = self.graph_outputs[output_idx]
-            if not isinstance(output, ir.IRNode) or not output.has_tensor_output():
-                raise AssertionError(
-                    f"Expected tensor output at index {output_idx}, got {type(output)}"
+        for buffer, output_idxs in new_outputs_by_buffer.items():
+            input_idxs = new_inputs_by_buffer.get(buffer, ())
+            # Outputs that keep the shared buffer; copied ones get their own.
+            kept: list[int] = []
+            for output_idx in output_idxs:
+                if all(
+                    (input_idx, output_idx) in old_input_output
+                    for input_idx in input_idxs
+                ) and all(
+                    (kept_idx, output_idx) in old_output_output for kept_idx in kept
+                ):
+                    kept.append(output_idx)
+                    continue
+                copy = ir.ExternKernel.copy_input(self.graph_outputs[output_idx])
+                # Keep the eager strides, which the copy would otherwise lose.
+                fx_output = fx_outputs[output_idx]
+                strides = (
+                    self.user_visible_output_strides.get(fx_output)
+                    if isinstance(fx_output, torch.fx.Node)
+                    else None
                 )
-            copy = ir.ExternKernel.copy_input(output)
-            # Keep the output stride after the copy unless it will do contiguous layout
-            fx_output = fx_outputs[output_idx]
-            strides = (
-                self.user_visible_output_strides.get(fx_output)
-                if isinstance(fx_output, torch.fx.Node)
-                else None
-            )
-            if strides and not free_unbacked_symbols(strides):
-                copy = ir.ExternKernel.require_exact_strides(
-                    copy, strides, allow_padding=config.pad_outputs
-                )
-            self.graph_outputs[output_idx] = copy
+                if strides and not free_unbacked_symbols(strides):
+                    copy = ir.ExternKernel.require_exact_strides(
+                        copy, strides, allow_padding=config.pad_outputs
+                    )
+                self.graph_outputs[output_idx] = copy
 
     def run_node(self, n: torch.fx.Node) -> object:
         """Lower and execute a single FX node into Inductor IR."""
@@ -2228,8 +2200,7 @@ class GraphLowering(torch.fx.Interpreter):
                 result = super().run_node(n)
 
             if n.op == "output":
-                if self._is_user_visible_output_alias_changed(n):
-                    self._fix_user_visible_output_aliases(n)
+                self._fix_user_visible_aliases(n)
 
             # require the same stride order for dense outputs,
             # 1. user-land view() will not throw because inductor
