@@ -29,6 +29,14 @@ C10_METAL_CONSTEXPR uint32_t kMatmulFullGridPerCore = 4;
 // fp32 K steps between barriers that keep a tile's simdgroups on the same
 // operand rows, which then stay in cache. half and bfloat do not drift.
 C10_METAL_CONSTEXPR uint32_t kMatmulPaceSteps = 4;
+// A grid of up to kMatmulKGroupsFullGrids full grids of single blocks leaves
+// GPU cores idle, so kMatmulKGroups simdgroups split the K of each block.
+C10_METAL_CONSTEXPR uint32_t kMatmulKGroups = 8;
+C10_METAL_CONSTEXPR uint32_t kMatmulKGroupsFullGrids = 2;
+// A grid that small also splits K into products of at least kMatmulSplitMinK,
+// up to a full grid over kMatmulSplitGridShare of threadgroups.
+C10_METAL_CONSTEXPR uint32_t kMatmulSplitMinK = 1024;
+C10_METAL_CONSTEXPR uint32_t kMatmulSplitGridShare = 2;
 // Complex products with M, K and N up to this are faster on the naive
 // kernels than as a real GEMM.
 C10_METAL_CONSTEXPR uint32_t kMatmulComplexNaiveMaxDim = 16;
@@ -77,6 +85,9 @@ struct MatmulParams {
   idx_t bias_stride_n;
   idx_t a_batch, b_batch, out_batch, bias_batch; // batch strides
   float alpha, beta; // beta == 0: bias is not read
+  // Not 0: each k_split of K is a product of its own, whose fp32 result goes
+  // to its plane of the partials bound as out.
+  uint32_t k_split;
 };
 
 #ifdef __METAL__
@@ -324,18 +335,21 @@ inline void matmul_mpp_cooperative_gemm(
 
 // Dense matmul2d tile op: out = alpha * A * B + beta * bias, one matmul2d call
 // per simdgroup block and K step.
-template <typename T, int BM, bool TA, bool TB>
+template <typename T, int BM, bool TA, bool TB, int KG>
 inline void matmul_mpp_block_gemm(
     thread const MatmulTile<T>& tile,
     constant MatmulParams<uint64_t>& p,
-    uint simd_group) {
+    uint simd_group,
+    threadgroup float* partials) {
   using namespace mpp::tensor_ops;
   using Ext = dextents<int32_t, 2>;
   using Str = array<int32_t, 2>;
   using Mat = tensor<device T, Ext, tensor_inline>;
   constexpr int RN = kMatmulBlock, KC = kMatmulStepBytes / sizeof(T);
-  const int col = simd_group * RN, pace = kMatmulPaceSteps * KC;
-  constexpr bool paced = is_same_v<T, float>;
+  // KG > 1: the tile is one block and its KG simdgroups split K.
+  const int group = KG > 1 ? simd_group : 0;
+  const int col = (simd_group - group) * RN, pace = kMatmulPaceSteps * KC;
+  constexpr bool paced = is_same_v<T, float> && KG == 1;
   if (col >= int(tile.cols)) {
     // A simdgroup without a block still meets the barriers of the others.
     for (int kk = pace; paced && kk < int(tile.k); kk += pace) {
@@ -367,7 +381,8 @@ inline void matmul_mpp_block_gemm(
   for (ushort i = 0; i < acc.get_capacity(); ++i) {
     acc[i] = 0;
   }
-  for (int kk = 0; kk < k; kk += KC) {
+  const int k_group = c10::metal::ceil_div(k, KC * KG) * KC;
+  for (int kk = group * k_group; kk < min(k, (group + 1) * k_group); kk += KC) {
     if (paced && kk && kk % pace == 0) {
       threadgroup_barrier(mem_flags::mem_none);
     }
@@ -384,8 +399,35 @@ inline void matmul_mpp_block_gemm(
       op.run(sa, sb, acc);
     }
   }
-  auto res = op.template get_destination_cooperative_tensor<Mat, Mat, T>();
+  if (KG > 1) {
+    // Groups 1.. leave their block in threadgroup memory for group 0 to add.
+    using Part = tensor<threadgroup float, Ext, tensor_inline>;
+    if (group) {
+      acc.store(
+          Part(partials + (group - 1) * BM * RN, Ext(RN, BM), Str{1, RN}));
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (group) {
+      return;
+    }
+    auto part =
+        op.template get_destination_cooperative_tensor<Mat, Mat, float>();
+    for (int g = 1; g < KG; ++g) {
+      part.load(Part(partials + (g - 1) * BM * RN, Ext(RN, BM), Str{1, RN}));
+      for (ushort i = 0; i < acc.get_capacity(); ++i) {
+        acc[i] += part[i];
+      }
+    }
+  }
   const Ext ext(cols, rows);
+  if (p.k_split) {
+    acc.store(tensor<device float, Ext, tensor_inline>(
+        reinterpret_cast<device float*>(tile.out) + col,
+        ext,
+        Str{1, int(p.out_stride_m / p.out_stride_n)}));
+    return;
+  }
+  auto res = op.template get_destination_cooperative_tensor<Mat, Mat, T>();
   // The bias branch stays out of the element loops, which then vectorize.
   if (p.beta != 0) {
     res.load(

@@ -603,7 +603,7 @@ void metal_gemm(const Tensor& a,
   // out stands in for a bias that is not read.
   const bool add = bias.defined() && beta.toDouble() != 0;
   const auto bias_ = add ? bias.expand_as(out) : out;
-  const auto params = matmul_params<uint64_t>(a, b, out, bias_, alpha.toFloat(), add ? beta.toFloat() : 0.0f);
+  auto params = matmul_params<uint64_t>(a, b, out, bias_, alpha.toFloat(), add ? beta.toFloat() : 0.0f);
   const int64_t batch = out.dim() == 3 ? out.size(0) : 1;
   static const int64_t full_grid = kMatmulFullGridPerCore * MPSDevice::getInstance()->getCoreCount();
   constexpr uint32_t mpp_bn = kMatmulBlock * kMatmulBlockSimdgroups;
@@ -612,12 +612,28 @@ void metal_gemm(const Tensor& a,
   const bool use_mpp = has_mpp() && params.out_stride_n == 1 && params.bias_stride_n == 1 &&
       (params.a_stride_m == 1 || params.a_stride_k == 1) && (params.b_stride_k == 1 || params.b_stride_n == 1) &&
       matmul_mpp_indices_fit(params, mpp_bm, mpp_bn);
-  const auto bm = use_mpp ? mpp_bm : matmul_tile_rows(params.m);
-  const auto bn = use_mpp ? mpp_bn : kMatmulTileN;
-  const auto simdgroups = use_mpp ? kMatmulBlockSimdgroups : matmul_simdgroups(bm, bn);
+  const int64_t blocks = at::ceil_div(params.m, kMatmulBlock / 2) * at::ceil_div(params.n, kMatmulBlock) * batch;
+  const bool k_groups = use_mpp && blocks <= kMatmulKGroupsFullGrids * full_grid;
+  const auto bm = k_groups ? kMatmulBlock / 2 : use_mpp ? mpp_bm : matmul_tile_rows(params.m);
+  const auto bn = k_groups ? kMatmulBlock : use_mpp ? mpp_bn : kMatmulTileN;
+  const auto simdgroups = k_groups ? kMatmulKGroups : use_mpp ? kMatmulBlockSimdgroups : matmul_simdgroups(bm, bn);
   const bool use_u32 = !use_mpp && offsetsFitIn<int32_t>(a, b, out, bias_);
+  const int64_t max_splits =
+      k_groups ? std::min<int64_t>(params.k / kMatmulSplitMinK, full_grid / (kMatmulSplitGridShare * blocks)) : 1;
+  const int64_t k_split = max_splits > 1 ? at::ceil_div<int64_t>(params.k, max_splits) : 0;
+  const int64_t splits = k_split ? at::ceil_div<int64_t>(params.k, k_split) : 1;
+  Tensor partials;
+  if (k_split) {
+    // Planes of fp32 blocks, addressed in elements of the operands.
+    const uint64_t scale = sizeof(float) / out.element_size();
+    partials = at::empty({batch, splits, params.m, params.n}, out.options().dtype(kFloat));
+    params.k_split = k_split;
+    params.out_stride_n = scale, params.out_stride_m = params.n * scale, params.out_batch = params.m * params.n * scale;
+  }
+  const auto& dst = k_split ? partials : out;
   const auto dtype = scalarToMetalTypeString(out);
-  const auto name = use_mpp ? fmt::format("matmul_mpp_{}{}_{}_bm{}",
+  const auto name = use_mpp ? fmt::format("matmul_mpp_{}{}{}_{}_bm{}",
+                                          k_groups ? "kg_" : "",
                                           params.a_stride_k == 1 ? 'n' : 't',
                                           params.b_stride_k == 1 ? 't' : 'n',
                                           dtype,
@@ -633,13 +649,17 @@ void metal_gemm(const Tensor& a,
       if (use_u32) {
         mtl_setArgs(encoder, a, b, out, bias_, matmul_params<uint32_t>(a, b, out, bias_, params.alpha, params.beta));
       } else {
-        mtl_setArgs(encoder, a, b, out, bias_, params);
+        mtl_setArgs(encoder, a, b, dst, bias_, params);
       }
-      [encoder dispatchThreadgroups:MTLSizeMake(at::ceil_div(params.n, bn), at::ceil_div(params.m, bm), batch)
+      [encoder dispatchThreadgroups:MTLSizeMake(at::ceil_div(params.n, bn), at::ceil_div(params.m, bm), batch * splits)
               threadsPerThreadgroup:MTLSizeMake(simdgroups * c10::metal::simdgroup_size, 1, 1)];
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
+  if (k_split) {
+    auto sum = partials.sum(1).mul_(alpha);
+    out.copy_((add ? sum.add_(bias_, beta) : sum).view_as(out));
+  }
 }
 
 // metal_gemm, or the GEMV kernels for a 2-D product with one row or column.

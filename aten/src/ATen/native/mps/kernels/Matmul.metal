@@ -75,8 +75,8 @@ INSTANTIATE_MATMUL_SIMD_DTYPE(half);
 INSTANTIATE_MATMUL_SIMD_DTYPE(bfloat);
 
 #if C10_METAL_HAS_MPP
-template <typename T, int BM, bool TA, bool TB>
-[[max_total_threads_per_threadgroup(kMatmulBlockSimdgroups * simdgroup_size)]]
+template <typename T, int BM, bool TA, bool TB, int KG = 1>
+[[max_total_threads_per_threadgroup(kMatmulKGroups * simdgroup_size)]]
 kernel void matmul_mpp(
     device const T* a [[buffer(0)]],
     device const T* b [[buffer(1)]],
@@ -85,9 +85,20 @@ kernel void matmul_mpp(
     constant MatmulParams<uint64_t>& params [[buffer(4)]],
     uint3 tgid [[threadgroup_position_in_grid]],
     uint simd_group [[simdgroup_index_in_threadgroup]]) {
-  constexpr int BN = kMatmulBlock * kMatmulBlockSimdgroups;
-  auto tile = matmul_tile<T, BM, BN>(a, b, out, bias, params, tgid);
-  matmul_mpp_block_gemm<T, BM, TA, TB>(tile, params, simd_group);
+  constexpr int BN = kMatmulBlock * (KG > 1 ? 1 : kMatmulBlockSimdgroups);
+  threadgroup float partials[(KG - 1) * BM * kMatmulBlock + 1];
+  const uint splits =
+      params.k_split ? c10::metal::ceil_div(params.k, params.k_split) : 1;
+  const uint split = tgid.z % splits, batch = tgid.z / splits;
+  auto tile =
+      matmul_tile<T, BM, BN>(a, b, out, bias, params, uint3(tgid.xy, batch));
+  if (params.k_split) {
+    tile.a += split * params.k_split * params.a_stride_k;
+    tile.b += split * params.k_split * params.b_stride_k;
+    tile.out += (tgid.z - batch) * params.out_batch;
+    tile.k = min(params.k_split, params.k - split * params.k_split);
+  }
+  matmul_mpp_block_gemm<T, BM, TA, TB, KG>(tile, params, simd_group, partials);
 }
 
 #define INSTANTIATE_MATMUL_MPP(T, BM, TA, TB, LAYOUT)                        \
@@ -112,9 +123,19 @@ kernel void matmul_mpp(
   INSTANTIATE_MATMUL_MPP_BM(T, 16);     \
   INSTANTIATE_MATMUL_MPP_BM(T, 32)
 
+// K groups, on tiles of kMatmulBlock / 2 rows.
+#define INSTANTIATE_MATMUL_MPP_KG(T)                                          \
+  INSTANTIATE_MATMUL_MPP(T, 16, false, false MB_COMMA kMatmulKGroups, kg_nn); \
+  INSTANTIATE_MATMUL_MPP(T, 16, false, true MB_COMMA kMatmulKGroups, kg_nt);  \
+  INSTANTIATE_MATMUL_MPP(T, 16, true, false MB_COMMA kMatmulKGroups, kg_tn);  \
+  INSTANTIATE_MATMUL_MPP(T, 16, true, true MB_COMMA kMatmulKGroups, kg_tt)
+
 INSTANTIATE_MATMUL_MPP_DTYPE(float);
 INSTANTIATE_MATMUL_MPP_DTYPE(half);
 INSTANTIATE_MATMUL_MPP_DTYPE(bfloat);
+INSTANTIATE_MATMUL_MPP_KG(float);
+INSTANTIATE_MATMUL_MPP_KG(half);
+INSTANTIATE_MATMUL_MPP_KG(bfloat);
 #endif
 
 // Grid (cols, rows, planes).
