@@ -1033,6 +1033,12 @@ def run_joint_graph_passes_on_hops(
             else:
                 raise
 
+        if config.deterministic_recompute:
+            prefix = f"{identifier.lstrip('_')}_"
+            deterministic_recompute(
+                new_fw_hop_gm, new_bw_hop_gm, num_fw_outputs, prefix=prefix
+            )
+
         # Save the new forward and backward graph modules
         new_hop_graphs[identifier].new_fw_hop_gm = new_fw_hop_gm
         new_hop_graphs[identifier].new_bw_hop_gm = new_bw_hop_gm
