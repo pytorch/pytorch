@@ -1681,7 +1681,9 @@ static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
     TORCH_CHECK(
         c10::impl::FakeTensorModeTLS::get_state() == nullptr,
         "trying to set the current C++ FakeTensorMode, but one already exists");
-    c10::impl::FakeTensorModeTLS::set_state(std::move(cpp_mode));
+    c10::impl::FakeTensorModeTLS::set_state(
+        std::make_shared<c10::FakeTensorModeHandle>(
+            c10::FakeTensorModeHandle{std::move(cpp_mode)}));
     Py_RETURN_NONE;
   }
 
