@@ -4178,6 +4178,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.codegen_reduction_indices(self.body)
 
     def register_jagged_range(self, bound, jagged_range):
+        # Nodes that share a JaggedRange register the same bound (the lowering
+        # guarantees it), so the first registration serves the whole kernel.
         if jagged_range in self.jagged_bound_code:
             return
         tree = next(tree for tree in self.range_trees if tree.numel == jagged_range)
@@ -4189,6 +4191,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         #
         # Everything emitted so far moves before the loop with it, so inner_fn
         # must register the bound before it uses the reduction index.
+        #
+        # Loop code that does not use r0_index is masked only by xmask, so it
+        # also runs for rows that have already ended. Lowerings therefore
+        # indirect-index with the reduction index included, as in
+        # indirect_indexing(offsets[b] + r). Indexing offsets[b] alone puts its
+        # bounds check in the loop as
+        #     tl.device_assert(((0 <= tmp6) & (tmp6 < 1030)) | ~(xmask), ...)
+        # which fails for an empty last row, whose start is the total length.
         code = IndentedBuffer()
         code.splice(self.indexing_code)
         code.splice(self.loads)
@@ -8524,6 +8534,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     "cannot override persistent reduction with unknown dynamic rnumel"
                 )
             kernel_kwargs["override_persistent_reduction"] = False
+        # A cooperative reduction splits r0_numel over RSPLIT blocks, but a
+        # jagged kernel gets r0_numel = -1 and loops to each row's own bound,
+        # so every block would reduce the whole row: with RSPLIT = 8 a row sum
+        # comes out 8x too large.
+        if kernel_features.reduction_numel.has(JaggedRange):
+            kernel_kwargs["override_cooperative_reduction"] = False
 
     def codegen_static_numels(self, code):
         """
