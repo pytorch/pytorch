@@ -175,6 +175,7 @@ __global__ void compute_grad_weight_atomic_accumulate(
     const index_t *partial_to_segment_idx,
     const index_t *segment_offsets,
     output_t *grad_weight,
+    int64_t num_weights,
     const int64_t padding_idx,
     const int64_t stride_warped) {
 
@@ -208,6 +209,7 @@ __global__ void compute_grad_weight_atomic_accumulate(
   const index_t target_row = sorted_indices[segment_offsets[segment_id]];
 
   if (target_row != padding_idx) {
+    CUDA_KERNEL_ASSERT(target_row >= 0 && target_row < num_weights);
     gpuAtomicAddNoReturn(
         &grad_weight[target_row * stride + startFeature],
         static_cast<output_t>(weight));
@@ -235,7 +237,7 @@ __global__ void krn_partial_to_segment_idx(
 // This kernel assumes that all input tensors are contiguous.
 template <typename scalar_t, typename index_t>
 __global__ void sum_and_scatter(
-    const index_t *input, scalar_t *gradWeight, int64_t stride,
+    const index_t *input, scalar_t *gradWeight, int64_t stride, int64_t num_weights,
     const index_t* segment_offsets, const int64_t *num_of_segments_ptr,
     const acc_type<scalar_t, true> *grad_weight_per_segment,
     const index_t *segment_sizes_offsets, const int64_t *num_of_partial_segments_ptr,
@@ -262,6 +264,7 @@ __global__ void sum_and_scatter(
   }
   int64_t target_row = input[segment_offsets[id]];
   if (target_row != padding_idx) {
+    CUDA_KERNEL_ASSERT(target_row >= 0 && target_row < num_weights);
     gradWeight[target_row * stride + startFeature] = weight;
   }
 }
@@ -417,6 +420,7 @@ Tensor embedding_backward_cuda_kernel(
                 partial_to_segment_idx.const_data_ptr<index_t>(),
                 segment_offsets.const_data_ptr<index_t>(),
                 grad_weight_acc.mutable_data_ptr<partial_weight_t>(),
+                num_weights,
                 padding_idx,
                 stride_warped);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -435,6 +439,7 @@ Tensor embedding_backward_cuda_kernel(
                 partial_to_segment_idx.const_data_ptr<index_t>(),
                 segment_offsets.const_data_ptr<index_t>(),
                 grad_weight.mutable_data_ptr<scalar_t>(),
+                num_weights,
                 padding_idx,
                 stride_warped);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -478,7 +483,7 @@ Tensor embedding_backward_cuda_kernel(
               sum_and_scatter<scalar_t><<<grid2, block, 0, stream>>>(
                 sorted_indices.const_data_ptr<index_t>(),
                 grad_weight.mutable_data_ptr<scalar_t>(),
-                stride,
+                stride, num_weights,
                 segment_offsets.const_data_ptr<index_t>(),
                 num_of_segments_ptr, grad_weight_per_segment.const_data_ptr<partial_weight_t>(),
                 partials_per_segment_offset.const_data_ptr<index_t>(),
