@@ -15,9 +15,14 @@ from torch._inductor.fx_passes.pad_mm import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
+@instantiate_parametrized_tests
 class PadMMTest(TestCase):
     def setUp(self):
         super().setUp()
@@ -419,8 +424,9 @@ class PadMMTest(TestCase):
             out_eager = torch.ops.aten.addmm(*inps)
             self.assertEqual(out, out_eager)
 
+    @parametrize("pad_m_dim", (True, False))
     @inductor_config.patch(force_shape_pad=True)
-    def test_pad_batch(self):
+    def test_pad_batch(self, pad_m_dim):
         m = 6
         n = 9
         k = 11
@@ -428,22 +434,24 @@ class PadMMTest(TestCase):
         mat1 = torch.ones((batch_size, m, k), device=GPU_TYPE, dtype=torch.float16)
         mat2 = torch.ones((batch_size, k, n), device=GPU_TYPE, dtype=torch.float16)
         expected_alignment = get_alignment_size(mat1)
+        expected_m = 8 if pad_m_dim else m
 
         if expected_alignment != 8:
             raise AssertionError("Alignment for float16 should be 8")
-        if not can_pad(mat1, mat2, torch.ops.aten.bmm):
-            raise AssertionError("This should pass the common padding criteria")
 
         @torch.compile()
         def bmm(mat1, mat2):
             return torch.bmm(mat1, mat2)
 
-        res2, (code,) = run_and_get_code(bmm, mat1, mat2)
+        with inductor_config.patch(pad_m_dim=pad_m_dim):
+            if not can_pad(mat1, mat2, torch.ops.aten.bmm):
+                raise AssertionError("This should pass the common padding criteria")
+            res2, (code,) = run_and_get_code(bmm, mat1, mat2)
         bmm_expected_result = torch.bmm(mat1, mat2)
         # in call code, expect to see a single pad per input, and then we should see padded allocation for output
         FileCheck().check("del async_compile").check_count(
             ".run(", 2, exactly=True
-        ).check(f"empty_strided_{GPU_TYPE}((3, 8, 16)").run(code)
+        ).check(f"empty_strided_{GPU_TYPE}((3, {expected_m}, 16)").run(code)
 
         if not torch.allclose(res2, bmm_expected_result):
             raise AssertionError("BMM results are not identical")
