@@ -116,11 +116,18 @@ class CompletedWork : public ::c10d::Work {
 // NCCL's encryption key is process-global and reread for every new socket,
 // including those of live communicators and NCCL's RAS thread. Set it at most
 // once, before the first nccl2 group is constructed. Groups constructed with a
-// key must not be constructed concurrently with other groups.
-void applyEncryptionPsk(const std::optional<std::string>& psk) {
+// key, or while TORCH_NCCL_ENCRYPTION_PSK is set and no key is applied, must
+// not be constructed concurrently with other groups. Never log the key.
+void applyEncryptionPsk(std::optional<std::string> psk) {
   static std::atomic<bool> group_constructed{false};
   static std::optional<std::string> applied_psk;
   bool first_group = !group_constructed.load();
+  if (!psk.has_value() && !applied_psk.has_value()) {
+    auto env_psk = getCvarString({"TORCH_NCCL_ENCRYPTION_PSK"}, "");
+    if (!env_psk.empty()) {
+      psk = std::move(env_psk);
+    }
+  }
   if (!psk.has_value() || psk == applied_psk) {
     group_constructed.store(true);
     return;
@@ -128,15 +135,15 @@ void applyEncryptionPsk(const std::optional<std::string>& psk) {
   // NCCL reads the key as a C string.
   TORCH_CHECK_VALUE(
       psk->find('\0') == std::string::npos,
-      "encryption_psk must not contain NUL bytes");
+      "encryption_psk/TORCH_NCCL_ENCRYPTION_PSK must not contain NUL bytes");
   TORCH_CHECK(
       !applied_psk.has_value(),
       "encryption_psk differs from the key set by an earlier nccl2 group; "
       "NCCL's key is process-global and can't be changed");
   TORCH_CHECK(
       first_group,
-      "encryption_psk must be set on the first nccl2 group created in the "
-      "process");
+      "encryption_psk/TORCH_NCCL_ENCRYPTION_PSK must be set on the first nccl2 "
+      "group created in the process");
 #if NCCL_VERSION_CODE < NCCL_VERSION(2, 32, 3) || defined(USE_ROCM)
   TORCH_CHECK(
       false,
@@ -148,7 +155,7 @@ void applyEncryptionPsk(const std::optional<std::string>& psk) {
       nullptr,
       nccl_api.setEncryptionPsk(psk->c_str()),
       "ncclSetEncryption failed");
-  applied_psk = psk;
+  applied_psk = std::move(psk);
   group_constructed.store(true);
 }
 } // namespace

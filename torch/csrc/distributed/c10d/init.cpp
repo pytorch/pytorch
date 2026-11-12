@@ -4565,7 +4565,9 @@ Attributes:
             passphrase. Requires NCCL 2.32.3+ built with
             ``TLS_BACKEND=OPENSSL3`` with ``libcrypto.so.3`` and
             ``libssl.so.3`` available at runtime; otherwise group or
-            communicator creation fails. Default is None.
+            communicator creation fails. If None and no key has
+            been applied yet, the ``TORCH_NCCL_ENCRYPTION_PSK`` environment
+            variable is used when non-empty. Default is None.
 
 Example::
     >>> import torch.distributed as dist

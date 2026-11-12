@@ -718,6 +718,7 @@ class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
             "NCCL_NET": "Socket",
             # Nonblocking init overwrites the "built without TLS" error.
             "TORCH_NCCL_USE_COMM_NONBLOCKING": "0",
+            "TORCH_NCCL_ENCRYPTION_PSK": "",
         }
         with mock.patch.dict(os.environ, env):
             self._spawn_processes()
@@ -766,6 +767,23 @@ class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_encryption_psk_env(self) -> None:
+        bad_psk = "y" * 31
+        with mock.patch.dict(os.environ, {"TORCH_NCCL_ENCRYPTION_PSK": bad_psk}):
+            with self.assertRaisesRegex(RuntimeError, "ncclSetEncryption failed") as cm:
+                self._new_pg(None)
+        self.assertNotIn(bad_psk, str(cm.exception))
+        with mock.patch.dict(os.environ, {"TORCH_NCCL_ENCRYPTION_PSK": _TEST_PSK}):
+            self._new_pg(None)
+            with self.assertRaisesRegex(RuntimeError, "differs"):
+                self._new_pg(_TEST_PSK[::-1])
+        self._new_pg(_TEST_PSK)
+        # The env key is only read until a key is applied.
+        with mock.patch.dict(os.environ, {"TORCH_NCCL_ENCRYPTION_PSK": "z" * 32}):
+            self._new_pg(None)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_encryption_psk_split(self) -> None:
         device = torch.device("cuda", self.rank)
         dist.init_process_group(
@@ -778,6 +796,25 @@ class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
         ranks = list(range(self.world_size))
         with self.assertRaisesRegex(RuntimeError, "first nccl2 group"):
             dist.split_group(split_ranks=[ranks], pg_options=_psk_options(_TEST_PSK))
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @requires_nccl_version((2, 27), "Need NCCL 2.27+ for communicator shrink")
+    @skip_if_lt_x_gpu(2)
+    def test_encryption_psk_shrink(self) -> None:
+        device = torch.device("cuda", self.rank)
+        dist.init_process_group(
+            "nccl2",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=dist.FileStore(self.file_name, self.world_size),
+            device_id=device,
+        )
+        group = dist.new_group(device_id=device)
+        dist.barrier(group=group)
+        if self.rank == 0:
+            with self.assertRaisesRegex(RuntimeError, "first nccl2 group"):
+                dist.shrink_group([1], group=group, pg_options=_psk_options(_TEST_PSK))
         dist.destroy_process_group()
 
     @requires_nccl()
