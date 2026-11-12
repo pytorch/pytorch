@@ -494,6 +494,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
         num_slots = handle.signal_pad_size // 4
         max_channel = num_slots // self.world_size
+        self.assertEqual(handle.group_signal_pad_channels, max_channel)
 
         # check_channel() is shared with the CUDA backend; an over-capacity
         # channel must be rejected host-side before the kernel launch (#191618).

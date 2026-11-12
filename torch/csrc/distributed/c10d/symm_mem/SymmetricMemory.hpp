@@ -61,7 +61,7 @@ inline void check_rank(int rank, int world_size) {
 // Breaking either can pair signals wrongly without an error, or make an
 // operation time out or hang. The group's first rendezvous on a device creates
 // the pad and fixes its rank-to-device mapping (a later rendezvous with another
-// mapping raises), its size and whether it
+// mapping raises), its size (the handle's group_signal_pad_size) and whether it
 // has a multicast mapping. If creating the pad fails on some ranks but not
 // others, or a signal is left set, the group stays that way on the device. In
 // each case a new group starts clean. A pad costs one allocation granule, its

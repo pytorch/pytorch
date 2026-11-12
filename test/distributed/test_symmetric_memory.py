@@ -655,6 +655,40 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
+    def test_handle_reports_group_signal_pad(self) -> None:
+        """The handle reports the size and channels of the pad its built-in
+        ops use, which on the CUDA backend is the group's pad, fixed at the
+        group's first rendezvous, not the size set for later allocations."""
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+        original_size = symm_mem.get_signal_pad_size()
+        group = dist.new_group(list(range(self.world_size)))
+        first = symm_mem.empty(64, device=self.device)
+        symm_mem.rendezvous(first, group=group)
+        symm_mem.set_signal_pad_size(original_size * 4)
+        try:
+            t = symm_mem.empty(64, device=self.device)
+            hdl = symm_mem.rendezvous(t, group=group)
+            # Checked while the global size is 4x, so a property or check that
+            # read the global would fail here.
+            channels = original_size // (4 * self.world_size)
+            self.assertEqual(hdl.group_signal_pad_size, original_size)
+            self.assertEqual(hdl.group_signal_pad_channels, channels)
+            hdl.barrier(channel=channels - 1)
+            with self.assertRaises(RuntimeError) as cm:
+                hdl.barrier(channel=channels)
+        finally:
+            symm_mem.set_signal_pad_size(original_size)
+        self.assertIn("maximum supported channel", str(cm.exception))
+        dist.barrier()
+        dist.destroy_process_group(group)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_group_graphs_replay_in_turn(self) -> None:
         """Signals are the group's (clause (1) of NOTE [symmetric memory group
         signal pad]): put_signal() on one allocation satisfies wait_signal() on

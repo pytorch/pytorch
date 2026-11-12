@@ -1823,6 +1823,19 @@ instead.)")
             return reinterpret_cast<uintptr_t>(symm_mem->get_multicast_ptr());
           })
       .def_property_readonly("buffer_size", &SymmetricMemory::get_buffer_size)
+      // barrier(), put_signal(), wait_signal() and the collectives reject a
+      // channel at or above group_signal_pad_channels. group_signal_pad_size is
+      // the size that bound is computed from: the group's internal pad on the
+      // CUDA backend (see NOTE [symmetric memory group signal pad]), the
+      // current get_signal_pad_size() on the other backends.
+      .def_property_readonly(
+          "group_signal_pad_size", &SymmetricMemory::get_group_signal_pad_size)
+      .def_property_readonly(
+          "group_signal_pad_channels",
+          [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
+            return symm_mem->get_group_signal_pad_size() /
+                (sizeof(uint32_t) * symm_mem->get_world_size());
+          })
       .def_property_readonly("offset", &SymmetricMemory::get_offset)
       .def_property_readonly("device", &SymmetricMemory::get_device)
       // Convert the pybind `_SymmetricMemory` object into the TorchBind custom

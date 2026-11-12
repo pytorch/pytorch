@@ -1964,13 +1964,15 @@ def _check_lc_ag_out(
 
 
 def _check_lc_signal_pad_capacity(symm_mem: _SymmetricMemory) -> None:
-    required_bytes = (_CE_MULTICAST_BARRIER_CHANNEL + 1) * symm_mem.world_size * 4
-    actual_bytes = _SymmetricMemory.signal_pad_size
-    if actual_bytes < required_bytes:
+    channels = symm_mem.group_signal_pad_channels
+    if channels <= _CE_MULTICAST_BARRIER_CHANNEL:
+        required_bytes = (_CE_MULTICAST_BARRIER_CHANNEL + 1) * symm_mem.world_size * 4
         raise RuntimeError(
-            f"low_contention all-gather requires signal_pad_size >= "
+            f"low_contention all-gather requires a signal pad of at least "
             f"{required_bytes} bytes for world_size={symm_mem.world_size}, but "
-            f"the current size is {actual_bytes} bytes."
+            f"the pad its barriers use has {symm_mem.group_signal_pad_size} bytes. "
+            "Call set_signal_pad_size() with a larger size before the group's "
+            "first rendezvous on this device, or use a new group."
         )
 
 

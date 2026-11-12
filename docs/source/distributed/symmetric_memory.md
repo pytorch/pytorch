@@ -188,8 +188,10 @@ in eager mode and within one graph capture, but a graph replay is not ordered
 against another replay or against the group's eager operations.
 The group keeps the pad size,
 device mapping and multicast mapping of its first rendezvous on a device; a
-rendezvous with another mapping raises, and a new group starts clean. Each
-group costs a signal pad per device. Kernels using
+rendezvous with another mapping raises, and a new group starts clean. The
+handle's `group_signal_pad_channels` bounds the channels its operations accept,
+and `group_signal_pad_size` is the size it is computed from. Each group costs a
+signal pad per device. Kernels using
 symmetric memory can be written both in CUDA and in Triton. Here’s an example
 allocating symmetric tensor and exchanging handles:
 
