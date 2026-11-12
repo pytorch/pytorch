@@ -359,27 +359,9 @@ HELION_OPS = OrderedSet(
 ) | OrderedSet(name for name in vars(HelionOverrides) if not name.startswith("_"))
 
 
-def lowest(dtype: torch.dtype) -> bool | float | int:
-    if dtype == torch.bool:
-        return False
-    return -math.inf if dtype.is_floating_point else torch.iinfo(dtype).min
-
-
-def highest(dtype: torch.dtype) -> bool | float | int:
-    if dtype == torch.bool:
-        return True
-    return math.inf if dtype.is_floating_point else torch.iinfo(dtype).max
-
-
-# Reduction types of ir.Reduction that a Helion kernel supports, and the initial
-# value of their accumulator for an input dtype. The others, e.g. argmax or
-# Welford, stay Triton for now.
-REDUCTIONS: dict[str, Callable[[torch.dtype], bool | float | int]] = {
-    "sum": lambda dtype: 0,
-    "prod": lambda dtype: 1,
-    "max": lowest,
-    "min": highest,
-}
+# Reduction types of ir.Reduction that a Helion kernel supports. The others,
+# e.g. argmax or Welford, stay Triton for now.
+REDUCTIONS = OrderedSet(["sum", "prod", "max", "min"])
 
 
 def is_helion_matmul(node: BaseSchedulerNode) -> bool:
@@ -411,10 +393,11 @@ def helion_supports(node: BaseSchedulerNode) -> bool:
 
     It must be a scheduler node of HELION_OPS, with static indices and without
     atomic stores or CPU scalar reads, whose reduction, if any, is in
-    REDUCTIONS or a Helion matmul's dot. Checked before codegen, so that the others are Triton
-    kernels; e.g. a layer norm's welford_reduce, a @ b + c[i] (c[i] reads
-    through indirect_indexing) and a @ b + torch.tensor(2.0), whose CPU scalar
-    the kernel would get as a CPU tensor:
+    REDUCTIONS or a Helion matmul's dot. Checked before codegen, so that the
+    others are Triton kernels; e.g. a layer norm's welford_reduce,
+    a @ b + c[i] (c[i] reads through indirect_indexing) and
+    a @ b + torch.tensor(2.0), whose CPU scalar the kernel would get as a CPU
+    tensor:
         ValueError: Pointer argument cannot be accessed from Triton (cpu tensor?)
     """
     if not isinstance(node, SchedulerNode) or node.is_template():
@@ -1285,7 +1268,11 @@ class HelionKernel(SIMDKernel[CSEVariable]):
             value = self.cse.generate(
                 self.compute, line, dtype=value.dtype, shape=shape
             )
-        init = REDUCTIONS[reduction_type](upcast_compute_type(src_dtype))
+        init = Reduction.default_accumulator(
+            reduction_type, upcast_compute_type(src_dtype)
+        )
+        if not isinstance(init, (bool, float, int)):
+            raise AssertionError(f"expected one initial value, got {init}")
         acc = self.accumulator(init, upcast_compute_type(dtype))
         block = {
             "sum": f"{acc} + torch.sum({value}, -1)",
