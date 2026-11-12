@@ -424,8 +424,10 @@ class TestKernelGeneral(TestCase):
             var, mean = torch.var_mean(x.double(), dim=1)
         expected = [var.float(), mean.float()][: len(outs)]
         atol, rtol = (1e-3, 1e-4) if shift else (1e-5, 1e-5)
-        self.assertEqual(dense, expected, atol=atol, rtol=rtol)
-        self.assertEqual(outs, expected, atol=atol, rtol=rtol)
+        for got in (dense, outs):
+            self.assertEqual(got[0], expected[0], atol=atol, rtol=rtol)
+            # The pairwise tree keeps the mean within the default fp32 tolerance.
+            self.assertEqual(got[1:], expected[1:])
 
     def test_uniform_welford_tree_counts_share_kernels(self):
         # A tail kernel serves every count strictly between nloads * block and
@@ -556,8 +558,26 @@ class TestKernelGeneral(TestCase):
         cap64 = 64 * tile.UNIFORM_TREE_MAX_LOADS
         span = f"128 to {cap} values per output for 128 threads, got"
         fold, clamp = "a linear general-axis fold, got axis=", "an unclamped run, got"
+
+        class OwnCombine(T.WelfordOps):
+            def combine(self, a, b):
+                return super().combine(a, b)
+
+        # A replacing class may opt back in; its plain subclasses keep that choice.
+        class OptedIn(OwnCombine):
+            has_combine_equal = True
+
+        class KeepsOptIn(OptedIn):
+            pass
+
+        opted = tree | dict(trait=KeepsOptIn(acc=cutlass.Float32))
+        self.assertEqual(kg.ReduceBlock(**opted).tile.uniform_tree_loads, 1024 // 128)
         for bad, reason in (
             (dict(trait=trait), "a trait with has_combine_equal, got SumOps"),
+            (
+                dict(trait=OwnCombine(acc=cutlass.Float32)),
+                "a trait with has_combine_equal, got OwnCombine",
+            ),
             (dict(count=0, red_pairs=((0, 1),)), f"{span} 0"),
             (dict(count=64, red_pairs=((64, 1),)), f"{span} 64"),
             (dict(count=cap + 1, red_pairs=((cap + 1, 1),)), f"{span} {cap + 1}"),
