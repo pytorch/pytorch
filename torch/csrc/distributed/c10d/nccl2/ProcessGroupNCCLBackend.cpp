@@ -86,12 +86,41 @@ std::vector<uint64_t> normalizeSplitSizes(
   return out;
 }
 
-// Trivially-completed c10d::Work used for empty coalescing windows and for the
-// per-op sentinels returned while a coalescing batch is being accumulated.
+c10::intrusive_ptr<c10::ivalue::Future> makeResultFuture() {
+  return c10::make_intrusive<c10::ivalue::Future>(c10::AnyEnumType::get());
+}
+
+c10::IValue resultValue(::c10d::WorkResult r) {
+  return c10::IValue(static_cast<uint8_t>(r));
+}
+
+} // namespace
+
+struct CoalescedBatchResult {
+  // Completes with the batch work's result: the window's p2p ops, not the
+  // window work returned when the window also holds collectives.
+  c10::intrusive_ptr<c10::ivalue::Future> future = makeResultFuture();
+  // The batch work, once issued.
+  c10::intrusive_ptr<WorkNCCL> work;
+};
+
+namespace {
+
+// c10d::Work used for empty coalescing windows and for the per-op sentinels
+// returned while a coalescing batch is being accumulated. The sentinels report
+// as completed and successful at once, but their result future and duration
+// are the batch's: the result is pending until the batch completes, may end
+// COMM_ERROR or TIMEOUT, and never completes if the batch never reaches the
+// watchdog (graph capture) or the window is never ended (an exception inside
+// _coalescing_manager, abort or destroy with the window open). Waiting on it
+// inside the window, or in blocking-wait mode (no watchdog) without waiting on
+// the window's work, hangs.
 class CompletedWork : public ::c10d::Work {
  public:
-  explicit CompletedWork(std::vector<at::Tensor> outputs = {})
-      : outputs_(std::move(outputs)) {}
+  explicit CompletedWork(
+      std::vector<at::Tensor> outputs = {},
+      std::shared_ptr<CoalescedBatchResult> batch = nullptr)
+      : outputs_(std::move(outputs)), batch_(std::move(batch)) {}
   bool isCompleted() override {
     return true;
   }
@@ -105,9 +134,31 @@ class CompletedWork : public ::c10d::Work {
   std::vector<at::Tensor> result() override {
     return outputs_;
   }
+  c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override {
+    if (batch_) {
+      return batch_->future;
+    }
+    auto result = makeResultFuture();
+    result->markCompleted(resultValue(::c10d::WorkResult::SUCCESS));
+    return result;
+  }
+  bool hasFutureResult() const override {
+    return true;
+  }
+  float getDuration() const override {
+    if (!batch_) {
+      return Work::getDuration();
+    }
+    TORCH_CHECK(
+        batch_->work,
+        "Duration unavailable: the coalescing window's batch was not issued "
+        "(window still open, or issuing it failed)");
+    return batch_->work->getDuration();
+  }
 
  private:
   std::vector<at::Tensor> outputs_;
+  std::shared_ptr<CoalescedBatchResult> batch_;
 };
 
 } // namespace
@@ -285,52 +336,6 @@ void ProcessGroupNCCL::registerAbortHook(
 void ProcessGroupNCCL::unregisterAbortHook(int64_t hook_id) {
   std::lock_guard<std::mutex> lock(abort_hooks_mutex_);
   abortHooks_.erase(hook_id);
-}
-
-bool ProcessGroupNCCL::hasCompletionHooks() {
-  std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
-  return !completionHooks_.empty();
-}
-
-void ProcessGroupNCCL::runCompletionHooks(
-    uint64_t completion_key,
-    std::optional<float> duration_ms) {
-  // Snapshot rather than hold the lock across the hooks, and for a harder
-  // reason than runAbortHooks has: a hook's owner unregisters with its own lock
-  // held (c10d::FlightRecorderHook::remove does), so calling into a hook while
-  // holding completion_hooks_mutex_ would be the reverse order and deadlock.
-  std::vector<::c10d::CompletionHook> hooks;
-  {
-    std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
-    hooks.reserve(completionHooks_.size());
-    for (const auto& [_, hook] : completionHooks_) {
-      hooks.push_back(hook);
-    }
-  }
-  ::c10d::CompletionHookArgs args;
-  args.completionKey = completion_key;
-  args.duration_ms = duration_ms;
-  for (const auto& hook : hooks) {
-    try {
-      hook(args);
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "[TC] Completion hook threw exception: " << e.what();
-    } catch (...) {
-      LOG(ERROR) << "[TC] Completion hook threw unknown exception.";
-    }
-  }
-}
-
-void ProcessGroupNCCL::registerCompletionHook(
-    int64_t hook_id,
-    ::c10d::CompletionHook hook) {
-  std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
-  completionHooks_.emplace(hook_id, std::move(hook));
-}
-
-void ProcessGroupNCCL::unregisterCompletionHook(int64_t hook_id) {
-  std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
-  completionHooks_.erase(hook_id);
 }
 
 void ProcessGroupNCCL::shutdown() {
@@ -963,7 +968,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::send(
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
   if (coalescing_batch_.has_value()) {
     coalescing_batch_->send(tensors.at(0), dstRank);
-    return c10::make_intrusive<CompletedWork>(tensors);
+    return c10::make_intrusive<CompletedWork>(tensors, coalescing_result_);
   }
   auto work = sendImpl(
       tensors.at(0), dstRank, /*async_op=*/true, options_c10d_->timeout);
@@ -978,7 +983,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::recv(
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
   if (coalescing_batch_.has_value()) {
     coalescing_batch_->recv(tensors.at(0), srcRank);
-    return c10::make_intrusive<CompletedWork>(tensors);
+    return c10::make_intrusive<CompletedWork>(tensors, coalescing_result_);
   }
   auto work = recvImpl(
       tensors.at(0), srcRank, /*async_op=*/true, options_c10d_->timeout);
@@ -992,6 +997,7 @@ void ProcessGroupNCCL::startCoalescing() {
       "startCoalescing called while a batch is already active");
   coalescing_works_.clear();
   coalescing_batch_.emplace();
+  coalescing_result_ = std::make_shared<CoalescedBatchResult>();
 }
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
@@ -1002,9 +1008,27 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
   coalescing_batch_.reset();
   auto works = std::move(coalescing_works_);
   coalescing_works_.clear();
+  auto batch_result = std::move(coalescing_result_);
   if (!batch.ops.empty()) {
-    works.push_back(
-        batch_op_issue(batch.ops, /*async_op=*/true, options_c10d_->timeout));
+    c10::intrusive_ptr<WorkNCCL> work;
+    try {
+      work =
+          batch_op_issue(batch.ops, /*async_op=*/true, options_c10d_->timeout);
+    } catch (...) {
+      batch_result->future->markCompleted(
+          resultValue(::c10d::WorkResult::COMM_ERROR));
+      throw;
+    }
+    works.push_back(work);
+    batch_result->work = work;
+    // Not getFutureResult(): it polls the work, which is illegal under a
+    // graph capture. Captures only the future: batch_result holds the work.
+    work->state_->futureWorkResult->addCallback(
+        [result = batch_result->future](c10::ivalue::Future& f) {
+          result->markCompleted(
+              f.hasError() ? resultValue(::c10d::WorkResult::COMM_ERROR)
+                           : f.value());
+        });
   }
   if (works.empty()) {
     return c10::make_intrusive<CompletedWork>();
@@ -1018,8 +1042,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
   // off the current stream (async or on a side stream), so the current stream
   // is not made to wait, and waits for every op issued on another stream, so
   // it completes after every op in the window. It is enqueued so the watchdog
-  // completes its future; no flight recorder entry maps to its completion key,
-  // so its completion is not recorded twice.
+  // completes its result future.
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t current = at::cuda::getCurrentCUDAStream(device_.index());
   bool off_current =

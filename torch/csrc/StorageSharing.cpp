@@ -12,6 +12,7 @@
 #include <torch/csrc/copy_utils.h>
 
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/safe_conv.h>
 #include <fmt/format.h>
 
 #include <torch/csrc/Storage.h>
@@ -432,7 +433,7 @@ static PyObject* THPStorage_newSharedDevice(
   ptrdiff_t storage_offset_bytes =
       static_cast<ptrdiff_t>(THPUtils_unpackLong(_offset_bytes));
 
-  const auto device = c10::checked_convert<c10::DeviceIndex>(
+  const auto device = c10::safe_conv<c10::DeviceIndex>(
       THPUtils_unpackLong(_device), "c10::DeviceIndex");
   const auto acc_type = at::accelerator::getAccelerator(true).value();
   at::DeviceGuard device_guard({acc_type, device});
