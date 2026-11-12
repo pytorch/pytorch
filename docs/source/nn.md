@@ -522,6 +522,7 @@ in {func}`torch.nn.utils.parameterize.register_parametrization`.
     :nosignatures:
 
     parametrizations.orthogonal
+    parametrizations.partial_freeze
     parametrizations.weight_norm
     parametrizations.spectral_norm
 ```

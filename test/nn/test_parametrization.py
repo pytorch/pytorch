@@ -14,6 +14,11 @@ from torch.nn import Buffer, Parameter
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
+from torch.testing._internal.common_optimizers import (
+    _get_optim_inputs_including_global_cliquey_kwargs,
+    optim_db,
+    optims,
+)
 from torch.testing._internal.common_utils import (
     gradcheck,
     HardwareClassification,
@@ -1882,6 +1887,167 @@ class TestNNParametrization(NNTestCase):
             type_after_right_inverse=TwoTensor,
         )
 
+    def test_partial_freeze(self):
+        from torch.nn.utils.parametrizations import partial_freeze
+
+        m = nn.Linear(5, 4)
+        w0 = m.weight.detach().clone()
+        mask = torch.rand(4, 5) < 0.5
+        partial_freeze(m, "weight", mask=mask)
+        self.assertTrue(parametrize.is_parametrized(m, "weight"))
+        self.assertFalse(parametrize.is_parametrized(m, "bias"))
+        # registration does not change the value
+        self.assertEqual(m.weight, w0, atol=0, rtol=0)
+        self.assertEqual(m.parametrizations.weight.original, w0, atol=0, rtol=0)
+
+        # gradients of the frozen entries are exactly zero
+        x = torch.randn(3, 5)
+        m(x).pow(2).sum().backward()
+        g = m.parametrizations.weight.original.grad
+        self.assertTrue((g[mask] == 0).all())
+        ref = nn.Linear(5, 4)
+        with torch.no_grad():
+            ref.weight.copy_(w0)
+            ref.bias.copy_(m.bias)
+        ref(x).pow(2).sum().backward()
+        self.assertEqual(g[~mask], ref.weight.grad[~mask], atol=0, rtol=0)
+
+        # changing the frozen entries of original does not change the weight
+        with torch.no_grad():
+            m.parametrizations.weight.original.add_(1.0)
+        self.assertEqual(m.weight[mask], w0[mask], atol=0, rtol=0)
+        self.assertEqual(m.weight[~mask], w0[~mask] + 1.0, atol=0, rtol=0)
+
+    def test_partial_freeze_broadcast_mask(self):
+        from torch.nn.utils.parametrizations import partial_freeze
+
+        # freeze output channels 0 and 2 of a conv
+        m = nn.Conv2d(2, 4, 3)
+        w0 = m.weight.detach().clone()
+        mask = torch.tensor([True, False, True, False]).view(4, 1, 1, 1)
+        partial_freeze(m, mask=mask)
+        self.assertEqual(m.parametrizations.weight[0].mask.shape, (4, 1, 1, 1))
+        opt = torch.optim.SGD(m.parameters(), lr=1.0, momentum=0.9, weight_decay=0.1)
+        for _ in range(3):
+            opt.zero_grad()
+            m(torch.randn(2, 2, 5, 5)).sum().backward()
+            opt.step()
+        self.assertEqual(m.weight[[0, 2]], w0[[0, 2]], atol=0, rtol=0)
+        self.assertNotEqual(m.weight[[1, 3]], w0[[1, 3]])
+
+        # all-True and all-False masks
+        m = nn.Linear(3, 3)
+        partial_freeze(m, mask=torch.tensor(True))
+        m(torch.randn(2, 3)).sum().backward()
+        self.assertEqual(
+            m.parametrizations.weight.original.grad, torch.zeros(3, 3), atol=0, rtol=0
+        )
+        m = nn.Linear(3, 3)
+        partial_freeze(m, mask=torch.zeros(3, dtype=torch.bool))
+        m(torch.randn(2, 3)).sum().backward()
+        self.assertTrue((m.parametrizations.weight.original.grad != 0).all())
+
+    def test_partial_freeze_dtypes(self):
+        from torch.nn.utils.parametrizations import partial_freeze
+
+        for dtype in (torch.float16, torch.bfloat16, torch.float64, torch.complex64):
+            m = nn.Linear(4, 3, dtype=dtype)
+            w0 = m.weight.detach().clone()
+            mask = torch.tensor([True, False, True, False])
+            partial_freeze(m, mask=mask)
+            opt = torch.optim.SGD(m.parameters(), lr=0.1, weight_decay=0.1)
+            m(torch.randn(2, 4, dtype=dtype)).abs().sum().backward()
+            opt.step()
+            self.assertEqual(m.weight.dtype, dtype)
+            self.assertEqual(m.weight[:, mask], w0[:, mask], atol=0, rtol=0)
+            self.assertNotEqual(m.weight[:, ~mask], w0[:, ~mask])
+        # the mask stays boolean across dtype conversions
+        m = partial_freeze(nn.Linear(4, 3), mask=mask).double()
+        self.assertEqual(m.parametrizations.weight[0].mask.dtype, torch.bool)
+        self.assertEqual(m.parametrizations.weight[0].frozen.dtype, torch.float64)
+
+    def test_partial_freeze_errors(self):
+        from torch.nn.utils.parametrizations import partial_freeze
+
+        with self.assertRaisesRegex(TypeError, "boolean"):
+            partial_freeze(nn.Linear(3, 4), mask=torch.ones(4, 3))
+        with self.assertRaisesRegex(TypeError, "boolean"):
+            partial_freeze(nn.Linear(3, 4), mask=[[True] * 3] * 4)
+        with self.assertRaisesRegex(ValueError, "not broadcastable"):
+            partial_freeze(nn.Linear(3, 4), mask=torch.ones(3, 4, dtype=torch.bool))
+        with self.assertRaisesRegex(ValueError, "not broadcastable"):
+            partial_freeze(nn.Linear(3, 4), mask=torch.ones(2, 4, 3, dtype=torch.bool))
+        with self.assertRaisesRegex(ValueError, "no parameter or buffer"):
+            partial_freeze(nn.Linear(3, 4), "foo", mask=torch.tensor(True))
+
+    def test_partial_freeze_state_dict_and_remove(self):
+        from torch.nn.utils.parametrizations import partial_freeze
+
+        mask = torch.rand(4, 3) < 0.5
+        m = partial_freeze(nn.Linear(3, 4), mask=mask)
+        opt = torch.optim.AdamW(m.parameters(), lr=0.1, weight_decay=0.5)
+        for _ in range(3):
+            opt.zero_grad()
+            m(torch.randn(2, 3)).sum().backward()
+            opt.step()
+        sd = m.state_dict()
+        self.assertEqual(
+            set(sd.keys()),
+            {
+                "bias",
+                "parametrizations.weight.original",
+                "parametrizations.weight.0.mask",
+                "parametrizations.weight.0.frozen",
+            },
+        )
+        m2 = partial_freeze(nn.Linear(3, 4), mask=torch.zeros(4, 3, dtype=torch.bool))
+        m2.load_state_dict(sd)
+        self.assertEqual(m2.weight, m.weight, atol=0, rtol=0)
+        self.assertEqual(m2.parametrizations.weight[0].mask, mask)
+
+        m3 = deepcopy(m)
+        self.assertEqual(m3.weight, m.weight, atol=0, rtol=0)
+
+        # removing the parametrization with leave_parametrized=True keeps the
+        # effective value, with leave_parametrized=False it keeps original
+        w = m.weight.detach().clone()
+        orig = m.parametrizations.weight.original.detach().clone()
+        self.assertNotEqual(orig[mask], w[mask])  # moved by weight decay
+        parametrize.remove_parametrizations(m, "weight")
+        self.assertFalse(parametrize.is_parametrized(m))
+        self.assertIsInstance(m.weight, nn.Parameter)
+        self.assertEqual(m.weight, w, atol=0, rtol=0)
+        parametrize.remove_parametrizations(m2, "weight", leave_parametrized=False)
+        self.assertEqual(m2.weight, orig, atol=0, rtol=0)
+
+    def test_partial_freeze_assign_and_compose(self):
+        from torch.nn.utils.parametrizations import partial_freeze, weight_norm
+
+        # assignment sets every entry, frozen ones included
+        mask = torch.rand(4, 3) < 0.5
+        m = partial_freeze(nn.Linear(3, 4), mask=mask)
+        new = torch.randn(4, 3)
+        m.weight = new
+        self.assertEqual(m.weight, new, atol=0, rtol=0)
+        self.assertEqual(m.parametrizations.weight.original, new, atol=0, rtol=0)
+        # a failed assignment leaves the frozen values untouched
+        for bad in (torch.randn(3), torch.randn(4, 3, dtype=torch.float64)):
+            with self.assertRaisesRegex(ValueError, "cannot assign"):
+                m.weight = bad
+            self.assertEqual(m.weight, new, atol=0, rtol=0)
+
+        # composes with other parametrizations: the composite weight is frozen
+        m = weight_norm(nn.Linear(3, 4))
+        w0 = m.weight.detach().clone()
+        partial_freeze(m, mask=mask)
+        opt = torch.optim.Adam(m.parameters(), lr=0.1)
+        for _ in range(3):
+            opt.zero_grad()
+            m(torch.randn(2, 3)).sum().backward()
+            opt.step()
+        self.assertEqual(m.weight[mask], w0[mask], atol=0, rtol=0)
+        self.assertNotEqual(m.weight[~mask], w0[~mask])
+
 
 class TestNNParametrizationDevice(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -1919,6 +2085,128 @@ class TestNNParametrizationDevice(NNTestCase):
             expected_output = m(input)
             m = torch.nn.utils.parametrizations.weight_norm(m, dim=None)
             self.assertEqual(m(input), expected_output)
+
+    @skipIfTorchDynamo("Slow under dynamo and not testing dynamo-specific behavior")
+    @optims(
+        [o for o in optim_db if not o.only_supports_sparse_grads],
+        dtypes=[torch.float32],
+    )
+    def test_partial_freeze_optimizers(self, device, dtype, optim_info):
+        # For every optimizer config, a partially frozen weight must
+        # 1. keep its frozen entries bit-exact, and
+        # 2. train its other entries exactly as projected optimization does:
+        #    zero the gradient of the frozen entries, step, restore the frozen entries.
+        # 2. holds for every optimizer whose update of the trainable entries does not
+        # read the frozen entries of the optimized tensor. Adafactor reads the RMS of
+        # the whole tensor, which differs once weight decay moves the (unused) frozen
+        # entries of ``original``, so we only check 2. for it without weight decay.
+        from torch.nn.utils.parametrizations import partial_freeze
+
+        optim_cls = optim_info.optim_cls
+        optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info, skip=("differentiable",)
+        )
+        torch.manual_seed(0)
+        # Muon only supports 2D parameters, so use a bias-free linear layer
+        w_init = torch.randn(6, 5, device=device, dtype=dtype)
+        mask = torch.rand(6, 5, device=device) < 0.5
+        inputs = [torch.randn(4, 5, device=device, dtype=dtype) for _ in range(5)]
+
+        for optim_input in optim_inputs:
+            kwargs = optim_input.kwargs
+            m = nn.Linear(5, 6, bias=False, device=device, dtype=dtype)
+            ref = nn.Linear(5, 6, bias=False, device=device, dtype=dtype)
+            with torch.no_grad():
+                m.weight.copy_(w_init)
+                ref.weight.copy_(w_init)
+            partial_freeze(m, mask=mask)
+            opt = optim_cls(m.parameters(), **deepcopy(kwargs))
+            opt_ref = optim_cls(ref.parameters(), **deepcopy(kwargs))
+
+            for x in inputs:
+
+                def closure():
+                    opt.zero_grad()
+                    loss = m(x).pow(2).mean()
+                    loss.backward()
+                    return loss
+
+                def closure_ref():
+                    opt_ref.zero_grad()
+                    loss = ref(x).pow(2).mean()
+                    loss.backward()
+                    with torch.no_grad():
+                        ref.weight.grad.masked_fill_(mask, 0)
+                    return loss
+
+                if optim_info.step_requires_closure:
+                    opt.step(closure)
+                    opt_ref.step(closure_ref)
+                else:
+                    closure()
+                    opt.step()
+                    closure_ref()
+                    opt_ref.step()
+                with torch.no_grad():
+                    ref.weight.copy_(torch.where(mask, w_init, ref.weight))
+
+            msg = f"{optim_cls.__name__} {optim_input.desc} {kwargs}"
+            self.assertEqual(m.weight[mask], w_init[mask], atol=0, rtol=0, msg=msg)
+            self.assertNotEqual(m.weight[~mask], w_init[~mask], msg=msg)
+            reads_whole_param = optim_cls is torch.optim.Adafactor
+            if not reads_whole_param or opt.param_groups[0]["weight_decay"] == 0:
+                self.assertEqual(m.weight, ref.weight, msg=msg)
+
+    def test_partial_freeze_grad_scaler_and_clipping(self, device):
+        from torch.nn.utils.parametrizations import partial_freeze
+
+        m = nn.Linear(5, 4, device=device)
+        w0 = m.weight.detach().clone()
+        mask = torch.zeros(4, 5, dtype=torch.bool, device=device)
+        mask[0] = True
+        partial_freeze(m, mask=mask)
+        opt = torch.optim.AdamW(m.parameters(), lr=0.1)
+        scaler = torch.amp.GradScaler(device, init_scale=1024.0)
+
+        # an infinite gradient that only reaches frozen entries does not skip the step
+        c = torch.ones(4, 5, device=device)
+        c[0, 0] = float("inf")
+        with torch.autocast(device):
+            loss = (m.weight * c).sum() + m(torch.randn(3, 5, device=device)).sum()
+        scaler.scale(loss).backward()
+        scaler.unscale_(opt)
+        g = m.parametrizations.weight.original.grad
+        self.assertTrue(torch.isfinite(g).all())
+        self.assertTrue((g[mask] == 0).all())
+        # the gradient norm only sees the trainable entries
+        expected = torch.linalg.vector_norm(
+            torch.cat([g[~mask], m.bias.grad.flatten()])
+        )
+        total = torch.nn.utils.clip_grad_norm_(m.parameters(), max_norm=1e-3)
+        self.assertEqual(total, expected)
+        scaler.step(opt)
+        scaler.update()
+        # the step was not skipped, so the scale did not back off
+        self.assertEqual(scaler.get_scale(), 1024.0)
+        self.assertEqual(m.weight[mask], w0[mask], atol=0, rtol=0)
+        self.assertNotEqual(m.weight[~mask], w0[~mask])
+
+    @skipIfTorchDynamo("Test compiles itself")
+    def test_partial_freeze_compile(self, device):
+        from torch.nn.utils.parametrizations import partial_freeze
+
+        m = nn.Linear(5, 4, device=device)
+        w0 = m.weight.detach().clone()
+        mask = torch.rand(4, 5, device=device) < 0.5
+        partial_freeze(m, mask=mask)
+        opt = torch.optim.AdamW(m.parameters(), lr=0.1, weight_decay=0.1)
+        fn = torch.compile(lambda x: m(x).pow(2).sum(), backend="aot_eager")
+        for _ in range(3):
+            opt.zero_grad()
+            fn(torch.randn(3, 5, device=device)).backward()
+            opt.step()
+        self.assertEqual(m.weight[mask], w0[mask], atol=0, rtol=0)
+        self.assertNotEqual(m.weight[~mask], w0[~mask])
 
 
 instantiate_device_type_tests(TestNNParametrizationDevice, globals())
