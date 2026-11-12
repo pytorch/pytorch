@@ -2997,7 +2997,9 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         given number of ``operands``, and runs the backward's shared calls and
         matmuls in ``bw_order`` (e.g. ["recompute", "mm"]). Each backward call
         must read what the forward's call read: the same primal or saved value,
-        or the same output of an earlier call."""
+        the same output of an earlier call, or the backward's replay of the
+        same RNG draw."""
+        from torch._functorch._aot_autograd.deterministic_recompute import _draw_of
         from torch._higher_order_ops import invoke_subgraph
 
         def piece(call):
@@ -3007,6 +3009,11 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             if n.target is operator.getitem and n.args[0].target is invoke_subgraph:
                 return piece(n.args[0]), n.args[1]
             return None
+
+        def by_name(n):
+            # A primal or saved value, or the backward's replay of an RNG draw:
+            # both graphs have it under one name.
+            return n.op == "placeholder" or _draw_of(n) is not None
 
         fw_operands = {}
 
@@ -3018,7 +3025,7 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
                     fw_operands[piece(n)] = [(a.name, call_output(a)) for a in ops]
                     continue
                 for a, (name, out) in zip(ops, fw_operands[piece(n)], strict=True):
-                    same = a.op == "placeholder" and a.name == name
+                    same = a.name == name and by_name(a)
                     if not same and (out is None or call_output(a) != out):
                         raise AssertionError(f"{a} isn't the forward's {name} in {gm}")
             if order is not None:
@@ -3687,6 +3694,164 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         x = torch.randn(4, 4, device=device, requires_grad=True)
         y = torch.randn(4, 4, device=device, requires_grad=True)
         self._validate(fn, self._shared_recompute_backend(2), x, y)
+
+    @parametrize(
+        "case",
+        [
+            "before",
+            "after",
+            "two",
+            "rand",
+            "constant",
+            "atomic",
+            "order",
+            "order_chained",
+            "view",
+            "chained",
+        ],
+    )
+    def test_deterministic_recompute_dropout(self, device, case):
+        # The partitioner re-runs a random op in the backward from its own
+        # generator, kept in sync with the forward's; the re-run counts as a
+        # copy of the forward's draw and stays out of the shared pieces, which
+        # read its result. So with graphsafe RNG, the recompute after a dropout
+        # (the norm, silu) is shared, also after a second dropout (two), and
+        # also around a single-tensor draw read on both sides of a saved mm
+        # (rand). (The recompute before a dropout is shared anyway.) The draw
+        # must read the same values in both graphs: a constant it reads is
+        # shared as a piece of its own (constant), and after a draw reading a
+        # piece left as partitioned (index_add's, atomic), nothing is shared.
+        # A piece reading the draw goes after the piece the draw reads, though
+        # it starts earlier, also through a draw of a draw (order,
+        # order_chained). A view of a primal reads the same in both
+        # graphs (view), and so does a draw of a draw (chained).
+        # Compiled dropout doesn't match eager's draws on every device, so
+        # compare against the unshared compile.
+        from torch._functorch._aot_autograd.utils import supports_graphsafe_rng
+
+        def norm(h):
+            return h * torch.rsqrt(h.pow(2).mean(-1, keepdim=True) + 1e-6)
+
+        def before(x, w1, w2):
+            h = F.dropout(F.gelu(F.linear(x, w1)), p=0.3, training=True)
+            return F.linear(h, w2)
+
+        def after(x, w1, w2):
+            h = norm(F.dropout(x, p=0.3, training=True))
+            return F.silu(h @ w1) @ w2
+
+        def two(x, w1, w2):
+            h = norm(F.dropout(x, p=0.3, training=True))
+            h = norm(F.dropout(F.silu(h @ w1), p=0.3, training=True))
+            return h @ w2
+
+        def rand(x, w1, w2):
+            r = torch.rand_like(x)
+            return (torch.mm((x * r).sin(), w1) * r).cos() @ w2
+
+        def constant(x, w1, w2):
+            c = torch.arange(64, device=x.device, dtype=x.dtype).view(8, 8).sin()
+            h = norm(F.dropout(c, p=0.3, training=True) + x)
+            return F.silu(h @ w1) @ w2
+
+        def atomic(x, w1, w2):
+            idx = torch.tensor([0, 1, 2, 3, 0, 1, 2, 3], device=x.device)
+            return after(torch.zeros_like(x).index_add(0, idx, x), w1, w2)
+
+        def order(x, w1, w2):
+            a = x.sin()
+            return (a * F.dropout(w1.cos(), p=0.3, training=True)) @ w2
+
+        def order_chained(x, w1, w2):
+            a = x.sin()
+            d = F.dropout(F.dropout(w1.cos(), p=0.3, training=True), p=0.3)
+            return (a * d) @ w2
+
+        def view(x, w1, w2):
+            return after(x.t(), w1, w2)
+
+        def chained(x, w1, w2):
+            h = F.dropout(F.dropout(x.sin(), p=0.3, training=True), p=0.3)
+            return F.silu(norm(h) @ w1) @ w2
+
+        cases = {
+            "before": (before, 1),
+            "after": (after, 1),
+            "two": (two, 2),
+            "rand": (rand, 2),
+            "constant": (constant, 2),
+            "atomic": (atomic, 0),
+            "order": (order, 2),
+            "order_chained": (order_chained, 2),
+            "view": (view, 1),
+            "chained": (chained, 2),
+        }
+        gn, pieces = cases[case]
+        if case != "before" and not supports_graphsafe_rng(torch.device(device)):
+            self.skipTest("no graphsafe RNG functionalization on this device")
+        # (rand saves its mm, between the two pieces.)
+        kwargs = {"context_fn": save_mm_context_fn} if case == "rand" else {}
+
+        def fn(x, w1, w2):
+            ckpt = torch.utils.checkpoint.checkpoint
+            return ckpt(gn, x, w1, w2, use_reentrant=False, **kwargs)
+
+        inputs = [torch.randn(8, 8, device=device) for _ in range(3)]
+
+        def run(share):
+            torch._dynamo.reset()
+            args = [t.clone().requires_grad_() for t in inputs]
+            backend = self._shared_recompute_backend(pieces if share else 0)
+            torch.manual_seed(0)
+            with torch._functorch.config.patch(deterministic_recompute=share):
+                out = torch.compile(fn, backend=backend, fullgraph=True)(*args)
+            out.sum().backward()
+            return out, [a.grad for a in args]
+
+        self.assertEqual(run(True), run(False))
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_deterministic_recompute_after_dropout_inductor(self, device):
+        # Inductor draws dropout's random numbers from a seed, so only drawing the
+        # seed stays out of the shared piece: the random numbers, the mask and
+        # the rest of the recompute run in one shared subgraph, with the same
+        # code in both graphs.
+        from torch._functorch._aot_autograd.utils import supports_graphsafe_rng
+
+        if not supports_graphsafe_rng(torch.device(device)):
+            self.skipTest("no graphsafe RNG functionalization on this device")
+
+        def gn(x, w):
+            h = F.dropout(x, p=0.3, training=True)
+            h = h * torch.rsqrt(h.pow(2).mean(-1, keepdim=True) + 1e-6)
+            return F.silu(h @ w) @ w
+
+        def fn(x, w):
+            return torch.utils.checkpoint.checkpoint(gn, x, w, use_reentrant=False)
+
+        inputs = [torch.randn(8, 8, device=device) for _ in range(2)]
+
+        def run(share):
+            torch._dynamo.reset()
+            args = [t.clone().requires_grad_() for t in inputs]
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+
+            def step():
+                out = compiled(*args)
+                out.sum().backward()
+                return out, [a.grad for a in args]
+
+            torch.manual_seed(0)
+            with torch._functorch.config.patch(deterministic_recompute=share):
+                return run_and_get_code(step)
+
+        shared, (fw_code, bw_code) = run(True)
+        self.assertEqual(shared, run(False)[0])
+        fw = shared_recompute_code(fw_code, "fw")
+        self.assertEqual(len(fw), 1)
+        self.assertTrue(any("rand" in src for src in fw["recompute_0"][1]))
+        self.assertEqual(fw, shared_recompute_code(bw_code, "bw"))
 
     @requires_gpu_and_triton
     @torch._inductor.config.patch(force_disable_caches=True)
@@ -6640,8 +6805,9 @@ class DeterministicRecomputeHelperTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not TEST_CUDA, "graphsafe RNG functionalization is CUDA-only")
     def test_recomputed_copies_graphsafe_rng(self):
         # On CUDA the backward replays dropout with graphsafe_run_with_rng_state,
-        # under the forward draw's name but from its own RNG state: same name,
-        # different inputs, so not a copy.
+        # under the forward draw's name but from its own RNG state, which the
+        # runtime keeps in sync with the forward's: a copy, but in no region,
+        # since pieces read the draw instead of drawing again.
         from torch._functorch._aot_autograd.deterministic_recompute import (
             _recomputed_copies,
         )
@@ -6655,7 +6821,7 @@ class DeterministicRecomputeHelperTests(torch._dynamo.test_case.TestCase):
         w = torch.randn(4, 4, device="cuda", requires_grad=True)
         copies, regions = _recomputed_copies(*self._partitioned(fn, x, w))
         draw = torch._prims.rng_prims.graphsafe_run_with_rng_state
-        self.assertFalse([n for n in copies if n.target is draw])
+        self.assertTrue([n for n in copies if n.target is draw])
         targets = [[n.target for n in nodes] for nodes in regions.values()]
         self.assertEqual(targets, [[torch.ops.aten.mm.default]])
 
