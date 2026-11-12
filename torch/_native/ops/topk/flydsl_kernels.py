@@ -107,7 +107,7 @@ class TopKSpec:
     # identity. The dtype spec is already bound in. Not part of equality.
     val_to_narrow_ord: Callable = field(compare=False, hash=False)
     nan_sentinel: int | None = None
-    nan_exp: int | None = None
+    positive_inf_bits: int | None = None
 
     def cache_token(self) -> str:
         name = str(self.dtype).removeprefix("torch.")
@@ -138,10 +138,10 @@ class TopKSpec:
         #    bit, so the narrow transform leaves it unchanged.
         raw = val.bitcast(self.int_ty)
         if self.has_nan:
-            nan_exp = self.int_ty(cast(int, self.nan_exp))
+            positive_inf_bits = self.int_ty(cast(int, self.positive_inf_bits))
             nan_sentinel = self.int_ty(cast(int, self.nan_sentinel))
             low_mask = (1 << (self.width - 1)) - 1
-            is_nan = (raw & self.int_ty(low_mask)) > nan_exp
+            is_nan = (raw & self.int_ty(low_mask)) > positive_inf_bits
             raw = is_nan.select(nan_sentinel, raw)
         # 1. Apply the dtype's same-width transform.
         narrow = self.val_to_narrow_ord(raw)
@@ -173,7 +173,8 @@ class TopKSpec:
 
 
 def topk_spec(dtype: torch.dtype, largest: bool) -> TopKSpec:
-    # torch dtype: flydsl dtype, same-width signed int, bit width, nan sentinel, nan exponent.
+    # torch dtype: flydsl dtype, same-width signed int, bit width,
+    # NaN sentinel, positive-infinity bits.
     # None for the NaN fields means the dtype has no NaN.
     def int_to_narrow_ord(bits, spec):
         return bits
@@ -197,7 +198,7 @@ def topk_spec(dtype: torch.dtype, largest: bool) -> TopKSpec:
             int_ty=Int32,
             width=32,
             nan_sentinel=0x7FFFFFFF,
-            nan_exp=0x7F800000,
+            positive_inf_bits=0x7F800000,
             to_narrow_ord=float_to_narrow_ord,
         ),
         torch.float16: dict(
@@ -205,7 +206,7 @@ def topk_spec(dtype: torch.dtype, largest: bool) -> TopKSpec:
             int_ty=Int16,
             width=16,
             nan_sentinel=0x7FFF,
-            nan_exp=0x7C00,
+            positive_inf_bits=0x7C00,
             to_narrow_ord=float_to_narrow_ord,
         ),
         torch.bfloat16: dict(
@@ -213,7 +214,7 @@ def topk_spec(dtype: torch.dtype, largest: bool) -> TopKSpec:
             int_ty=Int16,
             width=16,
             nan_sentinel=0x7FFF,
-            nan_exp=0x7F80,
+            positive_inf_bits=0x7F80,
             to_narrow_ord=float_to_narrow_ord,
         ),
         torch.int32: dict(
