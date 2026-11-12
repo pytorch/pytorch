@@ -6468,7 +6468,7 @@ class PythonWrapperCodegen(CodeGen):
                 if inductor_config_patches
                 else contextlib.nullcontext()
             )
-            # do not graph partition inside subgraph bodies
+            # Keep legacy config readers consistent with the unsplit subgraph.
             with (
                 ctx,
                 config.patch("graph_partition", False),

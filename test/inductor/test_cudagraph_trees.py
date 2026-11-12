@@ -878,7 +878,13 @@ if HAS_CUDA_AND_TRITON:
             )
 
         @parametrize("customized_wrapper", [False, True])
-        @config.patch({"graph_partition": True, "force_disable_caches": True})
+        @config.patch(
+            {
+                "graph_partition": True,
+                "force_disable_caches": True,
+                "alignment_asserts_inputs": True,
+            }
+        )
         def test_graph_lowering_partition_decision_overrides_config(
             self, customized_wrapper
         ):
@@ -912,14 +918,22 @@ if HAS_CUDA_AND_TRITON:
                     self.assertEqual(compiled(x), f(x))
             self.assertNotIn("class Runner", code)
             self.assertNotIn("partition_0", code)
-            FileCheck().check("def call(").check("assert_size_stride(arg0_1").run(code)
+            FileCheck().check("def call(").check("assert_alignment(arg0_1").check(
+                "assert_size_stride(arg0_1"
+            ).run(code)
             self.assertEqual(wrapped, [])
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
             self.assertIsNotNone(self.get_manager())
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
         @parametrize("cudagraphs_per_partition", [False, True])
-        @config.patch({"graph_partition": True, "force_disable_caches": True})
+        @config.patch(
+            {
+                "graph_partition": True,
+                "force_disable_caches": True,
+                "alignment_asserts_inputs": True,
+            }
+        )
         def test_graph_lowering_cudagraphs_per_partition_overrides_config(
             self, cudagraphs_per_partition
         ):
@@ -945,28 +959,43 @@ if HAS_CUDA_AND_TRITON:
                     self.assertEqual(compiled(x), f(x))
             runner_call = code[code.index("class Runner") :]
             if cudagraphs_per_partition:
-                FileCheck().check("def partition_0(").check("class Runner").run(code)
-                # call() leaves the input asserts to the partitions.
+                FileCheck().check("def partition_0(").check(
+                    "assert_alignment(arg0_1"
+                ).check("assert_size_stride(arg0_1").check("class Runner").run(code)
+                # Only partitions read this input, so call() has no size assert;
+                # alignment and NaN checks are also left to the partitions.
                 self.assertNotIn("assert_size_stride", runner_call)
+                self.assertNotIn("assert_alignment", runner_call)
                 self.assertIsNone(self.get_manager())
             else:
                 self.assertNotIn("def partition_0", code)
-                FileCheck().check("assert_size_stride(arg0_1").run(runner_call)
+                FileCheck().check("assert_alignment(arg0_1").check(
+                    "assert_size_stride(arg0_1"
+                ).run(runner_call)
                 self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
                 self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
-        @parametrize("split_into_partitions", [False, True])
+        @parametrize(
+            "split_into_partitions,cudagraphs_per_partition",
+            [(False, False), (True, False), (True, True)],
+        )
+        @parametrize("cudagraphs", [False, True])
+        @parametrize("graph_partition", [False, True])
         @config.patch(
             {
-                "graph_partition": True,
-                "triton.cudagraphs": True,
                 "triton.reorder_for_reducing_graph_partitions": True,
                 "force_disable_caches": True,
             }
         )
-        def test_partition_reorder_follows_graph_lowering(self, split_into_partitions):
-            # The partition-minimizing reorder only runs for a graph whose
-            # partitions are for CUDA Graphs.
+        def test_partition_reorder_follows_graph_lowering(
+            self,
+            split_into_partitions,
+            cudagraphs_per_partition,
+            cudagraphs,
+            graph_partition,
+        ):
+            # Partition reordering remains a CUDA Graph optimization, not an
+            # optimization for customized partition wrappers alone.
             from torch._inductor.scheduler import Scheduler
 
             def f(x, y):
@@ -975,9 +1004,15 @@ if HAS_CUDA_AND_TRITON:
             reorder = Scheduler.reorder_for_partition_with_simple_dependency
             x, y = torch.randn(8, device="cuda"), torch.randn(8, device="cuda")
             with (
+                config.patch(
+                    {
+                        "triton.cudagraphs": cudagraphs,
+                        "graph_partition": graph_partition,
+                    }
+                ),
                 _force_graph_lowering_decisions(
                     split_into_partitions=split_into_partitions,
-                    cudagraphs_per_partition=None,
+                    cudagraphs_per_partition=cudagraphs_per_partition,
                 ),
                 mock.patch.object(
                     Scheduler,
@@ -987,7 +1022,10 @@ if HAS_CUDA_AND_TRITON:
                 ) as spy,
             ):
                 self.assertEqual(torch.compile(f)(x, y), f(x, y))
-            self.assertEqual(spy.called, split_into_partitions)
+            self.assertEqual(
+                spy.called,
+                graph_partition and cudagraphs_per_partition and cudagraphs,
+            )
 
         @torch._inductor.config.patch("triton.cudagraph_skip_dynamic_graphs", True)
         def test_skip_symbolic(self):
@@ -4378,11 +4416,11 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @parametrize("cudagraphs", [False, True])
-        @torch._inductor.config.patch({"cpp_wrapper": True, "graph_partition": True})
-        def test_cpp_wrapper_refuses_override_cudagraphs(self, cudagraphs):
-            # cpp_wrapper cannot partition, so with graph_partition it turns
-            # cudagraphs off, and override_cudagraphs(fwd=True) does not turn them
-            # back on. Only a refused triton.cudagraphs=True is reported.
+        @parametrize("wrapper", ["cpp_wrapper", "fx_wrapper"])
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_wrapper_refuses_override_cudagraphs(self, cudagraphs, wrapper):
+            # An annotation must not undo the wrapper's refusal. Ignoring it is
+            # logged, but only a refused triton.cudagraphs=True counts as a skip.
             @torch._dynamo.override_cudagraphs(fwd=True)
             def foo(x):
                 return x.sin() + 1
@@ -4391,17 +4429,26 @@ if HAS_CUDA_AND_TRITON:
             log_stream, ctx = logs_to_string(
                 "torch._inductor.cudagraph_utils", "cudagraphs"
             )
-            with config.patch("triton.cudagraphs", cudagraphs), ctx():
+            with (
+                config.patch({"triton.cudagraphs": cudagraphs, wrapper: True}),
+                ctx(),
+            ):
                 for _ in range(3):
                     t = torch.rand([32], device="cuda")
                     self.assertEqual(foo(t), foo_c(t))
 
+            skip_reason = (
+                f"{wrapper.replace('_', '-')} does not support graph partition yet"
+            )
             self.assertIsNone(self.get_manager())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], int(cudagraphs))
+            FileCheck().check(
+                f"ignoring override_cudagraphs annotation: {skip_reason}"
+            ).run(log_stream.getvalue())
             if cudagraphs:
-                FileCheck().check(
-                    "skipping cudagraphs due to cpp-wrapper does not support graph partition yet"
-                ).run(log_stream.getvalue())
+                FileCheck().check(f"skipping cudagraphs due to {skip_reason}").run(
+                    log_stream.getvalue()
+                )
 
         def test_storage_access_error(self):
             x = torch.rand([4], device="cuda")

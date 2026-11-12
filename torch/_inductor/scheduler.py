@@ -6310,6 +6310,8 @@ class Scheduler:
 
         self.process_grouped_nodes()
 
+        # Preserve the config opt-in for this CUDA Graph optimization; a
+        # customized partition wrapper alone does not request reordering.
         if (
             # pyrefly: ignore[unbound-name]
             config.graph_partition
@@ -12009,11 +12011,12 @@ class Scheduler:
                     raise AssertionError("expected op to be a torch._ops.OpOverload")
                 return f"custom partition op: {op_overload_name}"
 
-        # When not using cudagraphs, keep all kernels in the `call` function
-        # instead of graph partition functions, since graph partition only brings
-        # benefit to cudagraph
+        # When the partitions are not for CUDA Graphs, keep kernels in call();
+        # the whole callable may still be captured by post_compile.
         if not V.graph.cudagraphs_per_partition:
-            return "partition includes all ops when cudagraphs is disabled"
+            return (
+                "partition includes all ops when the partitions are not for CUDA Graphs"
+            )
 
         if isinstance(node, FusedSchedulerNode):
             for snode in node.snodes:

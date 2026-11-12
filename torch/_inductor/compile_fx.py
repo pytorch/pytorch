@@ -934,12 +934,10 @@ def maybe_disable_comprehensive_padding(
 
 
 def maybe_disable_graph_partition(
-    cpp_wrapper: bool, aot_mode: bool
+    cpp_wrapper: bool, aot_mode: bool, fx_wrapper: bool
 ) -> AbstractContextManager[None, None]:
-    """
-    graph partition does not support cpp_wrapper and aot_mode yet.
-    """
-    if cpp_wrapper or aot_mode:
+    """Graph partitioning is only supported by the non-AOT Python wrapper."""
+    if cpp_wrapper or fx_wrapper or aot_mode:
         return config.patch(graph_partition=False)
     else:
         return contextlib.nullcontext()
@@ -1762,7 +1760,7 @@ class _InProcessFxCompile(FxCompile):
             with (
                 V.set_fake_mode(fake_mode),
                 maybe_disable_comprehensive_padding(example_inputs),
-                maybe_disable_graph_partition(cpp_wrapper, aot_mode),
+                maybe_disable_graph_partition(cpp_wrapper, aot_mode, fx_wrapper),
             ):
                 const_output_index = None
                 const_graph = None
@@ -2634,13 +2632,17 @@ def fw_compiler_freezing(
     return wrapper
 
 
+def get_wrapper_cudagraph_skip_reason() -> str | None:
+    if config.graph_partition:
+        wrapper = "fx-wrapper" if config.fx_wrapper else "cpp-wrapper"
+        return f"{wrapper} does not support graph partition yet"
+    return None
+
+
 def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]:
-    if log_cudagraph_skip and config.triton.cudagraphs and config.graph_partition:
-        log_cudagraph_skip_and_bump_counter(
-            format_default_skip_message(
-                "cpp-wrapper does not support graph partition yet"
-            )
-        )
+    skip_reason = get_wrapper_cudagraph_skip_reason()
+    if log_cudagraph_skip and config.triton.cudagraphs and skip_reason:
+        log_cudagraph_skip_and_bump_counter(format_default_skip_message(skip_reason))
 
     autotune_at_compile_time = (
         config.triton.autotune_at_compile_time
@@ -2655,9 +2657,7 @@ def get_cpp_wrapper_config(log_cudagraph_skip: bool = True) -> dict[str, object]
         "triton.autotune_at_compile_time": autotune_at_compile_time,
         "triton.autotune_cublasLt": not autotune_at_compile_time,
         "triton.cudagraphs": (
-            config.triton.cudagraphs
-            and not V.aot_compilation
-            and not config.graph_partition
+            config.triton.cudagraphs and not V.aot_compilation and skip_reason is None
         ),
         "triton.store_cubin": True,
     }
@@ -2796,14 +2796,16 @@ def create_compiler_config_extra(
         and (annotation := dynamo_graph_metadata.get("cudagraph_annotation"))
         is not None
     ):
-        # cpp_wrapper cannot partition, so get_cpp_wrapper_config turned cudagraphs
-        # off under graph_partition, and the annotation does not turn them back on.
-        cpp_wrapper_refuses = config.cpp_wrapper and config.graph_partition
-        if (
-            annotation.fwd is not None
-            and annotation.fwd != config.triton.cudagraphs
-            and not (annotation.fwd and cpp_wrapper_refuses)
-        ):
+        skip_reason = (
+            get_wrapper_cudagraph_skip_reason()
+            if config.cpp_wrapper or config.fx_wrapper
+            else None
+        )
+        if annotation.fwd and skip_reason:
+            cudagraphs_log.info(
+                "ignoring override_cudagraphs annotation: %s", skip_reason
+            )
+        elif annotation.fwd is not None and annotation.fwd != config.triton.cudagraphs:
             cudagraphs = BoxedBool(annotation.fwd)
             if annotation.fwd:
                 cudagraphs_log.info(

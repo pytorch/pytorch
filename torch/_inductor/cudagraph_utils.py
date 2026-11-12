@@ -104,9 +104,9 @@ class CUDAGraphPolicy:
         real call via an inner closure.  Subclasses that need the
         example inputs for warmup or static-input detection may use them.
 
-        When ``config.graph_partition=True``, setting a CUDAGraphPolicy
-        bypasses ``cudagraph_partition_post_compile`` (which wraps each
-        partition individually) and routes through ``cudagraph_post_compile``
+        When ``CompiledFxGraph.cudagraphs_per_partition=True``, setting a
+        CUDAGraphPolicy bypasses ``cudagraph_partition_post_compile`` (which wraps
+        each partition individually) and routes through ``cudagraph_post_compile``
         instead, so this method wraps the *entire* callable, not individual
         partitions.  Subclasses that need per-partition control should
         handle partitioning internally.
