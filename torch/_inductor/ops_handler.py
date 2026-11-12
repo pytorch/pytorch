@@ -1075,9 +1075,7 @@ class KernelFormatterHandler(DefaultHandler):
         return self.parent_handler.indirect_indexing(*args, **kwargs)
 
     def register_jagged_range(self, bound, jagged_range):
-        self._output.writeline(
-            f"ops.register_jagged_range({bound}, {sympy_str(jagged_range)})"
-        )
+        self._output.writeline(f"ops.register_jagged_range({bound}, {jagged_range})")
         return self.parent_handler.register_jagged_range(bound, jagged_range)
 
     def _write(self, line):
