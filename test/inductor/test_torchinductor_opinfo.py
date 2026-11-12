@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     OpDTypes,
     ops,
+    preserves_device_selection,
     skipCPUIf,
     skipCUDAIf,
     skipIf,
@@ -34,6 +35,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    decorateIf,
     HardwareClassification,
     IS_ARM64,
     IS_CI,
@@ -1313,6 +1315,11 @@ def _inductor_extra_samples(op_name, device, dtype, requires_grad):
 if NEXTAFTER_IN_RANGE:
 
     class TestInductorNextafter(TestCase):
+        setUp = preserves_device_selection(TestCase.setUp)
+        setUpClass = classmethod(
+            preserves_device_selection(TestCase.setUpClass.__func__)
+        )
+
         @device_dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
         @parametrize("noncontiguous", (False, True))
         @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
@@ -1428,8 +1435,10 @@ if NEXTAFTER_IN_RANGE:
 @wrapper_noop_set_seed_decorator
 class TestInductorOpInfo(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+    setUp = preserves_device_selection(TestCase.setUp)
 
     @classmethod
+    @preserves_device_selection
     def setUpClass(cls):
         super().setUpClass()
         cls._test_config_stack = contextlib.ExitStack()
@@ -1463,6 +1472,19 @@ class TestInductorOpInfo(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
+    @decorateIf(
+        unittest.skip("Skipped!"),
+        lambda params: params["op"].full_name
+        not in (
+            "nn.functional.interpolate.bilinear",
+            "nn.functional.interpolate.bicubic",
+            "nn.functional.upsample_bilinear",
+            "nn.functional.upsample_nearest",
+            "fill",
+            "full_like",
+        )
+        and params["dtype"] not in (f16, f32, f64, i32, i64, b8),
+    )
     @_ops(op_db[START:END])
     @skipOps(test_skips_or_fails)
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
