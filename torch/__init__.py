@@ -1953,11 +1953,11 @@ def set_deterministic_debug_mode(debug_mode: builtins.int | str) -> None:
             )
 
     if debug_mode == 0:
-        _C._set_deterministic_algorithms(False)
+        use_deterministic_algorithms(False)
     elif debug_mode == 1:
-        _C._set_deterministic_algorithms(True, warn_only=True)
+        use_deterministic_algorithms(True, warn_only=True)
     elif debug_mode == 2:
-        _C._set_deterministic_algorithms(True)
+        use_deterministic_algorithms(True)
     else:
         raise RuntimeError(
             f"invalid value of debug_mode, expected 0, 1, or 2, but got {debug_mode}"

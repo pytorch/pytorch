@@ -1603,9 +1603,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 if isinstance(warn_only, VariableTracker)
                 else warn_only
             )
+            # At runtime, also set Inductor's deterministic flag, as in eager.
             tx.output.create_node(
                 "call_function",
-                torch._C._set_deterministic_algorithms,
+                torch.use_deterministic_algorithms,
                 (value,),
                 {"warn_only": warn_only_value},
             )

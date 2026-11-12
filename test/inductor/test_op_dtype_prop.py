@@ -56,6 +56,79 @@ pointwise_ops = [
 
 
 class TestCase(InductorTestCase):
+    def test_masked_dtype(self, device):
+        # masked has the dtype of its body's result, not of the fill value
+        # (e.g. an int64 pointwise cat fills with 0.0).
+        from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
+        from torch._inductor.loop_body import LoopBody
+        from torch._inductor.virtualized import V
+
+        def masked(body, other):
+            return V.ops.masked(V.ops.constant(True, torch.bool), body, other)
+
+        def fn(index):
+            return (
+                masked(lambda: V.ops.constant(3, torch.int64), 0.0),
+                masked(
+                    lambda: masked(lambda: V.ops.constant(2.5, torch.float64), 0), 0
+                ),
+            )
+
+        with config.patch(constant_and_index_propagation=False):
+            body = LoopBody(fn, ([],), {}, [], [])
+        with V.set_ops_handler(DtypePropagationOpsHandler()):
+            self.assertEqual(body(), (torch.int64, torch.float64))
+
+    def test_masked_body_in_prologue_analyses(self, device):
+        # The prologue analyses run the ops inside masked bodies too.
+        from torch._inductor.analyze_preserves_zero_mask import (
+            PreservesZeros,
+            RecordLowPrecisionOps,
+        )
+        from torch._inductor.index_propagation import TypedExpr
+        from torch._inductor.loop_body import LoopBody
+        from torch._inductor.virtualized import V
+
+        def run(handler, value_fn):
+            with config.patch(constant_and_index_propagation=False):
+                body = LoopBody(lambda index: value_fn(), ([],), {}, [], [])
+            with (
+                config.patch("triton.codegen_upcast_to_fp32", False),
+                V.set_ops_handler(handler),
+            ):
+                return body()
+
+        def masked(body):
+            return V.ops.masked(V.ops.constant(True, torch.bool), body, 0.0)
+
+        def remainder():
+            two = V.ops.constant(2.0, torch.float32)
+            return V.ops.remainder(V.ops.constant(2.5, torch.float32), two)
+
+        def bf16(value):
+            constant = V.ops.constant(value, torch.float32)
+            return V.ops.to_dtype(constant, torch.bfloat16)
+
+        def mantissa():
+            return V.ops.frexp(V.ops.constant(2.5, torch.float32))[0]
+
+        # SymPyOps cannot represent a float remainder: an unknown value. frexp
+        # has two outputs.
+        for fn in (remainder, lambda: masked(remainder), lambda: masked(mantissa)):
+            out = run(PreservesZeros(), fn)
+            self.assertIsInstance(out, TypedExpr)
+            self.assertEqual(out.dtype, torch.float32)
+
+        # bf16 arithmetic inside the masked body counts; the masked op does not.
+        for fn, numeric in (
+            (lambda: masked(lambda: bf16(1.0)), False),
+            (lambda: masked(mantissa), False),
+            (lambda: masked(lambda: V.ops.mul(bf16(1.0), bf16(2.0))), True),
+        ):
+            handler = RecordLowPrecisionOps()
+            run(handler, fn)
+            self.assertEqual(handler.low_precision_numeric_op, numeric)
+
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
     def test_floor_divide_cast_arange(self, device, dtype):
