@@ -366,6 +366,8 @@ class TestCuTeDSLReductionWiring(TestCase):
         with torch.cuda.graph(g):
             out = torch.sum(y, dim=-1)
         self.assertEqual(len(kg._REPLAYS), recorded + 1)
+        # _run started from no entries, so both are this test's recordings.
+        self.assertNotIn(None, [replay for _, replay in kg._REPLAYS.items()])
         y.copy_(torch.randn_like(y))
         g.replay()
         with _disabled():
