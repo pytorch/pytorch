@@ -117,17 +117,11 @@ other parts.
 
 #### Numerics change
 
-Localization will change the numerics of any reduction operations (matmuls
-involve a reduction). In many cases this is equivalent to switching to a
-"split-k" GEMM implementation and so has the same limitations: because we
-change where partial sums are accumulated, this can affect numerics in subtle
-ways.
-
-In practice we have found simple networks do not change behavior with
-localization enabled or not, and theoretically localization should lead to
-*more* accurate numerics. This is perhaps little consolation to a model author
-whose model accuracy declines in practice. Training with localization enabled
-is currently unsupported.
+For linear operations, localization splits output channels. Each branch computes
+complete output elements, and concatenation joins them without additional
+arithmetic. Different GEMM shapes and execution resources can change kernel
+selection and floating-point rounding, so results may differ numerically.
+Training with localization enabled is currently unsupported.
 
 #### Integration gotchas
 
