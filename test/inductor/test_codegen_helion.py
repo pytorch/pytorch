@@ -719,6 +719,27 @@ def kernel(in0: torch.Tensor, in1: torch.Tensor, in2: torch.Tensor, out0: torch.
                 self.assertEqual(b.grad, rb.grad, atol=1e-4, rtol=1e-4)
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
+    @parametrize("case", ["baddbmm", "addmm_beta0", "addmm_out_dtype"])
+    def test_k1_matmul_keeps_its_lowering(self, case):
+        # K == 1 matmuls that are not decomposed to a multiply before lowering
+        # use the regular lowering instead of a Helion kernel without a K loop.
+        fn, args = {
+            "baddbmm": (
+                torch.baddbmm,
+                (randn(3, 40, 136), randn(3, 40, 1), randn(3, 1, 136)),
+            ),
+            "addmm_beta0": (
+                lambda c, a, b: torch.addmm(c, a, b, beta=0),
+                (randn(40, 136), randn(40, 1), randn(1, 136)),
+            ),
+            "addmm_out_dtype": (
+                lambda c, a, b: torch.addmm(c, a, b, out_dtype=torch.float32),
+                (randn(40, 136, dtype=torch.float32), randn(40, 1), randn(1, 136)),
+            ),
+        }[case]
+        expected = fn(*args) if case == "addmm_out_dtype" else None
+        self.assertEqual(self.compile(fn, *args, expected=expected, helion=False), [])
+
     @parametrize("effort", ["none", "quick", "full"])
     def test_kernel_settings(self, effort):
         # Only the decorator is checked, so skip running (and autotuning) it.
