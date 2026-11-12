@@ -319,12 +319,20 @@ def gen_alias_from_base(
     target_view_meta_sequence: ViewMetaSequence | None = None,
     *,
     replay_views: bool,
+    target_requires_grad_for_backward: bool | None = None,
 ) -> Tensor:
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
     # and (ii) the concrete returned output does require grad or not.
     def patch_requires_grad(out: Tensor) -> Tensor:
-        if aliased_base_tensor.requires_grad and not target_requires_grad:
+        if (
+            aliased_base_tensor.requires_grad
+            and target_requires_grad
+            and target_requires_grad_for_backward is False
+        ):
+            # A no_grad view keeps requires_grad but has no autograd history.
+            out = out.detach().requires_grad_(True)
+        elif aliased_base_tensor.requires_grad and not target_requires_grad:
             out = out.detach()
         elif not aliased_base_tensor.requires_grad and target_requires_grad:
             out.requires_grad_(True)

@@ -255,6 +255,7 @@ class AliasOfInputHandler:
         self.base_idx = info.base_idx
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
+        self.requires_grad_for_backward = info.requires_grad_for_backward
         self.view_meta_sequence = info.view_meta_sequence
         self.replay_views = config.view_replay_for_aliased_outputs
 
@@ -268,6 +269,7 @@ class AliasOfInputHandler:
             self.requires_grad,
             self.view_meta_sequence,
             replay_views=self.replay_views,
+            target_requires_grad_for_backward=self.requires_grad_for_backward,
         )
 
 
@@ -312,6 +314,7 @@ class AliasOfIntermediateHandler:
 
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
+        self.requires_grad_for_backward = info.requires_grad_for_backward
         self.view_meta_sequence = info.view_meta_sequence
         self.replay_views = config.view_replay_for_aliased_outputs
 
@@ -325,6 +328,7 @@ class AliasOfIntermediateHandler:
             self.requires_grad,
             self.view_meta_sequence,
             replay_views=self.replay_views,
+            target_requires_grad_for_backward=self.requires_grad_for_backward,
         )
 
 
@@ -1042,7 +1046,9 @@ def _create_runtime_wrapper(
                         f"ret_outs.append(gen_alias_from_base("
                         f"orig_inputs[{handler.base_idx}], {out_expr}, "
                         f"{handler.requires_grad!r}, {vms_name}, "
-                        f"replay_views={handler.replay_views!r}))"
+                        f"replay_views={handler.replay_views!r}, "
+                        f"target_requires_grad_for_backward="
+                        f"{handler.requires_grad_for_backward!r}))"
                     )
                 elif isinstance(handler, AliasOfIntermediateHandler):
                     vms_name = buf.bind_value("_vms", handler.view_meta_sequence)
@@ -1063,7 +1069,9 @@ def _create_runtime_wrapper(
                         f"ret_outs.append(gen_alias_from_base("
                         f"{base_expr}, {out_expr}, "
                         f"{handler.requires_grad!r}, {vms_name}, "
-                        f"replay_views={handler.replay_views!r}))"
+                        f"replay_views={handler.replay_views!r}, "
+                        f"target_requires_grad_for_backward="
+                        f"{handler.requires_grad_for_backward!r}))"
                     )
                 else:
                     raise AssertionError(

@@ -2314,6 +2314,28 @@ def forward(self, primals_1, primals_2):
         test_grad = inp.grad
         self.assertEqual(ref_grad, test_grad)
 
+    def test_output_aliases_input_no_grad_view(self):
+        def f(a):
+            with torch.no_grad():
+                view = a[1:]
+            return view, a * 2
+
+        def run(fn):
+            inp = torch.arange(1, 5, dtype=torch.float32, requires_grad=True)
+            view, out = fn(inp)
+            (view.sum() + out.sum()).backward()
+            return inp.grad, view
+
+        compiled_f = aot_function(f, nop)
+        ref_grad, ref_view = run(f)
+        test_grad, test_view = run(compiled_f)
+
+        self.assertEqual(ref_grad, test_grad)
+        self.assertEqual(ref_view, test_view)
+        self.assertTrue(test_view.requires_grad)
+        self.assertTrue(test_view.is_leaf)
+        self.assertIsNone(test_view.grad_fn)
+
     def test_output_aliases_intermediate_returned_multiple_times(self):
         def f(a):
             out = torch.mul(a, 3)
