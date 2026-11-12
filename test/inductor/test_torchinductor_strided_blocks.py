@@ -2562,10 +2562,29 @@ class TritonHostSideTMATestCUDA(BlockDescriptorTestBase):
             self.assertTrue(expands)
             for line in expands:
                 name = line.split("_host_tma_desc")[0].strip()
-                self.assertIn(
-                    f'{name}_aligned = _host_tma_aligned({name}, "{name}")', lines
-                )
+                aligned = f'{name}_aligned = _host_tma_aligned({name}, "{name}"'
+                self.assertTrue(any(ln.startswith(aligned) for ln in lines), lines)
                 self.assertIn(f"{name}_aligned,", line)
+
+    @parametrize("static_launcher", (False, True))
+    def test_host_tma_launcher_marks_output_args(self, static_launcher: bool):
+        # is_output has to survive _create_compile_meta into both launchers, or
+        # a misaligned output would be cloned and its writes lost.
+        def fn(a, b):
+            return (a + b) * 2
+
+        a = torch.randn(1024, 1024, device=self.device, dtype=torch.bfloat16)
+        b = torch.randn(1024, 1024, device=self.device, dtype=torch.bfloat16)
+        with config.patch("use_static_triton_launcher", static_launcher):
+            captured, result = self._host_tma_launcher_lines(fn, a, b)
+        self.assertTrue(torch.allclose(result, fn(a, b)))
+        aligned = [
+            ln for lines, _ in captured for ln in lines if "= _host_tma_aligned(" in ln
+        ]
+        outputs = [ln for ln in aligned if "is_output=True" in ln]
+        self.assertTrue(outputs, aligned)
+        self.assertTrue(all("out_ptr" in ln for ln in outputs), aligned)
+        self.assertTrue(any("in_ptr" in ln for ln in aligned if ln not in outputs))
 
     def test_host_tma_meta_index_follows_signature_order(self):
         # triton keys tensordesc_meta by signature position. Real kernels happen
