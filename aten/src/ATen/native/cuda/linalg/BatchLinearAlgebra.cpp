@@ -627,6 +627,12 @@ namespace {
 
     // cuBLAS does not support rectangular inputs.
     if (m != n) {
+      // Try using custom kernel for batched inputs, and when m <= 1024,
+      // where it is optimized for virtual swaps, and presides in the registers.
+      // No custom kernel for shapes outside when nopiv.
+      if ((1 < batch && batch <= 65535) && ((1 <= m && m <= 1024) || compute_pivots)) {
+          return SolverBackend::CUSTOM;
+      }
       return SolverBackend::CUSOLVER;
     }
 
