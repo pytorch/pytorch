@@ -14,6 +14,7 @@
 #include <ATen/ops/imag.h>
 #endif
 
+#include <limits>
 #include <thrust/swap.h>
 #include <cooperative_groups.h>
 
@@ -637,7 +638,7 @@ bool try_launch_fused_panel_register_resident(
 }
 
 // Batched panel LU factorization for nrows > 1024.
-template <typename scalar_t, int BS>
+template <typename scalar_t, int BS, typename index_t>
 __global__ void __launch_bounds__(BS)
 batched_panel_colserial_fused_kernel(
   scalar_t* __restrict__ dA, int64_t matrix_stride,
@@ -711,8 +712,8 @@ batched_panel_colserial_fused_kernel(
 
     // 4. Rank-1 update (linearized)
     if (rows_below > 0 && update_cols > 0) {
-      const int64_t numel = static_cast<int64_t>(rows_below) * update_cols;
-      for (int64_t idx = tid; idx < numel; idx += BS) {
+      const index_t numel = static_cast<index_t>(rows_below) * update_cols;
+      for (index_t idx = tid; idx < numel; idx += BS) {
         auto local_row = idx % rows_below;
         auto local_col = idx / rows_below;
         auto i = k + 1 + local_row;
@@ -770,18 +771,29 @@ void lu_batched_panel_recursive(
     // Fallback: nrows > 1024 or nb is larger than what the register-resident kernel requires
     TORCH_CHECK(compute_pivots, "nopiv LU must not reach the pivoting colserial fallback");
     auto grid = dim3(1, 1, batch_count);
+    // Retain the faster int32 rank-1 update for panels whose flattened
+    // index space fits, and use int64_t only for larger panels.
+    const bool use_int32 = static_cast<int64_t>(m - col_start) * nb <= std::numeric_limits<int>::max();
     if ((m - col_start) > tuning.panel_threshold) {
-      batched_panel_colserial_fused_kernel<scalar_t, 1024><<<grid, 1024, 0, at::cuda::getCurrentCUDAStream()>>>(
-        dA, matrix_stride, lda, m,
-        col_start, nb,
-        ipiv_stride, dipiv, dinfo
-      );
+      if (use_int32) {
+        batched_panel_colserial_fused_kernel<scalar_t, 1024, int><<<grid, 1024, 0, at::cuda::getCurrentCUDAStream()>>>(
+          dA, matrix_stride, lda, m, col_start, nb, ipiv_stride, dipiv, dinfo
+        );
+      } else {
+        batched_panel_colserial_fused_kernel<scalar_t, 1024, int64_t><<<grid, 1024, 0, at::cuda::getCurrentCUDAStream()>>>(
+          dA, matrix_stride, lda, m, col_start, nb, ipiv_stride, dipiv, dinfo
+        );
+      }
     } else {
-      batched_panel_colserial_fused_kernel<scalar_t, 256><<<grid, 256, 0, at::cuda::getCurrentCUDAStream()>>>(
-        dA, matrix_stride, lda, m,
-        col_start, nb,
-        ipiv_stride, dipiv, dinfo
-      );
+      if (use_int32) {
+        batched_panel_colserial_fused_kernel<scalar_t, 256, int><<<grid, 256, 0, at::cuda::getCurrentCUDAStream()>>>(
+          dA, matrix_stride, lda, m, col_start, nb, ipiv_stride, dipiv, dinfo
+        );
+      } else {
+        batched_panel_colserial_fused_kernel<scalar_t, 256, int64_t><<<grid, 256, 0, at::cuda::getCurrentCUDAStream()>>>(
+          dA, matrix_stride, lda, m, col_start, nb, ipiv_stride, dipiv, dinfo
+        );
+      }
     }
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     return;
