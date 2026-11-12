@@ -988,13 +988,6 @@ class CppFakeTensorMode(torch._C._CppFakeTensorMode):
 
         copy_data = torch._functorch.config.fake_tensor_propagate_real_tensors
         super().__init__(FakeTensorConverter(copy_data=copy_data), shape_env)
-        self._attach_python_object()
-
-    @classmethod
-    def _from_cpp_mode(cls, cpp_mode: object) -> Self:
-        self = cls.__new__(cls)
-        torch._C._CppFakeTensorMode.__init__(self, cpp_mode)
-        return self
 
 
 @functools.cache
