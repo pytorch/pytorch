@@ -5,6 +5,7 @@ import dataclasses
 import gc
 import operator
 import sys
+import traceback
 import unittest
 
 import torch
@@ -1733,6 +1734,54 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires PEP 657 positions")
+    def test_exception_traceback_frame_summary_positions(self):
+        def fn(x):
+            try:
+                raise ValueError("oops")
+            except ValueError as e:
+                frame = traceback.extract_tb(e.__traceback__)[0]
+                return (
+                    x + frame.lineno,
+                    x + frame.end_lineno,
+                    x + frame.colno,
+                    x + frame.end_colno,
+                )
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), ref)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires PEP 657 positions")
+    @parametrize("attr", ("end_lineno", "colno", "end_colno"))
+    def test_exception_traceback_frame_summary_position_write(self, attr):
+        descriptor = getattr(traceback.FrameSummary, attr)
+
+        def fn(x):
+            y = x.sin() + 1
+            try:
+                raise ValueError("oops")
+            except ValueError as e:
+                frame = traceback.extract_tb(e.__traceback__)[0]
+                try:
+                    descriptor.__set__(frame, 7)
+                except AttributeError:
+                    return y + 1, -1
+                return y + 2, getattr(frame, attr)
+
+        x = torch.ones(1)
+        ref = fn(x)
+        self.assertEqual(ref[1], 7)
+        counter = CompileCounter()
+        self.assertEqual(torch.compile(fn, backend=counter)(x), ref)
+        self.assertGreaterEqual(counter.frame_count, 1)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            Unsupported, "Write to unmodeled getset/member attribute"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
 
     def test_exception_with_traceback_method(self):
         # Test the with_traceback() method
