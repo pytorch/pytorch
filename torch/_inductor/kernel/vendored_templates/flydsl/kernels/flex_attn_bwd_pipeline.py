@@ -34,9 +34,8 @@ def make_pipeline_kernel(context, f32, exp2):
     lse_in_log2 = context["lse_in_log2"]
     scale = context["softmax_scale"]
     scale_log2 = context["scale_log2"]
-    unmasked = context["unmasked_traversal"]
-    direct_range = context["direct_range_traversal"]
-    block_list = context["block_list_traversal"]
+    if not context["block_list_traversal"]:
+        raise ValueError("the backward pipeline walks block lists only")
     query_split = context["sparse_q_block_size"] // 16
     sparse_kv_block_size = context["sparse_kv_block_size"]
     mask_buffer_count = context["mask_buffer_count"]
@@ -836,13 +835,12 @@ def make_pipeline_kernel(context, f32, exp2):
                                 cached_mask,
                             )
                             probability = keep.select(probability, f32(0.0))
-                        if const_expr(not direct_range):
-                            in_bounds = key_pos + fx.Int32(group * 16) < fx.Int32(
-                                kv_sequence_length
-                            )
-                            probability = in_bounds.select(probability, f32(0.0))
-                            if const_expr(has_score_mod):
-                                keep = in_bounds if keep is None else keep & in_bounds
+                        in_bounds = key_pos + fx.Int32(group * 16) < fx.Int32(
+                            kv_sequence_length
+                        )
+                        probability = in_bounds.select(probability, f32(0.0))
+                        if const_expr(has_score_mod):
+                            keep = in_bounds if keep is None else keep & in_bounds
                         if const_expr(q_ragged):
                             in_rows = position < fx.Int32(sequence_length)
                             probability = in_rows.select(probability, f32(0.0))
@@ -1169,11 +1167,10 @@ def make_pipeline_kernel(context, f32, exp2):
                         if masked:
                             keep = evaluate_mask(position, key_pos, cached_mask)
                             probability = keep.select(probability, f32(0.0))
-                        if const_expr(not direct_range):
-                            in_bounds = key_pos < fx.Int32(kv_sequence_length)
-                            probability = in_bounds.select(probability, f32(0.0))
-                            if const_expr(has_score_mod):
-                                keep = in_bounds if keep is None else keep & in_bounds
+                        in_bounds = key_pos < fx.Int32(kv_sequence_length)
+                        probability = in_bounds.select(probability, f32(0.0))
+                        if const_expr(has_score_mod):
+                            keep = in_bounds if keep is None else keep & in_bounds
                         if const_expr(q_ragged):
                             in_rows = position < fx.Int32(sequence_length)
                             probability = in_rows.select(probability, f32(0.0))
@@ -1346,7 +1343,6 @@ def make_pipeline_kernel(context, f32, exp2):
 
             def run(
                 count,
-                first_query,
                 query_indices,
                 masked: fx.Constexpr[bool],
                 producer: fx.Constexpr[bool],
@@ -1355,21 +1351,18 @@ def make_pipeline_kernel(context, f32, exp2):
                 cached_keys,
             ):
                 def query_at(index):
-                    if const_expr(block_list):
-                        list_offset = (
-                            fx.Int64(query_batch_head) * fx.Int64(key_metadata_chunks)
-                            + fx.Int64(sparse_key)
-                        ) * fx.Int64(metadata_chunks)
-                        sparse_query = fx.Int32(
-                            fx.get_iter(query_indices)[
-                                list_offset + fx.Int64(index // fx.Int32(list_split))
-                            ]
-                        )
-                        return sparse_query * fx.Int32(step_split) + index % fx.Int32(
-                            list_split
-                        )
-                    else:
-                        return first_query + index
+                    list_offset = (
+                        fx.Int64(query_batch_head) * fx.Int64(key_metadata_chunks)
+                        + fx.Int64(sparse_key)
+                    ) * fx.Int64(metadata_chunks)
+                    sparse_query = fx.Int32(
+                        fx.get_iter(query_indices)[
+                            list_offset + fx.Int64(index // fx.Int32(list_split))
+                        ]
+                    )
+                    return sparse_query * fx.Int32(step_split) + index % fx.Int32(
+                        list_split
+                    )
 
                 stage_step, produce_step, consume_step, load_previous = (
                     (
@@ -1429,82 +1422,39 @@ def make_pipeline_kernel(context, f32, exp2):
             def execute_runs(
                 producer: fx.Constexpr[bool], dk_wide, dv_wide, cached_keys
             ):
-                if const_expr(unmasked):
-                    run(
-                        fx.Int32(query_tiles),
-                        fx.Int32(0),
-                        partial_kv_indices,
-                        False,
-                        producer,
-                        dk_wide,
-                        dv_wide,
-                        cached_keys,
-                    )
-                elif const_expr(direct_range):
-                    first_query = key_base // fx.Int32(16)
-                    masked_count = fx.min(
-                        fx.Int32(key_rows // 16),
-                        fx.Int32(query_tiles) - first_query,
-                    )
-                    run(
-                        masked_count,
-                        first_query,
-                        partial_kv_indices,
-                        True,
-                        producer,
-                        dk_wide,
-                        dv_wide,
-                        cached_keys,
-                    )
-                    run(
-                        fx.Int32(query_tiles) - first_query - masked_count,
-                        first_query + masked_count,
-                        full_kv_indices_transposed,
-                        False,
-                        producer,
-                        dk_wide,
-                        dv_wide,
-                        cached_keys,
-                    )
-
-                else:
-                    count_index = fx.Int64(query_batch_head) * fx.Int64(
-                        key_metadata_chunks
-                    ) + fx.Int64(sparse_key)
-                    partial_count = fx.Int32(
-                        fx.get_iter(partial_kv_counts)[count_index]
-                    )
-                    full_count = fx.Int32(fx.get_iter(full_kv_counts)[count_index])
-                    if const_expr(direct_dq and not producer):
-                        if partial_count + full_count == fx.Int32(0):
-                            zero = fx.make_fragment_like(ccoords, fx.Float32)
-                            zero.fill(0)
-                            for query_tile in fx.range_constexpr(query_tiles):
-                                for part in fx.range_constexpr(dq_wave_tiles):
-                                    tile = (wave - fx.Int32(producer_waves)) * fx.Int32(
-                                        dq_wave_tiles
-                                    ) + fx.Int32(part)
-                                    store_dq(fx.Int32(query_tile), zero, tile, part)
-                    run(
-                        partial_count * fx.Int32(list_split),
-                        fx.Int32(0),
-                        partial_kv_indices,
-                        True,
-                        producer,
-                        dk_wide,
-                        dv_wide,
-                        cached_keys,
-                    )
-                    run(
-                        full_count * fx.Int32(list_split),
-                        fx.Int32(0),
-                        full_kv_indices_transposed,
-                        False,
-                        producer,
-                        dk_wide,
-                        dv_wide,
-                        cached_keys,
-                    )
+                count_index = fx.Int64(query_batch_head) * fx.Int64(
+                    key_metadata_chunks
+                ) + fx.Int64(sparse_key)
+                partial_count = fx.Int32(fx.get_iter(partial_kv_counts)[count_index])
+                full_count = fx.Int32(fx.get_iter(full_kv_counts)[count_index])
+                if const_expr(direct_dq and not producer):
+                    if partial_count + full_count == fx.Int32(0):
+                        zero = fx.make_fragment_like(ccoords, fx.Float32)
+                        zero.fill(0)
+                        for query_tile in fx.range_constexpr(query_tiles):
+                            for part in fx.range_constexpr(dq_wave_tiles):
+                                tile = (wave - fx.Int32(producer_waves)) * fx.Int32(
+                                    dq_wave_tiles
+                                ) + fx.Int32(part)
+                                store_dq(fx.Int32(query_tile), zero, tile, part)
+                run(
+                    partial_count * fx.Int32(list_split),
+                    partial_kv_indices,
+                    True,
+                    producer,
+                    dk_wide,
+                    dv_wide,
+                    cached_keys,
+                )
+                run(
+                    full_count * fx.Int32(list_split),
+                    full_kv_indices_transposed,
+                    False,
+                    producer,
+                    dk_wide,
+                    dv_wide,
+                    cached_keys,
+                )
 
             def execute_query_heads(
                 producer: fx.Constexpr[bool], dk_wide, dv_wide, cached_keys

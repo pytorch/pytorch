@@ -16,14 +16,7 @@ from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 from ...codegen.flydsl import flydsl_utils
 from ...codegen.flydsl.flydsl_flex_kernel import FlyDSLFlexTemplate
-from ...ir import (
-    ExternKernel,
-    FixedLayout,
-    FlexibleLayout,
-    Pointwise,
-    Reduction,
-    TensorBox,
-)
+from ...ir import ExternKernel, FixedLayout, Pointwise, Reduction, TensorBox
 from ...lowering import constant_pad_nd, empty_strided, full, lowerings
 from ...ops_handler import ReductionType
 from ...select_algorithm import autotune_select_algorithm
@@ -47,6 +40,7 @@ from ..vendored_templates.flydsl.kernels.flex_attn_target import (
     WAVE_SIZE,
 )
 from .common import (
+    construct_strides,
     create_indices_fake,
     create_num_blocks_fake_generator,
     freeze_irnodes,
@@ -86,7 +80,9 @@ _SCORE_MOD_CAPTURE_DTYPES = (torch.float32, torch.bfloat16, torch.float16)
 _MAX_HEAD_DIM = max(max(dims) for dims in WIDE_HEAD_DIMS)
 
 
-_contiguous_strides = FlexibleLayout.contiguous_strides
+def _contiguous_strides(shape):
+    """Row-major strides of ``shape`` as ints, or SymInts for symbolic sizes."""
+    return construct_strides(shape, range(len(shape) - 1, -1, -1))
 
 
 def _sym(expr):
@@ -103,6 +99,17 @@ def _sym(expr):
 
 def _syms(values):
     return tuple(_sym(value) for value in values)
+
+
+def _static_scale(scale) -> float:
+    """``scale`` as a float, guarding the sizes it reads, e.g. the default
+    ``1 / sqrt(head_dim)`` under dynamic shapes."""
+    if isinstance(scale, (int, float)):
+        return float(scale)
+    expr = sympy.sympify(scale)
+    for symbol in sorted(expr.free_symbols, key=str):
+        expr = expr.subs(symbol, V.graph.sizevars.guard_int(symbol))
+    return float(expr)
 
 
 def _expr(value):
@@ -692,7 +699,7 @@ def _get_flydsl_flex_attention_forward_config(
             qk_dim = key_dim
         sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
         sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
-        scale_value = float(scale)
+        scale_value = _static_scale(scale)
         output_stride = _syms(
             infer_dense_strides(
                 [query.get_size()[0], hq, query.get_size()[2], stored_dims[1]],
@@ -773,6 +780,9 @@ def _get_flydsl_flex_attention_forward_config(
         return None, "BlockMask batch dimension must be 1 or B"
     if mask_shape[1] not in (1, hkv, hq):
         return None, "BlockMask head dimension must be 1, Hkv, or Hq"
+    # Triton's prefill reads BlockMask row h % H_mask; the kernels read h // G.
+    if not decode and mask_shape[1] not in (1, hq):
+        return None, "prefill requires a BlockMask head dimension of 1 or Hq with GQA"
     if sparse_q_block_size <= 0 or sparse_kv_block_size <= 0:
         return None, "requires positive sparse block sizes"
 
@@ -855,9 +865,11 @@ def _get_flydsl_flex_attention_forward_config(
         },
         "O_STRIDE": _template_strides(output_stride, sq),
     }
-    runtime = _is_runtime(list(sizes.values())) or _is_runtime(
-        mask_config["MASK_BUFFER_SHAPES"]
-    ) or _is_runtime(mask_config["MASK_BUFFER_STRIDES"])
+    runtime = (
+        _is_runtime(list(sizes.values()))
+        or _is_runtime(mask_config["MASK_BUFFER_SHAPES"])
+        or _is_runtime(mask_config["MASK_BUFFER_STRIDES"])
+    )
     reason = _capture_table_reason(mask_config, score_mod_config["CAPTURE_TABLE"])
     if reason:
         return None, reason
@@ -1051,10 +1063,8 @@ def _create_dense_metadata(query, key):
     shape = [1, 1, num_q_blocks]
     device = query.get_device()
     if isinstance(num_q_blocks, int) and isinstance(num_kv_blocks, int):
-        # Static metadata is registered as graph constants.  Dynamic shapes
-        # take the runtime path below and materialize three full buffers plus
-        # the indexed range, so metadata construction is not uniformly a
-        # one-time operation.
+        # Graph constants: four tiny kernels per call cost as much as a small
+        # attention. Dynamic block counts build the buffers in the graph below.
         with torch.utils._python_dispatch._disable_current_modes():
             tensors = (
                 torch.zeros(shape, dtype=torch.int32, device=device),
@@ -1147,8 +1157,7 @@ def _create_packed_decode_union_metadata(
 ):
     """Merge a per-Q-head decode BlockMask over each GQA group: a block stays
     full only if every head lists it as full. Assumes distinct list entries.
-    This is a graph-time reduction even for static shapes because the
-    per-head lists are runtime inputs."""
+    The per-head lists are runtime inputs, so this runs in the graph."""
     mask_batch, num_q_heads, num_q_blocks = map(_size_expr, kv_num_blocks.get_size())
     num_q_heads = V.graph.sizevars.guard_int(num_q_heads)
     capacities = [

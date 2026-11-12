@@ -221,11 +221,17 @@ def _hierarchical_indexer_cute(
     size: Sequence[int],
     stride: Sequence[int] | None = None,
     offset: Expr = Integer(0),
+    *,
+    ignore_offset: bool = False,
 ) -> Callable[[Sequence[Expr]], Expr]:
-    """Return an indexer that preserves multi-dimensional indices for CuteDSL."""
+    """Return an indexer that preserves multi-dimensional indices for CuteDSL.
+
+    ``ignore_offset`` is for callers whose buffers reach the kernel as views that
+    already apply the offset.
+    """
 
     def indexer(indices: Sequence[Expr]) -> Expr:
-        if offset != Integer(0):
+        if not ignore_offset and offset != Integer(0):
             raise AssertionError("Offset not supported for hierarchical indexing")
         if len(indices) != len(size):
             raise AssertionError(
@@ -241,8 +247,11 @@ def _hierarchical_indexer_cute(
 
 
 @contextmanager
-def patch_fixed_layout_indexer(indexer_factory):
-    """Temporarily swap ``FixedLayout.make_indexer`` for hierarchical indexing.
+def patch_fixed_layout_indexer_for_cutedsl(*, ignore_offset: bool = False):
+    """
+    Temporarily swap FixedLayout.make_indexer so CuteDSL sees hierarchical indexing.
+
+    The FlyDSL flex mods use the same patch with ``ignore_offset=True``.
 
     Note [CuteDSL indexer patch]:
     Flex flash attention only supports a limited set of IR ops (pointwise, reads, no stores),
@@ -252,19 +261,15 @@ def patch_fixed_layout_indexer(indexer_factory):
     original_make_indexer = FixedLayout.make_indexer
 
     def cutedsl_make_indexer(self):
-        return indexer_factory(self.size, self.stride, self.offset)
+        return _hierarchical_indexer_cute(
+            self.size, self.stride, self.offset, ignore_offset=ignore_offset
+        )
 
     FixedLayout.make_indexer = cutedsl_make_indexer  # type: ignore[assignment]
     try:
         yield
     finally:
         FixedLayout.make_indexer = original_make_indexer  # type: ignore[assignment]
-
-
-@contextmanager
-def patch_fixed_layout_indexer_for_cutedsl():
-    with patch_fixed_layout_indexer(_hierarchical_indexer_cute):
-        yield
 
 
 def wrap_choice_render_with_cutedsl_indexer(choice: Any) -> None:

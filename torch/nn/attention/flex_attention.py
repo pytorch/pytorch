@@ -284,10 +284,11 @@ class FlexKernelOptions(TypedDict, total=False):
     does not affect forward."""
 
     FLYDSL_HEAD_SLOW_ORDER: NotRequired[bool]
-    """Let FlyDSL forwards (``BACKEND="FLYDSL"``) without a BlockMask, or with a
-    dense one, run long, many-headed grids in head-slow workgroup order to keep
-    each head's K/V in L2. Default: True. The output is the same either way.
-    This option does not affect backward."""
+    """Let FlyDSL forwards (``BACKEND="FLYDSL"``) without a BlockMask run grids
+    with Sq >= 16384 and a multiple of 8 query heads in head-slow workgroup
+    order to keep each head's K/V in L2. Forwards with a ``mask_mod`` or a
+    user-created BlockMask always run head-fast. Default: True. The output is
+    the same either way. This option does not affect backward."""
 
     FLYDSL_SPLIT_KV: NotRequired[bool | int]
     """Split each FlyDSL decode (Sq < 128) CTA's KV blocks across several CTAs,

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 RUNTIME_ALIAS = "fdu"
 RUNTIME_MODULE = "torch._inductor.codegen.flydsl.flydsl_mod_runtime"
 
+
 class FlyDSLCSEVariable(CSEVariable):
     """A FlyDSL value; ``index_expr`` names the coordinate it was loaded from."""
 
@@ -61,6 +62,44 @@ _BOOL_RESULT = frozenset(
     ]
 )
 
+# Unary ops other than neg, abs, relu, logical_not and bitwise_not, plus
+# truediv, pow and atan2.
+_FLOAT_RESULT = frozenset(
+    [
+        "reciprocal",
+        "sqrt",
+        "rsqrt",
+        "exp",
+        "exp2",
+        "expm1",
+        "log",
+        "log2",
+        "log10",
+        "log1p",
+        "floor",
+        "ceil",
+        "trunc",
+        "round",
+        "sin",
+        "cos",
+        "tanh",
+        "sigmoid",
+        "sinh",
+        "cosh",
+        "asin",
+        "acos",
+        "atan",
+        "asinh",
+        "acosh",
+        "atanh",
+        "erf",
+        "erfc",
+        "truediv",
+        "pow",
+        "atan2",
+    ]
+)
+
 
 def _result_dtype(fn: str, args: Sequence[Any]) -> torch.dtype:
     if fn in _BOOL_RESULT:
@@ -93,301 +132,237 @@ def _call(fn: str, *args: Any) -> Any:
 class FlyDSLOpOverrides(OpOverrides):
     """Emit FlyDSL source for the pointwise ops a score_mod can contain."""
 
-    _UNARY = (
-        "neg",
-        "abs",
-        "reciprocal",
-        "sqrt",
-        "rsqrt",
-        "exp",
-        "exp2",
-        "expm1",
-        "log",
-        "log2",
-        "log10",
-        "log1p",
-        "floor",
-        "ceil",
-        "trunc",
-        "round",
-        "sin",
-        "cos",
-        "tanh",
-        "sigmoid",
-        "sinh",
-        "cosh",
-        "asin",
-        "acos",
-        "atan",
-        "asinh",
-        "acosh",
-        "atanh",
-        "erf",
-        "erfc",
-        "relu",
-        "logical_not",
-        "bitwise_not",
-    )
-
-    _BINARY = (
-        "add",
-        "sub",
-        "mul",
-        "truediv",
-        "floordiv",
-        "mod",
-        "remainder",
-        "maximum",
-        "minimum",
-        "pow",
-        "lt",
-        "le",
-        "gt",
-        "ge",
-        "eq",
-        "ne",
-        "logical_and",
-        "logical_or",
-        "logical_xor",
-        "bitwise_and",
-        "bitwise_or",
-        "bitwise_xor",
-        "bitwise_left_shift",
-        "bitwise_right_shift",
-        "atan2",
-    )
+    @staticmethod
+    def neg(a: Any) -> Any:
+        return _call("neg", a)
 
     @staticmethod
-    def neg(*args):
-        return _call("neg", *args)
+    def abs(x0: Any) -> Any:
+        return _call("abs", x0)
 
     @staticmethod
-    def abs(*args):
-        return _call("abs", *args)
+    def reciprocal(x: Any) -> Any:
+        return _call("reciprocal", x)
 
     @staticmethod
-    def reciprocal(*args):
-        return _call("reciprocal", *args)
+    def sqrt(x0: Any) -> Any:
+        return _call("sqrt", x0)
 
     @staticmethod
-    def sqrt(*args):
-        return _call("sqrt", *args)
+    def rsqrt(x0: Any) -> Any:
+        return _call("rsqrt", x0)
 
     @staticmethod
-    def rsqrt(*args):
-        return _call("rsqrt", *args)
+    def exp(x0: Any) -> Any:
+        return _call("exp", x0)
 
     @staticmethod
-    def exp(*args):
-        return _call("exp", *args)
+    def exp2(x: Any) -> Any:
+        return _call("exp2", x)
 
     @staticmethod
-    def exp2(*args):
-        return _call("exp2", *args)
+    def expm1(x: Any) -> Any:
+        return _call("expm1", x)
 
     @staticmethod
-    def expm1(*args):
-        return _call("expm1", *args)
+    def log(x0: Any) -> Any:
+        return _call("log", x0)
 
     @staticmethod
-    def log(*args):
-        return _call("log", *args)
+    def log2(x: Any) -> Any:
+        return _call("log2", x)
 
     @staticmethod
-    def log2(*args):
-        return _call("log2", *args)
+    def log10(x: Any) -> Any:
+        return _call("log10", x)
 
     @staticmethod
-    def log10(*args):
-        return _call("log10", *args)
+    def log1p(x: Any) -> Any:
+        return _call("log1p", x)
 
     @staticmethod
-    def log1p(*args):
-        return _call("log1p", *args)
+    def floor(x0: Any) -> Any:
+        return _call("floor", x0)
 
     @staticmethod
-    def floor(*args):
-        return _call("floor", *args)
+    def ceil(x0: Any) -> Any:
+        return _call("ceil", x0)
 
     @staticmethod
-    def ceil(*args):
-        return _call("ceil", *args)
+    def trunc(x0: Any) -> Any:
+        return _call("trunc", x0)
 
     @staticmethod
-    def trunc(*args):
-        return _call("trunc", *args)
+    def round(x0: Any) -> Any:
+        return _call("round", x0)
 
     @staticmethod
-    def round(*args):
-        return _call("round", *args)
+    def sin(x0: Any) -> Any:
+        return _call("sin", x0)
 
     @staticmethod
-    def sin(*args):
-        return _call("sin", *args)
+    def cos(x0: Any) -> Any:
+        return _call("cos", x0)
 
     @staticmethod
-    def cos(*args):
-        return _call("cos", *args)
+    def tanh(x0: Any) -> Any:
+        return _call("tanh", x0)
 
     @staticmethod
-    def tanh(*args):
-        return _call("tanh", *args)
+    def sigmoid(x: Any) -> Any:
+        return _call("sigmoid", x)
 
     @staticmethod
-    def sigmoid(*args):
-        return _call("sigmoid", *args)
+    def sinh(x0: Any) -> Any:
+        return _call("sinh", x0)
 
     @staticmethod
-    def sinh(*args):
-        return _call("sinh", *args)
+    def cosh(x0: Any) -> Any:
+        return _call("cosh", x0)
 
     @staticmethod
-    def cosh(*args):
-        return _call("cosh", *args)
+    def asin(x0: Any) -> Any:
+        return _call("asin", x0)
 
     @staticmethod
-    def asin(*args):
-        return _call("asin", *args)
+    def acos(x0: Any) -> Any:
+        return _call("acos", x0)
 
     @staticmethod
-    def acos(*args):
-        return _call("acos", *args)
+    def atan(x0: Any) -> Any:
+        return _call("atan", x0)
 
     @staticmethod
-    def atan(*args):
-        return _call("atan", *args)
+    def asinh(x0: Any) -> Any:
+        return _call("asinh", x0)
 
     @staticmethod
-    def asinh(*args):
-        return _call("asinh", *args)
+    def acosh(x0: Any) -> Any:
+        return _call("acosh", x0)
 
     @staticmethod
-    def acosh(*args):
-        return _call("acosh", *args)
+    def atanh(x0: Any) -> Any:
+        return _call("atanh", x0)
 
     @staticmethod
-    def atanh(*args):
-        return _call("atanh", *args)
+    def erf(x0: Any) -> Any:
+        return _call("erf", x0)
 
     @staticmethod
-    def erf(*args):
-        return _call("erf", *args)
+    def erfc(x: Any) -> Any:
+        return _call("erfc", x)
 
     @staticmethod
-    def erfc(*args):
-        return _call("erfc", *args)
+    def relu(x: Any) -> Any:
+        return _call("relu", x)
 
     @staticmethod
-    def relu(*args):
-        return _call("relu", *args)
+    def logical_not(a: Any) -> Any:
+        return _call("logical_not", a)
 
     @staticmethod
-    def logical_not(*args):
-        return _call("logical_not", *args)
+    def bitwise_not(x: Any) -> Any:
+        return _call("bitwise_not", x)
 
     @staticmethod
-    def bitwise_not(*args):
-        return _call("bitwise_not", *args)
+    def add(a: Any, b: Any) -> Any:
+        return _call("add", a, b)
 
     @staticmethod
-    def add(*args):
-        return _call("add", *args)
+    def sub(a: Any, b: Any) -> Any:
+        return _call("sub", a, b)
 
     @staticmethod
-    def sub(*args):
-        return _call("sub", *args)
+    def mul(a: Any, b: Any) -> Any:
+        return _call("mul", a, b)
 
     @staticmethod
-    def mul(*args):
-        return _call("mul", *args)
+    def truediv(a: Any, b: Any) -> Any:
+        return _call("truediv", a, b)
 
     @staticmethod
-    def truediv(*args):
-        return _call("truediv", *args)
+    def floordiv(a: Any, b: Any) -> Any:
+        return _call("floordiv", a, b)
 
     @staticmethod
-    def floordiv(*args):
-        return _call("floordiv", *args)
+    def mod(a: Any, b: Any) -> Any:
+        return _call("mod", a, b)
 
     @staticmethod
-    def mod(*args):
-        return _call("mod", *args)
+    def remainder(a: Any, b: Any) -> Any:
+        return _call("remainder", a, b)
 
     @staticmethod
-    def remainder(*args):
-        return _call("remainder", *args)
+    def maximum(x0: Any, x1: Any) -> Any:
+        return _call("maximum", x0, x1)
 
     @staticmethod
-    def maximum(*args):
-        return _call("maximum", *args)
+    def minimum(x0: Any, x1: Any) -> Any:
+        return _call("minimum", x0, x1)
 
     @staticmethod
-    def minimum(*args):
-        return _call("minimum", *args)
+    def pow(a: Any, b: Any) -> Any:
+        return _call("pow", a, b)
 
     @staticmethod
-    def pow(*args):
-        return _call("pow", *args)
+    def lt(a: Any, b: Any) -> Any:
+        return _call("lt", a, b)
 
     @staticmethod
-    def lt(*args):
-        return _call("lt", *args)
+    def le(a: Any, b: Any) -> Any:
+        return _call("le", a, b)
 
     @staticmethod
-    def le(*args):
-        return _call("le", *args)
+    def gt(a: Any, b: Any) -> Any:
+        return _call("gt", a, b)
 
     @staticmethod
-    def gt(*args):
-        return _call("gt", *args)
+    def ge(a: Any, b: Any) -> Any:
+        return _call("ge", a, b)
 
     @staticmethod
-    def ge(*args):
-        return _call("ge", *args)
+    def eq(a: Any, b: Any) -> Any:
+        return _call("eq", a, b)
 
     @staticmethod
-    def eq(*args):
-        return _call("eq", *args)
+    def ne(a: Any, b: Any) -> Any:
+        return _call("ne", a, b)
 
     @staticmethod
-    def ne(*args):
-        return _call("ne", *args)
+    def logical_and(x0: Any, x1: Any) -> Any:
+        return _call("logical_and", x0, x1)
 
     @staticmethod
-    def logical_and(*args):
-        return _call("logical_and", *args)
+    def logical_or(x0: Any, x1: Any) -> Any:
+        return _call("logical_or", x0, x1)
 
     @staticmethod
-    def logical_or(*args):
-        return _call("logical_or", *args)
+    def logical_xor(x0: Any, x1: Any) -> Any:
+        return _call("logical_xor", x0, x1)
 
     @staticmethod
-    def logical_xor(*args):
-        return _call("logical_xor", *args)
+    def bitwise_and(x: Any, y: Any) -> Any:
+        return _call("bitwise_and", x, y)
 
     @staticmethod
-    def bitwise_and(*args):
-        return _call("bitwise_and", *args)
+    def bitwise_or(x: Any, y: Any) -> Any:
+        return _call("bitwise_or", x, y)
 
     @staticmethod
-    def bitwise_or(*args):
-        return _call("bitwise_or", *args)
+    def bitwise_xor(x: Any, y: Any) -> Any:
+        return _call("bitwise_xor", x, y)
 
     @staticmethod
-    def bitwise_xor(*args):
-        return _call("bitwise_xor", *args)
+    def bitwise_left_shift(x: Any, y: Any) -> Any:
+        return _call("bitwise_left_shift", x, y)
 
     @staticmethod
-    def bitwise_left_shift(*args):
-        return _call("bitwise_left_shift", *args)
+    def bitwise_right_shift(x: Any, y: Any) -> Any:
+        return _call("bitwise_right_shift", x, y)
 
     @staticmethod
-    def bitwise_right_shift(*args):
-        return _call("bitwise_right_shift", *args)
-
-    @staticmethod
-    def atan2(*args):
-        return _call("atan2", *args)
+    def atan2(x0: Any, x1: Any) -> Any:
+        return _call("atan2", x0, x1)
 
     @staticmethod
     def erfinv(*args, **kwargs):
@@ -457,11 +432,3 @@ class FlyDSLOpOverrides(OpOverrides):
         raise NotImplementedError(
             "indirect indexing is not supported in FlyDSL flex mods"
         )
-
-
-# Ops whose result is f32: every unary op but these, and truediv, pow, atan2.
-_FLOAT_RESULT = (
-    frozenset(FlyDSLOpOverrides._UNARY)
-    - frozenset(["neg", "abs", "relu", "logical_not", "bitwise_not"])
-    | frozenset(["truediv", "pow", "atan2"])
-)

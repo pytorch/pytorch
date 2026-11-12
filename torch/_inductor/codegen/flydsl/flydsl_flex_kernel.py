@@ -30,7 +30,7 @@ from .flydsl_template import FlyDSLTemplate
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
 
     from ...ir import Buffer
 
@@ -60,32 +60,13 @@ def _runtime_source_hash() -> str:
         return hashlib.sha256(f.read()).hexdigest()
 
 
-def _hierarchical_indexer(size: Sequence[Any]) -> Callable[[Sequence[Any]], Any]:
+def _patch_capture_indexer() -> contextlib.AbstractContextManager[None]:
+    from ...kernel.flex.flex_flash_attention import (
+        patch_fixed_layout_indexer_for_cutedsl,
+    )
+
     # Captured views reach the kernel as reinterpreted tensors, so ignore the offset.
-    from ...kernel.flex.flex_flash_attention import HierarchicalIndex
-
-    def indexer(indices: Sequence[Any]) -> Any:
-        if len(indices) != len(size):
-            raise AssertionError(
-                f"Rank mismatch: got {len(indices)} indices for rank {len(size)}"
-            )
-        if not indices:
-            return sympy.Integer(0)
-        if len(indices) == 1:
-            return indices[0]
-        return HierarchicalIndex(*indices)
-
-    return indexer
-
-
-@contextlib.contextmanager
-def _patch_capture_indexer():
-    from ...kernel.flex.flex_flash_attention import patch_fixed_layout_indexer
-
-    with patch_fixed_layout_indexer(
-        lambda size, stride, offset: _hierarchical_indexer(size)
-    ):
-        yield
+    return patch_fixed_layout_indexer_for_cutedsl(ignore_offset=True)
 
 
 @dataclasses.dataclass
@@ -234,7 +215,8 @@ class FlyDSLFlexTemplateKernel(FlyDSLTemplateKernel):
         )
 
     def mod_key(self, *extra: Any) -> str:
-        """Hash of the rendered mod bodies, the runtime shim and ``extra``."""
+        """Hash of the rendered mod bodies, the scalar values they read, the
+        runtime shim and ``extra``."""
         if not self.subgraph_bodies:
             raise AssertionError("mod_key() called before any modification() rendered")
         payload = "\x00".join(
@@ -243,6 +225,8 @@ class FlyDSLFlexTemplateKernel(FlyDSLTemplateKernel):
                     f"{name}\x00{info.body.getvalue()}"
                     for name, info in sorted(self.subgraph_bodies.items())
                 ),
+                # FlyDSL's JIT cache does not see module constants the mods read.
+                self.scalar_defines(),
                 _runtime_source_hash(),
                 *(str(e) for e in extra),
             ]

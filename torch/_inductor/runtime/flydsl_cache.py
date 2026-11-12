@@ -108,11 +108,11 @@ def run_cached_flydsl(
     if compile_args_factory is not None and compile_args:
         raise TypeError("pass compile_args or compile_args_factory, not both")
     device = getattr(dispatch_args[0], "device", None)
-    gpu_arch = os.environ.get("FLYDSL_GPU_ARCH") or _device_gpu_arch(device)
     cache_key = (
         os.getpid(),
         getattr(device, "index", None),
-        gpu_arch,
+        # The device index fixes the arch; only an explicit override can change it.
+        os.environ.get("FLYDSL_GPU_ARCH"),
         constexpr_param.__cache_signature__(),
         layout_key,
     )

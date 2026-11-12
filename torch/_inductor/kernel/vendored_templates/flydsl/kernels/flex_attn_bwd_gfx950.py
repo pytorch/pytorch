@@ -108,10 +108,11 @@ def build_flex_attn_bwd_module(
     Each compute CTA owns one KV head and walks its group's Q heads, so dK/dV
     reduce in registers. With a ``plan``, None sizes/strides are read at
     runtime. ``joint_mod(pre, b, h, q_idx, kv_idx, dS, aux)`` maps dS with a
-    ``score_mod``. With ``has_grad_logsumexp``, ``delta`` holds the log2-LSE
-    gradient on entry (finite past Sq) and becomes
-    ``rowsum(dO * O) - grad * log2(e)``. ``single_pass`` (``backward_single_pass``
-    head dims) gives each producer 16 key rows at full width and steps over Q
+    ``score_mod``. With ``has_grad_logsumexp``, ``delta`` holds the LSE
+    gradient on entry (finite past Sq) and becomes ``rowsum(dO * O) - grad``,
+    with ``grad`` scaled by log2(e) under ``lse_in_log2``. ``single_pass``
+    (``backward_single_pass`` head dims) gives each producer 16 key rows at full
+    width and steps over Q
     in 32-row pairs of tiles, so S and dP are computed once. ``target_limits``
     are the ``TargetLimits`` to plan for, by default the current device's.
     """
@@ -645,7 +646,10 @@ def build_flex_attn_bwd_module(
                     fx.Int64(batch_head) * fx.Int64(padded_sequence_length)
                     + fx.Int64(row)
                 ]
-            row_sum = row_sum - _f32(grad_logsumexp) * _f32(_LOG2E)
+            if const_expr(lse_in_log2):
+                row_sum = row_sum - _f32(grad_logsumexp) * _f32(_LOG2E)
+            else:
+                row_sum = row_sum - _f32(grad_logsumexp)
         if chunk == fx.Int32(0):
             if const_expr(dense_linear_delta):
                 fx.get_iter(delta_view)[
@@ -2908,7 +2912,9 @@ def build_flex_attn_bwd_module(
         for owner in fx.range_constexpr(dq_partitions):
             valid_owner = fx.Int32(1)
             if const_expr(block_list_traversal and dq_partitions <= 32):
-                valid_owner = (active_slots & fx.Int32(1 << owner)) != fx.Int32(0)
+                # 1 << 31 is not an Int32 constant; shift like mark_owner_slots.
+                owner_bit = fx.Int32(1) << fx.Int32(owner)
+                valid_owner = (active_slots & owner_bit) != fx.Int32(0)
             if const_expr(direct_range_traversal and owner > 0):
                 valid_owner = query_base >= fx.Int32(owner * key_rows)
             if const_expr(runtime_owners and not block_list_traversal and owner > 0):

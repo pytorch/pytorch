@@ -63,6 +63,7 @@ from .flex_flydsl_attention import (
     _require_bhsd_stride,
     _size_expr,
     _sparse_block_size_reason,
+    _static_scale,
     _sym,
     _syms,
     _target_limits,
@@ -219,7 +220,7 @@ def _get_flydsl_flex_attention_backward_config(
         )
         block_m = V.graph.sizevars.guard_int(sparse_q_block_size)
         block_n = V.graph.sizevars.guard_int(sparse_kv_block_size)
-        scale_value = float(scale)
+        scale_value = _static_scale(scale)
     except (AttributeError, TypeError, ValueError):
         return None, "FlyDSL flex bwd requires backed shapes and a static scale"
 
@@ -325,10 +326,11 @@ def _get_flydsl_flex_attention_backward_config(
     mask_batch, mask_heads, _ = count_shape
     if mask_batch not in (1, b):
         return None, "FlyDSL flex bwd BlockMask batch dimension must be 1 or B"
-    if mask_heads not in (1, hk, h):
+    # Triton reads BlockMask row h % H_mask; the kernel reads h // G for H_mask == Hkv.
+    if mask_heads not in (1, h):
         return (
             None,
-            "FlyDSL flex bwd BlockMask head dimension must be 1, KV heads, or Q heads",
+            "FlyDSL flex bwd BlockMask head dimension must be 1 or Q heads",
         )
     if (
         len(index_shape) != 4
