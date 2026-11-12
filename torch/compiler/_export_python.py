@@ -81,6 +81,13 @@ def export_python(
     run a new process to pick up an edit, since loading an edited file where an
     earlier version of it is loaded raises.
 
+    With the inductor backend the capture tunes its Triton kernels at compile time, as
+    every :class:`~torch.compiler.precompile.DynamoTracer` capture does, so the graph
+    code carries a ``KERNEL_CONFIGS`` table of the config each kernel inductor
+    generated launches with: editing a row changes that kernel's launch config. A
+    template (flex attention, say) or a user-defined kernel keeps its config in its
+    own decorator instead, editable the same way.
+
     The file is trusted executable Python, locked to the PyTorch build and Python
     version that produced it. Decorate a function defined in an importable module:
     serving the file imports the module the function was captured from.
