@@ -131,8 +131,8 @@ class JaggedRange(sympy.Dummy):
     with config.constant_and_index_propagation, ops.minimum of index_expr(b)
     and constant 2 is recorded as index_expr(Min(b, 2)) and passes.
 
-    A JaggedRange is not a tensor shape. Its bound is defined per node, so two
-    nodes sharing a JaggedRange are not assumed to have the same bound.
+    A JaggedRange is not a tensor shape, but nodes that share one must register
+    the same bound; the lowering that creates the JaggedRange guarantees this.
     """
 
     def __new__(cls, name, dummy_index=None, **assumptions):

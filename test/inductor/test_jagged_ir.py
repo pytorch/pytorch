@@ -1,7 +1,5 @@
 # Owner(s): ["module: inductor"]
 
-import unittest
-
 import torch
 import torch.nn.functional as F
 from torch._inductor import config, ir
@@ -16,9 +14,9 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TEST_CUDA,
     TestCase,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 def graph():
@@ -69,8 +67,9 @@ def trace(data):
     return buffer.get_default_sizes_body()
 
 
+@requires_cuda_and_triton
 class TestJaggedReductionIR(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CUDA
 
     def test_bound_dependencies(self):
         j_range = JaggedRange("j")
@@ -82,16 +81,7 @@ class TestJaggedReductionIR(TestCase):
             return ops.load("values", start + rindex[0])
 
         with V.set_graph_handler(graph()):
-            reduction = ir.Reduction(
-                device=torch.device("cpu"),
-                dtype=torch.float32,
-                inner_fn=inner_fn,
-                ranges=[4],
-                reduction_ranges=[j_range],
-                reduction_type="sum",
-                src_dtype=torch.float32,
-                reduction_hint=ir.ReductionHint.DEFAULT,
-            )
+            reduction = row_sum(inner_fn, j_range)
             self.assertIn("ops.register_jagged_range(", str(reduction))
             tensor = ir.TensorBox.create(reduction)
             tensor.realize()
@@ -208,40 +198,44 @@ class TestJaggedReductionIR(TestCase):
         with self.assertRaisesRegex(AssertionError, "must start with 'j'"):
             JaggedRange("u0")
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
-    def test_triton_row_sum_bj_to_b(self):
-        # Row 2 is longer than one reduction block; row 1 is empty.
-        offsets = torch.tensor([0, 2, 2, 1029, 1030], device="cuda")
-        values = torch.randn(1030, device="cuda")
+    @parametrize("cooperative", [False, True])
+    def test_triton_row_sum_bj_to_b(self, cooperative):
+        # Row 2 is longer than any R0_BLOCK autotuning picks (at most 4096), so
+        # its loop runs more than once; rows 1 and 4 are empty. Integer values
+        # keep the sums exact. A forced cooperative reduction must still be
+        # turned off.
+        offsets = torch.tensor([0, 2, 2, 4099, 4100, 4100], device="cuda")
+        values = torch.randint(-8, 8, (4100,), device="cuda").float()
         j_range = JaggedRange("j")
 
         def inner_fn(index, rindex):
             b = index[0]
             length = ops.load("offsets", b + 1) - ops.load("offsets", b)
             ops.register_jagged_range(length, j_range)
-            start = ops.indirect_indexing(ops.load("offsets", b), values.numel())
-            return ops.load("values", start + rindex[0])
+            row = ops.load("offsets", b) + ops.index_expr(rindex[0], torch.int64)
+            return ops.load("values", ops.indirect_indexing(row, values.numel()))
 
         reduction = ir.Reduction(
             device=values.device,
             dtype=values.dtype,
             inner_fn=inner_fn,
-            ranges=[4],
+            ranges=[5],
             reduction_ranges=[j_range],
             reduction_type="sum",
             src_dtype=values.dtype,
             reduction_hint=ir.ReductionHint.DEFAULT,
         )
-        actual, _ = compile_and_run(reduction, {"offsets": offsets, "values": values})
+        inputs = {"offsets": offsets, "values": values}
+        with config.patch({"triton.force_cooperative_reductions": cooperative}):
+            actual, _ = compile_and_run(reduction, inputs)
         self.assertEqual(actual, torch.segment_reduce(values, "sum", offsets=offsets))
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_triton_row_sum_bjd_to_bd(self):
         # Enough rows that a (y, x) tiling would otherwise be picked.
         lengths = torch.randint(0, 8, (256,), device="cuda")
-        lengths[1], lengths[2] = 0, 1027
+        lengths[1], lengths[2] = 0, 4097
         offsets = torch.nn.functional.pad(lengths.cumsum(0), (1, 0))
-        values = torch.randn(int(offsets[-1]), 3, device="cuda")
+        values = torch.randint(-8, 8, (int(offsets[-1]), 3), device="cuda").float()
         j_range = JaggedRange("j")
 
         def inner_fn(index, rindex):
@@ -269,7 +263,6 @@ class TestJaggedReductionIR(TestCase):
         self.assertNotIn("ynumel", code)
         self.assertEqual(actual, torch.segment_reduce(values, "sum", offsets=offsets))
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     @parametrize("reduce", ["sum", "mean", "max", "min", "prod", "amax", "amin"])
     @parametrize("shape", [(1030,), (1030, 3)])
     def test_segment_reduce_offsets(self, reduce, shape):
@@ -283,7 +276,6 @@ class TestJaggedReductionIR(TestCase):
         self.assertIn("r0_bound", "\n".join(codes))
         self.assertEqual(actual, fn(data, offsets))
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_segment_reduce_low_precision(self, dtype):
         offsets = torch.tensor([0, 2, 2, 1029, 1030], device="cuda")
@@ -298,7 +290,6 @@ class TestJaggedReductionIR(TestCase):
         expected = fn(data.double(), offsets).to(dtype)
         self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_segment_reduce_inner_axis(self):
         offsets = torch.tensor([[0, 3, 3, 7], [0, 0, 5, 7]], device="cuda").int()
         data = torch.randn(2, 7, 4, device="cuda")
@@ -310,7 +301,6 @@ class TestJaggedReductionIR(TestCase):
         self.assertIn("r0_bound", "\n".join(codes))
         self.assertEqual(actual, fn(data, offsets))
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     @parametrize("unsafe", [True, False])
     def test_segment_reduce_lengths(self, unsafe):
         lengths = torch.tensor([2, 0, 1027, 1], device="cuda")
@@ -326,7 +316,6 @@ class TestJaggedReductionIR(TestCase):
         self.assertEqual("lengths contains negative value" in code, not unsafe)
         self.assertEqual(actual, fn(data, lengths))
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     @parametrize("segments", ["offsets", "lengths", "unsafe_lengths"])
     def test_segment_reduce_negative_axis(self, segments):
         offsets = torch.tensor([[0, 3, 3, 7], [0, 0, 5, 7]], device="cuda")
@@ -349,7 +338,6 @@ class TestJaggedReductionIR(TestCase):
         self.assertIn("r0_bound", "\n".join(codes))
         self.assertEqual(actual, fn(data, offsets))
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     @parametrize(
         "reduce,initial,lowered",
         [
@@ -378,7 +366,6 @@ class TestJaggedReductionIR(TestCase):
         self.assertEqual("r0_bound" in "\n".join(codes), lowered)
         self.assertEqual(actual, fn(data, lengths))
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_segment_reduce_constant_offsets(self):
         data = torch.randn(1030, 3, device="cuda")
 
@@ -390,7 +377,6 @@ class TestJaggedReductionIR(TestCase):
         self.assertIn("r0_bound", "\n".join(codes))
         self.assertEqual(actual, fn(data))
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_segment_reduce_horizontal_fusion(self):
         offsets = torch.tensor([0, 2, 2, 1029, 1030], device="cuda")
         other = torch.tensor([0, 10, 20, 30, 1030], device="cuda")
@@ -425,7 +411,6 @@ class TestJaggedReductionIR(TestCase):
             self.assertEqual("\n".join(codes).count(".run("), launches)
             self.assertEqual(actual, fn(*args))
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_segment_reduce_vertical_prologue(self):
         offsets = torch.tensor([0, 2, 2, 1029, 1030], device="cuda")
         data = torch.randn(1030, 3, device="cuda")
@@ -444,7 +429,6 @@ class TestJaggedReductionIR(TestCase):
             self.assertEqual("\n".join(codes).count(".run("), launches)
             self.assertEqual(actual, fn(data, offsets), atol=1e-4, rtol=1e-4)
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_segment_reduce_vertical_epilogue(self):
         offsets = torch.tensor([0, 2, 2, 1029, 1030], device="cuda")
         data = torch.randn(1030, 3, device="cuda")
@@ -465,7 +449,6 @@ class TestJaggedReductionIR(TestCase):
             self.assertEqual("\n".join(codes).count(".run("), launches)
             self.assertEqual(actual, fn(data, offsets, bias), atol=1e-4, rtol=1e-4)
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     @parametrize("mode", ["sum", "mean"])
     @parametrize("dtype", [torch.float32, torch.bfloat16])
     def test_embedding_bag(self, mode, dtype):
@@ -482,7 +465,6 @@ class TestJaggedReductionIR(TestCase):
         # The summation order differs from eager.
         self.assertEqual(actual, fn(weight, indices, offsets), atol=1e-2, rtol=1e-2)
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_embedding_bag_options(self):
         offsets = torch.tensor([0, 2, 2, 1029], device="cuda")
         indices = torch.randint(0, 5, (1030,), device="cuda")
@@ -516,7 +498,6 @@ class TestJaggedReductionIR(TestCase):
             expected = fn(weight, indices, offsets)
             self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     @parametrize("mode", ["sum", "mean"])
     def test_embedding_bag_backward(self, mode):
         # The backward stays a fallback that reads offset2bag and bag_size.
@@ -533,7 +514,6 @@ class TestJaggedReductionIR(TestCase):
         torch.compile(fn)(compiled, indices, offsets).backward()
         self.assertEqual(compiled.grad, eager.grad, atol=1e-2, rtol=1e-2)
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_embedding_bag_max_falls_back(self):
         offsets = torch.tensor([0, 2, 2, 1029], device="cuda")
         indices = torch.randint(0, 100, (1030,), device="cuda")
@@ -546,7 +526,6 @@ class TestJaggedReductionIR(TestCase):
         self.assertNotIn("r0_bound", "\n".join(codes))
         self.assertEqual(actual, fn(weight, indices, offsets))
 
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
     def test_embedding_bag_fusion(self):
         offsets = torch.tensor([0, 2, 2, 1029], device="cuda")
         indices = torch.randint(0, 100, (1030,), device="cuda")
