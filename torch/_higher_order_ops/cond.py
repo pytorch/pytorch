@@ -30,7 +30,7 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
@@ -481,7 +481,7 @@ def _merge_output(
     if type(a) is int and type(b) is int:
         return _merge_ints_to_symint([a, b], mode)
 
-    if not (type(a) is FakeTensor and type(b) is FakeTensor):
+    if not (is_fake_tensor(a) and is_fake_tensor(b)):
         raise AssertionError(
             f"expected both a and b to be FakeTensor, got a={type(a)}, b={type(b)}"
         )
@@ -713,12 +713,27 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
         can_auto_functionalize,
         do_auto_functionalize_v2,
     )
-    from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
+    from torch._higher_order_ops.utils import (
+        _check_alias,
+        _check_alias_and_mutation,
+        HopInstance,
+    )
 
     hop_instance = HopInstance.create(cond_op, pred, true_fn, false_fn, inputs)
     # For now, we only support auto-functionalization for cond when using python
     # functionalization mode
     if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
+        # Auto-functionalization supports operand mutation, but not aliasing that it
+        # does not repair: returning a mutated operand is fine, since the output then
+        # aliases the clone inserted for that base, while returning an operand that is
+        # not mutated leaves the output aliasing the caller's tensor.
+        # _check_alias_and_mutation is skipped on this path because it would also
+        # reject the mutation, so check aliasing only.  This re-traces both branches;
+        # see the PR discussion for why the maps gen_schema computed are not reused.
+        unwrapped_inputs = ctx.unwrap_tensors(inputs)
+        pre_dispatch = ctx.mode.pre_dispatch
+        for branch, branch_name in [(true_fn, "cond_true"), (false_fn, "cond_false")]:
+            _check_alias(branch, unwrapped_inputs, branch_name, pre_dispatch)
         return do_auto_functionalize_v2(
             ctx.mode,
             hop_instance,
