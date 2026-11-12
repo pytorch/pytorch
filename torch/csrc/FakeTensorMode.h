@@ -17,7 +17,7 @@ TORCH_PYTHON_API std::shared_ptr<c10::FakeTensorMode> getCppFakeTensorMode(
 TORCH_PYTHON_API py::object getCppFakeTensorModePyObj(
     const std::shared_ptr<c10::FakeTensorMode>& mode);
 
-TORCH_PYTHON_API std::shared_ptr<c10::FakeTensorMode> cpp_fake_mode_from_capsule(
-    const py::capsule& capsule);
+TORCH_PYTHON_API void initCppFakeTensorMode(PyObject* module);
+TORCH_PYTHON_API bool isCppFakeTensorMode(py::handle obj);
 
 } // namespace torch::fake_tensor
