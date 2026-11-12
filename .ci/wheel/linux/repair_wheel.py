@@ -68,6 +68,23 @@ def copy_runtime_dependencies(
     gpu_arch_type: str,
     gpu_arch_version: str,
 ) -> None:
+    """Copy runtime libraries that need to be bundled with the current build
+    into an unpacked wheel's torch/lib.
+
+    Dependencies are read from the build environment.
+    Modify the unpacked tree in place and return None on success.
+    Raise an exception on failure rather than silently returning.
+
+    Assumes the wheel is already unpacked and torch_dir/lib exists and is
+    writable.
+
+    Args:
+        torch_dir (Path): Torch package directory inside the unpacked wheel.
+        arch (str): Build host architecture from platform.machine().
+        use_cuda (bool): Whether this is a CUDA build.
+        gpu_arch_type (str): Accelerator type from GPU_ARCH_TYPE.
+        gpu_arch_version (str): Accelerator SDK version from GPU_ARCH_VERSION.
+    """
     torch_lib = torch_dir / "lib"
     libgomp_path = detect_libgomp()
     if not libgomp_path.exists():
@@ -97,8 +114,8 @@ def copy_runtime_dependencies(
         # systems the bare dev name exists only if numactl-devel is
         # installed (#195670). The 10.0 SDK line links the vendored soname
         # directly instead (rocm-systems#6640), so bundle a bare-named
-        # copy, reached via $ORIGIN on the RPATHs above, only for older
-        # SDKs. The builder image installs numactl-libs for this.
+        # copy, reached via $ORIGIN in prepare_runtime_paths(), only for
+        # older SDKs. The builder image installs numactl-libs for this.
         ver = gpu_arch_version
         if ver != "preview" and (
             not ver or tuple(map(int, ver.split(".")[:2])) < (10, 0)
@@ -268,6 +285,16 @@ def repair_wheel(
 def prepare_runtime_paths(
     use_cuda: bool, gpu_arch_type: str, gpu_arch_version: str
 ) -> tuple[str, str, bool]:
+    """Prepare runtime paths without modifying the wheel.
+
+    Return (c_so_rpath, lib_so_rpath, force_rpath) for the build configuration.
+
+    c_so_rpath applies to ``torch/*.so*``,
+    and lib_so_rpath applies to ``torch/lib/*.so*``.
+    The returned boolean force_rpath selects DT_RPATH when True
+    and DT_RUNPATH when False.
+    The caller applies these paths after copying runtime dependencies.
+    """
     is_rocm = gpu_arch_type == "rocm" or "rocm" in os.environ.get("DESIRED_CUDA", "")
     if use_cuda:
         rpaths = cuda_rpaths(gpu_arch_version)
