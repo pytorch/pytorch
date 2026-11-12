@@ -48,8 +48,10 @@ constexpr auto kMemHandleTypeFabric = hipMemHandleTypeNone;
 constexpr auto kMemHandleTypePosixFd = hipMemHandleTypePosixFileDescriptor;
 #else
 using FabricHandleType = CUmemFabricHandle;
+#if defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 constexpr auto kMemHandleTypeFabric = CU_MEM_HANDLE_TYPE_FABRIC;
 constexpr auto kMemHandleTypePosixFd = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+#endif
 #endif
 
 /* Start of CUDASymmetricMemory implementation */

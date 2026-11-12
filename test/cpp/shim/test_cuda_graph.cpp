@@ -215,7 +215,7 @@ TEST_F(AOTICudaGraphTest, OtherThreadsRunDuringCapture) {
   EXPECT_TRUE(y.equal(at::full({8}, 3.0, at::kCUDA)));
 }
 
-TEST_F(AOTICudaGraphTest, UsesThePoolsDevice) {
+TEST_F(AOTICudaGraphTest, UsesThePoolsDeviceMultiGpu) {
   if (c10::cuda::device_count() < 2) {
     GTEST_SKIP() << "Needs 2 GPUs";
   }
@@ -459,7 +459,7 @@ TEST_F(AOTICudaGraphRAIITest, EndsOnlyACaptureItBegan) {
       "AOTICudaGraph: no capture to end");
 }
 
-TEST_F(AOTICudaGraphRAIITest, MakesNonBlockingStreamsAndEvents) {
+TEST_F(AOTICudaGraphRAIITest, MakesNonBlockingStreamsAndEventsMultiGpu) {
   for (int32_t device = 0;
        device < std::min<int32_t>(c10::cuda::device_count(), 2);
        ++device) {
@@ -546,7 +546,7 @@ TEST_F(AOTICudaGraphRAIITest, EndsTheInvalidatedCaptureItLeftOpen) {
   EXPECT_TRUE(y.equal(at::full({8}, 3.0f, at::kCUDA)));
 }
 
-TEST_F(AOTICudaGraphRAIITest, EndsACaptureOnAnotherDevice) {
+TEST_F(AOTICudaGraphRAIITest, EndsACaptureOnAnotherDeviceMultiGpu) {
   if (c10::cuda::device_count() < 2) {
     GTEST_SKIP() << "Needs two GPUs";
   }

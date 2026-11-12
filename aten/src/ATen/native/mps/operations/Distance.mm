@@ -2,6 +2,7 @@
 #include <ATen/native/Distance.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/metal/common.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -88,6 +89,9 @@ static void cdist_backward_kernel_mps(Tensor& result,
   constexpr uint32_t kSmallTG = c10::metal::simdgroup_size;
   constexpr uint32_t kLargeTG = 4 * c10::metal::simdgroup_size;
   const uint32_t tg_c = (c >= 2 * kSmallTG) ? kLargeTG : kSmallTG;
+  TORCH_CHECK(std::in_range<int32_t>(c) && std::in_range<uint32_t>(r1) && std::in_range<uint32_t>(batch_product),
+              "cdist_backward: MPS does not support x1 of size ",
+              x1.sizes());
   const auto D_padded = c10::metal::ceil_div(static_cast<uint32_t>(c), tg_c) * tg_c;
 
   auto stream = getCurrentMPSStream();

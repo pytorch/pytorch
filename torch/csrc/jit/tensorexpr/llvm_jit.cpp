@@ -116,7 +116,9 @@ static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder(
 #else
   JTMB.setCodeGenOptLevel(llvm::CodeGenOpt::Default);
 #endif
+#if LLVM_VERSION_MAJOR < 24
   JTMB.getOptions().AllowFPOpFusion = llvm::FPOpFusion::Fast;
+#endif
   return JTMB;
 }
 

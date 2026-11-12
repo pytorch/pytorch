@@ -15,6 +15,7 @@
 #include <ATen/ops/view_as_real.h>
 #include <ATen/ops/zeros_like.h>
 #include <fmt/format.h>
+#include <utility>
 
 namespace at::native {
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
@@ -150,7 +151,7 @@ void inner_contiguous_scatter_mps(const Tensor& input,
   const uint64_t num_slices = (input.nbytes() + slice_bytes - 1) / slice_bytes;
   const uint64_t max_out = off_bytes + (num_slices ? (num_slices - 1) * out_stride_bytes + slice_bytes : 0);
   const uint64_t bound = std::max<uint64_t>(input.nbytes(), max_out);
-  if (bound > std::numeric_limits<uint32_t>::max()) {
+  if (!std::in_range<uint32_t>(bound)) {
     exec_inner_contiguous_scatter<uint64_t>(input, output, slice_bytes, out_stride_bytes, off_bytes);
   } else {
     exec_inner_contiguous_scatter<uint32_t>(input, output, slice_bytes, out_stride_bytes, off_bytes);
