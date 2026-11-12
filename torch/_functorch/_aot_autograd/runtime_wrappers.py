@@ -256,6 +256,7 @@ class AliasOfInputHandler:
         self.base_idx = info.base_idx
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
+        self.replay_under_no_grad = info.replay_under_no_grad
         self.view_meta_sequence = info.view_meta_sequence
         self.replay_views = config.view_replay_for_aliased_outputs
 
@@ -263,13 +264,14 @@ class AliasOfInputHandler:
         self, orig_inputs: dict[int, Tensor], fw_outs: list[Any], out: Any
     ) -> torch.Tensor:
         aliased_base_tensor = orig_inputs[self.base_idx]
-        return gen_alias_from_base(
-            aliased_base_tensor,
-            self.unwrap_out(out),
-            self.requires_grad,
-            self.view_meta_sequence,
-            replay_views=self.replay_views,
-        )
+        with torch.no_grad() if self.replay_under_no_grad else nullcontext():
+            return gen_alias_from_base(
+                aliased_base_tensor,
+                self.unwrap_out(out),
+                self.requires_grad,
+                self.view_meta_sequence,
+                replay_views=self.replay_views,
+            )
 
 
 class IsInputHandler:
@@ -1039,12 +1041,18 @@ def _create_runtime_wrapper(
                         if trace_joint
                         else f"fw_outs[{i}]"
                     )
-                    buf.writeline(
-                        f"ret_outs.append(gen_alias_from_base("
-                        f"orig_inputs[{handler.base_idx}], {out_expr}, "
-                        f"{handler.requires_grad!r}, {vms_name}, "
-                        f"replay_views={handler.replay_views!r}))"
-                    )
+                    if handler.replay_under_no_grad:
+                        buf.bind(torch=torch)
+                        buf.writeline("with torch.no_grad():")
+                    with (
+                        buf.indent() if handler.replay_under_no_grad else nullcontext()
+                    ):
+                        buf.writeline(
+                            f"ret_outs.append(gen_alias_from_base("
+                            f"orig_inputs[{handler.base_idx}], {out_expr}, "
+                            f"{handler.requires_grad!r}, {vms_name}, "
+                            f"replay_views={handler.replay_views!r}))"
+                        )
                 elif isinstance(handler, AliasOfIntermediateHandler):
                     vms_name = buf.bind_value("_vms", handler.view_meta_sequence)
                     out_expr = (

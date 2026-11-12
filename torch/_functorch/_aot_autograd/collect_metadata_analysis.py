@@ -718,6 +718,9 @@ from a multi-output view call"
                     view_meta_sequence = ViewMetaSequence(o)
 
             requires_grad = isinstance(o, torch.Tensor) and o.requires_grad
+            requires_grad_for_backward = requires_grad and (
+                o._base is None or grad_fn is not None
+            )
             out_info = OutputAliasInfo(
                 output_type=output_type,
                 raw_type=type(o),
@@ -727,8 +730,13 @@ from a multi-output view call"
                 # A view created under no_grad() inherits requires_grad from
                 # its base but has no grad_fn and does not participate in
                 # differentiation.
-                requires_grad_for_backward=requires_grad
-                and (o._base is None or grad_fn is not None),
+                requires_grad_for_backward=requires_grad_for_backward,
+                replay_under_no_grad=(
+                    output_type == OutputType.alias_of_input
+                    and prior_grad_enabled
+                    and requires_grad
+                    and not requires_grad_for_backward
+                ),
                 view_meta_sequence=view_meta_sequence,
             )
             output_info.append(out_info)
