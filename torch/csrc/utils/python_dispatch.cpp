@@ -242,7 +242,7 @@ struct PyObjectRedispatchFunc {
 
 // ORs the dispatch keys from `obj` into key_set
 static void pyobject_dispatch_collect_keys(PyObject* obj, uint64_t& key_set) {
-  if (C10_LIKELY(THPVariable_CheckExact(obj))) {
+  if (THPVariable_CheckExact(obj)) [[likely]] {
     key_set |=
         THPVariable_Unpack(obj).unsafeGetTensorImpl()->key_set().raw_repr();
     return;
@@ -446,7 +446,7 @@ static PyObject* pyobject_dispatch_with_keyset(
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
   // TODO(#187974): Figure out why we need a special case to send the Python
   // key back to the C++ Dispatcher.
-  if (C10_UNLIKELY(key_set.has(c10::DispatchKey::Python))) {
+  if (key_set.has(c10::DispatchKey::Python)) [[unlikely]] {
     return pyobject_dispatch_call_redispatch_cpp(
         self->cpp_redispatch_fn,
         key_set,
@@ -460,7 +460,7 @@ static PyObject* pyobject_dispatch_with_keyset(
   // If there's no Python kernel, call back to the C++ Dispatcher
   const auto* holder =
       kernel_function.template boxedKernelFunctor<PythonKernelHolder>();
-  if (C10_UNLIKELY(holder == nullptr || holder->with_op())) {
+  if (holder == nullptr || holder->with_op()) [[unlikely]] {
     return pyobject_dispatch_call_redispatch_cpp(
         self->cpp_redispatch_fn,
         key_set,
@@ -473,11 +473,11 @@ static PyObject* pyobject_dispatch_with_keyset(
   // Otherwise, just directly invoke the Python kernel.
   auto* kernel = holder->func(self->interpreter);
   TORCH_INTERNAL_ASSERT(kernel != nullptr);
-  if (C10_UNLIKELY(skip_torch_function)) {
+  if (skip_torch_function) [[unlikely]] {
     torch::consume_should_skip_torch_function();
   }
   PyObject* result = nullptr;
-  if (C10_UNLIKELY(holder->with_keyset())) {
+  if (holder->with_keyset()) [[unlikely]] {
     result = pyobject_dispatch_call_python_with_keyset(
         kernel, key_set, args, nargs, nkwargs, kwnames, op_args_start);
   } else {
@@ -500,9 +500,9 @@ static PyObject* pyobject_dispatch_vectorcall(
   Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
   bool skip_torch_function = torch::peek_should_skip_torch_function();
-  if (C10_UNLIKELY(
-          !skip_torch_function &&
-          pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 0))) {
+  if (!skip_torch_function &&
+      pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 0))
+      [[unlikely]] {
     return PyObject_Vectorcall(
         self->cpp_dispatch_fn, args, static_cast<size_t>(nargs), kwnames);
   }
@@ -522,7 +522,7 @@ static PyObject* pyobject_dispatch_vectorcall(
       normalized_args.empty() ? args : normalized_args.data();
   auto key_set = pyobject_dispatch_compute_keyset(
       self->handle->dispatchKeyExtractor(), op_args, nargs);
-  if (C10_UNLIKELY(skip_torch_function)) {
+  if (skip_torch_function) [[unlikely]] {
     key_set = key_set.remove(c10::DispatchKey::Python);
   }
   return pyobject_dispatch_with_keyset(
@@ -540,9 +540,9 @@ static PyObject* pyobject_redispatch_vectorcall(
   Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
   Py_ssize_t nkwargs = kwnames == nullptr ? 0 : PyTuple_GET_SIZE(kwnames);
   bool skip_torch_function = torch::peek_should_skip_torch_function();
-  if (C10_UNLIKELY(
-          !skip_torch_function &&
-          pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 1))) {
+  if (!skip_torch_function &&
+      pyobject_dispatch_has_torch_function(args, nargs, nkwargs, 1))
+      [[unlikely]] {
     return PyObject_Vectorcall(
         self->cpp_redispatch_fn, args, static_cast<size_t>(nargs), kwnames);
   }
@@ -563,7 +563,7 @@ static PyObject* pyobject_redispatch_vectorcall(
     return nullptr;
   }
   auto key_set = c10::DispatchKeySet::from_raw_repr(raw_repr);
-  if (C10_UNLIKELY(skip_torch_function)) {
+  if (skip_torch_function) [[unlikely]] {
     key_set = key_set.remove(c10::DispatchKey::Python);
   }
   return pyobject_dispatch_with_keyset(
