@@ -5902,6 +5902,14 @@ class SourcelessBuilder:
             from .cutedsl import CuteDSLKernelVariable
 
             return CuteDSLKernelVariable(value, None, None)
+        elif is_cutedsl_from_dlpack(value):
+            from .cutedsl import CuteDSLFromDlpackVariable
+
+            return CuteDSLFromDlpackVariable(value)
+        elif is_cutedsl_current_stream(value):
+            from .cutedsl import CuteDSLCurrentStreamFunctionVariable
+
+            return CuteDSLCurrentStreamFunctionVariable(value)
         elif is_function_or_wrapper(value):
             # pyrefly: ignore[not-callable, bad-argument-count]
             return trace_rules.lookup(value)(value)

@@ -2822,6 +2822,17 @@
       ]
     }
   ],
+  "GB1202": [
+    {
+      "Gb_type": "CuTeDSL raw call capture disabled",
+      "Context": "",
+      "Explanation": "torch._dynamo.config.capture_cutedsl_raw_calls is False, so Dynamo does not capture this raw call of the CuTeDSL host function {name} (a call written as for eager, not through wrap_cutedsl): it graph-breaks and runs eagerly, unless fullgraph=True or strict export, which refuse it.",
+      "Hints": [
+        "To capture the call, call the kernel through torch._library.cutedsl.wrap_cutedsl(fn, mutates_args=[...]), naming the parameters it writes: Dynamo captures a call of the wrapper with this flag False too.",
+        "Or set torch._dynamo.config.capture_cutedsl_raw_calls = True, which captures a raw call with every tensor argument counted as written."
+      ]
+    }
+  ],
   "GB3754": [
     {
       "Gb_type": "CuTeDSL kernel wrapper attribute",
