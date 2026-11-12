@@ -390,17 +390,9 @@ def get_intel_gpu_onboard(run_lambda):
             try:
                 obj = json.loads(txt)
                 device_list = obj.get("device_list", [])
-                if isinstance(device_list, list) and device_list:
-                    # xpu-smi 2.x enumerates every onboard GPU regardless of
-                    # ZE_AFFINITY_MASK, and describes the masked ones by
-                    # device_state only (e.g. "survivability mode"), with no
-                    # device_name.
-                    lst.extend(
-                        f'* {device.get("device_name", device.get("device_state", "N/A"))}'
-                        for device in device_list
-                    )
-                else:
-                    lst.append("N/A")
+                for device in device_list:
+                    name = device.get("device_name") or device.get("device_state", "N/A")
+                    lst.append(f'* [{device.get("device_id", "?")}] {name}')
             except (ValueError, TypeError) as e:
                 lst.append(txt)
                 lst.append(str(e))

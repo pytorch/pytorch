@@ -700,7 +700,7 @@ class TestCollectEnv(TestCase):
             onboard = get_intel_gpu_onboard(run_lambda)
         self.assertEqual(
             onboard,
-            "* Intel(R) Arc(TM) Pro B60 Graphics\n* survivability mode\n* N/A",
+            "* [0] Intel(R) Arc(TM) Pro B60 Graphics\n* [1] survivability mode\n* [2] N/A",
         )
 
 
