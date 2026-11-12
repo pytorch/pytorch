@@ -302,10 +302,14 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
         ::c10d::detail::is_libuv_tcpstore_backend_available(),
         "TCPStore server requires libuv but PyTorch was built without libuv support.");
   }
-  tlsCert_ = tls.cert;
-  tlsKey_ = tls.key;
-  tlsCa_ = tls.ca;
-  tlsPsk_ = tls.psk;
+  if (!tls.cert.empty()) {
+    tlsCert_ = tls.cert;
+    tlsKey_ = tls.key;
+    tlsCa_ = tls.ca;
+  }
+  if (!tls.psk.empty()) {
+    tlsPsk_ = tls.psk;
+  }
 
   Socket::initialize();
 

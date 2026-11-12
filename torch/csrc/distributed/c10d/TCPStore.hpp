@@ -67,8 +67,8 @@ struct TCPStoreOptions {
   // a pre-shared key: a regular file of 32 to 256 random bytes, which cannot
   // be combined with the certificate options. If no tls* option is set, the
   // matching TORCH_TCPSTORE_TLS_{CERT,KEY,CA,PSK} environment variables are
-  // used instead. TLS is enabled if any value is non-empty; set them to empty
-  // strings to disable TLS regardless of the environment.
+  // used instead. TLS is enabled if any option or environment variable is set.
+  // Empty values and paths containing NUL bytes are rejected.
   std::optional<std::string> tlsCert = std::nullopt;
   std::optional<std::string> tlsKey = std::nullopt;
   std::optional<std::string> tlsCa = std::nullopt;
@@ -177,10 +177,10 @@ class TORCH_API TCPStore : public Store {
   const std::string initKey_ = "init/";
   const std::string keyPrefix_ = "/";
   std::mutex activeOpLock_;
-  std::string tlsCert_;
-  std::string tlsKey_;
-  std::string tlsCa_;
-  std::string tlsPsk_;
+  std::optional<std::string> tlsCert_;
+  std::optional<std::string> tlsKey_;
+  std::optional<std::string> tlsCa_;
+  std::optional<std::string> tlsPsk_;
 };
 
 } // namespace c10d
