@@ -3653,6 +3653,30 @@ class TestInvokeSubgraphCompileCUDA(TestCase):
 class TestInvokeSubgraphReuse(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_method_receiver_alias_guards_retrace(self):
+        class Pair:
+            def __init__(self, left, right):
+                self.left, self.right = left, right
+
+        @nested_compile_region
+        def region(x, pair):
+            return x + (
+                list.count.__get__(pair.left, list)
+                == list.count.__get__(pair.right, list)
+            )
+
+        def fn(x, first, second):
+            return region(x, first) + region(x, second)
+
+        x, shared = torch.ones(1), []
+        first, second = Pair([], []), Pair(shared, shared)
+        with self._count_speculate_calls() as count:
+            result = torch.compile(fn, backend="eager", fullgraph=True)(
+                x, first, second
+            )
+        self.assertEqual(result, 2 * x + 1)
+        self.assertEqual(count(), 2)
+
     @contextlib.contextmanager
     def _count_speculate_calls(self):
         count = 0

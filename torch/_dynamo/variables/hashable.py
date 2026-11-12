@@ -14,7 +14,7 @@ from torch._subclasses.fake_tensor import maybe_get_fake_constant
 
 from .. import variables
 from ..exc import raise_observed_exception
-from ..guards import GuardBuilder, install_guard
+from ..guards import _method_identity_guards_filtered, GuardBuilder, install_guard
 from ..source import ConstDictKeySource
 from ..utils import guard_if_dyn, specialize_symnode
 from .base import VariableTracker
@@ -88,6 +88,11 @@ def _guard_lazy_key(vt: VariableTracker) -> VariableTracker:
                 type(value) is types.BuiltinMethodType
                 and bound_builtin_method_descriptor(value) is not None
             ):
+                from ..symbolic_convert import InstructionTranslator
+
+                tx = InstructionTranslator.current_tx()
+                if _method_identity_guards_filtered(tx):
+                    return vt.realize()
                 install_guard(vt.source.make_guard(GuardBuilder.ID_MATCH))
                 return vt
         # Constructed keys must guard their elements, not just a trace-time hash.

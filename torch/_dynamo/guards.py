@@ -115,6 +115,7 @@ from torch._guards import (
     GuardSource,
     Source,
     StorageOverlap,
+    TracingContext,
 )
 from torch._library.custom_ops import CustomOpDef, OPDEFS
 from torch._library.fake_class_registry import FakeScriptObject
@@ -144,6 +145,7 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
+from .exc import unimplemented
 from .source import (
     AttrProxySource,
     AttrSource,
@@ -255,6 +257,7 @@ if TYPE_CHECKING:
 
     from torch._C import DispatchKeySet
     from torch._dynamo.output_graph import OutputGraphCommon, OutputGraphGuardsState
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch.utils._python_dispatch import TraceableWrapperSubclass
 
 T = TypeVar("T")
@@ -346,6 +349,45 @@ def _native_method_matches(value: object, expected: NativeMethodMetadata) -> boo
         and value.__self__ is expected.receiver
         and value == getattr(expected.receiver, expected.name)
     )
+
+
+def _method_identity_guards_filtered(tx: InstructionTranslatorBase) -> bool:
+    context = CompileContext.try_get()
+    return (
+        context is not None
+        and context.is_aot_capture
+        or config.caching_precompile
+        or tx.export
+        or TracingContext.get().guards_context.skip_install
+    )
+
+
+def install_builtin_method_guard(
+    tx: InstructionTranslatorBase, source: Source, value: object = None
+) -> None:
+    if _method_identity_guards_filtered(tx):
+        if value is None:
+            value = tx.output.resolve_source_value(source)
+        expected = (
+            _native_method_metadata(value)
+            if type(value) is types.BuiltinMethodType
+            and issubclass(type(value.__self__), type)
+            else None
+        )
+        if expected is None:
+            unimplemented(
+                gb_type="Prebound builtin method requires identity guards",
+                context=source.name,
+                explanation="Dynamo cannot track this prebound builtin method when its identity guard can be skipped or filtered.",
+                hints=["Bind the builtin method inside the compiled function."],
+            )
+        install_guard(
+            source.make_guard(
+                functools.partial(GuardBuilder.NATIVE_METHOD_MATCH, expected=expected)
+            )
+        )
+        return
+    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
 
 
 def _mapping_proxy_mapping(value: object) -> object:
@@ -5045,6 +5087,12 @@ class GuardsStatePickler(FunctionPicklerBase):
         else:
             setstate(attrs)
 
+    @staticmethod
+    def _unpickle_method_wrapper(
+        owner: type, name: str, receiver: object
+    ) -> types.MethodWrapperType:
+        return inspect.getattr_static(owner, name).__get__(receiver, type(receiver))
+
     @classmethod
     def _unpickle_count_iter(cls, item: int, step: int) -> itertools.count[int]:
         return itertools.count(item, step)
@@ -5350,6 +5398,14 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         if id(obj) in self.empty_values:
             return type(obj).__new__, (type(obj),)
+
+        if type(obj) is types.MethodWrapperType:
+            # Pickle's getattr(receiver, name) can select a different subclass slot.
+            return type(self)._unpickle_method_wrapper, (
+                obj.__objclass__,
+                obj.__name__,
+                obj.__self__,
+            )
 
         if obj is dict_keys:
             return type, (dict[Any, Any]().keys(),)
@@ -7458,8 +7514,6 @@ def install_guard(*guards: Guard, skip: int = 0) -> None:
         guards: guard(s) to add
         skip: number of stack frames to ignore for debug stack trace
     """
-    from torch._guards import TracingContext
-
     guards_context = TracingContext.get().guards_context
     if guards_context.skip_install:
         return

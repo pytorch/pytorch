@@ -305,6 +305,36 @@ def _mro_sum(x, left, right):
 
 
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
+    def test_builtin_method_comparison_alias_guard(self):
+        def fn(x, left, right):
+            return x + (
+                list.count.__get__(left, list) == list.count.__get__(right, list)
+            )
+
+        x = torch.ones(1)
+        compiled = _aot_compile(fn, x, [], [])
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+        left, right = [], []
+        self.assertTrue(loaded.guard_check(x, left, right))
+        self.assertEqual(loaded(x, left, right), x)
+        self.assertFalse(loaded.guard_check(x, left, left))
+
+    def test_slot_wrapper_declaring_owner_survives_serialization(self):
+        def fn(x, method):
+            return x + 1, method.__qualname__
+
+        receiver = collections.OrderedDict()
+        initial = dict.__setitem__.__get__(receiver)
+        replacement = collections.OrderedDict.__setitem__.__get__(receiver)
+        x = torch.ones(1)
+        compiled = _aot_compile(fn, x, initial)
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        loaded = AOTCompiledFunction.deserialize(data)
+        self.assertTrue(loaded.guard_check(x, initial))
+        self.assertEqual(loaded(x, initial), fn(x, initial))
+        self.assertFalse(loaded.guard_check(x, replacement))
+
     def test_mro_guard_survives_serialization(self):
         x, left, right = torch.ones(1), _MROLeft(), _MRORight()
         compiled = _aot_compile(_mro_sum, x, left, right)
@@ -338,7 +368,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             artifact = os.path.join(directory, "mro.py")
             cache = os.path.join(directory, "mro.cache")
-            with self.assertRaisesRegex(PrecompileError, "dropped guard.*__mro__"):
+            with self.assertRaisesRegex(
+                PrecompileError, "dropped guard.*__mro__.*MRO bases.*importable"
+            ):
                 with capture(
                     _mro_sum,
                     artifact_path=artifact,
@@ -594,11 +626,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         control_counts = collections.Counter(
             g.create_fn_name() for g in control_state.output_graph.guards
         )
-        # pytree's classes are TreeSpec and typing.Any, which is a class only
-        # from Python 3.11 on; before that it is a _SpecialForm, guarded by an
-        # ID_MATCH that is kept because it pickles as the global typing.Any.
+        # Class matches protect the tensor type, TreeSpec and typing.Any. The
+        # identity matches include TreeSpec's MRO base and two torch imports.
+        # Before Python 3.11, typing.Any is a _SpecialForm guarded by identity.
         any_is_class = isinstance(pytree.Any, type)
-        class_matches, id_matches = (3, 2) if any_is_class else (2, 3)
+        class_matches, id_matches = (3, 3) if any_is_class else (2, 4)
         self.assertEqual(
             counts - control_counts,
             {

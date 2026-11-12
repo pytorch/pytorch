@@ -44,6 +44,7 @@ from ..source import (
     AttrSource,
     DictGetItemSource,
     GetItemSource,
+    is_constant_source,
     is_from_skip_guard_source,
     Source,
     TypeDictSource,
@@ -52,6 +53,7 @@ from ..source import (
 )
 from ..utils import (
     get_type_mro_no_user_code,
+    has_custom_metaclass_accessor,
     iter_mro_static_attrs,
     iter_mro_static_dicts,
     specialize_symnode,
@@ -2254,13 +2256,14 @@ def mro_lookup(py_type: type, name: str) -> object:
 
 
 def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
-    """Source for ``klass.__mro__[idx]``.
+    r"""Source for ``klass.__mro__[idx]``.
 
     Entry 0 is spelled as the class itself when it is the class, which it is for
     every MRO CPython computes. A metaclass overriding ``mro()`` can put
     something else there, so check rather than assume.
     """
-    if not idx and get_type_mro_no_user_code(klass)[0] is klass:
+    base = get_type_mro_no_user_code(klass)[idx]
+    if not idx and base is klass:
         return klass_source
     return GetItemSource(TypeMROSource(klass_source), idx)
 
@@ -2273,21 +2276,19 @@ def guard_mro_absent(
     stop: int,
 ) -> None:
     """Guard that *name* stays out of the ``__dict__`` of ``klass.__mro__[:stop]``."""
-    memoize = (
-        not TracingContext.get().guards_context.skip_install
-        and not is_from_skip_guard_source(klass_source)
-    )
+    guards_context = tx.output.tracing_context.guards_context
+    if guards_context.skip_install or is_from_skip_guard_source(klass_source):
+        return
     for idx in range(stop):
         absent_key = (id(klass), idx, name)
-        if memoize and absent_key in tx.output.guarded_mro_absent_keys:
+        if absent_key in tx.output.guarded_mro_absent_keys:
             continue
-        if memoize:
-            tx.output.guarded_mro_absent_keys.add(absent_key)
         install_guard(
             TypeDictSource(_mro_entry_source(klass, klass_source, idx)).make_guard(
                 partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
             )
         )
+        tx.output.guarded_mro_absent_keys.add(absent_key)
 
 
 def mro_attr_source(
@@ -2296,15 +2297,15 @@ def mro_attr_source(
     klass_source: Source,
     name: str,
 ) -> "DictGetItemSource | None":
-    """Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
+    r"""Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
 
     Reading the attribute back as ``klass_source.name`` would go through
     ``type.__getattribute__``, where a data descriptor on the metaclass wins over
     the class chain -- a different object than `mro_lookup` returned. Index the
     owning class's ``__dict__`` instead.
 
-    Returns None if *name* is absent from the whole MRO; callers decide whether
-    that is an error.
+    Guards absence in every skipped class, including a complete MRO miss.
+    Returns None on a complete miss; callers decide whether that is an error.
     """
     entries = tuple(iter_mro_static_dicts(klass))
     memoize = (
@@ -2321,14 +2322,28 @@ def mro_attr_source(
         install_guard(mro_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
         # The builtin metaclass always puts the already guarded class first.
         first = 1 if type(klass) is type else 0
-        # Its C3 MRO also always ends in object; length already pins that position.
-        stop = len(entries) - 1 if type(klass) is type else len(entries)
-        for index in range(first, stop):
+        # A custom ancestor MRO can replace even an object tail at constant length.
+        for index in range(first, len(entries)):
             install_guard(
                 GetItemSource(mro_source, index).make_guard(GuardBuilder.ID_MATCH)
             )
         tx.output.guarded_mro_type_ids.add(id(klass))
     for idx, (base, namespace) in enumerate(entries):
+        if not is_constant_source(klass_source):
+            direct = not idx and base is klass
+            attr = None
+            if has_custom_metaclass_accessor(base, "__dict__"):
+                attr = "__dict__"
+            elif not direct and has_custom_metaclass_accessor(klass, "__mro__"):
+                attr = "__mro__"
+            if attr is not None:
+                unimplemented(
+                    gb_type="Custom metaclass metadata access",
+                    context=f"metadata={attr}, name={name}",
+                    explanation="Dynamo cannot safely construct a class metadata source "
+                    "through custom metaclass accessors.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
         if name not in namespace:
             continue
 
@@ -2353,6 +2368,9 @@ def mro_attr_source(
             tx.output.mro_source_cache[cache_key] = source
         return source
 
+    guard_mro_absent(
+        tx, klass, klass_source, name, len(get_type_mro_no_user_code(klass))
+    )
     return None
 
 
