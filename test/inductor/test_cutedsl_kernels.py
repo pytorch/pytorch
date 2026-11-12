@@ -1347,9 +1347,10 @@ def forward(self, x_1, y_1):
             cutedsl_kernel_side_table.add_kernel(CuteDSLKernel(add_kernel, "unknown")),
             idx,
         )
-        # torch._dynamo.reset() resets Triton's table, not this one.
+        # torch._dynamo.reset() clears this table, as it does Triton's.
         torch._dynamo.reset()
-        self.assertEqual(cutedsl_kernel_side_table.get_kernel(idx), record)
+        with self.assertRaisesRegex(AssertionError, "not found"):
+            cutedsl_kernel_side_table.get_kernel(idx)
 
 
 instantiate_parametrized_tests(CuteDSLHOPTests)
