@@ -324,6 +324,9 @@ int munmap(void* addr, size_t length) {
 #else
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #endif // USE_XPU
+#ifdef USE_MTIA
+#include <torch/csrc/inductor/aoti_runtime/utils_mtia.h>
+#endif // USE_MTIA
 #include <torch/csrc/inductor/aoti_runtime/constant_type.h>
 
 // At codegen time, we write out a binary file called constants.bin.
@@ -1166,6 +1169,73 @@ RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
   auto deleter = [](void* ptr) { std::free(ptr); };
   return RAIIDataPtr(data_ptr, deleter);
 }
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
+// The stable C ABI has no raw MTIA allocator or memcpy, so the MTIA constant
+// blob is the storage of a uint8 tensor, and copies go through aten copy_.
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
+RAIIDataPtr RAII_mtiaMalloc(size_t num_bytes, int32_t device_index) {
+  const int64_t size = static_cast<int64_t>(num_bytes);
+  const int64_t stride = 1;
+  AtenTensorHandle handle = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
+      1,
+      &size,
+      &stride,
+      aoti_torch_dtype_uint8(),
+      aoti_torch_device_type_mtia(),
+      device_index,
+      &handle));
+  RAIIAtenTensorHandle tensor(handle);
+  void* data_ptr = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(tensor.get(), &data_ptr));
+  auto deleter = [handle = tensor.release()](void* /*ptr*/) noexcept {
+    auto err = aoti_torch_delete_tensor_object(handle);
+    if (err != AOTI_TORCH_SUCCESS) {
+      std::cerr
+          << "Failed to free MTIA memory in AOTInductor model: error code "
+          << err << '\n';
+    }
+  };
+  return RAIIDataPtr(data_ptr, deleter);
+}
+
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
+void mtia_memcpy_h2d(
+    void* dst,
+    const void* src,
+    size_t num_bytes,
+    int32_t device_index) {
+  const int64_t size = static_cast<int64_t>(num_bytes);
+  const int64_t stride = 1;
+  AtenTensorHandle dst_handle = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
+      dst,
+      1,
+      &size,
+      &stride,
+      0,
+      aoti_torch_dtype_uint8(),
+      aoti_torch_device_type_mtia(),
+      device_index,
+      &dst_handle));
+  RAIIAtenTensorHandle dst_tensor(dst_handle);
+  AtenTensorHandle src_handle = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
+      const_cast<void*>(src),
+      1,
+      &size,
+      &stride,
+      0,
+      aoti_torch_dtype_uint8(),
+      aoti_torch_device_type_cpu(),
+      0,
+      &src_handle));
+  RAIIAtenTensorHandle src_tensor(src_handle);
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_copy_(dst_handle, src_handle, /*non_blocking=*/0));
+}
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
 } // anonymous namespace
 
 namespace torch::aot_inductor {
@@ -1238,7 +1308,7 @@ inline void parse_device_str(
     const std::string& device_str,
     int32_t& device_type,
     int32_t& device_idx) {
-  std::regex re("(cpu|cuda|xpu|mps)(:([0-9]+))?");
+  std::regex re("(cpu|cuda|xpu|mps|mtia)(:([0-9]+))?");
   std::smatch sm;
   bool matched = std::regex_match(device_str, sm, re);
   AOTI_RUNTIME_CHECK(matched, "Invalid device: " + device_str);
@@ -1254,6 +1324,10 @@ inline void parse_device_str(
 #ifdef USE_MPS
   } else if (sm[1].str() == "mps") {
     device_type = aoti_torch_device_type_mps();
+#endif
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
+  } else if (sm[1].str() == "mtia") {
+    device_type = aoti_torch_device_type_mtia();
 #endif
   } else {
     AOTI_RUNTIME_CHECK(false, "Invalid device: " + device_str);
@@ -1339,6 +1413,15 @@ class AOTInductorModelBase {
         cubin_dir_(std::move(cubin_dir)),
         include_weights(include_weights) {
     parse_device_str(device_str, device_type_, device_idx_);
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
+    if (device_type_ == aoti_torch_device_type_mtia()) {
+      if (device_idx_ == -1) {
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_get_current_device_index(&device_idx_));
+      }
+    }
+#endif
 
 #ifdef USE_CUDA
     if (device_idx_ == -1) {
@@ -1552,6 +1635,8 @@ class AOTInductorModelBase {
     if (blob_size > 0) {
 #if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
       constant_blob_ = RAII_gpuMalloc(blob_size);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
+      constant_blob_ = RAII_mtiaMalloc(blob_size, device_idx_);
 #else
       constant_blob_ = RAII_cpuMalloc(blob_size);
 #endif
@@ -1767,6 +1852,12 @@ class AOTInductorModelBase {
           data_size,
           _get_constants_start());
       return constants_ptr;
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
+      mtia_memcpy_h2d(
+          internal_ptr,
+          _get_constants_start() + bytes_read,
+          data_size,
+          device_idx_);
 #else
       memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size);
 #endif
