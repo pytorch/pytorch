@@ -16,7 +16,8 @@ inline void fill_inplace(Tensor& self, const Scalar& value_scalar) {
                 std::is_same_v<scalar_t, at::Float8_e5m2fnuz> ||
                 std::is_same_v<scalar_t, at::Float8_e4m3fn> ||
                 std::is_same_v<scalar_t, at::Float8_e4m3fnuz> ||
-                std::is_same_v<scalar_t, at::Float8_e8m0fnu>) {
+                std::is_same_v<scalar_t, at::Float8_e8m0fnu> ||
+                std::is_same_v<scalar_t, at::Float8_e5m3fnu>) {
     // relaxed float cast: allow inf similar to the torch.tensor constructor
     //
     // without this, we had the following divergence:

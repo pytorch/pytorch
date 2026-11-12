@@ -168,6 +168,30 @@ class AllGather(Comm):
     ) -> dist.Work | None: ...
 
 
+class AllReduce(Comm):
+    """Interface for an in-place all-reduce communication primitive.
+
+    FSDP calls this primitive synchronously on its internal all-reduce stream
+    with ``SUM`` or ``AVG``. ``AVG`` must divide by the process-group size.
+    Implementations using another stream must wait on the calling stream
+    before accessing the tensor and join it before returning, so that FSDP's
+    completion event covers the collective and protects the buffer lifetime.
+
+    The input buffer is allocated by the reduce-scatter primitive, so FSDP
+    does not call this primitive's ``allocate`` method. Implementations needing
+    registered memory may require a matching custom ``ReduceScatter``.
+    """
+
+    @abstractmethod
+    def __call__(
+        self,
+        tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        op: _ReduceOp,
+        async_op: bool = False,
+    ) -> dist.Work | None: ...
+
+
 class ReduceScatter(Comm):
     """
     Interface for reduce_scatter comm primitive
@@ -253,3 +277,38 @@ class CPUOffloadPolicy(OffloadPolicy):
     """
 
     pin_memory: bool = True
+
+
+@dataclass(eq=False, slots=True)
+class AllGatherInput:
+    r"""Describe one payload returned by an FSDP all-gather extension.
+
+    Return these among the all-gather inputs of ``fsdp_pre_all_gather``. FSDP
+    concatenates each rank's ``tensor`` along ``dim`` and passes the result to
+    ``fsdp_post_all_gather``, e.g. ``(2, F, D)`` with ``dim=1`` gathers to
+    ``(2, N * F, D)`` over ``N`` ranks. Plain tensor inputs are instead read as rows
+    of the padded sharded parameter, concatenated along its shard dim, and passed
+    viewed as ``(-1, *tensor.shape[1:])``. With several shard ranks and rows, nonempty
+    ones need the padded sharded parameter's element count or dims before its shard dim.
+
+    Every rank must return the same shapes and dtypes, and the number of inputs
+    and each input's element count and dtype must stay fixed across calls, except
+    that plain tensors may become uint8 byte views of their whole outputs, which
+    are passed back in the outputs' dtype, or, with a single row (as for Shard(0))
+    and nonzero trailing dims, shrink, leaving unspecified data after the gathered
+    prefix. Extensions own any padding: the local shard is unpadded on ranks with
+    a smaller shard, so per-row payloads such as scales need padding too. On a
+    nonzero shard dim, the padding lies inside every row of the gathered
+    parameter, and ``fsdp_post_all_gather`` must drop it. When
+    ``fsdp_pre_all_gather`` takes ``outer_size``, FSDP requires every plain tensor
+    of an unevenly sharded parameter to have the padded sharded size, so return
+    payloads of other shapes, such as scales, as records.
+
+    Attributes:
+        tensor (Tensor): Local payload, flattened with ``view(-1)``. Scalars count
+            as shape ``(1,)``.
+        dim (int): Dimension to concatenate along; may be negative.
+    """
+
+    tensor: torch.Tensor
+    dim: int = field(kw_only=True)

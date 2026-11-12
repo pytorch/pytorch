@@ -288,26 +288,6 @@ The order of the last two graphs is nondeterministic depending
 on which one is encountered first by the just-in-time compiler.
 ```
 
-### Speedy Backend
-
-Integrating a custom backend that offers superior performance is also
-easy and we’ll integrate a real one
-with [optimize_for_inference](https://pytorch.org/docs/stable/generated/torch.jit.optimize_for_inference.html):
-
-```python
-def optimize_for_inference_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
-    scripted = torch.jit.script(gm)
-    return torch.jit.optimize_for_inference(scripted)
-```
-
-And then you should be able to optimize any existing code with:
-
-```python
-@torch.compile(backend=optimize_for_inference_compiler)
-def code_to_accelerate():
-    ...
-```
-
 ### Composable Backends
 
 TorchDynamo includes many backends, which can be listed with
