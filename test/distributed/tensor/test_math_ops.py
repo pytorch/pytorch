@@ -37,6 +37,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
     with_comms,
 )
+from torch.utils._debug_mode import DebugMode
 
 
 funcol = torch.ops.c10d_functional
@@ -841,6 +842,47 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         # partial result
         partial_out = torch.ops.aten.linalg_vector_norm(partial_grad, 2)
         self.assertEqual(partial_out.full_tensor(), out)
+
+    @with_comms
+    def test_vector_norm_low_precision(self):
+        # A shard norm of 256 squares past the fp16 max of 65504, so the
+        # partial norm must be reduced in fp32 and cast back.
+        device_mesh = self.build_device_mesh()
+        n = 2 * self.world_size
+        inputs = {
+            "one 256": lambda dtype: torch.tensor(
+                [256.0] + [0.0] * (n - 1), dtype=dtype
+            ),
+            "all 200": lambda dtype: torch.full((n,), 200.0, dtype=dtype),
+        }
+        for dtype in (torch.float16, torch.bfloat16):
+            for name, make in inputs.items():
+                with self.subTest(dtype=dtype, input=name):
+                    grad = make(dtype)
+                    out = torch.linalg.vector_norm(grad)
+                    dgrad = distribute_tensor(grad, device_mesh, [Shard(0)])
+                    with DebugMode(record_torchfunction=False) as debug_mode:
+                        sharded_out = torch.linalg.vector_norm(dgrad)
+                        full_out = sharded_out.full_tensor()
+                    self.assertIn(
+                        "_c10d_functional::all_reduce(t: f32[]",
+                        debug_mode.debug_string(),
+                    )
+                    self.assertEqual(sharded_out.dtype, dtype)
+                    self.assertEqual(full_out, out)
+
+                    # clip_grad_norm_ must clip like one device, not zero the grad.
+                    ref = torch.nn.Parameter(torch.zeros_like(grad))
+                    ref.grad = grad.clone()
+                    torch.nn.utils.clip_grad_norm_([ref], max_norm=1.0)
+                    param = torch.nn.Parameter(
+                        distribute_tensor(
+                            torch.zeros_like(grad), device_mesh, [Shard(0)]
+                        )
+                    )
+                    param.grad = distribute_tensor(grad, device_mesh, [Shard(0)])
+                    torch.nn.utils.clip_grad_norm_([param], max_norm=1.0)
+                    self.assertEqual(param.grad.full_tensor(), ref.grad)
 
     @with_comms
     def test_foreach_norm(self):
