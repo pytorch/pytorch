@@ -6415,6 +6415,90 @@ class TestCppFakeTensorModeBindings(TestCase):
         )
 
     @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @parametrize("active", [False, True])
+    def test_fake_fallback_retained_outputs(self, active):
+        mode = CppFakeTensorMode()
+        fake = mode.from_tensor(torch.randn(2, 3))
+        retained = torch.empty(2, 3, device="meta")
+        self.assertFalse(is_fake_tensor(retained))
+
+        def meta_impl(x):
+            return retained, [retained, retained], [None, retained]
+
+        with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
+            lib.define("retained(Tensor x) -> (Tensor, Tensor[], Tensor?[])")
+            lib.impl("retained", meta_impl, "Meta")
+            with mode if active else contextlib.nullcontext():
+                for _ in range(2):
+                    result, repeated, optional = torch.ops._test_fake_fallback.retained(
+                        fake
+                    )
+                    for output in (result, *repeated, optional[1]):
+                        self.assertIs(output, retained)
+                        self.assertIs(maybe_get_fake_mode(output), mode)
+                        self.assertEqual(output.device, fake.device)
+                    self.assertIsNone(optional[0])
+        self.assertTrue(is_fake_tensor(retained))
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
+    @parametrize("active", [False, True])
+    @parametrize("output_device", ["cpu", "meta"])
+    @fake_tensor_modes
+    def test_fake_fallback_existing_fake_output(self, active, output_device, mode_cls):
+        mode = mode_cls()
+        fake = mode.from_tensor(torch.empty(2))
+        retained = mode.from_tensor(torch.empty(2, device=output_device))
+        with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
+            lib.define("retained(Tensor x) -> Tensor")
+            lib.impl("retained", lambda x: retained, "Meta")
+            op = torch.ops._test_fake_fallback.retained.default
+            with mode if active else contextlib.nullcontext():
+                if output_device == "cpu":
+                    self.assertIs(op(fake), retained)
+                else:
+                    msg = "FakeTensor is wrapped to wrong device, found meta, expected cpu"
+                    with self.assertRaisesRegex(RuntimeError, msg):
+                        op(fake)
+        self.assertEqual(retained.device, torch.device(output_device))
+        self.assertIs(maybe_get_fake_mode(retained), mode)
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
+    @torch._dynamo.config.patch(use_cpp_fake_tensor=False)
+    @parametrize("active", [False, True])
+    @parametrize("enabled", [False, True])
+    @fake_tensor_modes
+    def test_fake_fallback_autocast(self, active, enabled, mode_cls):
+        mode = mode_cls()
+        fake = mode.from_tensor(torch.empty(2, 2))
+        fail = False
+
+        def callback(x):
+            self.assertFalse(torch.is_autocast_enabled("cpu"))
+            if fail:
+                raise RuntimeError("callback error")
+            return torch.mm(x, x)
+
+        with torch.library._scoped_library("_test_fake_fallback", "DEF") as lib:
+            lib.define("autocast(Tensor x) -> Tensor")
+            op = torch.ops._test_fake_fallback.autocast.default
+            lib.impl("autocast", callback, "Meta")
+            with (
+                torch.inference_mode(),
+                torch.autocast("cpu", enabled=enabled),
+                mode if active else contextlib.nullcontext(),
+            ):
+                result = op(fake)
+                self.assertEqual(result.dtype, torch.float32)
+                self.assertEqual(result.shape, (2, 2))
+                self.assertIs(maybe_get_fake_mode(result), mode)
+                self.assertEqual(torch.is_autocast_enabled("cpu"), enabled)
+                fail = True
+                with self.assertRaisesRegex(RuntimeError, "callback error"):
+                    op(fake)
+                self.assertEqual(torch.is_autocast_enabled("cpu"), enabled)
+
+    @skipIfTorchDynamo(_CPP_FAKE_DYNAMO_SKIP)
     def test_fake_fallback_clears_inherited_dispatch_keys(self):
         mode = CppFakeTensorMode()
         real = torch.randn(2, 3)
