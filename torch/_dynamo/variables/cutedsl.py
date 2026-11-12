@@ -19,7 +19,9 @@ eager::
 
 ``from_dlpack(t)`` becomes a CuteDSLTensorVariable standing for ``t``, the stream a
 CuteDSLCurrentStreamVariable, and the call is captured as
-``wrap_cutedsl(add_kernel, mutates_args=RAW_CALL_MUTATES_ARGS)(x, y, out, n)``.
+``wrap_cutedsl(add_kernel, mutates_args=RAW_CALL_MUTATES_ARGS)(x, y, out, n)``, unless
+``torch._dynamo.config.capture_cutedsl_raw_calls`` is False: then it graph-breaks, and
+runs eagerly unless fullgraph=True or strict export refuses it.
 """
 
 import collections
@@ -51,7 +53,7 @@ from torch._higher_order_ops.user_kernel_hop import (
     constant_key,
 )
 
-from .. import graph_break_hints
+from .. import config, graph_break_hints
 from ..exc import unimplemented
 from ..source import (
     AttrSource,
@@ -167,6 +169,23 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
             context="",
             explanation=f"Eager refuses this call too: {exc}",
             hints=[*graph_break_hints.USER_ERROR],
+        )
+
+    def raise_wrapper_error(
+        self, variable: "CuteDSLKernelVariable", exc: TypeError | ValueError
+    ) -> Never:
+        if variable.is_wrapper and not variable.raw_call:
+            self.raise_user_error(exc)
+        # A raw call, captured as the call of its wrapper (see wrap_raw), which
+        # refuses what eager CuTeDSL may run (a host function with a keyword-only
+        # parameter, say, or a constant holding a tensor), and some calls that eager
+        # CuTeDSL refuses too (a parameter left to a tensor default, a cute tensor
+        # for a cutlass Numeric parameter): all are refused as unsupported here.
+        name = cutedsl_kernel_name(variable.kernel)
+        self.raise_unsupported(
+            f"a raw call is captured as the call of wrap_cutedsl({name}, "
+            f"mutates_args={RAW_CALL_MUTATES_ARGS!r}), which refuses it: {exc}; "
+            "change the call or the host function so that the wrapper takes it"
         )
 
     def raise_modified(self, name: str, key: str, path: str) -> Never:
@@ -303,6 +322,7 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
             RAW_CALL_MUTATES_ARGS,
             None,
             wrapper_type=TraceableCuteDSLKernelWrapper,
+            raw_call=True,
         )
 
     def overlapping_args(
@@ -437,10 +457,10 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
     ) -> Never:
         """Refuse a constant argument of a call of ``variable`` with ``exc``, an
         error of the side table's walk, which the eager launch of a wrapper re-raises
-        naming the kernel and the parameter (see raise_user_error)."""
+        naming the kernel and the parameter (see raise_wrapper_error)."""
         name = cutedsl_kernel_name(variable.kernel)
         msg = f"CuTeDSL kernel {name}: parameter {key!r}: {exc}"
-        self.raise_user_error(type(exc)(msg))
+        self.raise_wrapper_error(variable, type(exc)(msg))
 
     def guard_contents(
         self,
@@ -470,9 +490,10 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         tuple or dict subclass), in its order. ``keyed`` is False for a value inside
         a constant made in the region (see constant_object), which the side table
         may key whole without walking to it.
-        ``variable`` is the wrapper called and ``key`` the parameter, ``where`` is the
-        walk's path to ``value`` from the argument, and ``containers`` maps the id of
-        each container on that path to the path it was entered at."""
+        ``variable`` is the wrapper called (wrap_raw's for a raw call) and ``key`` the
+        parameter, ``where`` is the walk's path to ``value`` from the argument, and
+        ``containers`` maps the id of each container on that path to the path it was
+        entered at."""
         name = cutedsl_kernel_name(variable.kernel)
         if writes.modifies(value):
             self.raise_modified(name, key, source.name)
@@ -664,8 +685,12 @@ class DynamoCuteDSLHOPifier(CuteDSLHOPifier):
         )
         if overlap is not None:
             earlier, later = overlap
-            written = f"both are written (mutates_args={mutates_args!r})"
-            fix = "pass tensors that do not overlap, or give mutates_args"
+            if variable.raw_call:
+                written = "a raw call counts every tensor as written"
+                fix = f"call wrap_cutedsl({name}, mutates_args=[...])"
+            else:
+                written = f"both are written (mutates_args={mutates_args!r})"
+                fix = "pass tensors that do not overlap, or give mutates_args"
             self.raise_unsupported(
                 f"CuTeDSL kernel {name}: parameters {earlier!r} and {later!r} are the "
                 f"same tensor or views that may overlap, and {written}, which PT2 "
@@ -718,6 +743,8 @@ class CuteDSLKernelVariable(VariableTracker):
     # wrap_cutedsl returns) or the subclass of it passed in; None for the @cute.jit
     # function itself, whose calls are raw.
     wrapper_type: type | None
+    # Whether this is the wrapper that wrap_raw makes for a raw call.
+    raw_call: bool
 
     def __init__(
         self,
@@ -728,6 +755,7 @@ class CuteDSLKernelVariable(VariableTracker):
     ) -> None:
         self.kernel_source = kwargs.pop("kernel_source", kwargs.get("source"))
         self.wrapper_type = kwargs.pop("wrapper_type", None)
+        self.raw_call = kwargs.pop("raw_call", False)
         super().__init__(**kwargs)
         dynamo_cutedsl_hopifier_singleton.init_variable(
             self, kernel, mutates_args, kernel_idx, raw=not self.is_wrapper
@@ -814,6 +842,20 @@ class CuteDSLKernelVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if not self.is_wrapper and not config.capture_cutedsl_raw_calls:
+            name = cutedsl_kernel_name(self.kernel)
+            unimplemented(
+                gb_type="CuTeDSL raw call capture disabled",
+                context="",
+                explanation="torch._dynamo.config.capture_cutedsl_raw_calls is False, so "
+                f"Dynamo does not capture this raw call of the CuTeDSL host function {name} "
+                "(a call written as for eager, not through wrap_cutedsl): it graph-breaks "
+                "and runs eagerly, unless fullgraph=True or strict export, which refuse it.",
+                hints=[
+                    "To capture the call, call the kernel through torch._library.cutedsl.wrap_cutedsl(fn, mutates_args=[...]), naming the parameters it writes: Dynamo captures a call of the wrapper with this flag False too.",
+                    "Or set torch._dynamo.config.capture_cutedsl_raw_calls = True, which captures a raw call with every tensor argument counted as written.",
+                ],
+            )
         return dynamo_cutedsl_hopifier_singleton.call_cutedsl_kernel(
             self, list(args), kwargs, tx, raw=not self.is_wrapper
         )

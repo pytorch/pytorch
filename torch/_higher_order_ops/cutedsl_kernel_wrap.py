@@ -61,7 +61,9 @@ if TYPE_CHECKING:
 MutatesArgs = tuple[str, ...] | Literal["unknown"]
 
 # The write set Dynamo gives a raw call (a host function called as in eager code, not
-# through wrap_cutedsl): every tensor argument.
+# through wrap_cutedsl): every tensor argument. With
+# torch._dynamo.config.capture_cutedsl_raw_calls = False, Dynamo graph-breaks on a raw
+# call instead.
 RAW_CALL_MUTATES_ARGS: MutatesArgs = "unknown"
 
 
@@ -825,7 +827,8 @@ class CuteDSLHOPifier(UserKernelHOPifier):
     HOP. A raw call is written as for eager, with ``from_dlpack(t)`` for each tensor
     and ``cutlass.torch.current_stream()`` for the stream; it is captured as the call
     of ``wrap_cutedsl(fn, mutates_args=RAW_CALL_MUTATES_ARGS)`` with the torch
-    tensors and no stream.
+    tensors and no stream (unless ``torch._dynamo.config.capture_cutedsl_raw_calls``
+    is False).
 
     2. For make_fx and non-strict export, which cannot see a raw call, wrap_cutedsl
     returns a TraceableCuteDSLKernelWrapper, whose calls TracingCuteDSLHOPifier turns
@@ -841,9 +844,13 @@ class CuteDSLHOPifier(UserKernelHOPifier):
     that PT2 cannot take) goes through raise_user_error (see UserKernelHOPifier) as
     a TypeError or ValueError naming the kernel and any parameter involved: the one
     CuteDSLKernel or the eager launch raises for the same mistake, where they check
-    it. What wrap_cutedsl cannot wrap (a function that is not ``@cute.jit``, a bound
-    ``@cute.jit`` method, a kernel object) it refuses itself, with a TypeError it
-    raises before any HOPifier is involved.
+    it. What a wrapper refuses in a call (bind_call and bind_args, and for a raw call
+    its host function, see unwrap_raw_args) goes there through raise_wrapper_error,
+    which DynamoCuteDSLHOPifier makes refuse a raw call as unsupported instead: eager
+    CuTeDSL may run a raw call that its wrapper refuses. What wrap_cutedsl cannot
+    wrap (a function that is not ``@cute.jit``, a bound ``@cute.jit`` method, a
+    kernel object) it refuses itself, with a TypeError it raises before any HOPifier
+    is involved.
     """
 
     def is_tensor(self, val: Any) -> bool:
@@ -881,6 +888,15 @@ class CuteDSLHOPifier(UserKernelHOPifier):
         """The wrapper a raw call of ``variable`` is captured through:
         ``wrap_cutedsl(variable.kernel, mutates_args=RAW_CALL_MUTATES_ARGS)``."""
         raise NotImplementedError("abstract method")
+
+    def raise_wrapper_error(self, variable: Any, exc: TypeError | ValueError) -> Never:
+        """Refuse a call of ``variable`` with ``exc``, what the eager call of a wrapper
+        raises for it (a host function PT2 cannot launch, a call that does not bind
+        to it, a constant the side table's walk refuses): a user error (see
+        raise_user_error). Dynamo checks a raw call as the call of its wrapper (see
+        wrap_raw), and DynamoCuteDSLHOPifier refuses it as unsupported instead, since
+        eager CuTeDSL may run the raw call."""
+        self.raise_user_error(exc)
 
     def call_HOP(  # type: ignore[no-untyped-def]
         self,
@@ -938,7 +954,8 @@ class CuteDSLHOPifier(UserKernelHOPifier):
         args: tuple[Any, ...] | list[Any],
         kwargs: dict[str, Any],
     ) -> dict[str, Any]:
-        """Bind a call to the host function's parameters, minus the stream, and
+        """Bind a call of a wrapper (torch tensors, no stream) to the host function's
+        parameters, minus the stream, and
         refuse what PT2 cannot launch without looking inside an argument: a call
         that does not bind, a tensor for a scalar parameter, a DSL runtime object,
         a parameter left to a tensor default, and a written parameter given or left
@@ -955,22 +972,23 @@ class CuteDSLHOPifier(UserKernelHOPifier):
             by_keyword = info.params[info.stream_index + 1 : len(args) + 1]
             if by_keyword:
                 msg += f"; pass {', '.join(map(repr, by_keyword))} by keyword"
-            self.raise_user_error(TypeError(msg))
+            self.raise_wrapper_error(variable, TypeError(msg))
         combined_args = dict(zip(info.params, args))
         for key, val in kwargs.items():
             if key in combined_args:
-                self.raise_user_error(
+                self.raise_wrapper_error(
+                    variable,
                     TypeError(
                         f"CuTeDSL kernel {name}: got multiple values for argument "
                         f"{key!r}"
-                    )
+                    ),
                 )
             combined_args[key] = val
 
         try:
             info.check_call(name, combined_args)
         except TypeError as e:
-            self.raise_user_error(e)
+            self.raise_wrapper_error(variable, e)
 
         # PT2 can only functionalize a tensor that the call passes: a written
         # parameter takes a tensor, or None for an optional tensor that the call
@@ -980,34 +998,37 @@ class CuteDSLHOPifier(UserKernelHOPifier):
             if key in combined_args:
                 continue
             if isinstance(default, Tensor):
-                self.raise_user_error(_tensor_default_error(name, key))
+                self.raise_wrapper_error(variable, _tensor_default_error(name, key))
             if key in written and default is not None:
-                self.raise_user_error(
+                self.raise_wrapper_error(
+                    variable,
                     ValueError(
                         f"CuTeDSL kernel {name}: mutates_args names parameter {key!r}, "
                         "which takes a tensor or None, but the call leaves it to its "
                         f"default, of type {type(default).__name__}"
-                    )
+                    ),
                 )
         for key, val in combined_args.items():
             if self.is_tensor(val):
                 if key in info.constexpr_params or key in info.numeric_params:
-                    self.raise_user_error(_scalar_param_error(name, key))
+                    self.raise_wrapper_error(variable, _scalar_param_error(name, key))
                 continue
             val_type = self.python_type(val)
             if is_dsl_runtime_object(val_type):
-                self.raise_user_error(
+                self.raise_wrapper_error(
+                    variable,
                     TypeError(
                         f"CuTeDSL kernel {name}: parameter {key!r} got a "
                         f"{val_type.__name__}: {_DSL_RUNTIME_OBJECT_FIX}"
-                    )
+                    ),
                 )
             if key in written and val_type is not type(None):
-                self.raise_user_error(
+                self.raise_wrapper_error(
+                    variable,
                     TypeError(
                         f"CuTeDSL kernel {name}: mutates_args names parameter {key!r}, "
                         f"which takes a tensor or None, not {val_type.__name__}"
-                    )
+                    ),
                 )
         return combined_args
 
@@ -1030,7 +1051,7 @@ class CuteDSLHOPifier(UserKernelHOPifier):
                 leaves = self.leaves(val)
             except (TypeError, ValueError) as e:
                 msg = f"CuTeDSL kernel {info.name}: parameter {key!r}: {e}"
-                self.raise_user_error(type(e)(msg))
+                self.raise_wrapper_error(variable, type(e)(msg))
             is_container = not (len(leaves) == 1 and leaves[0] is val)
             if key in info.constexpr_params or is_container:
                 # The DSL bakes a Constexpr argument into the compiled kernel, and a
@@ -1053,11 +1074,15 @@ class CuteDSLHOPifier(UserKernelHOPifier):
         because the wrapper launches on that stream. A call that does not bind, or
         that passes a torch.Tensor for a parameter, is a user error (see
         raise_user_error), as eager CuTeDSL refuses it too; a host function that PT2
-        cannot launch is refused as the wrapper refuses it (see host_fn_info), as is
-        anything else the wrapper refuses (see bind_args)."""
+        cannot launch, which eager CuTeDSL may run, is refused as the wrapper refuses
+        it (see raise_wrapper_error), as is anything else the wrapper refuses (see
+        bind_args), whether eager CuTeDSL refuses it too or not."""
         kernel = variable.kernel
         name = cutedsl_kernel_name(kernel)
-        info = self.host_fn_info(kernel)
+        try:
+            info = get_host_fn_info(kernel)
+        except ValueError as e:
+            self.raise_wrapper_error(variable, e)
         if len(args) > len(info.params):
             self.raise_user_error(
                 TypeError(
