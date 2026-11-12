@@ -1,4 +1,5 @@
 #include <ATen/native/mkldnn/detail/Matmul.h>
+#include <ATen/native/mkldnn/detail/PrimitiveCache.h>
 #include <ATen/native/mkldnn/detail/Utils.h>
 
 #if AT_MKLDNN_ENABLED()
@@ -153,8 +154,7 @@ void do_prepare(
   }
   param.primitive = dnnl::matmul(param.pd);
 #else
-  // Shares ideep's primitive cache with ideep's own matmul_forward.
-  auto key = ideep::utils::create_key(
+  auto key = utils::create_key(
       src_desc,
       weights_desc,
       bias_desc,
@@ -163,7 +163,7 @@ void do_prepare(
       with_bias,
       omp_get_max_threads());
   param.pd =
-      ideep::utils::computation_cache<dnnl::matmul::primitive_desc>::
+      utils::computation_cache<dnnl::matmul::primitive_desc>::
           fetch_or_create(key, [&]() {
             if (with_bias) {
               return dnnl::matmul::primitive_desc(
@@ -380,7 +380,7 @@ void do_prepare_static_quant(
   }
   param.primitive = dnnl::matmul(param.pd);
 #else
-  auto key = ideep::utils::create_key(
+  auto key = utils::create_key(
       src_desc,
       weights_desc,
       bias_desc,
@@ -389,7 +389,7 @@ void do_prepare_static_quant(
       with_bias,
       omp_get_max_threads());
   param.pd =
-      ideep::utils::computation_cache<dnnl::matmul::primitive_desc>::
+      utils::computation_cache<dnnl::matmul::primitive_desc>::
           fetch_or_create(key, [&]() {
             if (with_bias) {
               return dnnl::matmul::primitive_desc(
@@ -549,7 +549,7 @@ void do_prepare_dynamic_quant(
   }
   param.primitive = dnnl::matmul(param.pd);
 #else
-  auto key = ideep::utils::create_key(
+  auto key = utils::create_key(
       src_desc,
       weights.get_desc(),
       bias_desc,
@@ -558,7 +558,7 @@ void do_prepare_dynamic_quant(
       with_bias,
       omp_get_max_threads());
   param.pd =
-      ideep::utils::computation_cache<dnnl::matmul::primitive_desc>::
+      utils::computation_cache<dnnl::matmul::primitive_desc>::
           fetch_or_create(key, [&]() {
             if (with_bias) {
               return dnnl::matmul::primitive_desc(

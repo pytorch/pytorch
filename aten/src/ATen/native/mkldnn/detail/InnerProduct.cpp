@@ -1,4 +1,5 @@
 #include <ATen/native/mkldnn/detail/InnerProduct.h>
+#include <ATen/native/mkldnn/detail/PrimitiveCache.h>
 #include <ATen/native/mkldnn/detail/Utils.h>
 
 #if AT_MKLDNN_ENABLED()
@@ -21,8 +22,7 @@ struct inner_product_forward_params {
 };
 
 // Ported from ideep::inner_product_forward::get_primitive_desc. On x86 the
-// descriptor comes from ideep's primitive cache, shared with ideep's own
-// inner_product_forward.
+// descriptor comes from the primitive cache in detail/PrimitiveCache.h.
 #ifdef __aarch64__
 std::pair<
     dnnl::inner_product_forward::primitive_desc,
@@ -56,7 +56,7 @@ dnnl::inner_product_forward::primitive_desc get_primitive_desc(
     const ideep::attr_t& attr = ideep::attr_t(),
     const dnnl::prop_kind prop_kind = dnnl::prop_kind::forward) {
   const auto& engine = ideep::engine::cpu_engine();
-  auto key = ideep::utils::create_key(
+  auto key = utils::create_key(
       prop_kind,
       src_desc,
       weights_desc,
@@ -65,7 +65,7 @@ dnnl::inner_product_forward::primitive_desc get_primitive_desc(
       attr,
       with_bias,
       omp_get_max_threads());
-  return ideep::utils::computation_cache<
+  return utils::computation_cache<
       dnnl::inner_product_forward::primitive_desc>::
       fetch_or_create(key, [&]() {
         if (with_bias) {
