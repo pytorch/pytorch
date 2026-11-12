@@ -367,11 +367,15 @@ void fakeFallback(
   // Integer indexing works without unbacked sizes; bool indexing calls nonzero.
   const bool is_index_tensor =
       schema.name() == "aten::index" && schema.overload_name() == "Tensor";
+  const bool is_static_repeat_interleave =
+      schema.name() == "aten::repeat_interleave" &&
+      schema.overload_name() == "Tensor" &&
+      (*stack)[arguments_begin + 1].isInt();
   const bool allocates_unbacked = schema.name() == "aten::_spdiags" ||
       schema.name() == "aten::_pack_padded_sequence" ||
       schema.name() == "aten::_padded_dense_to_jagged_forward";
   if (allocates_unbacked ||
-      (!is_index_tensor &&
+      (!is_index_tensor && !is_static_repeat_interleave &&
        (op.hasTag(at::Tag::dynamic_output_shape) ||
         op.hasTag(at::Tag::data_dependent_output)))) {
     unsupported(op, "ops with data-dependent outputs");
