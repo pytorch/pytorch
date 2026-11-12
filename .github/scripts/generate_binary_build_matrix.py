@@ -25,14 +25,15 @@ SCRIPT_DIR = Path(__file__).absolute().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
 
-CUDA_ARCHES = ["13.2", "13.4"]
+CUDA_ARCHES = ["13.2", "13.4", "13.5"]
+CUDA_WINDOWS_ARCHES = ["13.2", "13.4"]
 CUDA_STABLE = "13.2"
 # Only consumed by generate_docker_release_matrix.py, whose Dockerfile installs
 # an already-published torch nightly. A CUDA version belongs here only once its
 # wheels are on the download.pytorch.org index.
 CUDA_ARCHES_FULL_VERSION = {
     "13.2": "13.2.2",
-    "13.4": "13.4.1",
+    "13.4": "13.4.3",
 }
 # CUDA versions that can only produce the runtime docker image. The devel image
 # apt-installs cuda-toolkit-<major>-<minor> from NVIDIA's repo.
@@ -41,6 +42,7 @@ CUDA_ARCHES_RUNTIME_IMAGE_ONLY = []
 CUDA_ARCHES_CUDNN_VERSION = {
     "13.2": "9",
     "13.4": "9",
+    "13.5": "9",
 }
 
 ROCM_ARCHES = ["10.0", "10.1"]
@@ -67,12 +69,15 @@ CPU_S390X_ARCH = ["cpu-s390x"]
 CUDA_AARCH64_ARCHES = [
     "13.2-aarch64",
     "13.4-aarch64",
+    "13.5-aarch64",
 ]
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "13.2": {
         "linux": (
-            "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.2; platform_system == 'Linux' | "
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusparse,cufile,nvjitlink,nvtx]==13.2.2; platform_system == 'Linux' | "
+            "nvidia-cublas==13.4.3.11; platform_system == 'Linux' | "
+            "nvidia-cusolver==12.2.0.11; platform_system == 'Linux' | "
             "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
             "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
             "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Linux' | "
@@ -88,7 +93,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     },
     "13.4": {
         "linux": (
-            "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusparse,cufile,nvjitlink,nvtx]==13.4.1; platform_system == 'Linux' | "
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusparse,cufile,nvjitlink,nvtx]==13.4.3; platform_system == 'Linux' | "
             "nvidia-cublas>=13.7.0.27,<=13.8.1.7; platform_system == 'Linux' | "
             "nvidia-cusolver==12.3.2.15; platform_system == 'Linux' | "
             "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
@@ -99,10 +104,21 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
             "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
         ),
         "windows": (
-            "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.2; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.3; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "cuda-pathfinder>=1.8.5; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Windows' and platform_machine == 'AMD64' | "
             "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Windows' and platform_machine == 'AMD64'"
+        ),
+    },
+    "13.5": {
+        "linux": (
+            "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.5.0; platform_system == 'Linux' | "
+            "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
+            "cupti-python==13.5.0; platform_system == 'Linux' and python_version < '3.15' | "
+            "nvidia-cudnn-cu13==9.27.0.42; platform_system == 'Linux' | "
+            "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Linux' | "
+            "nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | "
+            "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
         ),
     },
     # dependency on latest patch version for (major, minor)
@@ -159,7 +175,11 @@ CUDA_NIGHTLY_SOURCE_MATRIX = {
     f"cuda-{major}.{minor}": dict(
         name=f"cuda-{major}.{minor}",
         index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu{major}{minor}",
-        supported_platforms=["Linux", "Windows"],
+        supported_platforms=(
+            ["Linux", "Windows"]
+            if f"{major}.{minor}" in CUDA_WINDOWS_ARCHES
+            else ["Linux"]
+        ),
         accelerator="cuda",
     )
     for major, minor in (map(int, version.split(".")) for version in CUDA_ARCHES)
@@ -392,7 +412,7 @@ def generate_libtorch_matrix(
     if arches is None:
         arches = ["cpu"]
         if os == "windows":
-            arches += CUDA_ARCHES
+            arches += CUDA_WINDOWS_ARCHES
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -445,7 +465,7 @@ def generate_wheels_matrix(
         if os == "linux":
             arches += CUDA_ARCHES + ROCM_ARCHES + ROCM_PREVIEW_ARCHES + XPU_ARCHES
         elif os == "windows":
-            arches += CUDA_ARCHES + XPU_ARCHES
+            arches += CUDA_WINDOWS_ARCHES + XPU_ARCHES
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
@@ -494,7 +514,7 @@ def generate_wheels_matrix(
             # to install CUDA runtime libraries from PyPI.
 
             if (
-                arch_version in ["13.4", "13.2"]
+                arch_version in CUDA_ARCHES
                 and os in ("linux", "windows")
                 or arch_version in CUDA_AARCH64_ARCHES
             ):
