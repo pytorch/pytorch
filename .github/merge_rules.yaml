@@ -293,7 +293,6 @@
   - third_party/ideep
   - third_party/oneDNN
   - cmake/Modules/FindMKLDNN.cmake
-  - third_party/mkl-dnn.BUILD
   approved_by:
   - XiaobingSuper
   - jgong5

@@ -19,12 +19,6 @@ IF(NOT MKLDNN_FOUND)
   SET(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
   SET(MKLDNN_ROOT "${PROJECT_SOURCE_DIR}/third_party/oneDNN")
 
-  # The UKERNEL probe below reads this checkout, so it must exist first.
-  IF(NOT EXISTS "${MKLDNN_ROOT}/include/oneapi/dnnl/dnnl.hpp")
-    MESSAGE(STATUS "third_party/oneDNN not checked out, initializing submodule")
-    EXECUTE_PROCESS(COMMAND git${CMAKE_EXECUTABLE_SUFFIX} submodule update --init third_party/oneDNN WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-  ENDIF()
-
   if(USE_XPU) # Build oneDNN GPU library
     if(WIN32)
       # Windows
@@ -129,6 +123,9 @@ IF(NOT MKLDNN_FOUND)
 
   FIND_PACKAGE(BLAS)
   FIND_PATH(IDEEP_INCLUDE_DIR ideep.hpp PATHS ${IDEEP_ROOT} PATH_SUFFIXES include)
+  # Drop results cached from ideep's nested mkl-dnn by older build directories.
+  UNSET(MKLDNN_INCLUDE_DIR CACHE)
+  UNSET(LLGA_INCLUDE_DIR CACHE)
   FIND_PATH(MKLDNN_INCLUDE_DIR dnnl.hpp dnnl.h dnnl_ukernel.hpp dnnl_ukernel.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include/oneapi/dnnl)
   IF(BUILD_ONEDNN_GRAPH)
     FIND_PATH(LLGA_INCLUDE_DIR dnnl_graph.hpp PATHS ${LLGA_ROOT} PATH_SUFFIXES include/oneapi/dnnl)
