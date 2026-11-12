@@ -523,6 +523,11 @@ void scan_simple_mps_impl(const Tensor& self, const Tensor& output, int64_t dim,
   const auto axis_size = self.size(wrapped_dim);
   const auto n_scans = self.numel() / axis_size;
   const bool is_innermost = (wrapped_dim == ndim - 1);
+  // A size-1 dim can have any stride, which the outer kernels would take for the inner size.
+  if (axis_size == 1) {
+    output.copy_(self);
+    return;
+  }
 
   // Run a scan that writes a contiguous result shaped like `proto`, delivering it
   // into `output` (staging through a temporary when output isn't contiguous).
@@ -713,6 +718,11 @@ static void scan_with_indices_mps_impl(const Tensor& self,
   const int64_t ndim = self.dim();
   const int64_t wrapped_dim = maybe_wrap_dim(dim, ndim);
   const int64_t axis_size = self.size(wrapped_dim);
+  if (axis_size == 1) {
+    values_output.copy_(self);
+    indices_output.zero_();
+    return;
+  }
 
   // Preprocess input tensor - ensure it's contiguous for Metal shaders
   auto input_tensor = self.contiguous();
