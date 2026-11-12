@@ -439,11 +439,14 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
         self.run_subtests(
             {
                 "mp_dtype": [torch.bfloat16, torch.float16],
+                "use_custom_all_reduce": [False, True],
             },
             self._test_ar_buffer_lifetime_mixed_dtype,
         )
 
-    def _test_ar_buffer_lifetime_mixed_dtype(self, mp_dtype: torch.dtype):
+    def _test_ar_buffer_lifetime_mixed_dtype(
+        self, mp_dtype: torch.dtype, use_custom_all_reduce: bool
+    ):
         torch.manual_seed(0)
         mesh = init_device_mesh(
             device_type.type,
@@ -482,15 +485,27 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
                 )
                 return orig_all_reduce(*args, **kwargs)
 
+            if use_custom_all_reduce:
+                custom_comm = mock.MagicMock(
+                    side_effect=lambda tensor, group, op: slow_all_reduce(
+                        tensor, group=group, op=op
+                    )
+                )
+                for layer in model:
+                    if isinstance(layer, nn.Linear):
+                        layer.set_custom_all_reduce(custom_comm if slow_ar else None)
+
             patch_ctx = (
                 mock.patch.object(dist, "all_reduce", slow_all_reduce)
-                if slow_ar
+                if slow_ar and not use_custom_all_reduce
                 else contextlib.nullcontext()
             )
             with patch_ctx:
                 out = model(inp)
                 loss = out.sum()
                 loss.backward()
+            if use_custom_all_reduce and slow_ar:
+                self.assertEqual(custom_comm.call_count, 3)
 
             return {
                 name: (

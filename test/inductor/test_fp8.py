@@ -30,10 +30,12 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
     onlyOn,
+    preserves_device_selection,
     skipCUDAIf,
 )
 from torch.testing._internal.common_quantized import ceil_div, to_blocked
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
@@ -169,6 +171,9 @@ def _simulate_float8_e4m3fn_uint8_storage():
 
 
 class TestFP8Types(TestCase):
+    setUp = preserves_device_selection(TestCase.setUp)
+    setUpClass = classmethod(preserves_device_selection(TestCase.setUpClass.__func__))
+
     @onlyCUDA
     @skipIfRocm
     @config.patch({"force_disable_caches": True})
@@ -551,7 +556,7 @@ class TestFP8Types(TestCase):
             amax_buffer_compiled, amax_buffer, rtol=1e-2, atol=1e-2
         )
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("4,2048,4096",))
@@ -920,6 +925,9 @@ instantiate_parametrized_tests(TestScaledMMLayoutConstraint)
 
 
 class TestFP8Lowering(TestCase):
+    setUp = preserves_device_selection(TestCase.setUp)
+    setUpClass = classmethod(preserves_device_selection(TestCase.setUpClass.__func__))
+
     @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not has_triton_tma_device(), "Requires device-side TMA")
@@ -1220,7 +1228,7 @@ class TestFP8Lowering(TestCase):
             self.assertEqual(actual, expected)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     def test_functional_scaled_mm_fullgraph(self, device):
         M, N, K = 128, 128, 128
         x = torch.randn(M, K, device=device, dtype=torch.bfloat16)
@@ -1245,7 +1253,7 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(expected, actual)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     @parametrize(
         "scale_a_shape,scale_b_shape",
         [
@@ -1280,7 +1288,7 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(expected, actual, rtol=1e-2, atol=1e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     def test_scaled_mm_rejects_high_rank_scale_b(self, device):
         M = N = K = 64
         dtype_float8 = _fix_fp8_dtype_for_rocm(torch.float8_e4m3fn, device)
@@ -1303,6 +1311,10 @@ class TestFP8Lowering(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"t\(\) expects"):
             torch.compile(fn, fullgraph=True)(x_fp8, w_fp8, scale_a, scale_b)
 
+    @decorateIf(
+        unittest.skip("bias is not supported when output dtype is float32"),
+        lambda params: params["dtype"] is torch.float32 and params["has_bias"],
+    )
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("dtype", (torch.bfloat16, torch.float32))
     @parametrize("shape", ("16,16,32", "16,32,32", "1024,1024,512"))
@@ -1311,7 +1323,7 @@ class TestFP8Lowering(TestCase):
     @parametrize(
         "persistent_matmul", [False, True] if has_triton_tma_device() else [False]
     )
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     def test_tensorwise_scaling(
         self,
         dtype: torch.dtype,
@@ -1391,7 +1403,7 @@ class TestFP8Lowering(TestCase):
                 self.assertEqual(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     def test_scaled_mm_preserves_strides(self, device):
         """Test that scaled_mm preserves stride ordering through a custom pass."""
 
@@ -1488,7 +1500,7 @@ class TestFP8Lowering(TestCase):
             # The clones should be visible in the generated code
             self.assertIn("clone", wrapper.lower())
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     @skipIfXpu(msg="torch-xpu-ops/issues/4852")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
@@ -1656,7 +1668,7 @@ class TestFP8Lowering(TestCase):
         not has_triton_tma_device() or not is_big_gpu(),
         "Need device-side TMA support in Triton and max-autotune",
     )
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     @skipIfXpu(msg="torch-xpu-ops/issues/4852")
     @parametrize("shape", ("16,32,32", "1024,1024,512"))
     @parametrize("use_fast_accum", (False, True))
@@ -1744,7 +1756,7 @@ class TestFP8Lowering(TestCase):
         _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
     )
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     @xfailIf(
         torch.cuda.is_available() and torch.cuda.get_device_capability() != (9, 0)
     )  # cuBLAS 128-element blockwise scaling is only supported for CC 9.0
@@ -2047,7 +2059,7 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=5e-2, atol=0.07)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @torch._inductor.config.patch("emulate_precision_casts", True)
     def test_mx_fusion(self, device):
@@ -2286,7 +2298,7 @@ class TestFP8Lowering(TestCase):
                     )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     def test_mxfp8_dtype_view_indexer_e2e(self, device):
         with (
             torch.library._scoped_library("test_fp8", "FRAGMENT") as lib,
@@ -2418,7 +2430,7 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_mm_v2_no_swizzle(self, device):
         """Regression test: _scaled_mm_v2 must not segfault when swizzle is
@@ -2526,7 +2538,7 @@ class TestFP8Lowering(TestCase):
         with self.assertRaisesRegex((ValueError, RuntimeError), "scale_a.*elements"):
             compiled(A, B, A_scale[:-1], B_scale)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
     def test_mx_fp8_max_autotune(self, device):
         # K must match the operands, which are eye(M)/eye(N) (i.e. 128 wide);
@@ -2573,7 +2585,7 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(("cuda", "xpu"))
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_unacceptable_input_dims(self, device):
         # for compiled ops, type checking is in torch/_meta_registrations.py
@@ -2765,7 +2777,7 @@ class TestCvtE8M0Rceil(TestCase):
 
     def test_pattern_match(self):
         """Test that the log2+ceil pattern gets matched and replaced."""
-        _misc_patterns_init()
+        _misc_patterns_init("cuda")
 
         E8M0_BIAS = 127
 
@@ -2805,7 +2817,7 @@ class TestCvtE8M0Rceil(TestCase):
         so ceil(log2(x)) would incorrectly return e instead of e+1.
         The PTX/bit-manipulation replacement must always return the correct value.
         """
-        _misc_patterns_init()
+        _misc_patterns_init("cuda")
         E8M0_BIAS = 127
 
         def fn(inp):
@@ -2847,7 +2859,7 @@ class TestE8M0Log2PatternBitManip(TestCase):
 
     def test_pattern_fires_and_is_correct(self):
         """The log2+ceil pattern should be matched and produce correct uint8."""
-        _misc_patterns_init()
+        _misc_patterns_init("cuda")
         E8M0_BIAS = 127
 
         def fn(inp):
