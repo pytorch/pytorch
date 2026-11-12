@@ -18,9 +18,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Start with XPU. Add the other exact production labels only when needed:
-        # amd-dpx-linux.rocm.gpu.gfx950.1, linux.google.tpuv7x.1
-        runner: [linux.idc.xpu]
+        # Existing production labels; no host-cleanup setup actions.
+        runner:
+          - linux.idc.xpu
+          - linux.client.xpu
+          - linux.rocm.gpu.mi300.1
+          - amd-dpx-linux.rocm.gpu.gfx950.1
+          - linux.google.tpuv7x.1
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 5
     steps:
