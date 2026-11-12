@@ -63,9 +63,9 @@ inline void brgemm(
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
-    bool add_C,
-    const c10::Half* A,
-    const c10::Half* B,
+    const bool add_C,
+    const at::Half* A,
+    const at::Half* B,
     float* C,
     bool is_vnni = true) {
   detail::brgemm(
@@ -92,9 +92,9 @@ inline void brgemm(
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
-    bool add_C,
-    const c10::BFloat16* A,
-    const c10::BFloat16* B,
+    const bool add_C,
+    const at::BFloat16* A,
+    const at::BFloat16* B,
     float* C,
     bool is_vnni = true) {
   detail::brgemm(
@@ -121,7 +121,7 @@ inline void brgemm(
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
-    bool add_C,
+    const bool add_C,
     const float* A,
     const float* B,
     float* C,
@@ -150,9 +150,9 @@ inline void brgemm(
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
-    bool add_C,
-    const uint8_t* A,
-    const uint8_t* B,
+    const bool add_C,
+    const unsigned char* A,
+    const unsigned char* B,
     int32_t* C,
     bool is_vnni = true) {
   detail::brgemm(
@@ -179,9 +179,9 @@ inline void brgemm(
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
-    bool add_C,
-    const uint8_t* A,
-    const int8_t* B,
+    const bool add_C,
+    const unsigned char* A,
+    const signed char* B,
     int32_t* C,
     bool is_vnni = true) {
   detail::brgemm(
@@ -208,9 +208,9 @@ inline void brgemm(
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
-    bool add_C,
-    const int8_t* A,
-    const int8_t* B,
+    const bool add_C,
+    const signed char* A,
+    const signed char* B,
     int32_t* C,
     bool is_vnni = true) {
   detail::brgemm(
@@ -237,9 +237,9 @@ inline void brgemm(
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
-    bool add_C,
-    const c10::Float8_e4m3fn* A,
-    const c10::Float8_e4m3fn* B,
+    const bool add_C,
+    const at::Float8_e4m3fn* A,
+    const at::Float8_e4m3fn* B,
     float* C,
     bool is_vnni = true) {
   detail::brgemm(
@@ -266,9 +266,9 @@ inline void brgemm(
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
-    bool add_C,
-    const c10::Float8_e5m2* A,
-    const c10::Float8_e5m2* B,
+    const bool add_C,
+    const at::Float8_e5m2* A,
+    const at::Float8_e5m2* B,
     float* C,
     bool is_vnni = true) {
   detail::brgemm(
