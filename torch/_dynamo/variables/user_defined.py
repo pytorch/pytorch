@@ -965,12 +965,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not is_torch_class(self.value)
             and name not in ("__get__", "__set__", "__delete__")
         ):
-            if self.source is not None:
-                source = self.get_source_by_walking_mro(tx, name)
+            descriptor_source = (
+                self.get_source_by_walking_mro(tx, name)
+                if self.source is not None
+                else source
+            )
             return VariableBuilder.create_internal_wrapper_descriptor(
                 cls_attr,
                 owner=self._descriptor_defining_class_vt(tx, cls_attr),
-                source=source,
+                source=descriptor_source,
             )
 
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L140-L141
@@ -979,12 +982,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not is_torch_class(self.value)
             and name not in ("__get__", "__set__", "__delete__")
         ):
-            if self.source is not None:
-                source = self.get_source_by_walking_mro(tx, name)
+            descriptor_source = (
+                self.get_source_by_walking_mro(tx, name)
+                if self.source is not None
+                else source
+            )
             return VariableBuilder.create_internal_method_descriptor(
                 cls_attr,
                 owner=self._descriptor_defining_class_vt(tx, cls_attr),
-                source=source,
+                source=descriptor_source,
             )
 
         # User-defined descriptor with Python __get__.
