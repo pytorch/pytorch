@@ -128,11 +128,12 @@ class LaunchRecord:
     A replay allocates every buffer uninitialized and repeats only the launches, so
     callers must ensure that no recorded launch depends on an output buffer's contents
     from before the recorded launches wrote it (later launches may read earlier
-    launches' outputs, e.g. FusedTwoStage's parts), that every compiled-kernel call goes
-    through launch(), and that no torch op writes data to a launch buffer while
-    recording (resizes that do not grow the storage are fine). finish() catches a direct
-    call only when it writes a storage no launch has seen and a launch then reads that
-    storage, or that storage is returned without a launch writing it.
+    launches' outputs, e.g. gensplit2 combines gensplit1's partials), that every
+    compiled-kernel call goes through launch(), and that no torch op writes data to a
+    launch buffer while recording (resizes that do not grow the storage are fine).
+    finish() catches a direct call only when it writes a storage no launch has seen and a
+    launch then reads that storage, or that storage is returned without a launch writing
+    it.
     finish() returns None unless every operand views `x` or a buffer whose storage first
     appeared in a launch's output position, before any input position, and every output
     views a distinct such buffer. Torch-op results that a launch reads, or that are
