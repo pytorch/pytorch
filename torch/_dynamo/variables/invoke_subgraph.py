@@ -460,7 +460,7 @@ def is_reuse_eligible(
 
     It is possible that a subgraph is morally reusable but does not fall
     into the limited support that Dynamo has today. Current limitations:
-      - The subgraph must not have side effects or builtin-method key guards.
+      - Without a reuse hash, no side effects or builtin-method identity dependencies.
       - No sourceful variable accessed by the subgraph may have been
         mutated, because guards are snapshotted on source values at trace
         time — if the underlying object changed since then, the cached
@@ -477,10 +477,9 @@ def is_reuse_eligible(
     go stale from mutations.
     """
     if not has_reuse_hash_fn:
-        if tracing_info.has_builtin_method_keys:
-            # Stamp-out does not replay remapped receiver-alias guards. Trace
-            # each region to retain its runtime identity constraints.
-            hc_log.debug("subgraph_reuse: not eligible -- builtin-method key guards")
+        if tracing_info.has_builtin_method_identity:
+            # Stamp-out cannot replay remapped receiver-alias guards.
+            hc_log.debug("subgraph_reuse: not eligible -- builtin-method identity")
             return False
         if tracing_info.side_effect_stack is not None:
             stack_msg = "\n" + "".join(

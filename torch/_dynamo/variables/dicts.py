@@ -199,19 +199,24 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 "and all values must be VariableTracker"
             )
 
+        keys: list[HashableTracker] = []
+
         def make_hashable(
             key: Union[VariableTracker, "HashableTracker"],
         ) -> "HashableTracker":
-            return key if isinstance(key, Hashable) else Hashable(key)
+            result = key if isinstance(key, Hashable) else Hashable(key)
+            keys.append(result)
+            return result
 
-        keys = {id(key): make_hashable(key) for key in items}
-        if keys and self.source is None:
-            guard_key_collisions(keys.values())
         items_cls = cast(type, self._cpython_type)
         storage_cls = dict if items_cls is collections.defaultdict else items_cls
-        self.items: dict[HashableTracker, VariableTracker] = storage_cls(
-            {keys[id(x)]: v for x, v in items.items()}
-        )
+        self.items: dict[HashableTracker, VariableTracker]
+        try:
+            self.items = storage_cls({make_hashable(x): v for x, v in items.items()})
+        finally:
+            # A caught equality exception still depends on the participating method keys.
+            if keys and self.source is None:
+                guard_key_collisions(keys)
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = (
@@ -473,6 +478,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         value = self.items.get(key)
         # The deletion marker is explicit; `isinstance` would realize lazy values.
         if value is None or type(value) is variables.DeletedVariable:
+            self.install_dict_contains_guard(tx, key, key_present=False)
             raise_observed_exception(KeyError, tx, args=[arg])
         return value
 
@@ -522,6 +528,22 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if self.source and not is_constant_source(self.source):
             self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
+
+    def check_base_dict_mutation(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> None:
+        if (
+            name in ("__init__", "__ior__", "__setitem__", "__delitem__")
+            or name in ("clear", "pop", "popitem", "setdefault", "update")
+        ) and issubclass(self.python_type(), collections.OrderedDict):
+            unimplemented(
+                gb_type="dict storage mutation on OrderedDict",
+                context=f"dict.{name}",
+                explanation="Base dict writes bypass OrderedDict's linked storage.",
+                hints=["Use OrderedDict methods to preserve its linked storage."],
+                skip_frame=True,
+                apply_to_code=False,
+            )
 
     def install_dict_contains_guard(
         self,

@@ -341,6 +341,34 @@ def less_match_verbose_code_parts(expected):
 class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("invalid", ["label", "root", "noncanonical"])
+    def test_object_alias_pattern_invalid_install_is_atomic(self, invalid):
+        values = {"a": [], "b": [], "c": []}
+        root = RootGuardManager()
+        managers = [
+            root.dict_getitem_manager(name, name, value, default_mgr_enum)
+            for name, value in values.items()
+        ]
+        participants = managers.copy()
+        aliases = [0, 1, 2]
+        if invalid == "label":
+            aliases[1] = len(values)
+        elif invalid == "noncanonical":
+            aliases = [0, 0, 1]
+        else:
+            other_root = RootGuardManager()
+            participants[1] = other_root.dict_getitem_manager(
+                "b", "b", values["b"], default_mgr_enum
+            )
+        error = "share a root" if invalid == "root" else "first participant"
+        with self.assertRaisesRegex(RuntimeError, error):
+            guards.install_object_alias_pattern_guard(participants, aliases, [], None)
+        self.assertEqual(managers[0].get_leaf_guards(), [])
+        self.assertTrue(root.check(values))
+        guards.install_object_alias_pattern_guard(managers, [0, 1, 2], [], None)
+        self.assertTrue(root.check(values))
+        self.assertFalse(root.check({**values, "b": values["a"]}))
+
     def test_storage_overlap_diff_participant_closure(self):
         from torch._dynamo.guards import GuardManagerWrapper
 

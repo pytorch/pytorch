@@ -6,7 +6,10 @@ from unittest.mock import MagicMock, patch
 
 os.environ["GITHUB_TOKEN"] = "test_token"
 
-from delete_old_branches import delete_old_tags
+from delete_old_branches import (
+    delete_old_tags,
+    get_branches_with_magic_label_or_open_pr,
+)
 
 
 @patch("delete_old_branches.delete_branch")
@@ -50,6 +53,34 @@ class TestDeleteTag(unittest.TestCase):
             ]
             delete_old_tags()
             mock_delete_tag.assert_not_called()
+
+
+class TestKeepBranches(unittest.TestCase):
+    @patch("delete_old_branches.get_open_prs")
+    @patch("delete_old_branches.paginate_graphql")
+    def test_keeps_open_pr_heads_and_bases(
+        self, mock_paginate: "MagicMock", mock_open_prs: "MagicMock"
+    ) -> None:
+        mock_paginate.return_value = [
+            {"headRefName": "labeled", "baseRefName": "closed-base"},
+        ]
+        mock_open_prs.return_value = [
+            {"headRefName": "alice/feat-2", "baseRefName": "alice/feat-1"},
+            {"headRefName": "gh/bob/2/head", "baseRefName": "gh/bob/1/head"},
+            {"headRefName": "alice/feat-1-fix", "baseRefName": "main"},
+        ]
+        self.assertEqual(
+            get_branches_with_magic_label_or_open_pr(),
+            {
+                "labeled",
+                "alice/feat-2",
+                "alice/feat-1",
+                "gh/bob/2",
+                "gh/bob/1",
+                "alice/feat-1-fix",
+                "main",
+            },
+        )
 
 
 if __name__ == "__main__":
