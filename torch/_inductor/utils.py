@@ -224,6 +224,7 @@ from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
     Max,
+    Mod,
     ModularIndexing,
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -753,14 +754,16 @@ def do_bench_using_profiling(
     # But that's not trivial due to so many call sites in and out of pytorch.
 
     from torch._inductor.runtime.benchmarking import (
+        _triton_benchmarking_context,
         gpu_benchmark_lock,
         may_distort_benchmarking_result,
     )
 
     locked_bench = gpu_benchmark_lock(_do_bench_using_profiling)
-    return may_distort_benchmarking_result(locked_bench)(
-        fn, warmup, rep, is_vetted_benchmarking
-    )
+    with _triton_benchmarking_context()():
+        return may_distort_benchmarking_result(locked_bench)(
+            fn, warmup, rep, is_vetted_benchmarking
+        )
 
 
 def _get_do_bench_profile_result(
@@ -2421,8 +2424,8 @@ def _bytes_aligned(expr_bytes: _IntLike, alignment: int = TMA_ALIGNMENT) -> bool
 def tma_inner_dim(strides: Sequence[_IntLike]) -> int | None:
     """Index of the single stride-1 ("inner") dim, or None if there is not
     exactly one. TMA requires exactly one contiguous dim, so None means the
-    tensor is not TMA-compatible. `strides` must already be resolved to ints or
-    hinted symbols by the caller.
+    tensor is not TMA-compatible. A symbolic stride only counts as inner when
+    it is statically 1.
     """
     from .virtualized import V
 
@@ -2450,12 +2453,54 @@ def can_use_tma(
       * All "outer" dims have 16-byte aligned strides
       * Inner dim size × itemsize is a multiple of 16
       * For 1-byte dtypes (e.g. FP8), inner dim ≥ 32
+
+    Sizes are never specialized; only these requirements are checked. With
+    ``add_guards=True``, a requirement that depends on a dynamic size is decided
+    from the example inputs. Requirements that held are guarded only once TMA is
+    accepted. If TMA is rejected only by requirements on dynamic sizes, it is
+    guarded that one of them still fails, so an input meeting all of them
+    recompiles (an aligned size after an unaligned one gets TMA); a static
+    failure rejects TMA for every input and guards nothing. Under AOTI, where those guards are not checked at
+    runtime, a requirement must instead be statically provable. With
+    ``add_guards=False``, requirements are decided from size hints and nothing
+    is guarded.
     """
     from torch.utils._triton import has_triton_tma_device
 
     from .virtualized import V
 
-    _aligned = _bytes_aligned
+    # Requirements decided on the hints, guarded only once the outcome is known.
+    # Guarding each as it is checked would leave guards behind that don't
+    # decide the result, recompiling inputs that get the same graph.
+    held: list[sympy.Basic] = []
+    failed: list[sympy.Basic] = []
+
+    def _holds(requirement: sympy.Basic) -> bool:
+        sizevars = V.graph.sizevars
+        # AOTI does not check Inductor's guards at runtime.
+        if add_guards and V.graph.aot_mode:
+            return sizevars.statically_known_true(requirement)
+        hints = {
+            s: sizevars.replace_backed_symbols_with_hints(s)
+            for s in requirement.free_symbols
+        }
+        if not sizevars.statically_known_true(requirement.xreplace(hints)):
+            if (
+                not add_guards
+                or not requirement.free_symbols
+                or free_unbacked_symbols(requirement)
+            ):
+                return False
+            # Fails on the hints but depends on backed sizes: keep checking, as
+            # a later static failure would reject TMA for every input anyway.
+            failed.append(requirement)
+            return True
+        if add_guards and requirement.free_symbols:
+            held.append(requirement)
+        return True
+
+    def _aligned(expr_bytes: _IntLike) -> bool:
+        return _holds(sympy.Eq(Mod(expr_bytes, TMA_ALIGNMENT), 0))
 
     def _is_tma_compatible_layout(layout: Layout | None) -> bool:
         if layout is None:
@@ -2498,35 +2543,24 @@ def can_use_tma(
         if dtype not in _TMA_SUPPORTED_DTYPES:
             return False
 
-        if add_guards:
-            sizes_i = V.graph.sizevars.guard_int_seq(sizes)
-            strides_i = V.graph.sizevars.guard_int_seq(strides)
-        else:
-            sizes_i = [
-                V.graph.sizevars.replace_backed_symbols_with_hints(s) for s in sizes
-            ]
-            strides_i = [
-                V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides
-            ]
-
-        inner_idx = tma_inner_dim(strides_i)
+        inner_idx = tma_inner_dim(strides)
         if inner_idx is None:
             return False
 
         # All "outer" dims must have 16-byte aligned strides
-        for i, st in enumerate(strides_i):
+        for i, st in enumerate(strides):
             if i == inner_idx:
                 continue
             if not _aligned(st * itemsize):
                 return False
 
         # Inner dim byte width must be a multiple of 16 B
-        inner_dim = sizes_i[inner_idx]
+        inner_dim = sizes[inner_idx]
         if not _aligned(inner_dim * itemsize):
             return False
 
         # 1-byte dtypes (FP8 etc.) need inner dim ≥ 32 for tensor core alignment
-        if itemsize == 1 and not V.graph.sizevars.statically_known_geq(inner_dim, 32):
+        if itemsize == 1 and not _holds(sympy.Ge(inner_dim, 32)):
             return False
 
         return True
@@ -2553,11 +2587,20 @@ def can_use_tma(
 
         return True
 
-    return (
+    if not (
         has_triton_tma_device()
         and all(_is_tma_compatible_matrix(m) for m in matrices)
         and _is_tma_compatible_layout(output_layout)
-    )
+    ):
+        return False
+    if failed:
+        # Only dynamic requirements reject TMA: guard that one still fails, so
+        # an input meeting all of them recompiles and gets TMA.
+        V.graph.sizevars.guard_or_false(sympy.Or(*(sympy.Not(r) for r in failed)))
+        return False
+    # Guarded one by one rather than as a single And, so later static checks
+    # (e.g. statically_known_multiple_of) still see each fact.
+    return all(V.graph.sizevars.guard_or_false(r) for r in held)
 
 
 def _descriptor_shapes_fit_in_int32(
@@ -3301,12 +3344,7 @@ def use_decompose_k_choice(
 ) -> bool:
     from torch._inductor.virtualized import V
 
-    rocm_bounds = _rocm_decompose_k_auto()
-    decompose_k_threshold = (
-        config.rocm.decompose_k_threshold
-        if rocm_bounds
-        else config.triton.decompose_k_threshold
-    ) * threshold_multiple
+    decompose_k_threshold = config.triton.decompose_k_threshold * threshold_multiple
 
     return (
         V.graph.sizevars.statically_known_true(
@@ -3317,8 +3355,7 @@ def use_decompose_k_choice(
         )
         and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
         and not V.graph.cpp_wrapper
-        and decompose_k_num_splits() > 0
-        and (not rocm_bounds or _rocm_decompose_k_shape_ok(m, n, k))
+        and config.triton.num_decompose_k_splits > 0
         # Callers rely on False to retain the regular MM fallback.
         and bool(get_k_splits(m, n, k))
     )
@@ -3348,51 +3385,10 @@ def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     )
 
 
-# ROCm archs where decompose_k is on by default (num_decompose_k_splits=-1) and
-# bounded by config.rocm.decompose_k_*.
-_ROCM_DECOMPOSE_K_ARCHS = ("gfx950",)
-
-
-def _rocm_decompose_k_auto() -> bool:
-    """Whether the validated ROCm defaults apply: num_decompose_k_splits=-1 on one of
-    _ROCM_DECOMPOSE_K_ARCHS. An explicit split count keeps the generic behavior."""
-    return (
-        config.triton.num_decompose_k_splits < 0
-        and rocm_gfx_arch() in _ROCM_DECOMPOSE_K_ARCHS
-    )
-
-
-def _rocm_decompose_k_shape_ok(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
-    """The config.rocm.decompose_k_* bounds on K and on the unsplit output tile count.
-
-    Symbolic shapes are not offered decompose_k unless these bounds are provable.
-    """
-    from torch._inductor.virtualized import V
-
-    return V.graph.sizevars.statically_known_true(
-        sympy.And(
-            sympy.Ge(k, config.rocm.decompose_k_min_k),
-            sympy.Le(k, config.rocm.decompose_k_max_k),
-            sympy.Lt(
-                CeilDiv(m, 256) * CeilDiv(n, 256),
-                config.rocm.decompose_k_max_output_tiles,
-            ),
-        )
-    )
-
-
-def decompose_k_num_splits() -> int:
-    """config.triton.num_decompose_k_splits, with -1 resolved for the current device."""
-    num_splits = config.triton.num_decompose_k_splits
-    if num_splits >= 0:
-        return num_splits
-    return 10 if _rocm_decompose_k_auto() else 0
-
-
 @functools.cache
 def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
     # To limit compile time
-    k_splits_limit = decompose_k_num_splits()
+    k_splits_limit = config.triton.num_decompose_k_splits
 
     # Hand-tuned
     default_k_splits = [16, 32, 64, 128, 256]

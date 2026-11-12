@@ -12,6 +12,7 @@ from torch.utils._config_module import (
     inherit_fields_from,
     install_config_module,
 )
+from torch.utils._triton import triton_compile_iq_enabled
 
 
 if TYPE_CHECKING:
@@ -71,7 +72,19 @@ def lite_mode_default(lite_value: bool, default: bool) -> bool:
 def static_cuda_launcher_default() -> bool:
     STATIC_CUDA_LAUNCHER_VERSION = 2
 
-    if "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
+    if triton_compile_iq_enabled():
+        # fbtriton's compile_iq collect/apply hooks run in Triton's launcher, which the static
+        # launcher bypasses.
+        if os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1":
+            import logging
+
+            log = logging.getLogger(__name__)
+            log.warning(
+                "Ignoring TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER=1: TRITON_COMPILE_IQ_COLLECT "
+                "and TRITON_COMPILE_IQ_APPLY require Triton's launcher."
+            )
+        return False
+    elif "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
         return os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1"
     elif is_fbcode():
         version = torch._utils_internal.justknobs_getval_int(
@@ -705,7 +718,7 @@ multi_kernel_hints: list[int] = []
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
-# CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
+# CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM 10.x and 11.x only).
 # FLYDSL: FlyDSL templates for ROCm GPUs (experimental).
 # NVGEMM: NVIDIA Universal GEMM via cutlass.operators (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
@@ -988,6 +1001,9 @@ warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 # For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
+# Broadcasts at least this wide also apply realize_reads_threshold to the
+# broadcast producer, which is otherwise recomputed for every broadcast element
+realize_broadcast_reuse_threshold = 64
 _realize_opcount_threshold_default = 30
 realize_opcount_threshold: int | None = None
 realize_opusers_threshold = 5
@@ -1155,6 +1171,15 @@ max_pointwise_cat_inputs = 8
 
 # force concat to be generated as a pointwise op with masked loads
 force_pointwise_cat = False
+
+# Lower a cat input that is all of an already-laid-out computed buffer through
+# ConcatKernel, so its copy can fuse into the producer instead of being re-read
+# by a pointwise cat. Off by default: profitability depends on the destination
+# layout (a permuted destination makes the fused stores uncoalesced).
+# TODO: map out profitability and remove this flag. A stack's size-1 views
+# freeze such buffers, which should not happen; once they don't, this rule is
+# rarely needed.
+cat_fuse_computed_input_copies = False
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
@@ -1728,11 +1753,12 @@ keep_static_cubin_raw: bool = (
     os.environ.get("TORCHINDUCTOR_KEEP_STATIC_CUBIN_RAW", "0") == "1"
 )
 
-# Use _FastCudaLauncher (vectorcall C extension) instead of
-# StaticallyLaunchedCudaKernel.run for the CachingAutotuner fast path.
+# Use _FastCudaLauncher / _FastXpuLauncher (vectorcall C extension) instead of
+# StaticallyLaunchedTritonKernel.run for the CachingAutotuner fast path.
 # Pre-binds kernel metadata at first launch and uses THPVariable_Unpack +
-# tensor.data_ptr() in C++ to bypass PyArg_ParseTuple, cuPointerGetAttribute,
-# and cuCtxGetCurrent.
+# tensor.data_ptr() in C++ to bypass PyArg_ParseTuple and, per pointer
+# argument, cuPointerGetAttribute and cuCtxGetCurrent on CUDA, or
+# zeMemGetAllocProperties and the context lookup it needs on XPU.
 use_fast_triton_launcher: bool = (
     os.environ.get("TORCHINDUCTOR_USE_FAST_TRITON_LAUNCHER", "1") == "1"
 )
@@ -1987,11 +2013,27 @@ class cpp:
     # set to torch.get_num_threads()
     threads = -1
 
+    # Decompose output-only FP32 aten._scaled_dot_product_flash_attention_for_cpu
+    # into Inductor ops; eligibility is in fx_passes/post_grad.py and numerics (incl.
+    # a NaN difference from native) in Note [CPU flash attention accumulation order].
+    # No size heuristic, so benchmark the model before enabling.
+    enable_cpu_flash_attention_decomposition: bool = False
+
     # Do not generate loops when the condition doesn't hold, like:
     # for(long i0=4096; i0<4096; i0+=1)
     no_redundant_loops = (
         os.environ.get("TORCHINDUCTOR_CPP_NO_REDUNDANT_LOOPS", "1") == "1"
     )
+
+    # On AVX2, reduce float vector lanes with a shuffle tree (simd_vec_reduce_all
+    # in cpp_prefix.h) instead of at::vec::vec_reduce_all, whose tree path is
+    # GCC-only. Changes the rounding of horizontal float sums.
+    simd_horizontal_reduction: bool = False
+
+    # Compute vectorized float exp with Vectorized<float>::exp_u20, an inline
+    # polynomial accurate to within 2 ULP. The CPU flash attention kernel uses
+    # exp_u20 for its softmax.
+    vec_exp_u20: bool = False
 
     # Assume number of threads is dynamic, don't specialize thread number.
     # Kernels don't recompile on thread number changes with this flag on.
@@ -2024,6 +2066,17 @@ class cpp:
 
     # enable weight prepacking to get a better performance; may lead to large memory footprint
     weight_prepack = os.environ.get("TORCHINDUCTOR_CPP_WEIGHT_PREPACK", "1") == "1"
+
+    # Emit scalar sqrt / rsqrt as sqrt_without_errno (cpp_prefix.h), a square root
+    # without the errno update that -fmath-errno keeps (the non-Windows build), so
+    # the compiler can optimize it like other arithmetic. sqrt results are
+    # unchanged; with enable_unsafe_math_opt_flag, 1 / sqrt(x) may become a
+    # reciprocal-sqrt estimate, which changes rsqrt results in the last bits.
+    # Where the SSE2 path isn't compiled in (see cpp_prefix.h) this is std::sqrt.
+    # Off by default because of that numerics change.
+    sqrt_without_errno = (
+        os.environ.get("TORCHINDUCTOR_CPP_SQRT_WITHOUT_ERRNO", "0") == "1"
+    )
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
@@ -2111,6 +2164,15 @@ class cpp:
 
     force_inline_kernel = (
         os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_KERNEL", "0") == "1"
+    )
+
+    # Always inline the Welford helpers in cpp_prefix.h (welford_combine and
+    # welford_vec_reduce_all), which the compiler can otherwise leave as calls in
+    # Welford reduction loops. Code size can grow. The arithmetic is the same, but
+    # with enable_unsafe_math_opt_flag or FP contraction the compiler can optimize
+    # across the inlined code, which can change results in the last bits.
+    force_inline_welford = (
+        os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_WELFORD", "0") == "1"
     )
 
     # Use static constexpr or static const for int array
@@ -2548,13 +2610,9 @@ class triton:
     # Note: it may also need to be used with config.compile_threads = 1
     disallow_failing_autotune_kernels_TESTING_ONLY = False
 
-    # specify number of splits to autotune on for decompose_k. 0 disables decompose_k.
-    # -1 (the ROCm default) means 10 on the ROCm archs where decompose_k was validated
-    # (utils._ROCM_DECOMPOSE_K_ARCHS) and 0 elsewhere.
+    # specify number of splits to autotune on for decompose_k. 0 disables decompose_k
     num_decompose_k_splits = int(
-        os.environ.get(
-            "TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "-1" if torch.version.hip else "10"
-        )
+        os.environ.get("TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "10")
     )
 
     # Backends for the partial BMM nested inside a decompose-K subgraph. This
@@ -3126,17 +3184,6 @@ class rocm:
 
     # The threshold at which we trigger a contiguous subgraph transformation
     contiguous_threshold: int = 16
-
-    # decompose_k bounds on the archs in utils._ROCM_DECOMPOSE_K_ARCHS (MI350X) when
-    # triton.num_decompose_k_splits is -1 (the ROCm default), used in place of
-    # triton.decompose_k_threshold. An explicit split count skips them. decompose_k is offered when
-    # K >= decompose_k_threshold * max(M, N), decompose_k_min_k <= K <= decompose_k_max_k,
-    # and the unsplit GEMM has fewer than decompose_k_max_output_tiles 256x256 output
-    # tiles. Outside these bounds it rarely beats hipBLASLt and only adds autotune time.
-    decompose_k_threshold: int = 8
-    decompose_k_min_k: int = 8192
-    decompose_k_max_k: int = 2 * 1024 * 1024
-    decompose_k_max_output_tiles: int = 32
     # Enable origami GEMM autotuning on Triton templates (ROCm only).
     #
     # When True, the rocm-origami pip package is consulted at GEMM compile time
