@@ -138,8 +138,9 @@ std::string gemv_kernel_name(c10::ScalarType dt,
   if (use_t) {
     return fmt::format("gemv_t_{}_{}_{}_{}{}{}", dt_str, config.nsimd, config.vec, epi_str, matrix_str, idx_str);
   }
+  const auto rows_str = config.rows > 1 ? fmt::format("_r{}", config.rows) : std::string();
   return fmt::format(
-      "gemv_nt_{}_{}_{}_{}_{}{}{}", dt_str, config.nsimd, config.vec, epi_str, x_str, matrix_str, idx_str);
+      "gemv_nt_{}_{}_{}_{}_{}{}{}{}", dt_str, config.nsimd, config.vec, epi_str, x_str, matrix_str, idx_str, rows_str);
 }
 
 GemvLaunch prepare_gemv_launch(c10::ScalarType dt,
@@ -194,7 +195,8 @@ void dispatch_gemv(const Tensor& A,
                    const GemvPolicy& policy,
                    bool m_is_one,
                    int64_t outlen,
-                   bool idx64) {
+                   bool idx64,
+                   int64_t rows = 1) {
   const auto dt = out.scalar_type();
   constexpr int64_t r = 0, c = 1;
   const auto K = A.size(1);
@@ -225,11 +227,16 @@ void dispatch_gemv(const Tensor& A,
   dims.ms = matrix.stride;
   dims.xs = vec_xs;
   dims.bias_r = gemv_use_t ? 0 : out_stride;
-  dims.bias_c = gemv_use_t ? out_stride : 0;
+  dims.bias_c = gemv_use_t ? out_stride : rows > 1 ? expanded_bias.stride(r) : 0;
+  dims.rows = rows;
+  dims.xr = A.stride(r);
+  dims.yr = out.stride(r);
   const std::array<float, 2> alpha_beta = {static_cast<float>(alpha.toDouble()), static_cast<float>(beta.toDouble())};
 
   GemvConfig config;
-  if (idx64) {
+  if (rows > 1) {
+    config = GemvPolicy::pick_nt_rows(dt, rows);
+  } else if (idx64) {
     // Offsets overflow int32: such operands are DRAM-bound, so skip the
     // policy and use the fixed configs the _i64 variants are built at.
     config = gemv_use_t ? GemvConfig{16, 2} : GemvConfig{8, dt == at::kFloat ? 4 : 8};
@@ -273,10 +280,12 @@ bool try_mps_gemv(const Tensor& A,
   const auto M = A.size(0);
   const auto N = B.size(1);
   const auto K = A.size(1);
-  if (M != 1 && N != 1) {
+  // x @ W.t() for a few rows of x reads W once on gemv_nt.
+  const bool rows = M > 1 && M <= kGemvRowsMax && N != 1;
+  if (M != 1 && N != 1 && !rows) {
     return false;
   }
-  const auto m_is_one = (M == 1);
+  const auto m_is_one = M == 1 || rows;
   const auto outlen = m_is_one ? N : M;
   // Output must be unit-stride along its length for the flat store.
   const auto out_unit = m_is_one ? (out.stride(1) == 1) : (out.stride(0) == 1);
@@ -286,8 +295,15 @@ bool try_mps_gemv(const Tensor& A,
   const auto matrix = resolve_matrix(m_is_one ? B : A);
   // Dispatch 64-bit-index variants when numel or storage offsets exceed int32.
   const bool idx64 = !offsetsFitIn<int32_t>(A, B, out) || (bias.has_value() && !offsetsFitIn<int32_t>(*bias));
+  // The kernels over rows load contiguous, aligned rows of W and x.
+  const int64_t vec = GemvPolicy::pick_nt_rows(dtype, M).vec;
+  if (rows &&
+      (!matrix.transposed || matrix.stride != 1 || idx64 || A.stride(1) != 1 ||
+       (matrix.ld | matrix.tensor.storage_offset() | A.stride(0) | A.storage_offset()) % vec != 0)) {
+    return false;
+  }
   const GemvPolicy policy = GemvPolicy::current();
-  dispatch_gemv(A, B, out, bias, matrix, alpha, beta, epi, policy, m_is_one, outlen, idx64);
+  dispatch_gemv(A, B, out, bias, matrix, alpha, beta, epi, policy, m_is_one, outlen, idx64, rows ? M : 1);
   return true;
 }
 

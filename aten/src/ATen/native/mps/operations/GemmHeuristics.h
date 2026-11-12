@@ -15,6 +15,7 @@ struct GemvConfig {
   int nsimd, vec;
   int kq = 4; // k-sublanes per simdgroup (gemv_t2d only)
   GemvKernel kernel = GemvKernel::Standard;
+  int rows = 1; // rows of x of the gemv_nt instantiation
 };
 
 // gemv_t is bandwidth bound, so the pick just has to keep enough simdgroups
@@ -56,6 +57,8 @@ class GemvPolicy {
       int64_t outlen,
       int64_t K,
       int64_t align) const;
+  // gemv_nt over a few rows of x; it is built for 2 and 4 rows.
+  static GemvConfig pick_nt_rows(c10::ScalarType dt, int64_t rows);
 
   // Halves vec until the matrix leading dim and storage offset are aligned.
   static GemvConfig clamp_vec(GemvConfig cfg, int64_t align);
