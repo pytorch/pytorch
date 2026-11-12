@@ -8,6 +8,8 @@
 
 namespace torch::fake_tensor {
 
+TORCH_PYTHON_API extern PyTypeObject PyCppFakeTensorModeType;
+
 // Accepts only the exact CppFakeTensorMode. Caller must hold the GIL.
 TORCH_PYTHON_API std::shared_ptr<c10::FakeTensorMode> getCppFakeTensorMode(
     py::handle py_mode);
@@ -16,8 +18,5 @@ TORCH_PYTHON_API std::shared_ptr<c10::FakeTensorMode> getCppFakeTensorMode(
 // Caller must hold the GIL.
 TORCH_PYTHON_API py::object getCppFakeTensorModePyObj(
     const std::shared_ptr<c10::FakeTensorMode>& mode);
-
-TORCH_PYTHON_API void initCppFakeTensorMode(PyObject* module);
-TORCH_PYTHON_API bool isCppFakeTensorMode(py::handle obj);
 
 } // namespace torch::fake_tensor
