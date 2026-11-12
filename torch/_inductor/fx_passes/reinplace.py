@@ -26,6 +26,7 @@ from torch._inductor.fx_utils import (
 )
 from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
+    lowerings,
 )
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import (
@@ -262,7 +263,19 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     if scatter_always_uses_mutation(node):
         return True
 
-    if is_node_realized(inp) and is_node_realized(node):  # type: ignore[arg-type]
+    def is_realized_or_fallback(node: torch.fx.Node) -> bool:
+        if is_node_realized(node):
+            return True
+
+        # OpOverloads without a lowering (e.g. custom ops) become FallbackKernel
+        # buffers, which is_node_realized() misses. HOPs may lower differently.
+        return (
+            node.op == "call_function"
+            and isinstance(node.target, torch._ops.OpOverload)
+            and node.target not in lowerings
+        )
+
+    if is_realized_or_fallback(inp) and is_node_realized(node):  # type: ignore[arg-type]
         return True
 
     # If the output is copied back into the input, this forces both to be
