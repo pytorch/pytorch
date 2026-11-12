@@ -8,6 +8,7 @@
 #include <dnnl.hpp>
 #include <ATen/native/mkldnn/detail/Attr.h>
 #include <ATen/native/mkldnn/detail/Tensor.h>
+#include <ATen/native/mkldnn/detail/Utils.h>
 
 #ifndef DNNL_PREREQ
 // oneDNN version check macro

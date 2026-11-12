@@ -590,7 +590,7 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
   }
 
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-  auto engine = ideep::engine::cpu_engine();
+  auto engine = mkldnn::Engine::cpu_engine();
   dnnl::matmul::primitive_desc primitive_desc = with_bias
       ? dnnl::matmul::primitive_desc(
             engine, src_desc, weights_desc, bias_desc, dst_desc, op_attr)
@@ -621,7 +621,7 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
     args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_scales_t});
   }
 
-  primitive.execute(ideep::stream::default_stream(), args);
+  primitive.execute(mkldnn::Stream::default_stream(), args);
   return out;
 }
 

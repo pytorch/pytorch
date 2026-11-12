@@ -557,7 +557,7 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
        result.strides().vec()},
       result.mutable_data_ptr());
   // Create primitive desc
-  auto engine = ideep::engine::cpu_engine();
+  auto engine = mkldnn::Engine::cpu_engine();
   mkldnn::Attr op_attr;
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto src_desc = src.get_desc();
@@ -581,7 +581,7 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
   // Create primitive and execute
   auto primitive = dnnl::matmul(prim_desc);
-  primitive.execute(ideep::stream::default_stream(), args);
+  primitive.execute(mkldnn::Stream::default_stream(), args);
 }
 
 template <typename a_type>

@@ -12,6 +12,10 @@ namespace at::native::mkldnn {
 // oneDNN tensor (memory descriptor, buffer, scales/zero points, workspace).
 using ITensor = ideep::tensor;
 
+// CPU engine (with ATen's allocator registered) and its default stream.
+using Engine = ideep::engine;
+using Stream = ideep::stream;
+
 } // namespace at::native::mkldnn
 
 #endif // AT_MKLDNN_ENABLED()

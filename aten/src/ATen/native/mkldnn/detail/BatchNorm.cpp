@@ -13,7 +13,7 @@ void batch_normalization_forward_inference(
     const ITensor& shift,
     ITensor& dst,
     float epsilon) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   const auto pd_flags = dnnl::normalization_flags::use_scale |
       dnnl::normalization_flags::use_shift |
       dnnl::normalization_flags::use_global_stats;
@@ -40,7 +40,7 @@ void batch_normalization_forward_inference(
   auto expected_mean = mean.reorder_if_differ_in(pd.mean_desc());
   auto expected_var = variance.reorder_if_differ_in(pd.variance_desc());
   dnnl::batch_normalization_forward(pd).execute(
-      ideep::stream::default_stream(),
+      Stream::default_stream(),
       {{DNNL_ARG_SRC, expected_src},
        {DNNL_ARG_SCALE, scale},
        {DNNL_ARG_SHIFT, shift},
@@ -58,7 +58,7 @@ void batch_normalization_forward_training(
     ITensor& mean,
     ITensor& variance,
     float epsilon) {
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   const auto pd_flags = dnnl::normalization_flags::use_scale |
       dnnl::normalization_flags::use_shift;
 
@@ -84,7 +84,7 @@ void batch_normalization_forward_training(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::batch_normalization_forward(pd).execute(
-      ideep::stream::default_stream(),
+      Stream::default_stream(),
       {{DNNL_ARG_SRC, expected_src},
        {DNNL_ARG_SCALE, scale},
        {DNNL_ARG_SHIFT, shift},
@@ -113,7 +113,7 @@ void batch_normalization_backward(
         dnnl_invalid_arguments,
         "DNNL does not support bf16/f16 backward on the platform with avx2_vnni_2");
   }
-  const auto& engine = ideep::engine::cpu_engine();
+  const auto& engine = Engine::cpu_engine();
   const auto pd_flags = dnnl::normalization_flags::use_scale |
       dnnl::normalization_flags::use_shift;
   // Workaround for oneDNN issue intel/mkl-dnn#588 (kept from ideep).
@@ -151,7 +151,7 @@ void batch_normalization_backward(
   ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::batch_normalization_backward(pd).execute(
-      ideep::stream::default_stream(),
+      Stream::default_stream(),
       {{DNNL_ARG_SRC, expected_src},
        {DNNL_ARG_DIFF_DST, expected_diff_dst},
        {DNNL_ARG_SCALE, scale},

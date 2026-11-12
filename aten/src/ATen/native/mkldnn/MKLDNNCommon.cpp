@@ -253,7 +253,7 @@ mkldnn::ITensor itensor_from_const_tensor(const Tensor& tensor) {
 }
 
 int set_verbose(int level) {
-    return ideep::utils::set_verbose(level);
+    return mkldnn::utils::set_verbose(level);
 }
 
 TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {

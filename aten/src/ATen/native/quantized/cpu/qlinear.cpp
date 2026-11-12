@@ -847,7 +847,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
     return output;
   }
   auto output_ideep_data_type = is_input_qint8 ? dnnl::memory::data_type::s8 : dnnl::memory::data_type::u8;
-  auto ideep_lowp_kind = is_input_qint8 ? ideep::s8s8 : ideep::u8s8;
+  auto ideep_lowp_kind = is_input_qint8 ? at::native::mkldnn::s8s8 : at::native::mkldnn::u8s8;
   at::native::mkldnn::ITensor y({dst_dims, output_ideep_data_type,
                    {output.strides().cbegin(), output.strides().cend()}},
                   output.data_ptr());
@@ -1165,7 +1165,7 @@ static at::Tensor linear_int8_with_onednn_weight(
           auto other_2d = other_ref.reshape({-1, other_ref.size(dim - 1)});
           params.src1->set_data_handle(other_2d.data_ptr());
         }
-        params.primitive.execute(ideep::stream::default_stream(), params.args);
+        params.primitive.execute(at::native::mkldnn::Stream::default_stream(), params.args);
         return dim == 2 ? output : output.resize_(params.output_size);
       }
     }
@@ -1307,7 +1307,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   if (input_zero_point != 0) {
     op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
   }
-  op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, ideep::utils::op_scale_mask(weight_scales.numel()));
+  op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, at::native::mkldnn::utils::op_scale_mask(weight_scales.numel()));
   if (output_scale != 1.0f) {
     op_attr.set_scales_mask(DNNL_ARG_DST, 0);
   }
@@ -1315,7 +1315,7 @@ static at::Tensor linear_int8_with_onednn_weight(
     op_attr.set_zero_points_mask(DNNL_ARG_DST, 0);
   }
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-  auto engine = ideep::engine::cpu_engine();
+  auto engine = at::native::mkldnn::Engine::cpu_engine();
   auto primitive_desc = with_bias ?
       dnnl::matmul::primitive_desc(engine, src_desc, weights_desc, bias_desc, dst_desc, op_attr) :
       dnnl::matmul::primitive_desc(engine, src_desc, weights_desc, dst_desc, op_attr);
@@ -1355,7 +1355,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   if (binary_post_op == "add") {
     args.insert({DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1, src1});
   }
-  primitive.execute(ideep::stream::default_stream(), args);
+  primitive.execute(at::native::mkldnn::Stream::default_stream(), args);
   // Update cache if needed
   if (allow_cache) {
     QlinearForwardParams params;

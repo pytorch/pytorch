@@ -430,7 +430,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
     // convolution_transpose_forward::expected_weights_desc() gives format [i, o, ...],
     // but ONEDNN requires [o, i, ...] for computation
     dims_iohw = w_desc.get_dims();
-    dims_giohw = with_groups ? ideep::utils::group_dims(dims_iohw, groups) : dims_iohw;
+    dims_giohw = with_groups ? at::native::mkldnn::utils::group_dims(dims_iohw, groups) : dims_iohw;
     std::vector<int64_t> perms(dims_giohw.size(), 0); // for permutation of weight
     std::iota(perms.begin(), perms.end(), 0);
     std::swap(perms[with_groups], perms[with_groups + 1]);
@@ -448,7 +448,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
   } else {
     w_tag = kSpatialDim == 2 ? dnnl::memory::format_tag::oihw : dnnl::memory::format_tag::oidhw;
   }
-  dnnl::memory::dims w_dims = with_groups ? ideep::utils::group_dims(w_desc.get_dims(), groups)
+  dnnl::memory::dims w_dims = with_groups ? at::native::mkldnn::utils::group_dims(w_desc.get_dims(), groups)
                                    : w_desc.get_dims();
   at::native::mkldnn::ITensor wgt = at::native::mkldnn::ITensor(
       at::native::mkldnn::ITensor::desc({w_dims, dnnl::memory::data_type::s8, w_tag}, groups),
@@ -613,7 +613,7 @@ at::Tensor _qconv_prepack_onednn(
   } else {
     w_tag = kSpatialDim == 2 ? dnnl::memory::format_tag::oihw : dnnl::memory::format_tag::oidhw;
   }
-  dnnl::memory::dims wei_dims = with_groups ? ideep::utils::group_dims(w_desc.get_dims(), groups)
+  dnnl::memory::dims wei_dims = with_groups ? at::native::mkldnn::utils::group_dims(w_desc.get_dims(), groups)
                                   : w_desc.get_dims();
   at::native::mkldnn::ITensor wgt = at::native::mkldnn::ITensor(
       at::native::mkldnn::ITensor::desc({wei_dims, w_dnnl_dtype, w_tag}, groups),
