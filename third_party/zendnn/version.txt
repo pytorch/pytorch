@@ -1,0 +1,10 @@
+# Upstream source of each file in this directory. oneDNN v3.14.1
+# (third_party/ideep/mkl-dnn, cmake/options.cmake) downloads ZenDNN v6.1.2
+# at build time, and ZenDNN downloads AOCL-DLP and AOCL-Utils. Recheck these
+# files when a oneDNN update changes ZENDNN_RELEASE_TAG.
+# THIRD-PARTY-NOTICES comes from the v6.1.2 release branch, which corrects
+# the title in the tagged file.
+LICENSE https://github.com/amd/ZenDNN.git f57927b6b032f5d8c8a56dbd86dcfca40c988a24
+THIRD-PARTY-NOTICES https://github.com/amd/ZenDNN.git 6b85212ed01907b4aaecf749af5e46063015dde2
+aocl-dlp/LICENSE https://github.com/amd/aocl-dlp.git 8c746244b76efe1626f57a01f7517e8bcc408610
+aocl-utils/License.txt https://github.com/amd/aocl-utils.git 621b256db4524239016b5bcfb8eb236d03bd2901
