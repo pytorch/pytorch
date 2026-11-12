@@ -2989,14 +2989,15 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             cfn(x).backward()
 
     def _shared_recompute_backend(
-        self, shared, fw_mms=None, bw_mms=None, bw_order=None
+        self, shared, fw_mms=None, bw_mms=None, operands=None, bw_order=None
     ):
         """aot_autograd backend asserting each graph makes ``shared`` shared
         recompute calls and, if given, runs fw_mms / bw_mms matmuls (counted
-        inside the shared subgraphs too), and runs the backward's shared calls
-        and matmuls in ``bw_order`` (e.g. ["recompute", "mm"]). Each backward
-        call must read what the forward's call read: the same primal or saved
-        value, or the same output of an earlier call."""
+        inside the shared subgraphs too), passes each call (in piece order) the
+        given number of ``operands``, and runs the backward's shared calls and
+        matmuls in ``bw_order`` (e.g. ["recompute", "mm"]). Each backward call
+        must read what the forward's call read: the same primal or saved value,
+        or the same output of an earlier call."""
         from torch._higher_order_ops import invoke_subgraph
 
         def piece(call):
@@ -3028,6 +3029,11 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
                 ]
                 if actual != order:
                     raise AssertionError(f"expected order {order}, got {actual}:\n{gm}")
+            if operands is not None:
+                calls = gm.graph.find_nodes(op="call_function", target=invoke_subgraph)
+                calls.sort(key=lambda n: int(piece(n).rsplit("_", 1)[1]))
+                if [len(n.args) - 2 for n in calls] != operands:
+                    raise AssertionError(f"expected {operands} operands in {gm}")
             if mms is not None:
                 actual = sum(
                     n.target is torch.ops.aten.mm.default
@@ -3516,11 +3522,10 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
     @torch._inductor.config.patch(force_disable_caches=True)
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_input_free_piece(self, device):
-        # The recompute is only constants (a factory op and its exp), which are
-        # copied into the pieces that read them, so it has no piece of its own;
-        # the backward reads the exp directly, which the log says.
-        from torch._functorch._aot_autograd import deterministic_recompute
-
+        # The backward reads the constant (a factory op and its exp) directly, so
+        # it's shared as a piece of its own, which reads no tensor input: its
+        # forward call goes after the last graph input, and Inductor lowers a
+        # call with no operands.
         def fn(x):
             return torch.utils.checkpoint.checkpoint(
                 lambda x: x * torch.full((16,), 0.5, device=x.device).exp(),
@@ -3529,11 +3534,9 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             )
 
         x = torch.randn(16, 16, device=device, requires_grad=True)
-        with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
-            _, codes = run_and_get_code(self._validate, fn, "inductor", x)
-        for code in codes:
-            self.assertNotIn("def recompute_", code)
-        self.assertIn("the backward reads it directly", logs.output[0])
+        _, codes = run_and_get_code(self._validate, fn, "inductor", x)
+        for code, side in zip(codes, ("fw", "bw"), strict=True):
+            self.assertEqual(len(shared_recompute_code(code, side)), 1)
 
     @parametrize("case", ["view", "saved_cat", "no_size_asserts"])
     @requires_gpu_and_triton
@@ -3727,6 +3730,9 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         # A tensor constant and flex_attention's score_mod are graph attributes
         # (get_attr). They are copied into the pieces that read them, so the
         # recompute reading them, and everything computed from it, is shared.
+        # The backward also reads the tensor constant directly, so it gets a
+        # piece of its own; flex_attention's block mask, which its backward
+        # reads too, is integers, the same in any lowering, so it stays copied.
         from torch.nn.attention.flex_attention import flex_attention
 
         def const_gn(x, w):
@@ -3771,8 +3777,11 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
                     _, code = run_and_get_code(lambda: compiled(x, w).sum().backward())
                     if backend == "inductor":
                         fw_code, bw_code = code
-                        self.assertEqual(len(shared_recompute_code(fw_code, "fw")), 1)
-                        self.assertEqual(len(shared_recompute_code(bw_code, "bw")), 1)
+                        pieces = {"const": 2, "flex": 1}[name]
+                        fw = shared_recompute_code(fw_code, "fw")
+                        self.assertEqual(len(fw), pieces)
+                        bw = shared_recompute_code(bw_code, "bw")
+                        self.assertEqual(len(bw), pieces)
                     self.assertEqual(x.grad, xe.grad, atol=1e-3, rtol=1e-3)
                     self.assertEqual(w.grad, we.grad, atol=1e-3, rtol=1e-3)
 
@@ -4004,6 +4013,52 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
                     torch.randn(s, device=device, requires_grad=True) for s in shapes
                 ]
                 self._validate(fn, self._shared_recompute_backend(1), *args)
+
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_constant_piece(self, device):
+        # The backward reads the constant table directly (the gradient of h in
+        # h * table), so table is shared as a piece of its own that the rest of
+        # the recompute reads, and the backward's table is the one the forward
+        # used. That piece has no tensor operands (with dynamic shapes, only a
+        # SymInt), which Inductor must still lower.
+        def table(h):
+            n = h.shape[-1]
+            return (torch.arange(n, device=h.device, dtype=h.dtype) / n).exp()
+
+        def read_by_backward(x, y):
+            h = torch.matmul(x, y)
+            return (h * table(h)).sin()
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                read_by_backward,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=save_mm_context_fn,
+            )
+
+        for backend in (self._shared_recompute_backend(2, operands=[0, 2]), "inductor"):
+            args = [
+                torch.randn(8, 8, device=device, requires_grad=True) for _ in range(2)
+            ]
+            self._validate(fn, backend, *args)
+        # With dynamic shapes, the table's piece takes the SymInt n.
+        dynamic = self._shared_recompute_backend(2, operands=[1, 2])
+        for backend in (dynamic, "inductor"):
+            torch._dynamo.reset()
+            args = [
+                torch.randn(8, 8, device=device, requires_grad=True) for _ in range(2)
+            ]
+            ref = [a.detach().clone().requires_grad_() for a in args]
+            fn(*ref).sum().backward()
+            compiled = torch.compile(fn, backend=backend, fullgraph=True, dynamic=True)
+            _, codes = run_and_get_code(lambda: compiled(*args).sum().backward())
+            if backend == "inductor":
+                for code, side in zip(codes, ("fw", "bw"), strict=True):
+                    self.assertEqual(len(shared_recompute_code(code, side)), 2)
+            for a, r in zip(args, ref):
+                self.assertEqual(a.grad, r.grad)
 
     @parametrize("case", ["plain", "sac", "benchmark_fusion"])
     @requires_gpu_and_triton
@@ -4264,6 +4319,128 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         finally:
             dist.destroy_process_group()
 
+    @parametrize("dynamic", [False, True])
+    @parametrize("mask", ["causal", "threshold"])
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_exact_constant_stays_copied(
+        self, device, mask, dynamic
+    ):
+        # The backward reads the mask directly too. A causal mask is the same in
+        # any lowering, also when a SymInt sizes it, so it stays copied into the
+        # region's piece; a threshold on float math could differ, so it is
+        # shared as a piece of its own.
+        def causal(x):
+            n = x.shape[0]
+            return torch.ones(n, n, dtype=torch.bool, device=x.device).tril()
+
+        def threshold(x):
+            n = x.shape[0]
+            return (torch.arange(n, device=x.device) / n).exp() > 1.5
+
+        make_mask = causal if mask == "causal" else threshold
+
+        def fn(x, w):
+            return torch.utils.checkpoint.checkpoint(
+                lambda x, w: (x @ w).sin().masked_fill(make_mask(x), 0.0),
+                x,
+                w,
+                use_reentrant=False,
+            )
+
+        x = torch.randn(8, 8, device=device, requires_grad=True)
+        w = torch.randn(8, 8, device=device, requires_grad=True)
+        backend = self._shared_recompute_backend(1 if mask == "causal" else 2)
+        with torch._dynamo.config.patch(assume_static_by_default=not dynamic):
+            self._validate(fn, backend, x, w)
+
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_moved_view(self, device):
+        # The table's piece goes right before the table's first reader, after
+        # the region's transpose and add; the region's piece reads it, so the
+        # transpose, a view that piece copies in, moves below its call, while
+        # the add it replaces still reads the transpose above the call.
+        def gn(x, w):
+            t = (torch.arange(x.shape[-1], device=x.device, dtype=x.dtype) / 8).exp()
+            a = (x @ w).t() + 1.0
+            return (a * t).cos()
+
+        def fn(x, w):
+            return torch.utils.checkpoint.checkpoint(gn, x, w, use_reentrant=False)
+
+        for backend in (self._shared_recompute_backend(2), "inductor"):
+            torch._dynamo.reset()
+            args = [
+                torch.randn(8, 8, device=device, requires_grad=True) for _ in range(2)
+            ]
+            self._validate(fn, backend, *args)
+
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_skipped_constant_piece(self, device):
+        # The constants the backward reads directly (a, a sorted table, and o,
+        # an exp of its outer product) reach each other through the outer
+        # product, which the policy saves, so their piece is left as
+        # partitioned; they are copied into the region's piece instead.
+        from torch._functorch._aot_autograd import deterministic_recompute
+
+        def gn(x, w):
+            table = (torch.arange(8, device=x.device, dtype=x.dtype) / 8).exp()
+            a = table.sort(descending=True)[0].view(-1, 1)
+            o = ((a @ a.t()) / 64).exp()
+            return (x @ w * o * a.t()).sin()
+
+        def fn(x, w):
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, w, use_reentrant=False, context_fn=save_mm_context_fn
+            )
+
+        args = [torch.randn(8, 8, device=device, requires_grad=True) for _ in range(2)]
+        with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
+            self._validate(fn, self._shared_recompute_backend(1), *args)
+        self.assertIn("depends on its own recompute", logs.output[0])
+
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_no_checkpoint(self, device):
+        # Without a checkpoint region, the pass leaves the graphs alone, even
+        # when the partitioner recomputes a constant the backward reads, which
+        # the log says.
+        from torch._functorch._aot_autograd import deterministic_recompute
+
+        def fn(x, w):
+            table = (torch.arange(8, device=x.device) / 8).exp()
+            return ((x @ w) * table).sin()
+
+        x = torch.randn(8, 8, device=device, requires_grad=True)
+        w = torch.randn(8, 8, device=device, requires_grad=True)
+        with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
+            self._validate(fn, self._shared_recompute_backend(0), x, w)
+        self.assertIn("the backward reads it directly", logs.output[0])
+
+    @parametrize("backend", ["aot_eager", "inductor"])
+    @parametrize("op", ["split", "max"])
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_multi_output_constant(self, device, op, backend):
+        # The backward reads one result of a multi-output op over a constant
+        # (scale, in h * scale's gradient). The op and all of its results are
+        # shared as a piece of their own, since a piece can't take or return a
+        # tuple: a view (split) and a reduction (max).
+        def gn(x, y):
+            table = (torch.arange(16, device=x.device, dtype=x.dtype) / 16).exp()
+            if op == "split":
+                scale, shift = table.split(8)
+            else:
+                scale, shift = table.view(2, 8).max(0)
+            return (torch.matmul(x, y) * scale + shift).sin()
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, y, use_reentrant=False, context_fn=save_mm_context_fn
+            )
+
+        if backend == "aot_eager":
+            backend = self._shared_recompute_backend(2)
+        args = [torch.randn(8, 8, device=device, requires_grad=True) for _ in range(2)]
+        self._validate(fn, backend, *args)
+
     @requires_gpu_and_triton
     @torch._inductor.config.patch(force_disable_caches=True)
     @torch._functorch.config.patch(deterministic_recompute=True)
@@ -4453,7 +4630,8 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
     def test_deterministic_recompute_symint_constant(self, device):
         # The cos table's length h.shape[-1] // 2 is SymInt arithmetic the
         # partitioner recomputes outside the region rather than saves, so the
-        # backward has no value of it to pass: the piece copies it in.
+        # backward has no value of it to pass: the table's piece (the backward
+        # reads the table directly) copies it in.
         def gn(x, w):
             h = x @ w
             c = (torch.arange(h.shape[-1] // 2, device=x.device).float() / 32).cos()
@@ -4471,8 +4649,8 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         _, (fw_code, bw_code) = run_and_get_code(
             lambda: compiled(x, w).sum().backward()
         )
-        self.assertEqual(len(shared_recompute_code(fw_code, "fw")), 1)
-        self.assertEqual(len(shared_recompute_code(bw_code, "bw")), 1)
+        self.assertEqual(len(shared_recompute_code(fw_code, "fw")), 2)
+        self.assertEqual(len(shared_recompute_code(bw_code, "bw")), 2)
         self.assertEqual(x.grad, xe.grad, atol=1e-3, rtol=1e-3)
         self.assertEqual(w.grad, we.grad, atol=1e-3, rtol=1e-3)
 
@@ -4481,9 +4659,9 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
     @torch._functorch.config.patch(deterministic_recompute=True)
     def test_deterministic_recompute_saved_symint(self, device):
         # The arange's length T // 2 is SymInt arithmetic the partitioner saves,
-        # since the backward reshapes a gradient with it. The piece takes it as
-        # an operand, and also the SymInt input T, which binds the symbol its
-        # sizes use.
+        # since the backward reshapes a gradient with it. The arange's piece (the
+        # backward reads it directly) takes it as an operand, and also the
+        # SymInt input T, which binds the symbol its sizes use.
         def gn(h0, w, T):
             h = h0 @ w
             c = torch.arange(T // 2, device=h.device).float()
@@ -4504,8 +4682,8 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         _, (fw_code, bw_code) = run_and_get_code(
             lambda: compiled(h0, w, t).sum().backward()
         )
-        self.assertEqual(len(shared_recompute_code(fw_code, "fw")), 1)
-        self.assertEqual(len(shared_recompute_code(bw_code, "bw")), 1)
+        self.assertEqual(len(shared_recompute_code(fw_code, "fw")), 2)
+        self.assertEqual(len(shared_recompute_code(bw_code, "bw")), 2)
         self.assertEqual(h0.grad, he.grad, atol=1e-3, rtol=1e-3)
         self.assertEqual(w.grad, we.grad, atol=1e-3, rtol=1e-3)
 
@@ -4697,7 +4875,9 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         # differ between the forward and the recompute however each lowers, so
         # the region is left as partitioned and the log says why. Integer
         # accumulation is exact in any order, and overwriting or taking the max
-        # doesn't accumulate: those regions are shared.
+        # doesn't accumulate: those regions are shared. (The constant that
+        # index_reduce's and the max's backward reads directly is shared as a
+        # piece of its own either way.)
         from torch._functorch._aot_autograd import deterministic_recompute
 
         rep = torch.tensor([0, 1, 0, 1], device=device)
@@ -4712,27 +4892,35 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             counts = full(x, 0, rows=1).long().scatter_add(1, rep[None], ones)
             return x * counts.sum()
 
-        gn, shared = {
-            "index_add": (lambda x: full(x, 0.0).index_add(0, rep, x), 0),
+        gn, shared, skipped = {
+            "index_add": (lambda x: full(x, 0.0).index_add(0, rep, x), 0, True),
             "index_reduce": (
                 lambda x: full(x, 1.0).index_reduce(0, rep, x, "prod"),
-                0,
+                1,
+                True,
             ),
             "index_put": (
                 lambda x: full(x, 0.0).index_put((rep,), x, accumulate=True),
                 0,
+                True,
             ),
-            "scatter_add": (lambda x: full(x, 0.0).scatter_add(0, rep2d, x), 0),
-            "histc": (lambda x: x * torch.histc(x * 2, bins=4).max(), 0),
-            "cumsum": (lambda x: x.cumsum(0), 0),
-            "int_scatter_add": (int_scatter_add, 1),
+            "scatter_add": (
+                lambda x: full(x, 0.0).scatter_add(0, rep2d, x),
+                0,
+                True,
+            ),
+            "histc": (lambda x: x * torch.histc(x * 2, bins=4).max(), 0, True),
+            "cumsum": (lambda x: x.cumsum(0), 0, True),
+            "int_scatter_add": (int_scatter_add, 1, False),
             "index_put_overwrite": (
                 lambda x: full(x, 0.0, rows=4).index_put((uniq,), x),
                 1,
+                False,
             ),
             "scatter_amax": (
                 lambda x: full(x, 0.0).scatter_reduce(0, rep2d, x, "amax"),
-                1,
+                2,
+                False,
             ),
         }[op]
 
@@ -4743,7 +4931,7 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 
         x = torch.randn(4, 8, device=device, requires_grad=True)
         backend = self._shared_recompute_backend(shared)
-        if shared:
+        if not skipped:
             self._validate(fn, backend, x)
             return
         with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
