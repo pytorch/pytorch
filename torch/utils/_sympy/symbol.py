@@ -53,6 +53,9 @@ class SymT(Enum):
     VIEW = auto()
     # Alternate (non-modular) indexing used in halide kernels
     HALIDE = auto()
+    # Inductor: JaggedRange, a reduction range whose extent inner_fn sets with
+    # ops.register_jagged_range
+    JAGGED_RANGE = auto()
 
 
 # Invariant: there must not be a prefix which is a prefix of another string,
@@ -78,6 +81,7 @@ prefix_str = {
     SymT.INDIRECT: "indirect",  # false aliasing?
     SymT.VIEW: "view",
     SymT.HALIDE: "h",
+    SymT.JAGGED_RANGE: "j",
 }
 
 

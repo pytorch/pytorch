@@ -1097,7 +1097,7 @@ class Loops(IRNode):
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        if any(isinstance(size, JaggedRange) for size in self.ranges):
+        if any(isinstance(s, JaggedRange) for s in free_symbols(self.ranges)):
             raise AssertionError(
                 f"JaggedRange must be a reduction range: {self.ranges}"
             )
