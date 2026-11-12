@@ -519,6 +519,12 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
       irb_(getContext()),
       kernel_func_name_(std::move(kernel_func_name)),
       bufsExtAlloc_(ExternalAllocBufFinder::find(stmt)) {
+#if LLVM_VERSION_MAJOR >= 24
+  // LLVM 24 uses IR-level contraction flags instead of AllowFPOpFusion.
+  llvm::FastMathFlags fast_math_flags;
+  fast_math_flags.setAllowContract(true);
+  irb_.setFastMathFlags(fast_math_flags);
+#endif
   if (!triple) {
     triple = LLVMTargetTriple();
   }
@@ -2718,7 +2724,11 @@ void LLVMCodeGenImpl::visit(const AllocatePtr& v) {
     }
   }
 
-#if LLVM_VERSION_MAJOR > 17
+#if LLVM_VERSION_MAJOR >= 24
+  irb_.SetInsertPoint(irb_.GetInsertBlock());
+  llvm::Instruction* I = irb_.CreateMalloc(LongTy_, size, nullptr, nullptr, "");
+  varToVal_[v->buffer_var()] = I;
+#elif LLVM_VERSION_MAJOR > 17
   irb_.SetInsertPoint(irb_.GetInsertBlock());
   llvm::Instruction* I = irb_.CreateMalloc(
       LongTy_, dtypeToLLVM(v->dtype()), size, nullptr, nullptr, "");
@@ -2895,7 +2905,11 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   // Take a look at the PassBuilder constructor parameters for more
   // customization, e.g. specifying a TargetMachine or various debugging
   // options.
+#if LLVM_VERSION_MAJOR >= 24
+  llvm::PassBuilder PB(M.getContext(), &TM);
+#else
   llvm::PassBuilder PB(&TM);
+#endif
 
 #if LLVM_VERSION_MAJOR >= 18 && LLVM_VERSION_MAJOR < 19
   TM.registerPassBuilderCallbacks(PB, false);

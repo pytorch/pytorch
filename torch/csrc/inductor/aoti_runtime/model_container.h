@@ -297,7 +297,7 @@ class AOTInductorModelContainer {
           pool_.return_model_to_available(model);
           throw;
         }
-        pool_.return_model_to_pending(model);
+        pool_.return_model_to_in_flight(model);
       }
       constants_folding_lk.unlock();
       model_lk.lock();
@@ -317,7 +317,7 @@ class AOTInductorModelContainer {
       throw;
     }
 
-    pool_.return_model_to_pending(model);
+    pool_.return_model_to_in_flight(model);
   }
 
   // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
@@ -474,7 +474,7 @@ class AOTInductorModelContainer {
         pool_.return_model_to_available(model);
         throw;
       }
-      pool_.return_model_to_pending(model);
+      pool_.return_model_to_in_flight(model);
     } else {
       std::shared_lock model_lk(model_exec_mutex_);
       [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
@@ -485,6 +485,13 @@ class AOTInductorModelContainer {
       auto inactive_map = inactive().map;
       auto inactive_array = inactive().array;
 
+      auto use_active_constants = [&] {
+        auto active_map = active().map;
+        auto active_array = active().array;
+        model->update_constants_map(
+            active_map, /* remap_constants_array= */ false);
+        model->update_constants_array(active_array);
+      };
       try {
         model->update_constants_map(
             inactive_map, /* remap_constants_array= */ false);
@@ -496,19 +503,16 @@ class AOTInductorModelContainer {
             /* use_inactive = */ true,
             /* validate_full_update = */ false);
 
-        // Swap back the model's constants mapping
-        auto active_map = active().map;
-        auto active_array = active().array;
-        model->update_constants_map(
-            active_map, /* remap_constants_array= */ false);
-        model->update_constants_array(active_array);
+        use_active_constants();
         const_folded = ConstantState::FOLDED;
       } catch (...) {
+        // Otherwise the model would keep running with the inactive constants.
+        use_active_constants();
         pool_.return_model_to_available(model);
         throw;
       }
 
-      pool_.return_model_to_pending(model);
+      pool_.return_model_to_in_flight(model);
     }
   }
 
@@ -606,10 +610,10 @@ class AOTInductorModelContainer {
           continue;
         }
 
-        AtenTensorHandle tensor;
+        AtenTensorHandle tensor = nullptr;
         if (it == constants_map.end()) {
-          aoti_torch_clone(
-              source.map->find(constant_name)->second.get(), &tensor);
+          AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_clone(
+              source.map->find(constant_name)->second.get(), &tensor));
         } else {
           tensor = it->second;
           // Null the source slot before RAIIAtenTensorHandle takes ownership so
@@ -628,6 +632,8 @@ class AOTInductorModelContainer {
           kv.second = nullptr;
         }
       }
+      // The array borrows from the map, whose replaced entries are freed.
+      target.update_array(&model);
       throw;
     }
     target.update_array(&model);
@@ -655,6 +661,11 @@ class AOTInductorModelContainer {
     AOTI_RUNTIME_CHECK(
         !(allow_h2d_copy && user_managed),
         "update_constant_buffer: allow_h2d_copy is not supported with user_managed");
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && defined(USE_MTIA)
+    AOTI_RUNTIME_CHECK(
+        user_managed,
+        "update_constant_buffer: MTIA supports only user_managed constant updates");
+#endif
 
     int32_t cpu_device_type = aoti_torch_device_type_cpu();
     auto num_constants = model.num_constants();
