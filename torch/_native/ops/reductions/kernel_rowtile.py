@@ -20,7 +20,7 @@ from .inner_tree_plan import _INNER_TREE_ENV
 from .kernel_general import (  # safe: kernel_general imports us only lazily
     _SM107_CCS,
     _SM107_DTYPES,
-    _SM107_LARGE_SIZES,
+    _SM107_FULL_SIZES,
     _SM107_MIN_SIZE,
     _SM107_ONE_FIELD,
     _sm107_outputs,
@@ -243,7 +243,7 @@ def select_full_itree_arch(
         cc not in _SM107_CCS
         or dtype not in _SM107_DTYPES
         or M != 1
-        or N * dtype.itemsize not in _SM107_LARGE_SIZES
+        or N * dtype.itemsize not in _SM107_FULL_SIZES
         or not contiguous
         or alignment < tile.TRANSFER_ALIGNMENT
     ):
@@ -256,7 +256,7 @@ def select_full_itree_arch(
     fp32_sum = nfields == 1 and trait_type is SumOps and dtype == torch.float32
     if fp32_sum or nfields == 2 and trait_type is ArgMaxOps:
         return _SM107_FULL_ITREE_ARCH
-    if nfields != 3:
+    if nfields != 3 or welford_outs == 0:
         return None
     return _SM107_FULL_ITREE_ARCH._replace(
         combine_unroll=64, uniform_count=True, combine_weights=True
@@ -366,7 +366,7 @@ def select_row_order(
     simple = trait_type in _SM107_ONE_FIELD and nfields == 1
     if not (simple or argmax or welford):
         return "linear"
-    large = size in _SM107_LARGE_SIZES
+    large = size in _SM107_FULL_SIZES
     if N == 1024:
         inner = welford or (dtype == torch.bfloat16 and argmax)
     elif N == 256:

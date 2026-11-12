@@ -568,7 +568,7 @@ class TestColTileHost(TestCase):
             (dict(vec=4), "column groups need vec=1, got vec=4$"),
             (
                 dict(trait=T.SumOps(acc=cutlass.Float32)),
-                "column groups need a trait with has_combine_equal, got SumOps$",
+                "column groups need a trait with has_combine_equal, got SumOps \\(",
             ),
         ],
         name_fn=lambda case, error: "_".join(case),
@@ -1587,12 +1587,14 @@ class TestOrderedColDevice(TestCase):
                 launched = {tuple(map(f.get, names)) for f in ops}
                 self.assertEqual(launched, {cfg[1:4]})
             # The split plan declines where cc has no entry for its trait and no fallback,
-            # given or from the device query.
+            # given or from the device query, even where cc has entries for other traits.
             got = ct.reduce_ordered_col(T.SumOps(), "select_cc2", x, f32, 1, cc=(2, 0))
+            self.assertIsNone(got)
+            mean = T.MeanOps()
+            got = ct.reduce_ordered_col(mean, "select_mean_cc1", x, f32, 1, cc=(1, 0))
             self.assertIsNone(got)
             # Without an entry, a split view on _ORDERED_COL_CCS takes the selector's
             # 32-column fallback.
-            mean = T.MeanOps()
             got = ct.reduce_ordered_col(mean, "select_mean", x, f32, 1)
             if cc not in kg._ORDERED_COL_CCS:
                 self.assertIsNone(got)

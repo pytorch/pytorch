@@ -3,10 +3,11 @@
 Conditions check capability and fall through to ATen for unsupported calls.
 Supported layouts use a fast path or the general TensorIterator decode. Full prod and
 the Python out= overloads (sum.IntList_out, mean.out, mean.dtype_out, amax.out,
-amin.out, prod.int_out) are not registered here, so they stay on ATen, whose results
-can differ bitwise from the served overloads', unless PYTORCH_SUM_INNER_TREE has
-cutedsl_impl register sum.IntList_out and prod.int_out. aten::sum.out (the dtype-only
-at::sum_out) routes through sum.default to sum.dim_IntList and is served.
+amin.out, prod.int_out) are not registered here. Full prod stays on ATen, as do the out=
+overloads without native AOT (below), and ATen's results can differ bitwise from the
+served overloads', unless PYTORCH_SUM_INNER_TREE has cutedsl_impl register
+sum.IntList_out and prod.int_out. aten::sum.out (the dtype-only at::sum_out) routes
+through sum.default to sum.dim_IntList and is served.
 
 Of the launch policies, these one-field operations reach only the one-field rules;
 index and Welford rules serve direct kernel calls.
@@ -18,6 +19,12 @@ need the full overload: disable_operations("sum") matches nothing. Disabling
 sum.dim_IntList or prod.dim_int also drops PYTORCH_SUM_INNER_TREE's registration of that
 symbol. cutedsl.disabled() does the same as enabled = False while its block runs
 (process-wide), along with native AOT for every DSL.
+
+Builds with the native-AOT reduction kernels (aot.py) also serve covered calls from them,
+including out= calls of the overloads above (mean.dtype_out as a full reduction), which
+then follow PYTORCH_NATIVE_INNER_TREE. Only torch._native.set_aot_enabled(False),
+TORCH_DISABLE_NATIVE_AOT=1 and cutedsl.disabled() turn those kernels off;
+cutedsl.enabled = False, disable_operations and TORCH_DISABLE_NATIVE_JIT=1 do not.
 
 PYTORCH_NATIVE_INNER_TREE also orders served calls: a user who asks for the inner-tree
 order gets it, and serving an unordered request in that order is fine. The condition
@@ -53,7 +60,7 @@ _Dim: TypeAlias = int | Sequence[int] | None
 _Red: TypeAlias = set[int] | None
 
 
-# Compute-capability majors this family's kernels have been run on: Hopper and Blackwell.
+# Compute-capability majors served by default: Hopper and Blackwell.
 _ARCH_MAJORS = (9, 10)
 
 _SUPPORTED_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
