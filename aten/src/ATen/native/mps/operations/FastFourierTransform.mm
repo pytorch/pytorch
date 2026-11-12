@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ceil_div.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
@@ -145,19 +146,16 @@ enum class Table { W, W2, Chirp, ChirpFFT };
 
 Tensor table(Table kind, int64_t n, bool inverse = false) {
   using Key = std::tuple<Table, int64_t, bool>;
-  constexpr size_t kMaxSize = 4096;
+  constexpr size_t kMaxSize = 4096, kMaxBytes = 64 << 20;
   static std::mutex mutex;
   static std::list<std::pair<Key, Tensor>> usage_list;
   static std::map<Key, decltype(usage_list)::iterator> cache;
+  static size_t bytes = 0;
   std::lock_guard<std::mutex> guard(mutex);
   const Key key{kind, n, inverse};
   if (const auto it = cache.find(key); it != cache.end()) {
     usage_list.splice(usage_list.begin(), usage_list, it->second);
     return it->second->second;
-  }
-  if (usage_list.size() >= kMaxSize) {
-    cache.erase(usage_list.back().first);
-    usage_list.pop_back();
   }
   const auto k = kind == Table::W2
       ? at::cat({at::arange(kFFTTwiddleBlock, at::kDouble), at::arange(0, n, kFFTTwiddleBlock, at::kDouble)})
@@ -170,9 +168,16 @@ Tensor table(Table kind, int64_t n, bool inverse = false) {
   const auto b = kind == Table::ChirpFFT
       ? at::fft_fft(at::cat({c.conj(), at::zeros({M - 2 * n + 1}, c.options()), c.narrow(0, 1, n - 1).conj().flip(0)}))
       : c;
-  usage_list.emplace_front(key, b.to(at::device(kMPS).dtype(kComplexFloat)));
+  const auto t = b.to(at::device(kMPS).dtype(kComplexFloat));
+  usage_list.emplace_front(key, t);
   cache[key] = usage_list.begin();
-  return usage_list.front().second;
+  bytes += t.nbytes();
+  while (usage_list.size() > kMaxSize || bytes > kMaxBytes) {
+    bytes -= usage_list.back().second.nbytes();
+    cache.erase(usage_list.back().first);
+    usage_list.pop_back();
+  }
+  return t;
 }
 
 struct Dim {
@@ -230,6 +235,7 @@ struct Pass {
 // Encodes n-point transforms of the batch with the kernels whose offsets are of type index_t
 template <typename index_t>
 void launch_as(id<MTLComputeCommandEncoder> enc, const Batch& b, int64_t n, bool inv, const Pass& x) {
+  TORCH_CHECK_NOT_IMPLEMENTED(b.dims.size() <= c10::metal::max_ndim, "MPS FFT: too many batch dims: ", b.dims.size());
   const auto radix = x.global ? radices(x.global, kFFTGlobalRadices) : radices(n);
   const auto to_u32 = [](int64_t v) { return c10::checked_convert<uint32_t>(v, "uint32_t"); };
   const auto to_off = [](int64_t v) { return c10::checked_convert<index_t>(v, "offset"); };
@@ -508,6 +514,7 @@ bool needs_fp32(const Tensor& in, const Tensor& out, IntArrayRef dim, int64_t n)
 }
 
 double norm_scale(int64_t normalization, const Tensor& t, IntArrayRef dims) {
+  TORCH_CHECK(normalization >= 0 && normalization <= 2, "Unsupported normalization type ", normalization);
   const auto n = std::accumulate(dims.begin(), dims.end(), 1.0, [&](double a, int64_t d) { return a * t.size(d); });
   return std::pow(n, -0.5 * normalization); // fft_norm_mode: none, by_root_n, by_n
 }
@@ -525,6 +532,9 @@ Tensor _fft_r2c_mps(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 }
 
 Tensor _fft_c2c_mps(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
+  if (dim.empty()) {
+    return self.clone();
+  }
   auto out = at::empty(self.sizes(), self.options());
   return _fft_c2c_mps_out(self, dim, normalization, forward, out);
 }
@@ -646,7 +656,8 @@ Tensor& _fft_c2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
   if (dim.empty()) {
     return out.copy_(self);
   }
-  if (out.scalar_type() != self.scalar_type() || needs_fp32(self, out, dim, self.size(dim.back()))) {
+  const bool overlap = at::get_overlap_status(out, self) == at::MemOverlapStatus::Partial;
+  if (overlap || out.scalar_type() != self.scalar_type() || needs_fp32(self, out, dim, self.size(dim.back()))) {
     return out.copy_(_fft_c2c_mps(self.to(kComplexFloat), dim, normalization, forward));
   }
   const auto scale = norm_scale(normalization, self, dim);
