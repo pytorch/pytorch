@@ -2078,6 +2078,64 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         test(vmap(op), (torch.rand(B0, B1, 1),))
         test(vmap(op), (torch.rand(B1, 1, B0),), in_dims=2)
 
+    def test_inplace_view_ops(self):
+        # These ops change the metadata of the BatchedTensor in-place
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        B0, B1 = 7, 11
+
+        ops = (
+            lambda x: x.squeeze_(),
+            lambda x: x.squeeze_(0),
+            lambda x: x.squeeze_(-1),
+            lambda x: x.squeeze_(1),
+            lambda x: x.squeeze_((0, 2)),
+            lambda x: x.unsqueeze_(0),
+            lambda x: x.unsqueeze_(2),
+            lambda x: x.unsqueeze_(-1),
+            lambda x: x.transpose_(0, 2),
+            lambda x: x.transpose_(-1, 1),
+        )
+        for op in ops:
+            # Single vmap, various in_dims / out_dims
+            test(op, (torch.rand(B0, 1, 3, 1),))
+            test(op, (torch.rand(1, 3, B0, 1),), in_dims=2)
+            test(op, (torch.rand(1, B0, 3, 1),), in_dims=1, out_dims=1)
+            test(op, (torch.rand(1, 3, 1, B0),), in_dims=3)
+            # The batch dim must not be squeezed even if it has size 1
+            test(op, (torch.rand(1, 1, 3, 1),))
+
+            # Doubly nested vmap
+            test(vmap(op), (torch.rand(B0, B1, 1, 3, 1),))
+            test(vmap(op, in_dims=1), (torch.rand(1, B1, 3, B0, 1),), in_dims=3)
+
+        # The ops modify the BatchedTensor and return it
+        def op(x):
+            result = x.unsqueeze_(0).squeeze_(1).transpose_(0, 1)
+            self.assertTrue(result is x)
+            return x
+
+        test(op, (torch.rand(B0, 3, 1),))
+
+        # They shouldn't modify the tensor that was passed to vmap
+        x = torch.rand(B0, 1, 3)
+        result = vmap(lambda x: x.squeeze_(0).unsqueeze_(-1).transpose_(0, 1))(x)
+        self.assertEqual(result.shape, (B0, 1, 3))
+        self.assertEqual(x.shape, (B0, 1, 3))
+        self.assertEqual(result, x.squeeze(1).unsqueeze(-1).transpose(1, 2))
+
+        # Special case: scalar tensor
+        for op in (
+            lambda x: x.squeeze_(),
+            lambda x: x.squeeze_(0),
+            lambda x: x.squeeze_(-1),
+            lambda x: x.transpose_(0, -1),
+            lambda x: x.unsqueeze_(0),
+            lambda x: x.unsqueeze_(-1),
+        ):
+            test(op, (torch.rand(B0),))
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+            vmap(lambda x: x.squeeze_(1))(torch.rand(B0))
+
     def test_sum_dim(self):
         test = self._vmap_test
         B0, B1 = 5, 7
