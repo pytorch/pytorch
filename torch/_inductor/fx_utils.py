@@ -837,6 +837,19 @@ def get_node_storage(node: torch.fx.Node) -> int | None:
     return get_storage(node.meta["val"])
 
 
+def get_mutated_schema_args(
+    schema: torch._C.FunctionSchema,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> list[Any]:
+    """Arguments that the schema marks as written, without flattening."""
+    return [
+        arg
+        for schema_arg, arg in zip_schema(schema, args, kwargs)
+        if schema_arg.alias_info is not None and schema_arg.alias_info.is_write
+    ]
+
+
 def get_mutated_input_nodes(node: torch.fx.Node) -> list[torch.fx.Node]:
     """Tensor input nodes that node writes in place."""
     target: object = node.target
@@ -846,11 +859,7 @@ def get_mutated_input_nodes(node: torch.fx.Node) -> list[torch.fx.Node]:
     if is_user_kernel_mutation_hop(target):
         written = [node.kwargs["kwargs"]]
     elif isinstance(target, torch._ops.OpOverload) and target._schema.is_mutable:
-        written = [
-            arg
-            for schema_arg, arg in zip_schema(target._schema, args, node.kwargs)
-            if schema_arg.alias_info is not None and schema_arg.alias_info.is_write
-        ]
+        written = get_mutated_schema_args(target._schema, args, node.kwargs)
     else:
         return []
     return [x for x in pytree.tree_leaves(written) if isinstance(x, torch.fx.Node)]

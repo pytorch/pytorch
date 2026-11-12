@@ -28,6 +28,12 @@ from _suite_manifest import run_this_suite, TestTheSuiteIsWhole  # noqa: E402,F4
 REPO = "o/r"
 PR = 7
 ARGV = ["--repo", REPO, "--pr", str(PR), "--head-sha", "abc"]
+AUTHOR_CHECK = f"repos/{REPO}/collaborators/author/permission"
+
+
+def other_checks(api):
+    """Permission checks besides the one for the PR author, which every run makes."""
+    return [c for c in api.calls if "/collaborators/" in c and c != AUTHOR_CHECK]
 
 
 def user(login, kind="User"):
@@ -166,7 +172,7 @@ class TestCollect(unittest.TestCase):
         )
         self.assertFalse(out["truncated"])
 
-    def test_each_login_is_checked_once_and_bots_and_the_author_never(self):
+    def test_each_login_is_checked_once_and_bots_never(self):
         api = FakeApi(
             issue=[
                 comment("maint"),
@@ -179,18 +185,43 @@ class TestCollect(unittest.TestCase):
         )
         fpc.collect(api, REPO, PR)
         checks = [c for c in api.calls if "/collaborators/" in c]
-        self.assertEqual(checks, [f"repos/{REPO}/collaborators/maint/permission"])
+        self.assertEqual(
+            checks, [AUTHOR_CHECK, f"repos/{REPO}/collaborators/maint/permission"]
+        )
 
     def test_machine_accounts_registered_as_users_are_dropped(self):
         api = FakeApi(
             issue=[comment("pytorchmergebot")], maintainers={"pytorchmergebot"}
         )
         self.assertEqual(fpc.collect(api, REPO, PR)["items"], [])
-        self.assertFalse([c for c in api.calls if "/collaborators/" in c])
+        self.assertFalse(other_checks(api))
 
     def test_an_unknown_user_is_not_a_maintainer(self):
         api = FakeApi(issue=[comment("ghost")], unknown={"ghost"})
         self.assertEqual(fpc.collect(api, REPO, PR)["items"], [])
+
+    def test_the_author_is_flagged_when_they_are_a_maintainer(self):
+        out = fpc.collect(
+            FakeApi(issue=[comment("author")], maintainers={"author"}), REPO, PR
+        )
+        self.assertTrue(out["pr_author_is_maintainer"])
+        self.assertEqual([i["role"] for i in out["items"]], ["author"])
+        self.assertFalse(fpc.collect(FakeApi(), REPO, PR)["pr_author_is_maintainer"])
+
+    def test_a_failed_author_check_is_not_a_maintainer_and_not_fatal(self):
+        api = FakeApi(issue=[comment("maint")], maintainers={"maint"})
+        real = api.__call__
+
+        def flaky(endpoint, body=None):
+            if endpoint == AUTHOR_CHECK:
+                raise RuntimeError("HTTP 502")
+            return real(endpoint, body)
+
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            out = fpc.collect(flaky, REPO, PR)
+        self.assertFalse(out["pr_author_is_maintainer"])
+        self.assertEqual([i["author"] for i in out["items"]], ["maint"])
+        self.assertIn("could not check the PR author's access", err.getvalue())
 
     def test_empty_reviews_are_dropped_unless_they_request_changes(self):
         reviews = [
@@ -442,7 +473,7 @@ class TestEarlierAutomatedFindings(unittest.TestCase):
         self.assertEqual(out["items"][2]["in_reply_to_id"], 10)
         # Of the review bodies, only the latest marked one comes in.
         self.assertEqual(out["items"][0]["kind"], "review")
-        self.assertFalse([c for c in api.calls if "/collaborators/" in c])
+        self.assertFalse(other_checks(api))
 
     def test_the_marker_and_author_match_post_review(self):
         import post_review
@@ -937,7 +968,7 @@ class TestReactions(unittest.TestCase):
             out = fpc.collect(api, REPO, PR)
         (item,) = out["items"]
         self.assertTrue(out["reactions_truncated"])
-        checks = [c for c in api.calls if "/collaborators/" in c]
+        checks = other_checks(api)
         # maint, from its comment, plus three reactors.
         self.assertEqual(len(checks), 4)
         self.assertEqual(
