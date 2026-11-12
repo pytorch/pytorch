@@ -65,6 +65,7 @@ from ..ir import (
     FixedLayout,
     IRNode,
     MutationLayoutSHOULDREMOVE,
+    Reduction,
     ReinterpretView,
 )
 from ..loop_body import MemoryUsageType
@@ -75,6 +76,7 @@ from ..utils import (
     sympy_product,
     sympy_subs,
     upcast_compute_type,
+    use_helion_native_matmul,
 )
 from ..virtualized import V
 from .common import CSEVariable, OpOverrides, PythonPrinter
@@ -384,17 +386,27 @@ REDUCTIONS: dict[str, Callable[[torch.dtype], bool | float | int]] = {
 
 
 def is_helion_matmul(node: BaseSchedulerNode) -> bool:
+    """Whether `node` has a native matmul that was lowered for a Helion kernel.
+
+    It asks use_helion_native_matmul() as the lowering did. A native matmul
+    from config.triton.native_matmul stays Triton: only the Helion lowering
+    realizes the operands that HelionKernel reads by tile, and
+    a.permute(1, 0, 2).reshape(40, 64) @ b would fail with
+        NotImplementedError: Cannot read a Helion dot operand at 8*yindex + 320*((r0_index//8)) + (ModularIndexing(r0_index, 1, 8))
+    """
     # is_native_matmul() asserts on templates, e.g. flex_attention in the graph:
     # AssertionError: type(self.node)=<class 'torch._inductor.ir.TritonTemplateBuffer'>
-    # A native matmul from config.triton.native_matmul stays Triton: only the
-    # Helion lowering realizes the operands that HelionKernel reads by tile, and
-    # a.permute(1, 0, 2).reshape(40, 64) @ b would fail with
-    #   NotImplementedError: Cannot read a Helion dot operand at 8*yindex + 320*((r0_index//8)) + (ModularIndexing(r0_index, 1, 8))
-    return (
-        config.helion.native_matmul
-        and not node.is_template()
-        and node.is_native_matmul()
-    )
+    if node.is_template():
+        return False
+    for snode in node.get_nodes():
+        if snode.is_native_matmul():
+            buffer = cast(ComputedBuffer, snode.node)
+            (k,) = buffer.get_reduction_size()
+            dtype = cast(Reduction, buffer.data).src_dtype
+            return use_helion_native_matmul(
+                buffer.get_device(), dtype, buffer.get_size(), k
+            )
+    return False
 
 
 @dataclass(frozen=True)
@@ -1251,6 +1263,9 @@ class HelionScheduling(TritonScheduling):
         for node in nodes:
             if not isinstance(node, SchedulerNode) or node.is_template():
                 why("Helion matmul kernel fuses only scheduler nodes")
+                return False
+            if node.is_native_matmul() and not is_helion_matmul(node):
+                why("Helion matmul kernel does not fuse a Triton native matmul")
                 return False
             if unsupported := OrderedSet(node._body.op_counts) - HELION_OPS:
                 why("Helion kernels do not support %s", unsupported)

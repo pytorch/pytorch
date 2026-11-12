@@ -5309,9 +5309,11 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         # Combo kernels are Triton; Helion matmul kernels stay standalone. A
         # combo kernel of (a @ b, a.sin(), b.cos()) cannot emit the dot:
         #   AssertionError: expected native matmul kernel
-        if config.helion.enabled and config.helion.native_matmul:
+        if config.helion.enabled:
+            from .codegen.helion import is_helion_matmul
+
             filtered_nodes = [
-                node for node in filtered_nodes if not node.is_native_matmul()
+                node for node in filtered_nodes if not is_helion_matmul(node)
             ]
 
         # Keep strict reductions standalone so their planned R0_BLOCK cannot change.
@@ -7582,18 +7584,14 @@ class Scheduler:
         if not config.benchmark_fusion and not is_multi_template:
             return FusionResult.fuse(True)
 
-        if (
-            config.helion.enabled
-            and config.helion.native_matmul
-            and any(
-                not node.is_template() and node.is_native_matmul()
-                for node in (node1, node2)
-            )
-        ):
+        if config.helion.enabled:
+            from .codegen.helion import is_helion_matmul
+
             # Fusion benchmarking compiles Triton kernels, so it cannot measure
             # a Helion matmul kernel; keep the fusion. With benchmark_fusion it
             # would fail with AttributeError: module '...' has no attribute 'get_args'.
-            return FusionResult.fuse(True)
+            if is_helion_matmul(node1) or is_helion_matmul(node2):
+                return FusionResult.fuse(True)
 
         # Staged reductions cannot be represented by generic benchmark codegen.
         # Initial standalone candidates need backend planning because their
