@@ -466,10 +466,9 @@ def _wrap(kernel, mutates_args):
     """wrap_cutedsl(kernel, mutates_args=mutates_args) for the wrappers that most tests
     share as module globals: Dynamo must handle a global TraceableCuteDSLKernelWrapper,
     and the wrappers are reused across tests, between which torch._dynamo.reset() runs
-    (it resets the Triton kernel side table; the CuTeDSL records these wrappers hold
-    must keep resolving). They are built at import, so if wrap_cutedsl raises, the
-    result raises its error when called instead: only the tests that use a wrapper
-    fail, not every test of this file."""
+    (it clears the side tables; a wrapper adds its record again when called). They are
+    built at import, so if wrap_cutedsl raises, the result raises its error when called
+    instead: only the tests that use a wrapper fail, not every test of this file."""
     try:
         return wrap_cutedsl(kernel, mutates_args=mutates_args)
     except Exception as e:
@@ -1988,9 +1987,10 @@ def forward(self, x_1, y_1):
             cutedsl_kernel_side_table.add_kernel(CuteDSLKernel(add_kernel, "unknown")),
             idx,
         )
-        # torch._dynamo.reset() resets Triton's table, not this one.
+        # torch._dynamo.reset() clears this table, as it does Triton's.
         torch._dynamo.reset()
-        self.assertEqual(cutedsl_kernel_side_table.get_kernel(idx), record)
+        with self.assertRaisesRegex(AssertionError, "not found"):
+            cutedsl_kernel_side_table.get_kernel(idx)
 
 
 def _is_tensor_node(v):
@@ -2013,6 +2013,26 @@ class CuteDSLWrapTests(TestCase):
     """wrap_cutedsl: eager launches, make_fx / non-strict export capture, errors."""
 
     hw_classification = HardwareClassification.CUDA
+
+    def test_wrapper_registers_its_kernel_after_dynamo_reset(self):
+        # torch._dynamo.reset() clears the side table; a wrapper made before it adds
+        # its record again when called, eagerly and under make_fx.
+        w = wrap_cutedsl(add_kernel, mutates_args=["mOut"])
+        x, y = _rand(1000), _rand(1000)
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            w(x, y, out, x.numel())
+            return out
+
+        torch._dynamo.reset()
+        self.assertEqual(f(x, y), x + y)
+        self.assertEqual(
+            cutedsl_kernel_side_table.get_kernel(w.kernel_idx),
+            CuteDSLKernel(add_kernel, ("mOut",)),
+        )
+        torch._dynamo.reset()
+        self.assertEqual(make_fx(f)(x, y)(x, y), x + y)
 
     def test_wrap_cutedsl_mutates_args_iterator(self):
         # A one-shot iterable is read once, not consumed by its validation: the
@@ -3710,7 +3730,7 @@ class CuteDSLDynamoTests(TestCase):
 
     def test_object_constant_holding_a_tensor_graph_breaks(self):
         # A tensor in a tuple made in the region would be baked into the side table,
-        # which is never reset and so also keeps it alive: the call graph-breaks,
+        # which keeps it alive until torch._dynamo.reset(): the call graph-breaks,
         # with the error of the side table's walk, as a user error.
         w_spec = wrap_cutedsl(spec_scale_kernel, mutates_args=["mOut"])
 
@@ -4126,30 +4146,22 @@ def forward(self, x, y):
         self.assertEqual(decomposed.graph_signature.user_inputs_to_mutate, {})
 
     @parametrize("strict", [False, True])
-    def test_later_strict_export_keeps_earlier_programs_valid(self, strict):
-        # Strict export runs Dynamo, which resets per-process tables (the Triton
-        # kernel side table is reset by torch._dynamo.reset()). A program exported
-        # earlier must keep launching its own kernel, not whatever now sits at its
-        # kernel_idx.
+    def test_strict_export_after_reset(self, strict):
+        # torch._dynamo.reset(), which strict export also runs, clears the side
+        # tables: a program exported after it, through a wrapper made before it,
+        # launches its own kernel. One exported before it does not (see the TODO in
+        # torch._dynamo.reset()).
         class Add(torch.nn.Module):
             def forward(self, x, y):
                 out = torch.empty_like(x)
                 add_w(x, y, out, x.numel())
                 return out
 
-        class Scale(torch.nn.Module):
-            def forward(self, x):
-                y = x.clone()
-                scale_inplace_w(y, y.numel())
-                return y
-
         x, y = _rand(1000), _rand(1000)
-        ep1 = torch.export.export(Add(), (x, y), strict=strict)
         torch._dynamo.reset()
-        ep2 = torch.export.export(Scale(), (x,), strict=True)
-        self.assertEqual(ep1.module()(x, y), x + y)
-        self.assertEqual(ep1.run_decompositions().module()(x, y), x + y)
-        self.assertEqual(ep2.module()(x), 2 * x)
+        ep = torch.export.export(Add(), (x, y), strict=strict)
+        self.assertEqual(ep.module()(x, y), x + y)
+        self.assertEqual(ep.run_decompositions().module()(x, y), x + y)
 
     def test_kernel_output_in_autograd_graph(self):
         # The launch has no derivative: its output enters the autograd graph as a
