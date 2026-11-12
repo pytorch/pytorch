@@ -19,13 +19,14 @@ restoring state changes.
 """
 
 import contextlib
+import functools
 import inspect
 import logging
 import types
 import warnings
 from collections.abc import Callable, Sequence, Sized
 from contextlib import AbstractContextManager, ExitStack
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch._C
 from torch._dynamo import config
@@ -35,14 +36,22 @@ from torch._logging import warning_once
 from .. import graph_break_hints, variables
 from ..bytecode_transformation import create_call_function
 from ..exc import unimplemented
-from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GlobalStateSource
+from ..guards import get_verbose_code_parts, GuardBuilder, install_guard
+from ..source import (
+    AttrSource,
+    CallFunctionNoArgsSource,
+    ConstantSource,
+    get_global_source_name,
+    get_local_source_name,
+    GlobalSource,
+    GlobalStateSource,
+)
 from ..utils import (
     _get_error_on_graph_break,
     _set_error_on_graph_break,
     is_safe_constant,
 )
-from .base import VariableTracker
+from .base import load_pending_mutation, VariableTracker
 from .descriptors import MethodDescriptorVariable
 from .functions import (
     NestedUserFunctionVariable,
@@ -1196,11 +1205,14 @@ class AutocastModeVariable(ContextWrappingVariable):
         self,
         target_values: Sequence[Any],
         initial_values: Any | None = None,
+        value_type: type = torch.amp.autocast_mode.autocast,
         **kwargs: Any,
     ) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+        self.value_type = value_type
+        self.cleanup_fn: Callable[..., Any] | None = None
 
     def exit(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
@@ -1211,13 +1223,161 @@ class AutocastModeVariable(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(None)
 
+    @staticmethod
+    def _guard_distinct_contexts(
+        builder: GuardBuilder, guard: Guard, other: Source
+    ) -> None:
+        if builder.save_guards:
+            for source in (guard.originating_source, other):
+                if name := get_local_source_name(source):
+                    builder.check_fn_manager.additional_used_local_vars.add(name)
+                if name := get_global_source_name(source):
+                    builder.check_fn_manager.additional_used_global_vars.add(name)
+        code = [f"{builder.arg_ref(guard)} is not {builder.arg_ref(other.name)}"]
+        guard.set_export_info("_guard_distinct_contexts", None, code, None)
+        builder.add_python_lambda_leaf_guard_to_root(
+            code, get_verbose_code_parts(code, guard)
+        )
+
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if self.source is not None:
+            if self.cleanup_fn is not None:
+                unimplemented(
+                    gb_type="Reentrant sourced autocast",
+                    context=self.source.name,
+                    explanation="Reentering an active sourced autocast object "
+                    "cannot preserve its original exit state.",
+                    hints=[],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
+                    apply_to_code=False,
+                )
+
+            def guard_source(source: Source) -> Source:
+                # Constants reconstruct as globals but need G[...] in guards.
+                return source.clone(
+                    lambda src: GlobalSource(src.source_name)
+                    if isinstance(src, ConstantSource)
+                    else src
+                )
+
+            for other in tx.output.side_effects.id_to_variable.values():
+                if (
+                    type.__instancecheck__(AutocastModeVariable, other)
+                    and other.source is not None
+                    and cast(AutocastModeVariable, other).cleanup_fn is not None
+                ):
+                    install_guard(
+                        guard_source(self.source).make_guard(
+                            functools.partial(
+                                self._guard_distinct_contexts,
+                                other=guard_source(other.source),
+                            )
+                        )
+                    )
+            fields = ("device", "fast_dtype", "_enabled", "_cache_enabled")
+            targets = list(self.target_values)
+            for index, field in enumerate(fields):
+                pending = load_pending_mutation(tx, self, field)
+                if pending is not None:
+                    targets[index] = pending.as_python_constant()
+            self.target_values = targets
+            dtype_getter = tx.output.install_global(
+                "__dynamo_source_autocast_dtype",
+                functools.partial(torch.get_autocast_dtype, targets[0]),
+            )
+            install_guard(
+                CallFunctionNoArgsSource(GlobalSource(dtype_getter)).make_guard(
+                    GuardBuilder.EQUALS_MATCH
+                )
+            )
+            prev = (
+                torch.is_autocast_cache_enabled(),
+                torch.is_autocast_enabled(targets[0]),
+                torch.get_autocast_dtype(targets[0]),
+            )
+            self.initial_values = prev
+            for field, value in zip(
+                ("prev_cache_enabled", "prev", "prev_fastdtype"), prev
+            ):
+                tx.output.side_effects.store_attr(
+                    self, field, variables.ConstantVariable.create(value)
+                )
         ctx = torch.amp._enter_autocast(*self.target_values)
         self.set_cleanup_hook(tx, lambda: torch.amp._exit_autocast(ctx))
         self.proxy = tx.output.create_node(
             "call_function", torch.amp._enter_autocast, (*self.target_values,), {}
         )
-        return variables.ConstantVariable.create(None)
+        return (
+            self if self.source is not None else variables.ConstantVariable.create(None)
+        )
+
+    def check_saved_state_mutation(
+        self, tx: "InstructionTranslatorBase", name: str, value: VariableTracker
+    ) -> None:
+        fields = ("prev_cache_enabled", "prev", "prev_fastdtype", "device")
+        if self.source is None or name not in fields:
+            return
+        if tx.f_code is torch.amp.autocast_mode.autocast.__enter__.__code__:
+            return
+        active: list[AutocastModeVariable] = (
+            [self] if self.cleanup_fn is not None else []
+        )
+        current: InstructionTranslatorBase | None = tx
+        while current is not None:
+            contexts: list[VariableTracker] = [
+                block.with_context
+                for block in current.block_stack
+                if block.with_context is not None
+            ]
+            for entry in current.stack:
+                entry = entry.unwrap()
+                if type.__instancecheck__(WithExitFunctionVariable, entry):
+                    contexts.append(cast(WithExitFunctionVariable, entry).ctx)
+            for ctx in contexts:
+                ctx = ctx.unwrap()
+                if type.__instancecheck__(AutocastModeVariable, ctx):
+                    ctx = cast(AutocastModeVariable, ctx)
+                    if ctx.cleanup_fn is not None:
+                        active.append(ctx)
+            current = current.parent
+        if not active:
+            return
+        if self in active and value.is_python_constant():
+            constant = value.as_python_constant()
+            if name == "device":
+                if type(constant) is str and constant == self.target_values[0]:
+                    return
+            elif (
+                self.initial_values is not None
+                and constant is self.initial_values[fields.index(name)]
+            ):
+                return
+        unimplemented(
+            gb_type="Autocast saved-state mutation inside with",
+            context=name,
+            explanation="Changing saved autocast state inside a compiled with block "
+            "is unsupported.",
+            hints=[],
+            skip_frame=True,
+            preserve_skip_frame_after_inline=True,
+            apply_to_code=False,
+        )
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        if self.source is not None:
+            pending = load_pending_mutation(tx, self, name)
+            if pending is not None:
+                return pending
+            fields = ("device", "fast_dtype", "_enabled", "_cache_enabled")
+            if name in fields:
+                return variables.ConstantVariable.create(
+                    self.target_values[fields.index(name)],
+                    source=AttrSource(self.source, name),
+                )
+        return None
 
     def module_name(self) -> str:
         return "torch.amp.autocast_mode"
@@ -1226,7 +1386,7 @@ class AutocastModeVariable(ContextWrappingVariable):
         return "autocast"
 
     def python_type(self) -> type:
-        return torch.amp.autocast_mode.autocast
+        return self.value_type
 
 
 class NullContextVariable(ContextWrappingVariable):
