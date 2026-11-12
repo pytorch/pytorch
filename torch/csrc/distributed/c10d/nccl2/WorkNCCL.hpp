@@ -110,6 +110,9 @@ class WorkNCCL : public c10d::Work {
   void setOutputs(std::vector<at::Tensor> outputs) {
     outputs_ = std::move(outputs);
   }
+  // Marks outputs_ as written on the current stream after the collective, so
+  // getFuture() completes on that stream rather than the work's.
+  void setOutputsOnCurrentStream();
   void setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children);
   // Makes getDuration() measure from where first's duration starts.
   void setDurationStart(const WorkNCCL& first);
@@ -201,6 +204,7 @@ class WorkNCCL : public c10d::Work {
   std::vector<at::Tensor> outputs_;
   std::optional<at::RecordFunction> recordFunction_;
   c10::intrusive_ptr<c10::ivalue::Future> future_;
+  std::optional<at::cuda::CUDAStream> outputsStream_;
 };
 
 class WorkNCCLQueue {

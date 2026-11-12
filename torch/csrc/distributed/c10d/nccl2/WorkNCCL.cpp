@@ -507,6 +507,11 @@ uint64_t WorkNCCL::getSequencenumber() const {
   return state_->seq;
 }
 
+void WorkNCCL::setOutputsOnCurrentStream() {
+  outputsStream_ =
+      at::cuda::getCurrentCUDAStream(state_->comm->getDevice().index());
+}
+
 c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
   if (future_) {
     return future_;
@@ -530,11 +535,12 @@ c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
     return future_;
   }
 
-  // Complete on the collective's stream so the future's events mark the end of
-  // the collective: consumers are ordered after it when they wait on the
-  // future, and the caller's stream is not blocked here (DDP calls getFuture()
-  // right after launching each bucket's allreduce).
-  c10::cuda::CUDAStreamGuard guard(state_->stream);
+  // Complete on the stream that last wrote the outputs (the collective's
+  // stream unless the backend copied them on another) so the future's events
+  // mark when they are ready: consumers are ordered after them when they wait
+  // on the future, and the caller's stream is not blocked here (DDP calls
+  // getFuture() right after launching each bucket's allreduce).
+  c10::cuda::CUDAStreamGuard guard(outputsStream_.value_or(state_->stream));
   future_->markCompleted(c10::IValue(outputs_));
   return future_;
 }
