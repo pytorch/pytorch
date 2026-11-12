@@ -2228,9 +2228,8 @@ def is_nvidia_sm100_or_later() -> bool:
 
 
 def get_sm_carveout() -> int | None:
-    """The experimental SM carveout that get_num_sms() subtracts, or None. Kernels
-    bake get_num_sms() into NUM_SMS and their grids, so caches of compiled code or
-    benchmark timings must key on this."""
+    """The experimental SM carveout get_num_sms() subtracts, or None. Kernels bake
+    it into NUM_SMS, so compiled-code and timing caches must key on it."""
     if torch.xpu.is_available():
         return None
     return torch._C._get_sm_carveout_experimental()
