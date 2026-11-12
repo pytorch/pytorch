@@ -505,6 +505,12 @@ test_python_smoke() {
   install_nvmath
   install_flash_attn_cute
   time python test/run_test.py --include "${PYTHON_NATIVE_CUTEDSL_SUITES[@]}" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # The CuTeDSL runtime is installed here, so the selected test_reductions and OpInfo
+  # test_ops checks (selected by name, as in test_python_smoke_b200) run with the sum,
+  # mean, amax, amin and prod overrides active on SM90 where their conditions accept a
+  # call; declined calls stay on ATen.
+  time python test/run_test.py --include test_reductions -k "$PYTHON_NATIVE_REDUCTIONS_FILTER" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_ops -k "$PYTHON_NATIVE_REDUCTION_OPS_FILTER" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_triton_kernels -k test_tma_descriptor_subclass_codegen $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_cuda -k test_graph_capture_cublas_workspace $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running

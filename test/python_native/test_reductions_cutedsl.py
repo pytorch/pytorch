@@ -50,7 +50,7 @@ def _overrides_inactive():
         return "CuTeDSL runtime unavailable, disabled, or at an unsupported version"
     major = torch.cuda.get_device_capability()[0]
     if torch.version.hip or major not in ov._ARCH_MAJORS:
-        return "the overrides serve SM100-family CUDA GPUs only"
+        return "the overrides serve SM90 and SM100-family CUDA GPUs only"
     return None
 
 
