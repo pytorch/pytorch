@@ -962,7 +962,20 @@ and {meth}`ProcessGroup.register_post_hook <torch.distributed.ProcessGroup.regis
 register hooks that run before and after each operation is issued, for every
 backend. A post-hook runs once the operation is issued, not when it completes.
 `op_id` pairs a pre-hook call with its post-hook call. Hooks run for the
-standard collective and point-to-point operations.
+standard collective and point-to-point operations, and with no tensors for
+{func}`torch.distributed.split_group` and the `ProcessGroup` methods
+`new_window` and `reconfigure` (op names `SPLIT`, `NEW_WINDOW` and
+`RECONFIGURE`). The `SPLIT` and `NEW_WINDOW` post-hooks get `work=None` and the
+new `group` or `window`. The `SPLIT` post-hook runs before
+{func}`torch.distributed.split_group` registers the group, so lookups such as
+`get_rank(group)` or `get_process_group_ranks` fail on it inside the hook.
+Other synchronous operations may also pass `work=None`, so hooks must not
+assume a `Work` or non-empty tensor lists. Calling the `Backend` methods
+`split`, `new_window` or `reconfigure` directly, or a Python subclass override
+of the `ProcessGroup` methods, bypasses hooks. Other group creation paths, such
+as `new_group` (including when it splits from an eagerly initialized default
+group), {func}`torch.distributed.distributed_c10d.shrink_group` and
+`ProcessGroup.merge_remote_group`, fire no hooks.
 
 The example below assumes the default process group is initialized.
 
