@@ -339,7 +339,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(1)
         expected = (x + 1, 1) if mode == "consume" else (x, 2)
         if mode == "inner":
-            expected = fn(x)
+            error = "dictionary update sequence element #1 has length 3; 2 is required"
+            if mapping_type is OrderedDict:
+                error = "too many values to unpack (expected 2)"
+            expected = (x + 1, error)
         self.assertEqual(fn(x), expected)
         self.assertEqual(
             torch.compile(fn, backend="eager", fullgraph=True)(x), expected
@@ -1106,12 +1109,17 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x, source = torch.ones(1), Mapping(a=1)
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Custom metaclass metadata access"):
+            compiled(x, source)
+        compiled = torch.compile(fn, backend=counter)
         self.assertEqual(compiled(x, source), fn(x, source))
         Mapping.__iter__ = (
             dict.__iter__ if override != "none" else lambda self: iter(())
         )
         self.assertEqual(compiled(x, source), fn(x, source))
-        self.assertEqual(counter.frame_count, 2)
+        frames = counter.frame_count
+        self.assertEqual(compiled(x, source), fn(x, source))
+        self.assertEqual(counter.frame_count, frames)
 
     @parametrize("inherited", [False, True])
     @parametrize("override", ["builtin", "staticmethod"])
@@ -1808,58 +1816,33 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(func(), x + 1)
 
     @parametrize(
-        "source_type",
+        "source_type, wrap",
         [
-            "list",
-            "list_pairs",
-            "tuple",
-            "generator",
-            "iterator",
-            "dict_keys",
-            "dict_values",
-            "dict_items",
-            "deque",
-            "set",
-            "set_iterator",
-            "zip",
-            "map",
-            "filter",
-            "chain",
+            ("list", lambda pairs: pairs),
+            ("list_pairs", lambda pairs: [list(pair) for pair in pairs]),
+            ("tuple", tuple),
+            ("generator", lambda pairs: (pair for pair in pairs)),
+            ("iterator", iter),
+            ("dict_keys", lambda pairs: {pairs[0]: None, pairs[1]: None}.keys()),
+            ("dict_values", lambda pairs: {0: pairs[0], 1: pairs[1]}.values()),
+            ("dict_items", lambda pairs: dict(pairs).items()),
+            ("deque", deque),
+            ("set", set),
+            ("set_iterator", lambda pairs: iter(set(pairs))),
+            ("zip", lambda pairs: pairs),
+            ("map", lambda pairs: map(tuple, pairs)),
+            ("filter", lambda pairs: filter(None, pairs)),
+            ("chain", itertools.chain),
         ],
     )
     @parametrize("mapping_type", [dict, OrderedDict])
     @parametrize("update", [False, True])
-    def test_dict_update_iterables(self, source_type, update, mapping_type):
+    def test_dict_update_iterables(self, source_type, wrap, update, mapping_type):
         def fn(x):
             pairs = [("a", x), ("b", x + 1)]
-            if source_type == "list_pairs":
-                pairs = [list(pair) for pair in pairs]
-            elif source_type == "tuple":
-                pairs = tuple(pairs)
-            elif source_type == "generator":
-                pairs = (pair for pair in pairs)
-            elif source_type == "iterator":
-                pairs = iter(pairs)
-            elif source_type == "dict_keys":
-                pairs = {pairs[0]: None, pairs[1]: None}.keys()
-            elif source_type == "dict_values":
-                pairs = {0: pairs[0], 1: pairs[1]}.values()
-            elif source_type == "dict_items":
-                pairs = dict(pairs).items()
-            elif source_type == "deque":
-                pairs = deque(pairs)
-            elif source_type in ("set", "set_iterator"):
-                pairs = set(pairs)
-                if source_type == "set_iterator":
-                    pairs = iter(pairs)
-            elif source_type in ("zip", "map", "filter", "chain"):
+            if source_type in ("zip", "map", "filter", "chain"):
                 pairs = zip(("a", "b"), (x, x + 1))
-                if source_type == "map":
-                    pairs = map(tuple, pairs)
-                elif source_type == "filter":
-                    pairs = filter(None, pairs)
-                elif source_type == "chain":
-                    pairs = itertools.chain(pairs)
+            pairs = wrap(pairs)
             if update:
                 result = mapping_type()
                 result.update(pairs)
@@ -6705,7 +6688,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(KeyError):
             list(mapping.items())  # dict.popitem leaves an orphaned OrderedDict link.
         torch._dynamo.reset()
-        with self.assertRaisesRegex(Unsupported, "dict.popitem on OrderedDict"):
+        with self.assertRaisesRegex(
+            Unsupported, "dict storage mutation on OrderedDict"
+        ):
             torch.compile(fn, backend="eager", fullgraph=True)(x, make_input())
 
     @parametrize("populate", [False, True])
@@ -7661,6 +7646,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_clear(self):
+        base = self.thetype if self.thetype is OrderedDict else dict
         d = self.thetype({"a": 1, "b": 2})
         d.clear()
         self.assertEqual(d, {})
@@ -7671,7 +7657,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.clear
         d = self.thetype({"a": 1, "b": 2})
-        dict.clear(d)
+        base.clear(d)
         self.assertEqual(d, {})
 
         d = self.thetype({"a": 1, "b": 2})
@@ -7754,6 +7740,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_pop(self):
+        base = self.thetype if self.thetype is OrderedDict else dict
         d = self.thetype({"a": 1, "b": 2})
         self.assertEqual(d.pop("a"), 1)
         self.assertEqual(d, {"b": 2})
@@ -7761,7 +7748,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.pop
         d = self.thetype({"a": 1, "b": 2})
-        self.assertEqual(dict.pop(d, "b"), 2)
+        self.assertEqual(base.pop(d, "b"), 2)
         self.assertEqual(self.thetype.pop(d, "a"), 1)
 
         # Test invalid usage
@@ -7770,6 +7757,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_popitem(self):
+        base = self.thetype if self.thetype is OrderedDict else dict
         d = self.thetype({"a": 1})
         key, value = d.popitem()
         self.assertEqual(key, "a")
@@ -7781,10 +7769,11 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         d["b"] = 2
         self.assertEqual(d.popitem(), ("b", 2))
 
-        # dict.popitem corrupts OrderedDict links; its fallback is tested separately.
-        if self.thetype is not OrderedDict:
-            d = self.thetype({"a": 1})
-            self.assertEqual(dict.popitem(d), ("a", 1))
+        # Test Dict.popitem
+        d = self.thetype({"a": 1})
+        key, value = base.popitem(d)
+        self.assertEqual(key, "a")
+        self.assertEqual(value, 1)
 
         d = self.thetype({"a": 1})
         key, value = self.thetype.popitem(d)
@@ -7798,6 +7787,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
     @make_dynamo_test
     def test_setdefault(self):
+        base = self.thetype if self.thetype is OrderedDict else dict
         d = self.thetype({"a": 1, "b": 2})
         self.assertEqual(d.setdefault("a", 3), 1)
         self.assertEqual(d.setdefault("c", 3), 3)
@@ -7805,7 +7795,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(d, {"a": 1, "b": 2, "c": 3, "d": None})
 
         # Test Dict.setdefault
-        self.assertEqual(dict.setdefault(d, "f", 5), 5)
+        self.assertEqual(base.setdefault(d, "f", 5), 5)
         self.assertEqual(self.thetype.setdefault(d, "e", 5), 5)
 
         # Test invalid usage
