@@ -164,6 +164,31 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
   ~Node() override;
   void release_resources() override;
 
+  /// Whether gradients flowing into output `output_nr` of this node (its
+  /// input `output_nr` in backward) may be summed implicitly in a backward run
+  /// with disallow_implicit_grad_accumulation.
+  virtual bool implicit_grad_accumulation_allowed(uint32_t output_nr) const {
+    return all_outputs_implicit_grad_accumulation_allowed_ ||
+        (output_nr < input_metadata_.size() &&
+         input_metadata_[output_nr].implicit_grad_accumulation_allowed());
+  }
+
+  /// Allows implicit gradient accumulation into output `output_nr` of this
+  /// node, or into all of its outputs if `output_nr` is not given.
+  virtual void allow_implicit_grad_accumulation(
+      std::optional<uint32_t> output_nr) {
+    if (!output_nr.has_value()) {
+      all_outputs_implicit_grad_accumulation_allowed_ = true;
+      return;
+    }
+    TORCH_CHECK(
+        *output_nr < input_metadata_.size(),
+        name(),
+        " has no output ",
+        *output_nr);
+    input_metadata_[*output_nr].allow_implicit_grad_accumulation();
+  }
+
   c10::intrusive_ptr<Node> getptr() {
     return c10::intrusive_ptr<Node>::unsafe_reclaim_from_nonowning(this);
   }
@@ -662,6 +687,10 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
   // See node_creation_hooks_fired() above. Placed next to has_parent_ so it
   // packs into the padding before thread_id_.
   bool node_creation_hooks_fired_ = false;
+
+  // See implicit_grad_accumulation_allowed() above. Also packs into the
+  // padding before thread_id_.
+  bool all_outputs_implicit_grad_accumulation_allowed_ = false;
 
   // Id of the thread that created the instance
   uint64_t thread_id_ = 0;

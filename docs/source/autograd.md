@@ -447,6 +447,10 @@ to avoid a reference cycle when the saved tensor is a graph output; see
 ```
 
 ```{eval-rst}
+.. autofunction:: torch.autograd.graph.allow_implicit_grad_accumulation
+```
+
+```{eval-rst}
 .. autofunction:: torch.autograd.graph.queue_callback
 ```
 

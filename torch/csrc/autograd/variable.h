@@ -273,6 +273,11 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 
   bool is_view_{false};
 
+  // For a leaf: whether gradients flowing into it may be summed implicitly in a
+  // backward run with disallow_implicit_grad_accumulation. Stored here rather
+  // than on its AccumulateGrad node, which is created lazily and recreated.
+  bool implicit_grad_accumulation_allowed_{false};
+
   // The "output number" of this variable; e.g., if this variable
   // was the second output of a function, then output_nr == 1.
   // We use this to make sure we can setup the backwards trace

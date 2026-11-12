@@ -45,6 +45,7 @@ __all__ = [
     "Node",
     "GradientEdge",
     "get_gradient_edge",
+    "allow_implicit_grad_accumulation",
     "increment_version",
     "queue_callback",
     "region_activation_memory_budget",
@@ -248,6 +249,56 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
     # for the AccumulateGrad node.
     # pyrefly: ignore [bad-argument-type]
     return GradientEdge(grad_fn, tensor.output_nr, ownership_token=token)
+
+
+def allow_implicit_grad_accumulation(
+    target: torch.Tensor | GradientEdge | Node,
+) -> None:
+    r"""Allow gradients flowing into ``target`` to be summed implicitly.
+
+    When a tensor is used by more than one operation, autograd sums the gradients
+    of its uses during backward. In a backward run with
+    ``disallow_implicit_grad_accumulation=True``, that sum raises an error instead,
+    unless the node output receiving the gradients is allowed by this function:
+
+    - A :class:`GradientEdge` allows that output of its node.
+    - A :class:`Node` allows all of its outputs.
+    - A tensor allows its current gradient edge (see :func:`get_gradient_edge`).
+      For a non-leaf tensor that is the output of ``tensor.grad_fn`` it refers to
+      now; after an in-place operation it refers to a new node, which is not
+      allowed. For a leaf tensor the setting is stored on the tensor and is
+      permanent: it applies to every later backward and cannot be undone.
+
+    Combined with :class:`node_creation_hook`, this allows every node created in
+    a region, e.g. inside library code that uses a tensor more than once. A leaf
+    is allowed (permanently, as above) if its gradient accumulator node is
+    created in the region, which happens on its first use unless the accumulator
+    already exists, e.g. because a graph from an earlier use is still alive.
+
+    Example::
+
+        >>> x = torch.randn(3, requires_grad=True).sin()
+        >>> torch.autograd.graph.allow_implicit_grad_accumulation(x)
+        >>> (x * 2 + x * 3).sum().backward(disallow_implicit_grad_accumulation=True)
+        >>> def library_block(t):
+        ...     h = t.cos()
+        ...     return h * h
+        >>> y = torch.randn(3, requires_grad=True).sin()
+        >>> with torch.autograd.graph.node_creation_hook(
+        ...     torch.autograd.graph.allow_implicit_grad_accumulation
+        ... ):
+        ...     out = library_block(y)
+        >>> out.sum().backward(disallow_implicit_grad_accumulation=True)
+    """
+    if isinstance(target, torch.Tensor):
+        target = get_gradient_edge(target)
+    if isinstance(target, GradientEdge):
+        edge, all_outputs = target, False
+    else:
+        # Anything else must be a Node; C++ checks, since nodes without a
+        # registered Python type (e.g. CppNode<T>) are not instances of Node.
+        edge, all_outputs = GradientEdge(target, 0), True
+    Variable._execution_engine._allow_implicit_grad_accumulation(edge, all_outputs)
 
 
 def increment_version(tensor: torch.Tensor | Iterable[torch.Tensor]) -> None:
