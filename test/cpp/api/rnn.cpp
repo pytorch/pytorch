@@ -809,6 +809,43 @@ TEST_F(RNNTest, UsePackedSequenceAsInput) {
   }
 }
 
+TEST_F(RNNTest, PackedUnsortedInputValidatesHiddenStateBeforePermute) {
+  const auto seq_len = 4;
+  const auto batch = 3;
+  const auto input_size = 2;
+  const auto hidden_size = 3;
+  auto input = torch::randn({seq_len, batch, input_size});
+  auto lengths = torch::tensor({2, 4, 3}, torch::kInt64);
+  auto packed_input = torch::nn::utils::rnn::pack_padded_sequence(
+      input, lengths, /*batch_first=*/false, /*enforce_sorted=*/false);
+  auto big_hx = torch::randn({1, batch + 1, hidden_size});
+  auto hx = torch::randn({1, batch, hidden_size});
+
+  {
+    auto m = RNN(input_size, hidden_size);
+    ASSERT_THROWS_WITH(
+        m->forward_with_packed_input(packed_input, big_hx),
+        "Expected hidden size");
+    ASSERT_NO_THROW(m->forward_with_packed_input(packed_input, hx));
+  }
+  {
+    auto m = GRU(input_size, hidden_size);
+    ASSERT_THROWS_WITH(
+        m->forward_with_packed_input(packed_input, big_hx),
+        "Expected hidden size");
+    ASSERT_NO_THROW(m->forward_with_packed_input(packed_input, hx));
+  }
+  {
+    auto m = LSTM(input_size, hidden_size);
+    ASSERT_THROWS_WITH(
+        m->forward_with_packed_input(
+            packed_input, std::make_tuple(big_hx, big_hx)),
+        "Expected hidden[0] size");
+    ASSERT_NO_THROW(
+        m->forward_with_packed_input(packed_input, std::make_tuple(hx, hx)));
+  }
+}
+
 TEST_F(RNNTest, CheckErrorInfos) {
   {
     auto options = torch::nn::RNNOptions(1, 0).num_layers(1);
