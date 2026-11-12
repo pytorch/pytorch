@@ -2561,17 +2561,15 @@ def prod(
 
 
 def _zero_numel_check_dims(a: TensorLikeType, dim: DimsType, fn_name: str) -> None:
-    # Mirrors zero_numel_check_dims in aten/src/ATen/native/ReduceOpsUtils.h.
-    # _reduction's generic has_identity=False guard raises a RuntimeError, but
-    # eager validates the explicitly requested dims here and raises IndexError,
-    # so without this the ref diverges from eager under meta/fake tensors.
-    # The scalar branch of the eager helper is unreachable for amax/amin (it is
-    # guarded by numel() == 0) and is therefore not mirrored.
+    # Eager checks explicitly requested dims with zero_numel_check_dims
+    # (ReduceOpsUtils.h) and raises IndexError, before _reduction's generic
+    # RuntimeError. Not mirrored: the scalar branch (unreachable here) and the
+    # empty-dims branch (dim=() still raises _reduction's RuntimeError).
     if a.ndim == 0:
         return
     for d in (dim,) if isinstance(dim, Dim) else dim:
         torch._check_index(
-            a.shape[utils.canonicalize_dim(a.ndim, d)] != 0,
+            a.shape[utils.canonicalize_dim(a.ndim, d)] > 0,
             lambda d=d: f"{fn_name}: Expected reduction dim {d} to have non-zero size.",
         )
 

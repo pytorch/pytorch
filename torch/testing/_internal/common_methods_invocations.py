@@ -3205,7 +3205,7 @@ def error_inputs_aminmax_amax_amin(op_info, device, **kwargs):
                          error_type=ValueError, error_regex="must not overlap")
 
     # Error Inputs for functions to raise an error on specified zero'd dimension as reduction dim
-    err_msg3 = "reduction"
+    err_msg3 = "Expected reduction dim"
     yield ErrorInput(SampleInput(torch.rand(shape, device=device), kwargs={'dim': 1}),
                      error_type=IndexError, error_regex=err_msg3)
 
