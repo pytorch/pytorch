@@ -283,8 +283,9 @@ def _lock_unavailable(lock_path, mode):
 
     filelock 3.x reports some "can't lock" errors the same way as a lock held
     by another process: ENOLCK (NFS without lockd) and EOPNOTSUPP (some FUSE/SMB
-    mounts) on Unix, EACCES (an unwritable directory or lock file) on both. 4.x
-    raises most of them instead. A lock that is held or free counts as available.
+    mounts) from flock on Unix, EACCES (an unwritable directory or lock file) on
+    Windows. 4.x raises most of them instead. A lock that is held or free counts
+    as available.
     """
     if sys.platform == "win32":
         # os.access reports every directory as writable on Windows.
@@ -350,12 +351,15 @@ def _cache_lock(path, stacklevel, verbose):
         yield
         return
 
-    lock_path = path + ".lock"
+    # A dot file, so that it isn't the path of another entry: "<entry>.lock" would
+    # be the cached checkpoint of a URL that ends in "<entry>.lock".
+    lock_dir, name = os.path.split(path)
+    lock_path = os.path.join(lock_dir, "." + name + ".lock")
     # filelock gives the lock files it creates this mode, whatever the umask.
     # They are group-writable only in a group-writable directory (a cache shared
     # by a group), so that every member of the group can take the lock. On Linux,
     # that also needs a setgid directory, so that the files get the shared group.
-    lock_dir_mode = os.stat(os.path.dirname(lock_path)).st_mode
+    lock_dir_mode = os.stat(lock_dir).st_mode
     mode = 0o664 if lock_dir_mode & stat.S_IWGRP else 0o644
 
     class _CacheLock(FileLock):
@@ -1023,12 +1027,14 @@ def load_state_dict_from_url(
     With filelock 3.20.1 or later, processes that share ``model_dir`` (for
     example DDP ranks) don't download the same file at the same time: one of
     them downloads it while the others wait, for up to an hour, and then load
-    the cached copy. The lock is a ``.lock`` file next to the downloaded file in
-    ``model_dir``, which stays there on Linux and macOS. If it can't be taken,
-    or is held for more than an hour, the file is downloaded without it and a
-    warning is raised. With an older filelock, every process downloads the
-    file. Checkpoints in the legacy zip format are still extracted on every
-    load, without the lock.
+    the cached copy. The lock for a downloaded file ``<name>`` is a
+    ``.<name>.lock`` file next to it in ``model_dir``, which stays there on
+    Linux and macOS. If it can't be taken, the file is downloaded without it
+    and a warning is raised. If it is held for more than an hour, a warning is
+    raised and the file is downloaded without it, unless it has been cached by
+    then. With an older filelock, every process downloads the file.
+    Checkpoints in the legacy zip format are still extracted on every load,
+    without the lock.
 
     Args:
         url (str): URL of the object to download

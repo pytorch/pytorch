@@ -145,14 +145,15 @@ Processes that share a cache directory (the hub directory, or the `model_dir` pa
 through lock files: when several of them need an entry that isn't cached yet, one of them
 downloads it while the others wait and then use the cached copy. This needs filelock 3.20.1 or
 later; with an older filelock, every process downloads the entry, as in earlier releases.
-On Linux and macOS the lock files (`<entry>.lock`) stay next to the entries; they are
+On Linux and macOS the lock files (`.<entry>.lock`) stay next to the entries; they are
 group-writable if the directory is, so that users who share the cache through a group can take
 each other's locks. On Linux this also needs the setgid bit on the directory (`chmod g+s`), so
 that new lock files get the shared group instead of their creator's primary group.
 If the lock can't be taken (for example on a filesystem without `flock` support, or a lock file
-another user created without giving this user write access) or another process holds it for
-more than an hour, the entry is downloaded without it, as in earlier releases, and a
-`UserWarning` is raised. Repos are downloaded and extracted in a temporary work directory in
+another user created without giving this user write access), the entry is downloaded without it,
+as in earlier releases, and a `UserWarning` is raised. If another process holds it for more than
+an hour, a `UserWarning` is raised and the entry is downloaded without the lock, unless that
+process has cached it by then. Repos are downloaded and extracted in a temporary work directory in
 the hub directory, whose name starts with `.<owner_repo_ref>~`.
 
 ### Known limitations:
