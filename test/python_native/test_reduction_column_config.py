@@ -302,21 +302,11 @@ class TestColumnConfig(TestCase):
         cfg = self._sm107_ordered(dtype, key, rows, columns, partials, outputs)
         self.assertIsNone(cfg)
 
-    def _sm107_ordered(
-        self, dtype, key, rows, columns, partials, outputs, full_tiles=True
-    ):
-        return ct.select_ordered_col_config(
-            (10, 7),
-            dtype,
-            columns,
-            1,
-            partials,
-            **_contract(_TRAITS[key]),
-            acc_bits=32,
-            out_dtypes=outputs,
-            rows=rows,
-            full_tiles=full_tiles,
-        )
+    def _sm107_ordered(self, dtype, key, rows, columns, partials, outputs, **overrides):
+        base = dict(acc_bits=32, out_dtypes=outputs, rows=rows, full_tiles=True)
+        kwargs = _contract(_TRAITS[key]) | base | overrides
+        args = ((10, 7), dtype, columns, 1, partials)
+        return ct.select_ordered_col_config(*args, **kwargs)
 
     @parametrize(
         "dtype,size,columns,key,order",
@@ -402,19 +392,8 @@ class TestColumnConfig(TestCase):
 
     def test_sm107_ordered_acc_bits_guard(self):
         """Decline SM107 ordered mappings for 64-bit accumulators."""
-        cfg = ct.select_ordered_col_config(
-            (10, 7),
-            torch.float32,
-            1024,
-            1,
-            64,
-            **_contract(T.MeanOps()),
-            acc_bits=64,
-            out_dtypes=(torch.float32,),
-            rows=524288,
-            full_tiles=True,
-        )
-        self.assertIsNone(cfg)
+        view = (torch.float32, "mean", 524288, 1024, 64, (torch.float32,))
+        self.assertIsNone(self._sm107_ordered(*view, acc_bits=64))
 
     def test_sm107_ordered_skips_fp16(self):
         """Map no fp16 view on SM107, even for traits with an entry."""
@@ -454,39 +433,17 @@ class TestColumnConfig(TestCase):
     @parametrize("key", ["var0", "varmean0"])
     def test_sm107_ordered_welford_outputs(self, key):
         """Map only one-output Welford columns at the SM107 Welford anchors."""
-        contract = _contract(_TRAITS[key])
-        nouts = contract["nouts"]
-        cfg = ct.select_ordered_col_config(
-            (10, 7),
-            torch.bfloat16,
-            4096,
-            1,
-            1,
-            **contract,
-            acc_bits=32,
-            out_dtypes=(torch.bfloat16,) * nouts,
-            rows=8192,
-            full_tiles=True,
-        )
+        nouts = _contract(_TRAITS[key])["nouts"]
+        outputs = (torch.bfloat16,) * nouts
+        cfg = self._sm107_ordered(torch.bfloat16, key, 8192, 4096, 1, outputs)
         selected = ct.OrderedColConfig(0, full_tiles=True, out_dtypes=(torch.bfloat16,))
         self.assertEqual(cfg, selected if nouts == 1 else None)
 
     @parametrize("welford_outs", [1, 0])
     def test_sm107_ordered_welford_entry_needs_one_output(self, welford_outs):
         """The SM107 WelfordOps entry serves var and std, not return_mean traits."""
-        contract = _contract(T.WelfordOps()) | {"welford_outs": welford_outs}
-        cfg = ct.select_ordered_col_config(
-            (10, 7),
-            torch.float32,
-            1024,
-            1,
-            8,
-            **contract,
-            acc_bits=32,
-            out_dtypes=(torch.float32,),
-            rows=65536,
-            full_tiles=True,
-        )
+        view = (torch.float32, "var1", 65536, 1024, 8, (torch.float32,))
+        cfg = self._sm107_ordered(*view, welford_outs=welford_outs)
         self.assertEqual(cfg is not None, welford_outs == 1)
 
     @parametrize(

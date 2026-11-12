@@ -369,19 +369,6 @@ def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
     )
 
 
-# B200 CUDA-graph timings against _try_indexed_itree (sum fp32/bf16/fp16, argmax and
-# var_mean fp32/fp16; R 20-20000, B * C 32-524288; bitwise equal): ordered columns win
-# 1.1-11x once B * C fills the GPU, but one 32-output block per tile leaves SMs idle
-# below that (0.16-0.6x), and wider traits need more outputs. At 1-16x those output
-# minimums and R = 128-8192, every other routed trait in fp32/bf16/fp16 (mean, prod,
-# nansum, norm1/2, amax, amin, absmax, absmin, all, any, count_nonzero, argmin,
-# max.dim, min.dim, aminmax, var and std) runs 1.0-13x. General-p norms (an exp/log
-# leaf; p = 3 measured) run 0.34-2.3x below 16384 outputs and 1.1-2.6x from there.
-# The route starts at the shortest measured win, R = 128 (reduce_ordered_col declines
-# the multirow plans of rows up to 32 for fp32 and 64 for 16-bit inputs anyway). The
-# looped route stops at R = 8192, the longest looped row within reduce_ordered_col's
-# replay cap of tile.MAX_UNROLL leaves (see the compile timings there). Each R compiles
-# once per mapping (see kernel_coltile.OrderedColConfig.min_blocks) and stride width.
 # Input dtypes of the B200 launch policies.
 _B200_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 _B200_CCS = ((10, 0),)
@@ -420,6 +407,19 @@ def _sm107_outputs(
     return (natural,) * nouts
 
 
+# B200 CUDA-graph timings against _try_indexed_itree (sum fp32/bf16/fp16, argmax and
+# var_mean fp32/fp16; R 20-20000, B * C 32-524288; bitwise equal): ordered columns win
+# 1.1-11x once B * C fills the GPU, but one 32-output block per tile leaves SMs idle
+# below that (0.16-0.6x), and wider traits need more outputs. At 1-16x those output
+# minimums and R = 128-8192, every other routed trait in fp32/bf16/fp16 (mean, prod,
+# nansum, norm1/2, amax, amin, absmax, absmin, all, any, count_nonzero, argmin,
+# max.dim, min.dim, aminmax, var and std) runs 1.0-13x. General-p norms (an exp/log
+# leaf; p = 3 measured) run 0.34-2.3x below 16384 outputs and 1.1-2.6x from there.
+# The route starts at the shortest measured win, R = 128 (reduce_ordered_col declines
+# the multirow plans of rows up to 32 for fp32 and 64 for 16-bit inputs anyway). The
+# looped route stops at R = 8192, the longest looped row within reduce_ordered_col's
+# replay cap of tile.MAX_UNROLL leaves (see the compile timings there). Each R compiles
+# once per mapping (see kernel_coltile.OrderedColConfig.min_blocks) and stride width.
 # Routing dtypes and ccs, deliberately separate from the launch-policy _B200_DTYPES and
 # _B200_CCS: the route and the policies are measured and extended independently.
 # See the comment on kernel_coltile._ORDERED_COL_CONFIGS for which views reach entries.
@@ -1223,6 +1223,9 @@ def replay_reduce(
             return reduce_all(trait, trait_key, x, out_dtype)
         return reduce_dim(trait, trait_key, x, dims, out_dtype)
 
+    if _L._RECORD.get() is not None:
+        # An outer recording captures these launches itself.
+        return run()
     dims_key = None if dims is None else tuple(sorted({d % x.dim() for d in dims}))
     # Unset, "" and "0" all leave the inner-tree order off; strict mode keys apart.
     order = os.environ.get(_INNER_TREE_ENV, "")
