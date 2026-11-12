@@ -38,6 +38,11 @@ run_if_exists tensor_interop_test
 run_if_exists cudnn_test
 run_if_exists cuda_generator_test
 run_if_exists apply_test
+# ROCm builds rename hip_* test targets to cuda_* (caffe2/CMakeLists.txt); run
+# the ROCm ApplyTest here. NVIDIA selection is unchanged. Python runs unpiped,
+# so a failing probe stops the script; only the last line of its output counts.
+is_rocm=$(cd "${CPP_TESTS_DIR}" && python -c 'import torch; print(torch.version.hip is not None)')
+if [[ "${is_rocm##*$'\n'}" == "True" ]]; then run_if_exists cuda_apply_test; fi
 run_if_exists stream_test
 run_if_exists cuda_half_test
 run_if_exists cuda_vectorized_test
