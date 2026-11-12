@@ -9,8 +9,7 @@ during symbolic execution. Used by both ConstDictVariable and SetVariable.
 import functools
 import inspect
 import types
-from collections.abc import Iterable, Iterator
-from contextvars import ContextVar
+from collections.abc import Iterable
 from typing import cast, TYPE_CHECKING
 
 import torch
@@ -56,11 +55,6 @@ _SAFE_KEY_EQUALITIES = (
     torch.Tensor.__eq__,
     torch.device.__eq__,
     torch.Size.__eq__,  # THPSize uses PyTuple_Type.tp_richcompare.
-)
-
-
-_identity_key_iteration: ContextVar[bool] = ContextVar(
-    "identity_key_iteration", default=False
 )
 
 
@@ -340,7 +334,6 @@ def guard_key_collisions(
     if not tx.output.builtin_method_keys.has_method_keys:
         return None
     tracker = tx.output.builtin_method_keys
-    # Read lazy equality sources before consulting custom-equality flags.
     probe = collections[1] if len(collections) == 2 else ()
     probe_equalities = None
     if type(probe) is tuple and len(probe) == 1 and not probe[0].has_builtin_method:
@@ -355,7 +348,7 @@ def guard_key_collisions(
             probe_equalities = equalities
     summary_inputs = collections[:1] if probe_equalities is not None else collections
     summaries = [tracker.summary(keys) for keys in summary_inputs]
-    result = summaries[0] if collections and isinstance(collections[0], dict) else None
+    result = summaries[0] if isinstance(collections[0], dict) else None
     if not any(summary.has_methods for summary in summaries):
         return result
     for summary in summaries:
@@ -454,7 +447,8 @@ def _guard_lazy_key(vt: VariableTracker) -> VariableTracker:
                 skip_install = TracingContext.get().guards_context.skip_install
                 if not skip_install and _method_identity_guards_filtered(tx):
                     return vt.realize()
-                install_guard(vt.source.make_guard(GuardBuilder.ID_MATCH))
+                if not skip_install:
+                    install_builtin_method_guard(tx, vt.source, value)
                 return vt
         # Constructed keys must guard their elements, not just a trace-time hash.
         return vt.realize()
@@ -535,7 +529,6 @@ class HashableTracker:
             source = cast(Source, vt.source)
             self.method_keys_guarded = not isinstance(vt.source, ConstDictKeySource)
             if self.method_keys_guarded:
-                # _guard_lazy_key retained an already guarded builtin method.
                 input_methods, lazy_key_types = (source,), ()
             else:
                 # Lazy hashability accepts only functions/classes and flat exact tuples.
@@ -764,22 +757,6 @@ class HashableTracker:
     def __hash__(self) -> int:
         return self._hash
 
-    @staticmethod
-    def iter_keys_by_identity(
-        mapping: dict["HashableTracker", VariableTracker],
-    ) -> Iterator["HashableTracker"]:
-        # OrderedDict iteration compares known stored keys by identity, without callbacks.
-        iterator = iter(mapping)
-        while True:
-            token = _identity_key_iteration.set(True)
-            try:
-                key = next(iterator)
-            except StopIteration:
-                return
-            finally:
-                _identity_key_iteration.reset(token)
-            yield key
-
     def __eq__(self, other: object) -> bool:
         """
         Checks equality between two HashableTracker instances.
@@ -793,8 +770,6 @@ class HashableTracker:
         Returns:
             True if the underlying variable trackers are Python-equal, False otherwise
         """
-        if _identity_key_iteration.get():
-            return self is other
         if not isinstance(other, HashableTracker):
             return False
         if self.vt is other.vt:
