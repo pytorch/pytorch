@@ -153,9 +153,9 @@ void ThreadPoolExecutor::run(
 
   const auto rootCount = roots.size();
 
-  if (C10_UNLIKELY(rootCount == 0)) {
+  if (rootCount == 0) [[unlikely]] {
     return;
-  } else if (C10_LIKELY(rootCount > 1)) {
+  } else if (rootCount > 1) [[likely]] {
     add(&session, roots.begin() + 1, roots.end());
   }
 
