@@ -150,9 +150,9 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
   check_alignment(mat_b, "mat_b");
   const auto bias_vec = bias.has_value() ? std::make_optional(bias->contiguous().view({n})) : std::nullopt;
   const ScaledMMParams<> params{
-      .m = c10::safe_conv<uint32_t>(m, "uint32_t"),
-      .n = c10::safe_conv<uint32_t>(n, "uint32_t"),
-      .k = c10::safe_conv<uint32_t>(k, "uint32_t"),
+      .m = c10::safe_conv<uint32_t>(m, "mat_a.size(0)"),
+      .n = c10::safe_conv<uint32_t>(n, "mat_b.size(1)"),
+      .k = c10::safe_conv<uint32_t>(k, "mat_a.size(1)"),
       .a_row_stride = mat_a.stride(0),
       .a_col_stride = mat_a.stride(1),
       .b_row_stride = mat_b.stride(0),
