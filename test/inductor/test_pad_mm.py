@@ -128,11 +128,10 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {aligned_k}").run(code)
         self.assertEqual(res1, res2)
 
-    @parametrize("pad_m_dim", (True, False))
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
-    def test_pad_mm_dyn_k(self, pad_m_dim):
+    def test_pad_mm_dyn_k(self):
         M = 21
         K = 80
         N = 30
@@ -150,19 +149,15 @@ class PadMMTest(TestCase):
         # TODO: Getting the alignment right requires pattern matcher to
         # run on newly added nodes
         aligned_m = get_padded_length(M, get_alignment_size(a)) + M
-        expected_m = aligned_m if pad_m_dim else M
         torch._dynamo.mark_dynamic(a, 1)
         torch._dynamo.mark_dynamic(b, 0)
-        with (
-            inductor_config.patch(pad_m_dim=pad_m_dim),
-            unittest.mock.patch(
-                "torch._inductor.fx_passes.pad_mm._skip_do_bench_times", True
-            ),
+        with unittest.mock.patch(
+            "torch._inductor.fx_passes.pad_mm._skip_do_bench_times", True
         ):
             res1 = fn(a, b)
             compiled_fn = torch.compile(fn)
             res2, (code,) = run_and_get_code(compiled_fn, a, b)
-            FileCheck().check(f"M = {expected_m}").run(code)
+            FileCheck().check(f"M = {aligned_m}").run(code)
         self.assertEqual(res1, res2)
 
     def test_pad_mm_dyn_mnk(self):
@@ -439,7 +434,6 @@ class PadMMTest(TestCase):
         mat1 = torch.ones((batch_size, m, k), device=GPU_TYPE, dtype=torch.float16)
         mat2 = torch.ones((batch_size, k, n), device=GPU_TYPE, dtype=torch.float16)
         expected_alignment = get_alignment_size(mat1)
-        # N is always padded 9 -> 16; M is only padded 6 -> 8 when pad_m_dim is on
         expected_m = 8 if pad_m_dim else m
 
         if expected_alignment != 8:

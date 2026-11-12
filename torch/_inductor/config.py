@@ -1636,11 +1636,8 @@ bw_outputs_user_visible = True
 # Whether to always use shape padding if it is enabled and possible
 force_shape_pad: bool = False
 
-# Whether shape padding may pad the M dimension of a mm/addmm/bmm.
-# K and N are stride-bearing (they set the row stride of A, and of B and the output),
-# so padding them to the dtype alignment makes rows 16-byte aligned. M is not: padding
-# it cannot change any stride, only whether the trailing M tile is masked, which is
-# free on templates that mask or use TMA. Padding M costs a copy of the whole operand.
+# Whether shape padding may pad M of mm/addmm/bmm. M sets no row stride, so padding
+# it costs an operand copy without improving alignment.
 pad_m_dim: bool = os.environ.get("TORCHINDUCTOR_PAD_M_DIM", "1") == "1"
 
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
