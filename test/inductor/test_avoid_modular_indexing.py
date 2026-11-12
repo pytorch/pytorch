@@ -1,12 +1,14 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import math
+from unittest import mock
 
 import sympy
 
 import torch
 import torch.nn.functional as F
 from torch._inductor import config, ir, metrics
+from torch._inductor.choices import InductorChoices
 from torch._inductor.exc import InductorError, NonAffineIndexingError
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import run_tests, TestCase
@@ -42,6 +44,7 @@ class AffineIndexingPredicateTest(TestCase):
                 name="floordiv_of_sizes",
             ),
             subtest((Identity(_p0 - 3) + 5, True), name="identity_wrapper"),
+            subtest((16 * Identity(Identity(_p0)) + _p1, True), name="nested_identity"),
             subtest((ModularIndexing(_p0, 1, 4), False), name="modular"),
             subtest((FloorDiv(_p0, 2) + _p1, False), name="floordiv"),
             subtest((Min(_p0, 3), False), name="min"),
@@ -190,6 +193,14 @@ class AvoidModularIndexingTest(TestCase):
             fn, x, cls_tok, w, b, kernel_count=2, modular_without_option=device != "cpu"
         )
 
+    def test_cat_of_inlined_cat(self, device):
+        # the pointwise cat wraps each input's index in Identity, so a cat of
+        # an inlined cat nests them; the index is affine all the same
+        def fn(a, b, c):
+            return torch.cat([torch.cat([a * 2, b * 2], 0), c], 0)
+
+        self.check(fn, *(torch.randn(n, 16, device=device) for n in (4, 5, 3)))
+
     def test_reshape_of_strided_buffer(self, device):
         # a realized channels-last buffer reshaped across non-contiguous dims
         def fn(x):
@@ -328,6 +339,22 @@ class AvoidModularIndexingTest(TestCase):
         x = torch.randn(100003, 4, 3, device=device)
         y = torch.randn(100003, 1, 1, device=device)
         self.check_split_reduction(fn, x, y)
+
+    @parametrize("var_mean,shape", [(False, (64, 4097)), (True, (2, 128, 8193))])
+    def test_split_reduction_first_stage_not_split_again(self, device, var_mean, shape):
+        # no chunking of 64 (128) rows gives the 33 (129) partials the split
+        # asks for, so the first stage reduces 8194 (8193) elements, above
+        # the size that devices with this threshold split: it must stay one
+        # kernel
+        def fn(x):
+            return torch.var_mean(x, (1, 2)) if var_mean else x.sum()
+
+        with mock.patch.object(
+            InductorChoices, "_inner_reduction_no_split_threshold", return_value=8192
+        ):
+            self.check_split_reduction(
+                fn, torch.randn(shape, device=device), modular_without_option=False
+            )
 
     def test_online_softmax_split_reduction(self, device):
         # a long softmax row is split; the chunks of the prime row length

@@ -1742,7 +1742,8 @@ def is_affine_indexing(index: sympy.Expr) -> bool:
     may involve size symbols, but there is no ModularIndexing, FloorDiv, Min,
     Max, Abs or Where of a loop variable and no product of loop variables.
     """
-    index = index.replace(Identity, lambda x: x)
+    # not simultaneous, which would leave the inner one of nested wrappers
+    index = index.replace(Identity, lambda x: x, simultaneous=False)
     loop_vars = [
         sym for sym in index.free_symbols if not symbol_is_type(sym, _SIZE_SYMBOL_TYPES)
     ]

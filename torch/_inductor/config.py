@@ -1000,10 +1000,11 @@ strict_output_strides = False
 # slice_scatter are lowered without modular arithmetic, loop reindexing during
 # fusion is skipped, and non-affine index arithmetic (%, //, abs, clamp) stays
 # a value computation behind an indirect variable. Best effort: adaptive
-# pooling with non-divisible sizes, split reductions over symbolic ranges and
-# a strided slice_scatter whose dim is not provably a multiple of the step
-# still produce modular addresses. Helps backends with restricted memory
-# addressing at the cost of extra buffers and copies.
+# pooling and upsample_nearest2d_backward with non-divisible sizes, split
+# reductions over symbolic ranges and a strided slice_scatter whose dim is not
+# provably a multiple of the step still produce modular addresses. Helps
+# backends with restricted memory addressing at the cost of extra buffers and
+# copies.
 avoid_modular_indexing = os.environ.get("TORCHINDUCTOR_AVOID_MODULAR_INDEXING") == "1"
 
 # Enabling this will let compiler print warning messages if a generated triton
