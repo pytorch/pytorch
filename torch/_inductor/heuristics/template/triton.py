@@ -29,6 +29,7 @@ from ...kernel.mm import (
     persistent_mm_template,
     persistent_tdm_mm_template,
     persistent_tma_mm_template,
+    persistent_xcd_mm_template,
     scaled_mm_device_tma_epilogue_scaling_template,
     scaled_mm_device_tma_main_loop_scaling_template,
 )
@@ -3547,9 +3548,9 @@ class ROCmPersistentMMTemplateConfigHeuristic(PersistentMMTemplateConfigHeuristi
     """
     Persistent MM template heuristic for ROCm. On archs in
     _ROCM_PERSISTENT_MM_NUM_XCDS the launch is configured per device: the grid
-    is sized by occupancy, an arch-specific pool is used, and an XCD-local
-    program order (NUM_XCDS) is offered as an extra variant. Other ROCm archs
-    keep the base behavior.
+    is sized by occupancy, an arch-specific pool is used, and some configs are
+    also offered with the XCD-local program order (mm_persistent_xcd). Other
+    ROCm archs keep the base behavior.
     """
 
     # A persistent kernel only hides load/store latency across workgroups that
@@ -3560,7 +3561,7 @@ class ROCmPersistentMMTemplateConfigHeuristic(PersistentMMTemplateConfigHeuristi
     # XCD-local tile order pays off once a row of A is shared by enough N tiles;
     # with fewer (tall-M, small N) it only costs HBM locality, so it is not tried.
     min_n_tiles_for_xcd_remap = 8
-    # (BLOCK_M, BLOCK_N, BLOCK_K, num_warps) that also get an XCD-remap variant.
+    # (BLOCK_M, BLOCK_N, BLOCK_K, num_warps) that mm_persistent_xcd also offers.
     xcd_remap_tiles = OrderedSet([(128, 128, 64, 4), (128, 256, 32, 4)])
 
     def __init__(self) -> None:
@@ -3593,19 +3594,30 @@ class ROCmPersistentMMTemplateConfigHeuristic(PersistentMMTemplateConfigHeuristi
         op_name: str,
         **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
-        num_xcds = _ROCM_PERSISTENT_MM_NUM_XCDS.get(rocm_gfx_arch())
-        if num_xcds is None:
+        if rocm_gfx_arch() not in _ROCM_PERSISTENT_MM_NUM_XCDS:
             yield from super()._get_template_configs_impl(
                 kernel_inputs, op_name, **kwargs
             )
             return
+        for template_kwargs, _ in self._occupancy_template_configs(
+            kernel_inputs, op_name, **kwargs
+        ):
+            yield template_kwargs
 
+    def _occupancy_template_configs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[tuple[dict[str, Any], bool], None, None]:
+        """Configs with the grid sized by occupancy, each paired with whether
+        mm_persistent_xcd also offers it."""
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(
                 "ROCmPersistentMMTemplateConfigHeuristic requires MMKernelInputs"
             )
         # A pool set by a caller (e.g. a pinned config) is compiled as given; the
-        # tile-count skip and the XCD variants only apply to the default pool.
+        # tile-count skip and mm_persistent_xcd only apply to the default pool.
         default_pool = self.mm_configs is self.persistent_mm_configs
         num_cus = get_num_sms()
         lds_per_cu = _rocm_lds_bytes_per_cu()
@@ -3640,28 +3652,50 @@ class ROCmPersistentMMTemplateConfigHeuristic(PersistentMMTemplateConfigHeuristi
                 # template plus loop overhead and a ragged last wave, so don't
                 # spend a compile on it.
                 if fallback is None or tiles > fallback[0]:
-                    fallback = (
-                        tiles,
-                        {**template_kwargs, "NUM_SMS": num_programs, "NUM_XCDS": 1},
-                    )
+                    fallback = (tiles, {**template_kwargs, "NUM_SMS": num_programs})
                 continue
             kept_any = True
-            yield {**template_kwargs, "NUM_SMS": num_programs, "NUM_XCDS": 1}
             tile = (block_m, block_n, block_k, template_kwargs["num_warps"])
-            if (
+            xcd_remap = (
                 default_pool
                 and tile in self.xcd_remap_tiles
                 and math.ceil(n_hint / block_n) >= self.min_n_tiles_for_xcd_remap
-            ):
-                yield {
-                    **template_kwargs,
-                    "NUM_SMS": num_programs,
-                    "NUM_XCDS": num_xcds,
-                }
+            )
+            yield {**template_kwargs, "NUM_SMS": num_programs}, xcd_remap
         if not kept_any and fallback is not None:
             # Keep the template selectable (e.g. by autotune_choice_name_regex)
             # with its finest tile when every config was skipped.
-            yield fallback[1]
+            yield fallback[1], False
+
+
+@register_template_heuristic(
+    persistent_xcd_mm_template.uid,
+    "cuda",
+    register=IS_ROCM,
+)
+class ROCmPersistentXCDMMTemplateConfigHeuristic(
+    ROCmPersistentMMTemplateConfigHeuristic
+):
+    """
+    Heuristic for the XCD-local persistent MM template. On archs in
+    _ROCM_PERSISTENT_MM_NUM_XCDS it offers the occupancy-sized configs that
+    benefit from the XCD remap; on other archs it offers nothing.
+    """
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        num_xcds = _ROCM_PERSISTENT_MM_NUM_XCDS.get(rocm_gfx_arch())
+        if num_xcds is None:
+            return
+        for template_kwargs, xcd_remap in self._occupancy_template_configs(
+            kernel_inputs, op_name, **kwargs
+        ):
+            if xcd_remap:
+                yield {**template_kwargs, "NUM_XCDS": num_xcds}
 
 
 @register_template_heuristic(
@@ -4088,6 +4122,18 @@ class ROCmAddMMPersistentTemplateConfigHeuristic(
     AddMMConfigMixin, ROCmPersistentMMTemplateConfigHeuristic
 ):
     """Addmm specific mixin for persistent MM on ROCm"""
+
+
+@register_template_heuristic(
+    persistent_xcd_mm_template.uid,
+    "cuda",
+    register=IS_ROCM,
+    op_name="addmm",
+)
+class ROCmAddMMPersistentXCDTemplateConfigHeuristic(
+    AddMMConfigMixin, ROCmPersistentXCDMMTemplateConfigHeuristic
+):
+    """Addmm specific mixin for the XCD-local persistent MM on ROCm"""
 
 
 # TODO(coconutruben): deprecate once autoheuristic is deprecated
