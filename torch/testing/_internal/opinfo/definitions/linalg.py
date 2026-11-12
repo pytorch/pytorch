@@ -21,7 +21,6 @@ from torch.testing._internal.common_device_type import (
     has_cusolver,
     skipCPUIfNoLapack,
     skipCUDAIfNoCusolver,
-    skipXPU,
     tol,
     toleranceOverride,
 )
@@ -2004,8 +2003,6 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_polar,
         decorators=[
-            # torch-xpu-ops/issues/4162
-            skipXPU,
             skipCUDAIfNoCusolver,
             skipCPUIfNoLapack,
             # On CUDA the cuSOLVER QDWH override is the path under test; without
