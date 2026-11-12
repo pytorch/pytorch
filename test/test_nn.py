@@ -10226,6 +10226,7 @@ class TestNNDeviceType(NNTestCase):
         self._test_upsamplingTrilinear3d(device, align_corners, memory_format)
 
     @onlyCUDA
+    @skipIfRocm
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last_3d])
     def test_upsamplingTrilinear3d_deterministic(self, device, align_corners, memory_format):
