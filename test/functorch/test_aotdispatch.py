@@ -13800,6 +13800,7 @@ class TestAOTAutogradDeviceWithCache(
 
 
 instantiate_parametrized_tests(TestAOTAutograd)
+instantiate_parametrized_tests(TestPartitioning)
 instantiate_device_type_tests(
     TestAOTAutogradDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
 )
@@ -13815,10 +13816,7 @@ instantiate_device_type_tests(
     only_for=("cpu", "cuda", "xpu"),
     allow_xpu=True,
 )
-
-instantiate_parametrized_tests(TestPartitioning)
 instantiate_device_type_tests(TestPartitioningCudaOnly, globals(), only_for=("cuda",))
-
 instantiate_parametrized_tests(TestAOTModuleSimplified)
 instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for="cpu")
