@@ -265,7 +265,7 @@ test_int_dtypes = [
     torch.int64,
 ]
 
-if SM80OrLater or torch.backends.mps.is_built() or GPU_TYPE == "xpu":
+if SM80OrLater or torch.backends.mps.is_built() or GPU_TYPE in ("xpu", "mtia"):
     test_dtypes.append(torch.bfloat16)
 
 
