@@ -3072,6 +3072,17 @@ partial_fn = functools.partial(fn, scale=2)
         self.assertIn("seek", w.__dict__)
         self.assertEqual(opt_fn(w, x), x + 1)
 
+        # Found without __getattr__: hasattr must still guard on presence.
+        def fn_tag(w, x):
+            return x + 1 if hasattr(w, "tag") else x - 1
+
+        opt_fn_tag = torch.compile(fn_tag, backend="eager", fullgraph=True)
+        w = Wrapper()
+        w.tag = 1
+        self.assertEqual(opt_fn_tag(w, x), x + 1)
+        del w.tag
+        self.assertEqual(opt_fn_tag(w, x), x - 1)
+
     @make_test
     def test_list_clear(a, b):
         tmp = [a + 1, a + 2]

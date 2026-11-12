@@ -12,6 +12,7 @@ import collections
 import contextlib
 import enum
 import functools
+import inspect
 import operator
 import sys
 import types
@@ -2683,14 +2684,18 @@ def generic_hasattr_str(
             or value.py_type is not None
         ):
             # A lazy read installs no guards, so HASATTR keeps a True answer
-            # valid. Skip it for a user __getattr__: HASATTR runs the real
-            # hasattr() when guards are built and checked, and that __getattr__
-            # may mutate the object (tempfile._TemporaryFileWrapper caches into
-            # __dict__). The traced __getattr__ already guarded its own reads.
-            has_user_getattr = isinstance(
-                obj, variables.UserDefinedObjectVariable
-            ) and isinstance(obj._check_for_getattr(), types.FunctionType)
-            if obj.source and not has_user_getattr:
+            # valid. Skip it when only a user __getattr__ found the name:
+            # HASATTR runs the real hasattr() when guards are built, which would
+            # call that __getattr__, and it may mutate the object
+            # (tempfile._TemporaryFileWrapper caches into __dict__). The traced
+            # __getattr__ already guarded its own reads.
+            found_by_user_getattr = (
+                isinstance(obj, variables.UserDefinedObjectVariable)
+                and isinstance(obj._check_for_getattr(), types.FunctionType)
+                and inspect.getattr_static(obj.value, name, NO_SUCH_SUBOBJ)
+                is NO_SUCH_SUBOBJ
+            )
+            if obj.source and not found_by_user_getattr:
                 install_guard(
                     obj.source.make_guard(
                         functools.partial(GuardBuilder.HASATTR, attr=name)
