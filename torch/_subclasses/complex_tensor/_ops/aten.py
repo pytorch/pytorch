@@ -91,7 +91,6 @@ SIMPLE_OPS_LIST = [
     aten.diagonal,
     aten.expand,
     aten.unsqueeze,
-    aten.unsqueeze_,
     aten.mean,
     aten.sum,
     aten.clone,
@@ -115,6 +114,49 @@ SIMPLE_OPS_LIST = [
 
 for simple_op in SIMPLE_OPS_LIST:
     globals()[_get_func_name(simple_op)] = register_simple(simple_op)
+
+
+def register_inplace_view(op: OpType) -> Callable[..., Any]:
+    """Register an in-place view op, which must also update the wrapper's own metadata."""
+
+    def impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> ComplexTensor:
+        # Run on aliases first so that an error leaves both components untouched.
+        re = op(aten.alias(self.re), *args, **kwargs)
+        op(aten.alias(self.im), *args, **kwargs)
+        op(self.re, *args, **kwargs)
+        op(self.im, *args, **kwargs)
+        # Autograd returns `self` for in-place ops, so its sizes/strides must match `re`'s.
+        # The wrapper's storage is synthetic, so use the meta `set_`, which grows it as needed.
+        python_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
+        with (
+            torch._C._ExcludeDispatchKeyGuard(python_key),
+            torch._C._PreserveDispatchKeyGuard(),
+        ):
+            torch._C._set_meta_in_tls_dispatch_include(True)
+            aten.set_.source_Storage_storage_offset(
+                self, self.untyped_storage(), re.storage_offset(), re.shape, re.stride()
+            )
+        return self
+
+    func_name = _get_func_name(op)
+    impl.__name__ = func_name
+    impl.__qualname__ = func_name
+
+    return register_complex(op, impl)
+
+
+INPLACE_VIEW_OPS = [
+    aten.unsqueeze_,
+    aten.squeeze_,
+    aten.transpose_,
+    aten.t_,
+    aten.as_strided_,
+]
+
+for inplace_view_op in INPLACE_VIEW_OPS:
+    globals()[_get_func_name(inplace_view_op)] = register_inplace_view(inplace_view_op)
+
+del inplace_view_op
 
 # TODO (hameerabbasi): Not being tested
 SIMPLE_FORCE_TESTED_OPS = [

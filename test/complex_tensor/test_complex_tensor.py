@@ -201,6 +201,28 @@ class TestComplexTensorGeneric(TestCase):
 
         self.assertEqual(torch.ne(r, xc), torch.ne(r, c))
 
+    def test_as_strided_inplace_beyond_wrapper_storage(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        xc = ComplexTensor(torch.zeros(10)[:2], torch.zeros(10)[:2])
+        result = xc.as_strided_((10,), (1,))
+
+        self.assertIs(result, xc)
+        self.assertEqual(xc.shape, (10,))
+        self.assertEqual(xc.re.shape, (10,))
+        self.assertEqual(xc.im.shape, (10,))
+
+    def test_as_strided_inplace_error_leaves_components_untouched(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        xc = ComplexTensor(torch.zeros(10)[:2], torch.zeros(2))
+        with self.assertRaises(RuntimeError):
+            xc.as_strided_((10,), (1,))
+
+        self.assertEqual(xc.shape, (2,))
+        self.assertEqual(xc.re.shape, (2,))
+        self.assertEqual(xc.im.shape, (2,))
+
 
 @unMarkDynamoStrictTest
 class TestComplexBwdGradients(TestCase):
