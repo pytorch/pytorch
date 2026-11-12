@@ -24,8 +24,10 @@ import torch._inductor.config as inductor_config
 import torch.nn as nn
 import torch.nn.functional as F
 from torch._dynamo.utils import counters
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    parametrize,
     run_tests,
     TestCase,
 )
@@ -1398,6 +1400,85 @@ class _LinearHeadEscapes2(nn.Module):
         return head, tail
 
 
+class TestConcatMemPool(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @inductor_config.patch({"triton.cudagraphs": False, "force_disable_caches": True})
+    @parametrize(
+        "placement", ["default", "same", "to_default", "from_default", "different"]
+    )
+    def test_cat_pool_placement(self, device, placement):
+        from torch._inductor.utils import run_and_get_code
+
+        torch._dynamo.reset()
+        pool = torch.cuda.MemPool()
+        other_pool = torch.cuda.MemPool()
+        src_pool = None if placement in ("default", "from_default") else pool
+        dst_pool = {
+            "default": None,
+            "same": pool,
+            "to_default": None,
+            "from_default": pool,
+            "different": other_pool,
+        }[placement]
+
+        def fn(x, w0, w1):
+            with (
+                torch.cuda.use_mem_pool(src_pool)
+                if src_pool is not None
+                else contextlib.nullcontext()
+            ):
+                y0 = x @ w0
+                y1 = x @ w1
+            with (
+                torch.cuda.use_mem_pool(dst_pool)
+                if dst_pool is not None
+                else contextlib.nullcontext()
+            ):
+                return torch.cat((y0, y1), dim=-1)
+
+        x = torch.randn(64, 128, device=device)
+        w0 = torch.randn(128, 256, device=device)
+        w1 = torch.randn(128, 256, device=device)
+        expected = fn(x, w0, w1)
+        actual, codes = run_and_get_code(torch.compile(fn, fullgraph=True), x, w0, w1)
+        self.assertEqual(actual, expected)
+        code = "\n".join(codes)
+        allocations = len(re.findall(r" = empty_strided_cuda\(", code))
+        copies = len(re.findall(r"^\s+triton_poi_\w+\.run\(", code, re.MULTILINE))
+        self.assertEqual(allocations, 1)
+        self.assertEqual(copies, 0)
+
+    @_requires_green_contexts
+    @inductor_config.patch({"triton.cudagraphs": False, "force_disable_caches": True})
+    @parametrize("bias", [False, True])
+    @parametrize("backend", ["ATEN", "TRITON"])
+    def test_localized_cat_preserves_copies(self, device, bias, backend):
+        from torch._inductor.utils import run_and_get_code
+        from torch.testing._internal.common_cuda import tf32_off
+
+        torch._dynamo.reset()
+        model = nn.Linear(128, 512, bias=bias, device=device).eval()
+        x = torch.randn(64, 128, device=device)
+        with torch.inference_mode(), tf32_off():
+            expected = model(x)
+            torch.cuda.localize(model)
+            with inductor_config.patch(
+                max_autotune=backend == "TRITON", max_autotune_gemm_backends=backend
+            ):
+                compiled = torch.compile(model, fullgraph=True)
+                actual, codes = run_and_get_code(compiled, x)
+        self.assertEqual(actual, expected)
+        code = "\n".join(codes)
+        self.assertEqual(len(re.findall(r" = empty_strided_cuda\(", code)), 3)
+        copies = re.findall(r"^\s+triton_poi_\w+\.run\(", code, re.MULTILINE)
+        self.assertEqual(len(copies), 2)
+        self.assertEqual(code.count("with torch.cuda.use_mem_pool("), 2)
+
+
+instantiate_device_type_tests(TestConcatMemPool, globals(), only_for="cuda")
+
+
 class TestLocalizationAllocatorMeta(TestCase):
     """Per-branch matmul outputs (and any pointwise tail duplicates) are
     routed into the matching locality-domain mempool.  These tests pin
@@ -1443,6 +1524,7 @@ class TestLocalizationAllocatorMeta(TestCase):
             if n.target not in (aten.mm.default, aten.addmm.default):
                 continue
             c = n.meta.get("custom") or {}
+            self.assertIs(c.get("localization"), True)
             s, a = c.get("stream"), c.get("mempool")
             self.assertIsNotNone(
                 s,
@@ -1492,6 +1574,7 @@ class TestLocalizationAllocatorMeta(TestCase):
         self.assertTrue(cats, "expected at least one cat in localized graph")
         for n in cats:
             c = n.meta.get("custom") or {}
+            self.assertNotIn("localization", c)
             self.assertNotIn("stream", c, f"cat {n} should not carry stream meta")
             self.assertNotIn("mempool", c, f"cat {n} should not carry mempool meta")
 
