@@ -6536,6 +6536,21 @@ def breaking_helper(y):
 
 def calls_breaking_helper(model, x):
     return breaking_helper(model(x)) + 1
+
+
+def overrides_the_backward(model, x):
+    with torch._dynamo.override_cudagraphs(bwd=False):
+        return step(model, x)
+
+
+def overrides_the_forward(model, x):
+    with torch._dynamo.override_cudagraphs(fwd=False):
+        return step(model, x)
+
+
+def turns_cudagraphs_on(model, x):
+    with torch._dynamo.override_cudagraphs(fwd=True):
+        return step(model, x)
 """
 
 _CUDAGRAPH_LOADER = """
@@ -6753,6 +6768,37 @@ class TestPrecompileCudagraphs(TestCase):
         self.assertEqual(meta["CUDAGRAPH_CONFIG"], {"triton.cudagraphs": False})
         env = {"TORCHINDUCTOR_CUDAGRAPHS": "1"}
         self.assertEqual(self._serve_in_fresh_process(y, env)["captured"], 0)
+
+    @parametrize(
+        "fn", ["overrides_the_forward", "overrides_the_backward", "turns_cudagraphs_on"]
+    )
+    @parametrize("flag", [False, True])
+    def test_a_capture_overriding_cudagraphs_is_refused_when_they_disagree(
+        self, fn, flag
+    ):
+        fn = getattr(self.mod, fn)
+        options = {"triton.cudagraphs": flag}
+        if flag != (fn is self.mod.turns_cudagraphs_on):
+            with self.assertRaisesRegex(PrecompileError, "Set triton.cudagraphs"):
+                self._capture_step(fn, grad=True, options=options)
+            return
+        y, _ = self._capture_step(fn, grad=True, options=options)
+        served = self._serve_in_fresh_process(y, expected_grad=self._eager_grad(fn))
+        # The forward and backward graphs, as the flag decides them.
+        self.assertEqual(served["recorded"], 2 if flag else 0)
+        self.assertEqual(served["skips"], 0)
+
+    def test_an_inference_capture_keeping_out_a_backward_it_lacks_serves(self):
+        fn = self.mod.overrides_the_backward
+        y, _ = self._capture_step(fn, options={"triton.cudagraphs": True})
+        self.assertGreater(self._serve_in_fresh_process(y)["recorded"], 0)
+
+    def test_an_eager_capture_has_no_cudagraph_config_to_contradict(self):
+        fn = self.mod.turns_cudagraphs_on
+        y, meta = self._capture_step(fn, grad=True, backend="eager")
+        self.assertEqual(meta["CUDAGRAPH_CONFIG"], {})
+        served = self._serve_in_fresh_process(y, expected_grad=self._eager_grad(fn))
+        self.assertEqual(served["captured"], 0)
 
 
 def _exception_chain(exc: BaseException | None) -> str:
