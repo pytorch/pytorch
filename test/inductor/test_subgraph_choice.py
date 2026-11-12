@@ -20,6 +20,7 @@ from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -94,6 +95,11 @@ class TestSubgraphChoice(TestCase):
             layout=FixedLayout(torch.device(f"{GPU_TYPE}:0"), dtype=dtype, size=shape),
         )
 
+    @decorateIf(
+        unittest.skip("MetaWS and partial configs only apply to the Triton backend"),
+        lambda params: params["backend"] == "aten"
+        and (params["meta_ws"] or params["config_index"]),
+    )
     @parametrize("backend", ("aten", "triton"))
     @parametrize("meta_ws", (False, True))
     @parametrize("config_index", (0, 1))
@@ -247,6 +253,44 @@ class TestSubgraphChoice(TestCase):
         source = "\n".join(codes)
         self.assertEqual("_split_aten" in source, expect_aten)
         self.assertEqual("_split_triton_" in source, expect_triton)
+
+    @unittest.skipUnless(
+        has_datacenter_blackwell_tma_device(),
+        "the Triton partial BMM needs datacenter Blackwell",
+    )
+    @parametrize("a_row_major", (False, True))
+    def test_decompose_k_triton_tf32_transposed_a(self, a_row_major):
+        # tcgen05.mma cannot read a transposed FP32 A operand from shared
+        # memory, so with TF32 on the Triton partial BMM must be skipped for a
+        # column-major A rather than failing to compile.
+        if a_row_major:
+            a = _exact_inputs(128, 16384, dtype=torch.float32)
+        else:
+            a = _exact_inputs(16384, 128, dtype=torch.float32).T
+        b = _exact_inputs(16384, 512, dtype=torch.float32)
+        old_precision = torch.backends.cuda.matmul.fp32_precision
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        try:
+            with config.patch(
+                {
+                    "max_autotune_gemm": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "compile_threads": 1,
+                    "triton.enable_template_tma_store": True,
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.num_decompose_k_splits": 4,
+                    "triton.decompose_k_bmm_backends": "ATEN,TRITON",
+                    "triton.disallow_failing_autotune_kernels_TESTING_ONLY": True,
+                }
+            ):
+                actual, codes = run_and_get_code(
+                    torch.compile(lambda x, y: x @ y, fullgraph=True), a, b
+                )
+        finally:
+            torch.backends.cuda.matmul.fp32_precision = old_precision
+        # Small integers are exact in both TF32 and IEEE fp32.
+        self.assertEqual(actual, a @ b, atol=0, rtol=0)
+        self.assertEqual("_split_triton_" in "\n".join(codes), a_row_major)
 
     def test_subgraph_freeze_layout(self):
         from torch._inductor.kernel.decompose_k import DecomposeKSubgraphTemplate

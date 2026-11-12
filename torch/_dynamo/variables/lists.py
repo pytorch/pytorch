@@ -2167,7 +2167,6 @@ class TupleVariable(BaseListVariable):  # noqa: RVT001
 
 class ByteArrayVariable(VariableTracker):
     # PyByteArray_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
-    # Missing slots: tp_as_sequence.sq_ass_item, tp_as_mapping.mp_ass_subscript
     _cpython_type = bytearray
     _index_not_found_msg = (
         "bytearray.index(x): x not in bytearray"
@@ -2233,6 +2232,58 @@ class ByteArrayVariable(VariableTracker):
             return ConstantVariable.create(self.data[index])
         except IndexError as e:
             raise_observed_exception(IndexError, tx, args=list(e.args))
+
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # bytearray_ass_subscript: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if self.source is not None:
+            unimplemented(
+                gb_type="bytearray store to an existing bytearray",
+                context=f"bytearray: {self.source.name}",
+                explanation="Dynamo leaves writes to bytearrays with a source "
+                "to eager to preserve shared buffers and resize errors.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        if not self.is_mutable():
+            raise AssertionError(f"bytearray store on immutable {type(self).__name__}")
+        if pyindex_check(maybe_get_python_type(key)):
+            index: Any = pynumber_as_ssize_t(tx, key).as_python_constant()
+            if value is not None:
+                value = pynumber_index(tx, value)
+        elif pyslice_check(key):
+            index = key.as_index_slice(tx)
+        else:
+            raise_type_error(
+                tx,
+                f"bytearray indices must be integers or slices, "
+                f"not {key.python_type_name()}",
+            )
+        if value is not None and not value.is_python_constant():
+            unimplemented(
+                gb_type="bytearray store with non-constant value",
+                context=f"value: {value.python_type_name()}",
+                explanation="Dynamo only traces bytearray item and slice stores "
+                "whose value is known at compile time.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        new_data = bytearray(self.data)
+        try:
+            if value is None:
+                del new_data[index]
+            else:
+                new_data[index] = value.as_python_constant()
+        except (TypeError, ValueError, IndexError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        self.data = new_data
+        return ConstantVariable.create(None)
+
+    sq_ass_item_impl = mp_ass_subscript_impl
 
     def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(tx, len(self.data))
