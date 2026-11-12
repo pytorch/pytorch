@@ -360,15 +360,15 @@ static std::vector<std::string> TORCH_FR_WAIT_TIMEOUT_DUMP_MILSEC = {
 
 // Backend name of the default FlightRecorder<c10::Event> instance, i.e. the
 // process-wide singleton FlightRecorder<c10::Event>::get() returns. That is
-// the instance ProcessGroupGloo records into natively, so leaving the backend
-// unnamed keeps every dump API answering exactly what it always has.
+// the instance gloo's ops are recorded into, so leaving the backend unnamed
+// keeps every dump API reading gloo's ops.
 constexpr const char* kDefaultFRBackend = "gloo";
 
 // Per-backend FlightRecorder<c10::Event> instances, created on first use.
 // Every hooked backend records into its own ring buffer, so a chatty backend
-// cannot evict another's entries and their pg_ids cannot collide. The built-in
-// backends already have that property -- gloo in this c10::Event instance,
-// nccl in the CUDAEvent one -- and this restores it for hooked backends.
+// cannot evict another's entries and their pg_ids cannot collide.
+// ProcessGroupNCCL already has that property through the CUDAEvent instance;
+// this gives it to hooked backends.
 //
 // The registry lives in libtorch_cpu and is only reachable through this
 // exported function. FlightRecorder<EventType>::get()'s function-local static
@@ -421,8 +421,8 @@ TORCH_API void dump_fr_trace_file(
 // FlightRecorder<c10::Event>::get() themselves: get()'s function-local static
 // is not an exported symbol, so every shared library that instantiates the
 // template ends up with a private, empty recorder of its own. Only code linked
-// into libtorch_cpu -- where the hooks and the gloo backend record -- sees the
-// instance that actually holds the trace.
+// into libtorch_cpu -- where the hooks record -- sees the instance that
+// actually holds the trace.
 TORCH_API bool try_dump_fr_trace_file(
     bool includeCollectives,
     bool includeStackTraces,

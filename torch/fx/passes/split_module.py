@@ -41,6 +41,12 @@ class Partition:
         )
 
 
+def _is_read_in_partition(attr: Any, read_pytree_specs: bool) -> bool:
+    return isinstance(attr, torch.nn.Module) or (
+        read_pytree_specs and torch.utils._pytree._is_pytreespec_instance(attr)
+    )
+
+
 def _get_attr_from_qualname(mod: torch.nn.Module, qualname: str) -> Any:
     attr_val = mod
     for atom in qualname.split("."):  # type: ignore[union-attr]
@@ -66,6 +72,10 @@ def split_module(
 ) -> GraphModule:
     """
     Creates subgraphs out of main graph
+
+    A submodule that a ``get_attr`` node reads is read inside the partition with
+    ``get_attr``. Other attributes that a ``get_attr`` node reads, such as
+    tensors, are passed to the partition as inputs.
 
     Args:
         m (GraphModule): Graph module to split
@@ -166,7 +176,37 @@ def split_module(
             > self.assertEqual(orig_out, submodules_out)
             True
     """
+    return _split_module(
+        m,
+        root_m,
+        split_callback,
+        qualname_map,
+        keep_original_order,
+        keep_original_node_name,
+        keep_original_input_name,
+        partition_affix=partition_affix,
+        tuple_return=tuple_return,
+    )
 
+
+def _split_module(
+    m: GraphModule,
+    root_m: torch.nn.Module,
+    split_callback: Callable[[Node], int],
+    qualname_map: dict[str, str] | None = None,
+    keep_original_order: bool | None = False,
+    keep_original_node_name: bool | None = False,
+    keep_original_input_name: bool = True,
+    *,
+    partition_affix: str | None = None,
+    tuple_return: bool = False,
+    read_pytree_specs_in_partition: bool = False,
+) -> GraphModule:
+    """
+    ``split_module`` with one more option. When ``read_pytree_specs_in_partition``
+    is True (it is False by default), a partition also reads each pytree spec it
+    uses with ``get_attr`` instead of taking it as an input.
+    """
     log.debug(
         "%s",
         lazy_format_graph_code("pre split_module", m, colored=True),
@@ -471,8 +511,9 @@ def split_module(
             if (
                 orig_node.op == "get_attr"
                 and isinstance(orig_node.target, str)
-                and isinstance(
-                    _get_attr_from_qualname(m, orig_node.target), torch.nn.Module
+                and _is_read_in_partition(
+                    _get_attr_from_qualname(m, orig_node.target),
+                    read_pytree_specs_in_partition,
                 )
             ):
                 get_attr_inputs.append(inp)
@@ -481,8 +522,6 @@ def split_module(
 
         for inp in placeholder_inputs + get_attr_inputs:
             orig_node = orig_nodes[inp]
-            # We don't pass in get_attr nodes as inputs to the partition, but
-            # instead set them as targets and use getattr within the module
 
             def add_placeholder() -> Node:
                 if keep_original_input_name:
@@ -505,7 +544,7 @@ def split_module(
                     )
 
                 orig_attr = _get_attr_from_qualname(m, orig_node.target)
-                if isinstance(orig_attr, torch.nn.Module):
+                if _is_read_in_partition(orig_attr, read_pytree_specs_in_partition):
                     placeholder = partition.graph.get_attr(orig_node.target)
                     partition.targets[orig_node.target] = orig_attr
                 else:
