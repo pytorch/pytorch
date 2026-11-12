@@ -1078,6 +1078,7 @@ def meta_segment_reduce(
         raise NotImplementedError(
             "segment_reduce(): indices based reduction is not supported yet."
         )
+    axis = utils.canonicalize_dim(data.dim(), axis)
 
     def segment_reduce_output(segment_count):
         output_shape = list(data.shape)
