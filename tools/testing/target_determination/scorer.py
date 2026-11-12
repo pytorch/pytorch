@@ -151,8 +151,8 @@ def build_scorer_block(
     test job CI-wide. On any error the block is reduced to the reason, or None if
     even that fails, and TD's own scores are written regardless. changed_files is
     None when they could not be listed; risk is then null. A model whose version
-    is more than MAX_MODEL_AGE_DAYS before today (UTC by default) is dropped as
-    stale. `unknown` lists the model's heuristics that are not in `heuristics`:
+    is more than MAX_MODEL_AGE_DAYS before today (UTC by default), more than a
+    day after it, or not a date is dropped as stale. `unknown` lists the model's heuristics that are not in `heuristics`:
     they score 0 for every file.
     """
     try:
