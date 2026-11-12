@@ -255,8 +255,8 @@ def select_col_config(
         narrow = dtype in (torch.float16, torch.bfloat16)
         # Two-output Welford views never reach these anchors through kg._col_route_ok.
         welford = welford_outs == nouts == 1
-        # Column groups need combine_equal; TileReduce rejects traits without it.
-        grouped = welford and getattr(trait_type, "has_combine_equal", False)
+        # The grouped rules below launch vec=1 tiles.
+        grouped = welford and tile.col_group_ok(trait_type, vec=1)
         # Only argmax with int32 indices (32-bit accumulators) was measured.
         index = trait_type is ArgMaxOps
         one_field = trait_type in kg._B200_RAGGED_COL_ONE_FIELD
