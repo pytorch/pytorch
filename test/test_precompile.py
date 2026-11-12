@@ -5113,7 +5113,7 @@ class TestPrecompileDynamoCapture(TestCase):
         with torch._inductor.config.patch(cudagraph_policy=object()):
             with self.assertRaisesRegex(PrecompileError, "Unset it while capturing"):
                 self._capture(single, options=on)
-            # A capture without CUDA graphs has no wrapping for it to decide.
+            # Without CUDA graphs a policy cannot change what the capture records.
             self._capture(single)
         # It is checked on every call, so one set after capture() began refuses too,
         # before compiling: a capture that recovers still saves.
@@ -6634,6 +6634,12 @@ def kernelless_backward(model, x):
     return x.sin().sum() + model.lin.weight.sum()
 
 
+def breaks_inline(model, x):
+    y = model(x).sin()
+    torch._dynamo.graph_break()
+    return y.cos()
+
+
 class WrapsNoGraph(CUDAGraphPolicy):
     def should_wrap(self, compiled_graph):
         return False
@@ -6921,7 +6927,8 @@ class TestPrecompileCudagraphs(TestCase):
         # The capture takes the flag from the ambient config, so the artifact's
         # INDUCTOR_OPTIONS do not carry it.
         with torch._inductor.config.patch({"triton.cudagraphs": cudagraphs}):
-            self._capture_step(fn)
+            _, meta = self._capture_step(fn)
+        self.assertEqual(meta["INDUCTOR_OPTIONS"], {})
         # A shape no captured variant covers, so every graph serving it is
         # compiled in the loading process, whose own flag says the opposite.
         miss = torch.randn(6, 8, device="cuda")
@@ -6955,6 +6962,16 @@ class TestPrecompileCudagraphs(TestCase):
             baseline += 1
             todo.extend(c for cs in todo.pop().children.values() for c in cs)
         self.assertEqual(served["recorded"], baseline)
+
+    def test_a_standalone_artifact_with_a_continuation_records_its_cudagraphs(self):
+        # The entry's graph and its continuation's run in the generation the
+        # entry's call started, so both record.
+        fn = self.mod.breaks_inline
+        y, meta = self._capture_step(fn, mode="reduce-overhead")
+        self.assertEqual(meta["SERVING_MODE"], "standalone")
+        served = self._serve_in_fresh_process(y)
+        self.assertEqual(served["recorded"], 2)
+        self.assertEqual(served["skips"], 0)
 
     def test_a_training_artifact_whose_backward_runs_without_a_cudagraph_serves(self):
         # The weight's backward is an expand with no kernel, so it runs without a

@@ -4330,7 +4330,9 @@ def load(
     loading process's, as for a :func:`torch.compile` cache hit. A loaded
     artifact does not apply :func:`torch.compile`'s CUPTI workaround for CUDA
     graphs: when profiling repeatedly on CUDA older than 12.6, set
-    ``DISABLE_CUPTI_LAZY_REINIT=1`` and ``TEARDOWN_CUPTI=0`` yourself.
+    ``DISABLE_CUPTI_LAZY_REINIT=1`` and ``TEARDOWN_CUPTI=0`` yourself. The
+    exception is ``allow_serve_time_compiles`` (below): its Inductor wrapper
+    applies the workaround at load when the artifact's CUDA graphs are on.
 
     Frozen C++ kernels are keyed by their build command with the PyTorch install
     taken out, so they serve a host that installed the same PyTorch build
