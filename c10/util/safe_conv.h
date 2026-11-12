@@ -40,9 +40,10 @@ concept SafeConvIntegral = std::is_integral_v<T> && !std::is_same_v<T, bool>;
 // c10::checked_convert (c10/util/TypeCast.h). For intentional modular wrap, use
 // c10::unsafe_wrapping_convert.
 //
-// Usable in both host and device code: on host it throws via
-// report_narrowing_overflow; in CUDA/HIP device code (which cannot throw) it
-// traps via CUDA_KERNEL_ASSERT_PRINTF, printing name if one is provided.
+// Usable in both host and device code: on host it throws std::runtime_error
+// via report_narrowing_overflow; in CUDA/HIP device code (which cannot throw)
+// it traps with the same message. As with c10::checked_convert, name is the
+// destination type's name, e.g. "int32_t".
 #if defined(__cpp_concepts)
 template <detail::SafeConvIntegral To, detail::SafeConvIntegral From>
 #else
@@ -67,11 +68,13 @@ template <typename To, typename From>
       !c10::less_than_lowest<To>(f) && !c10::greater_than_max<To>(f);
   if (!representable) {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    // Device code cannot throw; trap on overflow instead, printing name if set.
-    CUDA_KERNEL_ASSERT_PRINTF(
-        false,
-        "value cannot be safely converted without overflow: %s",
-        name != nullptr ? name : "<unknown>");
+    if (name != nullptr) {
+      CUDA_KERNEL_ASSERT_PRINTF(
+          false, "value cannot be converted to type %s without overflow", name);
+    } else {
+      CUDA_KERNEL_ASSERT_MSG(
+          false, "value cannot be safely converted without overflow");
+    }
 #else
     detail::report_narrowing_overflow(name);
 #endif
