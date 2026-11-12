@@ -13581,6 +13581,46 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
 
+    def test_deterministic_algorithms_sets_inductor_flag(self):
+        # Turning on deterministic algorithms inside a compiled function, or
+        # through set_deterministic_debug_mode, also turns on Inductor's
+        # deterministic mode, as torch.use_deterministic_algorithms does.
+        prior = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            torch.use_deterministic_algorithms(True)
+            return x + 1
+
+        try:
+            torch.use_deterministic_algorithms(False)
+            fn(torch.ones(2))
+            self.assertTrue(torch.are_deterministic_algorithms_enabled())
+            self.assertTrue(torch._inductor.config.deterministic)
+
+            torch.set_deterministic_debug_mode("default")
+            self.assertFalse(torch._inductor.config.deterministic)
+            torch.set_deterministic_debug_mode("warn")
+            self.assertTrue(torch._inductor.config.deterministic)
+        finally:
+            torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
+
+    def test_inductor_deterministic_survives_compile(self):
+        # Deterministic mode set through Inductor alone stays on after frames
+        # compile, and does not turn on deterministic algorithms.
+        prior = torch.are_deterministic_algorithms_enabled()
+        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        try:
+            torch.use_deterministic_algorithms(False)
+            with torch._inductor.config.patch(deterministic=True):
+                for fn in (lambda x: x + 1, lambda x: x * 2):
+                    torch.compile(fn, backend="eager")(torch.randn(4))
+                self.assertTrue(torch._inductor.config.deterministic)
+                self.assertFalse(torch.are_deterministic_algorithms_enabled())
+        finally:
+            torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
+
     def test_deterministic_algorithms_warn_only_compile_time_value(self):
         prior = torch.are_deterministic_algorithms_enabled()
         prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
@@ -13609,7 +13649,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                     node
                     for node in gm.graph.nodes
                     if node.op == "call_function"
-                    and node.target is torch._C._set_deterministic_algorithms
+                    and node.target is torch.use_deterministic_algorithms
                 ]
                 self.assertEqual(len(set_deterministic_nodes), 1)
                 self.assertEqual(set_deterministic_nodes[0].args, (True,))
