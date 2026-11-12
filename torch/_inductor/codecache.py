@@ -107,6 +107,7 @@ from torch._inductor.utils import (
     clear_on_fresh_cache,
     determine_aoti_mmap_flags,
     fp32_matmul_precision_key,
+    get_sm_carveout,
     is_linux,
     is_windows,
     parallel_num_threads,
@@ -1683,6 +1684,9 @@ class FxGraphHashDetails:
         # we need to guard on the device index in case we allocate cuda tensors
         if no_tensor_inputs and torch.accelerator.is_available():
             self.default_cuda_device_index = torch.accelerator.current_device_index()
+
+        if (sm_carveout := get_sm_carveout()) is not None:
+            self.sm_carveout = sm_carveout
 
         # 'Deterministic algorithms' can affect codegen via lowering to cuda kernels.
         self.deterministic_algorithms_settings = (
