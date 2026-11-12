@@ -417,7 +417,26 @@ AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
 
 AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm_release(int32_t is_vnni);
 
-AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_default_real(
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cpublas_gemm_no_downcast_default_alpha_beta_double(
+    int32_t dtype,
+    int32_t transa,
+    int32_t transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    double alpha,
+    const void* a,
+    int64_t lda,
+    const void* b,
+    int64_t ldb,
+    double beta,
+    void* c,
+    int64_t ldc);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cpublas_gemm_no_downcast_alpha_beta_double(
+    int32_t device_type,
     int32_t dtype,
     int32_t transa,
     int32_t transb,
