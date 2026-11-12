@@ -577,8 +577,8 @@ Vectorized<c10::Half> inline fmadd(
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vfmaq_f16(c, a, b));
 #else
-  // Compute in float, where the product is exact: rounding it to Half before
-  // adding would round twice.
+  // Compute in float, where the product is exact, rather than round the
+  // product to Half before adding.
   const auto [a_float_low, a_float_high] = convert_half_float(a);
   const auto [b_float_low, b_float_high] = convert_half_float(b);
   const auto [c_float_low, c_float_high] = convert_half_float(c);
