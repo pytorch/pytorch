@@ -41,24 +41,34 @@ inline void check_rank(int rank, int world_size) {
 // provided that the signal pads remain zero-filled following successful
 // synchronization.
 //
-// On the CUDA backend, PyTorch's own operations (barrier(), put_signal(),
-// wait_signal() and the collectives) do not use the pad get_signal_pad()
-// returns. They synchronize through a separate pad that belongs to the process
-// group on a device, so that groups sharing an allocation cannot take each
-// other's signals; it has the same layout and is internal. The pad
-// get_signal_pad() returns stays the allocation's, for kernels outside PyTorch,
-// which alone decide what it holds. The NCCL and NVSHMEM backends use the
-// allocation's pad for both.
+// On the CUDA backend, PyTorch's own operations do not use this pad; see
+// NOTE [symmetric memory group signal pad].
 //
-// Because the internal pad is the group's, signals are scoped to the group:
-// put_signal() on one allocation can satisfy wait_signal() on another
-// allocation of the same group on the same channel. As for other collectives, a
-// group's operations on one channel must be issued in the same order on every
-// rank, whichever allocation they use. Replays of captured graphs are not
-// ordered, so graphs that use the same group must not replay concurrently. The
-// pad is created by the group's first rendezvous on a device, which every rank
-// must reach on its own device of that mapping; using the group later with a
-// different mapping of ranks to devices raises. Use a new group for that.
+// NOTE [symmetric memory group signal pad]
+// On the CUDA backend, barrier(), put_signal(), wait_signal() and the
+// collectives synchronize through an internal pad per (process group, device),
+// shared by every allocation rendezvoused on the group, so groups that share an
+// allocation cannot take each other's signals. As for other collectives:
+//  (1) Every rank issues the group's operations in the same order, whichever
+//      allocation each one runs on. They share the pad's slots: put_signal()
+//      on one allocation can satisfy wait_signal() on another, and a barrier
+//      on channel c, or a collective (which synchronizes block b on channel b),
+//      can take a signal pending on that channel.
+//  (2) Two of the group's operations do not run concurrently unless something
+//      orders them. GroupStreamGuard orders them across streams in eager mode
+//      and within one graph capture, one capture at a time; nothing orders a
+//      graph replay against another replay or eager work.
+// Breaking either can pair signals wrongly without an error, or make an
+// operation time out or hang. The group's first rendezvous on a device creates
+// the pad and fixes its rank-to-device mapping (a later rendezvous with another
+// mapping raises), its size and whether it
+// has a multicast mapping. If creating the pad fails on some ranks but not
+// others, or a signal is left set, the group stays that way on the device. In
+// each case a new group starts clean. A pad costs one allocation granule, its
+// peer mappings and, with multicast, a multicast object; it is freed once its
+// group is released and its allocations are freed, when a later group is set
+// up. The NCCL and NVSHMEM backends use the allocation's pad, so the rules hold
+// per allocation there.
 //
 // NOTE [symmetric memory synchronization channel]
 // Synchronization channels allow users to use a single SymmetricMemory object

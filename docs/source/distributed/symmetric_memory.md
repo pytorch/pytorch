@@ -181,9 +181,15 @@ primitives, and each symmetric memory allocation comes with a signal pad that
 kernels like the one below can use for their own synchronization. On the CUDA
 backend, PyTorch's own operations synchronize through a separate pad that
 belongs to the process group on the device, so they do not use or disturb the
-allocation's pad. The group's operations share that pad whatever allocation they
-run on, and replays of captured graphs are not ordered against each other, so
-graphs that use the same group must not replay concurrently. Kernels using
+allocation's pad. As with other collectives, every rank must issue the group's
+operations in the same order, whichever allocation they run on, and they must
+not run concurrently unless ordered: operations on different streams are ordered
+in eager mode and within one graph capture, but a graph replay is not ordered
+against another replay or against the group's eager operations.
+The group keeps the pad size,
+device mapping and multicast mapping of its first rendezvous on a device; a
+rendezvous with another mapping raises, and a new group starts clean. Each
+group costs a signal pad per device. Kernels using
 symmetric memory can be written both in CUDA and in Triton. Here’s an example
 allocating symmetric tensor and exchanging handles:
 

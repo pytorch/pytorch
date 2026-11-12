@@ -2361,6 +2361,16 @@ def rendezvous(
         captured graph the same number of times, because each replay performs
         the peer synchronization for that rank.
 
+    .. note::
+        On the CUDA backend, the handle's ``barrier()``, ``put_signal()``,
+        ``wait_signal()`` and the symmetric memory collectives synchronize
+        through one signal pad per process group and device, shared by all of
+        the group's allocations. Every rank must issue them in the same order,
+        whichever allocation they use, and graphs that use the group must not
+        replay concurrently with each other or with the group's eager
+        operations. ``get_signal_pad()`` returns the allocation's own pad,
+        which these operations do not use.
+
     Args:
         tensor (:class:`torch.Tensor`): the local tensor used to establish the symmetric memory tensor.
             It must be allocated via :func:`torch._distributed._symmetric_memory.empty()`. The shape,
