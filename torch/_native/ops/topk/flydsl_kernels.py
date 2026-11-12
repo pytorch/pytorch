@@ -304,12 +304,14 @@ def _build_radix_select_topk_module(
     num_stages = (k - 1).bit_length()
     sort_len = 1 << num_stages
     block_threads = max(sort_len, _N_HIST_BINS)
-    max_step_elems = block_threads * spec.vec
-    if max_step_elems >= (1 << 15):
-        raise AssertionError(
-            "packed deterministic scan needs < 32768 elements per step, "
-            f"got {max_step_elems}"
-        )
+    if deterministic:
+        max_step_elems = block_threads * spec.vec
+        if max_step_elems >= (1 << 15):
+            raise AssertionError(
+                "deterministic gather packs above/equal counts into the high/low "
+                "16 bits of a signed int32; the above count must be < 32768, but "
+                f"this config can count {max_step_elems} elements per step"
+            )
     warp_size = 32 if is_rdna_arch(arch) else 64
     num_warps = block_threads // warp_size
     tile = block_threads * spec.vec
