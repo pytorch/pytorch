@@ -1687,6 +1687,9 @@ def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
         ((S, S), (1,), False),
         ((S, S), (-2,), False),
         ((S, S), (0, 1), False),
+        # dim=[] reduces over all dimensions
+        ((S, S), (), False),
+        ((S, S), (), True),
     )
     # Test large inputs to check numerical stability
     lows = (None, 1e3, 1e6) if dtype in (torch.float32, torch.float64, torch.complex64, torch.complex128) else (None,)
@@ -1707,6 +1710,16 @@ def reference_inputs_logsumexp(op, device, dtype, requires_grad, **kwargs):
 
     t = torch.tensor((), dtype=dtype, device=device, requires_grad=requires_grad)
     yield SampleInput(t, 0, False)
+    # 0-dim + empty dim: covers logsumexp_reduction_dims early return
+    yield SampleInput(t, ())
+
+    # Omit dim so OpInfo hits the schema default and the dim is None ref branch.
+    t = make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(t)
+    yield SampleInput(t, keepdim=True)
+
+    t = make_tensor((0, S), dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(t, ())
 
     # tests masking
     # https://github.com/pytorch/pytorch/pull/91860#pullrequestreview-1241344073

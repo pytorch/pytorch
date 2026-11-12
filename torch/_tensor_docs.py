@@ -3046,7 +3046,7 @@ returned distribution:
 add_docstr_all(
     "logsumexp",
     r"""
-logsumexp(dim, keepdim=False) -> Tensor
+logsumexp(dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.logsumexp`
 """,
