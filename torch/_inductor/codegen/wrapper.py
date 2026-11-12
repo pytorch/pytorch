@@ -5196,7 +5196,8 @@ class PythonWrapperCodegen(CodeGen):
     ) -> None:
         """Launch ``kernel_name``, defined by define_user_defined_cutedsl_kernel for
         ``kernel``, with ``runtime_args`` on the current stream of ``device``. This
-        wrapper uses ``kernel`` only to name it in errors."""
+        wrapper uses ``kernel`` only to name it in errors; the C++ wrapper also reads
+        the host function's signature from it."""
 
         def arg_str(arg: Any) -> str:
             if isinstance(arg, ir.IRNode):

@@ -14,7 +14,13 @@ torch2cute = {
     torch.float64: Float64,
     torch.float16: cutlass.Float16,
     torch.bfloat16: cutlass.BFloat16,
+    torch.float8_e4m3fn: cutlass.Float8E4M3FN,
+    torch.float8_e5m2: cutlass.Float8E5M2,
+    torch.int8: cutlass.Int8,
+    torch.uint8: cutlass.Uint8,
+    torch.int16: cutlass.Int16,
     torch.int32: Int32,
+    torch.int64: cutlass.Int64,
 }
 
 # Inverse mapping for allocating torch scratch from a trait's cute accumulator dtype.

@@ -41,6 +41,7 @@ from torch.utils._ordered_set import OrderedSet
 __all__ = [
     "CPP_CUDA_ERROR_CHECK",
     "CPP_HEADERS",
+    "CPP_INTEGER_ARG",
     "ConstantParamSpec",
     "CuteDSLExportedKernel",
     "CuteDSLExportError",
@@ -895,7 +896,7 @@ def export_for_link(
     return exported
 
 
-# Standard headers the declarations and launches use.
+# Standard headers the declarations, launches and CPP_INTEGER_ARG use.
 CPP_HEADERS = (
     "atomic",
     "cstdint",
@@ -903,6 +904,7 @@ CPP_HEADERS = (
     "iostream",
     "mutex",
     "string",
+    "type_traits",
     "vector",
 )
 
@@ -920,6 +922,29 @@ CPP_CUDA_ERROR_CHECK = r"""
             cudaGetErrorName(cutedsl_err_) + ": " +                        \
             cudaGetErrorString(cutedsl_err_));                             \
   } while (0)
+""".strip()
+
+# Defined once per wrapper. The C++ wrapper passes a symbolic value for an integer
+# parameter through it, so that the C++ type of the expression picks the conversion,
+# as it picks the dtype of a symbolic graph output (scalar_to_tensor_handle). A value
+# the launcher's int64_t or uint64_t parameter cannot hold (a negative one for
+# uint64_t; a floating one out of range, or NaN, whose conversion is undefined) is
+# refused; a floating one is truncated toward zero, as the DSL converts a float.
+CPP_INTEGER_ARG = r"""
+namespace {
+template <typename To, typename From>
+To cutedsl_integer_arg(From value, const char* msg) {
+  if constexpr (std::is_floating_point_v<From>) {
+    AOTI_RUNTIME_CHECK(
+        std::is_signed_v<To> ? value >= -0x1p63 && value < 0x1p63
+                             : value > -1.0 && value < 0x1p64,
+        msg);
+  } else if constexpr (std::is_unsigned_v<To> && std::is_signed_v<From>) {
+    AOTI_RUNTIME_CHECK(value >= 0, msg);
+  }
+  return static_cast<To>(value);
+}
+}  // namespace
 """.strip()
 
 
