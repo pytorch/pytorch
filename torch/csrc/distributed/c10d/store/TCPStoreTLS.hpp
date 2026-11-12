@@ -97,8 +97,10 @@ class TLSSession {
   void feed(const void* data, size_t length);
   // Returns true once the handshake has completed.
   bool handshake();
-  // Returns the number of plaintext bytes read, 0 if more input is needed.
-  size_t read(void* data, size_t length);
+  // Returns plaintext bytes read, 0 for more input, or nullopt for clean EOF.
+  std::optional<size_t> read(void* data, size_t length);
+  // Queues close_notify after the peer has finished sending.
+  void shutdown();
   // Encrypts data and appends the records to out.
   void write(const void* data, size_t length, std::vector<uint8_t>& out);
   // Appends pending output, e.g. handshake messages or alerts, to out.

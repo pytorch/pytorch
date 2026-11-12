@@ -54,6 +54,7 @@ using PskFindSessionCallback =
   _(void, SSL_set_bio, (void*, void*, void*))                                \
   _(void, SSL_set_connect_state, (void*))                                    \
   _(void, SSL_set_accept_state, (void*))                                     \
+  _(int, SSL_shutdown, (void*))                                              \
   _(int, SSL_do_handshake, (void*))                                          \
   _(int, SSL_read, (void*, void*, int))                                      \
   _(int, SSL_peek, (void*, void*, int))                                      \
@@ -81,11 +82,13 @@ struct OpenSSL {
       try {
         // libcrypto symbols resolve through this libssl's own dependency, so
         // the versions always match.
-        at::DynamicLibrary lib(name, nullptr, /*leak_handle=*/true);
+        at::DynamicLibrary lib(name);
 #define TCPSTORE_LOAD(ret, name, args) \
   name = reinterpret_cast<ret(*) args>(lib.sym(#name));
         TCPSTORE_OPENSSL_FUNCTIONS(TCPSTORE_LOAD)
 #undef TCPSTORE_LOAD
+        // Only a fully validated candidate gets a process-lifetime reference.
+        at::DynamicLibrary keepAlive(name, nullptr, /*leak_handle=*/true);
         return;
       } catch (const c10::DynamicLibraryError& e) {
         errors += fmt::format("; {}", e.what_without_backtrace());

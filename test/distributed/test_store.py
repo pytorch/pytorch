@@ -735,7 +735,7 @@ def _make_cert(d, name, ca):
     return cert, key
 
 
-@skip_if_win32()
+@unittest.skipUnless(sys.platform == "linux", "TCPStore TLS requires Linux")
 class TCPStoreTLSTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1054,6 +1054,104 @@ class TCPStoreTLSTest(TestCase):
         join_server()
         # CANCEL_WAIT
         self.assertEqual(received, [bytes([12])])
+
+    @parametrize("version", [ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3])
+    @parametrize("pending_wait", [False, True])
+    def test_tls_close_notify_drains_commands(self, version, pending_wait):
+        server = self._store(cert=self.server)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.load_verify_locations(self.ca)
+        ctx.load_cert_chain(*self.client)
+        ctx.minimum_version = version
+        ctx.maximum_version = version
+        incoming, outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
+        tls = ctx.wrap_bio(incoming, outgoing, server_hostname="localhost")
+
+        def blob(value):
+            return struct.pack("=Q", len(value)) + value
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as wire:
+            wire.settimeout(30)
+            if pending_wait:
+                # Keep the large GET queued while the other client wakes WAIT.
+                wire.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+            wire.connect(("127.0.0.1", server.port))
+
+            def flush():
+                if outgoing.pending:
+                    wire.sendall(outgoing.read())
+
+            def receive():
+                data = wire.recv(65536)
+                self.assertTrue(data, "TLS peer closed before the handshake completed")
+                incoming.write(data)
+
+            while True:
+                try:
+                    tls.do_handshake()
+                    flush()
+                    break
+                except ssl.SSLWantReadError:
+                    flush()
+                    receive()
+
+            # VALIDATE and PING ensure the server has authenticated this peer.
+            tls.write(struct.pack("=BI", 0, 0x3C85F7CE) + struct.pack("=BI", 13, 123))
+            flush()
+            response = b""
+            while len(response) < 4:
+                try:
+                    data = tls.read(4 - len(response))
+                    self.assertTrue(data, "TLS peer closed before PING completed")
+                    response += data
+                except ssl.SSLWantReadError:
+                    flush()
+                    receive()
+            self.assertEqual(response, struct.pack("=I", 123))
+
+            # Coalesce SET, GET and orderly EOF into one TCP write. The server
+            # must execute both commands and drain the GET reply before closing.
+            key, value = b"/last", b"value"
+            if pending_wait:
+                value = b"x" * (8 * 1024 * 1024)
+                server.set("last", value)
+                server.add("preloaded", 1)  # Wait for SET on this connection.
+                # WAIT(trigger), GET(last), SET(parsed). The marker proves
+                # these commands were parsed before a different client wakes
+                # the wait; that wake must not cancel the pending GET drain.
+                request = (
+                    b"\x06"
+                    + struct.pack("=Q", 1)
+                    + blob(b"/trigger")
+                    + b"\x03"
+                    + blob(key)
+                    + b"\x01"
+                    + blob(b"/parsed")
+                    + blob(b"yes")
+                )
+            else:
+                request = b"\x01" + blob(key) + blob(value) + b"\x03" + blob(key)
+            tls.write(request)
+            with self.assertRaisesRegex(ssl.SSLWantReadError, "read"):
+                tls.unwrap()
+            flush()
+            if pending_wait:
+                self.assertEqual(server.get("parsed"), b"yes")
+                server.set("trigger", "yes")
+                server.add("barrier", 1)  # Ensures the wake was processed.
+            while data := wire.recv(65536):
+                incoming.write(data)
+            incoming.write_eof()
+            expected = blob(value)
+            response = bytearray()
+            while len(response) < len(expected):
+                data = tls.read(len(expected) - len(response))
+                self.assertTrue(data, "TLS peer discarded a completed command")
+                response.extend(data)
+            self.assertTrue(response == expected, "GET reply was truncated or corrupt")
+            tls.unwrap()  # Verify the peer sent close_notify.
+        self.assertTrue(server.get("last") == value, "SET value was not preserved")
 
     def test_tls_untrusted_client(self):
         server = self._store(cert=self.server)
