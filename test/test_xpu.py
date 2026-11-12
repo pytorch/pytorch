@@ -628,8 +628,9 @@ print(torch.xpu.is_initialized())
     def test_stream_priority(self):
         low, high = torch.xpu.Stream.priority_range()
         for priority in range(high, low + 1):
-            s = torch.xpu.Stream(priority=priority)
+            s = torch.xpu.Stream(device=0, priority=priority)
             self.assertEqual(priority, s.priority)
+            self.assertEqual(torch.device("xpu:0"), s.device)
 
             e = torch.xpu.Event()
             e.record()
