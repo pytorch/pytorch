@@ -4,12 +4,14 @@ import copy
 import json
 import math
 import random
+import statistics
 import sys
 import tempfile
 import unittest
+from datetime import date, datetime, UTC
 from email.message import Message
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, TYPE_CHECKING
 from unittest import mock
 from urllib.error import HTTPError, URLError
 
@@ -32,8 +34,18 @@ from tools.testing.test_run import TestRun
 
 sys.path.remove(str(REPO_ROOT))
 
+if TYPE_CHECKING:
+    from typing import Self
+
 
 START_UP = 10.0
+TODAY = date(2026, 11, 11)
+
+
+def frozen_utc_now(now: datetime) -> mock.Mock:
+    frozen = mock.Mock(wraps=datetime)
+    frozen.now.return_value = now
+    return frozen
 
 
 def make_model(**overrides: Any) -> dict[str, Any]:
@@ -309,14 +321,37 @@ class TestEvaluation(unittest.TestCase):
             {
                 "n_files": 6,
                 "n_test_files": 1,
-                "n_source_files": 1,
+                "n_source_files": 2,
                 "n_areas": 6,
                 "docs_only": 0,
             },
         )
-        docs = scorer_model.change_features(["docs/a.py", "x/README.md"])
+        docs = scorer_model.change_features(["docs/a.rst", "x/README.md"])
         self.assertEqual(docs["docs_only"], 1)
         self.assertEqual(docs["n_areas"], 2)
+        self.assertEqual(docs["n_source_files"], 0)
+
+    def test_docs_are_md_and_rst_only_in_any_case(self) -> None:
+        def features(paths: list[str]) -> tuple[int, int, int]:
+            f = scorer_model.change_features(paths)
+            return f["n_files"], f["docs_only"], f["n_source_files"]
+
+        cases = [
+            (["CMakeLists.txt"], (1, 0, 1)),
+            ([".github/ci_commit_pins/triton.txt"], (1, 0, 1)),
+            (["requirements.txt"], (1, 0, 1)),
+            (["README.MD"], (1, 1, 0)),
+            (["torch/Notes.Rst"], (1, 1, 0)),
+            (["docs/a.py"], (1, 0, 0)),
+            (["README.md", ""], (1, 1, 0)),
+            ([""], (0, 0, 0)),
+            ([], (0, 0, 0)),
+        ]
+        for paths, expected in cases:
+            with self.subTest(paths=paths):
+                self.assertEqual(features(paths), expected)
+        empty = scorer_model.change_features([""])
+        self.assertEqual(set(empty.values()), {0})
 
     def test_risk_score(self) -> None:
         model = make_model()
@@ -341,13 +376,15 @@ class TestScorerBlock(unittest.TestCase):
         fetch: Any,
         changed: Any = ("test/test_a.py",),
         aggregated: AggregatedHeuristics | None = None,
+        today: date | None = TODAY,
     ) -> dict[str, Any]:
         with mock.patch("builtins.print") as printed:
             block = scorer.build_scorer_block(
                 aggregated or make_aggregated(),
-                [HEURISTIC_A, HEURISTIC_B],
+                iter([HEURISTIC_A, HEURISTIC_B]),
                 fetch,
                 None if changed is None else list(changed),
+                today,
             )
         self.printed = [" ".join(map(str, c.args)) for c in printed.call_args_list]
         if block is None:
@@ -362,11 +399,15 @@ class TestScorerBlock(unittest.TestCase):
             block["heuristics"], {"HeuristicA": {"test_a": 0.5, "test_b": 0.25}}
         )
         self.assertEqual(block["raised"], ["HeuristicB"])
+        self.assertEqual(block["unknown"], [])
         self.assertEqual(block["change"]["n_files"], 1)
         self.assertAlmostEqual(block["risk"], -0.5)
         self.assertEqual(
             self.printed,
-            [f"TD scorer: reason='ok' version='2026-11-11' risk={block['risk']!r}"],
+            [
+                "TD scorer: reason='ok' version='2026-11-11' "
+                f"risk={block['risk']!r} unknown=[]"
+            ],
         )
 
     def test_printed_line_escapes_model_strings(self) -> None:
@@ -374,12 +415,74 @@ class TestScorerBlock(unittest.TestCase):
         h = {"weight": -1.0, "x": [0.0], "y": [0.5]}
         bad = make_model()
         bad["scorer"]["heuristics"]["evil\nResults from X"] = h
-        for fetch in (lambda: encode(model), lambda: encode(bad)):
-            self.build(fetch)
-            self.assertEqual(len(self.printed), 1)
-            self.assertNotIn("\n", self.printed[0])
-            self.assertTrue(self.printed[0].startswith("TD scorer: reason="))
-        self.assertIn("evil", self.printed[0])
+        renamed = make_model()
+        renamed["scorer"]["heuristics"]["evil\nTD scorer: reason='ok'"] = {
+            "weight": 1.0,
+            "x": [0.0],
+            "y": [0.5],
+        }
+        for fetch, reason, injected in (
+            (lambda: encode(model), "stale: v\nTD scorer: reason='ok'", "stale: v\\n"),
+            (lambda: encode(bad), "invalid: ", "evil"),
+            (lambda: encode(renamed), "ok", "evil"),
+        ):
+            with self.subTest(reason=reason):
+                block = self.build(fetch)
+                self.assertTrue(block["reason"].startswith(reason))
+                self.assertEqual(len(self.printed), 1)
+                self.assertNotIn("\n", self.printed[0])
+                self.assertTrue(self.printed[0].startswith("TD scorer: reason="))
+                self.assertIn(injected, self.printed[0])
+        self.assertIn("unknown=[\"evil\\nTD scorer: reason='ok'\"]", self.printed[0])
+
+    def test_unknown_lists_model_heuristics_not_registered(self) -> None:
+        model = make_model()
+        model["scorer"]["heuristics"]["Renamed"] = {
+            "weight": 1.0,
+            "x": [0.0],
+            "y": [0.5],
+        }
+        block = self.build(lambda: encode(model))
+        self.assertEqual(block["reason"], "ok")
+        self.assertEqual(block["unknown"], ["Renamed"])
+        self.assertTrue(self.printed[0].endswith(" unknown=['Renamed']"))
+        block = self.build(lambda: None)
+        self.assertIsNone(block["unknown"])
+        self.assertTrue(self.printed[0].endswith(" unknown=None"))
+
+    def test_stale_model_is_dropped(self) -> None:
+        cases = [
+            ("2026-11-04", "ok"),
+            ("2026-11-03", "stale: 2026-11-03"),
+            ("2026-11-12", "ok"),
+            ("2026-11-13", "stale: 2026-11-13"),
+            ("2026-11-11", "ok"),
+            ("2026-02-30", "stale: 2026-02-30"),
+            ("refit-7", "stale: refit-7"),
+            ("", "stale: "),
+        ]
+        for version, reason in cases:
+            with self.subTest(version=version):
+                block = self.build(lambda: encode(make_model(version=version)))
+                self.assertEqual(block["reason"], reason)
+                if reason == "ok":
+                    self.assertEqual(block["model"]["version"], version)
+                else:
+                    self.assertIsNone(block["model"])
+                    self.assertIsNone(block["risk"])
+                    self.assertIsNone(block["unknown"])
+                    self.assertIn("HeuristicA", block["heuristics"])
+
+    def test_model_age_defaults_to_the_utc_date(self) -> None:
+        for now, reason in (
+            (datetime(2026, 11, 18, 23, 59, tzinfo=UTC), "ok"),
+            (datetime(2026, 11, 19, 0, 1, tzinfo=UTC), "stale: 2026-11-11"),
+        ):
+            frozen = frozen_utc_now(now)
+            with self.subTest(now=now), mock.patch.object(scorer, "datetime", frozen):
+                block = self.build(lambda: encode(make_model()), today=None)
+                self.assertEqual(block["reason"], reason)
+                frozen.now.assert_called_once_with(UTC)
 
     def test_missing_invalid_disabled(self) -> None:
         cases = [
@@ -503,6 +606,11 @@ class TestTDJob(unittest.TestCase):
                 mock.patch.object(td_job, "query_changed_files", query_changed_files),
                 mock.patch.dict("os.environ", {"CI": "false"}),
                 mock.patch("builtins.print"),
+                mock.patch.object(
+                    scorer,
+                    "datetime",
+                    frozen_utc_now(datetime(2026, 11, 12, 1, tzinfo=UTC)),
+                ),
             ]
             for name in (
                 "get_test_times",
@@ -540,6 +648,7 @@ class TestTDJob(unittest.TestCase):
         td_results = self.run_main(lambda _: encode(make_model()))
         self.assert_td_scores(td_results)
         self.assertEqual(td_results["scorer"]["reason"], "ok")
+        self.assertEqual(td_results["scorer"]["unknown"], [])
         self.assertEqual(td_results["scorer"]["change"]["n_files"], 1)
         self.assertEqual(self.changed_calls, 1)
 
@@ -710,6 +819,31 @@ class TestSelection(unittest.TestCase):
         again = self.select(copy.deepcopy(block), include, exclude, shuffled)
         self.assertEqual(first, again)
 
+    def test_trial_mode_heuristics_score_nothing(self) -> None:
+        self.assertEqual(scorer.TRIAL_HEURISTICS, {"HistoricalClassFailurCorrelation"})
+        tests = ["b", "d", "a", "c", "e", "f"]
+        times = dict.fromkeys(tests, 5.0)
+        include, exclude = td_cut(tests, {"f": 1.0})
+        block = make_block(HeuristicA={"f": 1.0})
+        self.assertEqual(
+            names(self.select(block, include, exclude, times)[0]), ["f", "a"]
+        )
+        raised = []
+
+        def spy(*args: Any) -> float:
+            raised.append(args[5])
+            return scorer_model.file_probability(*args)
+
+        trial = frozenset({"HeuristicA"})
+        with (
+            mock.patch.object(scorer, "TRIAL_HEURISTICS", trial),
+            mock.patch.object(scorer, "file_probability", spy),
+        ):
+            new_include, _, _ = self.select(block, include, exclude, times)
+        self.assertEqual(names(new_include), ["a", "b"])
+        self.assertEqual(raised, [{"HeuristicA"}] * len(tests))
+        self.assertEqual(block["raised"], [])
+
     def test_missing_times_use_the_median(self) -> None:
         times = {"a": 10.0, "b": 20.0, "c": 90.0}
         block = make_block()
@@ -806,7 +940,7 @@ class TestSelection(unittest.TestCase):
         include, exclude = td_cut(tests, scores)
         block = make_block(HeuristicA=scores)
         new_include, _, info = self.select(block, include, exclude, times)
-        median = sorted(times.values())[len(times) // 2]
+        median = statistics.median(times.values())
         td_cost = sum(file_cost(times.get(t.test_file, median)) for t in include)
         self.assertAlmostEqual(info["budget_ms"] / 1000, td_cost, delta=1.0)
         self.assertLessEqual(info["cost_ms"], info["budget_ms"])

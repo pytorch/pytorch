@@ -7,9 +7,11 @@ import hashlib
 import json
 import math
 import statistics
+from datetime import date, datetime, UTC
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
+from tools.testing.target_determination.heuristics import HEURISTICS
 from tools.testing.target_determination.heuristics.edited_by_pr import EditedByPR
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     PreviouslyFailedInPR,
@@ -39,6 +41,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 TD_RESULTS_PATH = REPO_ROOT / ".additional_ci_files" / "td_results.json"
 MAX_REASON_CHARS = 500
 MUST_RUN_HEURISTICS = (EditedByPR.__name__, PreviouslyFailedInPR.__name__)
+TRIAL_HEURISTICS = frozenset(h.name for h in HEURISTICS if h.trial_mode)
+MAX_MODEL_AGE_DAYS = 7
 
 
 class NoModel(Exception):
@@ -72,7 +76,19 @@ def heuristic_file_scores(
     return out
 
 
-def _load_model(fetch_model: Callable[[], bytes | None]) -> tuple[Any, str]:
+def _is_stale(version: str, today: date) -> bool:
+    """version is the refit's ISO date; one from the future by more than a day,
+    or that does not parse, is stale too."""
+    try:
+        age = (today - date.fromisoformat(version)).days
+    except (ValueError, TypeError):
+        return True
+    return not -1 <= age <= MAX_MODEL_AGE_DAYS
+
+
+def _load_model(
+    fetch_model: Callable[[], bytes | None], today: date | None
+) -> tuple[Any, str]:
     raw = fetch_model()
     if raw is None:
         return None, "missing"
@@ -82,6 +98,10 @@ def _load_model(fetch_model: Callable[[], bytes | None]) -> tuple[Any, str]:
         return None, invalid_reason(e)
     if not model["enabled"]:
         return None, "disabled"
+    if today is None:
+        today = datetime.now(UTC).date()
+    if _is_stale(model["version"], today):
+        return None, f"stale: {model['version']}"
     return model, "ok"
 
 
@@ -90,9 +110,15 @@ def _build_block(
     heuristics: Iterable[HeuristicInterface],
     fetch_model: Callable[[], bytes | None],
     changed_files: list[str] | None,
+    today: date | None,
 ) -> dict[str, Any]:
-    model, reason = _load_model(fetch_model)
+    heuristics = list(heuristics)
+    model, reason = _load_model(fetch_model, today)
     ran = {h.name for h in aggregated._heuristic_results}
+    unknown = None
+    if model is not None:
+        known = {h.name for h in heuristics}
+        unknown = sorted(set(model["scorer"]["heuristics"]) - known)
     change, risk = None, None
     try:
         if changed_files is not None:
@@ -106,6 +132,7 @@ def _build_block(
         "reason": reason,
         "heuristics": heuristic_file_scores(aggregated),
         "raised": [h.name for h in heuristics if h.name not in ran],
+        "unknown": unknown,
         "change": change,
         "risk": risk,
     }
@@ -116,18 +143,22 @@ def build_scorer_block(
     heuristics: Iterable[HeuristicInterface],
     fetch_model: Callable[[], bytes | None],
     changed_files: list[str] | None,
+    today: date | None = None,
 ) -> dict[str, Any] | None:
     """The `scorer` block for td_results.json; never raises.
 
     Test jobs `needs:` the TD job, so an exception escaping here would skip every
     test job CI-wide. On any error the block is reduced to the reason, or None if
     even that fails, and TD's own scores are written regardless. changed_files is
-    None when they could not be listed; risk is then null.
+    None when they could not be listed; risk is then null. A model whose version
+    is more than MAX_MODEL_AGE_DAYS before today (UTC by default) is dropped as
+    stale. `unknown` lists the model's heuristics that are not in `heuristics`:
+    they score 0 for every file.
     """
     try:
         try:
             block: dict[str, Any] = _build_block(
-                aggregated, heuristics, fetch_model, changed_files
+                aggregated, heuristics, fetch_model, changed_files, today
             )
             json.dumps(block, allow_nan=False)
         except Exception as e:
@@ -137,7 +168,7 @@ def build_scorer_block(
         reason = str(block["reason"])[:MAX_REASON_CHARS]
         print(
             f"TD scorer: reason={reason!r} version={version!r} "
-            f"risk={block.get('risk')!r}"
+            f"risk={block.get('risk')!r} unknown={block.get('unknown')!r}"
         )
         return block
     except Exception as e:
@@ -211,8 +242,9 @@ def select_tests(
     name, whatever their cost; the rest fill what is left of the budget by
     p / cost. Costs are summed in integer milliseconds so the order of summation
     cannot change what fits. Raises when the block carries no usable model or
-    the model has no start-up for this job. Every shard computes the same
-    selection: this depends only on its arguments.
+    the model has no start-up for this job. Trial-mode heuristics score nothing,
+    as they reorder nothing in TD. Every shard computes the same selection: this
+    depends only on its arguments.
     """
     if not isinstance(block, dict):
         raise NoModel("no scorer block")
@@ -225,7 +257,7 @@ def select_tests(
     if start_up is None:
         raise NoModel(f"no start-up for {build_env_key}/{test_config}")
     heuristics = block["heuristics"]
-    raised = set(block["raised"])
+    raised = set(block["raised"]) | TRIAL_HEURISTICS
     seconds = _seconds_lookup(times)
 
     def cost(f: str) -> float:

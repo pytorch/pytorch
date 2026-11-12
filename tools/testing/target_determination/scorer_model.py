@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from bisect import bisect_right
 from itertools import pairwise
 from typing import Any, TYPE_CHECKING
@@ -43,16 +44,16 @@ SCORER_KEYS = frozenset(
 HEURISTIC_KEYS = frozenset({"weight", "x", "y"})
 RISK_KEYS = frozenset({"intercept", "features", "quantiles"})
 RISK_FEATURE_KEYS = frozenset({"weight", "mean", "scale"})
-DOCS_SUFFIXES = (".md", ".rst", ".txt")
+DOCS_SUFFIXES = (".md", ".rst")
 NON_SOURCE_DIRS = ("test/", "docs/", "third_party/")
 
 
 def _is_docs(path: str) -> bool:
-    return path.startswith("docs/") or path.endswith(DOCS_SUFFIXES)
+    return os.path.splitext(path)[1].lower() in DOCS_SUFFIXES
 
 
 def _is_source(path: str) -> bool:
-    return not path.startswith(NON_SOURCE_DIRS) and not path.endswith(DOCS_SUFFIXES)
+    return not path.startswith(NON_SOURCE_DIRS) and not _is_docs(path)
 
 
 RISK_FEATURES: dict[str, Callable[[list[str]], int]] = {
@@ -60,7 +61,7 @@ RISK_FEATURES: dict[str, Callable[[list[str]], int]] = {
     "n_test_files": lambda paths: sum(p.startswith("test/") for p in paths),
     "n_source_files": lambda paths: sum(_is_source(p) for p in paths),
     "n_areas": lambda paths: len({p.split("/", 1)[0] for p in paths}),
-    "docs_only": lambda paths: int(all(_is_docs(p) for p in paths)),
+    "docs_only": lambda paths: int(bool(paths) and all(_is_docs(p) for p in paths)),
 }
 
 
@@ -259,7 +260,11 @@ def file_probability(
 
 
 def change_features(paths: list[str]) -> dict[str, int]:
-    """Risk features of a change, as raw counts, from its changed file paths."""
+    """Risk features of a change, as raw counts, from its changed file paths.
+
+    Empty paths are dropped first: git lists an empty diff as [""].
+    """
+    paths = [p for p in paths if p]
     return {name: feature(paths) for name, feature in RISK_FEATURES.items()}
 
 
