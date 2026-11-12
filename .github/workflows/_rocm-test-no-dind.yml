@@ -216,8 +216,9 @@ jobs:
             exit 1
           fi
 
-      # Same facts setup-rocm prints for the DinD path. free(1) reports the
-      # node's memory, not the pod's, so read the pod's cgroup values instead.
+      # Same facts setup-rocm prints for the DinD path (the amd-smi monitor table
+      # is already printed by "Job pod amd-smi"). free(1) reports the node's
+      # memory, not the pod's, so read the pod's cgroup values instead.
       - name: Job pod GPU diagnostics
         if: always()
         shell: bash
@@ -226,7 +227,7 @@ jobs:
           MATRIX_RUNNER: ${{ matrix.runner }}
         run: |
           source /etc/rocm_env.sh || true
-          bash .github/scripts/rocm_gpu_partition.sh --with-monitor || true
+          bash .github/scripts/rocm_gpu_partition.sh || true
           ls -l /dev/kfd /dev/dri || true
           grep -H . /sys/fs/cgroup/memory.{current,max} /sys/fs/cgroup/memory/memory.{usage,limit}_in_bytes 2>/dev/null || true
 
