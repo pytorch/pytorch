@@ -1636,6 +1636,10 @@ bw_outputs_user_visible = True
 # Whether to always use shape padding if it is enabled and possible
 force_shape_pad: bool = False
 
+# Whether shape padding may pad M of mm/addmm/bmm. M sets no row stride, so padding
+# it costs an operand copy without improving alignment.
+pad_m_dim: bool = os.environ.get("TORCHINDUCTOR_PAD_M_DIM", "1") == "1"
+
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 
