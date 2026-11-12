@@ -3886,11 +3886,6 @@ make_fallback(aten._trilinear)
 
 
 # 3) Difficult
-# Scans
-# See the discussion at
-# https://dev-discuss.pytorch.org/t/pytorch-sparse-gnn-compiler-rfc/1644/19
-make_fallback(aten._segment_reduce_backward.default)
-
 # Histogram (need to implement Histogram IR)
 make_fallback(aten.histc)
 make_fallback(aten.histogram.bin_ct)
