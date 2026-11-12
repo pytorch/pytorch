@@ -237,9 +237,10 @@ class TestCuteDSLHOPHelpers(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_side_table_dedupes_constant_args(self):
-        # The CuTeDSL table is never reset and every eager launch through the HOP adds
-        # its constants, so interchangeable constants share one entry (see
-        # constant_key), which holds a snapshot of the constants it was added with.
+        # Every eager launch through the HOP adds its constants to the CuTeDSL table,
+        # which only torch._dynamo.reset() clears, so interchangeable constants share
+        # one entry (see constant_key), which holds a snapshot of the constants it was
+        # added with.
         Tile = collections.namedtuple("Tile", ["m", "n"])
 
         @dataclasses.dataclass(frozen=True)
