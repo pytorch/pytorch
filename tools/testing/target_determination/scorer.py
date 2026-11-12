@@ -20,6 +20,7 @@ from tools.testing.target_determination.scorer_model import (
     ModelError,
     parse_model,
     risk_score,
+    start_up_seconds,
     validate_model,
 )
 from tools.testing.test_run import TestRun
@@ -38,11 +39,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 TD_RESULTS_PATH = REPO_ROOT / ".additional_ci_files" / "td_results.json"
 MAX_REASON_CHARS = 500
 MUST_RUN_HEURISTICS = (EditedByPR.__name__, PreviouslyFailedInPR.__name__)
-# A file the config records under MIN_RUN_SECONDS skips there (a CUDA-only file on a
-# CPU job): it starts and exits in about SKIP_OVERHEAD_SECONDS, so it is charged that
-# instead of the model's overhead_seconds. test-infra's trainer charges the same.
-MIN_RUN_SECONDS = 1.0
-SKIP_OVERHEAD_SECONDS = 3.0
 
 
 class NoModel(Exception):
@@ -178,6 +174,7 @@ def _info(
     version: str | None = None,
     budget_ms: int | None = None,
     cost_ms: int | None = None,
+    start_up: float | None = None,
     files: list[str] | None = None,
     seconds: float | None = None,
 ) -> dict[str, Any]:
@@ -189,6 +186,7 @@ def _info(
         "version": version,
         "budget_ms": budget_ms,
         "cost_ms": cost_ms,
+        "start_up": start_up,
         "n": len(files),
         "seconds": seconds,
         "hash": _selection_hash(files),
@@ -207,11 +205,14 @@ def select_tests(
 ) -> tuple[list[TestRun], list[TestRun], dict[str, Any]]:
     """The scorer's cut at the cost of TD's own cut, as whole test files.
 
-    Files with a non-zero score from a must-run heuristic come first, by name,
-    whatever their cost; the rest fill what is left of the budget by p / cost.
-    Costs are summed in integer milliseconds so the order of summation cannot
-    change what fits. Raises when the block carries no usable model. Every
-    shard computes the same selection: this depends only on its arguments.
+    A file's cost is its recorded seconds plus the model's start_up_seconds for
+    this build_env_key and test_config; the budget is the cost of TD's include
+    list. Files with a non-zero score from a must-run heuristic come first, by
+    name, whatever their cost; the rest fill what is left of the budget by
+    p / cost. Costs are summed in integer milliseconds so the order of summation
+    cannot change what fits. Raises when the block carries no usable model or
+    the model has no start-up for this job. Every shard computes the same
+    selection: this depends only on its arguments.
     """
     if not isinstance(block, dict):
         raise NoModel("no scorer block")
@@ -220,14 +221,15 @@ def select_tests(
     model = validate_model(block["model"])
     if not model["enabled"]:
         raise NoModel("disabled")
+    start_up = start_up_seconds(model, build_env_key, test_config)
+    if start_up is None:
+        raise NoModel(f"no start-up for {build_env_key}/{test_config}")
     heuristics = block["heuristics"]
     raised = set(block["raised"])
     seconds = _seconds_lookup(times)
-    overhead = float(model["overhead_seconds"])
 
     def cost(f: str) -> float:
-        s = seconds(f)
-        return s + (SKIP_OVERHEAD_SECONDS if s < MIN_RUN_SECONDS else overhead)
+        return seconds(f) + start_up
 
     def cost_ms(f: str) -> int:
         return round(cost(f) * 1000)
@@ -271,6 +273,7 @@ def select_tests(
         version=model["version"],
         budget_ms=budget,
         cost_ms=used,
+        start_up=start_up,
         files=selected,
         seconds=sum(seconds(f) for f in selected),
     )

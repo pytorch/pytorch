@@ -33,12 +33,15 @@ from tools.testing.test_run import TestRun
 sys.path.remove(str(REPO_ROOT))
 
 
+START_UP = 10.0
+
+
 def make_model(**overrides: Any) -> dict[str, Any]:
     model: dict[str, Any] = {
-        "schema": 1,
+        "schema": 2,
         "version": "2026-11-11",
         "enabled": True,
-        "overhead_seconds": 10.0,
+        "start_up_seconds": {"env1": {"default": START_UP, "slow": 2.5}},
         "scorer": {
             "intercept": -2.0,
             "cost_weight": 0.5,
@@ -139,12 +142,62 @@ class TestValidation(unittest.TestCase):
         self.assert_invalid(self.mutated(["risk", "extra"], 0.0), "keys")
 
     def test_scalar_fields(self) -> None:
-        self.assert_invalid(self.mutated(["schema"], 2), "schema")
+        self.assert_invalid(self.mutated(["schema"], 1), "schema 1 is not 2")
+        self.assert_invalid(self.mutated(["schema"], 3), "schema")
         self.assert_invalid(self.mutated(["version"], 1), "version")
         self.assert_invalid(self.mutated(["enabled"], 1), "enabled")
-        self.assert_invalid(self.mutated(["overhead_seconds"], -1), "overhead")
-        self.assert_invalid(self.mutated(["overhead_seconds"], 0), "overhead")
-        self.assert_invalid(self.mutated(["overhead_seconds"], 601), "overhead")
+
+    def test_schema_1_model_is_rejected(self) -> None:
+        old = make_model(schema=1, overhead_seconds=24.0)
+        del old["start_up_seconds"]
+        self.assert_invalid(old, "keys")
+        self.assert_invalid(make_model(overhead_seconds=24.0), "keys")
+
+    def test_start_up_table(self) -> None:
+        tables: list[dict[str, dict[str, float]]] = [
+            {},
+            {"env1": {}},
+            {"e": {"a": 1.0, "b": 600.0, "c": 7}},
+        ]
+        for table in tables:
+            with self.subTest(table=table):
+                model = make_model(start_up_seconds=table)
+                self.assertEqual(scorer_model.parse_model(encode(model)), model)
+
+        def at(k: Any) -> dict[str, Any]:
+            return self.mutated(["start_up_seconds", "env1", "default"], k)
+
+        self.assert_invalid(at(0.99), "outside")
+        self.assert_invalid(at(0), "outside")
+        self.assert_invalid(at(-5.0), "outside")
+        self.assert_invalid(at(600.01), "outside")
+        self.assert_invalid(at(True), "not a number")
+        self.assert_invalid(at("10"), "not a number")
+        self.assert_invalid(at(None), "not a number")
+        with self.assertRaisesRegex(ModelError, "not finite"):
+            scorer_model.validate_model(at(math.nan))
+        raw = encode(make_model()).decode().replace('"default": 10.0', '"default": NaN')
+        with self.assertRaisesRegex(ModelError, "non-finite"):
+            scorer_model.parse_model(raw.encode())
+        self.assert_invalid(make_model(start_up_seconds=[]), "not an object")
+        self.assert_invalid(make_model(start_up_seconds={"env1": 10.0}), "object")
+
+    def test_start_up_name_caps(self) -> None:
+        long_name = "x" * 201
+        cases = [
+            ({"": {"default": 10.0}}, "name"),
+            ({long_name: {"default": 10.0}}, "name"),
+            ({"env1": {long_name: 10.0}}, "name"),
+            ({f"e{i}": {} for i in range(2001)}, "more than 2000"),
+            ({"env1": {f"c{i}": 10.0 for i in range(501)}}, "more than 500"),
+        ]
+        for table, message in cases:
+            with self.subTest(message=message):
+                self.assert_invalid(make_model(start_up_seconds=table), message)
+        at_caps: dict[str, dict[str, float]] = {f"e{i}": {} for i in range(2000)}
+        at_caps["env1"] = {f"c{i}": 10.0 for i in range(500)}
+        del at_caps["e0"]
+        scorer_model.validate_model(make_model(start_up_seconds=at_caps))
 
     def test_heuristic_tables(self) -> None:
         def h(**kw: Any) -> dict[str, Any]:
@@ -222,6 +275,18 @@ class TestEvaluation(unittest.TestCase):
         )
         z = -2 + 0.5 * math.log(20) + math.log(0.3 / 0.7)
         self.assertAlmostEqual(p, 1 / (1 + math.exp(-z)), places=15)
+
+    def test_start_up_seconds_lookup(self) -> None:
+        model = make_model()
+        model["start_up_seconds"]["env2"] = {"default": 7}
+        lookup = scorer_model.start_up_seconds
+        self.assertEqual(lookup(model, "env1", "default"), START_UP)
+        self.assertEqual(lookup(model, "env1", "slow"), 2.5)
+        k = lookup(model, "env2", "default")
+        self.assertEqual((k, type(k)), (7.0, float))
+        self.assertIsNone(lookup(model, "env1", "other"))
+        self.assertIsNone(lookup(model, "env3", "default"))
+        self.assertIsNone(lookup(make_model(start_up_seconds={}), "env1", "default"))
 
     def test_extreme_z_does_not_overflow(self) -> None:
         model = make_model()
@@ -529,9 +594,7 @@ def make_block(model: Any = None, **scores: dict[str, float]) -> dict[str, Any]:
 
 
 def file_cost(seconds: float) -> float:
-    if seconds < scorer.MIN_RUN_SECONDS:
-        return seconds + scorer.SKIP_OVERHEAD_SECONDS
-    return seconds + 10.0
+    return seconds + START_UP
 
 
 def td_cut(
@@ -563,6 +626,7 @@ class TestSelection(unittest.TestCase):
         self.assertEqual(names(new_include)[:2], ["t07", "t09"])
         self.assertEqual(names(new_exclude), ["t05"])
         self.assertEqual(info["cost_ms"], 660_000)
+        self.assertEqual(info["start_up"], START_UP)
         self.assertEqual(info["cut"], "scorer")
         self.assertEqual(info["version"], "2026-11-11")
         self.assertEqual((info["n"], info["seconds"]), (11, 550.0))
@@ -586,7 +650,7 @@ class TestSelection(unittest.TestCase):
                 self.assertEqual(cost, info["cost_ms"])
                 self.assertEqual(len(new_include) + len(new_exclude), len(tests))
 
-    def test_files_that_skip_here_cost_their_start_up(self) -> None:
+    def test_every_file_costs_its_seconds_plus_the_start_up(self) -> None:
         tests = [f"t{i}" for i in range(8)]
         times = dict.fromkeys(tests, 0.04)
         times.update(t5=0.99, t6=100.0, t7=1.0)
@@ -594,9 +658,45 @@ class TestSelection(unittest.TestCase):
         self.assertEqual(names(include), ["t6", "t7", "t0"])
         block = make_block(HeuristicA={"t0": 1.0, "t1": 1.0, "t2": 1.0})
         new_include, _, info = self.select(block, include, exclude, times)
-        self.assertEqual(info["budget_ms"], 110_000 + 11_000 + 3_040)
+        self.assertEqual(info["budget_ms"], 110_000 + 11_000 + 10_040)
         self.assertEqual(names(new_include), ["t0", "t1", "t2", "t3", "t4", "t5", "t7"])
-        self.assertEqual(info["cost_ms"], 5 * 3_040 + 3_990 + 11_000)
+        self.assertEqual(info["cost_ms"], 5 * 10_040 + 10_990 + 11_000)
+
+    def test_start_up_comes_from_the_job_config(self) -> None:
+        times = {"a": 1.0, "b": 0.0049, "c": 4.0}
+        block = make_block()
+        _, _, info = scorer.select_tests(
+            block, [TestRun("a"), TestRun("b")], [TestRun("c")], times, "env1", "slow"
+        )
+        self.assertEqual(info["start_up"], 2.5)
+        self.assertEqual(info["budget_ms"], 3_500 + 2_505)
+        self.assertEqual(info["cost_ms"], 3_500 + 2_505)
+        self.assertEqual(info["n"], 2)
+
+    def test_zero_second_file_costs_the_start_up(self) -> None:
+        costs = []
+
+        def spy(*args: Any, **kwargs: Any) -> float:
+            costs.append(args[2])
+            return scorer_model.file_probability(*args, **kwargs)
+
+        with mock.patch.object(scorer, "file_probability", spy):
+            include, exclude, info = self.select(
+                make_block(), [TestRun("a")], [TestRun("b")], {"a": 0.0, "b": 0.0}
+            )
+        self.assertEqual(costs, [START_UP, START_UP])
+        self.assertEqual((info["budget_ms"], info["cost_ms"]), (10_000, 10_000))
+        self.assertEqual((len(include), len(exclude)), (1, 1))
+
+    def test_unlisted_job_raises_no_model(self) -> None:
+        for env, config in (("env1", "other"), ("env9", "default"), ("", "")):
+            with self.subTest(env=env, config=config):
+                with self.assertRaisesRegex(
+                    scorer.NoModel, f"^no start-up for {env}/{config}$"
+                ):
+                    scorer.select_tests(
+                        make_block(), [TestRun("a")], [], {"a": 1.0}, env, config
+                    )
 
     def test_deterministic_ties_by_name(self) -> None:
         tests = ["b", "d", "a", "c", "e", "f"]
@@ -617,12 +717,13 @@ class TestSelection(unittest.TestCase):
         self.assertEqual(info["budget_ms"], 30_000)
         self.assertEqual(info["td_seconds"], 20.0)
         _, _, info = self.select(block, [TestRun("d")], [], {})
-        self.assertEqual(info["budget_ms"], 3_000)
+        self.assertEqual(info["budget_ms"], 10_000)
 
     def test_build_env_one_hot_is_keyed_by_the_job_base_name(self) -> None:
         job = "dynamo-unittest / dynamo-test (3.12)"
         model = make_model()
         model["scorer"]["build_env"] = {job: 5.0, "linux-jammy-py3.12-clang21": -5.0}
+        model["start_up_seconds"][job] = {"default": START_UP}
         z = -2 + 0.5 * math.log(410) + 5.0 - 0.1
         z += math.log(0.1 / 0.9) + 2 * math.log(0.2 / 0.8)
         p = scorer_model.file_probability(model, {}, 410.0, job, "default")
@@ -713,7 +814,9 @@ class TestSelection(unittest.TestCase):
 
 
 class TestScorerCut(unittest.TestCase):
-    def cut(self, block: Any) -> tuple[Any, Any, dict[str, Any]]:
+    def cut(
+        self, block: Any, build_env_key: str = "env1"
+    ) -> tuple[Any, Any, dict[str, Any]]:
         self.include, self.exclude = td_cut(
             ["a", "b", "c", "d", "e"], {"e": 1.0, "d": 0.5}
         )
@@ -723,17 +826,19 @@ class TestScorerCut(unittest.TestCase):
             if block is not None:
                 path.write_text(json.dumps({"_test_scores": [], "scorer": block}))
             return scorer.scorer_cut(
-                path, self.include, self.exclude, times, "env1", "default"
+                path, self.include, self.exclude, times, build_env_key, "default"
             )
 
-    def assert_td_cut(self, block: Any, reason: str) -> None:
-        include, exclude, info = self.cut(block)
+    def assert_td_cut(self, block: Any, reason: str, env: str = "env1") -> None:
+        include, exclude, info = self.cut(block, env)
         self.assertEqual(include, self.include)
         self.assertEqual(exclude, self.exclude)
         self.assertEqual(info["cut"], "td")
         self.assertTrue(info["reason"].startswith(reason), info["reason"])
         self.assertEqual(info["n"], len(self.include))
         self.assertEqual(len(info["hash"]), 12)
+        self.assertIsNone(info["start_up"])
+        self.assertIsNone(info["budget_ms"])
 
     def test_fallbacks_give_td_cut_exactly(self) -> None:
         bad = make_model()
@@ -753,7 +858,7 @@ class TestScorerCut(unittest.TestCase):
                 self.assert_td_cut(block, reason)
         with mock.patch.object(scorer, "load_scorer_block", lambda _: make_block()):
             include, _, info = scorer.scorer_cut(
-                Path("unused"), [TestRun("a")], [], {"a": -20.0}, "", ""
+                Path("unused"), [TestRun("a")], [], {"a": -20.0}, "env1", "default"
             )
         self.assertEqual((names(include), info["cut"]), (["a"], "td"))
         self.assertTrue(info["reason"].startswith("error: ValueError"))
@@ -771,11 +876,15 @@ class TestScorerCut(unittest.TestCase):
         self.assertEqual(info["cut"], "td")
         self.assertIsNone(info["td_seconds"])
 
+    def test_unlisted_job_gives_td_cut(self) -> None:
+        self.assert_td_cut(make_block(), "no start-up for env9/default", env="env9")
+
     def test_scorer_cut_with_model(self) -> None:
         include, exclude, info = self.cut(make_block(HeuristicA={"a": 1.0}))
         self.assertEqual(info["cut"], "scorer")
         self.assertEqual(names(include)[0], "a")
         self.assertEqual(info["budget_ms"], 30_000)
+        self.assertEqual(info["start_up"], START_UP)
 
     def test_artifact_carries_scorer_info(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

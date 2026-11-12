@@ -25,13 +25,17 @@ MAX_BUILD_ENVS = 2000
 MAX_TEST_CONFIGS = 500
 MAX_RISK_FEATURES = 32
 MAX_BREAKPOINTS = 512
-MAX_OVERHEAD_SECONDS = 600.0
+# Every file costs at least MIN_START_UP_SECONDS, so log(cost) in file_probability
+# is finite and non-negative even for a file recorded at 0 s.
+MIN_START_UP_SECONDS = 1.0
+MAX_START_UP_SECONDS = 600.0
 N_QUANTILES = 101
 Y_MIN = 1e-6
 Y_MAX = 1 - 1e-6
 
+SCHEMA = 2
 TOP_KEYS = frozenset(
-    {"schema", "version", "enabled", "overhead_seconds", "scorer", "risk"}
+    {"schema", "version", "enabled", "start_up_seconds", "scorer", "risk"}
 )
 SCORER_KEYS = frozenset(
     {"intercept", "cost_weight", "heuristics", "build_env", "test_config"}
@@ -136,20 +140,31 @@ def _validate_heuristic(name: str, h: Any) -> None:
         raise ModelError(f"{where} y is outside [{Y_MIN}, {Y_MAX}]")
 
 
+def _validate_start_up(value: Any) -> None:
+    table = _names(value, "start_up_seconds", MAX_BUILD_ENVS)
+    for env, configs in table.items():
+        where = f"start_up_seconds {env!r}"
+        for config, k in _names(configs, where, MAX_TEST_CONFIGS).items():
+            what = f"{where} {config!r}"
+            if not MIN_START_UP_SECONDS <= _number(k, what) <= MAX_START_UP_SECONDS:
+                raise ModelError(
+                    f"{what} is outside "
+                    f"[{MIN_START_UP_SECONDS}, {MAX_START_UP_SECONDS}]"
+                )
+
+
 def validate_model(value: Any) -> dict[str, Any]:
     """Return value if it is a valid model; raise ModelError otherwise."""
     obj = _dict(value, "model", TOP_KEYS)
     schema = obj["schema"]
-    if isinstance(schema, bool) or schema != 1:
-        raise ModelError(f"schema {schema!r} is not 1")
+    if isinstance(schema, bool) or schema != SCHEMA:
+        raise ModelError(f"schema {schema!r} is not {SCHEMA}")
     version = obj["version"]
     if not isinstance(version, str) or len(version) > MAX_NAME_CHARS:
         raise ModelError(f"version is not a string of at most {MAX_NAME_CHARS} chars")
     if not isinstance(obj["enabled"], bool):
         raise ModelError("enabled is not a bool")
-    overhead = _number(obj["overhead_seconds"], "overhead_seconds")
-    if not 0 < overhead <= MAX_OVERHEAD_SECONDS:
-        raise ModelError(f"overhead_seconds is outside (0, {MAX_OVERHEAD_SECONDS}]")
+    _validate_start_up(obj["start_up_seconds"])
 
     scorer = _dict(obj["scorer"], "scorer", SCORER_KEYS)
     _number(scorer["intercept"], "scorer intercept")
@@ -201,6 +216,14 @@ def _sigmoid(z: float) -> float:
     return e / (1.0 + e)
 
 
+def start_up_seconds(
+    model: Mapping[str, Any], build_env_key: str, test_config: str
+) -> float | None:
+    """The job's per-file start-up in seconds, or None if the model has none."""
+    k = model["start_up_seconds"].get(build_env_key, {}).get(test_config)
+    return None if k is None else float(k)
+
+
 def file_probability(
     model: Mapping[str, Any],
     scores: Mapping[str, float],
@@ -212,9 +235,9 @@ def file_probability(
     """p that one test file fails in one job.
 
     scores maps heuristic name to this file's score (missing means 0.0); cost is
-    the file's seconds plus its start-up: overhead_seconds, or less for a file
-    that skips in the job's config (scorer.select_tests). build_env_key is the job's
-    test-times key, run_test.py's get_test_times_job_key().
+    the file's seconds plus the job's start_up_seconds (scorer.select_tests).
+    build_env_key is the job's test-times key, run_test.py's
+    get_test_times_job_key().
     """
     s = model["scorer"]
     z = (
