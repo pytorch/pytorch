@@ -1170,15 +1170,36 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
     def test_init_gpu_context_warmup_respects_local_index(self):
         """The warmup keeps the FakeTensor's device index when it exists
         locally, and falls back to the default device of the type only when it
-        does not. Runs on every build: the accelerator probe, the device count
-        and the allocation are all patched, so no real CUDA device is
-        required."""
+        does not. Runs on every build: the compile-time accelerator fact, the
+        device count and the allocation are all patched, so no real CUDA
+        device is required."""
         from torch._subclasses import fake_tensor as ft
 
         real_empty = torch.empty
+        cuda = torch.device("cuda")
 
-        def record(device, count):
+        # The legs are inlined and the accelerator is simulated at the C-level
+        # build fact, as in the two cases above. The previous helper-closure
+        # shape went red under the dynamo-wrapped CI harness: from the resumed
+        # closure frame dynamo started compiling the guard's accelerator query,
+        # and a new frame's stream-state probe consults the patched
+        # is_available and then calls an unpatched current_stream, which
+        # raises on CPU-only runners.
+        # device, simulated device count, expected warm-up allocation
+        for device_str, count, expected_attempt in (
+            ("cuda:3", 8, torch.device("cuda:3")),
+            ("cuda:7", 4, cuda),
+        ):
             attempts = []
+
+            def build_fact():
+                return cuda
+
+            def availability():
+                return True
+
+            def n_devices():
+                return count
 
             def spy(*args, **kwargs):
                 attempts.append(kwargs.get("device"))
@@ -1187,30 +1208,24 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             ft.init_gpu_context.cache_clear()
             try:
                 with (
-                    patch(
-                        "torch.accelerator.current_accelerator",
-                        lambda check_available=False: torch.device("cuda"),
-                    ),
-                    patch("torch.accelerator.is_available", lambda: True),
-                    patch("torch.accelerator.device_count", lambda: count),
+                    patch("torch._C._accelerator_getAccelerator", build_fact),
+                    patch("torch.accelerator.is_available", availability),
+                    patch("torch.accelerator.device_count", n_devices),
                     patch.object(torch, "empty", spy),
                     patch.object(torch, "zeros", spy),
                 ):
-                    normalized = FakeTensor._normalize_fake_device(torch.device(device))
+                    normalized = FakeTensor._normalize_fake_device(
+                        torch.device(device_str)
+                    )
             finally:
                 ft.init_gpu_context.cache_clear()
-            return attempts, normalized
-
-        # A locally existing index warms exactly that device, not the
-        # current one (multi-rank jobs use .to("cuda:3") without set_device).
-        attempts, device = record("cuda:3", count=8)
-        self.assertEqual(attempts, [torch.device("cuda:3")])
-        self.assertEqual(device, torch.device("cuda:3"))
-        # A locally missing index falls back to the type's default device:
-        # the warmup is a per-backend initialization.
-        attempts, device = record("cuda:7", count=4)
-        self.assertEqual(attempts, [torch.device("cuda")])
-        self.assertEqual(device, torch.device("cuda:7"))
+            # A locally existing index warms exactly that device, not the
+            # current one (multi-rank jobs use .to("cuda:3") without
+            # set_device); a locally missing one falls back to the type's
+            # default device, since the warmup is a per-backend init.
+            self.assertEqual(attempts, [expected_attempt])
+            # Either way the normalized FakeTensor keeps its own index.
+            self.assertEqual(normalized, torch.device(device_str))
 
     def _accelerator_with_is_initialized(self):
         """The current accelerator, skipping when there is none or when the
