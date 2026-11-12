@@ -584,7 +584,7 @@ _RAGGED_ROW_MAX_N = 16383
 
 def _ragged_row_min_n(trait: Any) -> int:
     """The narrowest row a trait takes ragged vectors at."""
-    if trait.nfields == 3:
+    if welford_outputs(trait):
         return _RAGGED_ROW_WELFORD_MIN_N
     late = isinstance(trait, (AbsMaxOps, AbsMinOps)) or _general_norm(trait)
     return _RAGGED_ROW_LATE_MIN_N if late else _RAGGED_ROW_MIN_N
