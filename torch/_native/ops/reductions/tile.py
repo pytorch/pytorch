@@ -272,24 +272,25 @@ def fold_uniform_tree(
     tidx,
     nloads: cutlass.Constexpr,
     tail: cutlass.Constexpr,
-    count,
+    rb,
 ):
     """Fold each thread's nloads loads as equal-count Welford trees, then the masked tail
     load when `tail`. Only nloads and `tail` are compiled: with T = threads_per_block, a
     tail kernel serves every count strictly between nloads * T and (nloads + 1) * T, and
     an exact multiple of T gets its own tail-free kernel."""
     tree = []
-    stride = rstrides[0]
     for load in cutlass.range_constexpr(nloads):
         r = tidx + Int32(const_expr(load * threads_per_block))
-        leaf = trait.leaf(trait.acc(mX[obase + Int64(r) * stride]), r)
+        off = obase + _decode_offset(r, None, rstrides, 1)
+        leaf = trait.leaf(trait.acc(mX[off]), r)
         _equal_count_push(tree, leaf, load, trait.combine_equal)
     acc = _linear_reduce(tree, trait.combine)
     if const_expr(tail):
         r = Int32(const_expr(nloads * threads_per_block)) + tidx
-        valid = r < count
+        valid = r < rb
         safe = r if valid else Int32(0)
-        leaf = trait.leaf(trait.acc(mX[obase + Int64(safe) * stride]), safe)
+        off = obase + _decode_offset(safe, None, rstrides, 1)
+        leaf = trait.leaf(trait.acc(mX[off]), safe)
         # Not trait.reduce: tree folds merge leaves via combine, not the online update.
         merged = trait.combine(acc, leaf)
         acc = tuple(
@@ -492,6 +493,18 @@ def fold_row_rolled(
         for i in cutlass.range_constexpr(vec):
             acc = reduce_fn(acc, acc_dt(frag[i]), ks * Int32(vec) + Int32(i), ok)
     return acc
+
+
+def ragged_vector_width(N: int, itemsize: int, order: str | None, use_tma: bool) -> int:
+    """Check a ragged vector row request and return its aligned interior's load width."""
+    # Empty rows have no defined min, max or arg result.
+    if N < 1:
+        raise ValueError(f"ragged vectors require nonempty rows, got {N=}")
+    if order == "inner_tree":
+        raise ValueError("ragged vectors require the linear order")
+    if use_tma:
+        raise ValueError("ragged vectors cannot use TMA")
+    return TRANSFER_ALIGNMENT // itemsize
 
 
 @cute.jit
@@ -846,17 +859,13 @@ class TileReduce:
                 f"column groups need axis='col', vec=1, combine=False and a trait with has_combine_equal, got {type(trait).__name__} {col_group=} {axis=} {combine=} {vec=}"
             )
         itemsize = dtype.width // 8 if dtype is not None else 0
+        ragged_vec = None
         if ragged_vector:
             if axis != "row":
                 raise ValueError(f"ragged vectors require the row axis, got {axis!r}")
-            if order != "linear":
-                raise ValueError("ragged vectors require the linear order")
             # fold_row_aligned also needs rows packed at stride N from a 16-byte aligned
             # base, which only the driver (reduce_row_tile) can check.
-            if N < 1:
-                raise ValueError(f"ragged vectors require nonempty rows, got {N=}")
-            if use_tma:
-                raise ValueError("ragged vectors cannot use TMA")
+            ragged_vec = ragged_vector_width(N, itemsize, order, use_tma)
             if combine:
                 raise ValueError("ragged vectors cannot combine partials")
         if order == "inner_tree":
@@ -944,7 +953,7 @@ class TileReduce:
                 itemsize,
                 threads_per_row,
                 N // vec_size(N, itemsize) if use_tma else 1,
-                vec=TRANSFER_ALIGNMENT // itemsize if ragged_vector else None,
+                vec=ragged_vec,
             )
             if axis == "row" and order == "linear"
             else None
