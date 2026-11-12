@@ -193,8 +193,6 @@ class BenchmarkFusionTestTemplate:
             ).check_regex("buf[0-9]* = buf[0-9]*; del buf[0-9]*").check("return").run(c)
 
     def test_fused_kernel_pool_failure_does_not_fail_compile(self):
-        # A fused candidate that fails in a compile-pool worker must not fail the
-        # whole compile; the in-process benchmark decides the fusion.
         if self.device == "cpu":
             self.skipTest("the C++ backend does not benchmark fusions")
         from torch._inductor.codecache import LambdaFuture

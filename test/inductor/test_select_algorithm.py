@@ -1007,8 +1007,6 @@ class TestSelectAlgorithm(TestCase):
 
 class TestBenchmarkChoiceFailures(TestCase):
     def test_pool_compile_failure_drops_choice(self):
-        # A kernel that fails to compile in an async-compile pool worker comes back
-        # as a SubprocException; that choice is dropped, not the whole compile.
         from torch._inductor.compile_worker.subproc_pool import SubprocException
 
         good, bad = unittest.mock.Mock(), unittest.mock.Mock()

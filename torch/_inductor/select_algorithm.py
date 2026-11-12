@@ -5775,9 +5775,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     f"Incorrect result from choice {choice}\n\n{e}"
                 )
             except SubprocException as e:
-                # A choice's kernel (e.g. inside a subgraph choice) failed to compile
-                # in an async-compile pool worker. In process, the same failure is a
-                # RuntimeError above; drop the choice the same way.
+                # Pool-worker compile failure; in process this is the RuntimeError above.
                 log.error(
                     "Compilation error during autotuning: \n%s. \nIgnoring this choice.",
                     e,

@@ -7920,9 +7920,8 @@ class Scheduler:
                         except Exception as e:
                             if _is_loop_carried_compile_error(e):
                                 raise
-                            # As in speedup_by_combo_kernel: the in-process
-                            # benchmark below recompiles and scores a failure as
-                            # inf, so the verdict doesn't depend on the pool.
+                            # The in-process benchmark below recompiles and scores
+                            # a failure as inf, as in speedup_by_combo_kernel.
                             fusion_log.debug(
                                 "Fused kernel failed to compile in the pool",
                                 exc_info=True,
