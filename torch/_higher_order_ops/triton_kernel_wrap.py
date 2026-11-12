@@ -2173,8 +2173,7 @@ def _rewrap_autotuner(
     else:
         reset_to_zero = list(kernel.reset_to_zero)
 
-    # Only pass the optional args that are set, since older Triton versions
-    # don't accept all of them.
+    # Older Triton versions don't accept all of these.
     optional_kwargs: dict[str, Any] = {}
     if getattr(kernel, "user_defined_pre_hook", False):
         optional_kwargs["pre_hook"] = kernel.pre_hook

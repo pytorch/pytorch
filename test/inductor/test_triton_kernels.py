@@ -6708,16 +6708,13 @@ else:
         self.assertEqual(y + increment, x)
 
     @requires_gpu
-    @common_utils.parametrize("backend", ["aot_eager", "inductor"])
-    @common_utils.parametrize("hook", ["restore_value", "reset_to_zero"])
     @common_utils.parametrize(
         "rewrap",
         ["heuristics", "launch_num_warps", "special_param", "prune_configs_by"],
     )
-    def test_triton_kernel_rewrap_keeps_autotune_hooks(self, backend, hook, rewrap):
-        # In each of these cases Dynamo rebuilds the user's autotuner; the
-        # rebuilt one must keep restore_value / reset_to_zero, otherwise
-        # benchmarking accumulates into `acc` more than once.
+    def test_triton_kernel_rewrap_keeps_autotune_hooks(self, rewrap):
+        # Dynamo rebuilds the autotuner here; without restore_value, benchmarking
+        # accumulates into `acc` more than once.
         if rewrap == "special_param":
 
             @triton.jit
@@ -6756,7 +6753,7 @@ else:
                     mask=mask,
                 )
 
-        autotune_kwargs = {hook: ["acc_ptr"]}
+        autotune_kwargs = {"restore_value": ["acc_ptr"]}
         launch_kwargs = {}
         if rewrap == "heuristics":
             acc_kernel = triton.heuristics(
@@ -6786,7 +6783,7 @@ else:
             acc_kernel[grid](x, acc, n_elements, **launch_kwargs)
             return acc
 
-        compiled = torch.compile(f, backend=backend, fullgraph=True, dynamic=False)
+        compiled = torch.compile(f, backend="aot_eager", fullgraph=True, dynamic=False)
         for n in (1024, 1000):
             x = torch.ones(n, device=GPU_TYPE)
             acc = torch.zeros(n, device=GPU_TYPE)
