@@ -344,8 +344,10 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             )
 
         validate_subgraph_args_types(
-            [o for o in operands if o is not None and not is_custom_class(type(o))],
-            extra_allowed_types=(torch.Generator, FakeScriptObject),
+            operands,
+            extra_allowed_types=(torch.Generator, FakeScriptObject, type(None)),
+            is_allowed=lambda o: is_custom_class(type(o)),
+            hop_name="invoke_subgraph",
         )
 
         # pyrefly: ignore [missing-attribute]
