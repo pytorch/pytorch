@@ -215,6 +215,36 @@ save_mm_context_fn = functools.partial(
 )
 
 
+def shared_recompute_code(code, side):
+    """Map region index -> (function body, sources of the kernels it launches)
+    for each shared checkpoint-recompute subgraph in Inductor output ``code``,
+    where ``side`` is "fw" or "bw". The subgraph name, the kernel names (which
+    number kernels across the whole graph), the ``optimize_mem`` autotuning hint
+    (which the forward and backward compiles set differently) and the kernel's
+    cache path (a hash of its source, hint included) are normalized away so both
+    sides compare equal."""
+    shared = {}
+    for i in re.findall(rf"def recompute_(\d+)_{side}_mod\(args\):", code):
+        name = f"recompute_{i}_{side}_mod"
+        # The function's body: its indented (or blank) lines.
+        match = re.search(rf"def {name}\(args\):\n((?:(?: +[^\n]*)?\n)+)", code)
+        if match is None:
+            raise AssertionError(f"no body for {name} in:\n{code}")
+        body = match.group(1).rstrip().replace(name, "shared")
+        kernels = list(dict.fromkeys(re.findall(r"(triton_\w+)\.run\(", body)))
+        sources = []
+        for j, k in enumerate(kernels):
+            d = code.index(f"\ndef {k}(")
+            end = re.compile(r"\n(?=\S)").search(code, d + 1).start()
+            source = code[code.rindex("\n@triton_heuristics.", 0, d) : end]
+            source = re.sub(r"\n *filename=[^\n]*", "", source)
+            source = re.sub(r"'optimize_mem': (True|False),? ?", "", source)
+            sources.append(re.sub(rf"\b{k}\b", f"kernel{j}", source))
+            body = re.sub(rf"\b{k}\b", f"kernel{j}", body)
+        shared[int(i)] = (body, sources)
+    return shared
+
+
 class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     def _validate(
         self,
@@ -3021,6 +3051,38 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         torch.compile(fn, backend=backend, fullgraph=True)(x, w).sum().backward()
         self.assertEqual(bw_marked, [False])
 
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(fx_graph_cache=True, fx_graph_remote_cache=False)
+    @torch._functorch.config.patch(
+        deterministic_recompute=True, enable_autograd_cache=False
+    )
+    def test_deterministic_recompute_fx_graph_cache(self, device):
+        # Shared subgraphs are named by their order in the graph rather than a
+        # process-global id, and their region config is part of the cache key,
+        # so recompiling the same function hits the FX graph cache for both the
+        # forward and the backward.
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import fresh_cache
+
+        def gn(x, w):
+            return torch.sigmoid(torch.matmul(x, w)).cos()
+
+        def fn(x, w):
+            return torch.utils.checkpoint.checkpoint(gn, x, w, use_reentrant=False)
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        w = torch.randn(4, 4, device=device, requires_grad=True)
+        with fresh_cache():
+            for _ in range(2):
+                counters.clear()
+                compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+                _, (fw_code, bw_code) = run_and_get_code(
+                    lambda: compiled(x, w).sum().backward()
+                )
+                self.assertEqual(len(shared_recompute_code(fw_code, "fw")), 1)
+                self.assertEqual(len(shared_recompute_code(bw_code, "bw")), 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
+
     @parametrize(
         "case",
         ["view", "multi_output", "attribute", "unbacked", "separate_input", "in_place"],
@@ -3225,8 +3287,8 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
     def test_deterministic_recompute_not_applied(self, device, flag):
         # Both trace the graphs again after the pass, and can't trace its calls:
         # the complex wrapper failed to compile, and compiled autograd
-        # graph-broke on each backward call. So the pass leaves the graphs
-        # alone.
+        # graph-broke on each backward call and compiled it without deterministic
+        # mode. So the pass leaves the graphs alone.
         def gn(x, w):
             return (x @ w).sin().cos()
 
@@ -3359,6 +3421,154 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
                 w = torch.randn(4, 4, device=device, requires_grad=True)
                 backend = self._shared_recompute_backend(1, 1, bw_mms)
                 self._validate(fn, backend, x, w)
+
+    @parametrize("case", ["plain", "sac", "benchmark_fusion"])
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(force_disable_caches=True)
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_identical_kernels(self, device, case):
+        # The forward and backward compiles each lower the shared subgraph. They
+        # must emit the same code for it, and its kernels must be compiled with
+        # deterministic=True so runtime autotuning can't pick different configs
+        # for the two copies; kernels outside it keep normal autotuning. The
+        # subgraph turns off benchmark_fusion, which deterministic mode doesn't
+        # allow, if it's on globally.
+        def gn(x, w):
+            h = torch.matmul(x, w).float()
+            scale = torch.rsqrt((h * h).mean(-1, keepdim=True) + 1e-6)
+            return (h * scale).to(x.dtype)
+
+        kwargs = {"context_fn": save_mm_context_fn} if case == "sac" else {}
+
+        def fn(x, w):
+            y = torch.utils.checkpoint.checkpoint(
+                gn, x, w, use_reentrant=False, **kwargs
+            )
+            return (y * 3.0).square().sum()
+
+        # Rows of 4096 make the norm a looped reduction, whose autotuned configs
+        # would change the order it accumulates in.
+        x = torch.randn(8, 64, dtype=torch.bfloat16, device=device)
+        w = torch.randn(64, 4096, dtype=torch.bfloat16, device=device)
+        x.requires_grad_()
+        with torch._inductor.config.patch(benchmark_fusion=case == "benchmark_fusion"):
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            _, (fw_code, bw_code) = run_and_get_code(lambda: compiled(x, w).backward())
+        fw = shared_recompute_code(fw_code, "fw")
+        self.assertEqual(len(fw), 1)
+        self.assertEqual(fw, shared_recompute_code(bw_code, "bw"))
+        ((_, sources),) = fw.values()
+        self.assertTrue(any("@triton_heuristics.reduction(" in src for src in sources))
+        for source in sources:
+            self.assertIn("'deterministic': True", source)
+        for code in (fw_code, bw_code):
+            call = re.search(
+                r"\n    def call\(self, args\):\n((?: +[^\n]*\n|\n)+)", code
+            )
+            kernels = set(re.findall(r"(triton_\w+)\.run\(", call.group(1)))
+            self.assertTrue(kernels)
+            for k in kernels:
+                d = code.index(f"\ndef {k}(")
+                meta = code[code.rindex("\n@triton_heuristics.", 0, d) : d]
+                self.assertIn("'deterministic': False", meta)
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        force_disable_caches=True, combo_kernels=True, benchmark_combo_kernel=True
+    )
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_benchmark_combo_kernel(self, device):
+        # Deterministic mode doesn't allow benchmarking combo kernels (here sin
+        # and cos), so a piece turns that off when it's on globally.
+        def fn(x, w):
+            return torch.utils.checkpoint.checkpoint(
+                lambda x, w: torch.sin(x) @ torch.cos(w), x, w, use_reentrant=False
+            ).sum()
+
+        x = torch.randn(8, 64, device=device, requires_grad=True)
+        w = torch.randn(64, 4096, device=device, requires_grad=True)
+        _, codes = run_and_get_code(self._validate, fn, "inductor", x, w)
+        for code, side in zip(codes, ("fw", "bw"), strict=True):
+            self.assertEqual(len(shared_recompute_code(code, side)), 1)
+
+    @requires_gpu_and_triton
+    @parametrize("case", ["looped_reduction", "padded_output", "padded_input"])
+    @torch._inductor.config.patch(force_disable_caches=True)
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_bitwise(self, device, case):
+        # gh-186572: the backward's recomputed activation must equal the forward's
+        # bit for bit. With g all ones, y * g is the forward's y, and g's gradient
+        # is the backward's y. Without the flag, the two compiles can autotune
+        # the looped reduction differently. With rows of 1101 floats, the
+        # backward's compile would pad the piece's outputs, or the saved a it
+        # reads, where the forward's doesn't, and the two copies would then
+        # accumulate in different orders.
+        def norm(h):
+            return h * torch.rsqrt((h * h).mean(-1, keepdim=True) + 1e-6)
+
+        ckpt = functools.partial(torch.utils.checkpoint.checkpoint, use_reentrant=False)
+        region, shapes = {
+            "looped_reduction": (lambda x, w: norm(x @ w), [(64, 64), (64, 4096)]),
+            "padded_output": (lambda x: norm(x.sin()), [(64, 1101)]),
+            # x.sum(0) is saved, and padded by the forward's compile.
+            "padded_input": (None, [(2, 64, 1101)]),
+        }[case]
+
+        def fn(g, *args):
+            if region is None:
+                return ckpt(norm, args[0].sum(0)) * g
+            return ckpt(region, *args) * g
+
+        args = [torch.randn(s, device=device, requires_grad=True) for s in shapes]
+        g = torch.ones(64, shapes[-1][-1], device=device, requires_grad=True)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        def run():
+            out = compiled(g, *args)
+            out.backward(torch.ones_like(out))
+            return out
+
+        out, (fw_code, bw_code) = run_and_get_code(run)
+        self.assertEqual(len(shared_recompute_code(fw_code, "fw")), 1)
+        self.assertEqual(len(shared_recompute_code(bw_code, "bw")), 1)
+        self.assertEqual(out, g.grad, atol=0, rtol=0)
+
+    @parametrize(
+        "op",
+        ["index_add", "index_reduce", "index_put", "scatter_add", "histc", "cumsum"],
+    )
+    @torch._functorch.config.patch(deterministic_recompute=True)
+    def test_deterministic_recompute_skips_atomics(self, device, op):
+        # Floating-point accumulation in an order that can change run to run
+        # (atomics over repeated indices, histc's atomic counts, a scan) can
+        # differ between the forward and the recompute however each lowers, so
+        # the region is left as partitioned and the log says why.
+        from torch._functorch._aot_autograd import deterministic_recompute
+
+        rep = torch.tensor([0, 1, 0, 1], device=device)
+        rep2d = torch.tensor([[0] * 8, [1] * 8] * 2, device=device)
+
+        def full(x, value):
+            return torch.full((2, 8), value, device=x.device)
+
+        gn = {
+            "index_add": lambda x: full(x, 0.0).index_add(0, rep, x),
+            "index_reduce": lambda x: full(x, 1.0).index_reduce(0, rep, x, "prod"),
+            "index_put": lambda x: full(x, 0.0).index_put((rep,), x, accumulate=True),
+            "scatter_add": lambda x: full(x, 0.0).scatter_add(0, rep2d, x),
+            "histc": lambda x: x * torch.histc(x * 2, bins=4).max(),
+            "cumsum": lambda x: x.cumsum(0),
+        }[op]
+
+        def fn(x):
+            return torch.utils.checkpoint.checkpoint(
+                lambda x: gn(x).sin(), x, use_reentrant=False
+            )
+
+        x = torch.randn(4, 8, device=device, requires_grad=True)
+        with self.assertLogs(deterministic_recompute.log, level="INFO") as logs:
+            self._validate(fn, self._shared_recompute_backend(0), x)
+        self.assertIn("accumulates in an order that can change", logs.output[0])
 
 
 class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase):
@@ -4567,6 +4777,35 @@ class DeterministicRecomputeHelperTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(_unbound_symbols([z], [z_sum, n["sin_1"]]), {s4})
         with torch._inductor.config.patch(size_asserts=False):
             self.assertEqual(_unbound_symbols([x, view, w, *sizes], body), {s2, s3})
+
+    def test_accumulates(self):
+        # Floating-point atomics over repeated indices and scans can accumulate
+        # in a different order each run; integer accumulation, an overwriting
+        # index_put and an amax scatter can't.
+        from torch._functorch._aot_autograd.deterministic_recompute import _accumulates
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(x, i, i2d):
+            zeros, n = torch.zeros(2, 8), (x > 0).long()
+            return (
+                zeros.index_add(0, i, x),
+                zeros.long().index_add(0, i, n),
+                zeros.index_put((i,), x, accumulate=True),
+                torch.zeros(4, 8).index_put((i.argsort(),), x),
+                zeros.scatter_reduce(0, i2d, x, "sum"),
+                zeros.scatter_reduce(0, i2d, x, "amax"),
+                x.cumsum(0),
+                n.cumsum(0),
+                x.cumprod(0),
+                x.logcumsumexp(0),
+            )
+
+        i = torch.tensor([0, 1, 0, 1])
+        i2d = torch.tensor([[0] * 8, [1] * 8] * 2)
+        gm = make_fx(fn)(torch.randn(4, 8), i, i2d)
+        names = [n.name for n in gm.graph.nodes if _accumulates(n)]
+        expected = ["index_add", "index_put", "scatter_reduce", "cumsum", "cumprod"]
+        self.assertEqual(names, [*expected, "logcumsumexp"])
 
 
 instantiate_parametrized_tests(DeterministicRecomputeHelperTests)
