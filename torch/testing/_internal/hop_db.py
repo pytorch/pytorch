@@ -74,6 +74,15 @@ def cuda_only_dtypes(*dtypes):
     }
 
 
+def cuda_xpu_dtypes(*dtypes):
+    # Same as cuda_only_dtypes but also enabled on XPU (the HOP runs on XPU).
+    return {
+        "dtypes": empty_types(),
+        "dtypesIfCUDA": custom_types(*dtypes),
+        "dtypesIfXPU": custom_types(*dtypes),
+    }
+
+
 # PLEASE DON'T ADD ANYTHING NEW TO THIS LIST,
 # and do add an OpInfo for your HOP.
 # The OpInfo lets us do automated testing for the HOP to check that
@@ -643,7 +652,7 @@ hop_db = [
         variant_test_name="simple",
         op=flex_attention,
         sample_inputs_func=sample_inputs_flex_attention,
-        **cuda_only_dtypes(torch.float16, torch.float32),
+        **cuda_xpu_dtypes(torch.float16, torch.float32),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
@@ -655,7 +664,7 @@ hop_db = [
         variant_test_name="simple",
         op=simple_flex_attention_backward,
         sample_inputs_func=sample_inputs_flex_attention_backward,
-        **cuda_only_dtypes(torch.float16, torch.float32),
+        **cuda_xpu_dtypes(torch.float16, torch.float32),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
@@ -669,7 +678,7 @@ hop_db = [
         variant_test_name="explicit_buffers",
         op=simple_flex_attention_backward,
         sample_inputs_func=sample_inputs_flex_attention_backward_explicit_buffers,
-        **cuda_only_dtypes(torch.float16, torch.float32),
+        **cuda_xpu_dtypes(torch.float16, torch.float32),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
