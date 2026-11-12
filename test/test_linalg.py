@@ -11610,6 +11610,18 @@ class TestLinalgCudaOnly(TestCase):
             for A, B, left, upper, uni in gen_inputs(shape, dtype, device, well_conditioned=True):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
+    @skipIfRocm
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float, torch.double)
+    def test_linalg_batched_lu_rectangular_nan_pivots(self, device, dtype):
+        # The column-serial LU panel must never use an invalid pivot row
+        # when an entire column contains NaNs.
+        A = torch.full((2, 2048, 8), float("nan"), dtype=dtype, device=device)
+        LU, pivots, info = torch.linalg.lu_factor_ex(A, check_errors=False)
+        self.assertTrue(((1 <= pivots) & (pivots <= A.size(-2))).all())
+        self.assertEqual(LU.shape, A.shape)
+        torch.cuda.synchronize()
+
     @slowTest
     @skipIfRocm
     @skipCUDAIfNoCusolver
