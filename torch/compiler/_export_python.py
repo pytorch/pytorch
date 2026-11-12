@@ -41,6 +41,7 @@ def export_python(
     *,
     backend: str = "inductor",
     dynamic: bool | None = None,
+    check: bool | None = None,
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Compile a function once into a Python file, and run that file from then on.
 
@@ -97,12 +98,35 @@ def export_python(
         backend: ``"inductor"`` (default) or ``"eager"``.
         dynamic: Forwarded to :class:`~torch.compiler.precompile.DynamoTracer`, as
             ``torch.compile(dynamic=)``.
+        check: Also run ``fn`` eagerly (a ``torch.compile``'d function it calls
+            too, as during compiler-internal tracing) on every served call, on copies
+            of the tensor arguments, and raise
+            :class:`~torch.compiler.PrecompileError` if its outputs, or its tensor
+            arguments after any in-place writes, differ beyond
+            ``torch.testing.assert_close``'s tolerances: a net for edits to ``path``.
+            Since a compiled kernel may sum in another order than eager, a
+            floating-point or complex tensor is held to a relative tolerance of at
+            least 1e-3 (``torch._dynamo.config.repro_tolerance``) and an absolute one
+            of 1e-3 of its largest finite magnitude: smaller differences are not
+            caught, so a tensor holding large sentinel values (a mask's ``-1e9``,
+            say) is checked only to 1e-3 of them.
+            ``fn``'s outputs must be values ``assert_close`` compares. Tensor
+            arguments are copied one by one, so arguments that alias each other (one
+            tensor passed twice, or views of one tensor) do not alias in the eager
+            run. Module arguments are not copied, so state a module updates in place
+            is updated twice per checked call. Not meaningful for a function that
+            draws random numbers, whose compiled and eager draws differ. Defaults to
+            the ``TORCH_EXPORT_PYTHON_CHECK`` environment variable (``1`` enables
+            it), read when the decorator is applied.
     """
 
     torch._C._log_api_usage_once("torch.compiler.export_python")
 
     def decorator(fn: Callable[_P, _R]) -> Callable[_P, _R]:
-        exported = _ExportedPython(fn, path, backend, dynamic)
+        enabled = os.environ.get("TORCH_EXPORT_PYTHON_CHECK") == "1"
+        exported = _ExportedPython(
+            fn, path, backend, dynamic, enabled if check is None else check
+        )
 
         @functools.wraps(fn)
         def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
@@ -224,6 +248,31 @@ def _captured_artifact(text: str, path: str) -> str:
     return artifact.replace(_GRAPH_CODE, _source_literal(code), 1)
 
 
+def _assert_matches_eager(actual: object, expected: object) -> None:
+    """``torch.testing.assert_close``, loosened for compiled code: a compiled kernel may
+    sum in another order than eager, and its rounding error scales with the values it
+    sums. So a floating-point or complex tensor is held to a relative tolerance of at
+    least 1e-3 (``torch._dynamo.config.repro_tolerance``, what Dynamo's accuracy
+    minifier holds a compiled graph to) and an absolute one of 1e-3 of its largest
+    finite magnitude, which still checks a tensor of small values."""
+    from torch.testing._comparison import default_tolerances
+
+    floor = torch._dynamo.config.repro_tolerance
+    got, got_spec = pytree.tree_flatten(actual)
+    want, want_spec = pytree.tree_flatten(expected)
+    if got_spec != want_spec:
+        raise AssertionError(f"{got_spec} is not eager's {want_spec}")
+    for g, w in zip(got, want):
+        if isinstance(w, torch.Tensor) and (w.is_floating_point() or w.is_complex()):
+            rtol, atol = default_tolerances(w)
+            finite = w[w.isfinite()]
+            scale = finite.abs().max().item() if finite.numel() else 0.0
+            rtol, atol = max(rtol, floor), max(atol, floor * scale)
+            torch.testing.assert_close(g, w, rtol=rtol, atol=atol)
+        else:
+            torch.testing.assert_close(g, w)
+
+
 class _ExportedPython:
     def __init__(
         self,
@@ -231,6 +280,7 @@ class _ExportedPython:
         path: str | os.PathLike[str],
         backend: str,
         dynamic: bool | None,
+        check: bool,
     ) -> None:
         if getattr(fn, "__module__", None) == "__main__":
             raise PrecompileError(
@@ -244,6 +294,7 @@ class _ExportedPython:
         self._cache_path = self._path + ".cache"
         self._backend = backend
         self._tracer = DynamoTracer(dynamic=dynamic, fullgraph=True)
+        self._check = check
         self._runnable: PrecompiledRunnable | None = None
         self._lock = threading.Lock()
 
@@ -254,7 +305,44 @@ class _ExportedPython:
                     if not os.path.exists(self._path):
                         return self._capture(*args, **kwargs)
                     self._runnable = self._load()
+        if self._check:
+            return self._checked(self._runnable, args, kwargs)
         return self._runnable(*args, **kwargs)
+
+    def _checked(
+        self,
+        runnable: PrecompiledRunnable,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+    ) -> object:
+        """Run the file, then ``fn`` eagerly on copies of the tensor arguments, and
+        raise unless the outputs and the tensor arguments of the two runs match."""
+        from torch._dynamo.eval_frame import _use_eager_on_nested_compile
+
+        # Copied before the artifact runs, so an in-place write cannot reach eager.
+        eager_args, eager_kwargs = pytree.tree_map_only(
+            torch.Tensor,
+            lambda t: t.detach().clone().requires_grad_(t.requires_grad),
+            (args, kwargs),
+        )
+        result = runnable(*args, **kwargs)
+        # A torch.compile'd function fn calls runs eagerly too, on this thread only
+        # (set_stance would switch every thread's compiles to eager).
+        with _use_eager_on_nested_compile():
+            expected = self._fn(*eager_args, **eager_kwargs)
+        # The tensor arguments too, so an edit that breaks an in-place write is caught.
+        inputs, eager_inputs = (
+            [t for t in pytree.tree_leaves(tree) if isinstance(t, torch.Tensor)]
+            for tree in ((args, kwargs), (eager_args, eager_kwargs))
+        )
+        try:
+            _assert_matches_eager((result, inputs), (expected, eager_inputs))
+        except AssertionError as e:
+            raise PrecompileError(
+                f"export_python: {self._path} does not match eager {self._name} "
+                f"(check is on): {e}"
+            ) from e
+        return result
 
     def _load(self, *, trusted: bool = False) -> PrecompiledRunnable:
         # Text mode, so a file saved with CRLF line endings reads as it was written.
