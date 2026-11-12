@@ -1176,8 +1176,8 @@ ownership:
     owners: []
     section: core_csrc_misc
     paths:
-      - /torch/csrc/CudaIPCTypes.cpp
-      - /torch/csrc/CudaIPCTypes.h
+      - /torch/csrc/IPCTypes.cpp
+      - /torch/csrc/IPCTypes.h
       - /torch/csrc/DataLoader.cpp
       - /torch/csrc/DataLoader.h
       - /torch/csrc/Device.cpp
