@@ -2279,37 +2279,6 @@ class BenchmarkRunner:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
         with self.pick_grad(name, self.args.training):
-            # Collect the fp64 reference outputs to be used later for accuracy checking.
-            fp64_outputs = None
-            model_fp64 = None
-            inputs_fp64 = None
-            try:
-                model_fp64, inputs_fp64 = cast_to_fp64(
-                    self.deepcopy_and_maybe_parallelize(model),
-                    clone_inputs(example_inputs),
-                )
-                self.init_optimizer(name, current_device, model_fp64.parameters())
-                fp64_outputs = self.run_n_iterations(
-                    model_fp64, inputs_fp64, self.model_iter_fn
-                )
-                fp64_outputs = tree_map(
-                    lambda x: x.to(torch.float64)
-                    if isinstance(x, torch.Tensor) and x.is_floating_point()
-                    else x,
-                    fp64_outputs,
-                )
-            except Exception:
-                log.warning(
-                    "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
-                    name,
-                    exc_info=True,
-                )
-                self.args.cosine = True
-                fp64_outputs = None
-            finally:
-                del model_fp64, inputs_fp64
-                empty_gpu_cache(current_device)
-
             tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
                 self.args.training, current_device, name
             )
@@ -2391,6 +2360,49 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             correct_rerun_result = None
+
+            # Collect the fp64 reference outputs to be used later for accuracy
+            # checking. This is run after the eager runs so the large fp64 model
+            # and its optimizer state do not stay resident while other stages
+            # are peak-memory-sensitive.
+            fp64_outputs = None
+            model_fp64 = None
+            inputs_fp64 = None
+            try:
+                model_fp64, inputs_fp64 = cast_to_fp64(
+                    self.deepcopy_and_maybe_parallelize(model),
+                    clone_inputs(example_inputs),
+                )
+                self.init_optimizer(name, current_device, model_fp64.parameters())
+                fp64_outputs = self.run_n_iterations(
+                    model_fp64, inputs_fp64, self.model_iter_fn
+                )
+                fp64_outputs = tree_map(
+                    lambda x: x.to(torch.float64)
+                    if isinstance(x, torch.Tensor) and x.is_floating_point()
+                    else x,
+                    fp64_outputs,
+                )
+            except Exception:
+                log.warning(
+                    "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
+                    name,
+                    exc_info=True,
+                )
+                self.args.cosine = True
+                fp64_outputs = None
+            finally:
+                del model_fp64, inputs_fp64
+                # init_optimizer stashes params on self.optimizer; drop the fp64
+                # one so it cannot leak into the compiled run below.
+                self.optimizer = None
+                empty_gpu_cache(current_device)
+
+            # Re-read the flag: the fp64 fallback above may have set
+            # args.cosine, which the compiled comparison below must honor.
+            tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
+                self.args.training, current_device, name
+            )
 
             # Support multiple accuracy check runs for flaky models
             accuracy_check_runs = self.get_accuracy_check_runs(name)
