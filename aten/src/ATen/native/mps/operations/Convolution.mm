@@ -13,6 +13,7 @@
 #include <ATen/ops/mps_convolution_backward_native.h>
 #include <ATen/ops/mps_convolution_transpose_backward_native.h>
 #include <fmt/format.h>
+#include <utility>
 
 #include <algorithm>
 #include <limits>
@@ -129,7 +130,7 @@ static Tensor conv3d_to_ndhwc(const Tensor& tensor) {
   }
   const auto channels = tensor.size(1);
   const int64_t spatial_size = tensor.size(2) * tensor.size(3) * tensor.size(4);
-  if (channels <= 8 || spatial_size > std::numeric_limits<int32_t>::max()) {
+  if (channels <= 8 || !std::in_range<int32_t>(spatial_size)) {
     return tensor.contiguous(MemoryFormat::ChannelsLast3d);
   }
   const auto source = tensor.contiguous();
@@ -315,11 +316,10 @@ static void conv3d_metal_forward(const Tensor& input_t,
   // The MPP path addresses one (batch, depth) activation plane and one output
   // plane with int32 tensor extents; larger planes run the long-indexed
   // simdgroup kernel.
-  constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
-  const bool use_long_index = input_channels * input_height * input_width > kInt32Max ||
-      output_channels * output_height * output_width > kInt32Max;
+  const bool use_long_index = !std::in_range<int32_t>(input_channels * input_height * input_width) ||
+      !std::in_range<int32_t>(output_channels * output_height * output_width);
   const int64_t input_channels_per_group = input_channels / groups;
-  TORCH_CHECK(weight_t.size(2) * weight_t.size(3) * weight_t.size(4) * input_channels_per_group <= kInt32Max,
+  TORCH_CHECK(std::in_range<int32_t>(weight_t.size(2) * weight_t.size(3) * weight_t.size(4) * input_channels_per_group),
               "conv3d: kernel volume times channels per group exceeds int32");
   const bool use_mpp = !use_long_index && has_mpp();
 
@@ -512,7 +512,6 @@ static Conv1dKernel conv1d_pick_kernel(const Tensor& input,
                                        int64_t dilation,
                                        int64_t groups) {
   using namespace mps;
-  constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
   // matmul2d on M1/M2 misreads operands whose row stride exceeds this many elements.
   constexpr int64_t kPreApple9MppMaxStride = std::numeric_limits<uint16_t>::max();
   const auto channels = input.size(1);
@@ -522,7 +521,8 @@ static Conv1dKernel conv1d_pick_kernel(const Tensor& input,
   const auto out_channels = output.size(1);
   const auto out_length = output.size(3);
   // Conv2DParams sizes are int32, as are matmul2d offsets within a batch.
-  if ((length + 2 * padding) * channels > kInt32Max || out_channels * out_length > kInt32Max) {
+  if (!std::in_range<int32_t>((length + 2 * padding) * channels) ||
+      !std::in_range<int32_t>(out_channels * out_length)) {
     return Conv1dKernel::Conv3d;
   }
   // Depthwise, or a single-channel conv whose output can't fill a 64x64 matmul2d tile.

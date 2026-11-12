@@ -89,7 +89,7 @@ class AOTICudaTunableOpDynamicDimsGuard {
 // These deleters run in destructors, so they log errors instead of throwing.
 inline void log_shim_error(AOTITorchError error, const char* what) {
   if (error != AOTI_TORCH_SUCCESS) {
-    std::cerr << "AOTInductor: " << what << '\n';
+    std::cerr << "AOTInductor: " << what << " (error " << error << ")\n";
   }
 }
 
@@ -248,6 +248,8 @@ class AOTICudaGraph {
   // Like torch.cuda.graph's __exit__, ends the capture once, with its stream
   // current, since the captured code may have changed the current stream.
   // Errors are ignored: an invalidated capture fails to end but still ends.
+  // A capture that is still open afterwards, e.g. because the graph was
+  // destroyed on another thread, is logged, since a destructor can't throw.
   void end_open_capture() noexcept {
     if (capture_stream_ == nullptr) {
       return;
@@ -256,6 +258,12 @@ class AOTICudaGraph {
       AOTICudaStreamGuard guard(capture_stream_, device_index_);
       (void)aoti_torch_cuda_graph_capture_end(graph_.get());
     } catch (...) {
+    }
+    cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
+    if (cudaStreamIsCapturing(capture_stream_, &status) == cudaSuccess &&
+        status != cudaStreamCaptureStatusNone) {
+      std::cerr << "AOTInductor: failed to end a CUDA graph capture, so its "
+                   "stream is still capturing\n";
     }
     (void)cudaGetLastError();
   }
