@@ -15,13 +15,13 @@ namespace at::native::mkldnn {
 // Ported from ideep::matmul_forward_dyn_quant_params.
 // Parameters for dynamic quantization
 struct matmul_forward_dyn_quant_params {
-  ideep::tensor::desc src_desc; // to create src tensor
+  ITensor::desc src_desc; // to create src tensor
   dnnl::reorder::primitive src_reorder; // to reorder src
 
   matmul_forward_dyn_quant_params() {}
 
   matmul_forward_dyn_quant_params(
-      ideep::tensor::desc&& src_desc,
+      ITensor::desc&& src_desc,
       dnnl::reorder::primitive&& src_reorder)
       : src_desc(std::move(src_desc)), src_reorder(std::move(src_reorder)) {}
 };
@@ -38,8 +38,8 @@ struct matmul_forward_params {
   std::shared_ptr<matmul_forward_dyn_quant_params> dq_param_ptr;
   // Keep {dnnl_arg, tensor} pairs of scales and zero points for primitive
   // execution
-  std::shared_ptr<std::unordered_map<int, ideep::tensor>> all_scales = nullptr;
-  std::shared_ptr<std::unordered_map<int, ideep::tensor>> all_zero_points =
+  std::shared_ptr<std::unordered_map<int, ITensor>> all_scales = nullptr;
+  std::shared_ptr<std::unordered_map<int, ITensor>> all_zero_points =
       nullptr;
 
   matmul_forward_params() {}
@@ -66,10 +66,10 @@ struct matmul_forward_params {
 // may be needed.
 template <bool reorder_src = true, bool reorder_weight = true>
 void matmul_forward_compute(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst,
     const std::vector<float>& src_scales,
     const std::vector<float>& weights_scales,
     const std::vector<float>& dst_scales,
@@ -87,10 +87,10 @@ void matmul_forward_compute(
 template <bool is_dynamic = false>
 void matmul_forward_prepare(
     matmul_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst,
     const std::vector<float>& src_scales,
     const std::vector<float>& weights_scales,
     const std::vector<float>& dst_scales,
@@ -111,10 +111,10 @@ void matmul_forward_prepare(
 template <bool reorder_src = true, bool reorder_weight = true>
 void matmul_forward_compute(
     const matmul_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst);
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst);
 
 // Ported from ideep::matmul_forward::compute (dynamic int8, with bias).
 // Compute for dynamic int8 (fp32 * int8 -> fp32)
@@ -125,10 +125,10 @@ void matmul_forward_compute(
 template <bool reorder_weight = true>
 void matmul_forward_compute(
     const matmul_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst,
     const std::vector<float>& src_scales,
     const std::vector<int32_t>& src_zero_points,
     const float dst_coeff = 1.0f);
@@ -136,15 +136,15 @@ void matmul_forward_compute(
 // Ported from ideep::matmul_forward::compute (without bias).
 // Deprecated 2-in-1 compute. Without bias.
 void matmul_forward(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    ideep::tensor& dst,
+    const ITensor& src,
+    const ITensor& weights,
+    ITensor& dst,
     const float dst_coeff = 1.0f,
     const float sum_coeff = 1.0f,
     const Attr& attr = Attr());
 
 // Ported from ideep::matmul_forward::expected_weights_desc (with y_dtype).
-ideep::tensor::desc matmul_forward_expected_weights_desc(
+ITensor::desc matmul_forward_expected_weights_desc(
     const dnnl::memory::dims& weights_dims,
     const dnnl::memory::dims& src_dims,
     dnnl::memory::data_type dtype,
@@ -153,7 +153,7 @@ ideep::tensor::desc matmul_forward_expected_weights_desc(
     const Attr& attr = Attr());
 
 // Ported from ideep::matmul_forward::expected_weights_desc (deduced y_dtype).
-ideep::tensor::desc matmul_forward_expected_weights_desc(
+ITensor::desc matmul_forward_expected_weights_desc(
     const dnnl::memory::dims& weights_dims,
     const dnnl::memory::dims& src_dims = dnnl::memory::dims(),
     dnnl::memory::data_type dtype = dnnl::memory::data_type::f32,

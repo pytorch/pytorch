@@ -9,9 +9,9 @@ namespace at::native::mkldnn {
 
 // Ported from ideep::pooling_forward::compute.
 void pooling_forward(
-    const ideep::tensor& src,
+    const ITensor& src,
     const dnnl::memory::dims& output_sizes,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& kernel,
     const dnnl::memory::dims& padding_l,
@@ -21,10 +21,10 @@ void pooling_forward(
 
 // Ported from ideep::pooling_backward::compute.
 void pooling_backward(
-    const ideep::tensor& diff_dst,
-    const ideep::tensor& dst,
-    const ideep::tensor& src,
-    ideep::tensor& diff_src,
+    const ITensor& diff_dst,
+    const ITensor& dst,
+    const ITensor& src,
+    ITensor& diff_src,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& kernel,
     const dnnl::memory::dims& padding_l,

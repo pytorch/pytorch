@@ -15,11 +15,11 @@ namespace at::native::mkldnn {
 // Common logic to prepare parameters for conv/deconv
 // quantization version
 void prepare_parameters(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
     const dnnl::memory::dims& dst_dims,
-    const ideep::tensor& dst,
+    const ITensor& dst,
     const dnnl::memory::dims& dilates,
     int groups,
     const std::vector<float>& src_scales,
@@ -31,16 +31,16 @@ void prepare_parameters(
     const ideep::lowp_kind alowp_kind,
     bool with_bias,
     bool is_deconv,
-    ideep::tensor& weight_grouped, /* Output */
+    ITensor& weight_grouped, /* Output */
     dnnl::memory::dims& dil_compatible, /* Output */
     Attr& op_attr, /* Output */
     Attr& src_attr, /* Output */
     Attr& weights_attr, /* Output */
     Attr& bias_attr, /* Output */
-    ideep::tensor::desc& src_desc, /* Output */
-    ideep::tensor::desc& weights_desc, /* Output */
-    ideep::tensor::desc& bias_desc, /* Output */
-    ideep::tensor::desc& dst_desc /* Output */) {
+    ITensor::desc& src_desc, /* Output */
+    ITensor::desc& weights_desc, /* Output */
+    ITensor::desc& bias_desc, /* Output */
+    ITensor::desc& dst_desc /* Output */) {
   std::vector<float> dst_scales_in;
   dnnl::memory::data_type dst_data_type;
   op_attr.set_post_ops(attr.get_post_ops());
@@ -180,7 +180,7 @@ void prepare_parameters(
       src_attr = {0, src_scales_in};
     }
 
-    weights_desc = ideep::tensor::desc(
+    weights_desc = ITensor::desc(
         weight_grouped.get_dims(),
         dnnl::memory::data_type::s8,
         dnnl::memory::format_tag::any);
@@ -222,7 +222,7 @@ void prepare_parameters(
         ? dnnl::memory::data_type::bf16
         : dnnl::memory::data_type::f32;
     src_desc = src.get_desc().to_type(dst_data_type);
-    weights_desc = ideep::tensor::desc(
+    weights_desc = ITensor::desc(
         weight_grouped.get_dims(), dst_data_type, dnnl::memory::format_tag::any);
     if (groups > 1) {
       weights_desc = weights_desc.to_grouped(groups);
@@ -247,33 +247,33 @@ void prepare_parameters(
 
   dst_desc = attr.has_op_kind(dnnl::primitive::kind::sum)
       ? dst.get_desc()
-      : ideep::tensor::desc(dst_dims, dst_data_type);
+      : ITensor::desc(dst_dims, dst_data_type);
 }
 
 // Ported from ideep::conv_deconv_utils::prepare_parameters.
 // Common logic to prepare parameters for conv/deconv.
 // non-quantization version
 void prepare_parameters(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
     const dnnl::memory::dims& dst_dims,
-    const ideep::tensor& dst,
+    const ITensor& dst,
     const dnnl::memory::dims& dilates,
     int groups,
     const Attr& attr,
     bool with_bias,
     bool is_deconv,
-    ideep::tensor& weight_grouped, /* Output */
+    ITensor& weight_grouped, /* Output */
     dnnl::memory::dims& dil_compatible, /* Output */
     Attr& op_attr, /* Output */
     Attr& src_attr, /* Output */
     Attr& weights_attr, /* Output */
     Attr& bias_attr, /* Output */
-    ideep::tensor::desc& src_desc, /* Output */
-    ideep::tensor::desc& weights_desc, /* Output */
-    ideep::tensor::desc& bias_desc, /* Output */
-    ideep::tensor::desc& dst_desc /* Output */) {
+    ITensor::desc& src_desc, /* Output */
+    ITensor::desc& weights_desc, /* Output */
+    ITensor::desc& bias_desc, /* Output */
+    ITensor::desc& dst_desc /* Output */) {
   dnnl::memory::data_type dst_data_type;
   op_attr = attr;
 
@@ -300,7 +300,7 @@ void prepare_parameters(
              ? dnnl::memory::data_type::f16
              : dnnl::memory::data_type::f32);
   src_desc = src.get_desc().to_type(dst_data_type);
-  weights_desc = ideep::tensor::desc(
+  weights_desc = ITensor::desc(
       weight_grouped.get_dims(), dst_data_type, dnnl::memory::format_tag::any);
   if (groups > 1) {
     weights_desc = weights_desc.to_grouped(groups);
@@ -325,7 +325,7 @@ void prepare_parameters(
 
   dst_desc = attr.has_op_kind(dnnl::primitive::kind::sum)
       ? dst.get_desc()
-      : ideep::tensor::desc(dst_dims, dst_data_type);
+      : ITensor::desc(dst_dims, dst_data_type);
 }
 
 namespace {
@@ -338,10 +338,10 @@ std::pair<
     dnnl::convolution_forward::primitive_desc,
     dnnl::convolution_forward>
 get_primitive_desc(
-    const ideep::tensor::desc& src_desc,
-    const ideep::tensor::desc& weights_desc,
-    const ideep::tensor::desc& bias_desc,
-    const ideep::tensor::desc& dst_desc,
+    const ITensor::desc& src_desc,
+    const ITensor::desc& weights_desc,
+    const ITensor::desc& bias_desc,
+    const ITensor::desc& dst_desc,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -353,13 +353,13 @@ get_primitive_desc(
   const auto& engine = ideep::engine::cpu_engine();
   auto src_desc_query = src_desc;
   auto weights_desc_query = weights_desc;
-  auto bias_desc_query = with_bias ? bias_desc : ideep::tensor::desc();
+  auto bias_desc_query = with_bias ? bias_desc : ITensor::desc();
   auto dst_desc_query = dst_desc;
 
   src_desc_query = src_desc.to_format_any();
   weights_desc_query = weights_desc.to_format_any();
   bias_desc_query =
-      with_bias ? bias_desc.to_format_any() : ideep::tensor::desc();
+      with_bias ? bias_desc.to_format_any() : ITensor::desc();
   dst_desc_query = dst_desc.to_format_any();
 
   // For nhwc path, weight uses format_tag::any,
@@ -410,10 +410,10 @@ get_primitive_desc(
 #else
 template <bool with_bias>
 dnnl::convolution_forward::primitive_desc get_primitive_desc(
-    const ideep::tensor::desc& src_desc,
-    const ideep::tensor::desc& weights_desc,
-    const ideep::tensor::desc& bias_desc,
-    const ideep::tensor::desc& dst_desc,
+    const ITensor::desc& src_desc,
+    const ITensor::desc& weights_desc,
+    const ITensor::desc& bias_desc,
+    const ITensor::desc& dst_desc,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -425,13 +425,13 @@ dnnl::convolution_forward::primitive_desc get_primitive_desc(
   const auto& engine = ideep::engine::cpu_engine();
   auto src_desc_query = src_desc;
   auto weights_desc_query = weights_desc;
-  auto bias_desc_query = with_bias ? bias_desc : ideep::tensor::desc();
+  auto bias_desc_query = with_bias ? bias_desc : ITensor::desc();
   auto dst_desc_query = dst_desc;
 
   src_desc_query = src_desc.to_format_any();
   weights_desc_query = weights_desc.to_format_any();
   bias_desc_query =
-      with_bias ? bias_desc.to_format_any() : ideep::tensor::desc();
+      with_bias ? bias_desc.to_format_any() : ITensor::desc();
   dst_desc_query = dst_desc.to_format_any();
 
   // For nhwc path, weight uses format_tag::any,
@@ -500,7 +500,7 @@ dnnl::convolution_forward::primitive_desc get_primitive_desc(
 // Ported from ideep::convolution_forward::expected_weights_desc (the
 // template on is_channels_last).
 template <bool is_channels_last = false>
-ideep::tensor::desc expected_weights_desc(
+ITensor::desc expected_weights_desc(
     const dnnl::memory::dims& weights_dims,
     dnnl::memory::data_type dtype = dnnl::memory::data_type::f32,
     const dnnl::memory::dims& strides = {1, 1},
@@ -519,7 +519,7 @@ ideep::tensor::desc expected_weights_desc(
   auto weights_dims_g = grouped
       ? ideep::utils::group_dims(weights_dims, groups)
       : weights_dims;
-  auto weights_desc = ideep::tensor::desc(weights_dims_g, dtype);
+  auto weights_desc = ITensor::desc(weights_dims_g, dtype);
 
   auto dims_in = weights_desc.get_dims();
   auto ndims = dims_in.size();
@@ -585,8 +585,8 @@ ideep::tensor::desc expected_weights_desc(
   auto y_dtype = dtype != dnnl::memory::data_type::s8
       ? dtype
       : dnnl::memory::data_type::s32;
-  ideep::tensor::desc src_desc(x_dims, x_dtype);
-  ideep::tensor::desc dst_desc(y_dims, y_dtype);
+  ITensor::desc src_desc(x_dims, x_dtype);
+  ITensor::desc dst_desc(y_dims, y_dtype);
 
   auto src_query = src_desc;
   auto dst_query = dst_desc;
@@ -621,7 +621,7 @@ ideep::tensor::desc expected_weights_desc(
   auto pd = get_primitive_desc</*with_bias=*/false>(
       src_query,
       weights_desc,
-      ideep::tensor::desc(),
+      ITensor::desc(),
       dst_query,
       strides,
       dilates_,
@@ -634,9 +634,9 @@ ideep::tensor::desc expected_weights_desc(
 
   // embed group info into weights_desc
 #ifdef __aarch64__
-  return ideep::tensor::desc(pd.first.weights_desc(), groups);
+  return ITensor::desc(pd.first.weights_desc(), groups);
 #else
-  return ideep::tensor::desc(pd.weights_desc(), groups);
+  return ITensor::desc(pd.weights_desc(), groups);
 #endif
 }
 
@@ -647,11 +647,11 @@ ideep::tensor::desc expected_weights_desc(
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void do_compute(
     const convolution_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst) {
-  auto scratchpad = ideep::tensor(param.pd.scratchpad_desc());
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst) {
+  auto scratchpad = ITensor(param.pd.scratchpad_desc());
 
   auto& expected_src =
       reorder_src ? src.reorder_if_differ_in(param.pd.src_desc()) : src;
@@ -671,14 +671,14 @@ void do_compute(
   if (param.all_scales && !param.all_scales->empty()) {
     for (auto& arg_scale_pair : *param.all_scales) {
       int dnnl_arg = arg_scale_pair.first;
-      ideep::tensor& scales_m = std::get<1>(arg_scale_pair);
+      ITensor& scales_m = std::get<1>(arg_scale_pair);
       args.insert({DNNL_ARG_ATTR_SCALES | dnnl_arg, scales_m});
     }
   }
   if (param.all_zero_points && !param.all_zero_points->empty()) {
     for (auto& arg_zp_pair : *param.all_zero_points) {
       int dnnl_arg = arg_zp_pair.first;
-      ideep::tensor& zp_m = std::get<1>(arg_zp_pair);
+      ITensor& zp_m = std::get<1>(arg_zp_pair);
       args.insert({DNNL_ARG_ATTR_ZERO_POINTS | dnnl_arg, zp_m});
     }
   }
@@ -686,7 +686,7 @@ void do_compute(
   // Deal with dst tensor
   if (reorder_src) {
     auto expected_dst_desc = param.pd.dst_desc();
-    ideep::tensor expected_dst;
+    ITensor expected_dst;
     if (dst.is_empty() || dst.get_desc() != expected_dst_desc) {
       // If dst buffer is not given by user or the given buffer is not in expected format,
       // We need to init a new one
@@ -720,14 +720,14 @@ void do_compute(
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void do_compute_binary(
     const convolution_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& other,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst) {
+    const ITensor& src,
+    const ITensor& other,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst) {
   auto& pd = param.pd;
   auto& primitive = param.primitive;
-  auto scratchpad = ideep::tensor(pd.scratchpad_desc());
+  auto scratchpad = ITensor(pd.scratchpad_desc());
   auto& expected_src =
       reorder_src ? src.reorder_if_differ_in(pd.src_desc()) : src;
   if (reorder_src) {
@@ -759,14 +759,14 @@ void do_compute_binary(
   if (param.all_scales && !param.all_scales->empty()) {
     for (auto& arg_scale_pair : *param.all_scales) {
       int dnnl_arg = arg_scale_pair.first;
-      ideep::tensor& scales_m = arg_scale_pair.second;
+      ITensor& scales_m = arg_scale_pair.second;
       args.insert({DNNL_ARG_ATTR_SCALES | dnnl_arg, scales_m});
     }
   }
   if (param.all_zero_points && !param.all_zero_points->empty()) {
     for (auto& arg_zp_pair : *param.all_zero_points) {
       int dnnl_arg = arg_zp_pair.first;
-      ideep::tensor& zp_m = arg_zp_pair.second;
+      ITensor& zp_m = arg_zp_pair.second;
       args.insert({DNNL_ARG_ATTR_ZERO_POINTS | dnnl_arg, zp_m});
     }
   }
@@ -780,11 +780,11 @@ void do_compute_binary(
 // For fp32
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void compute_dispatch(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -794,9 +794,9 @@ void compute_dispatch(
     const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::convolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward) {
-  ideep::tensor::desc src_desc, weights_desc, bias_desc, dst_desc;
+  ITensor::desc src_desc, weights_desc, bias_desc, dst_desc;
   Attr op_attr, src_attr, weights_attr, bias_attr;
-  ideep::tensor weights_grouped;
+  ITensor weights_grouped;
   dnnl::memory::dims dil_compatible;
 
   prepare_parameters(
@@ -852,11 +852,11 @@ void compute_dispatch(
 // For int8
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void compute_dispatch(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -872,9 +872,9 @@ void compute_dispatch(
     dnnl::algorithm aalgorithm = dnnl::algorithm::convolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward,
     const ideep::lowp_kind alowp_kind = ideep::u8s8) {
-  ideep::tensor::desc src_desc, weights_desc, bias_desc, dst_desc;
+  ITensor::desc src_desc, weights_desc, bias_desc, dst_desc;
   Attr op_attr, src_attr, weights_attr, bias_attr;
-  ideep::tensor weights_grouped;
+  ITensor weights_grouped;
   dnnl::memory::dims dil_compatible;
 
   prepare_parameters(
@@ -940,23 +940,23 @@ void compute_dispatch(
   // Prepare tensors for scales and zero points
   if (param.op_attr.has_scales()) {
     if (!param.all_scales) {
-      param.all_scales.reset(new std::unordered_map<int, ideep::tensor>);
+      param.all_scales.reset(new std::unordered_map<int, ITensor>);
     }
     for (auto& arg_scale_pair : param.op_attr.get_all_scales()) {
       int dnnl_arg = arg_scale_pair.first;
       const std::vector<float>& scale = arg_scale_pair.second.first;
-      ideep::tensor scales_m = ideep::tensor(scale);
+      ITensor scales_m = ITensor(scale);
       param.all_scales->insert({dnnl_arg, scales_m});
     }
   }
   if (param.op_attr.has_zero_points()) {
     if (!param.all_zero_points) {
-      param.all_zero_points.reset(new std::unordered_map<int, ideep::tensor>);
+      param.all_zero_points.reset(new std::unordered_map<int, ITensor>);
     }
     for (auto& arg_zp_pair : param.op_attr.get_all_zero_points()) {
       int dnnl_arg = arg_zp_pair.first;
       const std::vector<int32_t>& zp = arg_zp_pair.second.first;
-      ideep::tensor zp_m = ideep::tensor(zp);
+      ITensor zp_m = ITensor(zp);
       param.all_zero_points->insert({dnnl_arg, zp_m});
     }
   }
@@ -969,11 +969,11 @@ void compute_dispatch(
 template <bool with_bias>
 void do_prepare(
     convolution_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -983,9 +983,9 @@ void do_prepare(
     const Attr& attr,
     dnnl::algorithm aalgorithm,
     dnnl::prop_kind aprop_kind) {
-  ideep::tensor::desc src_desc, weights_desc, bias_desc, dst_desc;
+  ITensor::desc src_desc, weights_desc, bias_desc, dst_desc;
   Attr op_attr, src_attr, weights_attr, bias_attr;
-  ideep::tensor weights_grouped;
+  ITensor weights_grouped;
   dnnl::memory::dims dil_compatible;
 
   prepare_parameters(
@@ -1039,11 +1039,11 @@ void do_prepare(
 template <bool with_bias>
 void do_prepare(
     convolution_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1059,9 +1059,9 @@ void do_prepare(
     dnnl::algorithm aalgorithm,
     dnnl::prop_kind aprop_kind,
     const ideep::lowp_kind alowp_kind) {
-  ideep::tensor::desc src_desc, weights_desc, bias_desc, dst_desc;
+  ITensor::desc src_desc, weights_desc, bias_desc, dst_desc;
   Attr op_attr, src_attr, weights_attr, bias_attr;
-  ideep::tensor weights_grouped;
+  ITensor weights_grouped;
   dnnl::memory::dims dil_compatible;
 
   prepare_parameters(
@@ -1127,25 +1127,25 @@ void do_prepare(
   // Prepare tensors for scales and zero points
   if (param.op_attr.has_scales()) {
     if (!param.all_scales) {
-      param.all_scales.reset(new std::unordered_map<int, ideep::tensor>);
+      param.all_scales.reset(new std::unordered_map<int, ITensor>);
     }
     // get_all_scales() returns unordered_map<int, pair of scale and mask>
     for (auto& arg_scale_pair : param.op_attr.get_all_scales()) {
       int dnnl_arg = arg_scale_pair.first;
       const std::vector<float>& scale = std::get<0>(std::get<1>(arg_scale_pair));
-      ideep::tensor scales_m(scale);
+      ITensor scales_m(scale);
       param.all_scales->insert({dnnl_arg, scales_m});
     }
   }
   if (param.op_attr.has_zero_points()) {
     if (!param.all_zero_points) {
-      param.all_zero_points.reset(new std::unordered_map<int, ideep::tensor>);
+      param.all_zero_points.reset(new std::unordered_map<int, ITensor>);
     }
     // get_all_zero_points() returns unordered_map<int, pair of zp and mask>
     for (auto& arg_zp_pair : param.op_attr.get_all_zero_points()) {
       int dnnl_arg = arg_zp_pair.first;
       const std::vector<int32_t>& zp = std::get<0>(std::get<1>(arg_zp_pair));
-      ideep::tensor zp_m(zp);
+      ITensor zp_m(zp);
       param.all_zero_points->insert({dnnl_arg, zp_m});
     }
   }
@@ -1155,12 +1155,12 @@ void do_prepare(
 // For fp32 with binary post-op
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void compute_binary_dispatch(
-    const ideep::tensor& src,
-    const ideep::tensor& other,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
+    const ITensor& src,
+    const ITensor& other,
+    const ITensor& weights,
+    const ITensor& bias,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1194,11 +1194,11 @@ void compute_binary_dispatch(
 // Ported from ideep::convolution_backward_weights::compute_impl.
 template <bool with_diff_bias>
 void backward_weights_compute_impl(
-    const ideep::tensor& src,
-    const ideep::tensor& diff_dst,
+    const ITensor& src,
+    const ITensor& diff_dst,
     const dnnl::memory::dims& diff_weights_dims,
-    ideep::tensor& diff_weights,
-    ideep::tensor& diff_bias,
+    ITensor& diff_weights,
+    ITensor& diff_bias,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1220,7 +1220,7 @@ void backward_weights_compute_impl(
   }
   // make diff_weights and dilates compatible with DNNL
   auto dilates_ = ideep::utils::get_compatible_dilates(dilates);
-  auto diff_weights_desc = ideep::tensor::desc(
+  auto diff_weights_desc = ITensor::desc(
       diff_weights_dims, diff_dst_type, dnnl::memory::format_tag::any);
   if (groups > 1) {
     diff_weights_desc = diff_weights_desc.to_grouped(groups).to_format_any();
@@ -1240,7 +1240,7 @@ void backward_weights_compute_impl(
   auto diff_dst_desc = diff_dst.get_desc().to_format(format_tag);
   auto src_desc = src.get_desc().to_format(format_tag);
 
-  auto diff_bias_desc = ideep::tensor::desc(
+  auto diff_bias_desc = ITensor::desc(
       {diff_dst.get_dim(1)}, diff_dst_type, dnnl::memory::format_tag::any);
 
   // for forward hint, weights_desc should have same data_type
@@ -1323,8 +1323,8 @@ void backward_weights_compute_impl(
   auto expected_src = src.reorder_if_differ_in(pd.src_desc());
   // embed group info into diff_weights_desc
   auto expected_diff_weights_desc =
-      ideep::tensor::desc(pd.diff_weights_desc(), groups);
-  ideep::tensor expected_diff_weights;
+      ITensor::desc(pd.diff_weights_desc(), groups);
+  ITensor expected_diff_weights;
   // diff_weights not init in FW or has same desc with expected desc.
   if (diff_weights.is_empty() ||
       diff_weights.get_desc() == expected_diff_weights_desc) {
@@ -1334,7 +1334,7 @@ void backward_weights_compute_impl(
     expected_diff_weights.init(expected_diff_weights_desc);
   }
 
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  ITensor scratchpad(pd.scratchpad_desc());
 
   if (with_diff_bias) {
     diff_bias.reinit_if_possible(pd.diff_bias_desc());
@@ -1367,11 +1367,11 @@ void backward_weights_compute_impl(
 } // namespace
 
 void convolution_forward_compute_v2(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1427,10 +1427,10 @@ void convolution_forward_compute_v2(
 }
 
 void convolution_forward_compute_v2(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
+    const ITensor& src,
+    const ITensor& weights,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1444,7 +1444,7 @@ void convolution_forward_compute_v2(
     const Attr& attr) {
   bool is_channels_last = src.get_desc().is_channels_last() ||
       weights.get_desc().is_channels_last();
-  static ideep::tensor dummy_bias;
+  static ITensor dummy_bias;
   compute_dispatch</*with_bias=*/false, true, true>(
       src,
       weights,
@@ -1466,11 +1466,11 @@ void convolution_forward_compute_v2(
 }
 
 void convolution_forward_compute_v3(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1516,10 +1516,10 @@ void convolution_forward_compute_v3(
 }
 
 void convolution_forward_compute_v3(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
+    const ITensor& src,
+    const ITensor& weights,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1529,7 +1529,7 @@ void convolution_forward_compute_v3(
     const Attr& attr,
     dnnl::algorithm aalgorithm,
     dnnl::prop_kind aprop_kind) {
-  static ideep::tensor dummy_bias;
+  static ITensor dummy_bias;
   compute_dispatch<false, true, true>(
       src,
       weights,
@@ -1549,12 +1549,12 @@ void convolution_forward_compute_v3(
 
 template <bool reorder_src, bool reorder_weight>
 void convolution_forward_compute_binary(
-    const ideep::tensor& src,
-    const ideep::tensor& other,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
+    const ITensor& src,
+    const ITensor& other,
+    const ITensor& weights,
+    const ITensor& bias,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1603,11 +1603,11 @@ void convolution_forward_compute_binary(
 
 template <bool reorder_src, bool reorder_weight>
 void convolution_forward_compute_binary(
-    const ideep::tensor& src,
-    const ideep::tensor& other,
-    const ideep::tensor& weights,
+    const ITensor& src,
+    const ITensor& other,
+    const ITensor& weights,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1617,7 +1617,7 @@ void convolution_forward_compute_binary(
     const Attr& attr,
     dnnl::algorithm aalgorithm,
     dnnl::prop_kind aprop_kind) {
-  static ideep::tensor dummy_bias;
+  static ITensor dummy_bias;
   compute_binary_dispatch</*with_bias=*/false, reorder_src, reorder_weight>(
       src,
       other,
@@ -1636,7 +1636,7 @@ void convolution_forward_compute_binary(
       aprop_kind);
 }
 
-ideep::tensor::desc convolution_forward_expected_weights_desc(
+ITensor::desc convolution_forward_expected_weights_desc(
     const dnnl::memory::dims& weights_dims,
     dnnl::memory::data_type dtype,
     const dnnl::memory::dims& strides,
@@ -1683,11 +1683,11 @@ ideep::tensor::desc convolution_forward_expected_weights_desc(
 
 void convolution_forward_prepare(
     convolution_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1756,10 +1756,10 @@ void convolution_forward_prepare(
 template <bool reorder_src, bool reorder_weight>
 void convolution_forward_compute(
     const convolution_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst) {
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst) {
   if (bias.is_empty()) {
     do_compute</*with_bias=*/false, reorder_src, reorder_weight>(
         param, src, weights, bias, dst);
@@ -1771,11 +1771,11 @@ void convolution_forward_compute(
 
 template <bool reorder_src, bool reorder_weight>
 void convolution_forward_compute(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1838,10 +1838,10 @@ void convolution_forward_compute(
 }
 
 void convolution_backward_data_compute_v2(
-    const ideep::tensor& diff_dst,
-    const ideep::tensor& weights,
+    const ITensor& diff_dst,
+    const ITensor& weights,
     const dnnl::memory::dims& diff_src_dims,
-    ideep::tensor& diff_src,
+    ITensor& diff_src,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1876,7 +1876,7 @@ void convolution_backward_data_compute_v2(
   }
   auto diff_dst_desc = diff_dst.get_desc().to_format(format_tag);
   // align weight data type with diff_dst for bf16 and f16
-  auto weights_desc = ideep::tensor::desc(
+  auto weights_desc = ITensor::desc(
       weights_.get_dims(),
       diff_dst.get_data_type(),
       dnnl::memory::format_tag::any);
@@ -1884,13 +1884,13 @@ void convolution_backward_data_compute_v2(
     weights_desc = weights_desc.to_grouped(groups);
   }
 
-  auto diff_src_desc = ideep::tensor::desc(
+  auto diff_src_desc = ITensor::desc(
       diff_src_dims, diff_dst_desc.get_data_type(), format_tag);
 
   auto forward_hints = get_primitive_desc</*with_bias=*/false>(
       diff_src_desc,
       weights_desc,
-      ideep::tensor::desc(),
+      ITensor::desc(),
       diff_dst_desc,
       strides,
       dilates_,
@@ -1932,7 +1932,7 @@ void convolution_backward_data_compute_v2(
   auto expected_weights = weights_.reorder_if_differ_in(pd.weights_desc());
   diff_src.reinit_if_possible(pd.diff_src_desc());
 
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::convolution_backward_data(pd).execute(
       ideep::stream::default_stream(),
@@ -1943,11 +1943,11 @@ void convolution_backward_data_compute_v2(
 }
 
 void convolution_backward_weights_compute_v2(
-    const ideep::tensor& src,
-    const ideep::tensor& diff_dst,
+    const ITensor& src,
+    const ITensor& diff_dst,
     const dnnl::memory::dims& diff_weights_dims,
-    ideep::tensor& diff_weights,
-    ideep::tensor& diff_bias,
+    ITensor& diff_weights,
+    ITensor& diff_bias,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1971,10 +1971,10 @@ void convolution_backward_weights_compute_v2(
 }
 
 void convolution_backward_weights_compute_v2(
-    const ideep::tensor& src,
-    const ideep::tensor& diff_dst,
+    const ITensor& src,
+    const ITensor& diff_dst,
     const dnnl::memory::dims& diff_weights_dims,
-    ideep::tensor& diff_weights,
+    ITensor& diff_weights,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& dilates,
     const dnnl::memory::dims& padding_l,
@@ -1982,7 +1982,7 @@ void convolution_backward_weights_compute_v2(
     int groups,
     bool is_channels_last,
     const Attr& attr) {
-  static ideep::tensor dummy_diff_bias;
+  static ITensor dummy_diff_bias;
   backward_weights_compute_impl</*with_diff_bias=*/false>(
       src,
       diff_dst,
@@ -2001,17 +2001,17 @@ void convolution_backward_weights_compute_v2(
 // The template arguments used by ATen callers.
 template void convolution_forward_compute<false, false>(
     const convolution_forward_params&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    ideep::tensor&);
+    const ITensor&,
+    const ITensor&,
+    const ITensor&,
+    ITensor&);
 
 template void convolution_forward_compute<true, true>(
-    const ideep::tensor&,
-    const ideep::tensor&,
-    const ideep::tensor&,
+    const ITensor&,
+    const ITensor&,
+    const ITensor&,
     const dnnl::memory::dims&,
-    ideep::tensor&,
+    ITensor&,
     const dnnl::memory::dims&,
     const dnnl::memory::dims&,
     const dnnl::memory::dims&,
@@ -2028,12 +2028,12 @@ template void convolution_forward_compute<true, true>(
     const ideep::lowp_kind);
 
 template void convolution_forward_compute_binary<true, true>(
-    const ideep::tensor&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    const ideep::tensor&,
+    const ITensor&,
+    const ITensor&,
+    const ITensor&,
+    const ITensor&,
     const dnnl::memory::dims&,
-    ideep::tensor&,
+    ITensor&,
     const dnnl::memory::dims&,
     const dnnl::memory::dims&,
     const dnnl::memory::dims&,
@@ -2044,11 +2044,11 @@ template void convolution_forward_compute_binary<true, true>(
     dnnl::algorithm,
     dnnl::prop_kind);
 template void convolution_forward_compute_binary<true, true>(
-    const ideep::tensor&,
-    const ideep::tensor&,
-    const ideep::tensor&,
+    const ITensor&,
+    const ITensor&,
+    const ITensor&,
     const dnnl::memory::dims&,
-    ideep::tensor&,
+    ITensor&,
     const dnnl::memory::dims&,
     const dnnl::memory::dims&,
     const dnnl::memory::dims&,

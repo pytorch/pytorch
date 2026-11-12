@@ -5,12 +5,12 @@
 namespace at::native::mkldnn {
 
 void layer_normalization_forward(
-    const ideep::tensor& src,
-    const ideep::tensor& scale,
-    const ideep::tensor& shift,
-    ideep::tensor& dst,
-    ideep::tensor& mean,
-    ideep::tensor& variance,
+    const ITensor& src,
+    const ITensor& scale,
+    const ITensor& shift,
+    ITensor& dst,
+    ITensor& mean,
+    ITensor& variance,
     float epsilon) {
   const auto& engine = ideep::engine::cpu_engine();
   const auto flags = dnnl::normalization_flags::use_scale |
@@ -31,7 +31,7 @@ void layer_normalization_forward(
   mean.reinit_if_possible(pd.mean_desc());
   variance.reinit_if_possible(pd.variance_desc());
   dst.reinit_if_possible(pd.dst_desc());
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::layer_normalization_forward(pd).execute(
       ideep::stream::default_stream(),

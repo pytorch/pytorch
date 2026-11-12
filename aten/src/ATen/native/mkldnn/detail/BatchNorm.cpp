@@ -6,12 +6,12 @@
 namespace at::native::mkldnn {
 
 void batch_normalization_forward_inference(
-    const ideep::tensor& src,
-    const ideep::tensor& mean,
-    const ideep::tensor& variance,
-    const ideep::tensor& scale,
-    const ideep::tensor& shift,
-    ideep::tensor& dst,
+    const ITensor& src,
+    const ITensor& mean,
+    const ITensor& variance,
+    const ITensor& scale,
+    const ITensor& shift,
+    ITensor& dst,
     float epsilon) {
   const auto& engine = ideep::engine::cpu_engine();
   const auto pd_flags = dnnl::normalization_flags::use_scale |
@@ -35,7 +35,7 @@ void batch_normalization_forward_inference(
   auto expected_src = src.reorder_if_differ_in(pd.src_desc());
   // May replace dst's buffer and layout when they differ from pd.dst_desc().
   dst.reinit_if_possible(pd.dst_desc());
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  ITensor scratchpad(pd.scratchpad_desc());
 
   auto expected_mean = mean.reorder_if_differ_in(pd.mean_desc());
   auto expected_var = variance.reorder_if_differ_in(pd.variance_desc());
@@ -51,12 +51,12 @@ void batch_normalization_forward_inference(
 }
 
 void batch_normalization_forward_training(
-    const ideep::tensor& src,
-    const ideep::tensor& scale,
-    const ideep::tensor& shift,
-    ideep::tensor& dst,
-    ideep::tensor& mean,
-    ideep::tensor& variance,
+    const ITensor& src,
+    const ITensor& scale,
+    const ITensor& shift,
+    ITensor& dst,
+    ITensor& mean,
+    ITensor& variance,
     float epsilon) {
   const auto& engine = ideep::engine::cpu_engine();
   const auto pd_flags = dnnl::normalization_flags::use_scale |
@@ -81,7 +81,7 @@ void batch_normalization_forward_training(
   mean.reinit_if_possible(pd.mean_desc());
   variance.reinit_if_possible(pd.variance_desc());
   dst.reinit_if_possible(pd.dst_desc());
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::batch_normalization_forward(pd).execute(
       ideep::stream::default_stream(),
@@ -95,14 +95,14 @@ void batch_normalization_forward_training(
 }
 
 void batch_normalization_backward(
-    const ideep::tensor& src,
-    const ideep::tensor& mean,
-    const ideep::tensor& variance,
-    const ideep::tensor& diff_dst,
-    const ideep::tensor& scale,
-    ideep::tensor& diff_src,
-    ideep::tensor& diff_scale,
-    ideep::tensor& diff_shift,
+    const ITensor& src,
+    const ITensor& mean,
+    const ITensor& variance,
+    const ITensor& diff_dst,
+    const ITensor& scale,
+    ITensor& diff_src,
+    ITensor& diff_scale,
+    ITensor& diff_shift,
     float epsilon) {
   if (is_avx2_vnni_2() &&
       one_of(
@@ -148,7 +148,7 @@ void batch_normalization_backward(
   diff_scale.reinit_if_possible(scale.get_desc());
   diff_shift.reinit_if_possible(scale.get_desc());
 
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  ITensor scratchpad(pd.scratchpad_desc());
 
   dnnl::batch_normalization_backward(pd).execute(
       ideep::stream::default_stream(),

@@ -527,9 +527,9 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
       dim == 2 ? input : input.reshape({-1, input.size(input.dim() - 1)});
   auto input_dims = input_reshaped.sizes().vec();
   auto input_data_type = dnnl::memory::data_type::f32;
-  auto input_desc = ideep::tensor::desc(input_dims, input_data_type);
+  auto input_desc = at::native::mkldnn::ITensor::desc(input_dims, input_data_type);
   at::native::mkldnn::Attr op_attr = ReluFused ? at::native::mkldnn::Attr::fuse_relu() : at::native::mkldnn::Attr();
-  ideep::tensor x;
+  at::native::mkldnn::ITensor x;
   x.init(input_desc, input_contig.data_ptr());
   // Find quantization parameters
   float x_max = 0, x_min = 0;
@@ -575,7 +575,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   // Allocate output Tensor
   at::Tensor output = at::empty(dst_dims, input.options().dtype(at::kFloat));
   if (output.numel() == 0) return output;
-  ideep::tensor y({dst_dims, dnnl::memory::data_type::f32,
+  at::native::mkldnn::ITensor y({dst_dims, dnnl::memory::data_type::f32,
                    {output.strides().cbegin(), output.strides().cend()}},
                   output.data_ptr());
   bool with_bias = bias_.has_value();
@@ -586,7 +586,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
       bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
     }
   }
-  const auto& b = with_bias ? bias_.value() : ideep::tensor();
+  const auto& b = with_bias ? bias_.value() : at::native::mkldnn::ITensor();
   // Primitive cache is initialized when called for the first time
   // and won't be updated afterwards.
   int num_threads = at::get_num_threads();
@@ -637,7 +637,7 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
     at::Tensor onednn_weight, // fp16 tensor from MkldnnCPU
     std::optional<at::Tensor> bias,
     bool relu_fused) {
-  using ideep::tensor;
+  using tensor = at::native::mkldnn::ITensor;
   const int64_t dim = input.dim();
   TORCH_CHECK(input.scalar_type() == c10::ScalarType::Float,
       "onednn linear dynamic fp16: data type of input should be float.");
@@ -656,7 +656,7 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
   auto output_size = input.sizes().vec();
   output_size[dim - 1] = N;
 
-  std::optional<ideep::tensor> onednn_bias{std::nullopt};
+  std::optional<at::native::mkldnn::ITensor> onednn_bias{std::nullopt};
   bool with_bias = bias.has_value();
   at::Tensor bias_val_float;
   if (with_bias) {

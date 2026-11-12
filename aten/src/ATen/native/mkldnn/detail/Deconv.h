@@ -45,8 +45,8 @@ struct deconv_forward_params {
   Attr op_attr;
   Attr bias_attr;
   // Keep {dnnl_arg, tensor} pairs of scales and zero points for primitive execution
-  std::shared_ptr<std::unordered_map<int, ideep::tensor>> all_scales = nullptr;
-  std::shared_ptr<std::unordered_map<int, ideep::tensor>> all_zero_points =
+  std::shared_ptr<std::unordered_map<int, ITensor>> all_scales = nullptr;
+  std::shared_ptr<std::unordered_map<int, ITensor>> all_zero_points =
       nullptr;
 };
 
@@ -56,11 +56,11 @@ struct deconv_forward_params {
 // This one does not have `is_channels_last` argument for compatibility
 template <bool reorder_src = true, bool reorder_weight = true>
 void convolution_transpose_forward_compute(
-    const ideep::tensor& src,
-    const ideep::tensor& weights, // dim: {o, i[, d], h, w}
-    const ideep::tensor& bias,
+    const ITensor& src,
+    const ITensor& weights, // dim: {o, i[, d], h, w}
+    const ITensor& bias,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,
@@ -82,11 +82,11 @@ void convolution_transpose_forward_compute(
 // This one does not have `is_channels_last` argument for compatibility
 void convolution_transpose_forward_prepare(
     deconv_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights, // dim: {o, i[, d], h, w}
-    const ideep::tensor& bias,
+    const ITensor& src,
+    const ITensor& weights, // dim: {o, i[, d], h, w}
+    const ITensor& bias,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,
@@ -111,10 +111,10 @@ void convolution_transpose_forward_prepare(
 template <bool reorder_src = true, bool reorder_weight = true>
 void convolution_transpose_forward_compute(
     const deconv_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst);
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst);
 
 // Ported from ideep::convolution_transpose_forward::compute_v3 (with bias).
 // 2-in-1 Compute for fp32
@@ -124,11 +124,11 @@ void convolution_transpose_forward_compute(
 // Set them to False if you are sure they don't need reordering.
 template <bool reorder_src = true, bool reorder_weight = true>
 void convolution_transpose_forward_compute_v3(
-    const ideep::tensor& src,
-    const ideep::tensor& weights, // dim: {o, i[, d], h, w}
-    const ideep::tensor& bias,
+    const ITensor& src,
+    const ITensor& weights, // dim: {o, i[, d], h, w}
+    const ITensor& bias,
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,
@@ -147,10 +147,10 @@ void convolution_transpose_forward_compute_v3(
 // Set them to False if you are sure they don't need reordering.
 template <bool reorder_src = true, bool reorder_weight = true>
 void convolution_transpose_forward_compute_v3(
-    const ideep::tensor& src,
-    const ideep::tensor& weights, // dim: {o, i[, d], h, w}
+    const ITensor& src,
+    const ITensor& weights, // dim: {o, i[, d], h, w}
     const dnnl::memory::dims& dst_dims,
-    ideep::tensor& dst,
+    ITensor& dst,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,
@@ -168,7 +168,7 @@ void convolution_transpose_forward_compute_v3(
 ///                   [o, i, ...] or [g, o, i/g, ...] format used by oneDNN. By default
 ///                   it is true for backward compatibility (e.g. Caffe2)
 template <bool is_channels_last = false, bool transposed = true>
-ideep::tensor::desc convolution_transpose_forward_expected_weights_desc(
+ITensor::desc convolution_transpose_forward_expected_weights_desc(
     const dnnl::memory::dims& weights_dims, // [i, o, ...]
     dnnl::memory::data_type dtype = dnnl::memory::data_type::f32,
     const dnnl::memory::dims& strides = {1, 1},
@@ -183,10 +183,10 @@ ideep::tensor::desc convolution_transpose_forward_expected_weights_desc(
 
 // Ported from ideep::convolution_transpose_backward_data::compute_v3.
 void convolution_transpose_backward_data_compute_v3(
-    const ideep::tensor& diff_dst,
-    const ideep::tensor& weights, // dim: {i, o[, d], h, w}
+    const ITensor& diff_dst,
+    const ITensor& weights, // dim: {i, o[, d], h, w}
     const dnnl::memory::dims& diff_src_dims,
-    ideep::tensor& diff_src,
+    ITensor& diff_src,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,
@@ -199,11 +199,11 @@ void convolution_transpose_backward_data_compute_v3(
 // Ported from ideep::convolution_transpose_backward_weights::compute_v3 (with
 // bias).
 void convolution_transpose_backward_weights_compute_v3(
-    const ideep::tensor& src,
-    const ideep::tensor& diff_dst,
+    const ITensor& src,
+    const ITensor& diff_dst,
     const dnnl::memory::dims& diff_weights_dims,
-    ideep::tensor& diff_weights,
-    ideep::tensor& diff_bias,
+    ITensor& diff_weights,
+    ITensor& diff_bias,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,
@@ -216,10 +216,10 @@ void convolution_transpose_backward_weights_compute_v3(
 // Ported from ideep::convolution_transpose_backward_weights::compute_v3
 // (without bias).
 void convolution_transpose_backward_weights_compute_v3(
-    const ideep::tensor& src,
-    const ideep::tensor& diff_dst,
+    const ITensor& src,
+    const ITensor& diff_dst,
     const dnnl::memory::dims& diff_weights_dims,
-    ideep::tensor& diff_weights,
+    ITensor& diff_weights,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,

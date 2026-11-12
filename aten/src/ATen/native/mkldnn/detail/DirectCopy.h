@@ -8,7 +8,7 @@
 namespace at::native::mkldnn {
 
 // Ported from ideep::direct_copy::compute.
-void direct_copy(const ideep::tensor& src, ideep::tensor& dst);
+void direct_copy(const ITensor& src, ITensor& dst);
 
 } // namespace at::native::mkldnn
 

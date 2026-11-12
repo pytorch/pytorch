@@ -12,14 +12,14 @@ namespace at::native::mkldnn {
 // Ported from ideep::sum::compute.
 void sum(
     const std::vector<float>& scales,
-    const std::vector<ideep::tensor>& srcs,
-    ideep::tensor& dst);
+    const std::vector<ITensor>& srcs,
+    ITensor& dst);
 
 // Ported from ideep::binary::compute.
 void binary(
-    const ideep::tensor& src0,
-    const ideep::tensor& src1,
-    ideep::tensor& dst,
+    const ITensor& src0,
+    const ITensor& src1,
+    ITensor& dst,
     dnnl::algorithm algorithm);
 
 } // namespace at::native::mkldnn

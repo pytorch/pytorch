@@ -85,10 +85,10 @@ Tensor& mkldnn_add_out(
     const Scalar& alpha,
     Tensor& result
     ) {
-  ideep::tensor& x = itensor_from_mkldnn(self);
-  ideep::tensor& y = itensor_from_mkldnn(other);
+  mkldnn::ITensor& x = itensor_from_mkldnn(self);
+  mkldnn::ITensor& y = itensor_from_mkldnn(other);
 
-  ideep::tensor& z = itensor_from_mkldnn(result);
+  mkldnn::ITensor& z = itensor_from_mkldnn(result);
   if (result.is_same(other)) {
     const std::vector<float> scales{alpha.to<float>(), 1.0};
     mkldnn::sum(scales, {y, x}, z);
@@ -105,10 +105,10 @@ Tensor mkldnn_add(const Tensor& self, const Tensor& other, const Scalar& alpha) 
     return emptyBinaryOp(self, other);
   }
 
-  ideep::tensor& x = itensor_from_mkldnn(self);
-  ideep::tensor& y = itensor_from_mkldnn(other);
+  mkldnn::ITensor& x = itensor_from_mkldnn(self);
+  mkldnn::ITensor& y = itensor_from_mkldnn(other);
 
-  ideep::tensor z;
+  mkldnn::ITensor z;
   const std::vector<float> scales{1.0, alpha.to<float>()};
   mkldnn::sum(scales, {x, y}, z);
 
@@ -123,8 +123,8 @@ Tensor& mkldnn_add_(Tensor& self, const Tensor& other, const Scalar& alpha) {
 Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, Tensor& result) {
   TORCH_CHECK(result.sizes() == self.sizes(),
              "mkldnn_mul_out: the output size should be same as input size");
-  ideep::tensor& z = itensor_from_mkldnn(result);
-  ideep::tensor& x = itensor_from_mkldnn(self);
+  mkldnn::ITensor& z = itensor_from_mkldnn(result);
+  mkldnn::ITensor& x = itensor_from_mkldnn(self);
 
   // for zero_dim tensor
   if (other.ndimension() == 0) {
@@ -140,7 +140,7 @@ Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, Tensor& result) 
     if (mkldnn_lacks_aarch64_kernels()) {
       return result.copy_(self.to_dense().mul(other.to_dense()).to_mkldnn());
     }
-    ideep::tensor y = itensor_from_mkldnn(other);
+    mkldnn::ITensor y = itensor_from_mkldnn(other);
     mkldnn::binary(x, y, z, dnnl::algorithm::binary_mul);
 
     return result;
