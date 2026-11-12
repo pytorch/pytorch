@@ -776,6 +776,18 @@ def fold_cols_rolled(
     return accs
 
 
+def _col_group_issue(trait, axis, combine, vec) -> str | None:
+    if axis != "col":
+        return f"the col axis, got {axis=}"
+    if combine:
+        return "a fold of inputs, not partials"
+    if vec != 1:
+        return f"vec=1, got {vec=}"
+    if not getattr(trait, "has_combine_equal", False):
+        return f"a trait with has_combine_equal, got {type(trait).__name__}"
+    return None
+
+
 @cute.jit
 def _fold_welford_equal_group(
     leaf_fn,
@@ -902,17 +914,15 @@ class TileReduce:
             )
             if issue is not None:
                 raise ValueError(f"the uniform Welford tree needs {issue}")
+        if axis == "col" and vec is None:
+            # Column vec cannot be inferred from load width.
+            raise ValueError("the col axis needs an explicit vec")
         if col_group not in (1, 4, 8, 16):
             raise ValueError(f"col_group must be 1, 4, 8 or 16, got {col_group}")
-        if col_group > 1 and (
-            axis != "col"
-            or combine
-            or vec != 1
-            or not getattr(trait, "has_combine_equal", False)
-        ):
-            raise ValueError(
-                f"column groups need axis='col', vec=1, combine=False and a trait with has_combine_equal, got {type(trait).__name__} {col_group=} {axis=} {combine=} {vec=}"
-            )
+        if col_group > 1:
+            issue = _col_group_issue(trait, axis, combine, vec)
+            if issue is not None:
+                raise ValueError(f"column groups need {issue}")
         itemsize = dtype.width // 8 if dtype is not None else 0
         ragged_vec = None
         if ragged_vector:
@@ -992,8 +1002,7 @@ class TileReduce:
         self.threads_per_block = threads_per_block
         self.nouts = nouts
         self.final = final
-        # The grouped column fold ignores unroll; normalize it so the plans share a kernel.
-        self.unroll = 1 if col_group > 1 else unroll
+        self.unroll = unroll
         self.ragged_vector = ragged_vector
         # The count compiles as whole loads and whether a tail remains.
         tree_count = uniform_tree_count or 0
@@ -1036,9 +1045,6 @@ class TileReduce:
         elif axis == "general":
             # Arbitrary strides offer no vector width.
             self.vec = 1
-        elif vec is None:
-            # Column vec cannot be inferred from load width.
-            raise ValueError("the col axis needs an explicit vec")
         else:
             self.vec = vec
         # Columns keep vec slots; merged row and general axes keep one.
@@ -1072,7 +1078,8 @@ class TileReduce:
             self.threads_per_block,
             self.nouts,
             self.final,
-            self.unroll,
+            # The grouped column fold ignores unroll, so its plans share a kernel.
+            1 if self.col_group > 1 else self.unroll,
             self.use_tma,
             self.combine,
             self.batched_col,
