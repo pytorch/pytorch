@@ -25,6 +25,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
+    is_expandable_to,
     make_channels_last_strides_for,
     make_contiguous_strides_for,
     Number,
@@ -729,6 +730,35 @@ def meta_philox_randint_(self, key, low=None, high=None):
             "(torch.int64 or torch.uint64).",
         )
     _check_philox_gen_args("_philox_randint_", self, key)
+    return self
+
+
+def _check_philox_bound(op_name, name, bound, self):
+    torch._check(
+        bound.device == self.device,
+        lambda: (
+            f"{op_name}: {name} must be on the same device as self, "
+            f"got {bound.device} and {self.device}"
+        ),
+    )
+    torch._check(
+        bound.dtype.is_floating_point,
+        lambda: f"{op_name}: {name} must be a floating point tensor, got {bound.dtype}",
+    )
+    torch._check(
+        is_expandable_to(bound.shape, self.shape),
+        lambda: (
+            f"{op_name}: {name} shape {list(bound.shape)} is not broadcastable "
+            f"to the output shape {list(self.shape)}"
+        ),
+    )
+
+
+@register_meta(aten._philox_uniform_.Tensor)
+def meta_philox_uniform_tensor_(self, key, low, high):
+    _check_philox_distribution_args("_philox_uniform_", self, key)
+    _check_philox_bound("_philox_uniform_", "low", low, self)
+    _check_philox_bound("_philox_uniform_", "high", high, self)
     return self
 
 
@@ -9033,10 +9063,15 @@ def _meta_grouped_mm_common(
                 offs.dtype == torch.int32,
                 lambda: f"Offsets tensor must be integer (int32) tensor, but got {offs.dtype}.",
             )
-            torch._check(
-                offs.stride() == (1,),
-                lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
-            )
+            if scaled:
+                torch._check_value(
+                    offs.is_contiguous(), lambda: "Offsets have to be contiguous"
+                )
+            else:
+                torch._check(
+                    offs.stride() == (1,),
+                    lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
+                )
     else:
         torch._check(
             offs is None,
@@ -9128,10 +9163,42 @@ def meta_scaled_grouped_mm_v2(
     contraction_dim: list[int] | None = None,
     use_fast_accum: bool = False,
 ):
-    """Shape inference only, since the structured C++ meta doesn't support
-    dynamic shapes. Input validation lives there; same pattern as meta_mm.
+    r"""Infer output shape without requiring concrete dimensions.
+
+    This Python meta overrides the C++ validator under FakeTensor and compile.
+    It checks recipe-specific output dtype and offset contiguity; bias, offset dtype/rank, and
+    dimension alignment are validated by the eager C++ path at execution.
     """
     _out_dtype = out_dtype or torch.bfloat16
+    torch._check_value(
+        _out_dtype in (torch.bfloat16, torch.float16, torch.float32),
+        lambda: "Only bf16, fp16, and fp32 high precision output types are supported for grouped gemm",
+    )
+    from torch.nn.functional import ScalingType
+
+    rowwise = scale_recipe_a == scale_recipe_b == [ScalingType.RowWise.value]
+    tensorwise = [ScalingType.TensorWise.value]
+    block_recipes = (
+        ScalingType.BlockWise1x128.value,
+        ScalingType.BlockWise128x128.value,
+    )
+    fp32_block = (
+        len(scale_recipe_a) == len(scale_recipe_b) == 1
+        and scale_recipe_a[0] in block_recipes
+        and scale_recipe_b[0] in block_recipes
+        and ScalingType.BlockWise1x128.value in (scale_recipe_a[0], scale_recipe_b[0])
+    )
+    bf16_only = not fp32_block and (
+        scale_recipe_a != tensorwise or scale_recipe_b != tensorwise
+    )
+    message = "Grouped scaling configuration requires BFloat16 output"
+    if rowwise:
+        message = "Rowwise grouped GEMM requires BFloat16 output"
+    torch._check_value(not bf16_only or _out_dtype == torch.bfloat16, lambda: message)
+    if offs is not None:
+        torch._check_value(
+            offs.is_contiguous(), lambda: "Offsets have to be contiguous"
+        )
     return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, _out_dtype)
 
 

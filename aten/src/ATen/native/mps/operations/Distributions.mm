@@ -96,7 +96,7 @@ static void distribution_kernel_mps_impl(TensorIteratorBase& iter,
   // After `with_32bit_indexing` decomposition `iter.numel()` fits in uint32,
   // but `safe_conv` keeps us honest if anything ever reaches the kernel
   // with a count that would silently truncate.
-  const uint32_t numel = c10::safe_conv<uint32_t>(iter.numel(), "uint32_t");
+  const uint32_t numel = c10::safe_conv<uint32_t>(iter.numel(), "number of generated samples");
   const int64_t threads = at::ceil_div<int64_t>(numel, elements_per_thread);
 
   auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
@@ -190,7 +190,7 @@ static Tensor& bernoulli_tensor_mps_impl(Tensor& self, const Tensor& p_, std::op
       @autoreleasepool {
         auto computeEncoder = stream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
-        const auto numel = c10::safe_conv<uint32_t>(output.numel(), "uint32_t");
+        const auto numel = c10::safe_conv<uint32_t>(output.numel(), "output.numel()");
         mtl_setArgs(
             computeEncoder, output, p_float, std::array<long, 2>{seed, base_offset}, numel, stream->getErrorBuffer());
         mtl_dispatch1DJob(computeEncoder, pso, at::ceil_div<int64_t>(numel, 4));
