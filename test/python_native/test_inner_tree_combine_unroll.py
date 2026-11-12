@@ -112,10 +112,10 @@ class TestInnerTreeCombineUnroll(TestCase):
             candidate = rt.itree_combine_plan(split, itemsize, arch=uniform, **kwargs)
         supported = staged and (count, last, key) == (8192, 8192, "welford")
         self.assertEqual(candidate.combine_tile > 0, staged)
-        self.assertEqual(candidate.combine_count, count if supported else 0)
+        self.assertEqual(candidate.uniform_count, supported)
         self.assertEqual(candidate.combine_weights, weights and supported)
         self.assertEqual(
-            candidate._replace(combine_count=0, combine_weights=False), baseline
+            candidate._replace(uniform_count=False, combine_weights=False), baseline
         )
 
     @parametrize("weights", [False, True])
@@ -164,10 +164,9 @@ class TestInnerTreeCombineUnroll(TestCase):
     @parametrize(
         "updates,msg",
         [
-            ({"combine_count": 0}, "weights require uniform"),
+            ({"uniform_count": False}, "weights require uniform"),
             ({"shape": "split"}, "staged combine plan"),
             ({"combine_tile": 0}, "staged combine plan"),
-            ({"split": (1024, 4096, 4096, 512, 512)}, "staged combine plan"),
             ({"trait": "sum"}, "combine_uniform, got SumOps"),
             ({"trait": "fp64"}, "an FP32 accumulator"),
             ({"split": (1024,)}, "a split plan, got split"),
@@ -175,13 +174,10 @@ class TestInnerTreeCombineUnroll(TestCase):
             ({"split": (0, 8192, 8192, 512, 512)}, "partials, got 0$"),
             ({"split": (2**25, 8192, 8192, 512, 512)}, "partials, got 33554432"),
             (
-                {"split": (1024, 2**25, 2**25, 512, 512), "combine_count": 2**25},
+                {"split": (1024, 2**25, 2**25, 512, 512)},
                 "two count up to .*, got 33554432",
             ),
-            (
-                {"split": (1024, 6144, 6144, 512, 512), "combine_count": 6144},
-                "two count up to .*, got 6144",
-            ),
+            ({"split": (1024, 6144, 6144, 512, 512)}, "two count up to .*, got 6144"),
             ({"split": (1024, 8192, 8191, 512, 512)}, "one count, got 8192 and 8191"),
             ({"rows_per_block": 64}, "at most 32 threads per block, got 64"),
             ({"wpr": 2}, "at most 32 threads per block, got 64"),
@@ -215,7 +211,7 @@ class TestInnerTreeCombineUnroll(TestCase):
             (1024, 8192, 8192, 512, 512),
             combine_grp=4,
             combine_tile=512,
-            combine_count=8192,
+            uniform_count=True,
             combine_weights=True,
         )
         kwargs = dict(nouts=2, order="inner_tree")
@@ -350,7 +346,7 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         self.assertEqual(combine.combine_tile, 128)
         self.assertGreater(combine.split[0] // combine.combine_tile, 1)
         self.assertEqual(combine.combine_unroll, unroll)
-        self.assertEqual(bool(combine.combine_count), uniform != "off")
+        self.assertEqual(combine.uniform_count, uniform != "off")
         self.assertEqual(combine.combine_weights, uniform == "weights")
         # Both entry points ran this plan: the row stage-two key ends with its sig, and the
         # general one has the input alignments after it.
@@ -363,7 +359,7 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             self.assertEqual(col_combine.combine_tile, 128)
             self.assertEqual(col_combine.combine_unroll, unroll)
             self.assertGreater(col_combine.split[0] // col_combine.combine_tile, 1)
-            self.assertEqual(bool(col_combine.combine_count), uniform != "off")
+            self.assertEqual(col_combine.uniform_count, uniform != "off")
             self.assertEqual(col_combine.combine_weights, uniform == "weights")
             col_key = ("genitree2", f"{key}_col")
             col_sigs = {k[-2] for k in kg._COMPILE_CACHE if k[1:3] == col_key}
@@ -424,9 +420,9 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         self.assertEqual(ordered.view(torch.int32), got.view(torch.int32))
         staged = (split.shape, split.rows_per_block, split.stage_e)
         self.assertEqual(staged, ("split", 4, 32))
-        folded = (c.combine_tile, c.combine_unroll, c.combine_count, c.combine_weights)
+        folded = (c.combine_tile, c.combine_unroll, c.uniform_count, c.combine_weights)
         # Welford partials come from uniform 8192-element batches, so they are weighted.
-        want = (2048, 64, 8192, True) if welford else (2048, 128, 0, False)
+        want = (2048, 64, True, True) if welford else (2048, 128, False, False)
         self.assertEqual(folded, want)
         # Each stage's cache key ends with its plan's sig.
         for tag, plan in (("rowitree1", split), ("rowitree2", c)):
@@ -479,8 +475,9 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             combine_tile=512 if unroll else 128,
             combine_unroll=unroll,
         )
-        baseline = [torch.empty(rows, device=device) for _ in range(2)]
-        actual = [torch.empty_like(t) for t in baseline]
+        reference = [torch.empty(rows, device=device) for _ in range(2)]
+        baseline = [torch.empty_like(t) for t in reference]
+        actual = [torch.empty_like(t) for t in reference]
 
         def launch(selected, fields, outs):
             block = kg.ReduceBlock(
@@ -498,14 +495,23 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             kg._launch(block, key, fields, outs)
             return block.cache_sig
 
-        candidate = plan._replace(combine_count=count, combine_weights=weights)
+        candidate = plan._replace(uniform_count=True, combine_weights=weights)
+        # The production unstaged plan folds the same chain straight from global memory.
+        unstaged = plan._replace(
+            rows_per_block=128, combine_grp=1, combine_tile=0, combine_unroll=0
+        )
         # The candidate derives counts, so a poisoned count field must not reach it.
         poisoned = parts[:2] + [torch.full_like(parts[2], float("nan"))]
-        # Distinct kernels, so the bits below compare two compiled folds.
-        sigs = launch(plan, parts, baseline), launch(candidate, poisoned, actual)
-        self.assertNotEqual(*sigs)
-        for got, expected in zip(actual, baseline):
-            self.assertEqual(got.view(torch.uint8), expected.view(torch.uint8))
+        # Distinct kernels, so the bits below compare three compiled folds.
+        sigs = (
+            launch(unstaged, parts, reference),
+            launch(plan, parts, baseline),
+            launch(candidate, poisoned, actual),
+        )
+        self.assertEqual(len(set(sigs)), 3)
+        for outs in (baseline, actual):
+            for got, expected in zip(outs, reference, strict=True):
+                self.assertEqual(got.view(torch.uint8), expected.view(torch.uint8))
 
 
 instantiate_parametrized_tests(TestInnerTreeCombineUnroll)

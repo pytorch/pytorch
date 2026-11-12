@@ -960,6 +960,12 @@ class TestReplayRecords(TestCase):
         with self.assertRaises(KeyError):
             cache.pop("a")
 
+    def test_recordings_do_not_nest(self):
+        x = torch.randn(8)
+        with _L.recording(x), self.assertRaisesRegex(RuntimeError, "must not nest"):
+            with _L.recording(x):
+                pass
+
     def test_launch_record_declines(self):
         """Decline recordings a replay of the launches alone could not reproduce."""
         x = torch.randn(8)

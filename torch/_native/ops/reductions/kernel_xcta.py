@@ -2,8 +2,10 @@
 # Stage 1 reshapes (M, N) to (M*C, N/C) and emits raw accumulators; stage 2 combines C
 # partials and projects with true N, preserving mean/variance. C depends on N and the
 # sub-row target, which select_xcta_config can pick by M, so plans reuse across M only when
-# the target matches. Reshaping obscures global indices, so index traits use the general
-# kernel's ragged split. Measured 1.13-1.66x of ATen. Inputs must be on the current device.
+# the target matches. C also fixes the fold and merge trees, so where the target depends
+# on M, the same row can round differently in a one-row call than in a two-row call.
+# Reshaping obscures global indices, so index traits use the general kernel's ragged
+# split. Measured 1.13-1.66x of ATen. Inputs must be on the current device.
 
 import math
 from collections.abc import Sequence
