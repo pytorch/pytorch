@@ -580,6 +580,23 @@ class TestSelection(unittest.TestCase):
                 self.assertEqual(cost, info["cost_ms"])
                 self.assertEqual(len(new_include) + len(new_exclude), len(tests))
 
+    def test_files_that_skip_here_only_take_budget_left_over(self) -> None:
+        tests = [f"t{i}" for i in range(8)]
+        times = dict.fromkeys(tests, 0.04)
+        times.update(t6=100.0, t7=100.0)
+        include, exclude = td_cut(tests, {"t6": 1.0, "t7": 1.0})
+        self.assertEqual(names(include), ["t6", "t7", "t0"])
+        block = make_block(HeuristicA={"t0": 1.0, "t1": 1.0, "t2": 1.0})
+        new_include, _, info = self.select(block, include, exclude, times)
+        self.assertEqual(names(new_include), ["t6", "t7", "t0"])
+        self.assertEqual(info["budget_ms"], 230_040)
+        self.assertEqual(info["cost_ms"], 230_040)
+
+        times["t7"] = 0.9
+        include, exclude = td_cut(tests, {"t6": 1.0, "t7": 1.0})
+        new_include, _, _ = self.select(block, include, exclude, times)
+        self.assertEqual(names(new_include), ["t6", "t0", "t1"])
+
     def test_deterministic_ties_by_name(self) -> None:
         tests = ["b", "d", "a", "c", "e", "f"]
         times = dict.fromkeys(tests, 5.0)
@@ -635,7 +652,7 @@ class TestSelection(unittest.TestCase):
             tests = [f"t{i:02d}" for i in range(rng.randint(4, 80))]
             k = 25 * len(tests) // 100 + 1
             scores = {t: rng.uniform(0.5, 1.0) for t in rng.sample(tests, k)}
-            times = {t: rng.uniform(0, 500) for t in tests}
+            times = {t: rng.uniform(scorer.MIN_RUN_SECONDS, 500) for t in tests}
             include, exclude = td_cut(tests, scores)
             block = make_block(model=model, HeuristicA=scores)
             new_include, _, info = self.select(block, include, exclude, times)

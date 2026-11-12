@@ -38,6 +38,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 TD_RESULTS_PATH = REPO_ROOT / ".additional_ci_files" / "td_results.json"
 MAX_REASON_CHARS = 500
 MUST_RUN_HEURISTICS = (EditedByPR.__name__, PreviouslyFailedInPR.__name__)
+# A file the config records under this many seconds skips there (a CUDA-only file
+# on a CPU job): it cannot catch a failure, so it only takes budget left over.
+MIN_RUN_SECONDS = 1.0
 
 
 class NoModel(Exception):
@@ -203,7 +206,8 @@ def select_tests(
     """The scorer's cut at the cost of TD's own cut, as whole test files.
 
     Files with a non-zero score from a must-run heuristic come first, by name,
-    whatever their cost; the rest fill what is left of the budget by p / cost.
+    whatever their cost; the rest fill what is left of the budget by p / cost,
+    files under MIN_RUN_SECONDS last.
     Costs are summed in integer milliseconds so the order of summation cannot
     change what fits. Raises when the block carries no usable model. Every
     shard computes the same selection: this depends only on its arguments.
@@ -243,11 +247,11 @@ def select_tests(
         scores = {name: h.get(f, 0.0) for name, h in heuristics.items()}
         c = seconds(f) + overhead
         p = file_probability(model, scores, c, build_env_key, test_config, raised)
-        ranked.append((-p / c, f))
+        ranked.append((seconds(f) < MIN_RUN_SECONDS, -p / c, f))
     ranked.sort()
 
     rest: list[str] = []
-    for _, f in ranked:
+    for *_, f in ranked:
         c_ms = cost_ms(f)
         if used + c_ms <= budget:
             selected.append(f)
